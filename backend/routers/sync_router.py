@@ -4,8 +4,9 @@ API endpoints for Literature and TribologyData synchronization.
 """
 
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
+import os
 
 from database import get_db_session
 from schemas import (
@@ -285,46 +286,119 @@ async def get_tribology_records(
 @router.post("/literature/{literature_id}/reprocess")
 async def reprocess_literature_endpoint(
     literature_id: int,
+    file: UploadFile = File(None),  # Optional file upload
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Reprocess an existing Literature record by re-extracting data from its file.
+    Re-extract data from an existing Literature record.
     
-    This endpoint:
-    1. Reads the original file from file_path
-    2. Re-runs LLM extraction with updated logic
-    3. Deletes old TribologyData records
-    4. Inserts new records with environmental variable fields
-    5. Optionally updates Literature metadata
+    This endpoint re-runs the LLM extraction pipeline on existing Literature,
+    which is useful for:
+    - Populating new fields added to the schema (e.g., potential, water_content, surface_roughness)
+    - Fixing incorrectly extracted data
+    - Using updated LLM logic or prompts
     
-    Args:
-        literature_id: ID of the Literature to reprocess
+    **Two modes:**
     
-    Returns:
-        Reprocess result with success status, record count, and message
+    1. **No file upload**: Attempts to use `file_path` from database
+       - If `file_path` exists and file is accessible, uses that
+       - Otherwise returns error with `needs_upload: true`
     
-    Raises:
-        HTTPException 404: If Literature not found
-        HTTPException 400: If file cannot be read
-        HTTPException 500: If extraction or database operation fails
-    """
-    result = await reprocess_literature(literature_id, db)
+    2. **With file upload**: Uses the provided file content
+       - Reads and extracts from uploaded file
+       - Useful when original file is no longer available
     
-    if not result["success"]:
-        # Determine appropriate status code based on error message
-        message = result["message"]
-        if "not found" in message.lower():
-            raise HTTPException(status_code=404, detail=message)
-        elif "file not found" in message.lower() or "no file_path" in message.lower():
-            raise HTTPException(status_code=400, detail=message)
-        else:
-            raise HTTPException(status_code=500, detail=message)
+    **Process:**
+    - Deletes all existing TribologyData for this Literature
+    - Re-extracts using current LLM logic
+    - Inserts new records (including new environmental fields)
+    - Optionally updates Literature metadata if improved
     
-    return {
-        "success": True,
-        "literatureId": result["literature_id"],
-        "reprocessedCount": result["reprocessed_count"],
-        "message": result["message"],
-        "metadata": result.get("metadata")
+    **Parameters:**
+    - `literature_id`: Database ID of the Literature record
+    - `file` (optional): PDF/TXT/MD file to reprocess
+    
+    **Response:**
+    ```json
+    {
+        "success": true,
+        "literatureId": 123,
+        "reprocessedCount": 45,
+        "message": "成功重新提取 45 条数据记录",
+        "metadata": {...},
+        "needs_upload": false
     }
-
+    ```
+    """
+    try:
+        # Extract file content if provided
+        file_content = None
+        if file:
+            # Read file content
+            content_bytes = await file.read()
+            file_ext = os.path.splitext(file.filename)[1].lower()
+            
+            if file_ext == '.pdf':
+                # Extract PDF text
+                from PyPDF2 import PdfReader
+                import io
+                pdf_reader = PdfReader(io.BytesIO(content_bytes))
+                text_parts = []
+                for page in pdf_reader.pages:
+                    text = page.extract_text()
+                    if text:
+                        text_parts.append(text)
+                file_content = "\n\n".join(text_parts)
+            elif file_ext in ['.txt', '.md']:
+                file_content = content_bytes.decode('utf-8')
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unsupported file type: {file_ext}. Supported: .pdf, .txt, .md"
+                )
+        
+        # Call service function
+        result = await reprocess_literature(
+            literature_id=literature_id,
+            db=db,
+            file_content=file_content
+        )
+        
+        if not result["success"]:
+            # Determine appropriate status code based on error message
+            message = result["message"]
+            needs_upload = result.get("needs_upload", False)
+            
+            if "not found" in message.lower():
+                raise HTTPException(status_code=404, detail=message)
+            elif needs_upload:
+                # File content is needed - return 400 with clear message
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": message,
+                        "needs_upload": True,
+                        "hint": "Please upload the original file to reprocess this literature record."
+                    }
+                )
+            else:
+                raise HTTPException(status_code=500, detail=message)
+        
+        return {
+            "success": True,
+            "literatureId": result["literature_id"],
+            "reprocessedCount": result["reprocessed_count"],
+            "message": result["message"],
+            "metadata": result.get("metadata"),
+            "needs_upload": False
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Reprocessing failed: {str(e)}"
+        )

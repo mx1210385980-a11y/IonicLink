@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { BookOpen, User, Hash, Calendar, FileText, AlertCircle } from 'lucide-vue-next'
+import { ref, computed } from 'vue'
+import { BookOpen, User, Hash, Calendar, FileText, AlertCircle, ChevronDown, ChevronRight } from 'lucide-vue-next'
 import type { LiteratureMetadata } from '@/lib/api'
 import Card from '@/components/ui/Card.vue'
 import CardHeader from '@/components/ui/CardHeader.vue'
@@ -47,31 +47,65 @@ const volumeIssuePages = computed(() => {
   if (props.metadata.volume) parts.push(`Vol. ${props.metadata.volume}`)
   if (props.metadata.issue) parts.push(`No. ${props.metadata.issue}`)
   if (props.metadata.pages) parts.push(`pp. ${props.metadata.pages}`)
+  if (props.metadata.pages) parts.push(`pp. ${props.metadata.pages}`)
   return parts.join(', ') || '-'
 })
+
+// Collapsible state (default collapsed for high density)
+const isExpanded = ref(false)
+
+function toggleExpand() {
+  isExpanded.value = !isExpanded.value
+}
 </script>
 
 <template>
-  <Card class="mb-4 border-l-4" :class="validation.isValid ? 'border-l-primary' : 'border-l-yellow-500'">
-    <CardHeader class="pb-3">
-      <div class="flex items-center justify-between">
-        <CardTitle class="text-base flex items-center gap-2">
+  <Card class="mb-2 border-l-4 transition-all" :class="validation.isValid ? 'border-l-primary' : 'border-l-yellow-500'">
+    <CardHeader 
+      class="cursor-pointer select-none py-2 px-4 hover:bg-muted/50 transition-colors" 
+      @click="toggleExpand"
+    >
+      <div class="flex items-center justify-between gap-4">
+        <!-- Compact Summary Header (Visible when Collapsed) -->
+        <div v-if="!isExpanded" class="flex-1 min-w-0 flex items-center gap-2 text-sm">
+           <BookOpen class="h-4 w-4 text-primary shrink-0" />
+           <span class="font-medium truncate" :title="metadata.title">{{ metadata.title || '无标题' }}</span>
+           <span class="text-muted-foreground shrink-0 whitespace-nowrap hidden sm:inline">
+             | {{ metadata.journal || '-' }} ({{ metadata.year }})
+           </span>
+           <span v-if="!validation.isValid" class="text-yellow-600 shrink-0 text-xs flex items-center">
+             <AlertCircle class="h-3 w-3 mr-1" />
+             {{ validation.issues.length }} 处缺失
+           </span>
+        </div>
+
+        <!-- Full Header Title (Visible when Expanded) -->
+        <CardTitle v-else class="text-base flex items-center gap-2">
           <BookOpen class="h-4 w-4 text-primary" />
           文献信息
         </CardTitle>
-        <div class="flex items-center gap-2">
-          <Badge v-if="!validation.isValid" class="bg-yellow-500/10 text-yellow-600 border-yellow-500/20">
-            <AlertCircle class="h-3 w-3 mr-1" />
-            {{ validation.issues.join(', ') }}
-          </Badge>
-          <Badge v-else class="bg-green-500/10 text-green-600 border-green-500/20">
-            ✓ 已验证
-          </Badge>
+
+        <!-- Right Side: Toggle & Status -->
+        <div class="flex items-center gap-2 shrink-0">
+          <div v-if="isExpanded" class="flex items-center gap-2">
+            <Badge v-if="!validation.isValid" class="bg-yellow-500/10 text-yellow-600 border-yellow-500/20">
+              <AlertCircle class="h-3 w-3 mr-1" />
+              {{ validation.issues.join(', ') }}
+            </Badge>
+            <Badge v-else class="bg-green-500/10 text-green-600 border-green-500/20">
+              ✓ 已验证
+            </Badge>
+          </div>
+          
+          <component 
+            :is="isExpanded ? ChevronDown : ChevronRight" 
+            class="h-4 w-4 text-muted-foreground"
+          />
         </div>
       </div>
     </CardHeader>
     
-    <CardContent class="pt-0">
+    <CardContent v-show="isExpanded" class="pt-0 transition-all duration-200">
       <div class="space-y-3">
         <!-- 标题 -->
         <div class="group">

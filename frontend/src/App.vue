@@ -5,15 +5,16 @@ import FileUpload from '@/components/FileUpload.vue'
 import ChatPanel from '@/components/ChatPanel.vue'
 import BatchDataPreview from '@/components/BatchDataPreview.vue'
 import DataExplorer from '@/components/DataExplorer.vue'
+import LiteratureList from '@/components/LiteratureList.vue'
 import Button from '@/components/ui/Button.vue'
 import { uploadFile, extractData, chat, syncData, syncBatchData, type TribologyData, type BatchFile } from '@/lib/api'
 
 // 视图路由
-const currentView = ref<'extraction' | 'explorer'>('extraction')
+const currentView = ref<'extraction' | 'explorer' | 'literature'>('extraction')
 
 
-// 深色模式
-const isDark = ref(true)
+// 深色模式 - 默认浅色
+const isDark = ref(false)
 
 // 组件引用
 const fileUploadRef = ref<InstanceType<typeof FileUpload>>()
@@ -21,6 +22,7 @@ const chatPanelRef = ref<InstanceType<typeof ChatPanel>>()
 
 // 状态
 const batchFiles = ref<BatchFile[]>([])
+const selectedFileId = ref<string | null>(null)
 const isExtracting = ref(false)
 const isChatting = ref(false)
 
@@ -40,6 +42,14 @@ if (isDark.value) {
   document.documentElement.classList.add('dark')
 }
 
+// 处理清空文件
+function handleClearFiles() {
+  if (confirm('确定要清空所有文件吗？')) {
+    batchFiles.value = []
+    selectedFileId.value = null
+  }
+}
+
 // 处理文件上传
 async function handleUpload(file: File) {
   try {
@@ -47,32 +57,31 @@ async function handleUpload(file: File) {
     const response = await uploadFile(file)
     
     if (response.success) {
-      fileUploadRef.value?.addUploadedFile({
-        id: response.file_id,
-        name: response.filename,
-        preview: response.preview,
-        status: 'uploaded'
-      })
-      
       // 创建 BatchFile 对象
       batchFiles.value.push({
         id: response.file_id,
         name: response.filename,
-        status: 'pending',
+        status: 'uploaded',
         progress: 0,
         records: [],
         hasWarnings: false
       })
       
+      // Auto-select
+      if (!selectedFileId.value) {
+        selectedFileId.value = response.file_id
+      }
+      
       chatPanelRef.value?.addMessage('assistant', 
-        `✅ 文件 "${response.filename}" 上传成功！\n\n预览内容：\n${response.preview.substring(0, 200)}...\n\n点击"提取"按钮开始数据提取。`
+        `✅ 文件 "${response.filename}" 上传成功！`
       )
     }
   } catch (error: any) {
     chatPanelRef.value?.addMessage('assistant', 
       `❌ 上传失败：${error.message || '未知错误'}`
     )
-    fileUploadRef.value?.setUploading(false)
+  } finally {
+     fileUploadRef.value?.setUploading(false)
   }
 }
 
@@ -88,18 +97,10 @@ async function handleBatchUpload(files: File[]) {
       const response = await uploadFile(file)
       
       if (response.success) {
-        fileUploadRef.value?.addUploadedFile({
-          id: response.file_id,
-          name: response.filename,
-          preview: response.preview,
-          status: 'uploaded'
-        })
-        
-        // 创建 BatchFile 对象
         batchFiles.value.push({
           id: response.file_id,
           name: response.filename,
-          status: 'pending',
+          status: 'uploaded',
           progress: 0,
           records: [],
           hasWarnings: false
@@ -121,10 +122,10 @@ async function handleBatchUpload(files: File[]) {
   )
 }
 
-// 处理数据提取
-async function handleExtract(fileId: string) {
+// 处理批量上传
+async function handleExtract(fileId: string, force: boolean = false) {
   try {
-    fileUploadRef.value?.updateFileStatus(fileId, 'extracting')
+    // fileUploadRef.value?.updateFileStatus(fileId, 'extracting') -> Removed (Reactive)
     
     // 更新 BatchFile 状态
     const batchFile = batchFiles.value.find(f => f.id === fileId)
@@ -133,17 +134,21 @@ async function handleExtract(fileId: string) {
       batchFile.progress = 50
     }
     
-    chatPanelRef.value?.addMessage('assistant', '🔍 正在分析文献并提取数据...')
+    chatPanelRef.value?.addMessage('assistant', 
+      force ? '🔄 正在强制重新分析文献...' : '🔍 正在分析文献并提取数据...'
+    )
     
-    const response = await extractData(fileId)
+    // Pass force parameter to API
+    const response = await extractData(fileId, force)
     
+
     if (response.success) {
       // extractData() 返回的是 { success, metadata, data, message }
       // metadata 和 data 在顶层，不是嵌套在 response.data 里
-      const metadata = response.metadata || {}
+      const metadata: any = response.metadata || {}
       const records = response.data || []
       const rawRecords = Array.isArray(records) ? records : []
-      const safeMetadata = metadata || {}
+      const safeMetadata: any = metadata || {}
       
       console.log('[Extract] API response metadata:', metadata)
       console.log('[Extract] API response records count:', rawRecords.length)
@@ -176,6 +181,7 @@ async function handleExtract(fileId: string) {
             console.log('[Sync] Using extracted metadata:', safeMetadata)
             
             // 只在 safeMetadata 完全为空时才用默认值
+            // 只在 safeMetadata 完全为空时才用默认值
             const hasValidMetadata = safeMetadata.title || safeMetadata.doi
             const metadataToSync = hasValidMetadata ? {
               doi: safeMetadata.doi || '',
@@ -207,7 +213,8 @@ async function handleExtract(fileId: string) {
 
       }
       
-      fileUploadRef.value?.updateFileStatus(fileId, 'completed', safeRecords.length)
+      
+      // fileUploadRef.value?.updateFileStatus(fileId, 'completed', safeRecords.length) -> Removed
       chatPanelRef.value?.addMessage('assistant', 
         `✅ ${response.message}\n\n提取的数据已显示在右侧预览面板中。`
       )
@@ -217,7 +224,7 @@ async function handleExtract(fileId: string) {
         batchFile.errorMessage = response.message
       }
       
-      fileUploadRef.value?.updateFileStatus(fileId, 'error', undefined, response.message)
+      // fileUploadRef.value?.updateFileStatus(fileId, 'error', undefined, response.message) -> Removed
       chatPanelRef.value?.addMessage('assistant', 
         `⚠️ 提取完成，但可能存在问题：${response.message}`
       )
@@ -229,7 +236,7 @@ async function handleExtract(fileId: string) {
       batchFile.errorMessage = error.message
     }
     
-    fileUploadRef.value?.updateFileStatus(fileId, 'error', undefined, error.message)
+    // fileUploadRef.value?.updateFileStatus(fileId, 'error', undefined, error.message) -> Removed
     chatPanelRef.value?.addMessage('assistant', 
       `❌ 数据提取失败：${error.message || '未知错误'}`
     )
@@ -246,9 +253,10 @@ async function handleBatchExtract(fileIds: string[]) {
   let failCount = 0
   let totalRecords = 0
   
+
   for (const fileId of fileIds) {
     try {
-      fileUploadRef.value?.updateFileStatus(fileId, 'extracting')
+      // fileUploadRef.value?.updateFileStatus(fileId, 'extracting') -> Removed
       
       const batchFile = batchFiles.value.find(f => f.id === fileId)
       if (batchFile) {
@@ -260,10 +268,10 @@ async function handleBatchExtract(fileIds: string[]) {
       
       if (response.success) {
         // extractData() 返回的是 { success, metadata, data, message }
-        const metadata = response.metadata || {}
+        const metadata: any = response.metadata || {}
         const records = response.data || []
         const rawRecords = Array.isArray(records) ? records : []
-        const safeMetadata = metadata || {}
+        const safeMetadata: any = metadata || {}
 
         // 为每条记录注入唯一 ID 和文件关联
         const safeRecords = rawRecords.map((r: any, index: number) => ({
@@ -308,7 +316,7 @@ async function handleBatchExtract(fileIds: string[]) {
         }
         
         totalRecords += safeRecords.length
-        fileUploadRef.value?.updateFileStatus(fileId, 'completed', safeRecords.length)
+        // fileUploadRef.value?.updateFileStatus(fileId, 'completed', safeRecords.length) -> Removed
         successCount++
       } else {
         if (batchFile) {
@@ -316,7 +324,7 @@ async function handleBatchExtract(fileIds: string[]) {
           batchFile.errorMessage = response.message
         }
         
-        fileUploadRef.value?.updateFileStatus(fileId, 'error', undefined, response.message)
+        // fileUploadRef.value?.updateFileStatus(fileId, 'error', undefined, response.message) -> Removed
         failCount++
       }
     } catch (error: any) {
@@ -326,11 +334,10 @@ async function handleBatchExtract(fileIds: string[]) {
         batchFile.errorMessage = error.message
       }
       
-      fileUploadRef.value?.updateFileStatus(fileId, 'error', undefined, error.message)
+      // fileUploadRef.value?.updateFileStatus(fileId, 'error', undefined, error.message) -> Removed
       failCount++
     }
   }
-  
   chatPanelRef.value?.addMessage('assistant', 
     `✅ 批量提取完成！成功 ${successCount} 个，失败 ${failCount} 个。\n\n共提取 ${totalRecords} 条数据。`
   )
@@ -371,9 +378,9 @@ function handleExportFile(fileId: string) {
   URL.revokeObjectURL(url)
 }
 
-// 重试提取
+// 重试提取 (Force Re-extract)
 function handleRetryFile(fileId: string) {
-  handleExtract(fileId)
+  handleExtract(fileId, true)
 }
 
 // 处理记录更新
@@ -430,7 +437,6 @@ async function handleSaveSync(fileId: string) {
     chatPanelRef.value?.addMessage('assistant', `❌ 同步失败：${error.message || '未知错误'}`)
   }
 }
-
 </script>
 
 <template>
@@ -467,6 +473,13 @@ async function handleSaveSync(fileId: string) {
             >
                 Data Explorer
             </button>
+            <button 
+                @click="currentView = 'literature'"
+                class="text-sm font-medium transition-colors hover:text-primary"
+                :class="currentView === 'literature' ? 'text-primary' : 'text-muted-foreground'"
+            >
+                Literature
+            </button>
         </nav>
 
         <!-- 右侧操作 -->
@@ -500,14 +513,28 @@ async function handleSaveSync(fileId: string) {
         <DataExplorer />
       </div>
 
+      <!-- Literature Management View -->
+      <div v-else-if="currentView === 'literature'" class="h-[calc(100vh-88px)]">
+        <LiteratureList />
+      </div>
+
       <!-- Extraction View -->
-      <div v-else class="grid grid-cols-1 lg:grid-cols-12 gap-4 h-[calc(100vh-88px)]">
-        <!-- 左侧：文件上传 + 聊天 -->
-        <div class="lg:col-span-5 flex flex-col gap-4">
-          <!-- 文件上传区域 -->
-          <div class="h-[35%]">
+      <div v-else class="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-88px)]">
+        <!-- 左侧：Sidebar (Unified) -->
+        <div class="lg:col-span-4 flex flex-col gap-4 min-h-0">
+          <!-- 1. 文件操作区 (Upload + File List) -->
+          <div class="flex-1 min-h-0 flex flex-col">
             <FileUpload
               ref="fileUploadRef"
+              :files="batchFiles"
+              :selected-id="selectedFileId"
+              @select="(id) => selectedFileId = id"
+              @remove="(id) => {
+                 const idx = batchFiles.findIndex(f => f.id === id)
+                 if (idx !== -1) batchFiles.splice(idx, 1)
+                 if (selectedFileId === id) selectedFileId = null
+              }"
+              @clear="handleClearFiles"
               @upload="handleUpload"
               @batch-upload="handleBatchUpload"
               @extract="handleExtract"
@@ -515,8 +542,8 @@ async function handleSaveSync(fileId: string) {
             />
           </div>
           
-          <!-- 聊天面板 -->
-          <div class="flex-1 min-h-0">
+          <!-- 2. 聊天面板 (Fixed Height) -->
+          <div class="h-1/3 min-h-[200px] shrink-0">
             <ChatPanel
               ref="chatPanelRef"
               :loading="isChatting"
@@ -526,9 +553,10 @@ async function handleSaveSync(fileId: string) {
         </div>
         
         <!-- 右侧：数据预览 -->
-        <div class="lg:col-span-7 min-h-0">
+        <div class="lg:col-span-8 min-h-0">
           <BatchDataPreview
             :files="batchFiles"
+            :selected-id="selectedFileId"
             :loading="isExtracting"
             @export="handleExportFile"
             @retry="handleRetryFile"

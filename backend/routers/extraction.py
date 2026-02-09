@@ -1,10 +1,13 @@
 import os
 import uuid
 import hashlib
+import json
 from typing import List
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
-from PyPDF2 import PdfReader
+import fitz  # PyMuPDF
+import base64
 import io
+from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,13 +16,22 @@ from models.db_models import Literature, TribologyData as TribologyDataDB
 from services.llm_service import llm_service
 from services.data_sync_service import get_literature_by_hash, get_records_by_literature
 from services.score_service import calculate_confidence
+from services.score_service import calculate_confidence
 from database import get_db
+from utils.pdf_utils import process_pdf_to_base64, extract_pdf_text_fitz
 
 router = APIRouter(prefix="/api", tags=["extraction"])
 
 # 临时存储提取的数据
 extracted_data_store: dict = {}
 uploaded_files_store: dict = {}
+
+# Ensure temp directory exists
+TEMP_UPLOAD_DIR = "temp_uploads"
+os.makedirs(TEMP_UPLOAD_DIR, exist_ok=True)
+
+# Disk I/O functions removed to prevent storage spam
+
 
 
 @router.post("/upload")
@@ -46,19 +58,33 @@ async def upload_file(file: UploadFile = File(...)):
         file_hash = hashlib.md5(content).hexdigest()
         
         # 解析文件内容
-        if file_ext == '.pdf':
-            text_content = extract_pdf_text(content)
-        else:
-            text_content = content.decode('utf-8')
+        text_content = ""
+        base64_images = []
         
         # 生成文件ID并存储 (包含 file_hash)
         file_id = str(uuid.uuid4())
-        uploaded_files_store[file_id] = {
+        
+        if file_ext == '.pdf':
+            # Vision-First: Convert to images (In-Memory)
+            print(f"[Upload] Processing PDF to Base64 (Vision Mode)")
+            base64_images = process_pdf_to_base64(content)
+            
+            # Also extract text as fallback/metadata source
+            text_content = extract_pdf_text_fitz(content)
+        else:
+            text_content = content.decode('utf-8')
+        
+        file_data = {
             "filename": file.filename,
-            "content": text_content,
+            "content": text_content, # Still keep text for preview/fallback
+            "images": base64_images, # NEW: List of base64 strings
             "size": len(content),
             "file_hash": file_hash  # Store hash for cache lookup
         }
+        uploaded_files_store[file_id] = file_data
+        
+        # Persistence to disk removed
+        # save_upload_to_disk(file_id, file_data)
         
         return {
             "success": True,
@@ -72,136 +98,94 @@ async def upload_file(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"文件处理失败：{str(e)}")
 
 
-def extract_pdf_text(content: bytes) -> str:
-    """从PDF中提取文本"""
-    try:
-        pdf_reader = PdfReader(io.BytesIO(content))
-        text_parts = []
-        for page in pdf_reader.pages:
-            text = page.extract_text()
-            if text:
-                text_parts.append(text)
-        return "\n\n".join(text_parts)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"PDF解析失败：{str(e)}")
 
 
-@router.post("/extract/{file_id}", response_model=ExtractionResponse)
-async def extract_data(file_id: str, db: AsyncSession = Depends(get_db)):
-    """从上传的文件中提取文献元数据和摩擦学数据 (with Smart Caching)"""
+
+from services.file_service import save_upload_entry, process_file_safe
+
+@router.post("/extract/{file_id}")
+async def extract_data(
+    file_id: str, 
+    force: bool = False, 
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Synchronous Extraction with Scoped Session.
+    Waits for result to return data to Frontend, but uses isolated DB session to prevent errors.
+    """
     
+    # 1. Validate File Existence
     if file_id not in uploaded_files_store:
-        raise HTTPException(status_code=404, detail="文件不存在")
+        raise HTTPException(
+            status_code=404, 
+            detail="File session expired. Please re-upload."
+        )
     
     file_info = uploaded_files_store[file_id]
-    content = file_info["content"]
+    content = file_info.get("content", "")
+    images = file_info.get("images", [])
+    if not images: images = file_info.get("image_paths", [])
     file_hash = file_info.get("file_hash")
+    filename = file_info.get("filename", "Untitled")
     
     try:
-        # ============ Smart Caching: Check for existing extraction ============
-        if file_hash:
-            cached_literature = await get_literature_by_hash(db, file_hash)
-            
-            if cached_literature:
-                print(f"[Cache Hit] Found existing data for hash={file_hash}, literature_id={cached_literature.id}")
-                
-                # Fetch associated TribologyData records
-                cached_records = await get_records_by_literature(db, cached_literature.id)
-                
-                # Convert DB records to response format
-                data_list = []
-                for i, record in enumerate(cached_records):
-                    record_data = {
-                        "id": f"{file_id}_{i}",
-                        "material_name": record.material_name,
-                        "ionic_liquid": record.lubricant,  # Map lubricant to ionic_liquid
-                        "lubricant": record.lubricant,
-                        "cof": record.cof_raw or str(record.cof_value) if record.cof_value else None,
-                        "cof_value": record.cof_value,
-                        "cof_operator": record.cof_operator,
-                        "cof_raw": record.cof_raw,
-                        "load": record.load_raw or str(record.load_value) if record.load_value else None,
-                        "load_value": record.load_value,
-                        "load_raw": record.load_raw,
-                        "speed": str(record.speed_value) if record.speed_value else None,
-                        "speed_value": record.speed_value,
-                        "temperature": str(record.temperature) if record.temperature else None,
-                        "confidence": record.confidence,
-                    }
-                    data_list.append(record_data)
-                
-                # Construct cached metadata
-                metadata_dict = {
-                    "title": cached_literature.title,
-                    "authors": cached_literature.authors,
-                    "doi": cached_literature.doi or "",
-                    "journal": cached_literature.journal,
-                    "issn": cached_literature.issn,
-                    "year": cached_literature.year,
-                    "volume": cached_literature.volume,
-                    "issue": cached_literature.issue,
-                    "pages": cached_literature.pages,
-                    "file_hash": file_hash,   # snake_case for backend
-                    "fileHash": file_hash     # camelCase for frontend
-                }
-                metadata = LiteratureMetadata(**metadata_dict)
-                
-                # Store in extracted_data_store for consistency
-                extracted_data_store[file_id] = {
-                    "metadata": metadata_dict,
-                    "data": data_list
-                }
-                
-                return ExtractionResponse(
-                    success=True,
-                    metadata=metadata,
-                    data=data_list,
-                    message=f"[Cache Hit] 从缓存返回 {len(data_list)} 条数据记录"
-                )
+        # 2. Check Cache / Create Pending Record (Synchronous DB Op)
+        lit_record = await save_upload_entry(db, filename, content, file_hash)
         
-        # ============ Cache Miss: Proceed with LLM extraction ============
-        print(f"[Cache Miss] No cached data found for hash={file_hash}, proceeding with LLM extraction")
+        # 3. Process Safely (Synchronous Wait, Isolated Session)
+        print(f"[Extraction] Starting safe processing for Lit ID: {lit_record.id}")
         
-        # 使用LLM提取元数据和数据 (now async with DOI enrichment)
-        result = await llm_service.extract_with_metadata(content)
-        
-        metadata_dict = result.get("metadata", {})
-        data_list = result.get("data", [])  # Changed from "records" to "data"
-        
-        # 【双重注入】防止前后端命名风格(CamelCase vs SnakeCase)不一致导致丢包
-        # Add file_hash to metadata for sync service (both formats for compatibility)
-        metadata_dict["file_hash"] = file_hash   # snake_case for backend
-        metadata_dict["fileHash"] = file_hash    # camelCase for frontend
-        
-        # 为每条数据生成ID (data_list 现在是字典列表)
-        for i, data in enumerate(data_list):
-            data["id"] = f"{file_id}_{i}"
-        
-        # 创建 LiteratureMetadata 对象
-        metadata = LiteratureMetadata(**metadata_dict)
-        
-        # 存储提取结果 (包含元数据)
-        extracted_data_store[file_id] = {
-            "metadata": metadata_dict,
-            "data": data_list
-        }
-        
-        return ExtractionResponse(
-            success=True,
-            metadata=metadata,
-            data=data_list,
-            message=f"成功提取文献元数据和 {len(data_list)} 条数据记录"
+        # This will WAIT for extraction to finish
+        metadata, data_list = await process_file_safe(
+            file_id=lit_record.id, 
+            content=content, 
+            images=images, 
+            force=force
         )
         
+        # 4. Construct Response
+        if data_list:
+            # Construct LiteratureMetadata object
+            from models.tribology import LiteratureMetadata
+            # Ensure mandatory fields or use defaults
+            meta_obj = LiteratureMetadata(
+                title=metadata.get("title", filename),
+                doi=metadata.get("doi", ""),
+                authors=metadata.get("authors", ""),
+                journal=metadata.get("journal", ""),
+                year=metadata.get("year", 0),
+                volume=metadata.get("volume"),
+                issue=metadata.get("issue"),
+                pages=metadata.get("pages"),
+                issn=metadata.get("issn"),
+                file_hash=file_hash,
+                fileHash=file_hash
+            )
+            
+            # Update Memory Store (for consistency)
+            extracted_data_store[file_id] = {
+                "metadata": metadata,
+                "data": data_list
+            }
+            
+            return {
+                "success": True,
+                "metadata": meta_obj,
+                "data": data_list,
+                "message": f"Successfully extracted {len(data_list)} records."
+            }
+        else:
+             return {
+                "success": False,
+                "metadata": {},
+                "data": [],
+                "message": "No data extracted or processing failed."
+            }
+
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return ExtractionResponse(
-            success=False,
-            metadata=None,
-            data=[],
-            message=f"数据提取失败：{str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/data/{file_id}", response_model=List[TribologyData])
@@ -236,7 +220,7 @@ async def chat(request: ChatRequest):
         latest_file = list(uploaded_files_store.values())[-1]
         context = latest_file["content"][:3000]
     
-    response = llm_service.chat(request.message, context)
+    response = await llm_service.chat(request.message, context)
     
     return {
         "success": True,

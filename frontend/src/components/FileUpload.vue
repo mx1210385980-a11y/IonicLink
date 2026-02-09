@@ -7,44 +7,30 @@ import Button from '@/components/ui/Button.vue'
 import Spinner from '@/components/ui/Spinner.vue'
 import Badge from '@/components/ui/Badge.vue'
 
-type FileStatus = 'uploading' | 'uploaded' | 'extracting' | 'completed' | 'error'
-
-interface UploadedFile {
-  id: string
-  name: string
-  preview: string
-  status: FileStatus
-  dataCount?: number
-  error?: string
-}
+type FileStatus = 'uploading' | 'uploaded' | 'extracting' | 'processing' | 'completed' | 'success' | 'error'
 
 const emit = defineEmits<{
   'upload': [file: File]
   'batchUpload': [files: File[]]
   'extract': [fileId: string]
   'batchExtract': [fileIds: string[]]
+  'select': [fileId: string]
+  'clear': []
+  'remove': [fileId: string]
+}>()
+
+const props = defineProps<{
+  files: any[] // Using any temporarily, ideally Import BatchFile type
+  selectedId: string | null
 }>()
 
 const isDragging = ref(false)
 const isUploading = ref(false)
-const uploadedFiles = ref<UploadedFile[]>([])
 const fileInput = ref<HTMLInputElement>()
 
 defineExpose({
-  addUploadedFile(file: UploadedFile) {
-    uploadedFiles.value.push(file)
-    isUploading.value = false
-  },
   setUploading(value: boolean) {
     isUploading.value = value
-  },
-  updateFileStatus(fileId: string, status: FileStatus, dataCount?: number, error?: string) {
-    const file = uploadedFiles.value.find(f => f.id === fileId)
-    if (file) {
-      file.status = status
-      if (dataCount !== undefined) file.dataCount = dataCount
-      if (error) file.error = error
-    }
   }
 })
 
@@ -77,7 +63,7 @@ function handleFileSelect(e: Event) {
   target.value = ''
 }
 
-function handleFiles(files: File[]) {
+function handleFiles(files: File[]): void {
   const validTypes = ['application/pdf', 'text/plain', 'text/markdown']
   const validFiles = files.filter(file => {
     return validTypes.includes(file.type) || file.name.endsWith('.md')
@@ -96,9 +82,34 @@ function handleFiles(files: File[]) {
   emit('batchUpload', validFiles)
 }
 
-function removeFile(index: number) {
-  uploadedFiles.value.splice(index, 1)
+// function removeFile, clearAllFiles removed (handled by parent)
+
+function getStatusColor(status: FileStatus): string {
+  switch (status) {
+    case 'uploading': return 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20'
+    case 'uploaded': return 'bg-green-500/10 text-green-600 border-green-500/20'
+    case 'extracting': 
+    case 'processing': return 'bg-blue-500/10 text-blue-600 border-blue-500/20'
+    case 'completed': 
+    case 'success': return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
+    case 'error': return 'bg-red-500/10 text-red-600 border-red-500/20'
+    default: return 'bg-gray-500/10 text-gray-600 border-gray-500/20'
+  }
 }
+
+function getStatusText(status: FileStatus): string {
+  switch (status) {
+    case 'uploading': return '上传中'
+    case 'uploaded': return '已上传'
+    case 'extracting': 
+    case 'processing': return '处理中'
+    case 'completed': 
+    case 'success': return '已完成'
+    case 'error': return '失败'
+    default: return '未知'
+  }
+}
+
 
 function triggerUpload() {
   fileInput.value?.click()
@@ -109,44 +120,16 @@ function extractData(fileId: string) {
 }
 
 function extractAllFiles() {
-  const uploadedFileIds = uploadedFiles.value
-    .filter(f => f.status === 'uploaded')
-    .map(f => f.id)
-  
-  if (uploadedFileIds.length === 0) {
-    alert('没有可提取的文件')
+  const fileIds = props.files
+    .filter((f: any) => f.status === 'uploaded' || f.status === 'pending')
+    .map((f: any) => f.id)
+
+  if (fileIds.length === 0) {
+    // alert('没有可提取的文件') 
+    // Silent fail or toast
     return
   }
-  
-  emit('batchExtract', uploadedFileIds)
-}
-
-function clearAllFiles() {
-  if (uploadedFiles.value.length === 0) return
-  
-  if (confirm(`确定要清空所有 ${uploadedFiles.value.length} 个文件吗？`)) {
-    uploadedFiles.value = []
-  }
-}
-
-function getStatusColor(status: FileStatus): string {
-  switch (status) {
-    case 'uploading': return 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20'
-    case 'uploaded': return 'bg-green-500/10 text-green-600 border-green-500/20'
-    case 'extracting': return 'bg-blue-500/10 text-blue-600 border-blue-500/20'
-    case 'completed': return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
-    case 'error': return 'bg-red-500/10 text-red-600 border-red-500/20'
-  }
-}
-
-function getStatusText(status: FileStatus): string {
-  switch (status) {
-    case 'uploading': return '上传中'
-    case 'uploaded': return '已上传'
-    case 'extracting': return '提取中'
-    case 'completed': return '已完成'
-    case 'error': return '失败'
-  }
+  emit('batchExtract', fileIds)
 }
 </script>
 
@@ -192,25 +175,25 @@ function getStatusText(status: FileStatus): string {
       </div>
       
       <!-- 已上传文件列表 -->
-      <div v-if="uploadedFiles.length > 0" class="mt-4 flex-1 overflow-auto space-y-2">
+      <div v-if="files.length > 0" class="mt-4 flex-1 overflow-auto space-y-2">
         <!-- 批量操作按钮 -->
         <div class="flex items-center justify-between mb-2">
           <div class="text-sm font-medium text-muted-foreground">
-            已上传文件 ({{ uploadedFiles.length }})
+            已上传文件 ({{ files.length }})
           </div>
           <div class="flex gap-1">
             <Button
               size="sm"
               variant="outline"
               @click="extractAllFiles"
-              :disabled="!uploadedFiles.some(f => f.status === 'uploaded')"
+              :disabled="!files.some((f: any) => f.status === 'uploaded')"
             >
               全部提取
             </Button>
             <Button
               size="sm"
               variant="ghost"
-              @click="clearAllFiles"
+              @click="emit('clear')"
             >
               清空
             </Button>
@@ -218,31 +201,41 @@ function getStatusText(status: FileStatus): string {
         </div>
         
         <div
-          v-for="(file, index) in uploadedFiles"
+          v-for="file in files"
           :key="file.id"
-          class="flex items-center gap-3 p-3 rounded-lg bg-muted/50 group"
+          class="flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all group"
+          :class="[
+            selectedId === file.id 
+              ? 'bg-blue-50/80 border-blue-200 ring-1 ring-blue-300 dark:bg-blue-900/20 dark:border-blue-800' 
+              : 'bg-card hover:bg-muted/50 border-transparent hover:border-muted'
+          ]"
+          @click="emit('select', file.id)"
         >
           <!-- 状态图标 -->
           <div class="flex-shrink-0">
-            <Loader2 v-if="file.status === 'uploading' || file.status === 'extracting'" class="h-5 w-5 text-blue-500 animate-spin" />
-            <CheckCircle2 v-else-if="file.status === 'completed'" class="h-5 w-5 text-emerald-500" />
+            <Loader2 v-if="file.status === 'uploading' || file.status === 'processing'" class="h-5 w-5 text-blue-500 animate-spin" />
+            <CheckCircle2 v-else-if="file.status === 'success' || file.status === 'completed'" class="h-5 w-5 text-emerald-500" />
             <AlertCircle v-else-if="file.status === 'error'" class="h-5 w-5 text-red-500" />
             <FileText v-else class="h-5 w-5 text-primary" />
           </div>
           
           <div class="flex-1 min-w-0">
-            <p class="text-sm font-medium truncate">{{ file.name }}</p>
+            <p class="text-sm font-medium truncate" :class="selectedId === file.id ? 'text-primary' : ''">{{ file.name }}</p>
             <div class="flex items-center gap-2 mt-0.5">
               <Badge :class="getStatusColor(file.status)" class="text-xs">
                 {{ getStatusText(file.status) }}
               </Badge>
-              <span v-if="file.dataCount !== undefined" class="text-xs text-muted-foreground">
-                · {{ file.dataCount }} 条数据
+              <span v-if="file.records?.length > 0" class="text-xs text-muted-foreground">
+                · {{ file.records.length }} 条数据
               </span>
-              <span v-if="file.error" class="text-xs text-red-500 truncate">
-                · {{ file.error }}
+              <span v-if="file.errorMessage || file.error" class="text-xs text-red-500 truncate">
+                · {{ file.errorMessage || file.error }}
               </span>
             </div>
+            <!-- Progress Bar -->
+             <div v-if="file.status === 'processing'" class="mt-2 h-0.5 bg-muted rounded-full overflow-hidden">
+                <div class="h-full bg-primary transition-all duration-300" :style="{ width: `${file.progress}%` }" />
+             </div>
           </div>
           
           <div class="flex gap-1">
@@ -254,12 +247,13 @@ function getStatusText(status: FileStatus): string {
             >
               提取
             </Button>
+            <!-- Only show delete if not processing -->
             <Button
               size="icon"
               variant="ghost"
               class="h-8 w-8 opacity-0 group-hover:opacity-100"
-              @click.stop="removeFile(index)"
-              :disabled="file.status === 'uploading' || file.status === 'extracting'"
+              @click.stop="emit('remove', file.id)"
+              :disabled="file.status === 'uploading' || file.status === 'processing'"
             >
               <X class="h-4 w-4" />
             </Button>

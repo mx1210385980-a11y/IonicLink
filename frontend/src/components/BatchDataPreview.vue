@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { Download, Beaker, ChevronDown, ChevronUp, Gauge, ThermometerSun, Timer, Layers, AlertCircle, CheckCircle2, Loader2, RefreshCw, Check } from 'lucide-vue-next'
+import { ref, computed, watch } from 'vue'
+import { 
+  Download, Beaker, ChevronDown, ChevronUp, Gauge, ThermometerSun, 
+  Timer, Layers, AlertCircle, CheckCircle2, RefreshCw, Check, Zap, Search 
+} from 'lucide-vue-next'
 import type { BatchFile, TribologyData, LiteratureMetadata } from '@/lib/api'
 import { useValidation } from '@/composables/useValidation'
 import EditableField from '@/components/EditableField.vue'
@@ -14,6 +17,7 @@ import Badge from '@/components/ui/Badge.vue'
 
 const props = defineProps<{
   files: BatchFile[]
+  selectedId: string | null
   loading?: boolean
 }>()
 
@@ -29,13 +33,72 @@ const emit = defineEmits<{
 // Use validation composable
 const { validateRecord } = useValidation()
 
-const selectedFileId = ref<string | null>(null)
+// selectedFileId is now controlled by prop
+const selectedFileId = computed(() => props.selectedId)
 const expandedRows = ref<Set<string>>(new Set())
 
 // 选中的文件
 const selectedFile = computed(() => {
   if (!selectedFileId.value) return null
   return props.files.find(f => f.id === selectedFileId.value) || null
+})
+
+// Quick Filter Logic
+const selectedLiquidFilter = ref<string>('All')
+const filterSearch = ref('')
+const isFilterExpanded = ref(false)
+
+// Reset filter when file changes
+watch(selectedFileId, () => {
+  selectedLiquidFilter.value = 'All'
+  filterSearch.value = ''
+  isFilterExpanded.value = false
+})
+
+const uniqueLiquids = computed(() => {
+  if (!selectedFile.value) return []
+  
+  const counts: Record<string, number> = {}
+  
+  selectedFile.value.records.forEach(r => {
+    let name = r.ionic_liquid?.trim()
+    if (!name) name = 'Unknown'
+    counts[name] = (counts[name] || 0) + 1
+  })
+  
+  return Object.entries(counts)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count)
+})
+
+// Filter the chips list itself based on search
+const visibleUniqueLiquids = computed(() => {
+  if (!filterSearch.value) return uniqueLiquids.value
+  
+  const search = filterSearch.value.toLowerCase()
+  return uniqueLiquids.value.filter(l => l.name.toLowerCase().includes(search))
+})
+
+// Determine which chips to display (truncation logic)
+const displayedFilterLiquids = computed(() => {
+  if (isFilterExpanded.value) return visibleUniqueLiquids.value
+  // Show top 8 by default
+  return visibleUniqueLiquids.value.slice(0, 8)
+})
+
+const filteredRecords = computed(() => {
+  if (!selectedFile.value) return []
+  
+  const records = selectedFile.value.records
+  if (selectedLiquidFilter.value === 'All') {
+    return records
+  }
+  
+  return records.filter(r => {
+    let name = r.ionic_liquid?.trim()
+    if (!name) name = 'Unknown'
+    return name === selectedLiquidFilter.value
+  })
 })
 
 // 统计信息
@@ -47,11 +110,6 @@ const stats = computed(() => {
   
   return { total, completed, totalRecords, withWarnings }
 })
-
-// 选择文件
-function selectFile(fileId: string) {
-  selectedFileId.value = fileId
-}
 
 // 切换行展开
 function toggleRow(id: string) {
@@ -86,26 +144,6 @@ function getCofWidth(cofStr: string | undefined): string {
   return `${Math.min(cof * 200, 100)}%`
 }
 
-// 获取文件状态图标
-function getFileStatusIcon(file: BatchFile) {
-  switch (file.status) {
-    case 'processing': return Loader2
-    case 'success': return file.hasWarnings ? AlertCircle : CheckCircle2
-    case 'error': return AlertCircle
-    default: return null
-  }
-}
-
-// 获取文件状态颜色
-function getFileStatusColor(file: BatchFile): string {
-  switch (file.status) {
-    case 'processing': return 'text-blue-500'
-    case 'success': return file.hasWarnings ? 'text-yellow-500' : 'text-green-500'
-    case 'error': return 'text-red-500'
-    default: return 'text-muted-foreground'
-  }
-}
-
 // 导出当前文件
 function exportCurrentFile() {
   if (selectedFileId.value) {
@@ -113,11 +151,13 @@ function exportCurrentFile() {
   }
 }
 
-// 重试当前文件
-function retryCurrentFile() {
-  if (selectedFileId.value) {
-    emit('retry', selectedFileId.value)
-  }
+// 重试/重新提取指定文件
+async function handleReprocess(fileId?: string) {
+  // 如果传入的不是字符串（如事件对象），则使用当前选中的文件ID
+  const targetId = typeof fileId === 'string' ? fileId : selectedFileId.value
+  if (!targetId) return
+  
+  emit('retry', targetId)
 }
 
 // 判断是否为超润滑状态 (COF < 0.01)
@@ -195,7 +235,6 @@ function verifyRecord(recordId: string) {
   emit('update:record', selectedFile.value.id, recordId, record)
 }
 
-
 // 全部确认
 function markAllAsVerified() {
   if (!selectedFile.value) return
@@ -223,108 +262,32 @@ function markAllAsVerified() {
           共 {{ stats.totalRecords }} 条记录 · {{ stats.completed }}/{{ stats.total }} 文件已完成
         </p>
       </div>
-      <Button
-        v-if="stats.totalRecords > 0"
-        size="sm"
-        variant="outline"
-        @click="exportAllData"
-      >
-        <Download class="h-4 w-4 mr-1" />
-        全部导出
-      </Button>
+      <div class="flex items-center gap-2">
+        <Button
+          v-if="selectedFile && selectedFile.status === 'success'"
+          size="sm" 
+          variant="outline"
+          class="h-8 gap-1"
+          @click="handleReprocess()"
+          title="Force Re-extract (Bypass Cache)"
+        >
+          <RefreshCw class="h-4 w-4" />
+          <span class="sr-only sm:not-sr-only sm:whitespace-nowrap">Re-extract</span>
+        </Button>
+        <Button
+          v-if="stats.totalRecords > 0"
+          size="sm"
+          variant="outline"
+          class="h-8 gap-1"
+          @click="exportAllData"
+        >
+          <Download class="h-4 w-4" />
+          <span class="hidden sm:inline">全部导出</span>
+        </Button>
+      </div>
     </CardHeader>
     
     <CardContent class="flex-1 overflow-hidden pt-0 flex gap-4">
-      <!-- 左侧：文件列表 -->
-      <div class="w-72 flex flex-col border-r pr-4">
-        <!-- 总进度 -->
-        <div v-if="files.length > 0" class="mb-3">
-          <div class="flex items-center justify-between text-xs text-muted-foreground mb-1">
-            <span>整体进度</span>
-            <span>{{ stats.completed }}/{{ stats.total }}</span>
-          </div>
-          <div class="h-2 bg-muted rounded-full overflow-hidden">
-            <div
-              class="h-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all duration-300"
-              :style="{ width: `${(stats.completed / stats.total) * 100}%` }"
-            />
-          </div>
-        </div>
-        
-        <!-- 文件列表 -->
-        <div class="flex-1 overflow-y-auto space-y-2">
-          <!-- 空状态 -->
-          <div v-if="files.length === 0" class="h-full flex items-center justify-center">
-            <div class="text-center">
-              <Beaker class="mx-auto h-10 w-10 text-muted-foreground/50" />
-              <p class="mt-2 text-xs text-muted-foreground">
-                暂无文件
-              </p>
-            </div>
-          </div>
-          
-          <!-- 文件项 -->
-          <div
-            v-for="file in files"
-            :key="file.id"
-            class="group relative p-3 rounded-lg border cursor-pointer transition-all hover:shadow-md"
-            :class="[
-              selectedFileId === file.id 
-                ? 'bg-primary/5 border-primary ring-1 ring-primary' 
-                : 'bg-card hover:bg-muted/50'
-            ]"
-            @click="selectFile(file.id)"
-          >
-            <div class="flex items-start gap-2">
-              <!-- 状态图标 -->
-              <component
-                :is="getFileStatusIcon(file)"
-                class="h-5 w-5 flex-shrink-0 mt-0.5"
-                :class="[
-                  getFileStatusColor(file),
-                  file.status === 'processing' ? 'animate-spin' : ''
-                ]"
-              />
-              
-              <div class="flex-1 min-w-0">
-                <!-- 文件名 -->
-                <p class="text-sm font-medium truncate" :title="file.name">
-                  {{ file.name }}
-                </p>
-                
-                <!-- 记录数 & 警告 -->
-                <div class="flex items-center gap-1.5 mt-1">
-                  <Badge 
-                    v-if="file.status === 'success' && file.records.length > 0"
-                    class="bg-blue-500/10 text-blue-600 border-blue-500/20 text-xs"
-                  >
-                    {{ file.records.length }}
-                  </Badge>
-                  <Badge
-                    v-if="file.hasWarnings"
-                    class="bg-yellow-500/10 text-yellow-600 border-yellow-500/20 text-xs"
-                  >
-                    含缺失值
-                  </Badge>
-                  <span v-if="file.errorMessage" class="text-xs text-red-500 truncate">
-                    {{ file.errorMessage }}
-                  </span>
-                </div>
-              </div>
-            </div>
-            
-            <!-- 进度条（处理中时显示） -->
-            <div v-if="file.status === 'processing'" class="mt-2">
-              <div class="h-1 bg-muted rounded-full overflow-hidden">
-                <div
-                  class="h-full bg-blue-500 transition-all duration-300"
-                  :style="{ width: `${file.progress}%` }"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
       
       <!-- 右侧：详情视图 -->
       <div class="flex-1 flex flex-col min-w-0">
@@ -342,8 +305,8 @@ function markAllAsVerified() {
         <!-- 选中文件详情 -->
         <div v-else class="h-full flex flex-col">
           <!-- 头部操作栏 -->
-          <div class="flex items-center justify-between mb-3 pb-3 border-b">
-            <div>
+          <div class="flex items-center justify-between mb-3 pb-3 border-b gap-4">
+            <div class="min-w-0 flex-1 overflow-hidden">
               <h3 class="font-semibold truncate" :title="selectedFile.name">
                 {{ selectedFile.name }}
               </h3>
@@ -377,10 +340,19 @@ function markAllAsVerified() {
                 v-if="selectedFile.status === 'error'"
                 size="sm"
                 variant="outline"
-                @click="retryCurrentFile"
+                @click="handleReprocess()"
               >
                 <RefreshCw class="h-4 w-4 mr-1" />
-                重试
+                重试 (Re-extract)
+              </Button>
+              <Button
+                v-if="selectedFile.status === 'success'"
+                size="sm"
+                variant="outline"
+                @click="handleReprocess()"
+              >
+                <RefreshCw class="h-4 w-4 mr-1" />
+                重新提取
               </Button>
               <Button
                 v-if="selectedFile.records.length > 0"
@@ -394,6 +366,64 @@ function markAllAsVerified() {
             </div>
           </div>
           
+          
+          <!-- Filter Bar (High Density) -->
+          <div v-if="selectedFile.records.length > 0 && uniqueLiquids.length > 0" class="px-4 py-2 border-b bg-muted/5 flex flex-wrap items-center gap-2 text-xs">
+            <!-- Label -->
+            <div class="flex items-center gap-1.5 mr-1 text-muted-foreground shrink-0">
+               <span class="font-medium">Filter:</span>
+               <Badge variant="outline" class="text-[10px] h-4 px-1 font-normal border-muted-foreground/30">
+                  {{ uniqueLiquids.length }} types
+               </Badge>
+            </div>
+            
+            <!-- All Chip -->
+            <button
+              class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium transition-colors border shadow-sm h-6"
+              :class="selectedLiquidFilter === 'All' 
+                ? 'bg-primary text-primary-foreground border-primary' 
+                : 'bg-card text-card-foreground hover:bg-muted border-border'"
+              @click="selectedLiquidFilter = 'All'"
+            >
+              All
+              <span class="ml-1 opacity-70 scale-90">({{ selectedFile.records.length }})</span>
+            </button>
+            
+            <!-- Liquid Chips -->
+            <button
+              v-for="liquid in displayedFilterLiquids"
+              :key="liquid.name"
+              class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium transition-colors border shadow-sm h-6"
+              :class="selectedLiquidFilter === liquid.name 
+                ? 'bg-blue-600 text-white border-blue-600' 
+                : 'bg-white text-slate-700 hover:bg-blue-50 border-slate-200'"
+              @click="selectedLiquidFilter = liquid.name"
+            >
+              {{ liquid.name }}
+              <span class="ml-1 opacity-70 scale-90">({{ liquid.count }})</span>
+            </button>
+            
+            <!-- Expand/Collapse Button (Link style) -->
+            <button
+              v-if="visibleUniqueLiquids.length > 8"
+              class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium text-primary hover:text-primary/80 hover:bg-primary/5 transition-colors h-6"
+              @click="isFilterExpanded = !isFilterExpanded"
+            >
+              <component :is="isFilterExpanded ? ChevronUp : ChevronDown" class="h-3 w-3 mr-0.5" />
+              {{ isFilterExpanded ? '收起' : `+${visibleUniqueLiquids.length - 8}` }}
+            </button>
+            
+            <!-- Compact Search (Inline) -->
+             <div v-if="uniqueLiquids.length > 5 || filterSearch" class="relative w-32 ml-auto">
+                <Search class="absolute left-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                <input
+                  v-model="filterSearch"
+                  class="w-full h-6 pl-6 pr-2 rounded border text-[10px] bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                  placeholder="Search..."
+                />
+              </div>
+          </div>
+
           <!-- 数据卡片列表 -->
           <div class="flex-1 overflow-y-auto">
             <!-- 无数据 -->
@@ -415,9 +445,9 @@ function markAllAsVerified() {
             />
             
             <!-- 数据列表 -->
-            <div v-if="selectedFile.records.length > 0" class="space-y-3">
+            <div v-if="filteredRecords.length > 0" class="space-y-3">
               <div
-                v-for="item in selectedFile.records"
+                v-for="item in filteredRecords"
                 :key="item.id"
                 class="rounded-lg border bg-card overflow-hidden transition-all hover:shadow-md relative"
                 :class="{
@@ -430,7 +460,7 @@ function markAllAsVerified() {
                   v-if="item.validationStatus === 'modified'"
                   class="absolute top-2 right-2 w-2 h-2 rounded-full bg-blue-500"
                   title="已修改"
-                />
+                ></div>
                 <!-- 主要信息行 -->
                 <div
                   class="p-4 cursor-pointer"
@@ -438,13 +468,13 @@ function markAllAsVerified() {
                 >
                   <div class="flex items-start justify-between gap-4">
                     <div class="flex-1 min-w-0">
-                      <!-- 材料名称 -->
-                      <h4 class="font-semibold text-base truncate">
-                        {{ item.material_name }}
-                      </h4>
                       <!-- 离子液体 -->
+                      <h4 class="font-semibold text-base truncate">
+                        {{ item.ionic_liquid || '-' }}
+                      </h4>
+                      <!-- 材料名称/表面 -->
                       <p class="text-sm text-muted-foreground mt-0.5">
-                        {{ item.ionic_liquid }}
+                        {{ item.material_name }}
                       </p>
                       
                       <!-- 条件标签 -->
@@ -484,6 +514,16 @@ function markAllAsVerified() {
                             :validation-status="item.validationStatus"
                             placeholder="-"
                             @update:model-value="(val) => updateRecordField(item.id!, 'speed', val)"
+                          />
+                        </Badge>
+                        <Badge v-if="item.potential" class="bg-yellow-500/10 text-yellow-600 border-yellow-500/20">
+                          <Zap class="w-3 h-3 mr-1" />
+                          <EditableField
+                            :model-value="item.potential"
+                            field-name="potential"
+                            :validation-status="item.validationStatus"
+                            placeholder="-"
+                            @update:model-value="(val) => updateRecordField(item.id!, 'potential', val)"
                           />
                         </Badge>
                         <Badge v-if="item.contact_type" class="bg-green-500/10 text-green-600 border-green-500/20">
@@ -526,7 +566,7 @@ function markAllAsVerified() {
                           class="h-full transition-all duration-300"
                           :class="getCofColor(item.cof)"
                           :style="{ width: getCofWidth(item.cof) }"
-                        />
+                        ></div>
                       </div>
                       
                       <component
@@ -550,6 +590,26 @@ function markAllAsVerified() {
                     <div v-if="item.concentration">
                       <span class="text-muted-foreground">浓度:</span>
                       <span class="ml-2">{{ item.concentration }}</span>
+                    </div>
+                    <div v-if="item.film_thickness">
+                      <span class="text-muted-foreground">膜厚:</span>
+                      <span class="ml-2">{{ item.film_thickness }}</span>
+                    </div>
+                    <div v-if="item.mol_ratio">
+                      <span class="text-muted-foreground">摩尔比:</span>
+                      <span class="ml-2">{{ item.mol_ratio }}</span>
+                    </div>
+                    <div v-if="item.cation">
+                      <span class="text-muted-foreground">阳离子:</span>
+                      <span class="ml-2">{{ item.cation }}</span>
+                    </div>
+                    <div v-if="item.water_content">
+                      <span class="text-muted-foreground">含水量/湿度:</span>
+                      <span class="ml-2">{{ item.water_content }}</span>
+                    </div>
+                    <div v-if="item.surface_roughness">
+                      <span class="text-muted-foreground">表面粗糙度:</span>
+                      <span class="ml-2">{{ item.surface_roughness }}</span>
                     </div>
                     <div v-if="item.wear_rate">
                       <span class="text-muted-foreground">磨损率:</span>

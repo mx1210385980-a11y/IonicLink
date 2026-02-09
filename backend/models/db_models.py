@@ -44,13 +44,20 @@ class Literature(Base):
     volume: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     issue: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     pages: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    
+    # Text Content (New Field for Reprocess Fallback)
+    content: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Extracted text content of the file")
 
     # File Info
-    file_path: Mapped[str] = mapped_column(String(500), nullable=False, comment="本地 PDF 路径")
+    file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True, comment="本地 PDF 路径 (可选)")
     file_hash: Mapped[Optional[str]] = mapped_column(
         String(64), nullable=True, unique=True, index=True,
         comment="File content hash (MD5/SHA256) for deduplication"
     )
+
+    # Processing Status Fields
+    status: Mapped[str] = mapped_column(String(50), default="pending", index=True, comment="Processing status: pending, processing, completed, failed")
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Error message if processing failed")
 
     # Common fields
     created_at: Mapped[datetime] = mapped_column(default=func.now())
@@ -80,7 +87,7 @@ class TribologyData(Base):
     literature_id: Mapped[int] = mapped_column(ForeignKey("literature.id"), nullable=False)
 
     # Material & Lubricant
-    material_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    material_name: Mapped[str] = mapped_column(String(255), nullable=False, comment="材料名称/基底表面 (Mica, HOPG, Au(111), Silica, Stainless steel, Titanium)")
     lubricant: Mapped[str] = mapped_column(String(255), nullable=False)
 
     # COF Data
@@ -89,21 +96,25 @@ class TribologyData(Base):
     cof_raw: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, comment="Original extracted text")
 
     # Load Data
-    load_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    load_value: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, comment="Load value with unit (e.g., '20 nN', '10 N')")
     load_raw: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     # Speed & Temperature
-    speed_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True, comment="Standardized Speed")
-    temperature: Mapped[Optional[float]] = mapped_column(Float, nullable=True, comment="Temperature in Kelvin or Celsius (Needs standardization)")
+    speed_value: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, comment="Speed with unit (e.g., '5 mm/s', '100 rpm')")
+    temperature: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, comment="Temperature with unit (e.g., '298.15 K', '25°C')")
 
     # Environmental Variables (New)
     potential: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="Electrochemical potential (e.g., '+1.5V', 'OCP')")
     water_content: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="Water concentration or humidity (e.g., '50 ppm', 'Dry')")
     surface_roughness: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="Surface roughness (e.g., 'RMS 4.9 nm')")
+    film_thickness: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="Film thickness (e.g., '7 layers', '2 nm')")
+    mol_ratio: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="Molar ratio (e.g., '1:70')")
+    cation: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, comment="Cation type (e.g., 'HMIM', 'P66614')")
 
     # Tracking Fields
     extracted_at: Mapped[datetime] = mapped_column(default=func.now(), comment="Extraction timestamp")
     confidence: Mapped[float] = mapped_column(Float, default=0.9, comment="AI Confidence (0.0-1.0)")
+    evidence: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Verbatim evidence/quote from text")
 
     # Relationship
     literature: Mapped["Literature"] = relationship(

@@ -23,8 +23,10 @@ export async function uploadFile(file: File) {
 }
 
 // 提取数据
-export async function extractData(fileId: string) {
-    const response = await api.post(`/api/extract/${fileId}`)
+export async function extractData(fileId: string, force: boolean = false): Promise<ExtractionResponse> {
+    // Add query param for force explicitly
+    const url = force ? `/api/extract/${fileId}?force=true` : `/api/extract/${fileId}`
+    const response = await api.post(url)
     return response.data
 }
 
@@ -93,6 +95,13 @@ export interface TribologyData {
     wear_rate?: string
     test_duration?: string
     contact_type?: string
+    // Environmental variables
+    potential?: string  // 电化学电势/电压 (如 '+1.5V', 'OCP')
+    water_content?: string  // 含水量或湿度 (如 '50 ppm', 'Dry')
+    surface_roughness?: string  // 表面粗糙度 (如 'RMS 4.9 nm')
+    film_thickness?: string // 膜厚
+    mol_ratio?: string // 摩尔比
+    cation?: string // 阳离子
     source?: string
     notes?: string
 
@@ -168,6 +177,13 @@ export async function syncWithLiterature(metadata: LiteratureMetadata, records: 
             loadRaw: r.load,
             speedValue: r.speed ? parseFloat(r.speed.replace(/[^0-9.]/g, '')) : null,
             temperature: r.temperature ? parseFloat(r.temperature.replace(/[^0-9.]/g, '')) : null,
+            // Environmental variables
+            potential: r.potential,
+            waterContent: r.water_content,
+            surfaceRoughness: r.surface_roughness,
+            filmThickness: r.film_thickness,
+            molRatio: r.mol_ratio,
+            cation: r.cation,
             confidence: 0.9
         }))
     }
@@ -200,8 +216,14 @@ export async function syncBatchData(metadata: LiteratureMetadata, records: Tribo
             loadRaw: r.load,
             speedValue: r.speed ? parseFloat(r.speed.replace(/[^0-9.]/g, '')) : null,
             temperature: r.temperature ? parseFloat(r.temperature.replace(/[^0-9.]/g, '')) : null,
+            // Environmental variables
+            potential: r.potential,
+            waterContent: r.water_content,
+            surfaceRoughness: r.surface_roughness,
+            filmThickness: r.film_thickness,
+            molRatio: r.mol_ratio,
+            cation: r.cation,
             confidence: 0.9, // 默认置信度，或者从 frontend tracking 中获取
-            // 其他需要的字段...
         }))
     }
 
@@ -210,7 +232,7 @@ export async function syncBatchData(metadata: LiteratureMetadata, records: Tribo
 }
 
 // 批量处理相关类型
-export type FileExtractionStatus = 'pending' | 'processing' | 'success' | 'error'
+export type FileExtractionStatus = 'uploaded' | 'processing' | 'success' | 'error'
 
 export interface BatchFile {
     id: string
@@ -247,3 +269,66 @@ export interface RecordResponse {
 }
 
 export type ComparisonOperator = 'EQ' | 'LT' | 'GT' | 'LE' | 'GE'
+
+// --- Literature Management API ---
+
+export interface Literature {
+    id: number
+    doi: string
+    title: string
+    authors: string
+    journal: string
+    year: number
+    volume?: string | null
+    issue?: string | null
+    pages?: string | null
+    file_path?: string
+    created_at: string
+}
+
+export interface ReprocessResult {
+    success: boolean
+    literatureId: number
+    reprocessedCount: number
+    message: string
+    metadata?: LiteratureMetadata
+    needsUpload?: boolean
+}
+
+// 获取所有文献列表
+export async function listLiterature(skip: number = 0, limit: number = 100) {
+    const response = await api.get('/api/sync/literature', {
+        params: { skip, limit }
+    })
+    return response.data as Literature[]
+}
+
+// 获取文献详情 (包括历史提取记录)
+export async function getLiteratureDetails(literatureId: number) {
+    const response = await api.get(`/api/sync/literature/${literatureId}`)
+    return response.data as LiteratureWithRecords
+}
+
+// 重新提取文献数据
+export async function reprocessLiterature(literatureId: number) {
+    const response = await api.post(`/api/sync/literature/${literatureId}/reprocess`)
+    return response.data as ReprocessResult
+}
+
+// 扩展 Literature 类型，包含记录
+export interface LiteratureWithRecords extends Literature {
+    tribologyData: {
+        id: number
+        literatureId: number
+        materialName: string
+        lubricant: string
+        cofValue: number | null
+        cofOperator: string | null
+        loadValue: number | null
+        speedValue: number | null
+        temperature: number | null
+        confidence: number
+        extractedAt: string
+    }[]
+}
+

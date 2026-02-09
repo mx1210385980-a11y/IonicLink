@@ -50,7 +50,7 @@ class LiteratureSchema(LiteratureBase):
 
 class TribologyDataBase(BaseModel):
     """Base schema for TribologyData records"""
-    material_name: str = Field(..., alias="materialName", description="材料名称")
+    material_name: str = Field(..., alias="materialName", description="材料名称/基底表面 (Mica, HOPG, Au(111), Silica, Stainless steel, Titanium)")
     lubricant: str = Field("", description="润滑剂")
     
     # COF Data
@@ -70,6 +70,9 @@ class TribologyDataBase(BaseModel):
     potential: Optional[str] = Field(None, description="Electrochemical potential (e.g., '+1.5V', 'OCP')")
     water_content: Optional[str] = Field(None, alias="waterContent", description="Water concentration (e.g., '50 ppm', 'Dry')")
     surface_roughness: Optional[str] = Field(None, alias="surfaceRoughness", description="Surface roughness (e.g., 'RMS 4.9 nm')")
+    film_thickness: Optional[str] = Field(None, alias="filmThickness", description="Film thickness (e.g., '7 layers')")
+    mol_ratio: Optional[str] = Field(None, alias="molRatio", description="Molar ratio (e.g., '1:70')")
+    cation: Optional[str] = Field(None, description="Cation type (e.g., 'HMIM', 'P66614')")
     
     # Confidence
     confidence: float = Field(0.9, ge=0.0, le=1.0, description="AI 置信度")

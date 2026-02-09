@@ -6,7 +6,7 @@ from datetime import datetime
 class TribologyData(BaseModel):
     """摩擦学数据模型"""
     id: Optional[str] = None
-    material_name: str = Field(..., description="材料名称")
+    material_name: str = Field(..., description="材料名称/基底表面 (如 Mica, HOPG, Au(111), Silica, Stainless steel, Titanium)")
     ionic_liquid: Optional[str] = Field("", description="离子液体类型")
     base_oil: Optional[str] = Field(None, description="基础油")
     concentration: Optional[str] = Field(None, description="浓度")
@@ -23,9 +23,13 @@ class TribologyData(BaseModel):
     potential: Optional[str] = Field(None, description="电化学电势/电压 (如 '+1.5V', 'OCP', '-1.0V')")
     water_content: Optional[str] = Field(None, description="含水量或湿度 (如 '50 ppm', 'Dry', '10 wt%')")
     surface_roughness: Optional[str] = Field(None, description="表面粗糙度 (如 'RMS 0.1 nm', 'Ra 4.9 nm')")
+    film_thickness: Optional[str] = Field(None, description="膜厚 (如 '7 layers', '2 nm')")
+    mol_ratio: Optional[str] = Field(None, description="摩尔比 (如 '1:70', '50 mol%')")
+    cation: Optional[str] = Field(None, description="阳离子类型 (如 'HMIM', 'C2MIM')")
     source: Optional[str] = Field(None, description="文献来源")
     notes: Optional[str] = Field(None, description="备注")
     value_origin: Optional[str] = Field(None, description="数据来源标记 ('extracted' 或 'calculated')")
+    evidence: Optional[str] = Field(None, description="原文佐证/引用")
 
 
 class ExtractionRequest(BaseModel):

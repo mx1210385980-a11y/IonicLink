@@ -117,13 +117,13 @@ function exportData() {
           >
             <div class="flex items-start justify-between gap-4">
               <div class="flex-1 min-w-0">
-                <!-- 材料名称 -->
-                <h4 class="font-semibold text-base truncate">
-                  {{ item.material_name }}
-                </h4>
                 <!-- 离子液体 -->
+                <h4 class="font-semibold text-base truncate">
+                  {{ item.ionic_liquid || '-' }}
+                </h4>
+                <!-- 材料名称/表面 -->
                 <p class="text-sm text-muted-foreground mt-0.5">
-                  {{ item.ionic_liquid }}
+                  {{ item.material_name }}
                 </p>
                 
                 <!-- 条件标签 -->
@@ -185,6 +185,18 @@ function exportData() {
               <div v-if="item.concentration">
                 <span class="text-muted-foreground">浓度:</span>
                 <span class="ml-2">{{ item.concentration }}</span>
+              </div>
+              <div v-if="item.potential">
+                <span class="text-muted-foreground">电位:</span>
+                <span class="ml-2">{{ item.potential }}</span>
+              </div>
+              <div v-if="item.water_content">
+                <span class="text-muted-foreground">含水量/湿度:</span>
+                <span class="ml-2">{{ item.water_content }}</span>
+              </div>
+              <div v-if="item.surface_roughness">
+                <span class="text-muted-foreground">表面粗糙度:</span>
+                <span class="ml-2">{{ item.surface_roughness }}</span>
               </div>
               <div v-if="item.wear_rate">
                 <span class="text-muted-foreground">磨损率:</span>

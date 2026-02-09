@@ -144,6 +144,9 @@ async def sync_batch_data(
                 potential=getattr(record, 'potential', None),
                 water_content=getattr(record, 'water_content', None),
                 surface_roughness=getattr(record, 'surface_roughness', None),
+                film_thickness=getattr(record, 'film_thickness', None),
+                mol_ratio=getattr(record, 'mol_ratio', None),
+                cation=getattr(record, 'cation', None),
                 confidence=record.confidence
             )
             new_records.append(tribology_record)
@@ -220,6 +223,9 @@ async def sync_batch_data_with_replacement(
                 potential=getattr(record, 'potential', None),
                 water_content=getattr(record, 'water_content', None),
                 surface_roughness=getattr(record, 'surface_roughness', None),
+                film_thickness=getattr(record, 'film_thickness', None),
+                mol_ratio=getattr(record, 'mol_ratio', None),
+                cation=getattr(record, 'cation', None),
                 confidence=record.confidence
             )
             new_records.append(tribology_record)
