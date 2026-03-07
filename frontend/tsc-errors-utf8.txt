@@ -1,0 +1,4 @@
+src/components/ChatPanel.vue(4,1): error TS6133: 'Card' is declared but its value is never read.
+src/components/ChatPanel.vue(5,1): error TS6133: 'CardContent' is declared but its value is never read.
+src/components/FileUpload.vue(4,1): error TS6133: 'Card' is declared but its value is never read.
+src/components/FileUpload.vue(5,1): error TS6133: 'CardContent' is declared but its value is never read.

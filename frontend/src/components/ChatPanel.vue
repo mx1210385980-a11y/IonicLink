@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, nextTick, computed } from 'vue'
-import { Send, Bot, User } from 'lucide-vue-next'
-import Card from '@/components/ui/Card.vue'
-import CardContent from '@/components/ui/CardContent.vue'
+import { Send, User, Sparkles, ChevronRight } from 'lucide-vue-next'
+
+
 import Button from '@/components/ui/Button.vue'
 import Textarea from '@/components/ui/Textarea.vue'
 import Spinner from '@/components/ui/Spinner.vue'
@@ -26,7 +26,7 @@ const messages = ref<Message[]>([
   {
     id: '1',
     role: 'assistant',
-    content: '你好！我是 IonicLink 文献数据提取助手 🧪\n\n我可以帮助你从离子液体润滑相关的文献中自动提取摩擦学数据。\n\n请上传PDF文献，或直接向我提问！',
+    content: 'Hello! I am IonicLink AI Assistant 👋\n\nI can help you automatically extract core information such as **tribology data** and **physicochemical parameters** from complex ionic liquid lubrication literature.\n\nPlease upload a PDF on the left or send me a command directly here!',
     timestamp: new Date()
   }
 ])
@@ -71,17 +71,29 @@ async function scrollToBottom() {
 }
 
 function formatTime(date: Date) {
-  return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
 }
 </script>
 
 <template>
-  <Card class="h-full flex flex-col">
-    <CardContent class="flex-1 flex flex-col p-0 overflow-hidden">
-      <!-- 消息列表 -->
+  <div class="h-full flex flex-col bg-card bg-white">
+    <!-- Header -->
+    <div class="px-5 py-4 border-b flex items-center justify-between bg-white shrink-0 shadow-sm z-10">
+      <div class="flex items-center gap-2">
+        <Sparkles class="h-[18px] w-[18px] text-indigo-500" />
+        <h3 class="font-bold text-[14.5px] text-gray-800">IonicLink AI Assistant</h3>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+        <span class="text-[12px] text-gray-500 font-medium tracking-wide">Online</span>
+      </div>
+    </div>
+    
+    <div class="flex-1 flex flex-col overflow-hidden bg-white">
+      <!-- Message List -->
       <div 
         ref="messagesContainer"
-        class="flex-1 overflow-y-auto p-4 space-y-4"
+        class="flex-1 overflow-y-auto p-5 space-y-6 custom-scrollbar"
       >
         <div
           v-for="message in messages"
@@ -89,40 +101,58 @@ function formatTime(date: Date) {
           class="flex gap-3"
           :class="message.role === 'user' ? 'flex-row-reverse' : ''"
         >
-          <!-- 头像 -->
+          <!-- Avatar -->
           <div
-            class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center"
-            :class="message.role === 'user' 
-              ? 'bg-primary text-primary-foreground' 
-              : 'bg-muted text-muted-foreground'"
+            v-if="message.role === 'assistant'"
+            class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center bg-indigo-50 text-indigo-500 mt-1"
           >
-            <User v-if="message.role === 'user'" class="w-4 h-4" />
-            <Bot v-else class="w-4 h-4" />
+            <Sparkles class="w-4 h-4" />
+          </div>
+          <div
+            v-else
+            class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center bg-gray-100 text-gray-500 mt-1"
+          >
+            <User class="w-4 h-4" />
           </div>
           
-          <!-- 消息内容 -->
-          <div
-            class="max-w-[80%] rounded-2xl px-4 py-2"
-            :class="message.role === 'user'
-              ? 'bg-primary text-primary-foreground rounded-tr-md'
-              : 'bg-muted rounded-tl-md'"
-          >
-            <p class="text-sm whitespace-pre-wrap">{{ message.content }}</p>
+          <!-- Message Content -->
+          <div class="flex flex-col" :class="message.role === 'user' ? 'items-end' : 'items-start'">
+            <div
+              class="max-w-[100%] rounded-2xl px-5 py-4 shadow-sm border border-gray-100/50"
+              :class="message.role === 'user'
+                ? 'bg-primary text-primary-foreground rounded-br-sm'
+                : 'bg-white rounded-tl-sm text-gray-700'"
+            >
+              <!-- eslint-disable-next-line vue/no-v-html -->
+              <p class="text-[13.5px] leading-relaxed whitespace-pre-wrap" v-html="message.content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')"></p>
+            </div>
             <p 
-              class="text-[10px] mt-1"
-              :class="message.role === 'user' ? 'text-primary-foreground/70' : 'text-muted-foreground'"
+              class="text-[11px] mt-2 font-medium"
+              :class="message.role === 'user' ? 'text-gray-400' : 'text-gray-400 pl-1'"
             >
               {{ formatTime(message.timestamp) }}
             </p>
           </div>
         </div>
         
-        <!-- 加载动画 -->
+        <!-- Quick Actions (Only show after the first welcome message if it's the only message) -->
+        <div v-if="messages.length === 1" class="pl-11 space-y-3">
+           <button class="flex items-center justify-between px-4 py-2.5 bg-white border border-gray-200 rounded-full text-[13px] text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-colors shadow-sm w-[260px]" @click="inputMessage = 'Extract wear rate data from current doc'; sendMessage()">
+              <span>Extract wear rate data</span>
+              <ChevronRight class="w-3.5 h-3.5 text-gray-400" />
+           </button>
+           <button class="flex items-center justify-between px-4 py-2.5 bg-white border border-gray-200 rounded-full text-[13px] text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-colors shadow-sm w-[260px]" @click="inputMessage = 'Summarize ionic liquid synthesis methods'; sendMessage()">
+              <span>Summarize synthesis methods</span>
+              <ChevronRight class="w-3.5 h-3.5 text-gray-400" />
+           </button>
+        </div>
+        
+        <!-- Loading Animation -->
         <div v-if="loading" class="flex gap-3">
-          <div class="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
-            <Bot class="w-4 h-4 text-muted-foreground" />
+          <div class="w-8 h-8 rounded-full bg-indigo-50 flex items-center justify-center mt-1">
+            <Sparkles class="w-4 h-4 text-indigo-500" />
           </div>
-          <div class="bg-muted rounded-2xl rounded-tl-md px-4 py-3">
+          <div class="bg-white border border-gray-100/50 shadow-sm rounded-2xl rounded-tl-sm px-5 py-4">
             <div class="flex gap-1">
               <span class="w-2 h-2 bg-muted-foreground/50 rounded-full animate-bounce [animation-delay:0ms]"></span>
               <span class="w-2 h-2 bg-muted-foreground/50 rounded-full animate-bounce [animation-delay:150ms]"></span>
@@ -132,18 +162,20 @@ function formatTime(date: Date) {
         </div>
       </div>
       
-      <!-- 输入区域 -->
-      <div class="border-t p-4">
-        <div class="flex gap-2">
+      <!-- Input Area -->
+      <div class="p-4 bg-white shrink-0">
+        <div class="relative bg-gray-50 border border-gray-100 rounded-xl overflow-hidden focus-within:ring-1 focus-within:ring-blue-500 focus-within:border-blue-500 transition-all shadow-sm">
           <Textarea
             v-model="inputMessage"
-            placeholder="输入消息或提取指令..."
-            class="min-h-[44px] max-h-32 resize-none"
+            placeholder="Type a message or command..."
+            class="min-h-[44px] max-h-32 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 px-4 py-3.5 text-[13px] text-gray-700 placeholder:text-gray-400"
             :rows="1"
             @keydown="handleKeydown"
           />
           <Button
-            size="icon"
+            size="sm"
+            variant="ghost"
+            class="absolute bottom-2.5 right-2 h-8 w-8 p-0 rounded-full text-gray-400 hover:text-blue-500 hover:bg-blue-50"
             :disabled="isInputEmpty || loading"
             @click="sendMessage"
           >
@@ -151,10 +183,13 @@ function formatTime(date: Date) {
             <Send v-else class="h-4 w-4" />
           </Button>
         </div>
-        <p class="text-xs text-muted-foreground mt-2">
-          按 Enter 发送，Shift + Enter 换行
-        </p>
+        <div class="flex items-center justify-between mt-2.5 px-1">
+          <div class="text-[11px] text-gray-400 flex items-center gap-1">
+            Press Enter to send, Shift + Enter for new line
+          </div>
+          <div class="text-[11px] text-gray-400">Powered by AI</div>
+        </div>
       </div>
-    </CardContent>
-  </Card>
+    </div>
+  </div>
 </template>

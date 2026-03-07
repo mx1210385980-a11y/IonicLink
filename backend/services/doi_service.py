@@ -144,7 +144,13 @@ class DOIService:
                 doi = doi.split("doi.org/")[-1]
         elif doi.startswith("doi:"):
             doi = doi[4:]  # 移除"doi:"前缀
-            
+        
+        # 去掉末尾可能残留的标点（如 PDF 文本提取时 DOI 后紧跟句号、逗号等）
+        doi = doi.rstrip('.,;:)')
+        
+        # 统一小写 — DOI 本身大小写不敏感，统一小写可避免重复
+        doi = doi.lower()
+        
         return doi
     
     def _parse_metadata(self, message: Dict[str, Any], doi: str) -> DOIMetadata:

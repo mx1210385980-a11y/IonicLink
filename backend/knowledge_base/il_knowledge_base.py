@@ -260,6 +260,21 @@ class IonicLiquidKnowledgeBase:
                 r'\[?pip14\]?\s*\[?(tfsi|ntf2)\]?',
             ]
         },
+        
+        # 深共晶溶剂 (Deep Eutectic Solvents - DES), 注意: 它们不是离子液体
+        "Ethaline": {
+            "chinese_name": "氯化胆碱-乙二醇 (深共晶溶剂，非离子液体)",
+            "formula": "C5H14ClNO·2C2H6O2",
+            "aliases": [
+                "Ethaline", "ethaline", "Ethaline 200",
+                "ChCl-EG", "choline chloride-ethylene glycol"
+            ],
+            "patterns": [
+                r'\bethaline\b',
+                r'\bChCl\s*[-/]\s*EG\b'
+            ],
+            "is_des": True
+        },
     }
     
     def __init__(self):

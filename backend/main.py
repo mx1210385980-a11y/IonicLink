@@ -1,37 +1,51 @@
+﻿import os
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import extraction, sync_router, data_explorer
+
 from database import init_db
+from routers import data_explorer, extraction, sync_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期管理"""
-    # 启动时初始化数据库
+    """Application lifecycle hooks."""
     await init_db()
-    print("✓ 数据库初始化完成")
+    print("Database initialized")
     yield
-    # 关闭时清理资源（如需要）
 
 
 app = FastAPI(
-    title="IonicLink - 离子液体润滑文献数据提取助手",
-    description="一个小而美的文献数据提取工具，专注于离子液体润滑领域",
+    title="IonicLink - Ionic Liquid Tribology Extraction Assistant",
+    description="Ionic liquid tribology literature extraction assistant",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
-# CORS配置
+# CORS configuration (env-driven)
+cors_allow_origins = [
+    o.strip()
+    for o in os.getenv(
+        "CORS_ALLOW_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173",
+    ).split(",")
+    if o.strip()
+]
+cors_allow_credentials = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
+
+# Browsers reject credentials when origin is wildcard; disable credentials in that case.
+if cors_allow_credentials and cors_allow_origins == ["*"]:
+    cors_allow_credentials = False
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=cors_allow_origins,
+    allow_credentials=cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# 注册路由
 app.include_router(extraction.router)
 app.include_router(sync_router.router)
 app.include_router(data_explorer.router)
@@ -42,11 +56,10 @@ async def root():
     return {
         "name": "IonicLink API",
         "version": "1.0.0",
-        "description": "离子液体润滑文献数据提取助手"
+        "description": "Ionic liquid tribology literature extraction assistant",
     }
 
 
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
-

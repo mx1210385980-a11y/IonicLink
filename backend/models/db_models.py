@@ -50,10 +50,6 @@ class Literature(Base):
 
     # File Info
     file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True, comment="本地 PDF 路径 (可选)")
-    file_hash: Mapped[Optional[str]] = mapped_column(
-        String(64), nullable=True, unique=True, index=True,
-        comment="File content hash (MD5/SHA256) for deduplication"
-    )
 
     # Processing Status Fields
     status: Mapped[str] = mapped_column(String(50), default="pending", index=True, comment="Processing status: pending, processing, completed, failed")
@@ -107,14 +103,28 @@ class TribologyData(Base):
     potential: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="Electrochemical potential (e.g., '+1.5V', 'OCP')")
     water_content: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="Water concentration or humidity (e.g., '50 ppm', 'Dry')")
     surface_roughness: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="Surface roughness (e.g., 'RMS 4.9 nm')")
-    film_thickness: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="Film thickness (e.g., '7 layers', '2 nm')")
+    
+    # Film Thickness - Split into two distinct parameters (Nanoconfinement)
+    residual_film_thickness_d: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="Total confined thickness at hard wall (e.g., '3 nm', typically > 1.5 nm)")
+    layer_spacing_delta: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="Single molecular layer thickness from steps/oscillations (e.g., '0.7 nm', typically < 1.0 nm)")
+    film_thickness: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="[Deprecated] Generic film thickness - use specific fields above")
+    
     mol_ratio: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="Molar ratio (e.g., '1:70')")
     cation: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, comment="Cation type (e.g., 'HMIM', 'P66614')")
+    anion: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, comment="Anion type (e.g., 'TFSI', 'PF6')")
+    cation_smiles: Mapped[Optional[str]] = mapped_column(String(500), nullable=True, comment="Cation SMILES")
+    anion_smiles: Mapped[Optional[str]] = mapped_column(String(500), nullable=True, comment="Anion SMILES")
+    il_smiles: Mapped[Optional[str]] = mapped_column(String(500), nullable=True, comment="Full IL SMILES (cation.anion)")
+    il_inchikey: Mapped[Optional[str]] = mapped_column(String(27), nullable=True, index=True, comment="InChIKey for cross-literature alignment")
+    alkyl_chain_length: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, comment="Alkyl chain length of cation")
 
     # Tracking Fields
     extracted_at: Mapped[datetime] = mapped_column(default=func.now(), comment="Extraction timestamp")
     confidence: Mapped[float] = mapped_column(Float, default=0.9, comment="AI Confidence (0.0-1.0)")
     evidence: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="Verbatim evidence/quote from text")
+    evidence_page: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, comment="1-based PDF page where evidence was found")
+    evidence_bbox: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, comment="JSON bbox [x0,y0,x1,y1] in PDF points for the evidence")
+    source: Mapped[Optional[str]] = mapped_column(String(200), nullable=True, comment="Source label: Fig. X, Table Y, or Text")
 
     # Relationship
     literature: Mapped["Literature"] = relationship(

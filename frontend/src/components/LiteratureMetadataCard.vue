@@ -18,14 +18,14 @@ const emit = defineEmits<{
   'update:metadata': [metadata: LiteratureMetadata]
 }>()
 
-// 验证状态
+// Validation status
 const validation = computed(() => {
   const issues: string[] = []
   if (!props.metadata.doi || props.metadata.doi.trim() === '') {
-    issues.push('DOI 缺失')
+    issues.push('Missing DOI')
   }
   if (!props.metadata.title || props.metadata.title.trim() === '') {
-    issues.push('标题缺失')
+    issues.push('Missing Title')
   }
   return {
     isValid: issues.length === 0,
@@ -33,7 +33,7 @@ const validation = computed(() => {
   }
 })
 
-// 更新字段
+// Update fields
 function updateField(field: keyof LiteratureMetadata, value: string | number | null) {
   emit('update:metadata', {
     ...props.metadata,
@@ -41,7 +41,7 @@ function updateField(field: keyof LiteratureMetadata, value: string | number | n
   })
 }
 
-// 格式化卷/期/页码
+// Format Volume/Issue/Pages
 const volumeIssuePages = computed(() => {
   const parts: string[] = []
   if (props.metadata.volume) parts.push(`Vol. ${props.metadata.volume}`)
@@ -69,20 +69,20 @@ function toggleExpand() {
         <!-- Compact Summary Header (Visible when Collapsed) -->
         <div v-if="!isExpanded" class="flex-1 min-w-0 flex items-center gap-2 text-sm">
            <BookOpen class="h-4 w-4 text-primary shrink-0" />
-           <span class="font-medium truncate" :title="metadata.title">{{ metadata.title || '无标题' }}</span>
+           <span class="font-medium truncate" :title="metadata.title">{{ metadata.title || 'Untitled' }}</span>
            <span class="text-muted-foreground shrink-0 whitespace-nowrap hidden sm:inline">
              | {{ metadata.journal || '-' }} ({{ metadata.year }})
            </span>
            <span v-if="!validation.isValid" class="text-yellow-600 shrink-0 text-xs flex items-center">
              <AlertCircle class="h-3 w-3 mr-1" />
-             {{ validation.issues.length }} 处缺失
+             {{ validation.issues.length }} issues
            </span>
         </div>
 
         <!-- Full Header Title (Visible when Expanded) -->
         <CardTitle v-else class="text-base flex items-center gap-2">
           <BookOpen class="h-4 w-4 text-primary" />
-          文献信息
+          Literature Info
         </CardTitle>
 
         <!-- Right Side: Toggle & Status -->
@@ -93,7 +93,7 @@ function toggleExpand() {
               {{ validation.issues.join(', ') }}
             </Badge>
             <Badge v-else class="bg-green-500/10 text-green-600 border-green-500/20">
-              ✓ 已验证
+              ✓ Verified
             </Badge>
           </div>
           
@@ -107,9 +107,9 @@ function toggleExpand() {
     
     <CardContent v-show="isExpanded" class="pt-0 transition-all duration-200">
       <div class="space-y-3">
-        <!-- 标题 -->
+        <!-- Title -->
         <div class="group">
-          <label class="text-xs text-muted-foreground mb-1 block">标题</label>
+          <label class="text-xs text-muted-foreground mb-1 block">Title</label>
           <div v-if="!editable" class="font-medium text-sm leading-relaxed">
             {{ metadata.title || '-' }}
           </div>
@@ -117,16 +117,16 @@ function toggleExpand() {
             v-else
             :model-value="metadata.title"
             @update:model-value="updateField('title', $event)"
-            placeholder="文献标题"
+            placeholder="Paper title"
             :class="'text-sm' + (!metadata.title ? ' border-yellow-500' : '')"
           />
         </div>
         
-        <!-- 作者和年份 -->
+        <!-- Authors and Year -->
         <div class="grid grid-cols-2 gap-4">
           <div class="group">
             <label class="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-              <User class="h-3 w-3" /> 作者
+              <User class="h-3 w-3" /> Authors
             </label>
             <div v-if="!editable" class="text-sm text-muted-foreground">
               {{ metadata.authors || '-' }}
@@ -135,14 +135,14 @@ function toggleExpand() {
               v-else
               :model-value="metadata.authors"
               @update:model-value="updateField('authors', $event)"
-              placeholder="作者列表"
+              placeholder="Author list"
               class="text-sm"
             />
           </div>
           
           <div class="group">
             <label class="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-              <Calendar class="h-3 w-3" /> 年份
+              <Calendar class="h-3 w-3" /> Year
             </label>
             <div v-if="!editable" class="text-sm">
               {{ metadata.year }}
@@ -152,13 +152,13 @@ function toggleExpand() {
               type="number"
               :model-value="String(metadata.year)"
               @update:model-value="updateField('year', parseInt($event) || 2024)"
-              placeholder="年份"
+              placeholder="Year"
               class="text-sm w-24"
             />
           </div>
         </div>
         
-        <!-- DOI 和期刊 -->
+        <!-- DOI and Journal -->
         <div class="grid grid-cols-2 gap-4">
           <div class="group">
             <label class="text-xs text-muted-foreground mb-1 flex items-center gap-1">
@@ -173,7 +173,7 @@ function toggleExpand() {
               >
                 {{ metadata.doi }}
               </a>
-              <span v-else class="text-sm text-yellow-600">未提供</span>
+              <span v-else class="text-sm text-yellow-600">N/A</span>
             </div>
             <Input 
             v-else
@@ -186,7 +186,7 @@ function toggleExpand() {
           
           <div class="group">
             <label class="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-              <FileText class="h-3 w-3" /> 期刊
+              <FileText class="h-3 w-3" /> Journal
             </label>
             <div v-if="!editable" class="text-sm italic">
               {{ metadata.journal || '-' }}
@@ -195,19 +195,19 @@ function toggleExpand() {
               v-else
               :model-value="metadata.journal"
               @update:model-value="updateField('journal', $event)"
-              placeholder="期刊名称"
+              placeholder="Journal name"
               class="text-sm"
             />
           </div>
         </div>
         
-        <!-- 卷/期/页码 (只读视图显示组合, 编辑时分开) -->
+        <!-- Volume/Issue/Pages (Read-only view shows combo, separate when editing) -->
         <div v-if="!editable" class="text-xs text-muted-foreground">
           {{ volumeIssuePages }}
         </div>
         <div v-else class="grid grid-cols-3 gap-2">
           <div>
-            <label class="text-xs text-muted-foreground mb-1 block">卷号</label>
+            <label class="text-xs text-muted-foreground mb-1 block">Volume</label>
             <Input 
               :model-value="metadata.volume || ''"
               @update:model-value="updateField('volume', $event || null)"
@@ -216,7 +216,7 @@ function toggleExpand() {
             />
           </div>
           <div>
-            <label class="text-xs text-muted-foreground mb-1 block">期号</label>
+            <label class="text-xs text-muted-foreground mb-1 block">Issue</label>
             <Input 
               :model-value="metadata.issue || ''"
               @update:model-value="updateField('issue', $event || null)"
@@ -225,7 +225,7 @@ function toggleExpand() {
             />
           </div>
           <div>
-            <label class="text-xs text-muted-foreground mb-1 block">页码</label>
+            <label class="text-xs text-muted-foreground mb-1 block">Pages</label>
             <Input 
               :model-value="metadata.pages || ''"
               @update:model-value="updateField('pages', $event || null)"

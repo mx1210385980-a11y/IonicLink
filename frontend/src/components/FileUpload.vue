@@ -1,13 +1,166 @@
-<script setup lang="ts">
-import { ref } from 'vue'
-import { Upload, FileText, X, CheckCircle2, AlertCircle, Loader2 } from 'lucide-vue-next'
-import Card from '@/components/ui/Card.vue'
-import CardContent from '@/components/ui/CardContent.vue'
-import Button from '@/components/ui/Button.vue'
-import Spinner from '@/components/ui/Spinner.vue'
-import Badge from '@/components/ui/Badge.vue'
+<template>
+  <div class="h-full flex flex-col bg-white">
+    <!-- Sidebar Header -->
+    <div class="px-6 py-4 border-b border-slate-100 flex-shrink-0">
+      <div class="flex items-center gap-2">
+        <BookOpen class="w-5 h-5 text-blue-600" />
+        <h2 class="text-base font-bold text-slate-800">Literature Library</h2>
+      </div>
+    </div>
 
-type FileStatus = 'uploading' | 'uploaded' | 'extracting' | 'processing' | 'completed' | 'success' | 'error'
+    <div class="p-5 flex-1 flex flex-col min-h-0 overflow-y-auto">
+      <!-- Upload Area -->
+      <div
+        class="relative border-2 border-dashed rounded-2xl p-6 text-center transition-all cursor-pointer bg-slate-50/50 mb-6"
+        :class="[
+          isDragging 
+            ? 'border-blue-500 bg-blue-50' 
+            : 'border-slate-200 hover:border-blue-400 hover:bg-white'
+        ]"
+        @dragover="handleDragOver"
+        @dragleave="handleDragLeave"
+        @drop="handleDrop"
+        @click="triggerUpload"
+      >
+        <input
+          ref="fileInput"
+          type="file"
+          class="hidden"
+          accept=".pdf,.txt,.md"
+          multiple
+          @change="handleFileSelect"
+        />
+        
+        <div v-if="isUploading" class="flex flex-col items-center gap-2 py-2">
+          <Spinner size="default" class="text-blue-500" />
+          <span class="text-xs text-slate-500 font-medium tracking-tight">Uploading...</span>
+        </div>
+        
+        <template v-else>
+          <div class="mx-auto w-10 h-10 rounded-xl bg-blue-100/50 flex items-center justify-center mb-3">
+            <CloudUpload class="h-5 w-5 text-blue-600" />
+          </div>
+          <p class="text-sm font-bold text-slate-700">Click or drag to upload</p>
+          <p class="text-[10px] text-slate-400 mt-1 uppercase tracking-wider font-semibold">Supports PDF, TXT, MD</p>
+        </template>
+      </div>
+      
+      <!-- Uploaded File List -->
+      <div v-if="files.length > 0" class="flex-1 flex flex-col min-h-0">
+        <div class="flex items-center justify-between mb-4">
+          <div class="text-[11px] font-bold text-slate-400 uppercase tracking-widest">
+            Upload List ({{ files.length }})
+          </div>
+          <div class="flex items-center gap-3">
+            <button 
+              v-if="selectedIds.length > 0"
+              @click="toggleAll"
+              class="text-[11px] font-bold text-blue-500 hover:text-blue-600 uppercase tracking-widest transition-colors"
+            >
+              {{ selectedIds.length === files.length ? 'Deselect All' : 'Select All' }}
+            </button>
+            <button 
+              @click="emit('clear')"
+              class="text-[11px] font-bold text-slate-400 hover:text-red-500 uppercase tracking-widest transition-colors"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+        
+        <div class="space-y-3 pb-4">
+          <div
+            v-for="file in files"
+            :key="file.id"
+            class="group relative flex flex-col p-3 rounded-2xl border transition-all cursor-pointer"
+            :class="[
+              activeId === file.id 
+                ? 'bg-blue-50 border-blue-200 shadow-md shadow-blue-500/5 ring-1 ring-blue-50' 
+                : 'bg-white border-slate-100 hover:border-slate-200 hover:bg-slate-50/50'
+            ]"
+            @click="emit('select', file.id)"
+          >
+            <div class="flex items-start gap-3">
+              <!-- Checkbox -->
+              <div 
+                class="mt-1 w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition-colors"
+                :class="selectedIds.includes(file.id) ? 'bg-blue-500 border-blue-500' : 'bg-white border-slate-200 group-hover:border-blue-400'"
+                @click.stop="toggleSelect(file.id)"
+              >
+                <div v-if="selectedIds.includes(file.id)" class="w-2 h-2 bg-white rounded-full" />
+              </div>
+
+              <!-- PDF Icon -->
+              <div class="w-10 h-10 rounded-xl bg-red-50 flex-shrink-0 flex items-center justify-center">
+                <FileText class="w-5 h-5 text-red-500" />
+              </div>
+              
+              <div class="flex-1 min-w-0 pr-6">
+                <p class="text-sm font-bold truncate leading-tight transition-colors" :class="activeId === file.id ? 'text-blue-900' : 'text-slate-600'">
+                  {{ file.name }}
+                </p>
+                <div class="flex items-center gap-2 mt-1">
+                  <span class="text-[10px] font-semibold text-slate-400">PDF Document</span>
+                  <span v-if="file.status === 'success'" class="flex items-center gap-1 text-[10px] font-bold text-green-500">
+                    <CheckCircle class="w-2.5 h-2.5" /> Extracted
+                  </span>
+                </div>
+              </div>
+
+              <!-- Delete Button -->
+              <button 
+                class="absolute top-3 right-3 p-1 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all bg-white rounded-full shadow-sm border border-slate-100"
+                @click.stop="emit('remove', file.id)"
+              >
+                <X class="w-3 h-3" />
+              </button>
+            </div>
+
+            <!-- Individual Extract Button (Hidden if in batch) -->
+            <div v-if="activeId === file.id && file.status !== 'success' && selectedIds.length <= 1" class="mt-3">
+              <button 
+                @click.stop="emit('extract', file.id)"
+                :disabled="file.status === 'processing'"
+                class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 border border-blue-700/50 shadow-md disabled:opacity-50"
+              >
+                <Beaker v-if="file.status !== 'processing'" class="w-3.5 h-3.5" />
+                <Spinner v-else size="sm" class="text-white" />
+                Extract
+              </button>
+            </div>
+
+            <!-- Progress Bar -->
+            <div v-if="file.status === 'processing'" class="mt-3 h-1 bg-slate-100 rounded-full overflow-hidden">
+              <div class="h-full bg-blue-500 transition-all duration-300 shadow-[0_0_8px_rgba(59,130,246,0.5)]" :style="{ width: `${file.progress}%` }" />
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Empty State -->
+      <div v-else class="flex-1 flex flex-col items-center justify-center text-slate-300 gap-3 opacity-40">
+        <BookOpen class="w-12 h-12" />
+        <p class="text-xs font-bold uppercase tracking-widest">No files uploaded</p>
+      </div>
+
+      <!-- Batch Extract Floating Footer -->
+      <div v-if="selectedIds.length > 1" class="pt-4 border-t border-slate-100 mt-auto">
+        <button 
+          @click="emit('batchExtract', selectedIds)"
+          class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-500/30 ring-2 ring-blue-500/10"
+        >
+          <Beaker class="w-4 h-4" />
+          Batch Extract ({{ selectedIds.length }} files)
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, watch } from 'vue'
+import { CloudUpload, FileText, X, BookOpen, CheckCircle, Beaker } from 'lucide-vue-next'
+import Spinner from '@/components/ui/Spinner.vue'
 
 const emit = defineEmits<{
   'upload': [file: File]
@@ -20,13 +173,38 @@ const emit = defineEmits<{
 }>()
 
 const props = defineProps<{
-  files: any[] // Using any temporarily, ideally Import BatchFile type
-  selectedId: string | null
+  files: any[]
+  activeId: string | null
 }>()
 
 const isDragging = ref(false)
 const isUploading = ref(false)
 const fileInput = ref<HTMLInputElement>()
+const selectedIds = ref<string[]>([])
+
+// Auto-select the active file if no selection exists
+watch(() => props.activeId, (newId) => {
+  if (newId && selectedIds.value.length === 0) {
+    selectedIds.value = [newId]
+  }
+}, { immediate: true })
+
+function toggleSelect(id: string) {
+  const index = selectedIds.value.indexOf(id)
+  if (index === -1) {
+    selectedIds.value.push(id)
+  } else {
+    selectedIds.value.splice(index, 1)
+  }
+}
+
+function toggleAll() {
+  if (selectedIds.value.length === props.files.length) {
+    selectedIds.value = []
+  } else {
+    selectedIds.value = props.files.map(f => f.id)
+  }
+}
 
 defineExpose({
   setUploading(value: boolean) {
@@ -46,7 +224,6 @@ function handleDragLeave() {
 function handleDrop(e: DragEvent) {
   e.preventDefault()
   isDragging.value = false
-  
   const files = e.dataTransfer?.files
   if (files && files.length > 0) {
     handleFiles(Array.from(files))
@@ -59,214 +236,19 @@ function handleFileSelect(e: Event) {
   if (files && files.length > 0) {
     handleFiles(Array.from(files))
   }
-  // Reset input
   target.value = ''
 }
 
 function handleFiles(files: File[]): void {
   const validTypes = ['application/pdf', 'text/plain', 'text/markdown']
-  const validFiles = files.filter(file => {
-    return validTypes.includes(file.type) || file.name.endsWith('.md')
-  })
-  
+  const validFiles = files.filter(file => validTypes.includes(file.type) || file.name.endsWith('.md'))
   if (validFiles.length === 0) {
-    alert('请上传PDF、TXT或MD格式的文件')
+    alert('Please upload PDF, TXT or MD files')
     return
   }
-  
-  if (validFiles.length < files.length) {
-    alert(`已过滤 ${files.length - validFiles.length} 个不支持的文件`)
-  }
-  
   isUploading.value = true
   emit('batchUpload', validFiles)
 }
 
-// function removeFile, clearAllFiles removed (handled by parent)
-
-function getStatusColor(status: FileStatus): string {
-  switch (status) {
-    case 'uploading': return 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20'
-    case 'uploaded': return 'bg-green-500/10 text-green-600 border-green-500/20'
-    case 'extracting': 
-    case 'processing': return 'bg-blue-500/10 text-blue-600 border-blue-500/20'
-    case 'completed': 
-    case 'success': return 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
-    case 'error': return 'bg-red-500/10 text-red-600 border-red-500/20'
-    default: return 'bg-gray-500/10 text-gray-600 border-gray-500/20'
-  }
-}
-
-function getStatusText(status: FileStatus): string {
-  switch (status) {
-    case 'uploading': return '上传中'
-    case 'uploaded': return '已上传'
-    case 'extracting': 
-    case 'processing': return '处理中'
-    case 'completed': 
-    case 'success': return '已完成'
-    case 'error': return '失败'
-    default: return '未知'
-  }
-}
-
-
-function triggerUpload() {
-  fileInput.value?.click()
-}
-
-function extractData(fileId: string) {
-  emit('extract', fileId)
-}
-
-function extractAllFiles() {
-  const fileIds = props.files
-    .filter((f: any) => f.status === 'uploaded' || f.status === 'pending')
-    .map((f: any) => f.id)
-
-  if (fileIds.length === 0) {
-    // alert('没有可提取的文件') 
-    // Silent fail or toast
-    return
-  }
-  emit('batchExtract', fileIds)
-}
+function triggerUpload() { fileInput.value?.click() }
 </script>
-
-<template>
-  <Card class="h-full">
-    <CardContent class="p-4 h-full flex flex-col">
-      <!-- 上传区域 -->
-      <div
-        class="relative border-2 border-dashed rounded-lg p-6 text-center transition-all cursor-pointer"
-        :class="[
-          isDragging 
-            ? 'border-primary bg-primary/5' 
-            : 'border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/50'
-        ]"
-        @dragover="handleDragOver"
-        @dragleave="handleDragLeave"
-        @drop="handleDrop"
-        @click="triggerUpload"
-      >
-        <input
-          ref="fileInput"
-          type="file"
-          class="hidden"
-          accept=".pdf,.txt,.md"
-          multiple
-        @change="handleFileSelect"
-        />
-        
-        <div v-if="isUploading" class="flex flex-col items-center gap-2">
-          <Spinner size="lg" class="text-primary" />
-          <span class="text-sm text-muted-foreground">上传中...</span>
-        </div>
-        
-        <template v-else>
-          <Upload class="mx-auto h-10 w-10 text-muted-foreground" />
-          <p class="mt-2 text-sm font-medium">
-            拖放文献文件到这里
-          </p>
-          <p class="text-xs text-muted-foreground mt-1">
-            支持 PDF、TXT、MD 格式 · 支持多文件
-          </p>
-        </template>
-      </div>
-      
-      <!-- 已上传文件列表 -->
-      <div v-if="files.length > 0" class="mt-4 flex-1 overflow-auto space-y-2">
-        <!-- 批量操作按钮 -->
-        <div class="flex items-center justify-between mb-2">
-          <div class="text-sm font-medium text-muted-foreground">
-            已上传文件 ({{ files.length }})
-          </div>
-          <div class="flex gap-1">
-            <Button
-              size="sm"
-              variant="outline"
-              @click="extractAllFiles"
-              :disabled="!files.some((f: any) => f.status === 'uploaded')"
-            >
-              全部提取
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              @click="emit('clear')"
-            >
-              清空
-            </Button>
-          </div>
-        </div>
-        
-        <div
-          v-for="file in files"
-          :key="file.id"
-          class="flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-all group"
-          :class="[
-            selectedId === file.id 
-              ? 'bg-blue-50/80 border-blue-200 ring-1 ring-blue-300 dark:bg-blue-900/20 dark:border-blue-800' 
-              : 'bg-card hover:bg-muted/50 border-transparent hover:border-muted'
-          ]"
-          @click="emit('select', file.id)"
-        >
-          <!-- 状态图标 -->
-          <div class="flex-shrink-0">
-            <Loader2 v-if="file.status === 'uploading' || file.status === 'processing'" class="h-5 w-5 text-blue-500 animate-spin" />
-            <CheckCircle2 v-else-if="file.status === 'success' || file.status === 'completed'" class="h-5 w-5 text-emerald-500" />
-            <AlertCircle v-else-if="file.status === 'error'" class="h-5 w-5 text-red-500" />
-            <FileText v-else class="h-5 w-5 text-primary" />
-          </div>
-          
-          <div class="flex-1 min-w-0">
-            <p class="text-sm font-medium truncate" :class="selectedId === file.id ? 'text-primary' : ''">{{ file.name }}</p>
-            <div class="flex items-center gap-2 mt-0.5">
-              <Badge :class="getStatusColor(file.status)" class="text-xs">
-                {{ getStatusText(file.status) }}
-              </Badge>
-              <span v-if="file.records?.length > 0" class="text-xs text-muted-foreground">
-                · {{ file.records.length }} 条数据
-              </span>
-              <span v-if="file.errorMessage || file.error" class="text-xs text-red-500 truncate">
-                · {{ file.errorMessage || file.error }}
-              </span>
-            </div>
-            <!-- Progress Bar -->
-             <div v-if="file.status === 'processing'" class="mt-2 h-0.5 bg-muted rounded-full overflow-hidden">
-                <div class="h-full bg-primary transition-all duration-300" :style="{ width: `${file.progress}%` }" />
-             </div>
-          </div>
-          
-          <div class="flex gap-1">
-            <Button
-              v-if="file.status === 'uploaded'"
-              size="sm"
-              variant="ghost"
-              @click.stop="extractData(file.id)"
-            >
-              提取
-            </Button>
-            <!-- Only show delete if not processing -->
-            <Button
-              size="icon"
-              variant="ghost"
-              class="h-8 w-8 opacity-0 group-hover:opacity-100"
-              @click.stop="emit('remove', file.id)"
-              :disabled="file.status === 'uploading' || file.status === 'processing'"
-            >
-              <X class="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      </div>
-      
-      <!-- 空状态 -->
-      <div v-else class="flex-1 flex items-center justify-center">
-        <p class="text-sm text-muted-foreground">
-          暂无上传文件
-        </p>
-      </div>
-    </CardContent>
-  </Card>
-</template>

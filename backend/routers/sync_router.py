@@ -103,6 +103,10 @@ async def list_literature(
         List of LiteratureSchema
     """
     literature_list = await get_all_literature(db, skip=skip, limit=limit)
+
+    def _safe_year(y) -> int | None:
+        """Return None if year is missing or clearly invalid (< 1900)."""
+        return y if (y and y >= 1900) else None
     
     return [
         LiteratureSchema(
@@ -112,12 +116,11 @@ async def list_literature(
             authors=lit.authors,
             journal=lit.journal,
             issn=lit.issn,
-            year=lit.year,
+            year=_safe_year(lit.year),
             volume=lit.volume,
             issue=lit.issue,
             pages=lit.pages,
             file_path=lit.file_path or "",
-            file_hash=lit.file_hash,
             created_at=lit.created_at
         )
         for lit in literature_list
@@ -152,12 +155,11 @@ async def get_literature(
         authors=literature.authors,
         journal=literature.journal,
         issn=literature.issn,
-        year=literature.year,
+        year=(literature.year if (literature.year and literature.year >= 1900) else None),
         volume=literature.volume,
         issue=literature.issue,
         pages=literature.pages,
         file_path=literature.file_path or "",
-        file_hash=literature.file_hash,
         created_at=literature.created_at,
         tribology_data=[
             TribologyDataSchema(
@@ -172,6 +174,20 @@ async def get_literature(
                 load_raw=r.load_raw,
                 speed_value=r.speed_value,
                 temperature=r.temperature,
+                potential=r.potential,
+                water_content=r.water_content,
+                surface_roughness=r.surface_roughness,
+                residual_film_thickness_d=r.residual_film_thickness_d,
+                layer_spacing_delta=r.layer_spacing_delta,
+                film_thickness=r.film_thickness,
+                mol_ratio=r.mol_ratio,
+                cation=r.cation,
+                anion=r.anion,
+                cation_smiles=r.cation_smiles,
+                anion_smiles=r.anion_smiles,
+                il_smiles=r.il_smiles,
+                il_inchikey=r.il_inchikey,
+                alkyl_chain_length=r.alkyl_chain_length,
                 confidence=r.confidence,
                 extracted_at=r.extracted_at
             )
@@ -206,12 +222,11 @@ async def get_literature_by_doi_endpoint(
         authors=literature.authors,
         journal=literature.journal,
         issn=literature.issn,
-        year=literature.year,
+        year=(literature.year if (literature.year and literature.year >= 1900) else None),
         volume=literature.volume,
         issue=literature.issue,
         pages=literature.pages,
         file_path=literature.file_path or "",
-        file_hash=literature.file_hash,
         created_at=literature.created_at
     )
 
@@ -236,6 +251,91 @@ async def delete_literature_endpoint(
         raise HTTPException(status_code=404, detail=f"Literature ID={literature_id} not found")
     
     return {"success": True, "message": f"Deleted Literature ID={literature_id} and all related data"}
+
+
+# ============== IL Re-Resolution Patch Endpoint ==============
+
+@router.post("/patch-il-resolution")
+async def patch_il_resolution(
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Re-run IL resolution on all existing TribologyData records.
+    
+    This endpoint patches records that have missing cation/anion/SMILES data
+    because they were extracted before the IL resolver dictionary was updated.
+    Does NOT call the LLM — only re-runs the local/PubChem IL resolution logic.
+    
+    Returns:
+        Summary of updated records
+    """
+    from sqlalchemy import select, update as sql_update
+    from models.db_models import TribologyData
+    from services.il_resolver_service import resolve_il
+
+    try:
+        # Fetch all records that have a lubricant but missing cation or anion
+        query = select(TribologyData).where(
+            TribologyData.lubricant.isnot(None)
+        )
+        result = await db.execute(query)
+        records = list(result.scalars().all())
+
+        updated_count = 0
+        skipped_count = 0
+
+        for rec in records:
+            # Already fully resolved? skip
+            if rec.cation and rec.anion:
+                skipped_count += 1
+                continue
+
+            resolved = resolve_il(rec.lubricant or "")
+
+            # Only update if we resolved something new
+            changed = False
+            if resolved.get("cation") and not rec.cation:
+                rec.cation = resolved["cation"]
+                changed = True
+            if resolved.get("anion") and not rec.anion:
+                rec.anion = resolved["anion"]
+                changed = True
+            if resolved.get("cation_smiles") and not rec.cation_smiles:
+                rec.cation_smiles = resolved["cation_smiles"]
+                changed = True
+            if resolved.get("anion_smiles") and not rec.anion_smiles:
+                rec.anion_smiles = resolved["anion_smiles"]
+                changed = True
+            if resolved.get("il_smiles") and not rec.il_smiles:
+                rec.il_smiles = resolved["il_smiles"]
+                changed = True
+            if resolved.get("il_inchikey") and not rec.il_inchikey:
+                rec.il_inchikey = resolved["il_inchikey"]
+                changed = True
+            if resolved.get("alkyl_chain_length") is not None and rec.alkyl_chain_length is None:
+                rec.alkyl_chain_length = resolved["alkyl_chain_length"]
+                changed = True
+
+            if changed:
+                updated_count += 1
+                print(f"[Patch IL] Record {rec.id} ({rec.lubricant}): "
+                      f"cation={resolved['cation']}, anion={resolved['anion']}")
+
+        await db.commit()
+
+        return {
+            "success": True,
+            "total_scanned": len(records),
+            "updated_count": updated_count,
+            "skipped_count": skipped_count,
+            "message": f"Patched {updated_count} records, skipped {skipped_count} (already resolved)"
+        }
+
+    except Exception as e:
+        await db.rollback()
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Patch failed: {str(e)}")
 
 
 # ============== TribologyData Endpoints ==============
@@ -274,6 +374,20 @@ async def get_tribology_records(
             load_raw=r.load_raw,
             speed_value=r.speed_value,
             temperature=r.temperature,
+            potential=r.potential,
+            water_content=r.water_content,
+            surface_roughness=r.surface_roughness,
+            residual_film_thickness_d=r.residual_film_thickness_d,
+            layer_spacing_delta=r.layer_spacing_delta,
+            film_thickness=r.film_thickness,
+            mol_ratio=r.mol_ratio,
+            cation=r.cation,
+            anion=r.anion,
+            cation_smiles=r.cation_smiles,
+            anion_smiles=r.anion_smiles,
+            il_smiles=r.il_smiles,
+            il_inchikey=r.il_inchikey,
+            alkyl_chain_length=r.alkyl_chain_length,
             confidence=r.confidence,
             extracted_at=r.extracted_at
         )

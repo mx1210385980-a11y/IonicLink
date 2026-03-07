@@ -1,17 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { 
-  Download, Beaker, ChevronDown, ChevronUp, Gauge, ThermometerSun, 
-  Timer, Layers, AlertCircle, CheckCircle2, RefreshCw, Check, Zap, Search 
+  Download, ChevronDown, ChevronUp, Gauge, ThermometerSun, 
+  Timer, Layers, AlertCircle, CheckCircle2, RefreshCw, Check, Zap, Search, FileText, FileSearch
 } from 'lucide-vue-next'
 import type { BatchFile, TribologyData, LiteratureMetadata } from '@/lib/api'
 import { useValidation } from '@/composables/useValidation'
-import EditableField from '@/components/EditableField.vue'
 import LiteratureMetadataCard from '@/components/LiteratureMetadataCard.vue'
-import Card from '@/components/ui/Card.vue'
-import CardHeader from '@/components/ui/CardHeader.vue'
-import CardTitle from '@/components/ui/CardTitle.vue'
-import CardContent from '@/components/ui/CardContent.vue'
 import Button from '@/components/ui/Button.vue'
 import Badge from '@/components/ui/Badge.vue'
 
@@ -22,12 +17,13 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'export': [fileId: string]
+  'export': [fileId: string, format: 'json' | 'csv']
   'retry': [fileId: string]
   'update:record': [fileId: string, recordId: string, record: TribologyData]
   'update:file': [fileId: string]
   'update:metadata': [fileId: string, metadata: LiteratureMetadata]
   'save': [fileId: string]
+  'view-grounding': [fileId: string]
 }>()
 
 // Use validation composable
@@ -36,8 +32,9 @@ const { validateRecord } = useValidation()
 // selectedFileId is now controlled by prop
 const selectedFileId = computed(() => props.selectedId)
 const expandedRows = ref<Set<string>>(new Set())
+const showExportMenu = ref(false)
 
-// 选中的文件
+// Selected file
 const selectedFile = computed(() => {
   if (!selectedFileId.value) return null
   return props.files.find(f => f.id === selectedFileId.value) || null
@@ -101,7 +98,7 @@ const filteredRecords = computed(() => {
   })
 })
 
-// 统计信息
+// Statistics
 const stats = computed(() => {
   const total = props.files.length
   const completed = props.files.filter(f => f.status === 'success').length
@@ -111,7 +108,7 @@ const stats = computed(() => {
   return { total, completed, totalRecords, withWarnings }
 })
 
-// 切换行展开
+// Toggle row expansion
 function toggleRow(id: string) {
   if (expandedRows.value.has(id)) {
     expandedRows.value.delete(id)
@@ -120,7 +117,7 @@ function toggleRow(id: string) {
   }
 }
 
-// 解析 COF 值
+// Parse COF value
 function parseCof(cof: string | undefined): number | undefined {
   if (!cof) return undefined
   const numericStr = cof.replace(/[^\d.]/g, '')
@@ -128,7 +125,7 @@ function parseCof(cof: string | undefined): number | undefined {
   return isNaN(val) ? undefined : val
 }
 
-// COF 颜色
+// COF color
 function getCofColor(cofStr: string | undefined): string {
   const cof = parseCof(cofStr)
   if (cof === undefined) return 'bg-muted'
@@ -137,57 +134,51 @@ function getCofColor(cofStr: string | undefined): string {
   return 'bg-red-500'
 }
 
-// COF 宽度
+// COF width
 function getCofWidth(cofStr: string | undefined): string {
   const cof = parseCof(cofStr)
   if (cof === undefined) return '0%'
   return `${Math.min(cof * 200, 100)}%`
 }
 
-// 导出当前文件
-function exportCurrentFile() {
+// Export current file
+function exportCurrentFile(format: 'json' | 'csv' = 'json') {
   if (selectedFileId.value) {
-    emit('export', selectedFileId.value)
+    emit('export', selectedFileId.value, format)
   }
 }
 
-// 重试/重新提取指定文件
+
+
+// Retry/re-extract specified file
 async function handleReprocess(fileId?: string) {
-  // 如果传入的不是字符串（如事件对象），则使用当前选中的文件ID
+  // If not a string (e.g. event object), use selectedFileId
   const targetId = typeof fileId === 'string' ? fileId : selectedFileId.value
   if (!targetId) return
   
   emit('retry', targetId)
 }
 
-// 判断是否为超润滑状态 (COF < 0.01)
+// Determine if superlubricity (COF < 0.01)
 function isSuperlubricity(cofStr: string | undefined): boolean {
   if (!cofStr) return false
   
-  // 如果包含 "<" 符号,说明实际值小于显示值
+  // If it contains "<" symbol, it means the actual value is less than the displayed value
   const hasLessThan = cofStr.includes('<')
   const cof = parseCof(cofStr)
   
   if (cof === undefined) return false
   
-  // 如果有 "<" 符号且值 <= 0.01,或者值严格 < 0.01,都判定为超润滑
+  // If there is a "<" symbol and value <= 0.01, or value is strictly < 0.01, it is judged as superlubricity
   return hasLessThan ? cof <= 0.01 : cof < 0.01
 }
 
-// 导出所有数据
-function exportAllData() {
-  const allRecords = props.files.flatMap(f => f.records)
-  const jsonData = JSON.stringify(allRecords, null, 2)
-  const blob = new Blob([jsonData], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `tribology_data_all_${Date.now()}.json`
-  a.click()
-  URL.revokeObjectURL(url)
-}
 
-// 更新记录并验证
+
+
+
+
+// Update record and validate
 function updateRecordField(recordId: string, fieldName: keyof TribologyData, value: string | undefined) {
   if (!selectedFile.value) return
   
@@ -214,20 +205,20 @@ function updateRecordField(recordId: string, fieldName: keyof TribologyData, val
   emit('update:record', selectedFile.value.id, recordId, record)
 }
 
-// 验证单条记录
+// Verify single record
 function verifyRecord(recordId: string) {
   if (!selectedFile.value) return
   
   const record = selectedFile.value.records.find(r => r.id === recordId)
   if (!record) return
   
-  // 如果当前已经是 verified，点击则取消验证（这种交互更自然）
+  // If currently verified, click to unverify (more natural interaction)
   if (record.validationStatus === 'verified') {
     const validation = validateRecord(record)
     record.validationStatus = validation.status
     record.validationMessage = validation.message
   } else {
-    // 手动确认：强制标记为 verified
+    // Manual confirmation: force mark as verified
     record.validationStatus = 'verified'
     record.validationMessage = undefined
   }
@@ -235,7 +226,7 @@ function verifyRecord(recordId: string) {
   emit('update:record', selectedFile.value.id, recordId, record)
 }
 
-// 全部确认
+// Verify all
 function markAllAsVerified() {
   if (!selectedFile.value) return
   
@@ -254,64 +245,47 @@ function markAllAsVerified() {
 </script>
 
 <template>
-  <Card class="h-full flex flex-col">
-    <CardHeader class="flex-row items-center justify-between space-y-0 pb-4">
+  <div class="h-full flex flex-col bg-background">
+    <div class="px-4 py-3 border-b flex items-center justify-between">
       <div>
-        <CardTitle class="text-lg">提取数据预览</CardTitle>
-        <p class="text-sm text-muted-foreground mt-1">
-          共 {{ stats.totalRecords }} 条记录 · {{ stats.completed }}/{{ stats.total }} 文件已完成
+        <h2 class="text-lg font-semibold">Extracted Data Preview</h2>
+        <p class="text-sm text-muted-foreground">
+          Total {{ stats.totalRecords }} records · {{ stats.completed }}/{{ stats.total }} files completed
         </p>
       </div>
-      <div class="flex items-center gap-2">
-        <Button
-          v-if="selectedFile && selectedFile.status === 'success'"
-          size="sm" 
-          variant="outline"
-          class="h-8 gap-1"
-          @click="handleReprocess()"
-          title="Force Re-extract (Bypass Cache)"
-        >
-          <RefreshCw class="h-4 w-4" />
-          <span class="sr-only sm:not-sr-only sm:whitespace-nowrap">Re-extract</span>
-        </Button>
-        <Button
-          v-if="stats.totalRecords > 0"
-          size="sm"
-          variant="outline"
-          class="h-8 gap-1"
-          @click="exportAllData"
-        >
-          <Download class="h-4 w-4" />
-          <span class="hidden sm:inline">全部导出</span>
-        </Button>
-      </div>
-    </CardHeader>
+    </div>
     
-    <CardContent class="flex-1 overflow-hidden pt-0 flex gap-4">
+    <div class="flex-1 overflow-hidden p-4 relative">
       
-      <!-- 右侧：详情视图 -->
-      <div class="flex-1 flex flex-col min-w-0">
-        <!-- 未选择文件 -->
-        <div v-if="!selectedFile" class="h-full flex items-center justify-center">
-          <div class="text-center">
-            <Beaker class="mx-auto h-12 w-12 text-muted-foreground/50" />
-            <p class="mt-3 text-sm font-medium">请选择文件查看详情</p>
-            <p class="text-xs text-muted-foreground mt-1">
-              点击左侧文件列表中的文件
+      <!-- Right: Detail view -->
+      <div class="h-full flex flex-col min-w-0">
+        <!-- No file selected -->
+        <div v-if="!selectedFile" class="absolute inset-0 flex items-center justify-center p-6">
+          <div class="text-center bg-white rounded-2xl shadow-sm border border-gray-100/50 p-12 max-w-2xl w-full mx-auto">
+            <div class="w-16 h-16 bg-blue-50/80 rounded-2xl flex items-center justify-center mx-auto mb-6 ring-8 ring-blue-50/30">
+              <FileSearch class="h-8 w-8 text-blue-600" />
+            </div>
+            <h3 class="text-[17px] font-bold text-gray-800 mb-3">No Literature Selected</h3>
+            <p class="text-[13px] text-gray-500 leading-relaxed mb-8 max-w-sm mx-auto">
+              Please select a file from the sidebar to view extracted results, or upload new files for analysis.
             </p>
+            <Button variant="outline" class="w-auto h-10 px-6 font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 border-gray-200 shadow-sm rounded-lg" @click="$emit('view-grounding', '')" disabled>
+              <Layers class="w-4 h-4 mr-2 text-gray-400" />
+              Browse All Data
+            </Button>
           </div>
         </div>
         
-        <!-- 选中文件详情 -->
+        <!-- Selected file details -->
         <div v-else class="h-full flex flex-col">
-          <!-- 头部操作栏 -->
+          <!-- Header action bar -->
           <div class="flex items-center justify-between mb-3 pb-3 border-b gap-4">
             <div class="min-w-0 flex-1 overflow-hidden">
               <h3 class="font-semibold truncate" :title="selectedFile.name">
                 {{ selectedFile.name }}
               </h3>
               <p class="text-xs text-muted-foreground mt-0.5">
-                {{ selectedFile.records.length }} 条记录
+                {{ selectedFile.records.length }} records
               </p>
             </div>
             <div class="flex gap-2">
@@ -323,7 +297,7 @@ function markAllAsVerified() {
                 @click="markAllAsVerified"
               >
                 <CheckCircle2 class="h-4 w-4 mr-1" />
-                全部确认
+                Verify All
               </Button>
               <Button
                 v-if="selectedFile.status === 'success' && selectedFile.records.length > 0"
@@ -333,35 +307,59 @@ function markAllAsVerified() {
                 @click="emit('save', selectedFile.id)"
               >
                 <RefreshCw class="h-4 w-4 mr-1" />
-                同步到数据库
+                Sync to DB
               </Button>
-
               <Button
-                v-if="selectedFile.status === 'error'"
+                v-if="selectedFile.status === 'success' || selectedFile.status === 'error'"
                 size="sm"
                 variant="outline"
                 @click="handleReprocess()"
+                title="Re-extract data"
               >
                 <RefreshCw class="h-4 w-4 mr-1" />
-                重试 (Re-extract)
+                Re-extract
               </Button>
+              <!-- Export dropdown button -->
+              <div v-if="selectedFile.records.length > 0" class="relative">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  @click="showExportMenu = !showExportMenu"
+                >
+                  <Download class="h-4 w-4 mr-1" />
+                  Export
+                  <ChevronDown class="h-3 w-3 ml-1" />
+                </Button>
+                <div
+                  v-if="showExportMenu"
+                  class="absolute right-0 top-full mt-1 w-36 rounded-md border bg-popover shadow-lg z-50 py-1"
+                  @mouseleave="showExportMenu = false"
+                >
+                  <button
+                    class="w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors"
+                    @click="exportCurrentFile('json'); showExportMenu = false"
+                  >
+                    📄 Export JSON
+                  </button>
+                  <button
+                    class="w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors"
+                    @click="exportCurrentFile('csv'); showExportMenu = false"
+                  >
+                    📊 Export CSV
+                  </button>
+                </div>
+              </div>
+              <!-- Source Grounding button -->
               <Button
-                v-if="selectedFile.status === 'success'"
+                v-if="selectedFile.status === 'success' && selectedFile.records.length > 0"
                 size="sm"
                 variant="outline"
-                @click="handleReprocess()"
+                class="text-amber-600 border-amber-500 hover:bg-amber-50"
+                @click="emit('view-grounding', selectedFile.id)"
+                title="View source highlights"
               >
-                <RefreshCw class="h-4 w-4 mr-1" />
-                重新提取
-              </Button>
-              <Button
-                v-if="selectedFile.records.length > 0"
-                size="sm"
-                variant="outline"
-                @click="exportCurrentFile"
-              >
-                <Download class="h-4 w-4 mr-1" />
-                导出
+                <FileText class="h-4 w-4 mr-1" />
+                Source
               </Button>
             </div>
           </div>
@@ -410,7 +408,7 @@ function markAllAsVerified() {
               @click="isFilterExpanded = !isFilterExpanded"
             >
               <component :is="isFilterExpanded ? ChevronUp : ChevronDown" class="h-3 w-3 mr-0.5" />
-              {{ isFilterExpanded ? '收起' : `+${visibleUniqueLiquids.length - 8}` }}
+              {{ isFilterExpanded ? 'Collapse' : `+${visibleUniqueLiquids.length - 8}` }}
             </button>
             
             <!-- Compact Search (Inline) -->
@@ -424,19 +422,19 @@ function markAllAsVerified() {
               </div>
           </div>
 
-          <!-- 数据卡片列表 -->
-          <div class="flex-1 overflow-y-auto">
-            <!-- 无数据 -->
-            <div v-if="selectedFile.records.length === 0" class="h-full flex items-center justify-center">
+          <!-- Data card list -->
+          <div class="flex-1 overflow-y-auto min-h-0 relative">
+            <!-- No data -->
+            <div v-if="selectedFile.records.length === 0" class="absolute inset-0 flex items-center justify-center">
               <div class="text-center">
                 <AlertCircle class="mx-auto h-10 w-10 text-muted-foreground/50" />
                 <p class="mt-2 text-sm text-muted-foreground">
-                  该文件暂无提取数据
+                  No data extracted for this file
                 </p>
               </div>
             </div>
             
-          <!-- 文献信息卡片 -->
+          <!-- Literature info card -->
             <LiteratureMetadataCard
               v-if="selectedFile.metadata"
               :metadata="selectedFile.metadata"
@@ -444,7 +442,7 @@ function markAllAsVerified() {
               @update:metadata="(m) => selectedFile && emit('update:metadata', selectedFile.id, m)"
             />
             
-            <!-- 数据列表 -->
+            <!-- Data list -->
             <div v-if="filteredRecords.length > 0" class="space-y-3">
               <div
                 v-for="item in filteredRecords"
@@ -459,27 +457,39 @@ function markAllAsVerified() {
                 <div
                   v-if="item.validationStatus === 'modified'"
                   class="absolute top-2 right-2 w-2 h-2 rounded-full bg-blue-500"
-                  title="已修改"
+                  title="Modified"
                 ></div>
-                <!-- 主要信息行 -->
+                <!-- Main info row -->
                 <div
                   class="p-4 cursor-pointer"
                   @click="toggleRow(item.id!)"
                 >
                   <div class="flex items-start justify-between gap-4">
                     <div class="flex-1 min-w-0">
-                      <!-- 离子液体 -->
+                      <!-- Ionic liquid -->
                       <h4 class="font-semibold text-base truncate">
                         {{ item.ionic_liquid || '-' }}
                       </h4>
-                      <!-- 材料名称/表面 -->
+                      <!-- Cation/Anion decomposition badges -->
+                      <div v-if="item.cation || item.anion" class="flex items-center gap-1 mt-0.5">
+                        <Badge v-if="item.cation" class="bg-teal-500/10 text-teal-700 border-teal-500/20 text-[10px] px-1.5 py-0">
+                          {{ item.cation }}⁺
+                        </Badge>
+                        <Badge v-if="item.anion" class="bg-rose-500/10 text-rose-700 border-rose-500/20 text-[10px] px-1.5 py-0">
+                          {{ item.anion }}⁻
+                        </Badge>
+                        <Badge v-if="item.alkyl_chain_length" class="bg-indigo-500/10 text-indigo-700 border-indigo-500/20 text-[10px] px-1.5 py-0">
+                          C{{ item.alkyl_chain_length }}
+                        </Badge>
+                      </div>
+                      <!-- Material name/surface -->
                       <p class="text-sm text-muted-foreground mt-0.5">
                         {{ item.material_name }}
                       </p>
                       
-                      <!-- 条件标签 -->
+                      <!-- Condition labels -->
                       <div class="flex flex-wrap gap-1.5 mt-2">
-                        <!-- 超润滑标签 -->
+                        <!-- Superlubricity label -->
                         <Badge 
                           v-if="isSuperlubricity(item.cof)" 
                           class="bg-gradient-to-r from-pink-500/20 to-purple-500/20 text-pink-600 border-pink-500/30 font-semibold"
@@ -493,7 +503,7 @@ function markAllAsVerified() {
                             field-name="load"
                             :validation-status="item.validationStatus"
                             placeholder="-"
-                            @update:model-value="(val) => updateRecordField(item.id!, 'load', val)"
+                            @update:model-value="updateRecordField(item.id!, 'load', $event)"
                           />
                         </Badge>
                         <Badge v-if="item.temperature" class="bg-orange-500/10 text-orange-600 border-orange-500/20">
@@ -503,7 +513,7 @@ function markAllAsVerified() {
                             field-name="temperature"
                             :validation-status="item.validationStatus"
                             placeholder="-"
-                            @update:model-value="(val) => updateRecordField(item.id!, 'temperature', val)"
+                            @update:model-value="updateRecordField(item.id!, 'temperature', $event)"
                           />
                         </Badge>
                         <Badge v-if="item.speed" class="bg-purple-500/10 text-purple-600 border-purple-500/20">
@@ -513,7 +523,7 @@ function markAllAsVerified() {
                             field-name="speed"
                             :validation-status="item.validationStatus"
                             placeholder="-"
-                            @update:model-value="(val) => updateRecordField(item.id!, 'speed', val)"
+                            @update:model-value="updateRecordField(item.id!, 'speed', $event)"
                           />
                         </Badge>
                         <Badge v-if="item.potential" class="bg-yellow-500/10 text-yellow-600 border-yellow-500/20">
@@ -523,7 +533,7 @@ function markAllAsVerified() {
                             field-name="potential"
                             :validation-status="item.validationStatus"
                             placeholder="-"
-                            @update:model-value="(val) => updateRecordField(item.id!, 'potential', val)"
+                            @update:model-value="updateRecordField(item.id!, 'potential', $event)"
                           />
                         </Badge>
                         <Badge v-if="item.contact_type" class="bg-green-500/10 text-green-600 border-green-500/20">
@@ -533,7 +543,7 @@ function markAllAsVerified() {
                       </div>
                     </div>
                     
-                    <!-- COF 显示 -->
+                    <!-- COF display -->
                     <div class="flex flex-col items-end gap-2">
                       <!-- Verify button -->
                       <Button
@@ -542,7 +552,7 @@ function markAllAsVerified() {
                         class="h-6 w-6 p-0"
                         :class="item.validationStatus === 'verified' ? 'text-green-600 hover:text-green-700' : 'text-muted-foreground hover:text-primary'"
                         @click.stop="verifyRecord(item.id!)"
-                        :title="item.validationStatus === 'verified' ? '已验证' : '标记为已验证'"
+                        :title="item.validationStatus === 'verified' ? 'Verified' : 'Mark as verified'"
                       >
                         <Check class="h-4 w-4" />
                       </Button>
@@ -556,11 +566,11 @@ function markAllAsVerified() {
                             :validation-status="item.validationStatus"
                             :validation-message="item.validationMessage"
                             placeholder="-"
-                            @update:model-value="(val) => updateRecordField(item.id!, 'cof', val)"
+                            @update:model-value="updateRecordField(item.id!, 'cof', $event)"
                           />
                         </div>
                       </div>
-                      <!-- COF 条形图 -->
+                      <!-- COF bar chart -->
                       <div class="w-20 h-2 bg-muted rounded-full overflow-hidden">
                         <div
                           class="h-full transition-all duration-300"
@@ -577,54 +587,70 @@ function markAllAsVerified() {
                   </div>
                 </div>
                 
-                <!-- 展开详情 -->
+                <!-- Expanded details -->
                 <div
                   v-if="expandedRows.has(item.id!)"
                   class="px-4 pb-4 pt-0 border-t bg-muted/30"
                 >
                   <div class="grid grid-cols-2 gap-3 text-sm pt-3">
                     <div v-if="item.base_oil">
-                      <span class="text-muted-foreground">基础油:</span>
+                      <span class="text-muted-foreground">Base Oil:</span>
                       <span class="ml-2">{{ item.base_oil }}</span>
                     </div>
                     <div v-if="item.concentration">
-                      <span class="text-muted-foreground">浓度:</span>
+                      <span class="text-muted-foreground">Concentration:</span>
                       <span class="ml-2">{{ item.concentration }}</span>
                     </div>
                     <div v-if="item.film_thickness">
-                      <span class="text-muted-foreground">膜厚:</span>
+                      <span class="text-muted-foreground">Film Thickness:</span>
                       <span class="ml-2">{{ item.film_thickness }}</span>
                     </div>
                     <div v-if="item.mol_ratio">
-                      <span class="text-muted-foreground">摩尔比:</span>
+                      <span class="text-muted-foreground">Mol Ratio:</span>
                       <span class="ml-2">{{ item.mol_ratio }}</span>
                     </div>
                     <div v-if="item.cation">
-                      <span class="text-muted-foreground">阳离子:</span>
+                      <span class="text-muted-foreground">Cation:</span>
                       <span class="ml-2">{{ item.cation }}</span>
                     </div>
+                    <div v-if="item.anion">
+                      <span class="text-muted-foreground">Anion:</span>
+                      <span class="ml-2">{{ item.anion }}</span>
+                    </div>
+                    <div v-if="item.alkyl_chain_length">
+                      <span class="text-muted-foreground">Alkyl Chain:</span>
+                      <span class="ml-2">C{{ item.alkyl_chain_length }}</span>
+                    </div>
+                    <div v-if="item.il_smiles" class="col-span-2">
+                      <span class="text-muted-foreground">SMILES:</span>
+                      <span class="ml-2 font-mono text-xs break-all">{{ item.il_smiles }}</span>
+                    </div>
+                    <div v-if="item.il_inchikey" class="col-span-2">
+                      <span class="text-muted-foreground">InChIKey:</span>
+                      <span class="ml-2 font-mono text-xs">{{ item.il_inchikey }}</span>
+                    </div>
                     <div v-if="item.water_content">
-                      <span class="text-muted-foreground">含水量/湿度:</span>
+                      <span class="text-muted-foreground">Water / Humidity:</span>
                       <span class="ml-2">{{ item.water_content }}</span>
                     </div>
                     <div v-if="item.surface_roughness">
-                      <span class="text-muted-foreground">表面粗糙度:</span>
+                      <span class="text-muted-foreground">Roughness:</span>
                       <span class="ml-2">{{ item.surface_roughness }}</span>
                     </div>
                     <div v-if="item.wear_rate">
-                      <span class="text-muted-foreground">磨损率:</span>
+                      <span class="text-muted-foreground">Wear Rate:</span>
                       <span class="ml-2">{{ item.wear_rate }}</span>
                     </div>
                     <div v-if="item.test_duration">
-                      <span class="text-muted-foreground">测试时间:</span>
+                      <span class="text-muted-foreground">Duration:</span>
                       <span class="ml-2">{{ item.test_duration }}</span>
                     </div>
                     <div v-if="item.source" class="col-span-2">
-                      <span class="text-muted-foreground">来源:</span>
+                      <span class="text-muted-foreground">Source:</span>
                       <span class="ml-2">{{ item.source }}</span>
                     </div>
                     <div v-if="item.notes" class="col-span-2">
-                      <span class="text-muted-foreground">备注:</span>
+                      <span class="text-muted-foreground">Notes:</span>
                       <span class="ml-2">{{ item.notes }}</span>
                     </div>
                   </div>
@@ -634,6 +660,6 @@ function markAllAsVerified() {
           </div>
         </div>
       </div>
-    </CardContent>
-  </Card>
+    </div>
+  </div>
 </template>

@@ -29,7 +29,7 @@ function toggleRow(id: string) {
 
 function parseCof(cof: string | undefined): number | undefined {
   if (!cof) return undefined
-  // 移除非数字字符（保留小数点），比如 '<0.01' 变成 '0.01'
+  // Remove non-numeric characters (keep decimal point), e.g. '<0.01' becomes '0.01'
   const numericStr = cof.replace(/[^\d.]/g, '')
   const val = parseFloat(numericStr)
   return isNaN(val) ? undefined : val
@@ -65,9 +65,9 @@ function exportData() {
   <Card class="h-full flex flex-col">
     <CardHeader class="flex-row items-center justify-between space-y-0 pb-4">
       <div>
-        <CardTitle class="text-lg">提取数据预览</CardTitle>
+        <CardTitle class="text-lg">Extracted Data Preview</CardTitle>
         <p class="text-sm text-muted-foreground mt-1">
-          共 {{ data.length }} 条记录
+          Total {{ data.length }} records
         </p>
       </div>
       <Button
@@ -77,56 +77,56 @@ function exportData() {
         @click="exportData"
       >
         <Download class="h-4 w-4 mr-1" />
-        导出
+        Export
       </Button>
     </CardHeader>
     
     <CardContent class="flex-1 overflow-auto pt-0">
-      <!-- 加载状态 -->
+      <!-- Loading status -->
       <div v-if="loading" class="h-full flex items-center justify-center">
         <div class="text-center">
           <Spinner size="lg" class="mx-auto text-primary" />
-          <p class="mt-3 text-sm text-muted-foreground">正在提取数据...</p>
+          <p class="mt-3 text-sm text-muted-foreground">Extracting data...</p>
         </div>
       </div>
       
-      <!-- 空状态 -->
+      <!-- Empty state -->
       <div v-else-if="!hasData" class="h-full flex items-center justify-center">
         <div class="text-center">
           <Beaker class="mx-auto h-12 w-12 text-muted-foreground/50" />
           <p class="mt-3 text-sm text-muted-foreground">
-            暂无提取数据
+            No data extracted
           </p>
           <p class="text-xs text-muted-foreground mt-1">
-            上传文献并点击"提取"开始
+            Upload literature and click "Extract" to begin
           </p>
         </div>
       </div>
       
-      <!-- 数据列表 -->
+      <!-- Data list -->
       <div v-else class="space-y-3">
         <div
           v-for="item in data"
           :key="item.id"
           class="rounded-lg border bg-card overflow-hidden transition-all hover:shadow-md"
         >
-          <!-- 主要信息行 -->
+          <!-- Main info row -->
           <div
             class="p-4 cursor-pointer"
             @click="toggleRow(item.id!)"
           >
             <div class="flex items-start justify-between gap-4">
               <div class="flex-1 min-w-0">
-                <!-- 离子液体 -->
+                <!-- Ionic liquid -->
                 <h4 class="font-semibold text-base truncate">
                   {{ item.ionic_liquid || '-' }}
                 </h4>
-                <!-- 材料名称/表面 -->
+                <!-- Material name/surface -->
                 <p class="text-sm text-muted-foreground mt-0.5">
                   {{ item.material_name }}
                 </p>
                 
-                <!-- 条件标签 -->
+                <!-- Condition labels -->
                 <div class="flex flex-wrap gap-1.5 mt-2">
                   <Badge v-if="item.load" class="bg-blue-500/10 text-blue-600 border-blue-500/20">
                     <Gauge class="w-3 h-3 mr-1" />
@@ -147,7 +147,7 @@ function exportData() {
                 </div>
               </div>
               
-              <!-- COF 显示 -->
+              <!-- COF Display -->
               <div class="flex flex-col items-end gap-2">
                 <div class="text-right">
                   <p class="text-xs text-muted-foreground">COF</p>
@@ -155,7 +155,7 @@ function exportData() {
                     {{ item.cof ?? '-' }}
                   </p>
                 </div>
-                <!-- COF 条形图 -->
+                <!-- COF bar chart -->
                 <div class="w-20 h-2 bg-muted rounded-full overflow-hidden">
                   <div
                     class="h-full transition-all duration-300"
@@ -172,46 +172,46 @@ function exportData() {
             </div>
           </div>
           
-          <!-- 展开详情 -->
+          <!-- Expanded details -->
           <div
             v-if="expandedRows.has(item.id!)"
             class="px-4 pb-4 pt-0 border-t bg-muted/30"
           >
             <div class="grid grid-cols-2 gap-3 text-sm pt-3">
               <div v-if="item.base_oil">
-                <span class="text-muted-foreground">基础油:</span>
+                <span class="text-muted-foreground">Base Oil:</span>
                 <span class="ml-2">{{ item.base_oil }}</span>
               </div>
               <div v-if="item.concentration">
-                <span class="text-muted-foreground">浓度:</span>
+                <span class="text-muted-foreground">Concentration:</span>
                 <span class="ml-2">{{ item.concentration }}</span>
               </div>
               <div v-if="item.potential">
-                <span class="text-muted-foreground">电位:</span>
+                <span class="text-muted-foreground">Potential:</span>
                 <span class="ml-2">{{ item.potential }}</span>
               </div>
               <div v-if="item.water_content">
-                <span class="text-muted-foreground">含水量/湿度:</span>
+                <span class="text-muted-foreground">Water / Humidity:</span>
                 <span class="ml-2">{{ item.water_content }}</span>
               </div>
               <div v-if="item.surface_roughness">
-                <span class="text-muted-foreground">表面粗糙度:</span>
+                <span class="text-muted-foreground">Roughness:</span>
                 <span class="ml-2">{{ item.surface_roughness }}</span>
               </div>
               <div v-if="item.wear_rate">
-                <span class="text-muted-foreground">磨损率:</span>
+                <span class="text-muted-foreground">Wear Rate:</span>
                 <span class="ml-2">{{ item.wear_rate }}</span>
               </div>
               <div v-if="item.test_duration">
-                <span class="text-muted-foreground">测试时间:</span>
+                <span class="text-muted-foreground">Duration:</span>
                 <span class="ml-2">{{ item.test_duration }}</span>
               </div>
               <div v-if="item.source" class="col-span-2">
-                <span class="text-muted-foreground">来源:</span>
+                <span class="text-muted-foreground">Source:</span>
                 <span class="ml-2">{{ item.source }}</span>
               </div>
               <div v-if="item.notes" class="col-span-2">
-                <span class="text-muted-foreground">备注:</span>
+                <span class="text-muted-foreground">Notes:</span>
                 <span class="ml-2">{{ item.notes }}</span>
               </div>
             </div>

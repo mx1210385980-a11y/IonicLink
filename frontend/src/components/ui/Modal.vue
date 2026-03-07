@@ -5,7 +5,7 @@ import { onMounted, onUnmounted, watch } from 'vue'
 const props = defineProps<{
   title?: string
   show: boolean
-  maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '4xl' | 'full'
+  maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '4xl' | '5xl' | 'full'
 }>()
 
 const emit = defineEmits(['close'])
@@ -37,6 +37,7 @@ const maxWidthClass = {
   xl: 'max-w-xl',
   '2xl': 'max-w-2xl',
   '4xl': 'max-w-4xl',
+  '5xl': 'max-w-5xl',
   'full': 'max-w-full m-4',
 }
 </script>

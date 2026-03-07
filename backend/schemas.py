@@ -25,7 +25,6 @@ class LiteratureBase(BaseModel):
     pages: Optional[str] = None
     
     file_path: Optional[str] = Field("", alias="filePath", description="本地 PDF 路径")
-    file_hash: Optional[str] = Field(None, alias="fileHash", description="File content hash for deduplication")
     
     class Config:
         populate_by_name = True
@@ -64,15 +63,28 @@ class TribologyDataBase(BaseModel):
     
     # Speed & Temperature
     speed_value: Optional[float] = Field(None, alias="speedValue", description="速度 (m/s)")
-    temperature: Optional[float] = Field(None, description="温度")
+    speed_raw: Optional[str] = Field(None, alias="speedRaw", description="原始速度文本 (含单位)")
+    temperature: Optional[str] = Field(None, description="温度 (含单位)")
+    temperature_value: Optional[float] = Field(None, alias="temperatureValue", description="温度数值")
     
     # Environmental Variables
     potential: Optional[str] = Field(None, description="Electrochemical potential (e.g., '+1.5V', 'OCP')")
     water_content: Optional[str] = Field(None, alias="waterContent", description="Water concentration (e.g., '50 ppm', 'Dry')")
     surface_roughness: Optional[str] = Field(None, alias="surfaceRoughness", description="Surface roughness (e.g., 'RMS 4.9 nm')")
-    film_thickness: Optional[str] = Field(None, alias="filmThickness", description="Film thickness (e.g., '7 layers')")
+    
+    # Film Thickness - Split into two distinct parameters for nanoconfinement studies
+    residual_film_thickness_d: Optional[str] = Field(None, alias="residualFilmThicknessD", description="Total confined thickness at hard wall (e.g., '3 nm')")
+    layer_spacing_delta: Optional[str] = Field(None, alias="layerSpacingDelta", description="Single molecular layer thickness (e.g., '0.7 nm')")
+    film_thickness: Optional[str] = Field(None, alias="filmThickness", description="[Deprecated] Generic film thickness")
+    
     mol_ratio: Optional[str] = Field(None, alias="molRatio", description="Molar ratio (e.g., '1:70')")
     cation: Optional[str] = Field(None, description="Cation type (e.g., 'HMIM', 'P66614')")
+    anion: Optional[str] = Field(None, description="Anion type (e.g., 'TFSI', 'PF6')")
+    cation_smiles: Optional[str] = Field(None, alias="cationSmiles", description="Cation SMILES")
+    anion_smiles: Optional[str] = Field(None, alias="anionSmiles", description="Anion SMILES")
+    il_smiles: Optional[str] = Field(None, alias="ilSmiles", description="Full IL SMILES")
+    il_inchikey: Optional[str] = Field(None, alias="ilInchikey", description="InChIKey for cross-literature alignment")
+    alkyl_chain_length: Optional[int] = Field(None, alias="alkylChainLength", description="Alkyl chain length of cation")
     
     # Confidence
     confidence: float = Field(0.9, ge=0.0, le=1.0, description="AI 置信度")

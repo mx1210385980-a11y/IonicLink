@@ -68,11 +68,14 @@ async def get_or_create_literature(
             return existing, False
     
     # Create new Literature entry
-    # NOTE: pmid and arxiv_id fields were removed from the model, do NOT include them
-    file_hash_value = getattr(metadata, 'file_hash', None)
-    print(f"[Sync] Creating new Literature: title='{metadata.title[:50] if metadata.title else 'N/A'}...', file_hash={file_hash_value}")
+    # Generate temporary DOI if not provided
+    if not final_doi:
+        import time
+        final_doi = f"temp-{int(time.time() * 1000)}"
+    
+    print(f"[Sync] Creating new Literature: title='{metadata.title[:50] if metadata.title else 'N/A'}...'")
     new_literature = Literature(
-        doi=final_doi,  # Use None if empty to avoid UNIQUE constraint
+        doi=final_doi,
         title=metadata.title,
         authors=metadata.authors,
         journal=metadata.journal,
@@ -81,13 +84,12 @@ async def get_or_create_literature(
         volume=getattr(metadata, 'volume', None),
         issue=getattr(metadata, 'issue', None),
         pages=getattr(metadata, 'pages', None),
-        file_path=getattr(metadata, 'file_path', None),
-        file_hash=file_hash_value  # Smart caching hash
+        file_path=getattr(metadata, 'file_path', None)
     )
     
     db.add(new_literature)
     await db.flush()  # Get the ID without committing
-    print(f"[Sync] Created new Literature ID={new_literature.id}, file_hash={new_literature.file_hash}")
+    print(f"[Sync] Created new Literature ID={new_literature.id}")
     
     return new_literature, True
 
@@ -125,10 +127,28 @@ async def sync_batch_data(
             delete_result = await db.execute(delete_stmt)
             print(f"[Sync Debug] Deleted {delete_result.rowcount} old records for Literature ID: {literature.id}")
         
-        # Step 3: Bulk insert new TribologyData records
+        # Step 3: Deduplicate records based on key fields
+        seen_keys = set()
+        unique_records = []
+        for record in payload.records:
+            key = (
+                str(record.material_name or "").strip().lower(),
+                str(record.lubricant or "").strip().lower(),
+                str(record.cof_raw or "").strip(),
+                str(record.load_raw or "").strip(),
+                str(getattr(record, 'speed_raw', None) or record.speed_value or "").strip(),
+            )
+            if key not in seen_keys:
+                seen_keys.add(key)
+                unique_records.append(record)
+        
+        if len(payload.records) != len(unique_records):
+            print(f"[Sync] Deduplicated: {len(payload.records)} -> {len(unique_records)} records")
+        
+        # Step 4: Bulk insert new TribologyData records
         new_records: List[TribologyData] = []
         
-        for record in payload.records:
+        for record in unique_records:
             tribology_record = TribologyData(
                 literature_id=literature.id,
                 material_name=record.material_name,
@@ -138,15 +158,23 @@ async def sync_batch_data(
                 cof_raw=record.cof_raw,
                 load_value=record.load_value,
                 load_raw=record.load_raw,
-                speed_value=record.speed_value,
-                temperature=record.temperature,
+                speed_value=getattr(record, 'speed_raw', None) or record.speed_value,
+                temperature=getattr(record, 'temperature', None),
                 # Environmental variables
                 potential=getattr(record, 'potential', None),
                 water_content=getattr(record, 'water_content', None),
                 surface_roughness=getattr(record, 'surface_roughness', None),
+                residual_film_thickness_d=getattr(record, 'residual_film_thickness_d', None),
+                layer_spacing_delta=getattr(record, 'layer_spacing_delta', None),
                 film_thickness=getattr(record, 'film_thickness', None),
                 mol_ratio=getattr(record, 'mol_ratio', None),
                 cation=getattr(record, 'cation', None),
+                anion=getattr(record, 'anion', None),
+                cation_smiles=getattr(record, 'cation_smiles', None),
+                anion_smiles=getattr(record, 'anion_smiles', None),
+                il_smiles=getattr(record, 'il_smiles', None),
+                il_inchikey=getattr(record, 'il_inchikey', None),
+                alkyl_chain_length=getattr(record, 'alkyl_chain_length', None),
                 confidence=record.confidence
             )
             new_records.append(tribology_record)
@@ -204,10 +232,28 @@ async def sync_batch_data_with_replacement(
             delete_result = await db.execute(delete_stmt)
             deleted_count = delete_result.rowcount
         
-        # Step 3: Bulk insert new TribologyData records
+        # Step 3: Deduplicate records based on key fields
+        seen_keys = set()
+        unique_records = []
+        for record in payload.records:
+            key = (
+                str(record.material_name or "").strip().lower(),
+                str(record.lubricant or "").strip().lower(),
+                str(record.cof_raw or "").strip(),
+                str(record.load_raw or "").strip(),
+                str(getattr(record, 'speed_raw', None) or record.speed_value or "").strip(),
+            )
+            if key not in seen_keys:
+                seen_keys.add(key)
+                unique_records.append(record)
+        
+        if len(payload.records) != len(unique_records):
+            print(f"[Sync] Deduplicated: {len(payload.records)} -> {len(unique_records)} records")
+        
+        # Step 4: Bulk insert new TribologyData records
         new_records: List[TribologyData] = []
         
-        for record in payload.records:
+        for record in unique_records:
             tribology_record = TribologyData(
                 literature_id=literature.id,
                 material_name=record.material_name,
@@ -217,15 +263,23 @@ async def sync_batch_data_with_replacement(
                 cof_raw=record.cof_raw,
                 load_value=record.load_value,
                 load_raw=record.load_raw,
-                speed_value=record.speed_value,
-                temperature=record.temperature,
+                speed_value=getattr(record, 'speed_raw', None) or record.speed_value,
+                temperature=getattr(record, 'temperature', None),
                 # Environmental variables
                 potential=getattr(record, 'potential', None),
                 water_content=getattr(record, 'water_content', None),
                 surface_roughness=getattr(record, 'surface_roughness', None),
+                residual_film_thickness_d=getattr(record, 'residual_film_thickness_d', None),
+                layer_spacing_delta=getattr(record, 'layer_spacing_delta', None),
                 film_thickness=getattr(record, 'film_thickness', None),
                 mol_ratio=getattr(record, 'mol_ratio', None),
                 cation=getattr(record, 'cation', None),
+                anion=getattr(record, 'anion', None),
+                cation_smiles=getattr(record, 'cation_smiles', None),
+                anion_smiles=getattr(record, 'anion_smiles', None),
+                il_smiles=getattr(record, 'il_smiles', None),
+                il_inchikey=getattr(record, 'il_inchikey', None),
+                alkyl_chain_length=getattr(record, 'alkyl_chain_length', None),
                 confidence=record.confidence
             )
             new_records.append(tribology_record)
@@ -270,21 +324,6 @@ async def get_literature_by_doi(
 ) -> Optional[Literature]:
     """Get Literature by DOI."""
     query = select(Literature).where(Literature.doi == doi)
-    result = await db.execute(query)
-    return result.scalar_one_or_none()
-
-
-async def get_literature_by_hash(
-    db: AsyncSession,
-    file_hash: str
-) -> Optional[Literature]:
-    """
-    Get Literature by file content hash.
-    Used for smart caching - skip LLM if same file was extracted before.
-    """
-    if not file_hash:
-        return None
-    query = select(Literature).where(Literature.file_hash == file_hash)
     result = await db.execute(query)
     return result.scalar_one_or_none()
 

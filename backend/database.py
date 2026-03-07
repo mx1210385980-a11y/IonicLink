@@ -41,6 +41,20 @@ async def init_db():
         from models.db_models import Literature, TribologyData
         await conn.run_sync(Base.metadata.create_all)
 
+        # Lightweight column migrations — safely add new columns if not present
+        new_columns = [
+            "ALTER TABLE tribology_data ADD COLUMN evidence_page INTEGER",
+            "ALTER TABLE tribology_data ADD COLUMN evidence_bbox VARCHAR(200)",
+            "ALTER TABLE tribology_data ADD COLUMN source VARCHAR(200)",
+        ]
+        from sqlalchemy import text
+        for stmt in new_columns:
+            try:
+                await conn.execute(text(stmt))
+            except Exception:
+                pass  # Column already exists — SQLite raises an error, we ignore it
+
+
 
 async def get_db_session() -> AsyncSession:
     """获取数据库会话的依赖项"""
