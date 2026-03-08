@@ -10,6 +10,7 @@ from models.tribology import TribologyData
 from services.doi_service import DOIService
 from services.score_service import calculate_confidence
 from services.cleaning_service import (
+    calculate_missing_cof,
     normalize_temperature,
     set_default_temperature,
     normalize_surface_terms,
@@ -28,7 +29,7 @@ from services.llm.utils import (
     prepare_image_input,
     parse_json_response,
     clean_and_parse_json,
-    is_valid_numeric_entry
+    has_core_quantitative_signal,
 )
 from services.llm.deduplication import deduplicate_records
 
@@ -400,6 +401,7 @@ class LLMService:
             'load', 'speed', 'temperature', 'cof', 'wear_rate',
             'test_duration', 'concentration', 'base_oil', 'contact_type',
             'material_name', 'ionic_liquid', 'source', 'notes',
+            'source_figure',
             'friction_force', 'normal_load', 'value_origin',
             'potential', 'water_content', 'surface_roughness',
             'residual_film_thickness_d', 'layer_spacing_delta', 'film_thickness',
@@ -413,10 +415,12 @@ class LLMService:
             if not item:
                 continue
 
-            raw_cof   = item.get('cof')
-            raw_force = item.get('friction_force')
-            if not is_valid_numeric_entry(raw_cof) and not is_valid_numeric_entry(raw_force):
-                continue  # skip non-friction records
+            # Normalize synonymous load fields early so AFM records survive later
+            # validation and DB persistence.
+            if not item.get('load') and item.get('normal_load'):
+                item['load'] = item.get('normal_load')
+            if not item.get('normal_load') and item.get('load'):
+                item['normal_load'] = item.get('load')
 
             for field in string_fields:
                 if field in item and item[field] is not None:
@@ -428,6 +432,7 @@ class LLMService:
 
             converted_data.append(item)
 
+        converted_data = calculate_missing_cof(converted_data)
         converted_data = set_default_temperature(converted_data)
         converted_data = normalize_surface_terms(converted_data)
         converted_data = normalize_ionic_liquid_terms(converted_data)
@@ -435,6 +440,8 @@ class LLMService:
 
         valid_records = []
         for item in converted_data:
+            if not has_core_quantitative_signal(item):
+                continue
             if not item.get('material_name'):
                 item['material_name'] = "Unknown Material"
             if not item.get('ionic_liquid'):
@@ -568,6 +575,7 @@ class LLMService:
                 "base_oil":                record.base_oil,
                 "concentration":           record.concentration,
                 "load":                    record.load,
+                "normal_load":             record.normal_load,
                 "speed":                   record.speed,
                 "temperature":             record.temperature,
                 "cof":                     record.cof,
@@ -589,6 +597,8 @@ class LLMService:
                 "il_inchikey":             record.il_inchikey,
                 "alkyl_chain_length":      record.alkyl_chain_length,
                 "source":                  record.source,
+                "source_page":             record.source_page,
+                "source_figure":           record.source_figure,
                 "notes":                   record.notes,
                 "friction_force":          record.friction_force,
                 "normal_load":             record.normal_load,

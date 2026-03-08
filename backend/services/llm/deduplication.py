@@ -2,7 +2,58 @@ from typing import List, Dict, Tuple, Optional, Any
 import re
 from collections import defaultdict
 from models.tribology import TribologyData
-from services.llm.utils import sanitize_numeric_string, sanitize_potential, sanitize_cof
+from services.llm.utils import (
+    has_core_quantitative_signal,
+    normalize_record_value,
+    sanitize_numeric_string,
+    sanitize_potential,
+    sanitize_cof,
+)
+
+
+def _record_has_core_signal(record: TribologyData) -> bool:
+    return has_core_quantitative_signal(
+        {
+            "cof": record.cof,
+            "friction_force": record.friction_force,
+            "normal_load": record.normal_load or record.load,
+            "load": record.load,
+            "film_thickness": record.film_thickness,
+            "residual_film_thickness_d": record.residual_film_thickness_d,
+            "layer_spacing_delta": record.layer_spacing_delta,
+            "surface_roughness": record.surface_roughness,
+            "wear_rate": record.wear_rate,
+            "temperature": record.temperature,
+            "speed": record.speed,
+            "water_content": record.water_content,
+            "concentration": record.concentration,
+            "mol_ratio": record.mol_ratio,
+        }
+    )
+
+
+def _record_measurement_signature(record: TribologyData) -> str:
+    parts = []
+    for field in (
+        "cof",
+        "friction_force",
+        "normal_load",
+        "load",
+        "film_thickness",
+        "residual_film_thickness_d",
+        "layer_spacing_delta",
+        "surface_roughness",
+        "wear_rate",
+        "temperature",
+        "speed",
+        "potential",
+        "water_content",
+        "source",
+    ):
+        value = normalize_record_value(getattr(record, field, None))
+        if value:
+            parts.append(f"{field}:{value}")
+    return "|".join(parts)
 
 def deduplicate_records(records: List[TribologyData]) -> List[TribologyData]:
     """
@@ -35,21 +86,18 @@ def deduplicate_records(records: List[TribologyData]) -> List[TribologyData]:
         
         # Sanitize COF
         clean_cof = sanitize_cof(record.cof)
-        if clean_cof is None:
-            # print(f"[Deduplication] Dropping record with NULL cof: {record}")
-            continue # Drop useless records without valid COF
-            
-        # Store clean numeric COF temporarily for grouping (as monkey-patch attribute)
-        # We round to 3 decimals to catch 0.04 vs 0.040
-        record._clean_cof = round(clean_cof, 3) 
+        record._clean_cof = round(clean_cof, 3) if clean_cof is not None else None
+        if record._clean_cof is None and not _record_has_core_signal(record):
+            continue
         valid_records.append(record)
 
     if len(valid_records) < len(records):
         print(f"[Deduplication] Filtered {len(records)} -> {len(valid_records)} valid records (dropped null/invalid COF).")
 
     # --- 2. GROUPING (Broad Buckets) ---
-    # Group by (Material, IL, COF_3_decimal, Potential, Source)
-    # Source is included to identify duplicate data from same figure/table
+    # Group by identity + primary measurement signature.
+    # For COF records we retain the historical COF-centric grouping.
+    # For AFM / layering records without COF, use a richer measurement signature.
     
     def normalize_str(s):
         if not s: return ""
@@ -101,13 +149,13 @@ def deduplicate_records(records: List[TribologyData]) -> List[TribologyData]:
             return ''
         return p
 
-    groups: Dict[Tuple[str, str, float, str, str], List[TribologyData]] = defaultdict(list)
+    groups: Dict[Tuple[str, str, str, str, str], List[TribologyData]] = defaultdict(list)
     
     for r in valid_records:
         key = (
             normalize_str(r.material_name),
             normalize_str(r.ionic_liquid),
-            r._clean_cof,
+            str(r._clean_cof) if r._clean_cof is not None else _record_measurement_signature(r),
             normalize_potential(r.potential),
             normalize_source(r.source) if r.source else ""
         )
@@ -290,6 +338,10 @@ def are_compatible(a: TribologyData, b: TribologyData) -> bool:
     if not is_field_compatible(a.temperature, b.temperature): return False
     if not is_field_compatible(a.normal_load, b.normal_load, 'normal_load'): return False
     if not is_field_compatible(a.speed, b.speed, 'speed'): return False
+    if not is_field_compatible(a.film_thickness, b.film_thickness): return False
+    if not is_field_compatible(a.residual_film_thickness_d, b.residual_film_thickness_d): return False
+    if not is_field_compatible(a.layer_spacing_delta, b.layer_spacing_delta): return False
+    if not is_field_compatible(a.surface_roughness, b.surface_roughness): return False
     
     # Less critical: Water content with special handling
     if not is_water_content_compatible(a.water_content, b.water_content):

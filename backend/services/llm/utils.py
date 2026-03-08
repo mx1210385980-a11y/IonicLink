@@ -3,7 +3,7 @@ import json
 import re
 import base64
 import io
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 from PIL import Image
 
 
@@ -227,3 +227,65 @@ def sanitize_cof(value: Union[str, float, int]) -> Optional[float]:
         return None
     except:
         return None
+
+
+def normalize_record_value(value: Any) -> str:
+    """Normalize extracted record values for comparison and deduplication."""
+    if value is None:
+        return ""
+
+    normalized = str(value).strip().lower()
+    if not normalized or normalized in {"-", "--", "null", "none", "n/a", "na", "unknown"}:
+        return ""
+
+    normalized = normalized.replace("μ", "u").replace("渭", "u").replace("碌", "u")
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized
+
+
+def has_explicit_numeric_value(value: Any) -> bool:
+    """Return True when a field contains an explicit numeric quantity."""
+    normalized = normalize_record_value(value)
+    if not normalized:
+        return False
+
+    if any(token in normalized for token in ("increase", "decrease", "trend", "varies", "function of")):
+        return False
+
+    return bool(re.search(r"-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?", normalized))
+
+
+def has_core_quantitative_signal(record: dict[str, Any]) -> bool:
+    """
+    Determine whether a record contains a core quantitative experimental signal.
+
+    This intentionally goes beyond COF-only extraction so AFM / nanoconfinement
+    studies with explicit layer spacing, hard-wall thickness, roughness, or load
+    data are preserved through post-processing.
+    """
+    if not record:
+        return False
+
+    primary_fields = (
+        "cof",
+        "friction_force",
+        "normal_load",
+        "load",
+        "film_thickness",
+        "residual_film_thickness_d",
+        "layer_spacing_delta",
+        "surface_roughness",
+        "wear_rate",
+    )
+    if any(has_explicit_numeric_value(record.get(field)) for field in primary_fields):
+        return True
+
+    secondary_fields = (
+        "temperature",
+        "speed",
+        "water_content",
+        "concentration",
+        "mol_ratio",
+    )
+    secondary_hits = sum(1 for field in secondary_fields if has_explicit_numeric_value(record.get(field)))
+    return secondary_hits >= 2

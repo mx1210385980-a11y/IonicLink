@@ -61,6 +61,8 @@ class TribologyData(BaseModel):
     value_origin: Optional[str] = Field(None, description="数据来源标记 ('extracted' 或 'calculated')")
     evidence: Optional[str] = Field(None, description="原文佐证/引用")
 
+    source_page: Optional[int] = Field(None, description="1-based PDF page number for this record")
+    source_figure: Optional[str] = Field(None, description="Figure or table label for this record")
 
 class ExtractionRequest(BaseModel):
     """数据提取请求"""

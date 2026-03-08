@@ -24,6 +24,7 @@ from sqlalchemy import delete, update, func
 import re
 
 from fastapi import UploadFile
+from services.llm.utils import normalize_record_value
 
 TEMP_UPLOAD_DIR = "temp_uploads"
 
@@ -42,6 +43,27 @@ def _resolve_existing_path(raw_path: Optional[str]) -> Optional[str]:
         if p and os.path.exists(p):
             return p
     return None
+
+
+def _build_record_uniqueness_key(item: dict) -> tuple:
+    """Conservative uniqueness key used before DB persistence."""
+    return (
+        normalize_record_value(item.get("material_name")),
+        normalize_record_value(item.get("ionic_liquid", item.get("lubricant", ""))),
+        normalize_record_value(item.get("cof")),
+        normalize_record_value(item.get("friction_force")),
+        normalize_record_value(item.get("normal_load", item.get("load"))),
+        normalize_record_value(item.get("load")),
+        normalize_record_value(item.get("speed")),
+        normalize_record_value(item.get("temperature")),
+        normalize_record_value(item.get("potential")),
+        normalize_record_value(item.get("water_content")),
+        normalize_record_value(item.get("surface_roughness")),
+        normalize_record_value(item.get("film_thickness")),
+        normalize_record_value(item.get("residual_film_thickness_d")),
+        normalize_record_value(item.get("layer_spacing_delta")),
+        normalize_record_value(item.get("source")),
+    )
 
 async def save_upload_entry(db: AsyncSession, file: UploadFile) -> Literature:
     """
@@ -180,6 +202,7 @@ async def process_file_safe(file_id: int, content: str = None, images: list = No
             if not literature:
                 print(f"[Error] Literature {file_id} not found.")
                 return None, []
+            resolved_file_path = _resolve_existing_path(literature.file_path)
 
             # --- ✅ DATA EXISTENCE GUARD (Safety Fallback) ---
             # Even if status is wrong, TRUST THE DATA.
@@ -262,9 +285,9 @@ async def process_file_safe(file_id: int, content: str = None, images: list = No
                 content = literature.content
             
             # Ensure images (if needed)
-            if not images and literature.file_path and literature.file_path.endswith('.pdf'):
+            if not images and resolved_file_path and resolved_file_path.endswith('.pdf'):
                  try:
-                     images = process_pdf_to_base64(_read_file_bytes(literature.file_path))
+                     images = process_pdf_to_base64(_read_file_bytes(resolved_file_path))
                  except: pass
 
             if not content:
@@ -283,12 +306,12 @@ async def process_file_safe(file_id: int, content: str = None, images: list = No
                 result = await llm_service.extract_with_metadata(
                     content=content,
                     images=images,
-                    pdf_path=literature.file_path,
+                    pdf_path=resolved_file_path,
                 )
             else:
                 result = await llm_service.extract_with_metadata(
                     content=content,
-                    pdf_path=literature.file_path,
+                    pdf_path=resolved_file_path,
                 )
             
             records = result.get("data", [])
@@ -304,13 +327,7 @@ async def process_file_safe(file_id: int, content: str = None, images: list = No
                 seen_keys = set()
                 unique_records = []
                 for item in records:
-                    key = (
-                        str(item.get("material_name", "")).strip().lower(),
-                        str(item.get("ionic_liquid", item.get("lubricant", ""))).strip().lower(),
-                        str(item.get("cof", "")).strip(),
-                        str(item.get("load", "")).strip(),
-                        str(item.get("speed", "")).strip(),
-                    )
+                    key = _build_record_uniqueness_key(item)
                     if key not in seen_keys:
                         seen_keys.add(key)
                         unique_records.append(item)
@@ -341,8 +358,8 @@ async def process_file_safe(file_id: int, content: str = None, images: list = No
                         cof_value=cof_value,
                         cof_operator=item.get("cof_operator"),
                         cof_raw=cof_raw,
-                        load_value=item.get("load"),
-                        load_raw=item.get("load"),
+                        load_value=item.get("load") or item.get("normal_load"),
+                        load_raw=item.get("load") or item.get("normal_load"),
                         speed_value=item.get("speed"),
                         temperature=item.get("temperature"),
                         potential=item.get("potential"),
@@ -364,7 +381,7 @@ async def process_file_safe(file_id: int, content: str = None, images: list = No
                         source=item.get("source"),
                     )
                     # Resolve evidence coordinates from PDF
-                    _try_resolve_evidence_coords(db_record, item, literature.file_path)
+                    _try_resolve_evidence_coords(db_record, item, resolved_file_path)
                     new_records_db.append(db_record)
                     
                     # Prepare response item
@@ -540,6 +557,7 @@ async def reprocess_literature(
             raise ValueError(f"Literature ID={literature_id} not found")
         
         print(f"[Reprocess] Found Literature ID={literature_id}, title='{literature.title[:50]}...'")
+        resolved_file_path = _resolve_existing_path(literature.file_path)
         
         # Step 2: Get file content
         content = None
@@ -553,10 +571,10 @@ async def reprocess_literature(
             print(f"[Reprocess] Using stored content from database ({len(literature.content)} characters)")
             content = literature.content
             
-        elif literature.file_path and os.path.exists(literature.file_path):
-            print(f"[Reprocess] Reading file from: {literature.file_path}")
+        elif resolved_file_path:
+            print(f"[Reprocess] Reading file from: {resolved_file_path}")
             try:
-                content = _read_file_content(literature.file_path)
+                content = _read_file_content(resolved_file_path)
                 literature.content = content
             except Exception as e:
                 raise ValueError(f"Failed to read file: {e}")
@@ -576,21 +594,21 @@ async def reprocess_literature(
         
         # Vision support
         base64_images = []
-        if literature.file_path and os.path.exists(literature.file_path) and literature.file_path.lower().endswith('.pdf'):
+        if resolved_file_path and resolved_file_path.lower().endswith('.pdf'):
             try:
-                base64_images = process_pdf_to_base64(_read_file_bytes(literature.file_path))
+                base64_images = process_pdf_to_base64(_read_file_bytes(resolved_file_path))
             except: pass
         
         if base64_images:
             extraction_result = await llm_service.extract_with_metadata(
                 content=content,
                 images=base64_images,
-                pdf_path=literature.file_path,
+                pdf_path=resolved_file_path,
             )
         else:
             extraction_result = await llm_service.extract_with_metadata(
                 content,
-                pdf_path=literature.file_path,
+                pdf_path=resolved_file_path,
             )
         
         metadata_dict = extraction_result.get("metadata", {})
@@ -600,13 +618,7 @@ async def reprocess_literature(
         seen_keys = set()
         unique_data = []
         for item in data_list:
-            key = (
-                str(item.get("material_name", "")).strip().lower(),
-                str(item.get("ionic_liquid", item.get("lubricant", ""))).strip().lower(),
-                str(item.get("cof", "")).strip(),
-                str(item.get("load", "")).strip(),
-                str(item.get("speed", "")).strip(),
-            )
+            key = _build_record_uniqueness_key(item)
             if key not in seen_keys:
                 seen_keys.add(key)
                 unique_data.append(item)
@@ -636,8 +648,8 @@ async def reprocess_literature(
                 cof_value=cof_value,
                 cof_operator=record_data.get("cof_operator"),
                 cof_raw=cof_raw,
-                load_value=record_data.get("load"),
-                load_raw=record_data.get("load"),
+                load_value=record_data.get("load") or record_data.get("normal_load"),
+                load_raw=record_data.get("load") or record_data.get("normal_load"),
                 speed_value=record_data.get("speed"),
                 temperature=record_data.get("temperature"),
                 potential=record_data.get("potential"),
@@ -658,7 +670,7 @@ async def reprocess_literature(
                 evidence=record_data.get("evidence"),
                 source=record_data.get("source"),
             )
-            _try_resolve_evidence_coords(tribology_record, record_data, literature.file_path)
+            _try_resolve_evidence_coords(tribology_record, record_data, resolved_file_path)
             new_records.append(tribology_record)
         
         if new_records:

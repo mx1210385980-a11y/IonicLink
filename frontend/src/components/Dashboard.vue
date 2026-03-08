@@ -33,6 +33,9 @@ interface DashboardStats {
 // --- State ---
 const stats = ref<DashboardStats | null>(null)
 const loading = ref(true)
+const emit = defineEmits<{
+  (e: 'open-library'): void
+}>()
 
 // --- Colors & Styling Helpers ---
 const CHAT_COLORS = [
@@ -136,6 +139,29 @@ const cofSpanMax = computed(() => {
   return Math.max(...stats.value.cof_ranges.map(d => d.max))
 })
 
+const cofSpanMin = computed(() => {
+  if (!stats.value?.cof_ranges || stats.value.cof_ranges.length === 0) return 0.0
+  return Math.min(...stats.value.cof_ranges.map(d => d.min))
+})
+
+const cofSpanRange = computed(() => {
+  const span = cofSpanMax.value - cofSpanMin.value
+  return span > 0 ? span : 1
+})
+
+const cofSpanMid = computed(() => cofSpanMin.value + cofSpanRange.value / 2)
+
+function formatCofTick(value: number): string {
+  if (!Number.isFinite(value)) return '--'
+  const abs = Math.abs(value)
+  let decimals = 3
+  if (abs >= 1) decimals = 2
+  else if (abs >= 0.1) decimals = 3
+  else if (abs >= 0.01) decimals = 3
+  else decimals = 4
+  return value.toFixed(decimals).replace(/\.?0+$/, '')
+}
+
 // --- Lifecycle ---
 onMounted(() => {
   fetchStats()
@@ -147,7 +173,13 @@ onMounted(() => {
     <!-- Header Summary Stats -->
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
       <!-- Total Papers -->
-      <Card class="border-0 shadow-sm rounded-xl hover:shadow-md transition-shadow">
+      <Card
+        class="border-0 shadow-sm rounded-xl hover:shadow-md transition-shadow cursor-pointer hover:ring-2 hover:ring-blue-200"
+        role="button"
+        tabindex="0"
+        @click="emit('open-library')"
+        @keydown.enter="emit('open-library')"
+      >
         <CardContent class="p-6 flex items-center justify-between">
           <div>
             <p class="text-sm font-medium text-muted-foreground mb-1">Processed Papers</p>
@@ -265,31 +297,38 @@ onMounted(() => {
         </CardHeader>
         <CardContent>
           <div class="space-y-4 mt-6">
-            <div class="flex justify-between text-xs text-muted-foreground px-12 mb-2">
-              <span>0.0</span>
-              <span>{{ (cofSpanMax / 2).toFixed(1) }}</span>
-              <span>{{ cofSpanMax.toFixed(1) }}</span>
+            <div class="grid grid-cols-[96px_1fr_86px] items-center text-xs text-slate-500 mb-2">
+              <span></span>
+              <div class="flex justify-between px-1">
+                <span>{{ formatCofTick(cofSpanMin) }}</span>
+                <span class="font-semibold text-slate-700">{{ formatCofTick(cofSpanMid) }}</span>
+                <span>{{ formatCofTick(cofSpanMax) }}</span>
+              </div>
+              <span class="text-right">min ~ max</span>
             </div>
-            <div v-for="range in stats?.cof_ranges.slice(0, 5)" :key="range.name" class="flex items-center text-sm">
-              <span class="w-24 text-xs font-bold text-gray-800 text-right pr-4 shrink-0">{{ range.name }}</span>
-              <div class="flex-1 h-8 bg-gray-50/50 rounded-full relative flex items-center px-1">
+            <div v-for="range in stats?.cof_ranges.slice(0, 5)" :key="range.name" class="grid grid-cols-[96px_1fr_86px] items-center gap-2 text-sm">
+              <span class="text-xs font-bold text-gray-800 text-right pr-2 truncate">{{ range.name }}</span>
+              <div class="h-8 bg-slate-100 rounded-full relative flex items-center px-1 border border-slate-200">
                 <!-- Span visualization -->
                 <div 
-                  class="absolute h-6 bg-blue-100 rounded-full"
+                  class="absolute h-6 bg-blue-200/90 rounded-full border border-blue-300"
                   :style="{
-                    left: `${(range.min / cofSpanMax) * 100}%`,
-                    width: `${((range.max - range.min) / cofSpanMax) * 100}%`
+                    left: `${((range.min - cofSpanMin) / cofSpanRange) * 100}%`,
+                    width: `${Math.max(2, ((range.max - range.min) / cofSpanRange) * 100)}%`
                   }"
                 ></div>
                 <!-- Average point (approximated as middle for demo) -->
                 <div 
-                  class="absolute w-2 h-6 bg-blue-600 rounded-full"
+                  class="absolute w-2.5 h-6 bg-blue-600 rounded-full shadow-sm"
                   :style="{
-                    left: `${((range.min + range.max) / 2 / cofSpanMax) * 100}%`,
+                    left: `${((((range.min + range.max) / 2) - cofSpanMin) / cofSpanRange) * 100}%`,
                     transform: 'translateX(-50%)'
                   }"
                 ></div>
               </div>
+              <span class="text-right text-[11px] font-medium text-slate-600 tabular-nums">
+                {{ formatCofTick(range.min) }}-{{ formatCofTick(range.max) }}
+              </span>
             </div>
           </div>
         </CardContent>

@@ -14,6 +14,16 @@ ANTI_HALLUCINATION_PROMPT = JSON_ENFORCEMENT_PROMPT + "\n\n" + "You are a scient
 # Base prompt for tribology data extraction
 TRIBOLOGY_EXTRACTION_PROMPT = JSON_ENFORCEMENT_PROMPT + """
 
+ENGLISH OVERRIDE FOR CORE EXTRACTION SCOPE:
+- Extract experimentally quantified interfacial ionic-liquid data, not only COF.
+- Keep AFM / surface-force / nanoconfinement records when they contain explicit numeric values for any of:
+  `cof`, `friction_force`, `normal_load`, `load`, `film_thickness`,
+  `residual_film_thickness_d`, `layer_spacing_delta`, `surface_roughness`, `wear_rate`.
+- For AFM force-distance literature, records with explicit layer spacing, hard-wall distance,
+  rupture force, roughness, or film thickness are valid even if COF is absent.
+- Discard purely qualitative statements with no explicit numeric value.
+- Prefer one record per unique condition / sample / figure trace, and preserve sample identifiers.
+
 你是一个专业的摩擦学数据提取助手。请从以下文献内容中提取所有离子液体润滑相关的实验数据。
         
 【重要提示：视觉提取模式】
@@ -22,10 +32,12 @@ TRIBOLOGY_EXTRACTION_PROMPT = JSON_ENFORCEMENT_PROMPT + """
 2. 识别表格（Tables）的结构，准确提取行列数据。
 3. 关联正文描述与图表内容。
 
-CRITICAL RULE: Only extract data records that contain explicit Friction Coefficient (COF) or Friction Force measurements.
-- If a section describes synthesis, TGA, DSC, or molecular structure WITHOUT friction testing, IGNORE IT COMPLETELY.
-- Do not generate records with 'null' COF just to list a material.
-- If no friction data is found in a section, return nothing for that section.
+CRITICAL RULE:
+- Extract only records with explicit quantitative experimental measurements.
+- COF-only restriction is removed.
+- If a section describes synthesis, TGA, DSC, or molecular structure WITHOUT any interfacial quantitative measurement, IGNORE IT COMPLETELY.
+- Do not generate records with all core quantitative fields null just to list a material.
+- If no quantitative interfacial data is found in a section, return nothing for that section.
 
 ═══════════════════════════════════════════════════════════════
 【PART I: 字段定义与同义词映射】
@@ -351,6 +363,12 @@ Record 4: ionic_liquid=[BMIM][PF6], material_name=Silica, temperature=333.15 K, 
 
 # Focused prompt for generic Stage-1 evidence extraction (provenance workflow)
 FOCUSED_EVIDENCE_EXTRACTION_PROMPT = JSON_ENFORCEMENT_PROMPT + """
+ENGLISH OVERRIDE:
+- Focus on quantitative evidence-rich pages.
+- Keep explicit AFM / force-distance / layering records even when they do not report COF.
+- Typical valid outputs include layer spacing, hard-wall thickness, film thickness, surface roughness,
+  rupture force, friction force, normal load, COF, and wear-rate values with source/evidence.
+
 你是离子液体摩擦数据提取助手。当前任务是“分步提取”的第一阶段：
 只从“高信息密度证据页”中抽取结构化数据，作为中间态 JSON。
 

@@ -20,6 +20,10 @@ def _extract_number_tokens(text: str) -> list[str]:
     return re.findall(r"\d+(?:\.\d+)?", str(text or ""))
 
 
+def _extract_alpha_tokens(text: str) -> list[str]:
+    return [t for t in re.findall(r"[a-z]{3,}", str(text or "").lower())]
+
+
 def _word_level_find_rect(page: fitz.Page, query: str):
     """
     Fallback matcher for tricky PDF text tokenization:
@@ -39,6 +43,8 @@ def _word_level_find_rect(page: fitz.Page, query: str):
     if len(q_key) < 2:
         return None
     q_nums = _extract_number_tokens(query)
+    q_alpha_tokens = _extract_alpha_tokens(query)
+    is_chem_formula_like = ("[" in query and "]" in query) or (len(q_alpha_tokens) >= 2 and len(q_key) >= 8)
 
     max_window = min(6, max(2, len(query.split()) + 2))
     for i in range(len(words)):
@@ -57,7 +63,17 @@ def _word_level_find_rect(page: fitz.Page, query: str):
                 if not all(n in seg_nums for n in q_nums):
                     continue
 
-            if q_key in seg_key or seg_key in q_key:
+            # Chemical-formula-like terms (e.g. [EMIM][TFSI]) must keep key alpha tokens.
+            if is_chem_formula_like and q_alpha_tokens:
+                if not all(tok in seg_key for tok in q_alpha_tokens):
+                    continue
+
+            similar = SequenceMatcher(None, q_key, seg_key).ratio()
+            contains_ok = (
+                (len(seg_key) >= max(4, int(len(q_key) * 0.7)) and q_key in seg_key)
+                or (len(seg_key) >= max(5, int(len(q_key) * 0.8)) and seg_key in q_key)
+            )
+            if q_key == seg_key or contains_ok or similar >= 0.86:
                 x0 = min(float(words[k][0]) for k in range(i, j))
                 y0 = min(float(words[k][1]) for k in range(i, j))
                 x1 = max(float(words[k][2]) for k in range(i, j))

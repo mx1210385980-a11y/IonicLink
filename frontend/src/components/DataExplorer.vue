@@ -213,7 +213,7 @@ const clearDoiFilter = () => {
           <BookMarked class="w-4 h-4 text-blue-600" />
         </div>
         <div>
-          <h1 class="text-lg font-bold text-gray-900 leading-tight">IonicLink Sourcing & Library</h1>
+          <h1 class="text-lg font-bold text-gray-900 leading-tight">IonicLink Sourcing</h1>
           <p class="text-xs text-gray-500">Automatically locate source data and verify extraction accuracy.</p>
         </div>
       </div>

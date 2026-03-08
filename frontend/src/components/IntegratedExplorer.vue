@@ -19,6 +19,9 @@ import {
   BookOpen,
   Save,
   ExternalLink,
+  Eye,
+  Edit,
+  Download,
 } from 'lucide-vue-next'
 import Modal from '@/components/ui/Modal.vue'
 import PdfViewerWithHighlight from '@/components/PdfViewerWithHighlight.vue'
@@ -62,6 +65,9 @@ const cofMax = ref('')
 
 const currentPage = ref(1)
 const expandedRowId = ref<number | null>(null)
+const showExportMenu = ref(false)
+const exporting = ref(false)
+type ExportFormat = 'json' | 'csv' | 'ndjson'
 type EditableRecordValues = {
   lubricant: string
   materialName: string
@@ -126,40 +132,25 @@ function cofDisplay(record: RecordResponse): string {
   return '--'
 }
 
-function conditionText(record: RecordResponse): string {
-  const parts: string[] = [
-    record.temperature ? `T=${record.temperature}` : '',
-    record.potential ? `P=${record.potential}` : '',
-    record.waterContent ? `W=${record.waterContent}` : '',
-    record.speedValue ? `S=${record.speedValue}` : '',
-    record.loadValue ? `L=${record.loadValue}` : '',
-    record.surfaceRoughness ? `R=${record.surfaceRoughness}` : '',
-  ].filter(Boolean)
+function conditionTags(record: RecordResponse): string[] {
+  const tags: string[] = []
+  if (record.potential) tags.push(`Potential: ${record.potential}`)
+  if (record.waterContent) tags.push(`Water: ${record.waterContent}`)
+  if (record.speedValue) tags.push(`Speed: ${record.speedValue}`)
+  if (record.loadValue) tags.push(`Load: ${record.loadValue}`)
+  if (record.surfaceRoughness) tags.push(`Roughness: ${record.surfaceRoughness}`)
 
   const filmRaw = String(record.filmThickness || '').trim()
   if (filmRaw) {
-    const sampleMatch = filmRaw.match(/\(([A-Za-z0-9-]+)\)/)
-    const matchedSample = sampleMatch?.[1]
-    let sampleId = ''
-    if (matchedSample && /[A-Za-z]{2,}\d*(?:-\d+)+(?:-[A-Za-z])?/.test(matchedSample)) {
-      sampleId = matchedSample.trim()
-    } else {
-      const inlineSample = filmRaw.match(/[A-Za-z]{2,}\d*(?:-\d+)+(?:-[A-Za-z])?/)
-      if (inlineSample) sampleId = inlineSample[0]
-    }
-
     const thicknessValue = filmRaw.replace(/\([A-Za-z0-9-]+\)/g, '').trim()
     if (thicknessValue) {
-      parts.push(`Roughness: ${thicknessValue}`)
-    }
-    if (sampleId) {
-      parts.push(`Sample: ${sampleId}`)
-    } else if (!thicknessValue) {
-      parts.push(`Roughness: ${filmRaw}`)
+      tags.push(`Film: ${thicknessValue}`)
+    } else {
+      tags.push(`Film: ${filmRaw}`)
     }
   }
 
-  return parts.length ? parts.join(' | ') : '--'
+  return tags
 }
 
 function toggleRow(record: RecordResponse) {
@@ -239,6 +230,7 @@ function onPreviewWheel(e: WheelEvent) {
 
 function onGlobalKeydown(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
+  if (showExportMenu.value) showExportMenu.value = false
   if (imagePreview.value.open) closeImagePreview()
   if (pdfLocate.value.open) closePdfLocate()
 }
@@ -290,9 +282,16 @@ function findBestTermHit(ev: EvidenceResult | null | undefined, term: string): E
   const exact = hits.find((h) => {
     const hk = normalizeTermKey(h.term)
     const mk = normalizeTermKey(h.matched_text || '')
-    return hk === key || mk === key
+    return (hk === key || mk === key) && !h.inferred
   })
   if (exact) return exact
+
+  const inferredExact = hits.find((h) => {
+    const hk = normalizeTermKey(h.term)
+    const mk = normalizeTermKey(h.matched_text || '')
+    return hk === key || mk === key
+  })
+  if (inferredExact) return inferredExact
 
   // Keep numeric consistency first; avoids speed/temperature drifting to unrelated values.
   const numericConsistent = hits.filter((h) => {
@@ -314,7 +313,7 @@ function findBestTermHit(ev: EvidenceResult | null | undefined, term: string): E
     const contains =
       (best.length >= Math.max(5, Math.floor(key.length * 0.55)) && key.includes(best))
       || (key.length >= Math.max(5, Math.floor(best.length * 0.55)) && best.includes(key))
-    return prefixRatio >= 0.6 || contains
+    return (prefixRatio >= 0.6 || contains) && !h.inferred
   })
   if (compact) return compact
 
@@ -474,9 +473,16 @@ function highlightEvidenceHtml(record: RecordResponse): string {
   return html
 }
 
-function openTermInPdf(record: RecordResponse, term: string) {
+async function openTermInPdf(record: RecordResponse, term: string) {
   if (!record.literatureId) return
-  const ev = evidenceData.value[record.id]
+  let ev = evidenceData.value[record.id]
+  try {
+    const fresh = await getRecordEvidence(record.literatureId, record.id)
+    evidenceData.value[record.id] = fresh
+    ev = fresh
+  } catch {
+    // Use cached evidence if refresh fails.
+  }
   const hit = findBestTermHit(ev, term)
   const targetPage = hit?.page || ev?.page || 1
   const termKey = normalizeTermKey(term)
@@ -575,17 +581,143 @@ async function loadOptions() {
   }
 }
 
+function buildCurrentFilter(): SearchFilter {
+  return {
+    materials: selectedMaterial.value ? [selectedMaterial.value] : [],
+    lubricants: selectedLubricant.value ? [selectedLubricant.value] : [],
+    cof_min: cofMin.value ? parseFloat(cofMin.value) : undefined,
+    cof_max: cofMax.value ? parseFloat(cofMax.value) : undefined,
+    doi: searchDoi.value || undefined,
+    fileId: props.selectedFileId || undefined,
+  }
+}
+
+function exportFilename(ext: string): string {
+  const now = new Date()
+  const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`
+  const doiPart = searchDoi.value ? searchDoi.value.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 40) : 'all'
+  return `verified_data_${doiPart}_${stamp}.${ext}`
+}
+
+function triggerDownload(filename: string, content: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+function csvEscape(value: unknown): string {
+  const s = String(value ?? '')
+  if (/[",\n]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`
+  }
+  return s
+}
+
+function toCsv(records: RecordResponse[]): string {
+  const headers = [
+    'id',
+    'literatureId',
+    'doi',
+    'title',
+    'lubricant',
+    'materialName',
+    'temperature',
+    'potential',
+    'waterContent',
+    'speedValue',
+    'loadValue',
+    'surfaceRoughness',
+    'filmThickness',
+    'cofRaw',
+    'cofValue',
+    'source',
+    'evidence',
+    'evidencePage',
+  ]
+  const rows = records.map((r) => [
+    r.id,
+    r.literatureId,
+    r.literature?.doi || '',
+    r.literature?.title || '',
+    r.lubricant || '',
+    r.materialName || '',
+    r.temperature || '',
+    r.potential || '',
+    r.waterContent || '',
+    r.speedValue || '',
+    r.loadValue || '',
+    r.surfaceRoughness || '',
+    r.filmThickness || '',
+    r.cofRaw || '',
+    r.cofValue ?? '',
+    r.source || '',
+    r.evidence || '',
+    r.evidencePage ?? '',
+  ])
+  return [headers.join(','), ...rows.map((r) => r.map(csvEscape).join(','))].join('\n')
+}
+
+async function fetchAllFilteredRecords(): Promise<RecordResponse[]> {
+  const filter = buildCurrentFilter()
+  const pageSize = 200
+  let skip = 0
+  const all: RecordResponse[] = []
+  while (true) {
+    const page = await searchRecords(filter, skip, pageSize)
+    all.push(...(page.items || []))
+    skip += page.items.length
+    if (!page.items.length || skip >= page.total) break
+  }
+  return all
+}
+
+async function exportVerifiedData(format: ExportFormat) {
+  showExportMenu.value = false
+  if (exporting.value) return
+  exporting.value = true
+  try {
+    const records = await fetchAllFilteredRecords()
+    if (!records.length) {
+      alert('No records to export under current filters.')
+      return
+    }
+
+    if (format === 'json') {
+      const payload = {
+        exportedAt: new Date().toISOString(),
+        total: records.length,
+        filter: buildCurrentFilter(),
+        records,
+      }
+      triggerDownload(exportFilename('json'), JSON.stringify(payload, null, 2), 'application/json;charset=utf-8')
+      return
+    }
+
+    if (format === 'csv') {
+      triggerDownload(exportFilename('csv'), toCsv(records), 'text/csv;charset=utf-8')
+      return
+    }
+
+    const ndjson = records.map((r) => JSON.stringify(r)).join('\n')
+    triggerDownload(exportFilename('ndjson'), ndjson, 'application/x-ndjson;charset=utf-8')
+  } catch (err) {
+    console.error('Export failed', err)
+    alert('Export failed. Please try again.')
+  } finally {
+    exporting.value = false
+  }
+}
+
 async function fetchData() {
   loading.value = true
   try {
-    const filter: SearchFilter = {
-      materials: selectedMaterial.value ? [selectedMaterial.value] : [],
-      lubricants: selectedLubricant.value ? [selectedLubricant.value] : [],
-      cof_min: cofMin.value ? parseFloat(cofMin.value) : undefined,
-      cof_max: cofMax.value ? parseFloat(cofMax.value) : undefined,
-      doi: searchDoi.value || undefined,
-      fileId: props.selectedFileId || undefined,
-    }
+    const filter = buildCurrentFilter()
 
     const skip = (currentPage.value - 1) * PAGE_SIZE
     result.value = await searchRecords(filter, skip, PAGE_SIZE)
@@ -716,52 +848,119 @@ watch(
 <template>
   <div class="flex h-full flex-col overflow-hidden bg-slate-50">
     <div class="border-b bg-white px-6 py-4">
-      <div class="mb-3 flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <BookOpen class="h-5 w-5 text-blue-600" />
-          <h1 class="text-lg font-bold text-slate-900">IonicLink Sourcing & Library</h1>
+      <div class="mb-6 flex items-start justify-between">
+        <div>
+          <div class="flex items-center gap-2">
+            <BookOpen class="h-6 w-6 text-blue-600" />
+            <h1 class="text-xl font-bold text-slate-900">IonicLink Sourcing</h1>
+          </div>
+          <p class="mt-1 text-xs text-slate-500">Automatically locate data sources; dual verification ensures extraction precision.</p>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-3">
           <button
-            class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
             @click="emit('view-literature')"
           >
-            Literature Mgmt
+            <BookOpen class="h-4 w-4" /> Literature Mgmt
           </button>
+          <div class="relative">
+            <button
+              class="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+              :disabled="exporting"
+              @click="showExportMenu = !showExportMenu"
+            >
+              <Download class="h-4 w-4" />
+              {{ exporting ? 'Exporting...' : 'Export Verified Data' }}
+            </button>
+            <div
+              v-if="showExportMenu"
+              class="absolute right-0 z-20 mt-2 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg"
+            >
+              <button
+                type="button"
+                class="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                @click="exportVerifiedData('json')"
+              >
+                Export as JSON
+              </button>
+              <button
+                type="button"
+                class="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                @click="exportVerifiedData('csv')"
+              >
+                Export as CSV
+              </button>
+              <button
+                type="button"
+                class="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                @click="exportVerifiedData('ndjson')"
+              >
+                Export as NDJSON
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div class="mb-3 flex flex-wrap items-center gap-2 text-xs">
+      <div class="mb-6 flex flex-wrap items-center gap-2 text-xs">
         <span v-if="props.selectedFileId && props.sourceName" class="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-blue-700">
           Source: {{ props.sourceName }}
         </span>
-        <span v-else class="rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-slate-500">
+        <span v-else class="shrink-0 rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-slate-500">
           Showing all data
         </span>
-        <span v-if="searchDoi" class="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-blue-700">
-          DOI: {{ searchDoi }}
-          <button class="text-blue-600 hover:text-blue-800" @click="clearDoiFilter">
+
+        <div class="relative flex w-64 items-center">
+          <input
+            v-model="searchDoi"
+            type="text"
+            placeholder="Search by Literature DOI..."
+            class="w-full rounded-full border border-slate-200 bg-white py-1.5 pl-3 pr-8 text-xs text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            @keydown.enter="handleSearch"
+          />
+          <button
+            v-if="searchDoi"
+            class="absolute right-2.5 text-slate-400 hover:text-slate-600"
+            @click="clearDoiFilter"
+          >
             <Trash2 class="h-3.5 w-3.5" />
           </button>
-        </span>
+        </div>
       </div>
 
-      <div class="grid grid-cols-1 gap-3 md:grid-cols-5">
-        <select v-model="selectedLubricant" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" @change="handleSearch">
-          <option value="">All Ionic Liquids</option>
-          <option v-for="l in filterOptions.lubricants" :key="l" :value="l">{{ l }}</option>
-        </select>
+      <div class="mb-2 flex items-center gap-2">
+        <svg class="h-4 w-4 text-blue-500" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 6H20M4 12H20M4 18H20" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <h2 class="text-sm font-bold text-slate-800">Advanced Search</h2>
+      </div>
 
-        <select v-model="selectedMaterial" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" @change="handleSearch">
-          <option value="">All Surfaces</option>
-          <option v-for="m in filterOptions.materials" :key="m" :value="m">{{ m }}</option>
-        </select>
+      <div class="flex flex-wrap items-end gap-4">
+        <div class="w-48">
+          <label class="mb-1.5 block text-xs text-slate-400">Ionic Liquid</label>
+          <select v-model="selectedLubricant" class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" @change="handleSearch">
+            <option value="">All</option>
+            <option v-for="l in filterOptions.lubricants" :key="l" :value="l">{{ l }}</option>
+          </select>
+        </div>
 
-        <input v-model="cofMin" type="text" placeholder="COF min" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
-        <input v-model="cofMax" type="text" placeholder="COF max" class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+        <div class="w-48">
+          <label class="mb-1.5 block text-xs text-slate-400">Surface Type</label>
+          <select v-model="selectedMaterial" class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" @change="handleSearch">
+            <option value="">All</option>
+            <option v-for="m in filterOptions.materials" :key="m" :value="m">{{ m }}</option>
+          </select>
+        </div>
 
-        <button class="inline-flex items-center justify-center gap-1 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700" @click="handleSearch">
-          <Search class="h-4 w-4" /> Search
+        <div>
+          <label class="mb-1.5 block text-xs text-slate-400">COF Range</label>
+          <div class="flex items-center gap-2">
+            <input v-model="cofMin" type="text" placeholder="Min" class="w-24 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+            <span class="text-slate-300">-</span>
+            <input v-model="cofMax" type="text" placeholder="Max" class="w-24 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+          </div>
+        </div>
+
+        <button class="inline-flex h-[38px] w-[38px] items-center justify-center rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200" @click="handleSearch">
+          <Search class="h-4 w-4" />
         </button>
       </div>
     </div>
@@ -769,41 +968,53 @@ watch(
     <div class="flex-1 overflow-auto px-6 py-4">
       <div class="overflow-hidden rounded-xl border bg-white">
         <table class="w-full text-left text-sm">
-          <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+          <thead class="bg-slate-50 text-xs text-slate-500">
             <tr>
-              <th class="px-4 py-3">ID</th>
-              <th class="px-4 py-3">Ionic Liquid</th>
-              <th class="px-4 py-3">Surface</th>
-              <th class="px-4 py-3">Condition</th>
-              <th class="px-4 py-3">COF</th>
-              <th class="px-4 py-3 text-right">Actions</th>
+              <th class="px-4 py-4 font-medium text-slate-500">ID</th>
+              <th class="px-4 py-4 font-medium text-slate-500">IONIC LIQUID</th>
+              <th class="px-4 py-4 font-medium text-slate-500">SURFACE</th>
+              <th class="px-4 py-4 font-medium text-slate-500">TEMPERATURE (K)</th>
+              <th class="px-4 py-4 font-medium text-slate-500">CONDITION</th>
+              <th class="px-4 py-4 font-medium text-blue-600">COF</th>
+              <th class="px-4 py-4 font-medium text-slate-500 text-right">ACTIONS</th>
             </tr>
           </thead>
           <tbody>
             <tr v-if="loading">
-              <td colspan="6" class="px-4 py-8 text-center text-slate-400">Loading...</td>
+              <td colspan="7" class="px-4 py-8 text-center text-slate-400">Loading...</td>
             </tr>
             <template v-else-if="result.items.length">
               <template v-for="record in result.items" :key="record.id">
-                <tr class="border-t hover:bg-slate-50" @click="toggleRow(record)">
-                  <td class="px-4 py-3 text-slate-400">{{ record.id }}</td>
-                  <td class="px-4 py-3 font-semibold text-slate-800">{{ record.lubricant || '--' }}</td>
-                  <td class="px-4 py-3 text-slate-700">{{ record.materialName || '--' }}</td>
-                  <td class="px-4 py-3 text-slate-600">{{ conditionText(record) }}</td>
-                  <td class="px-4 py-3 font-bold text-blue-600">{{ cofDisplay(record) }}</td>
-                  <td class="px-4 py-3">
-                    <div class="flex items-center justify-end gap-2" @click.stop>
-                      <a
-                        v-if="record.literature?.doi"
-                        class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:text-blue-600"
-                        :href="`https://doi.org/${record.literature.doi}`"
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        <ExternalLink class="h-4 w-4" />
-                      </a>
+                <tr class="border-t hover:bg-blue-50/20 cursor-pointer" @click="toggleRow(record)">
+                  <td class="px-4 py-4 text-slate-500">{{ record.id }}</td>
+                  <td class="px-4 py-4 font-semibold text-slate-800">{{ record.lubricant || '--' }}</td>
+                  <td class="px-4 py-4 text-slate-600">{{ record.materialName || '--' }}</td>
+                  <td class="px-4 py-4 text-slate-600">{{ record.temperature || '--' }}</td>
+                  <td class="px-4 py-4">
+                    <div class="flex flex-wrap gap-1.5">
+                      <span v-for="tag in conditionTags(record)" :key="tag" class="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-600">
+                        {{ tag }}
+                      </span>
+                      <span v-if="!conditionTags(record).length" class="text-slate-400">--</span>
+                    </div>
+                  </td>
+                  <td class="px-4 py-4 font-bold text-blue-600">{{ cofDisplay(record) }}</td>
+                  <td class="px-4 py-4">
+                    <div class="flex items-center justify-end gap-1.5" @click.stop>
                       <button
-                        class="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-500 hover:text-red-600"
+                        class="inline-flex h-7 w-7 items-center justify-center rounded text-blue-500 hover:bg-blue-50"
+                        @click="toggleRow(record)"
+                      >
+                        <Eye class="h-4 w-4" />
+                      </button>
+                      <button
+                        class="inline-flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                        @click="toggleRow(record)"
+                      >
+                        <Edit class="h-4 w-4" />
+                      </button>
+                      <button
+                        class="inline-flex h-7 w-7 items-center justify-center rounded text-red-400 hover:bg-red-50 hover:text-red-600"
                         :disabled="deletingRowId === record.id"
                         @click="removeRecord(record)"
                       >
@@ -814,7 +1025,7 @@ watch(
                 </tr>
 
                 <tr v-if="expandedRowId === record.id" class="border-t bg-slate-50/50">
-                  <td colspan="6" class="px-4 py-4">
+                  <td colspan="7" class="px-4 py-4">
                     <div class="grid gap-4 md:grid-cols-3">
                       <div class="rounded-lg border border-slate-200 bg-white p-4">
                         <div class="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-800">
@@ -1056,7 +1267,7 @@ watch(
               </template>
             </template>
             <tr v-else>
-              <td colspan="6" class="px-4 py-8 text-center text-slate-400">No matching data</td>
+              <td colspan="7" class="px-4 py-8 text-center text-slate-400">No matching data</td>
             </tr>
           </tbody>
         </table>

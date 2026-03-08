@@ -473,7 +473,7 @@ function handleLiteratureView() {
           <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center">
             <Beaker class="w-5 h-5 text-white" />
           </div>
-            <label class="text-[11px] font-bold text-slate-400 uppercase">COF Range</label>
+            <label class="text-[11px] font-bold text-slate-400 uppercase">IonicLink</label>
         </div>
         
         <!-- Navigation -->
@@ -491,13 +491,6 @@ function handleLiteratureView() {
                 :class="currentView === 'dashboard' ? 'text-primary' : 'text-muted-foreground'"
             >
                 Overview
-            </button>
-            <button 
-                @click="currentView = 'literature'"
-                class="text-sm font-medium transition-colors hover:text-primary"
-                :class="currentView === 'literature' ? 'text-primary' : 'text-muted-foreground'"
-            >
-                Library
             </button>
         </nav>
 
@@ -529,7 +522,7 @@ function handleLiteratureView() {
     <main class="flex-1 overflow-hidden">
       <!-- Dashboard View -->
       <div v-if="currentView === 'dashboard'" class="h-[calc(100vh-56px)]">
-        <Dashboard />
+        <Dashboard @open-library="currentView = 'literature'" />
       </div>
 
       <!-- Workspace View (Integrated 3-column) -->
