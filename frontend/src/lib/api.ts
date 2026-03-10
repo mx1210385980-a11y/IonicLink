@@ -23,9 +23,17 @@ export async function uploadFile(file: File) {
 }
 
 // Extract Data
-export async function extractData(fileId: string, force: boolean = false): Promise<ExtractionResponse> {
-    // Add query param for force explicitly
-    const url = force ? `/api/extract/${fileId}?force=true` : `/api/extract/${fileId}`
+export async function extractData(
+    fileId: string,
+    force: boolean = false,
+    profile: 'high_accuracy' | 'standard' = 'high_accuracy',
+    strictCofMode?: boolean,
+): Promise<ExtractionResponse> {
+    const query = new URLSearchParams()
+    if (force) query.set('force', 'true')
+    query.set('profile', profile)
+    if (strictCofMode !== undefined) query.set('strict_cof_mode', strictCofMode ? 'true' : 'false')
+    const url = `/api/extract/${fileId}${query.toString() ? `?${query.toString()}` : ''}`
     const response = await api.post(url)
     return response.data
 }
@@ -84,6 +92,7 @@ export interface EvidenceResult {
     record_id: number
     evidence_text: string | null
     text_snippet?: string | null
+    source_type?: 'text' | 'visual' | 'unknown'
     highlight_terms?: string[]
     term_hits?: Array<{
         term: string
@@ -101,8 +110,72 @@ export interface EvidenceResult {
     has_pdf: boolean
 }
 
+export interface ExtractionRunDetail {
+    run_id: string
+    literature_id: number
+    profile: string
+    status: string
+    candidate_count: number
+    final_count: number
+    dropped_by_reason: Record<string, number>
+    page_coverage: Record<string, any>
+    page_candidate_counts?: Record<string, {
+        total: number
+        figure: number
+        text: number
+        other: number
+        kept_after_validation: number
+        dropped_after_validation: number
+    }>
+    progress_log?: Array<{
+        stage: string
+        message: string
+        page?: number
+    }>
+    summary: Record<string, any>
+    error_message?: string | null
+}
+
+export interface ExtractionRunCandidatesResponse {
+    run_id: string
+    total: number
+    skip: number
+    limit: number
+    items: Array<{
+        id: number
+        stage: string
+        modality: string
+        page: number | null
+        source_figure: string | null
+        panel_label: string | null
+        raw: any
+        normalized: any
+        drop_reason: string | null
+        merged_into: string | null
+    }>
+}
+
 export async function getRecordEvidence(litId: number, recordId: number): Promise<EvidenceResult> {
     const response = await api.get(`/api/pdf/${litId}/evidence/${recordId}`)
+    return response.data
+}
+
+export async function getExtractionRun(runId: string): Promise<ExtractionRunDetail> {
+    const response = await api.get(`/api/extraction-runs/${runId}`)
+    return response.data
+}
+
+export async function getLatestExtractionRun(literatureId: number): Promise<ExtractionRunDetail> {
+    const response = await api.get(`/api/extraction-runs/latest/${literatureId}`)
+    return response.data
+}
+
+export async function getExtractionRunCandidates(
+    runId: string,
+    skip: number = 0,
+    limit: number = 200,
+): Promise<ExtractionRunCandidatesResponse> {
+    const response = await api.get(`/api/extraction-runs/${runId}/candidates?skip=${skip}&limit=${limit}`)
     return response.data
 }
 
@@ -125,6 +198,37 @@ export async function getFilterOptions() {
 export async function updateTribologyRecord(recordId: number, data: Partial<RecordUpdatePayload>) {
     const response = await api.put(`/api/records/${recordId}`, data)
     return response.data
+}
+
+export interface PromoteConfidencePayload {
+    confidence: number
+    evidence?: string | null
+    evidencePage?: number | null
+    evidenceBbox?: string | null
+    source?: string | null
+    sourcePage?: number | null
+    sourceFigure?: string | null
+}
+
+export async function promoteTribologyRecordConfidence(recordId: number, data: PromoteConfidencePayload) {
+    const response = await api.post(`/api/records/${recordId}/promote-confidence`, data)
+    return response.data as {
+        success: boolean
+        id: number
+        confidence: number
+        confidenceDetails?: {
+            base_score?: number
+            base_percent?: number
+            score: number
+            percent: number
+            penalties: { reason: string, value: number }[]
+            boosts?: { reason: string, value: number }[]
+            penalty_total?: number
+            penalty_percent?: number
+            boost_total?: number
+            boost_percent?: number
+        }
+    }
 }
 
 // Delete single data record
@@ -154,6 +258,8 @@ export interface TribologyData {
     potential?: string  // Electrochemical potential/voltage (e.g. '+1.5V', 'OCP')
     water_content?: string  // Water content or humidity (e.g. '50 ppm', 'Dry')
     surface_roughness?: string  // Surface roughness (e.g. 'RMS 4.9 nm')
+    residual_film_thickness_d?: string
+    layer_spacing_delta?: string
     film_thickness?: string // Film thickness
     mol_ratio?: string // Mol ratio
     cation?: string // Cation
@@ -164,7 +270,10 @@ export interface TribologyData {
     il_inchikey?: string
     alkyl_chain_length?: number
     source?: string
+    source_page?: number
+    source_figure?: string
     notes?: string
+    evidence?: string
 
     // Validation fields
     validationStatus?: ValidationStatus
@@ -202,7 +311,29 @@ export interface ExtractionResponse {
     success: boolean
     metadata?: LiteratureMetadata
     data: TribologyData[]
+    extraction_summary?: ExtractionSummary
     message?: string
+}
+
+export interface ExtractionSummary {
+    run_id?: string | null
+    candidate_count: number
+    final_count: number
+    dropped_by_reason: Record<string, number>
+    page_coverage: Record<string, any>
+    page_candidate_counts?: Record<string, {
+        total: number
+        figure: number
+        text: number
+        other: number
+        kept_after_validation: number
+        dropped_after_validation: number
+    }>
+    progress_log?: Array<{
+        stage: string
+        message: string
+        page?: number
+    }>
 }
 
 export interface ChatResponse {
@@ -237,8 +368,8 @@ export async function syncWithLiterature(metadata: LiteratureMetadata, records: 
         records: records.map(r => ({
             materialName: r.material_name,
             lubricant: r.ionic_liquid,
-            cofValue: r.cof ? parseFloat(r.cof.replace(/[<>≤≥~]/g, '')) : null,
-            cofOperator: r.cof?.match(/[<>≤≥~]/)?.[0] || null,
+            cofValue: r.cof ? parseFloat(r.cof.replace(/[<>~=]/g, '')) : null,
+            cofOperator: r.cof?.match(/[<>~=]/)?.[0] || null,
             cofRaw: r.cof,
             loadValue: r.load ? parseFloat(r.load.replace(/[^0-9.]/g, '')) : null,
             loadRaw: r.load,
@@ -250,6 +381,8 @@ export async function syncWithLiterature(metadata: LiteratureMetadata, records: 
             potential: r.potential,
             waterContent: r.water_content,
             surfaceRoughness: r.surface_roughness,
+            residualFilmThicknessD: r.residual_film_thickness_d,
+            layerSpacingDelta: r.layer_spacing_delta,
             filmThickness: r.film_thickness,
             molRatio: r.mol_ratio,
             cation: r.cation,
@@ -259,6 +392,10 @@ export async function syncWithLiterature(metadata: LiteratureMetadata, records: 
             ilSmiles: r.il_smiles,
             ilInchikey: r.il_inchikey,
             alkylChainLength: r.alkyl_chain_length,
+            evidence: r.evidence,
+            source: r.source,
+            sourcePage: r.source_page,
+            sourceFigure: r.source_figure,
             confidence: 0.9
         }))
     }
@@ -283,8 +420,8 @@ export async function syncBatchData(metadata: LiteratureMetadata, records: Tribo
             // Map frontend TribologyData to backend TribologyDataCreate
             materialName: r.material_name,
             lubricant: r.ionic_liquid,
-            cofValue: r.cof ? parseFloat(r.cof.replace(/[<>≤≥~]/g, '')) : null,
-            cofOperator: r.cof?.match(/[<>≤≥~]/)?.[0] || null,
+            cofValue: r.cof ? parseFloat(r.cof.replace(/[<>~=]/g, '')) : null,
+            cofOperator: r.cof?.match(/[<>~=]/)?.[0] || null,
             cofRaw: r.cof,
             loadValue: r.load ? parseFloat(r.load.replace(/[^0-9.]/g, '')) : null,
             loadRaw: r.load,
@@ -296,6 +433,8 @@ export async function syncBatchData(metadata: LiteratureMetadata, records: Tribo
             potential: r.potential,
             waterContent: r.water_content,
             surfaceRoughness: r.surface_roughness,
+            residualFilmThicknessD: r.residual_film_thickness_d,
+            layerSpacingDelta: r.layer_spacing_delta,
             filmThickness: r.film_thickness,
             molRatio: r.mol_ratio,
             cation: r.cation,
@@ -305,6 +444,10 @@ export async function syncBatchData(metadata: LiteratureMetadata, records: Tribo
             ilSmiles: r.il_smiles,
             ilInchikey: r.il_inchikey,
             alkylChainLength: r.alkyl_chain_length,
+            evidence: r.evidence,
+            source: r.source,
+            sourcePage: r.source_page,
+            sourceFigure: r.source_figure,
             confidence: 0.9, // Default confidence, or fetch from frontend tracking
         }))
     }
@@ -366,8 +509,22 @@ export interface RecordResponse {
     potential: string | null
     waterContent: string | null
     surfaceRoughness: string | null
+    residualFilmThicknessD?: string | null
+    layerSpacingDelta?: string | null
     filmThickness: string | null
     confidence: number
+    confidenceDetails?: {
+        base_score?: number
+        base_percent?: number
+        score: number
+        percent: number
+        penalties: { reason: string, value: number }[]
+        boosts?: { reason: string, value: number }[]
+        penalty_total?: number
+        penalty_percent?: number
+        boost_total?: number
+        boost_percent?: number
+    }
     literatureId: number
     literature: RecordLiteratureDTO | null
     // Evidence / Source Evidence fields
@@ -375,6 +532,8 @@ export interface RecordResponse {
     evidencePage: number | null
     evidenceBbox: string | null
     source: string | null
+    sourcePage: number | null
+    sourceFigure: string | null
 }
 
 export interface PaginatedRecordResponse {

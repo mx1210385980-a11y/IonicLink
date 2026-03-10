@@ -4,6 +4,7 @@ import {
   searchRecords,
   getFilterOptions,
   updateTribologyRecord,
+  promoteTribologyRecordConfidence,
   deleteTribologyRecord,
   getRecordEvidence,
   type SearchFilter,
@@ -22,6 +23,12 @@ import {
   Eye,
   Edit,
   Download,
+  ShieldCheck,
+  Flag,
+  MinusCircle,
+  PlusCircle,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-vue-next'
 import Modal from '@/components/ui/Modal.vue'
 import PdfViewerWithHighlight from '@/components/PdfViewerWithHighlight.vue'
@@ -65,6 +72,7 @@ const cofMax = ref('')
 
 const currentPage = ref(1)
 const expandedRowId = ref<number | null>(null)
+const activeConfidencePopoverId = ref<number | null>(null)
 const showExportMenu = ref(false)
 const exporting = ref(false)
 type ExportFormat = 'json' | 'csv' | 'ndjson'
@@ -85,6 +93,7 @@ const editingValues = ref<Record<number, EditableRecordValues>>({})
 const evidenceData = ref<Record<number, EvidenceResult | null>>({})
 const evidenceLoading = ref<Record<number, boolean>>({})
 const evidenceError = ref<Record<number, string | null>>({})
+const confidenceSyncing = ref<Record<number, boolean>>({})
 const imagePreview = ref<{
   open: boolean
   src: string
@@ -102,6 +111,22 @@ type EvidenceTermHit = {
   bbox: number[]
   matched_text?: string | null
   inferred?: boolean
+}
+type ConfidenceLineItem = {
+  reason: string
+  value: number
+}
+type ConfidenceDetailsView = {
+  base_score: number
+  base_percent: number
+  score: number
+  percent: number
+  penalties: ConfidenceLineItem[]
+  boosts: ConfidenceLineItem[]
+  penalty_total: number
+  penalty_percent: number
+  boost_total: number
+  boost_percent: number
 }
 const pdfLocate = ref<{
   open: boolean
@@ -132,6 +157,178 @@ function cofDisplay(record: RecordResponse): string {
   return '--'
 }
 
+function confidenceDisplay(conf: number | null | undefined): string {
+  if (conf == null || Number.isNaN(Number(conf))) return '--'
+  const pct = Math.max(0, Math.min(100, Number(conf) * 100))
+  return `${pct.toFixed(1)}%`
+}
+
+function confidencePenaltyLabel(reason: string): string {
+  const labels: Record<string, string> = {
+    missing_lubricant: 'Missing ionic liquid',
+    unknown_lubricant: 'Unresolved ionic liquid',
+    missing_material: 'Missing surface',
+    unknown_material: 'Unresolved surface',
+    missing_cof: 'Missing COF value',
+    cof_uncertain: 'Uncertain COF notation',
+    cof_out_of_range: 'COF out of physical range',
+    missing_source: 'Missing source label',
+    missing_source_page: 'Missing page grounding',
+    missing_evidence: 'Missing evidence quote or bbox',
+    panel_mismatch: 'Figure panel mismatch',
+    sparse_conditions: 'Sparse experiment conditions',
+    model_inferred: 'Model-inferred condition',
+  }
+  return labels[reason] || reason.replace(/_/g, ' ')
+}
+
+function confidencePenaltyValue(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(Number(value))) return '--'
+  return `-${(Number(value) * 100).toFixed(0)} pts`
+}
+
+function confidenceBoostLabel(reason: string): string {
+  const labels: Record<string, string> = {
+    source_labeled: 'Specific source label present',
+    page_grounded: 'Page-level grounding',
+    evidence_quote_present: 'Evidence quote present',
+    grounded_bbox: 'Grounded bounding box',
+    panel_level_grounding: 'Panel-level figure grounding',
+    rich_conditions: 'Rich experiment conditions',
+  }
+  return labels[reason] || reason.replace(/_/g, ' ')
+}
+
+function confidenceBoostValue(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(Number(value))) return '--'
+  return `+${(Number(value) * 100).toFixed(0)} pts`
+}
+
+function confidencePercentNumber(conf: number | null | undefined): number {
+  if (conf == null || Number.isNaN(Number(conf))) return 0
+  return Math.max(0, Math.min(100, Number(conf) * 100))
+}
+
+function hasEvidenceText(value: string | null | undefined): boolean {
+  return !!String(value || '').trim()
+}
+
+function hasEvidenceBBox(value: number[] | string | null | undefined): boolean {
+  if (Array.isArray(value)) return value.length === 4
+  return !!String(value || '').trim()
+}
+
+function normalizeConfidenceDetails(details?: RecordResponse['confidenceDetails'] | null): ConfidenceDetailsView {
+  const penalties = Array.isArray(details?.penalties) ? details!.penalties.map((p) => ({ reason: p.reason, value: Number(p.value) || 0 })) : []
+  const boosts = Array.isArray(details?.boosts) ? details!.boosts.map((b) => ({ reason: b.reason, value: Number(b.value) || 0 })) : []
+  const baseScore = Number(details?.base_score ?? 1)
+  const penaltyTotal = penalties.reduce((sum, item) => sum + item.value, 0)
+  const boostTotal = boosts.reduce((sum, item) => sum + item.value, 0)
+  const score = Math.max(0.05, Math.min(1, baseScore - penaltyTotal + boostTotal))
+
+  return {
+    base_score: baseScore,
+    base_percent: Number((baseScore * 100).toFixed(1)),
+    score: Number(score.toFixed(4)),
+    percent: Number((score * 100).toFixed(1)),
+    penalties,
+    boosts,
+    penalty_total: Number(penaltyTotal.toFixed(4)),
+    penalty_percent: Number((penaltyTotal * 100).toFixed(1)),
+    boost_total: Number(boostTotal.toFixed(4)),
+    boost_percent: Number((boostTotal * 100).toFixed(1)),
+  }
+}
+
+function confidenceDetailsFor(record: RecordResponse): ConfidenceDetailsView {
+  const base = normalizeConfidenceDetails(record.confidenceDetails)
+  const ev = evidenceData.value[record.id]
+  if (!ev) return base
+
+  const hasSource = !!String(ev.source || record.source || record.sourceFigure || '').trim()
+  const hasPage = !!(ev.page || record.sourcePage || record.evidencePage)
+  const hasGroundedEvidence =
+    hasEvidenceText(ev.text_snippet) ||
+    hasEvidenceText(ev.evidence_text) ||
+    hasEvidenceText(record.evidence) ||
+    hasEvidenceBBox(ev.bbox) ||
+    hasEvidenceBBox(record.evidenceBbox)
+
+  const filteredPenalties = base.penalties.filter((penalty) => {
+    if (penalty.reason === 'missing_source' && hasSource) return false
+    if (penalty.reason === 'missing_source_page' && hasPage) return false
+    if (penalty.reason === 'missing_evidence' && hasGroundedEvidence) return false
+    return true
+  })
+
+  return normalizeConfidenceDetails({
+    ...base,
+    penalties: filteredPenalties,
+    penalty_total: filteredPenalties.reduce((sum, item) => sum + item.value, 0),
+    penalty_percent: filteredPenalties.reduce((sum, item) => sum + item.value, 0) * 100,
+  })
+}
+
+function confidenceValueFor(record: RecordResponse): number {
+  return confidenceDetailsFor(record).score
+}
+
+function confidenceDeltaPercent(record: RecordResponse): number {
+  return Number(((confidenceValueFor(record) - Number(record.confidence || 0)) * 100).toFixed(1))
+}
+
+function promoteRecordConfidence(record: RecordResponse) {
+  const liveDetails = confidenceDetailsFor(record)
+  const storedScore = Number(record.confidence || 0)
+  if (liveDetails.score > storedScore) {
+    record.confidence = liveDetails.score
+    record.confidenceDetails = {
+      base_score: liveDetails.base_score,
+      base_percent: liveDetails.base_percent,
+      score: liveDetails.score,
+      percent: liveDetails.percent,
+      penalties: liveDetails.penalties,
+      boosts: liveDetails.boosts,
+      penalty_total: liveDetails.penalty_total,
+      penalty_percent: liveDetails.penalty_percent,
+      boost_total: liveDetails.boost_total,
+      boost_percent: liveDetails.boost_percent,
+    }
+  }
+}
+
+async function persistPromotedConfidence(record: RecordResponse, previousStoredScore?: number) {
+  const ev = evidenceData.value[record.id]
+  if (!ev || confidenceSyncing.value[record.id]) return
+
+  const liveDetails = confidenceDetailsFor(record)
+  const storedScore = Number(previousStoredScore ?? record.confidence ?? 0)
+  if (liveDetails.score <= storedScore) return
+
+  confidenceSyncing.value[record.id] = true
+  try {
+    const resp = await promoteTribologyRecordConfidence(record.id, {
+      confidence: liveDetails.score,
+      evidence: ev.text_snippet || ev.evidence_text || record.evidence,
+      evidencePage: ev.page ?? record.evidencePage ?? record.sourcePage ?? null,
+      evidenceBbox: ev.bbox?.length === 4 ? JSON.stringify(ev.bbox) : (record.evidenceBbox || null),
+      source: ev.source || record.source,
+      sourcePage: ev.page ?? record.sourcePage ?? null,
+      sourceFigure: record.sourceFigure || (String(ev.source || '').match(/fig/i) ? String(ev.source) : null),
+    })
+    if (typeof resp?.confidence === 'number') {
+      record.confidence = resp.confidence
+    }
+    if (resp?.confidenceDetails) {
+      record.confidenceDetails = resp.confidenceDetails
+    }
+  } catch (err) {
+    console.error('Failed to persist promoted confidence', err)
+  } finally {
+    confidenceSyncing.value[record.id] = false
+  }
+}
+
 function conditionTags(record: RecordResponse): string[] {
   const tags: string[] = []
   if (record.potential) tags.push(`Potential: ${record.potential}`)
@@ -156,9 +353,11 @@ function conditionTags(record: RecordResponse): string[] {
 function toggleRow(record: RecordResponse) {
   if (expandedRowId.value === record.id) {
     expandedRowId.value = null
+    activeConfidencePopoverId.value = null
     return
   }
   expandedRowId.value = record.id
+  activeConfidencePopoverId.value = null
   if (!editingValues.value[record.id]) {
     editingValues.value[record.id] = {
       lubricant: record.lubricant ?? '',
@@ -180,6 +379,10 @@ function updateEditingField(recordId: number, field: keyof EditableRecordValues,
   const target = editingValues.value[recordId]
   if (!target) return
   target[field] = value
+}
+
+function toggleConfidencePopover(recordId: number) {
+  activeConfidencePopoverId.value = activeConfidencePopoverId.value === recordId ? null : recordId
 }
 
 function evidenceImageSrc(recordId: number): string | null {
@@ -233,6 +436,14 @@ function onGlobalKeydown(e: KeyboardEvent) {
   if (showExportMenu.value) showExportMenu.value = false
   if (imagePreview.value.open) closeImagePreview()
   if (pdfLocate.value.open) closePdfLocate()
+  activeConfidencePopoverId.value = null
+}
+
+function onGlobalPointerdown(e: PointerEvent) {
+  const target = e.target as HTMLElement | null
+  if (!target) return
+  if (target.closest('[data-confidence-popover-root="true"]')) return
+  activeConfidencePopoverId.value = null
 }
 
 function normalizeTermKey(input: string): string {
@@ -247,6 +458,17 @@ function normalizeTermKey(input: string): string {
 
 function extractNumberTokens(input: string): string[] {
   return (String(input || '').match(/\d+(?:\.\d+)?/g) || []).map((v) => String(v))
+}
+
+function numericTokensConsistent(term: string, matched: string): boolean {
+  const termNums = extractNumberTokens(term).map((n) => Number(n)).filter((n) => Number.isFinite(n))
+  if (!termNums.length) return true
+  const matchedNums = extractNumberTokens(matched).map((n) => Number(n)).filter((n) => Number.isFinite(n))
+  if (!matchedNums.length) return false
+  return termNums.every((tv) => {
+    const tol = Math.max(1e-6, Math.abs(tv) * 0.01)
+    return matchedNums.some((mv) => Math.abs(mv - tv) <= tol)
+  })
 }
 
 function commonPrefixLen(a: string, b: string): number {
@@ -296,8 +518,7 @@ function findBestTermHit(ev: EvidenceResult | null | undefined, term: string): E
   // Keep numeric consistency first; avoids speed/temperature drifting to unrelated values.
   const numericConsistent = hits.filter((h) => {
     if (!termNums.length) return true
-    const hNums = extractNumberTokens(`${h.term} ${h.matched_text || ''}`)
-    return termNums.every((n) => hNums.includes(n))
+    return numericTokensConsistent(termRaw, String(h.matched_text || ''))
   })
   if (numericConsistent.length === 1) return numericConsistent[0] || null
 
@@ -433,12 +654,23 @@ function evidenceTermChips(record: RecordResponse): EvidenceTermSpec[] {
   return buildEvidenceTermSpecs(record).slice(0, 14)
 }
 
+function isVisualEvidenceSource(ev: EvidenceResult | null | undefined): boolean {
+  const sourceType = String(ev?.source_type || '').trim().toLowerCase()
+  if (sourceType === 'visual') return true
+  if (sourceType === 'text') return false
+
+  const source = String(ev?.source || '').trim().toLowerCase()
+  if (!source) return false
+  return (
+    source.startsWith('fig')
+    || source.startsWith('table')
+    || source.startsWith('image')
+    || source.startsWith('plot')
+  )
+}
+
 function isTextEvidence(recordId: number): boolean {
-  const source = (evidenceData.value[recordId]?.source || '').trim().toLowerCase()
-  if (!source) return true
-  if (source === 'text') return true
-  if (source.startsWith('fig') || source.startsWith('table')) return false
-  return true
+  return !isVisualEvidenceSource(evidenceData.value[recordId])
 }
 
 function evidenceSnippet(record: RecordResponse): string {
@@ -484,7 +716,6 @@ async function openTermInPdf(record: RecordResponse, term: string) {
     // Use cached evidence if refresh fails.
   }
   const hit = findBestTermHit(ev, term)
-  const targetPage = hit?.page || ev?.page || 1
   const termKey = normalizeTermKey(term)
   const spec = buildEvidenceTermSpecs(record).find((s) => normalizeTermKey(s.term) === termKey)
     || buildEvidenceTermSpecs(record).find((s) => {
@@ -492,19 +723,55 @@ async function openTermInPdf(record: RecordResponse, term: string) {
       return k.includes(termKey) || termKey.includes(k)
     })
   const pdfColor = spec?.pdfColor || 'rgba(250, 204, 21, 0.35)'
+  const isVisualSource = isVisualEvidenceSource(ev)
+  let targetPage = hit?.page || ev?.page || 1
 
-  // Important: do not fallback to record-level bbox when a term has no own hit.
-  // Otherwise unrelated fields (e.g. speed) can be highlighted as COF bbox.
-  const highlight =
-    buildHighlightRect(`${record.id}-${Date.now()}`, hit?.page || 0, hit?.bbox, pdfColor) ||
-    buildPageAnchorHighlight(`${record.id}-p-${targetPage}-${Date.now()}`, targetPage, pdfColor)
+  // Image/figure sourced values: open image preview directly by default.
+  // This avoids misleading text-based jumps for visual-only evidence.
+  if (isVisualSource) {
+    targetPage = ev?.page || record.sourcePage || targetPage
+    // Prefer local crop image first; page thumbnail is fallback.
+    const previewSrc = evidenceImageSrc(record.id) || evidencePagePreviewSrc(record.id)
+    if (previewSrc) {
+      openImagePreview(
+        previewSrc,
+        `${ev?.source || 'Figure Evidence'} · Page ${targetPage}`,
+      )
+      return
+    }
+  }
+
+  let highlight: HighlightRect
+  if (isVisualSource) {
+    targetPage = ev?.page || record.sourcePage || 1
+    highlight =
+      buildHighlightRect(`${record.id}-visual-${Date.now()}`, ev?.page || 0, ev?.bbox, pdfColor) ||
+      buildPageAnchorHighlight(`${record.id}-visual-page-${targetPage}-${Date.now()}`, targetPage, pdfColor)
+  } else {
+    // Important: do not fallback to record-level bbox when a text term has no own hit.
+    // Otherwise unrelated fields (e.g. speed) can be highlighted as COF bbox.
+    highlight =
+      buildHighlightRect(`${record.id}-${Date.now()}`, hit?.page || 0, hit?.bbox, pdfColor) ||
+      buildPageAnchorHighlight(`${record.id}-p-${targetPage}-${Date.now()}`, targetPage, pdfColor)
+  }
 
   pdfLocate.value.open = true
-  pdfLocate.value.title = `Source Locator · Page ${targetPage}`
+  pdfLocate.value.title = isVisualSource
+    ? `Source Locator · Figure Page ${targetPage}`
+    : `Source Locator · Page ${targetPage}`
   pdfLocate.value.pdfUrl = `/api/pdf/${record.literatureId}`
   pdfLocate.value.highlights = [highlight]
   pdfLocate.value.activeHighlightId = highlight.id
   pdfLocate.value.notice = ''
+
+  if (isVisualSource) {
+    if (ev?.bbox && ev?.bbox.length === 4) {
+      pdfLocate.value.notice = `Visual evidence detected (${ev?.source || 'Figure'}). Positioned to the source image region.`
+    } else {
+      pdfLocate.value.notice = `Visual evidence detected (${ev?.source || 'Figure'}), but no exact figure bbox was found. Positioned to page ${targetPage}.`
+    }
+    return
+  }
 
   const snippet = (ev?.text_snippet || ev?.evidence_text || '').toLowerCase()
   const roomTempMentioned = snippet.includes('room temperature') || snippet.includes('ambient temperature')
@@ -520,6 +787,16 @@ async function openTermInPdf(record: RecordResponse, term: string) {
 function openRecordPdf(record: RecordResponse) {
   if (!record.literatureId) return
   const ev = evidenceData.value[record.id]
+  if (isVisualEvidenceSource(ev)) {
+    const previewSrc = evidenceImageSrc(record.id) || evidencePagePreviewSrc(record.id)
+    if (previewSrc) {
+      openImagePreview(
+        previewSrc,
+        `${ev?.source || 'Figure Evidence'} · Page ${ev?.page || record.sourcePage || '--'}`,
+      )
+      return
+    }
+  }
   const targetPage = ev?.page || 1
   const highlight =
     buildHighlightRect(`${record.id}-ev-${Date.now()}`, ev?.page || 0, ev?.bbox, 'rgba(250, 204, 21, 0.35)') ||
@@ -557,7 +834,12 @@ async function fetchEvidence(record: RecordResponse) {
       !!cached.page ||
       !!cached.source)
   const hasTermHits = !!(cached && Array.isArray(cached.term_hits) && cached.term_hits.length > 0)
-  if (hasUsefulCachedData && (!cached?.has_pdf || hasTermHits)) return
+  if (hasUsefulCachedData && (!cached?.has_pdf || hasTermHits)) {
+    const previousStoredScore = Number(record.confidence || 0)
+    promoteRecordConfidence(record)
+    await persistPromotedConfidence(record, previousStoredScore)
+    return
+  }
 
   evidenceLoading.value[record.id] = true
   evidenceError.value[record.id] = null
@@ -565,6 +847,9 @@ async function fetchEvidence(record: RecordResponse) {
   try {
     const ev = await getRecordEvidence(record.literatureId, record.id)
     evidenceData.value[record.id] = ev
+    const previousStoredScore = Number(record.confidence || 0)
+    promoteRecordConfidence(record)
+    await persistPromotedConfidence(record, previousStoredScore)
   } catch (err: any) {
     evidenceData.value[record.id] = null
     evidenceError.value[record.id] = err?.message || 'Failed to load evidence'
@@ -763,7 +1048,7 @@ async function saveRecord(record: RecordResponse) {
     const surfaceRoughness = vals.surfaceRoughness.trim()
     const filmThickness = vals.filmThickness.trim()
 
-    await updateTribologyRecord(record.id, {
+    const updated = await updateTribologyRecord(record.id, {
       lubricant,
       materialName,
       temperature,
@@ -789,6 +1074,15 @@ async function saveRecord(record: RecordResponse) {
     record.cofRaw = cofRaw
     if (!isNaN(parsed as number)) {
       record.cofValue = parsed as number
+    }
+    if (typeof updated?.confidence === 'number') {
+      record.confidence = updated.confidence
+    }
+    if (updated?.confidenceDetails) {
+      record.confidenceDetails = updated.confidenceDetails
+    }
+    if (evidenceData.value[record.id]) {
+      promoteRecordConfidence(record)
     }
     expandedRowId.value = null
   } catch (err) {
@@ -822,10 +1116,12 @@ onMounted(async () => {
   await loadOptions()
   await fetchData()
   window.addEventListener('keydown', onGlobalKeydown)
+  window.addEventListener('pointerdown', onGlobalPointerdown)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalKeydown)
+  window.removeEventListener('pointerdown', onGlobalPointerdown)
 })
 
 watch(
@@ -998,7 +1294,10 @@ watch(
                       <span v-if="!conditionTags(record).length" class="text-slate-400">--</span>
                     </div>
                   </td>
-                  <td class="px-4 py-4 font-bold text-blue-600">{{ cofDisplay(record) }}</td>
+                  <td class="px-4 py-4">
+                    <div class="font-bold text-blue-600">{{ cofDisplay(record) }}</div>
+                    <div class="mt-0.5 text-[11px] text-slate-400">Conf: {{ confidenceDisplay(confidenceValueFor(record)) }}</div>
+                  </td>
                   <td class="px-4 py-4">
                     <div class="flex items-center justify-end gap-1.5" @click.stop>
                       <button
@@ -1065,10 +1364,143 @@ watch(
                             <span v-else class="text-slate-900">--</span>
                           </div>
                         </div>
+
                       </div>
 
-                      <div class="rounded-lg border border-slate-200 bg-white p-3" @click.stop>
-                        <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-blue-700">Data Verification</p>
+                      <div class="relative rounded-lg border border-slate-200 bg-white p-3" @click.stop>
+                        <div class="mb-2 flex items-center justify-between">
+                          <p class="text-xs font-semibold uppercase tracking-wide text-blue-700">Data Verification</p>
+                          <div class="relative" data-confidence-popover-root="true">
+                            <button
+                              type="button"
+                              class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-100 transition hover:bg-emerald-100"
+                              @click.stop="toggleConfidencePopover(record.id)"
+                            >
+                              <span class="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
+                              Confidence {{ confidenceDisplay(confidenceValueFor(record)) }}
+                            </button>
+
+                            <div
+                              v-if="activeConfidencePopoverId === record.id"
+                              class="absolute right-0 z-20 mt-2 w-[340px] overflow-hidden rounded-2xl border border-emerald-50 bg-[linear-gradient(135deg,#ffffff_0%,#e8fcf5_100%)] shadow-[0_20px_60px_rgba(15,23,42,0.12)]"
+                            >
+                              <div class="px-5 py-5">
+                                <!-- Header -->
+                                <div class="mb-4 flex items-center gap-2">
+                                  <ShieldCheck class="h-5 w-5 text-emerald-600" />
+                                  <span class="text-sm font-bold text-slate-800">AI Confidence Score</span>
+                                </div>
+
+                                <!-- Big Score & Delta -->
+                                <div class="mb-5 flex items-end gap-3">
+                                  <div class="flex items-baseline text-emerald-600">
+                                    <span class="text-6xl font-black tracking-tighter leading-none">{{ confidencePercentNumber(confidenceValueFor(record)).toFixed(0) }}</span>
+                                    <span class="text-3xl font-bold leading-none">%</span>
+                                  </div>
+                                  <div class="pb-1">
+                                    <div class="text-[11px] font-bold uppercase tracking-wide text-emerald-600">
+                                      {{ confidencePercentNumber(confidenceValueFor(record)) >= 80 ? 'High Confidence' : confidencePercentNumber(confidenceValueFor(record)) >= 50 ? 'Medium Confidence' : 'Low Confidence' }}
+                                    </div>
+                                    <div class="mt-1">
+                                      <div
+                                        v-if="confidenceDeltaPercent(record) > 0"
+                                        class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 bg-emerald-100/60"
+                                      >
+                                        <ArrowUp class="h-3 w-3" /> Up from {{ confidencePercentNumber(record.confidence).toFixed(0) }}% (Stored)
+                                      </div>
+                                      <div
+                                        v-else-if="confidenceDeltaPercent(record) < 0"
+                                        class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-bold text-rose-700 bg-rose-100/60"
+                                      >
+                                        <ArrowDown class="h-3 w-3" /> Down from {{ confidencePercentNumber(record.confidence).toFixed(0) }}% (Stored)
+                                      </div>
+                                      <div
+                                        v-else
+                                        class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-bold text-slate-600 bg-slate-100/80"
+                                      >
+                                        Synced with stored confidence
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <!-- Box Breakdown -->
+                                <div class="rounded-xl bg-white/70 p-1 ring-1 ring-slate-100/50 backdrop-blur-sm">
+                                  <div class="flex flex-col gap-0.5">
+                                    <div class="flex items-center justify-between px-3 py-2">
+                                      <div class="flex items-center gap-2 text-slate-500">
+                                        <Flag class="h-4 w-4 text-slate-400" />
+                                        <span class="text-[13px] font-medium">Base Score</span>
+                                      </div>
+                                      <span class="text-[14px] font-bold text-slate-700">{{ confidenceDetailsFor(record).base_percent.toFixed(0) }}</span>
+                                    </div>
+
+                                    <div class="mx-3 h-px bg-slate-100"></div>
+
+                                    <template v-if="confidenceDetailsFor(record).penalties?.length">
+                                      <div
+                                        v-for="(penalty, idx) in confidenceDetailsFor(record).penalties"
+                                        :key="`pen-${idx}`"
+                                        class="flex flex-col"
+                                      >
+                                        <div class="flex items-center justify-between px-3 py-2 text-rose-500">
+                                          <div class="flex items-center gap-2 max-w-[200px]">
+                                            <MinusCircle class="h-4 w-4 shrink-0" />
+                                            <span class="text-[13px] truncate">{{ confidencePenaltyLabel(penalty.reason) }}</span>
+                                          </div>
+                                          <span class="text-[14px] font-bold shrink-0">{{ confidencePenaltyValue(penalty.value) }}</span>
+                                        </div>
+                                      </div>
+                                    </template>
+                                    <template v-else>
+                                      <div class="flex items-center justify-between px-3 py-2 text-rose-500/50">
+                                        <div class="flex items-center gap-2">
+                                          <MinusCircle class="h-4 w-4" />
+                                          <span class="text-[13px]">No penalties applied</span>
+                                        </div>
+                                        <span class="text-[14px] font-bold">-0</span>
+                                      </div>
+                                    </template>
+
+                                    <template v-if="confidenceDetailsFor(record).boosts?.length">
+                                      <div
+                                        v-for="(boost, idx) in confidenceDetailsFor(record).boosts"
+                                        :key="`bst-${idx}`"
+                                        class="flex flex-col"
+                                      >
+                                        <div class="flex items-center justify-between px-3 py-2 text-emerald-400">
+                                          <div class="flex items-center gap-2 max-w-[200px]">
+                                            <PlusCircle class="h-4 w-4 shrink-0" />
+                                            <span class="text-[13px] truncate">{{ confidenceBoostLabel(boost.reason) }}</span>
+                                          </div>
+                                          <span class="text-[14px] font-bold shrink-0">{{ confidenceBoostValue(boost.value) }}</span>
+                                        </div>
+                                      </div>
+                                    </template>
+                                    <template v-else>
+                                      <div class="flex items-center justify-between px-3 py-2 text-emerald-400">
+                                        <div class="flex items-center gap-2">
+                                          <PlusCircle class="h-4 w-4" />
+                                          <span class="text-[13px]">No boosts applied</span>
+                                        </div>
+                                        <span class="text-[14px] font-bold">+0</span>
+                                      </div>
+                                    </template>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div class="px-5 pb-5">
+                                <div class="h-1.5 w-full overflow-hidden rounded-full bg-slate-100 flex">
+                                  <div
+                                    class="h-full rounded-full bg-emerald-500 transition-all"
+                                    :style="{ width: `${confidencePercentNumber(confidenceValueFor(record))}%` }"
+                                  ></div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                         <div class="grid grid-cols-1 gap-2">
                           <div class="grid grid-cols-2 gap-2">
                             <div>

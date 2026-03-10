@@ -1,37 +1,26 @@
-import os
-import json
-import re
-import base64
+﻿import base64
 import io
+import json
+import os
+import re
 from typing import Any, List, Optional, Union
+
 from PIL import Image
 
 
 def clean_and_parse_json(text: str) -> Union[List, dict, None]:
-    """
-    Robust JSON cleaning and parsing function.
-    Handles:
-    - Pure JSON
-    - JSON wrapped in ```json ... ```
-    - JSON with leading/trailing text
-    - Nested markdown blocks
-    
-    Returns parsed JSON object or None if all parsing fails.
-    """
+    """Robust JSON cleaning and parsing function."""
     if not text:
         return None
-    
+
     original_text = text
     text = text.strip()
-    
-    # Strategy 1: Try direct parse first
+
     try:
-        result = json.loads(text)
-        return result
+        return json.loads(text)
     except json.JSONDecodeError:
         pass
-    
-    # Strategy 2: Remove markdown code blocks ```json ... ``` or ``` ... ```
+
     match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
     if match:
         candidate = match.group(1).strip()
@@ -39,80 +28,71 @@ def clean_and_parse_json(text: str) -> Union[List, dict, None]:
             return json.loads(candidate)
         except json.JSONDecodeError:
             pass
-    
-    # Strategy 3: Find outermost { } or [ ] and extract
-    first_brace = text.find('{')
-    first_bracket = text.find('[')
-    
+
+    first_brace = text.find("{")
+    first_bracket = text.find("[")
     if first_brace == -1 and first_bracket == -1:
         print(f"[clean_and_parse_json] No JSON delimiters found. Text: {text[:200]}...")
         return None
-    
-    # Determine which delimiter is first
+
     if first_bracket != -1 and (first_brace == -1 or first_bracket < first_brace):
         start_idx = first_bracket
-        bracket_count = 0
+        balance = 0
         end_idx = -1
-        for i, char in enumerate(text[start_idx:]):
-            if char == '[':
-                bracket_count += 1
-            elif char == ']':
-                bracket_count -= 1
-                if bracket_count == 0:
+        for i, ch in enumerate(text[start_idx:]):
+            if ch == "[":
+                balance += 1
+            elif ch == "]":
+                balance -= 1
+                if balance == 0:
                     end_idx = start_idx + i
                     break
         if end_idx != -1:
-            candidate = text[start_idx:end_idx+1]
             try:
-                return json.loads(candidate)
-            except json.JSONDecodeError as e:
-                print(f"[clean_and_parse_json] Bracket extraction failed: {e}")
+                return json.loads(text[start_idx : end_idx + 1])
+            except json.JSONDecodeError:
+                pass
     else:
         start_idx = first_brace
-        brace_count = 0
+        balance = 0
         end_idx = -1
-        for i, char in enumerate(text[start_idx:]):
-            if char == '{':
-                brace_count += 1
-            elif char == '}':
-                brace_count -= 1
-                if brace_count == 0:
+        for i, ch in enumerate(text[start_idx:]):
+            if ch == "{":
+                balance += 1
+            elif ch == "}":
+                balance -= 1
+                if balance == 0:
                     end_idx = start_idx + i
                     break
         if end_idx != -1:
-            candidate = text[start_idx:end_idx+1]
             try:
-                return json.loads(candidate)
-            except json.JSONDecodeError as e:
-                print(f"[clean_and_parse_json] Brace extraction failed: {e}")
-    
-    # All strategies failed
+                return json.loads(text[start_idx : end_idx + 1])
+            except json.JSONDecodeError:
+                pass
+
     print(f"[clean_and_parse_json] All parsing failed. Original length: {len(original_text)}")
     return None
 
 
-def prepare_image_input(image_input: str) -> Optional[str]:
-    """
-    Prepare image input for LLM with COMPRESSION.
-    Accepts either a local file path or a base64 data URI.
-    Returns a sanitized and compressed base64 data URI string.
-    """
+def prepare_image_input(
+    image_input: str,
+    max_side: int = 1800,
+    jpeg_quality: int = 85,
+) -> Optional[str]:
+    """Prepare image input for LLM with controllable compression."""
     if not image_input:
         return None
-        
+
     try:
         img_data = None
-        
-        # Case 1: Already a Base64 Data URI
+
         if image_input.startswith("data:image"):
             try:
-                header, encoded = image_input.split(",", 1)
+                _, encoded = image_input.split(",", 1)
                 img_data = base64.b64decode(encoded)
             except ValueError:
-                print(f"[LLM Utils] Invalid base64 string format")
+                print("[LLM Utils] Invalid base64 image format")
                 return None
-        
-        # Case 2: File Path
         elif os.path.exists(image_input):
             with open(image_input, "rb") as image_file:
                 img_data = image_file.read()
@@ -123,28 +103,25 @@ def prepare_image_input(image_input: str) -> Optional[str]:
         if not img_data:
             return None
 
-        # Process with Pillow
-        with Image.open(io.BytesIO(img_data)):
-            pil_img = Image.open(io.BytesIO(img_data))
-            if pil_img.mode != 'RGB':
-                pil_img = pil_img.convert('RGB')
-            
-            MAX_SIZE = (1024, 1024)
-            pil_img.thumbnail(MAX_SIZE)
-            
-            output_buffer = io.BytesIO()
-            pil_img.save(output_buffer, format='JPEG', quality=70)
-            
-            b64_str = base64.b64encode(output_buffer.getvalue()).decode('utf-8')
-            return f"data:image/jpeg;base64,{b64_str}"
-            
+        pil_img = Image.open(io.BytesIO(img_data))
+        if pil_img.mode != "RGB":
+            pil_img = pil_img.convert("RGB")
+
+        max_side = max(512, int(max_side))
+        jpeg_quality = max(50, min(95, int(jpeg_quality)))
+        pil_img.thumbnail((max_side, max_side))
+
+        output_buffer = io.BytesIO()
+        pil_img.save(output_buffer, format="JPEG", quality=jpeg_quality)
+
+        b64_str = base64.b64encode(output_buffer.getvalue()).decode("utf-8")
+        return f"data:image/jpeg;base64,{b64_str}"
     except Exception as e:
         print(f"[LLM Utils] Image processing failed: {e}")
         return None
 
 
 def clean_json_string(text: str) -> str:
-    """Legacy function - now uses clean_and_parse_json internally"""
     result = clean_and_parse_json(text)
     if result is None:
         return text
@@ -152,81 +129,77 @@ def clean_json_string(text: str) -> str:
 
 
 def parse_json_response(response_text: str) -> List[dict]:
-    """Parse JSON response with robust cleaning"""
+    """Parse JSON response with robust cleaning."""
     try:
         result = clean_and_parse_json(response_text)
-        
+
         if result is None:
             print(f"[LLM Utils] Failed to parse JSON. Raw: {response_text[:500]}...")
             return []
-        
+
         if isinstance(result, list):
             return result
-        elif isinstance(result, dict):
-            if "data" in result:
+        if isinstance(result, dict):
+            if "data" in result and isinstance(result["data"], list):
                 return result["data"]
-            elif "records" in result:
+            if "records" in result and isinstance(result["records"], list):
                 return result["records"]
-            else:
-                return [result]
-        else:
-            print(f"[LLM Utils] Unexpected JSON type: {type(result)}")
-            return []
-            
+            return [result]
+
+        print(f"[LLM Utils] Unexpected JSON type: {type(result)}")
+        return []
     except Exception as e:
         print(f"[LLM Utils] Unexpected parse error: {e}")
         return []
 
 
 def is_valid_numeric_entry(value: Union[str, float, int]) -> bool:
-    if not value:
+    if value is None:
         return False
     val_str = str(value).strip()
     if len(val_str) > 20:
         return False
-    forbidden_words = ['increase', 'decrease', 'depend', 'versus', 'function', 'correla', 'high', 'low', 'vary', 'varies']
+    forbidden_words = ["increase", "decrease", "depend", "versus", "function", "correla", "high", "low", "vary", "varies"]
     if any(word in val_str.lower() for word in forbidden_words):
         return False
-    if not re.search(r'\d', val_str):
-        return False
-    return True
+    return bool(re.search(r"\d", val_str))
 
 
 def sanitize_numeric_string(value: Union[str, float, int]) -> Optional[str]:
-    if not value:
+    if value is None:
         return None
     s = str(value).strip()
-    if len(s) > 50:
+    if len(s) > 80:
         return None
-    if re.match(r'^-?\d', s) and re.search(r'\d', s):
+    if re.search(r"\d", s):
         return s
     return None
 
 
 def sanitize_potential(value: Union[str, float, int]) -> Optional[str]:
-    if not value:
+    if value is None:
         return None
     s = str(value).strip()
     if any(x in s.upper() for x in ["OCP", "OPEN", "CIRCUIT"]):
         return "OCP"
-    if re.match(r'^[+-]?\d', s):
+    if re.match(r"^[+-]?\d", s):
         return s
     return None
 
 
 def sanitize_cof(value: Union[str, float, int]) -> Optional[float]:
-    if not value:
+    if value is None:
         return None
     try:
-        match = re.search(r'-?\d+(\.\d+)?([eE][-+]?\d+)?', str(value))
+        match = re.search(r"-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?", str(value))
         if not match:
             return None
         val_float = float(match.group(0))
         if 0.0001 <= val_float <= 5.0:
             return val_float
-        return None
-    except:
-        return None
+    except Exception:
+        pass
+    return None
 
 
 def normalize_record_value(value: Any) -> str:
@@ -238,13 +211,18 @@ def normalize_record_value(value: Any) -> str:
     if not normalized or normalized in {"-", "--", "null", "none", "n/a", "na", "unknown"}:
         return ""
 
-    normalized = normalized.replace("μ", "u").replace("渭", "u").replace("碌", "u")
+    normalized = (
+        normalized
+        .replace("μ", "u")
+        .replace("µ", "u")
+        .replace("渭", "u")
+        .replace("碌", "u")
+    )
     normalized = re.sub(r"\s+", " ", normalized)
     return normalized
 
 
 def has_explicit_numeric_value(value: Any) -> bool:
-    """Return True when a field contains an explicit numeric quantity."""
     normalized = normalize_record_value(value)
     if not normalized:
         return False
@@ -256,13 +234,7 @@ def has_explicit_numeric_value(value: Any) -> bool:
 
 
 def has_core_quantitative_signal(record: dict[str, Any]) -> bool:
-    """
-    Determine whether a record contains a core quantitative experimental signal.
-
-    This intentionally goes beyond COF-only extraction so AFM / nanoconfinement
-    studies with explicit layer spacing, hard-wall thickness, roughness, or load
-    data are preserved through post-processing.
-    """
+    """Return True when a record has at least one core quantitative field."""
     if not record:
         return False
 

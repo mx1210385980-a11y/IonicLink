@@ -188,6 +188,10 @@ async def get_literature(
                 il_smiles=r.il_smiles,
                 il_inchikey=r.il_inchikey,
                 alkyl_chain_length=r.alkyl_chain_length,
+                evidence=r.evidence,
+                source=r.source,
+                source_page=r.source_page,
+                source_figure=r.source_figure,
                 confidence=r.confidence,
                 extracted_at=r.extracted_at
             )
@@ -388,6 +392,10 @@ async def get_tribology_records(
             il_smiles=r.il_smiles,
             il_inchikey=r.il_inchikey,
             alkyl_chain_length=r.alkyl_chain_length,
+            evidence=r.evidence,
+            source=r.source,
+            source_page=r.source_page,
+            source_figure=r.source_figure,
             confidence=r.confidence,
             extracted_at=r.extracted_at
         )

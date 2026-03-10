@@ -23,6 +23,19 @@ interface DashboardStats {
   literature_count: number
   distinct_il_count: number
   cof_stats: { min: number, max: number, avg: number }
+  confidence_stats?: {
+    avg: number | null
+    avg_percent: number | null
+    min_percent: number | null
+    max_percent: number | null
+    count: number
+    breakdown?: Record<string, {
+      count: number
+      share_percent: number
+      avg: number | null
+      avg_percent: number | null
+    }>
+  }
   materials_ratio: { name: string, count: number }[]
   top_liquids: { name: string, count: number }[]
   publication_trend: { year: number, count: number }[]
@@ -162,6 +175,41 @@ function formatCofTick(value: number): string {
   return value.toFixed(decimals).replace(/\.?0+$/, '')
 }
 
+function formatConfidencePercent(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '--'
+  const safe = Math.max(0, Math.min(100, Number(value)))
+  return `${safe.toFixed(1)}%`
+}
+
+function confidenceBucketLabel(key: string): string {
+  const labels: Record<string, string> = {
+    text_grounded: 'Text-grounded',
+    figure_grounded: 'Figure-grounded',
+    inferred: 'Model-inferred',
+  }
+  return labels[key] || key.replace(/_/g, ' ')
+}
+
+function confidenceBucketTone(key: string): string {
+  const tones: Record<string, string> = {
+    text_grounded: 'from-emerald-400 to-teal-500',
+    figure_grounded: 'from-cyan-400 to-blue-500',
+    inferred: 'from-amber-400 to-orange-500',
+  }
+  return tones[key] || 'from-slate-400 to-slate-500'
+}
+
+const confidenceBreakdownItems = computed(() => {
+  const breakdown = stats.value?.confidence_stats?.breakdown || {}
+  const order = ['text_grounded', 'figure_grounded', 'inferred']
+  return order
+    .filter((key) => breakdown[key])
+    .map((key) => ({
+      key,
+      ...breakdown[key],
+    }))
+})
+
 // --- Lifecycle ---
 onMounted(() => {
   fetchStats()
@@ -225,8 +273,23 @@ onMounted(() => {
         <CardContent class="p-6 flex items-center justify-between">
           <div>
             <p class="text-sm font-medium text-muted-foreground mb-1">Data Confidence Score</p>
-            <h2 class="text-3xl font-bold">94.2%</h2>
-            <p class="text-xs text-green-500 font-medium mt-1">Verified by Rule Engine</p>
+            <h2 class="text-3xl font-bold">{{ formatConfidencePercent(stats?.confidence_stats?.avg_percent ?? null) }}</h2>
+            <p class="text-xs text-green-500 font-medium mt-1">AI composite confidence across library records</p>
+            <div class="mt-3 space-y-2">
+              <div v-for="bucket in confidenceBreakdownItems" :key="bucket.key">
+                <div class="mb-1 flex items-center justify-between text-[11px]">
+                  <span class="font-semibold text-slate-600">{{ confidenceBucketLabel(bucket.key) }}</span>
+                  <span class="text-slate-500">{{ bucket.count }} rec · {{ formatConfidencePercent(bucket.avg_percent) }}</span>
+                </div>
+                <div class="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    class="h-full rounded-full bg-gradient-to-r"
+                    :class="confidenceBucketTone(bucket.key)"
+                    :style="{ width: `${Math.max(8, Math.min(100, bucket.share_percent || 0))}%` }"
+                  ></div>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="w-12 h-12 rounded-xl bg-green-500 flex items-center justify-center">
             <ShieldCheck class="w-6 h-6 text-white" />

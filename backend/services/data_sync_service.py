@@ -11,6 +11,7 @@ Main Features:
 from datetime import datetime
 from typing import List, Optional, Tuple
 import traceback
+import re
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 
@@ -22,9 +23,50 @@ from schemas import (
     SyncResult
 )
 from services.doi_service import DOIService
+from knowledge_base import normalize_ionic_liquid
 
 # DOI normalizer instance
 _doi_service = DOIService()
+
+
+def _is_unknown_il(value: Optional[str]) -> bool:
+    return str(value or "").strip().lower() in {"", "unknown", "unknown il", "n/a", "none", "-", "--"}
+
+
+def _canonicalize_il(value: Optional[str]) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text_l = text.lower()
+    if "ethylammonium nitrate" in text_l or re.search(r"\bean\b", text_l):
+        return "EAN"
+    if "ethaline" in text_l:
+        return "Ethaline"
+    m = re.search(r"(\[[^\[\]]+?\]\s*(?:i\s*)?\[[^\[\]]+?\])", text)
+    if m:
+        return re.sub(r"\s+", "", m.group(1)).replace("]i[", "][")
+    # Avoid writing long sentence-like strings into lubricant field.
+    if len(text) > 80:
+        return ""
+    return text
+
+
+def _infer_lubricant(record: TribologyDataCreate) -> str:
+    current = _canonicalize_il(getattr(record, "lubricant", ""))
+    if current and not _is_unknown_il(current):
+        return current
+
+    spaces = [
+        str(getattr(record, "evidence", "") or ""),
+        str(getattr(record, "source", "") or ""),
+        str(getattr(record, "source_figure", "") or ""),
+        str(getattr(record, "film_thickness", "") or ""),
+    ]
+    for text in spaces:
+        candidate = _canonicalize_il(normalize_ionic_liquid(text))
+        if candidate and not _is_unknown_il(candidate):
+            return candidate
+    return current
 
 
 # ============== Core Sync Logic ==============
@@ -127,32 +169,15 @@ async def sync_batch_data(
             delete_result = await db.execute(delete_stmt)
             print(f"[Sync Debug] Deleted {delete_result.rowcount} old records for Literature ID: {literature.id}")
         
-        # Step 3: Deduplicate records based on key fields
-        seen_keys = set()
-        unique_records = []
-        for record in payload.records:
-            key = (
-                str(record.material_name or "").strip().lower(),
-                str(record.lubricant or "").strip().lower(),
-                str(record.cof_raw or "").strip(),
-                str(record.load_raw or "").strip(),
-                str(getattr(record, 'speed_raw', None) or record.speed_value or "").strip(),
-            )
-            if key not in seen_keys:
-                seen_keys.add(key)
-                unique_records.append(record)
-        
-        if len(payload.records) != len(unique_records):
-            print(f"[Sync] Deduplicated: {len(payload.records)} -> {len(unique_records)} records")
-        
-        # Step 4: Bulk insert new TribologyData records
+        # Step 3: Bulk insert new TribologyData records (do not deduplicate again here).
         new_records: List[TribologyData] = []
         
-        for record in unique_records:
+        for record in payload.records:
+            lubricant = _infer_lubricant(record)
             tribology_record = TribologyData(
                 literature_id=literature.id,
                 material_name=record.material_name,
-                lubricant=record.lubricant,
+                lubricant=lubricant,
                 cof_value=record.cof_value,
                 cof_operator=record.cof_operator,
                 cof_raw=record.cof_raw,
@@ -175,7 +200,11 @@ async def sync_batch_data(
                 il_smiles=getattr(record, 'il_smiles', None),
                 il_inchikey=getattr(record, 'il_inchikey', None),
                 alkyl_chain_length=getattr(record, 'alkyl_chain_length', None),
-                confidence=record.confidence
+                evidence=getattr(record, 'evidence', None),
+                source=getattr(record, 'source', None),
+                source_page=getattr(record, 'source_page', None),
+                source_figure=getattr(record, 'source_figure', None),
+                confidence=record.confidence,
             )
             new_records.append(tribology_record)
         
@@ -232,32 +261,15 @@ async def sync_batch_data_with_replacement(
             delete_result = await db.execute(delete_stmt)
             deleted_count = delete_result.rowcount
         
-        # Step 3: Deduplicate records based on key fields
-        seen_keys = set()
-        unique_records = []
-        for record in payload.records:
-            key = (
-                str(record.material_name or "").strip().lower(),
-                str(record.lubricant or "").strip().lower(),
-                str(record.cof_raw or "").strip(),
-                str(record.load_raw or "").strip(),
-                str(getattr(record, 'speed_raw', None) or record.speed_value or "").strip(),
-            )
-            if key not in seen_keys:
-                seen_keys.add(key)
-                unique_records.append(record)
-        
-        if len(payload.records) != len(unique_records):
-            print(f"[Sync] Deduplicated: {len(payload.records)} -> {len(unique_records)} records")
-        
-        # Step 4: Bulk insert new TribologyData records
+        # Step 3: Bulk insert new TribologyData records (single dedup happens in extraction pipeline).
         new_records: List[TribologyData] = []
         
-        for record in unique_records:
+        for record in payload.records:
+            lubricant = _infer_lubricant(record)
             tribology_record = TribologyData(
                 literature_id=literature.id,
                 material_name=record.material_name,
-                lubricant=record.lubricant,
+                lubricant=lubricant,
                 cof_value=record.cof_value,
                 cof_operator=record.cof_operator,
                 cof_raw=record.cof_raw,
@@ -280,7 +292,11 @@ async def sync_batch_data_with_replacement(
                 il_smiles=getattr(record, 'il_smiles', None),
                 il_inchikey=getattr(record, 'il_inchikey', None),
                 alkyl_chain_length=getattr(record, 'alkyl_chain_length', None),
-                confidence=record.confidence
+                evidence=getattr(record, 'evidence', None),
+                source=getattr(record, 'source', None),
+                source_page=getattr(record, 'source_page', None),
+                source_figure=getattr(record, 'source_figure', None),
+                confidence=record.confidence,
             )
             new_records.append(tribology_record)
         

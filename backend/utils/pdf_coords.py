@@ -20,6 +20,34 @@ def _extract_number_tokens(text: str) -> list[str]:
     return re.findall(r"\d+(?:\.\d+)?", str(text or ""))
 
 
+def _numeric_tokens_match(query: str, matched: str) -> bool:
+    query_nums = _extract_number_tokens(query)
+    if not query_nums:
+        return True
+    matched_nums = _extract_number_tokens(matched)
+    if not matched_nums:
+        return False
+
+    matched_vals: list[float] = []
+    for token in matched_nums:
+        try:
+            matched_vals.append(float(token))
+        except Exception:
+            continue
+    if not matched_vals:
+        return False
+
+    for token in query_nums:
+        try:
+            qv = float(token)
+        except Exception:
+            return False
+        tol = max(1e-6, abs(qv) * 0.01)
+        if not any(abs(mv - qv) <= tol for mv in matched_vals):
+            return False
+    return True
+
+
 def _extract_alpha_tokens(text: str) -> list[str]:
     return [t for t in re.findall(r"[a-z]{3,}", str(text or "").lower())]
 
@@ -58,10 +86,8 @@ def _word_level_find_rect(page: fitz.Page, query: str):
                 continue
 
             # numeric consistency reduces false positives
-            if q_nums:
-                seg_nums = _extract_number_tokens(seg_text)
-                if not all(n in seg_nums for n in q_nums):
-                    continue
+            if q_nums and not _numeric_tokens_match(query, seg_text):
+                continue
 
             # Chemical-formula-like terms (e.g. [EMIM][TFSI]) must keep key alpha tokens.
             if is_chem_formula_like and q_alpha_tokens:
@@ -105,10 +131,17 @@ def normalize_source_label(source: Optional[str]) -> Optional[str]:
     if not text:
         return None
 
-    fig_match = re.search(r"\bfig(?:ure)?\.?\s*([a-z]?\d+[a-z]?)\b", text, re.IGNORECASE)
+    # Accept forms like:
+    #   "Fig. 3b", "Fig. 3(b)", "Figure 10 C", "FIG.12C"
+    fig_match = re.search(
+        r"\bfig(?:ure)?\.?\s*(\d+)(?:\s*[\(\[]?\s*([a-z])\s*[\)\]]?)?\b",
+        text,
+        re.IGNORECASE,
+    )
     if fig_match:
-        idx = fig_match.group(1).upper()
-        return f"Fig. {idx}"
+        num = fig_match.group(1)
+        panel = (fig_match.group(2) or "").upper()
+        return f"Fig. {num}{panel}"
 
     table_match = re.search(r"\b(?:table|tab\.?)\s*([a-z]?\d+[a-z]?)\b", text, re.IGNORECASE)
     if table_match:
@@ -144,7 +177,29 @@ def find_text_coordinates(pdf_path: str, search_terms: list[dict]) -> list[dict]
             term_id = term_info["id"]
             queries = term_info.get("queries", [])
             page_hint = term_info.get("page_hint")
+            restrict_to_page_hint = bool(term_info.get("restrict_to_page_hint"))
+            anchor_bbox = term_info.get("anchor_bbox")
+            restrict_to_anchor_bbox = bool(term_info.get("restrict_to_anchor_bbox"))
             found = False
+
+            ax0 = ay0 = ax1 = ay1 = None
+            if anchor_bbox and isinstance(anchor_bbox, (list, tuple)) and len(anchor_bbox) == 4:
+                try:
+                    ax0, ay0, ax1, ay1 = [float(v) for v in anchor_bbox]
+                    if ax0 > ax1:
+                        ax0, ax1 = ax1, ax0
+                    if ay0 > ay1:
+                        ay0, ay1 = ay1, ay0
+                except Exception:
+                    ax0 = ay0 = ax1 = ay1 = None
+
+            def _in_anchor(rr: fitz.Rect) -> bool:
+                if ax0 is None:
+                    return True
+                cx = (rr.x0 + rr.x1) / 2.0
+                cy = (rr.y0 + rr.y1) / 2.0
+                margin = 12.0
+                return (ax0 - margin) <= cx <= (ax1 + margin) and (ay0 - margin) <= cy <= (ay1 + margin)
 
             for query in queries:
                 if not query or len(query.strip()) < 2:
@@ -154,31 +209,76 @@ def find_text_coordinates(pdf_path: str, search_terms: list[dict]) -> list[dict]
                 page_order = list(range(len(doc)))
                 if isinstance(page_hint, int) and 1 <= page_hint <= len(doc):
                     hinted = page_hint - 1
-                    page_order = [hinted] + [p for p in page_order if p != hinted]
+                    if restrict_to_page_hint:
+                        page_order = [hinted]
+                    else:
+                        page_order = [hinted] + [p for p in page_order if p != hinted]
 
                 for page_num in page_order:
                     page = doc[page_num]
                     rects = page.search_for(query_clean)
                     if rects:
-                        rect = rects[0]
-                        results.append(
-                            {
-                                "id": term_id,
-                                "page": page_num + 1,
-                                "x": round(rect.x0, 2),
-                                "y": round(rect.y0, 2),
-                                "w": round(rect.width, 2),
-                                "h": round(rect.height, 2),
-                                "matched_text": query_clean,
-                            }
-                        )
-                        found = True
-                        break
+                        # Validate candidates with actual extracted text to prevent
+                        # substring drift (e.g. query 0.1 matching 0.116667).
+                        valid_rects: list[tuple[fitz.Rect, str]] = []
+                        for rect in rects:
+                            matched_text = (page.get_textbox(rect) or query_clean).strip()
+                            if not matched_text:
+                                matched_text = query_clean
+                            if not _numeric_tokens_match(query_clean, matched_text):
+                                continue
+                            valid_rects.append((rect, matched_text))
+
+                        if not valid_rects:
+                            pass
+                        else:
+                            if restrict_to_anchor_bbox and ax0 is not None:
+                                anchored = [(r, t) for (r, t) in valid_rects if _in_anchor(r)]
+                                if anchored:
+                                    valid_rects = anchored
+                                else:
+                                    # When strict anchor mode is requested, skip out-of-anchor matches.
+                                    continue
+                            if anchor_bbox and isinstance(anchor_bbox, (list, tuple)) and len(anchor_bbox) == 4:
+                                try:
+                                    ax0, ay0, ax1, ay1 = [float(v) for v in anchor_bbox]
+                                    acx = (ax0 + ax1) / 2.0
+                                    acy = (ay0 + ay1) / 2.0
+
+                                    def _dist(item: tuple[fitz.Rect, str]) -> float:
+                                        rr = item[0]
+                                        rcx = (rr.x0 + rr.x1) / 2.0
+                                        rcy = (rr.y0 + rr.y1) / 2.0
+                                        return ((rcx - acx) ** 2 + (rcy - acy) ** 2) ** 0.5
+
+                                    rect, matched_text = min(valid_rects, key=_dist)
+                                except Exception:
+                                    rect, matched_text = valid_rects[0]
+                            else:
+                                rect, matched_text = valid_rects[0]
+
+                            results.append(
+                                {
+                                    "id": term_id,
+                                    "page": page_num + 1,
+                                    "x": round(rect.x0, 2),
+                                    "y": round(rect.y0, 2),
+                                    "w": round(rect.width, 2),
+                                    "h": round(rect.height, 2),
+                                    "matched_text": matched_text,
+                                }
+                            )
+                            found = True
+                            break
 
                     # Fallback for tokenization/encoding mismatches.
                     fallback = _word_level_find_rect(page, query_clean)
                     if fallback:
                         rect, matched_text = fallback
+                        if restrict_to_anchor_bbox and ax0 is not None and not _in_anchor(rect):
+                            continue
+                        if not _numeric_tokens_match(query_clean, matched_text or ""):
+                            continue
                         results.append(
                             {
                                 "id": term_id,
@@ -249,6 +349,7 @@ def find_evidence_coordinates(
     pdf_path: str,
     evidence_text: str,
     page_hint: Optional[int] = None,
+    restrict_to_page_hint: bool = False,
 ) -> tuple[Optional[int], Optional[list]]:
     """
     Search for evidence text in a PDF and return (page_num, [x0, y0, x1, y1]).
@@ -280,8 +381,11 @@ def find_evidence_coordinates(
         total_pages = len(doc)
 
         if page_hint and 1 <= page_hint <= total_pages:
-            search_order = [page_hint - 1]
-            search_order += [i for i in range(total_pages) if i != page_hint - 1]
+            if restrict_to_page_hint:
+                search_order = [page_hint - 1]
+            else:
+                search_order = [page_hint - 1]
+                search_order += [i for i in range(total_pages) if i != page_hint - 1]
         else:
             search_order = list(range(total_pages))
 
@@ -341,7 +445,12 @@ def find_evidence_coordinates(
     return None, None
 
 
-def find_figure_bbox(pdf_path: str, figure_label: str) -> tuple[Optional[int], Optional[list]]:
+def find_figure_bbox(
+    pdf_path: str,
+    figure_label: str,
+    page_hint: Optional[int] = None,
+    restrict_to_page_hint: bool = False,
+) -> tuple[Optional[int], Optional[list]]:
     """
     Search for a figure/table label and return an expanded bbox likely covering the visual.
 
@@ -355,6 +464,16 @@ def find_figure_bbox(pdf_path: str, figure_label: str) -> tuple[Optional[int], O
     label_clean = label_norm.strip()
 
     variants = [label_clean]
+    panel_letter = None
+    fig_number = None
+    fig_match = re.search(
+        r"\bfig(?:ure)?\.?\s*(\d+)(?:\s*[\(\[]?\s*([a-z])\s*[\)\]]?)?\b",
+        label_clean,
+        re.IGNORECASE,
+    )
+    if fig_match:
+        fig_number = fig_match.group(1).strip()
+        panel_letter = (fig_match.group(2) or "").strip().lower() or None
     if label_clean.lower().startswith("fig."):
         suffix = label_clean[4:].strip()
         variants.extend([f"Figure {suffix}", f"FIG. {suffix}", f"FIGURE {suffix}"])
@@ -364,11 +483,35 @@ def find_figure_bbox(pdf_path: str, figure_label: str) -> tuple[Optional[int], O
     elif label_clean.lower().startswith("table"):
         suffix = label_clean[5:].strip()
         variants.extend([f"Tab. {suffix}", f"TABLE {suffix}"])
+    if fig_number:
+        # Panel labels like Fig. 3b should also match the parent caption "Fig. 3".
+        base_fig_variants = [
+            f"Fig. {fig_number}",
+            f"Figure {fig_number}",
+            f"FIG. {fig_number}",
+            f"FIGURE {fig_number}",
+        ]
+        variants.extend(base_fig_variants)
+    else:
+        base_fig_variants = []
+    variants = list(dict.fromkeys(v.strip() for v in variants if v and v.strip()))
+    # For panel-level requests, prioritize parent figure caption anchor first.
+    if panel_letter and base_fig_variants:
+        base_order = [v for v in base_fig_variants if v in variants]
+        variants = base_order + [v for v in variants if v not in base_order]
 
     try:
         doc = fitz.open(pdf_path)
 
-        for page_idx in range(len(doc)):
+        page_order = list(range(len(doc)))
+        if isinstance(page_hint, int) and 1 <= page_hint <= len(doc):
+            hinted = page_hint - 1
+            if restrict_to_page_hint:
+                page_order = [hinted]
+            else:
+                page_order = [hinted] + [p for p in page_order if p != hinted]
+
+        for page_idx in page_order:
             page = doc[page_idx]
             page_height = page.rect.height
             page_width = page.rect.width
@@ -378,21 +521,228 @@ def find_figure_bbox(pdf_path: str, figure_label: str) -> tuple[Optional[int], O
                 if not rects:
                     continue
 
-                caption_rect = rects[0]
+                # Use the lowest caption hit for this variant (figure captions are commonly below visuals).
+                caption_rect = sorted(rects, key=lambda r: r.y0)[-1]
 
-                expanded = fitz.Rect(
-                    max(0, caption_rect.x0 - 20),
-                    max(0, caption_rect.y0 - 360),
-                    min(page_width, caption_rect.x1 + 80),
-                    min(page_height, caption_rect.y1 + 20),
-                )
+                def _collect_visual_rects() -> list[fitz.Rect]:
+                    out: list[fitz.Rect] = []
+                    try:
+                        text_dict = page.get_text("dict") or {}
+                        for b in text_dict.get("blocks", []):
+                            if b.get("type") != 1:
+                                continue
+                            bb = b.get("bbox")
+                            if not bb or len(bb) != 4:
+                                continue
+                            rr = fitz.Rect(float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3]))
+                            if rr.width < page_width * 0.06 or rr.height < page_height * 0.04:
+                                continue
+                            # Visual should be near/above caption.
+                            if rr.y1 > caption_rect.y0 + 24:
+                                continue
+                            if rr.y1 < caption_rect.y0 - 560:
+                                continue
+                            out.append(rr)
+                    except Exception:
+                        pass
+
+                    try:
+                        for d in page.get_drawings() or []:
+                            rr = d.get("rect")
+                            if not rr:
+                                continue
+                            rr = fitz.Rect(rr)
+                            if rr.width < page_width * 0.06 or rr.height < page_height * 0.04:
+                                continue
+                            if rr.y1 > caption_rect.y0 + 24:
+                                continue
+                            if rr.y1 < caption_rect.y0 - 560:
+                                continue
+                            out.append(rr)
+                    except Exception:
+                        pass
+                    return out
+
+                visual_rects = _collect_visual_rects()
+                if visual_rects:
+                    # For panel-level labels, keep all candidate visual rects first, then refine by panel.
+                    # Caption token centers (e.g., just "Fig. 3") are too narrow and can wrongly drop sibling panels.
+                    if panel_letter:
+                        filtered = visual_rects
+                    else:
+                        cap_cx = (caption_rect.x0 + caption_rect.x1) / 2.0
+                        filtered = []
+                        for rr in visual_rects:
+                            rcx = (rr.x0 + rr.x1) / 2.0
+                            if abs(rcx - cap_cx) <= page_width * 0.45 or rr.intersects(
+                                fitz.Rect(max(0, caption_rect.x0 - 180), 0, min(page_width, caption_rect.x1 + 180), page_height)
+                            ):
+                                filtered.append(rr)
+                        if not filtered:
+                            filtered = visual_rects
+
+                    x0 = min(r.x0 for r in filtered)
+                    y0 = min(r.y0 for r in filtered)
+                    x1 = max(r.x1 for r in filtered)
+                    y1 = max(r.y1 for r in filtered)
+                    figure_rect = fitz.Rect(
+                        max(0, x0 - 8),
+                        max(0, y0 - 8),
+                        min(page_width, x1 + 8),
+                        min(page_height, y1 + 8),
+                    )
+                else:
+                    # Fallback: caption-above region.
+                    figure_rect = fitz.Rect(
+                        max(0, caption_rect.x0 - 20),
+                        max(0, caption_rect.y0 - 420),
+                        min(page_width, caption_rect.x1 + 100),
+                        min(page_height, caption_rect.y1 + 20),
+                    )
+
+                # Optional panel refinement (e.g., Fig. 3F) using nearby panel labels.
+                if panel_letter:
+                    try:
+                        base_rect = fitz.Rect(figure_rect)
+
+                        # Grid fallback is always prepared, then used when label-based segmentation is missing/too large.
+                        cap_clip = fitz.Rect(
+                            0,
+                            max(0, caption_rect.y0 - 4),
+                            page_width,
+                            min(page_height, caption_rect.y1 + 120),
+                        )
+                        cap_text = (page.get_text("text", clip=cap_clip) or "").lower()
+                        letters = re.findall(r"\(([a-z])\)", cap_text)
+                        panel_count = 0
+                        if letters:
+                            panel_count = max(ord(ch) - ord("a") + 1 for ch in letters if "a" <= ch <= "z")
+                        if panel_count <= 0:
+                            panel_count = max(ord(panel_letter) - ord("a") + 1, 2)
+                        idx_raw = max(0, ord(panel_letter) - ord("a"))
+                        idx = min(idx_raw, max(0, panel_count - 1))
+
+                        # Special-case 3-panel layouts: many papers place (a) on top and (b)/(c) at bottom.
+                        # This fixes frequent C->B drift for figure structures like Fig. 10 in review articles.
+                        if panel_count == 3 and base_rect.width > page_width * 0.55:
+                            split_y = base_rect.y0 + base_rect.height * 0.54
+                            split_x = base_rect.x0 + base_rect.width * 0.5
+                            if idx <= 0:  # (a)
+                                gx0, gx1 = base_rect.x0, base_rect.x1
+                                gy0, gy1 = base_rect.y0, split_y
+                            elif idx == 1:  # (b)
+                                gx0, gx1 = base_rect.x0, split_x
+                                gy0, gy1 = split_y, base_rect.y1
+                            else:  # (c)
+                                gx0, gx1 = split_x, base_rect.x1
+                                gy0, gy1 = split_y, base_rect.y1
+                        else:
+                            # If the detected figure region is already a single column, split by rows only.
+                            is_single_column_region = base_rect.width <= page_width * 0.52 and idx >= 1
+                            if is_single_column_region:
+                                cols = 1
+                                rows = max(2, (panel_count + 1) // 2, (idx // 2) + 1)
+                                row = min(rows - 1, idx // 2)
+                                col = 0
+                            else:
+                                cols = 2 if panel_count > 1 else 1
+                                rows = max(1, (panel_count + cols - 1) // cols)
+                                row = min(rows - 1, idx // cols)
+                                col = min(cols - 1, idx % cols)
+
+                            cell_w = base_rect.width / max(1, cols)
+                            cell_h = base_rect.height / max(1, rows)
+                            gx0 = base_rect.x0 + col * cell_w
+                            gx1 = base_rect.x0 + (col + 1) * cell_w
+                            gy0 = base_rect.y0 + row * cell_h
+                            gy1 = base_rect.y0 + (row + 1) * cell_h
+
+                        grid_rect = fitz.Rect(
+                            max(base_rect.x0, gx0 - 10),
+                            max(base_rect.y0, gy0 - 10),
+                            min(base_rect.x1, gx1 + 10),
+                            min(base_rect.y1, gy1 + 10),
+                        )
+                        if not (
+                            grid_rect.width >= base_rect.width * 0.2
+                            and grid_rect.height >= base_rect.height * 0.12
+                        ):
+                            grid_rect = None
+
+                        words = page.get_text("words") or []
+                        panel_marks: list[tuple[str, fitz.Rect]] = []
+                        for w in words:
+                            if len(w) < 5:
+                                continue
+                            wx0, wy0, wx1, wy1, wt = float(w[0]), float(w[1]), float(w[2]), float(w[3]), str(w[4] or "")
+                            wr = fitz.Rect(wx0, wy0, wx1, wy1)
+                            if not wr.intersects(base_rect):
+                                continue
+                            t = wt.strip().lower()
+                            if not re.fullmatch(r"\(?[a-z]\)?\.?", t):
+                                continue
+                            letter = re.sub(r"[^a-z]", "", t)
+                            if not letter:
+                                continue
+                            panel_marks.append((letter, wr))
+
+                        target = next((pr for pr in panel_marks if pr[0] == panel_letter), None)
+                        target_rect = None
+                        if target:
+                            tx = (target[1].x0 + target[1].x1) / 2.0
+                            ty = (target[1].y0 + target[1].y1) / 2.0
+                            fw = max(1.0, base_rect.width)
+                            fh = max(1.0, base_rect.height)
+
+                            same_row = [pr for pr in panel_marks if abs(((pr[1].y0 + pr[1].y1) / 2.0) - ty) <= fh * 0.24]
+                            same_col = [pr for pr in panel_marks if abs(((pr[1].x0 + pr[1].x1) / 2.0) - tx) <= fw * 0.24]
+
+                            left = base_rect.x0
+                            right = base_rect.x1
+                            top = base_rect.y0
+                            bottom = base_rect.y1
+
+                            left_neighbors = [((pr[1].x0 + pr[1].x1) / 2.0) for pr in same_row if ((pr[1].x0 + pr[1].x1) / 2.0) < tx]
+                            right_neighbors = [((pr[1].x0 + pr[1].x1) / 2.0) for pr in same_row if ((pr[1].x0 + pr[1].x1) / 2.0) > tx]
+                            up_neighbors = [((pr[1].y0 + pr[1].y1) / 2.0) for pr in same_col if ((pr[1].y0 + pr[1].y1) / 2.0) < ty]
+                            down_neighbors = [((pr[1].y0 + pr[1].y1) / 2.0) for pr in same_col if ((pr[1].y0 + pr[1].y1) / 2.0) > ty]
+
+                            if left_neighbors:
+                                left = max(left, (max(left_neighbors) + tx) / 2.0)
+                            if right_neighbors:
+                                right = min(right, (min(right_neighbors) + tx) / 2.0)
+                            if up_neighbors:
+                                top = max(top, (max(up_neighbors) + ty) / 2.0)
+                            if down_neighbors:
+                                bottom = min(bottom, (min(down_neighbors) + ty) / 2.0)
+
+                            panel_rect = fitz.Rect(
+                                max(base_rect.x0, left - 12),
+                                max(base_rect.y0, top - 12),
+                                min(base_rect.x1, right + 12),
+                                min(base_rect.y1, bottom + 12),
+                            )
+                            if panel_rect.width >= fw * 0.16 and panel_rect.height >= fh * 0.12:
+                                target_rect = panel_rect
+
+                        if target_rect and grid_rect:
+                            # If label-neighbor refinement is still too coarse (e.g., full column), trust grid split.
+                            too_wide = target_rect.width > base_rect.width * 0.68
+                            too_tall = target_rect.height > base_rect.height * 0.62
+                            figure_rect = grid_rect if (too_wide or too_tall) else target_rect
+                        elif target_rect:
+                            figure_rect = target_rect
+                        elif grid_rect:
+                            figure_rect = grid_rect
+                    except Exception:
+                        pass
 
                 doc.close()
                 return page_idx + 1, [
-                    round(expanded.x0, 2),
-                    round(expanded.y0, 2),
-                    round(expanded.x1, 2),
-                    round(expanded.y1, 2),
+                    round(figure_rect.x0, 2),
+                    round(figure_rect.y0, 2),
+                    round(figure_rect.x1, 2),
+                    round(figure_rect.y1, 2),
                 ]
 
         doc.close()

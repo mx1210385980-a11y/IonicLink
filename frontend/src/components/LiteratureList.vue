@@ -181,6 +181,7 @@ function getJournalColorClass(journal: string | null | undefined): string {
   }
   
   // Default fallback hash logic for stable colors
+  const defaultColor = 'bg-blue-100 text-blue-700'
   const colors = [
     'bg-blue-100 text-blue-700',
     'bg-emerald-100 text-emerald-700',
@@ -194,7 +195,7 @@ function getJournalColorClass(journal: string | null | undefined): string {
   for (let i = 0; i < j.length; i++) {
     hash = j.charCodeAt(i) + ((hash << 5) - hash)
   }
-  return colors[Math.abs(hash) % colors.length] || colors[0]
+  return colors[Math.abs(hash) % colors.length] ?? defaultColor
 }
 
 // --- Lifecycle ---

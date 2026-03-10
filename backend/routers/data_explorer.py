@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from database import get_db_session
 from models.db_models import TribologyData, Literature
+from services.score_service import calculate_confidence, calculate_confidence_details
 
 
 router = APIRouter(
@@ -70,6 +71,8 @@ class RecordResponse(BaseModel):
     potential: Optional[str] = None
     water_content: Optional[str] = Field(None, alias="waterContent")
     surface_roughness: Optional[str] = Field(None, alias="surfaceRoughness")
+    residual_film_thickness_d: Optional[str] = Field(None, alias="residualFilmThicknessD")
+    layer_spacing_delta: Optional[str] = Field(None, alias="layerSpacingDelta")
     film_thickness: Optional[str] = Field(None, alias="filmThickness")
     
     # Evidence / Source fields
@@ -77,8 +80,11 @@ class RecordResponse(BaseModel):
     evidence_page: Optional[int] = Field(None, alias="evidencePage")
     evidence_bbox: Optional[str] = Field(None, alias="evidenceBbox")
     source: Optional[str] = None
+    source_page: Optional[int] = Field(None, alias="sourcePage")
+    source_figure: Optional[str] = Field(None, alias="sourceFigure")
     
     confidence: float
+    confidence_details: dict = Field(default_factory=dict, alias="confidenceDetails")
     literature_id: int = Field(..., alias="literatureId")
     literature: Optional[LiteratureDTO] = None
 
@@ -108,6 +114,19 @@ class RecordUpdatePayload(BaseModel):
     film_thickness: Optional[str] = Field(None, alias="filmThickness")
     material_name: Optional[str] = Field(None, alias="materialName")
     lubricant: Optional[str] = None
+
+    class Config:
+        populate_by_name = True
+
+
+class ConfidencePromotePayload(BaseModel):
+    confidence: Optional[float] = None
+    evidence: Optional[str] = None
+    evidence_page: Optional[int] = Field(None, alias="evidencePage")
+    evidence_bbox: Optional[str] = Field(None, alias="evidenceBbox")
+    source: Optional[str] = None
+    source_page: Optional[int] = Field(None, alias="sourcePage")
+    source_figure: Optional[str] = Field(None, alias="sourceFigure")
 
     class Config:
         populate_by_name = True
@@ -156,6 +175,80 @@ def _parse_load_numeric(value: Optional[str]) -> Optional[float]:
     except ValueError:
         return None
 
+
+def _confidence_input_from_record(r: TribologyData) -> dict:
+    return {
+        "material_name": r.material_name,
+        "lubricant": r.lubricant,
+        "cof_value": r.cof_value,
+        "cof_raw": r.cof_raw,
+        "cof_operator": r.cof_operator,
+        "load_value": r.load_value,
+        "speed_value": r.speed_value,
+        "temperature": r.temperature,
+        "potential": r.potential,
+        "water_content": r.water_content,
+        "surface_roughness": r.surface_roughness,
+        "film_thickness": r.film_thickness,
+        "evidence": getattr(r, "evidence", None),
+        "evidence_page": getattr(r, "evidence_page", None),
+        "source": getattr(r, "source", None),
+        "source_page": getattr(r, "source_page", None),
+        "source_figure": getattr(r, "source_figure", None),
+        "evidence_bbox": getattr(r, "evidence_bbox", None),
+        "value_origin": getattr(r, "value_origin", None),
+    }
+
+
+def _grounding_bucket_from_record(r: TribologyData) -> str:
+    source = str(getattr(r, "source", "") or "").strip().lower()
+    source_figure = str(getattr(r, "source_figure", "") or "").strip().lower()
+    value_origin = str(getattr(r, "value_origin", "") or "").strip().lower()
+
+    if any(tag in value_origin for tag in ("infer", "estimated", "derived")):
+        return "inferred"
+
+    source_label = source_figure or source
+    if any(tag in source_label for tag in ("fig", "figure", "panel", "plot", "image", "visual")):
+        return "figure_grounded"
+
+    return "text_grounded"
+
+
+def _is_blank(value: Optional[str]) -> bool:
+    if value is None:
+        return True
+    return str(value).strip() == ""
+
+
+def _is_generic_source_label(value: Optional[str]) -> bool:
+    if _is_blank(value):
+        return True
+    normalized = str(value).strip().lower()
+    return normalized in {"text", "text snippet", "text only", "unknown", "image", "image region", "visual"}
+
+
+def _effective_confidence_details(r: TribologyData) -> dict:
+    runtime_details = calculate_confidence_details(_confidence_input_from_record(r))
+    runtime_confidence = float(runtime_details.get("score") or 0.0)
+    stored_confidence = float(getattr(r, "confidence", 0.0) or 0.0)
+    effective_confidence = max(runtime_confidence, stored_confidence)
+    if effective_confidence <= runtime_confidence:
+        return runtime_details
+
+    details = dict(runtime_details)
+    boosts = [dict(item) for item in runtime_details.get("boosts", [])]
+    uplift = round(effective_confidence - runtime_confidence, 4)
+    if uplift > 0:
+        boosts.append({"reason": "stored_promotion", "value": uplift})
+    details["boosts"] = boosts
+    details["boost_total"] = round(sum(float(item.get("value") or 0.0) for item in boosts), 4)
+    details["boost_percent"] = round(details["boost_total"] * 100.0, 1)
+    details["score"] = round(effective_confidence, 4)
+    details["percent"] = round(effective_confidence * 100.0, 1)
+    return details
+
+
 def _record_to_response(r: TribologyData) -> RecordResponse:
     lit_dto = None
     if r.literature:
@@ -167,6 +260,9 @@ def _record_to_response(r: TribologyData) -> RecordResponse:
             journal=r.literature.journal or "",
             year=r.literature.year
         )
+    runtime_details = _effective_confidence_details(r)
+    runtime_confidence = float(runtime_details.get("score") or 0.0)
+
     return RecordResponse(
         id=r.id,
         material_name=r.material_name,
@@ -181,12 +277,17 @@ def _record_to_response(r: TribologyData) -> RecordResponse:
         potential=r.potential,
         water_content=r.water_content,
         surface_roughness=r.surface_roughness,
+        residual_film_thickness_d=r.residual_film_thickness_d,
+        layer_spacing_delta=r.layer_spacing_delta,
         film_thickness=r.film_thickness,
         evidence=getattr(r, 'evidence', None),
         evidence_page=getattr(r, 'evidence_page', None),
         evidence_bbox=getattr(r, 'evidence_bbox', None),
         source=getattr(r, 'source', None),
-        confidence=r.confidence,
+        source_page=getattr(r, 'source_page', None),
+        source_figure=getattr(r, 'source_figure', None),
+        confidence=runtime_confidence,
+        confidence_details=runtime_details,
         literature_id=r.literature_id,
         literature=lit_dto
     )
@@ -299,6 +400,43 @@ async def get_stats(session: AsyncSession = Depends(get_db_session)):
         )
     )
     cof_row = cof_stats.one()
+
+    conf_records = (await session.execute(select(TribologyData))).scalars().all()
+    runtime_conf = []
+    bucket_scores = {
+        "text_grounded": [],
+        "figure_grounded": [],
+        "inferred": [],
+    }
+    for record in conf_records:
+        score = max(
+            float(getattr(record, "confidence", 0.0) or 0.0),
+            calculate_confidence(_confidence_input_from_record(record)),
+        )
+        runtime_conf.append(score)
+        bucket_scores[_grounding_bucket_from_record(record)].append(score)
+
+    if runtime_conf:
+        conf_count = len(runtime_conf)
+        conf_avg = sum(runtime_conf) / conf_count
+        conf_min = min(runtime_conf)
+        conf_max = max(runtime_conf)
+    else:
+        conf_count = 0
+        conf_avg = None
+        conf_min = None
+        conf_max = None
+
+    confidence_breakdown = {}
+    total_bucket_count = sum(len(values) for values in bucket_scores.values())
+    for bucket, values in bucket_scores.items():
+        avg_bucket = (sum(values) / len(values)) if values else None
+        confidence_breakdown[bucket] = {
+            "count": len(values),
+            "share_percent": round((len(values) / total_bucket_count) * 100.0, 1) if total_bucket_count else 0.0,
+            "avg": float(avg_bucket) if avg_bucket is not None else None,
+            "avg_percent": round(float(avg_bucket) * 100.0, 1) if avg_bucket is not None else None,
+        }
     
     # --- New Dashboard Stats ---
     # 1. Materials Ratio
@@ -340,6 +478,14 @@ async def get_stats(session: AsyncSession = Depends(get_db_session)):
             "max": cof_row[1],
             "avg": float(cof_row[2]) if cof_row[2] else None
         },
+        "confidence_stats": {
+            "avg": float(conf_avg) if conf_avg is not None else None,
+            "avg_percent": round(float(conf_avg) * 100.0, 1) if conf_avg is not None else None,
+            "min_percent": round(float(conf_min) * 100.0, 1) if conf_min is not None else None,
+            "max_percent": round(float(conf_max) * 100.0, 1) if conf_max is not None else None,
+            "count": int(conf_count or 0),
+            "breakdown": confidence_breakdown,
+        },
         "materials_ratio": materials_ratio,
         "top_liquids": top_liquids,
         "publication_trend": publication_trend,
@@ -371,8 +517,61 @@ async def update_record(
         if hasattr(record, field):
             setattr(record, field, value)
 
+    details = calculate_confidence_details(_confidence_input_from_record(record))
+    record.confidence = max(float(getattr(record, "confidence", 0.0) or 0.0), float(details.get("score") or 0.0))
+
     await session.commit()
-    return {"success": True, "id": record_id}
+    return {"success": True, "id": record_id, "confidence": record.confidence, "confidenceDetails": _effective_confidence_details(record)}
+
+
+@router.post("/{record_id}/promote-confidence", response_model=dict, response_model_by_alias=True)
+async def promote_record_confidence(
+    record_id: int,
+    payload: ConfidencePromotePayload,
+    session: AsyncSession = Depends(get_db_session)
+):
+    from fastapi import HTTPException
+
+    result = await session.execute(
+        select(TribologyData).where(TribologyData.id == record_id)
+    )
+    record = result.scalar_one_or_none()
+    if not record:
+        raise HTTPException(status_code=404, detail=f"Record {record_id} not found")
+
+    incoming = payload.dict(exclude_none=True, by_alias=False)
+
+    incoming_source = incoming.get("source")
+    if incoming_source and (_is_blank(record.source) or _is_generic_source_label(record.source)):
+        record.source = incoming_source
+
+    if incoming.get("source_figure") and _is_blank(record.source_figure):
+        record.source_figure = incoming["source_figure"]
+
+    if incoming.get("source_page") and not getattr(record, "source_page", None):
+        record.source_page = incoming["source_page"]
+
+    if incoming.get("evidence_page") and not getattr(record, "evidence_page", None):
+        record.evidence_page = incoming["evidence_page"]
+
+    if incoming.get("evidence") and _is_blank(record.evidence):
+        record.evidence = incoming["evidence"]
+
+    if incoming.get("evidence_bbox") and _is_blank(record.evidence_bbox):
+        record.evidence_bbox = incoming["evidence_bbox"]
+
+    recomputed = calculate_confidence_details(_confidence_input_from_record(record))
+    promoted_confidence = float(incoming.get("confidence") or 0.0)
+    record.confidence = max(
+        float(getattr(record, "confidence", 0.0) or 0.0),
+        float(recomputed.get("score") or 0.0),
+        promoted_confidence,
+    )
+
+    await session.commit()
+    await session.refresh(record)
+    details = _effective_confidence_details(record)
+    return {"success": True, "id": record_id, "confidence": record.confidence, "confidenceDetails": details}
 
 
 @router.delete("/{record_id}", response_model=dict)

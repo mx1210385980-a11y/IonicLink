@@ -130,6 +130,15 @@ def calculate_missing_cof(data_items: List[dict]) -> List[dict]:
         has_load = 'normal_load' in item and item['normal_load']
         
         if cof_missing and has_friction and has_load:
+
+            modality = str(item.get('_modality') or '').lower()
+            evidence_text = str(item.get('evidence') or '').lower()
+            allow_from_figure = any(
+                token in evidence_text
+                for token in ('coefficient of friction', 'cof', 'slope', 'u=', 'mu=')
+            )
+            if 'figure' in modality and not allow_from_figure:
+                continue
             # 尝试计算 COF
             friction_val, friction_unit = parse_value_with_unit(str(item['friction_force']))
             load_val, load_unit = parse_value_with_unit(str(item['normal_load']))
