@@ -14,6 +14,8 @@ from sqlalchemy.orm import selectinload
 from database import get_db_session
 from models.db_models import TribologyData, Literature
 from services.score_service import calculate_confidence, calculate_confidence_details
+from services.agent_runtime_service import get_agent_runtime
+from services.file_service import _normalize_record_chemistry
 
 
 router = APIRouter(
@@ -263,32 +265,37 @@ def _record_to_response(r: TribologyData) -> RecordResponse:
     runtime_details = _effective_confidence_details(r)
     runtime_confidence = float(runtime_details.get("score") or 0.0)
 
+    payload = {
+        "id": r.id,
+        "material_name": r.material_name,
+        "lubricant": r.lubricant,
+        "cof_value": r.cof_value,
+        "cof_operator": r.cof_operator,
+        "cof_raw": r.cof_raw,
+        "load_value": r.load_value,
+        "load_raw": r.load_raw,
+        "speed_value": r.speed_value,
+        "temperature": r.temperature,
+        "potential": r.potential,
+        "water_content": r.water_content,
+        "surface_roughness": r.surface_roughness,
+        "residual_film_thickness_d": r.residual_film_thickness_d,
+        "layer_spacing_delta": r.layer_spacing_delta,
+        "film_thickness": r.film_thickness,
+        "evidence": getattr(r, 'evidence', None),
+        "evidence_page": getattr(r, 'evidence_page', None),
+        "evidence_bbox": getattr(r, 'evidence_bbox', None),
+        "source": getattr(r, 'source', None),
+        "source_page": getattr(r, 'source_page', None),
+        "source_figure": getattr(r, 'source_figure', None),
+        "confidence": runtime_confidence,
+        "confidence_details": runtime_details,
+        "literature_id": r.literature_id,
+        "literature": lit_dto.model_dump() if lit_dto else None,
+    }
+    _normalize_record_chemistry([payload])
     return RecordResponse(
-        id=r.id,
-        material_name=r.material_name,
-        lubricant=r.lubricant,
-        cof_value=r.cof_value,
-        cof_operator=r.cof_operator,
-        cof_raw=r.cof_raw,
-        load_value=r.load_value,
-        load_raw=r.load_raw,
-        speed_value=r.speed_value,
-        temperature=r.temperature,
-        potential=r.potential,
-        water_content=r.water_content,
-        surface_roughness=r.surface_roughness,
-        residual_film_thickness_d=r.residual_film_thickness_d,
-        layer_spacing_delta=r.layer_spacing_delta,
-        film_thickness=r.film_thickness,
-        evidence=getattr(r, 'evidence', None),
-        evidence_page=getattr(r, 'evidence_page', None),
-        evidence_bbox=getattr(r, 'evidence_bbox', None),
-        source=getattr(r, 'source', None),
-        source_page=getattr(r, 'source_page', None),
-        source_figure=getattr(r, 'source_figure', None),
-        confidence=runtime_confidence,
-        confidence_details=runtime_details,
-        literature_id=r.literature_id,
+        **payload,
         literature=lit_dto
     )
 
@@ -306,54 +313,17 @@ async def search_records(
     鎼滅储鎽╂摝瀛︽暟鎹褰曪紙鏀寔鍒嗛〉锛?
     鏀寔鎸夋潗鏂欍€佹鼎婊戝墏銆佽浇鑽疯寖鍥淬€丆OF鑼冨洿杩囨护
     """
-    conditions = _build_conditions(filter_params)
-    use_load_filter = filter_params.load_min is not None or filter_params.load_max is not None
-
-    if use_load_filter:
-        # Load values are stored as strings with units, so apply load filters in Python.
-        stmt = select(TribologyData).join(TribologyData.literature).options(selectinload(TribologyData.literature))
-        if conditions:
-            stmt = stmt.where(and_(*conditions))
-        stmt = stmt.order_by(TribologyData.id)
-
-        result = await session.execute(stmt)
-        all_records = result.scalars().all()
-
-        filtered_records = []
-        for record in all_records:
-            numeric_load = _parse_load_numeric(record.load_value)
-            if numeric_load is None:
-                continue
-            if filter_params.load_min is not None and numeric_load < filter_params.load_min:
-                continue
-            if filter_params.load_max is not None and numeric_load > filter_params.load_max:
-                continue
-            filtered_records.append(record)
-
-        total = len(filtered_records)
-        records = filtered_records[skip: skip + limit]
-    else:
-        # Count total
-        count_stmt = select(func.count(TribologyData.id)).join(TribologyData.literature)
-        if conditions:
-            count_stmt = count_stmt.where(and_(*conditions))
-        total_result = await session.execute(count_stmt)
-        total = total_result.scalar() or 0
-
-        # Fetch page
-        stmt = select(TribologyData).join(TribologyData.literature).options(selectinload(TribologyData.literature))
-        if conditions:
-            stmt = stmt.where(and_(*conditions))
-        stmt = stmt.order_by(TribologyData.id).offset(skip).limit(limit)
-
-        result = await session.execute(stmt)
-        records = result.scalars().all()
-
-    return PaginatedRecordResponse(
-        total=total,
+    result = await get_agent_runtime().search_records(
+        session=session,
+        filter_params=filter_params,
         skip=skip,
         limit=limit,
-        items=[_record_to_response(r) for r in records]
+    )
+    return PaginatedRecordResponse(
+        total=result.get("total", 0),
+        skip=result.get("skip", skip),
+        limit=result.get("limit", limit),
+        items=[RecordResponse(**item) for item in result.get("items", [])],
     )
 
 @router.get("/options", response_model=dict)
@@ -361,20 +331,7 @@ async def get_filter_options(session: AsyncSession = Depends(get_db_session)):
     """
     鑾峰彇鍙敤鐨勮繃婊ら€夐」锛堟潗鏂欏垪琛ㄣ€佹鼎婊戝墏鍒楄〃绛夛級
     """
-    result_materials = await session.execute(
-        select(TribologyData.material_name).distinct()
-    )
-    materials = result_materials.scalars().all()
-    
-    result_lubricants = await session.execute(
-        select(TribologyData.lubricant).distinct()
-    )
-    lubricants = result_lubricants.scalars().all()
-    
-    return {
-        "materials": sorted([m for m in materials if m]),
-        "lubricants": sorted([l for l in lubricants if l])
-    }
+    return await get_agent_runtime().get_filter_options(session=session)
 
 
 @router.get("/stats", response_model=dict)
@@ -382,116 +339,7 @@ async def get_stats(session: AsyncSession = Depends(get_db_session)):
     """
     鑾峰彇鏁版嵁缁熻淇℃伅
     """
-    total_records = await session.execute(
-        select(func.count(TribologyData.id))
-    )
-    total = total_records.scalar() or 0
-    
-    total_lit = await session.execute(
-        select(func.count(Literature.id))
-    )
-    literature_count = total_lit.scalar() or 0
-    
-    cof_stats = await session.execute(
-        select(
-            func.min(TribologyData.cof_value),
-            func.max(TribologyData.cof_value),
-            func.avg(TribologyData.cof_value)
-        )
-    )
-    cof_row = cof_stats.one()
-
-    conf_records = (await session.execute(select(TribologyData))).scalars().all()
-    runtime_conf = []
-    bucket_scores = {
-        "text_grounded": [],
-        "figure_grounded": [],
-        "inferred": [],
-    }
-    for record in conf_records:
-        score = max(
-            float(getattr(record, "confidence", 0.0) or 0.0),
-            calculate_confidence(_confidence_input_from_record(record)),
-        )
-        runtime_conf.append(score)
-        bucket_scores[_grounding_bucket_from_record(record)].append(score)
-
-    if runtime_conf:
-        conf_count = len(runtime_conf)
-        conf_avg = sum(runtime_conf) / conf_count
-        conf_min = min(runtime_conf)
-        conf_max = max(runtime_conf)
-    else:
-        conf_count = 0
-        conf_avg = None
-        conf_min = None
-        conf_max = None
-
-    confidence_breakdown = {}
-    total_bucket_count = sum(len(values) for values in bucket_scores.values())
-    for bucket, values in bucket_scores.items():
-        avg_bucket = (sum(values) / len(values)) if values else None
-        confidence_breakdown[bucket] = {
-            "count": len(values),
-            "share_percent": round((len(values) / total_bucket_count) * 100.0, 1) if total_bucket_count else 0.0,
-            "avg": float(avg_bucket) if avg_bucket is not None else None,
-            "avg_percent": round(float(avg_bucket) * 100.0, 1) if avg_bucket is not None else None,
-        }
-    
-    # --- New Dashboard Stats ---
-    # 1. Materials Ratio
-    mat_stmt = select(TribologyData.material_name, func.count('*')).group_by(TribologyData.material_name).order_by(desc(func.count('*'))).where(TribologyData.material_name != None).where(TribologyData.material_name != '').limit(5)
-    mat_res = await session.execute(mat_stmt)
-    materials_ratio = [{"name": row[0], "count": row[1]} for row in mat_res.all() if row[0]]
-
-    # 2. Top Ionic Liquids
-    il_stmt = select(TribologyData.lubricant, func.count('*')).group_by(TribologyData.lubricant).order_by(desc(func.count('*'))).where(TribologyData.lubricant != None).where(TribologyData.lubricant != '').where(~func.lower(TribologyData.lubricant).like('%ethaline%')).where(~func.lower(TribologyData.lubricant).like('%chcl%')).limit(5)
-    il_res = await session.execute(il_stmt)
-    top_liquids = [{"name": row[0], "count": row[1]} for row in il_res.all() if row[0]]
-
-    # 3. Publication Trend (by Year)
-    year_stmt = select(Literature.year, func.count('*')).group_by(Literature.year).order_by(Literature.year).where(Literature.year != None)
-    year_res = await session.execute(year_stmt)
-    publication_trend = [{"year": row[0], "count": row[1]} for row in year_res.all() if row[0]]
-
-    # 4. Top Journals
-    journal_stmt = select(Literature.journal, func.count('*')).group_by(Literature.journal).order_by(desc(func.count('*'))).where(Literature.journal != None).where(Literature.journal != '').limit(5)
-    journal_res = await session.execute(journal_stmt)
-    top_journals = [{"name": row[0], "count": row[1]} for row in journal_res.all() if row[0]]
-    
-    # 5. Distinct Ionic Liquids Count
-    distinct_il_count_stmt = select(func.count(func.distinct(TribologyData.lubricant))).where(TribologyData.lubricant != None).where(TribologyData.lubricant != '').where(~func.lower(TribologyData.lubricant).like('%ethaline%')).where(~func.lower(TribologyData.lubricant).like('%chcl%'))
-    distinct_il_count_res = await session.execute(distinct_il_count_stmt)
-    distinct_il_count = distinct_il_count_res.scalar() or 0
-    
-    # 6. COF Ranges by Material
-    cof_range_stmt = select(TribologyData.material_name, func.min(TribologyData.cof_value), func.max(TribologyData.cof_value)).group_by(TribologyData.material_name).where(TribologyData.material_name != None).where(TribologyData.material_name != '').where(TribologyData.cof_value != None)
-    cof_range_res = await session.execute(cof_range_stmt)
-    cof_ranges = [{"name": row[0], "min": row[1], "max": row[2]} for row in cof_range_res.all() if row[0] and row[1] is not None and row[2] is not None]
-
-    return {
-        "total_records": total,
-        "literature_count": literature_count,
-        "distinct_il_count": distinct_il_count,
-        "cof_stats": {
-            "min": cof_row[0],
-            "max": cof_row[1],
-            "avg": float(cof_row[2]) if cof_row[2] else None
-        },
-        "confidence_stats": {
-            "avg": float(conf_avg) if conf_avg is not None else None,
-            "avg_percent": round(float(conf_avg) * 100.0, 1) if conf_avg is not None else None,
-            "min_percent": round(float(conf_min) * 100.0, 1) if conf_min is not None else None,
-            "max_percent": round(float(conf_max) * 100.0, 1) if conf_max is not None else None,
-            "count": int(conf_count or 0),
-            "breakdown": confidence_breakdown,
-        },
-        "materials_ratio": materials_ratio,
-        "top_liquids": top_liquids,
-        "publication_trend": publication_trend,
-        "top_journals": top_journals,
-        "cof_ranges": cof_ranges
-    }
+    return await get_agent_runtime().get_stats(session=session)
 
 
 @router.put("/{record_id}", response_model=dict, response_model_by_alias=True)

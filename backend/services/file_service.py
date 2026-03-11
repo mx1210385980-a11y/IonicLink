@@ -29,6 +29,8 @@ from services.doi_service import DOIService
 from services.llm.utils import normalize_record_value
 from knowledge_base import normalize_ionic_liquid
 from services.score_service import calculate_confidence
+from services.fallback_extraction_service import extract_metadata_fallback, extract_table_fallback_records
+from services.il_resolver_service import resolve_il
 from services.extraction_trace_service import (
     add_extraction_candidates,
     create_extraction_run,
@@ -488,12 +490,32 @@ async def _load_cached_extraction_result(
             }
         )
 
+    _normalize_record_chemistry(data_list)
+    changed_db_rows = False
+    for idx, row in enumerate(data_list):
+        if not (0 <= idx < len(db_records)):
+            continue
+        db_row = db_records[idx]
+        normalized_lubricant = row.get("ionic_liquid") or row.get("lubricant")
+        normalized_film = row.get("film_thickness")
+        if normalized_lubricant and db_row.lubricant != normalized_lubricant:
+            db_row.lubricant = normalized_lubricant
+            changed_db_rows = True
+        if db_row.film_thickness != normalized_film:
+            db_row.film_thickness = normalized_film
+            changed_db_rows = True
+        for field in ("cation", "anion", "cation_smiles", "anion_smiles", "il_smiles", "il_inchikey", "alkyl_chain_length"):
+            if getattr(db_row, field) != row.get(field):
+                setattr(db_row, field, row.get(field))
+                changed_db_rows = True
+
     changed = _backfill_unknown_il_records(data_list, literature.file_path)
     if changed:
         for idx, il_name in changed.items():
             if 0 <= idx < len(db_records):
                 db_records[idx].lubricant = il_name
-        # Persist cache-path backfill so subsequent /records/search queries do not revert to Unknown IL.
+        changed_db_rows = True
+    if changed_db_rows:
         await db.commit()
 
     metadata = {
@@ -646,6 +668,103 @@ async def _safe_update_doi(db: AsyncSession, literature, new_doi: str) -> bool:
     return True
 
 
+def _apply_default_temperature(records: list[dict]) -> None:
+    for item in records or []:
+        if not isinstance(item, dict):
+            continue
+        temperature = str(item.get("temperature") or "").strip()
+        if not temperature:
+            item["temperature"] = "298.15 K"
+
+
+def _format_numeric_text(value: float) -> str:
+    if float(value).is_integer():
+        return str(int(value))
+    return f"{value:.3f}".rstrip("0").rstrip(".")
+
+
+def _normalize_thickness_value(value: object) -> Optional[str]:
+    text = str(value or "").strip()
+    if not text or text.lower() in {"-", "--", "n/a", "none", "unknown"}:
+        return None
+
+    match = re.search(r"([-+]?\d*\.?\d+)\s*(nm|μm|µm|um|pm|å|a\b|angstrom(?:s)?)", text, flags=re.IGNORECASE)
+    if not match:
+        return None
+
+    magnitude = float(match.group(1))
+    unit = match.group(2).lower()
+    if unit in {"μm", "µm", "um"}:
+        magnitude *= 1000.0
+    elif unit in {"pm"}:
+        magnitude /= 1000.0
+    elif unit in {"å", "a", "angstrom", "angstroms"}:
+        magnitude /= 10.0
+
+    return f"{_format_numeric_text(magnitude)} nm"
+
+
+def _canonicalize_ionic_liquid_name(value: object) -> tuple[Optional[str], dict]:
+    text = str(value or "").strip()
+    if not text or _is_unknown_il(text):
+        return None, {}
+
+    normalized = normalize_ionic_liquid(text) or text
+    resolved = resolve_il(normalized)
+    canonical_name = str(resolved.get("canonical_name") or normalized).strip()
+    if _is_unknown_il(canonical_name):
+        return None, resolved
+    return canonical_name, resolved
+
+
+def _normalize_record_chemistry(records: list[dict]) -> None:
+    for item in records or []:
+        if not isinstance(item, dict):
+            continue
+
+        raw_film_candidate = item.get("film_thickness")
+        item["film_thickness"] = _normalize_thickness_value(raw_film_candidate)
+        for field in ("residual_film_thickness_d", "layer_spacing_delta"):
+            item[field] = _normalize_thickness_value(item.get(field))
+
+        il_candidates: list[object] = [
+            raw_film_candidate if raw_film_candidate and not item.get("film_thickness") else None,
+            item.get("ionic_liquid"),
+            item.get("lubricant"),
+        ]
+        if not any(candidate and not _is_unknown_il(candidate) for candidate in il_candidates):
+            il_candidates.extend([
+                item.get("cation") and item.get("anion") and f"[{item.get('cation')}][{item.get('anion')}]",
+                raw_film_candidate,
+            ])
+
+        canonical_name: Optional[str] = None
+        resolved: dict = {}
+        for candidate in il_candidates:
+            canonical_name, resolved = _canonicalize_ionic_liquid_name(candidate)
+            if canonical_name:
+                break
+
+        if canonical_name:
+            item["ionic_liquid"] = canonical_name
+            item["lubricant"] = canonical_name
+
+        if resolved.get("cation"):
+            item["cation"] = resolved["canonical_name"].split("][")[0].lstrip("[") if resolved.get("canonical_name") else resolved["cation"]
+        if resolved.get("anion"):
+            item["anion"] = resolved["canonical_name"].split("][")[-1].rstrip("]") if resolved.get("canonical_name") else resolved["anion"]
+        if resolved.get("cation_smiles"):
+            item["cation_smiles"] = resolved["cation_smiles"]
+        if resolved.get("anion_smiles"):
+            item["anion_smiles"] = resolved["anion_smiles"]
+        if resolved.get("il_smiles"):
+            item["il_smiles"] = resolved["il_smiles"]
+        if resolved.get("il_inchikey"):
+            item["il_inchikey"] = resolved["il_inchikey"]
+        if resolved.get("alkyl_chain_length") is not None:
+            item["alkyl_chain_length"] = resolved["alkyl_chain_length"]
+
+
 async def process_file_safe(
     file_id: int,
     content: str = None,
@@ -683,6 +802,7 @@ async def process_file_safe(
 
             # --- 鉁?DATA EXISTENCE GUARD (Safety Fallback) ---
             # Even if status is wrong, TRUST THE DATA.
+            data_count = 0
             if not force:
                 result = await db.execute(
                     select(func.count(TribologyData.id)).where(TribologyData.literature_id == literature.id)
@@ -767,8 +887,10 @@ async def process_file_safe(
             # 4. Smart Caching Check
             # If valid, completed, and not forced, return existing data
             if not force and literature.status == 'completed':
-                print(f"[Process] Cache Hit for Lit ID {file_id}. Fetching from DB.")
-                return await _load_cached_extraction_result(db, literature)
+                if data_count > 0:
+                    print(f"[Process] Cache Hit for Lit ID {file_id}. Fetching from DB.")
+                    return await _load_cached_extraction_result(db, literature)
+                print(f"[Process] Completed file {file_id} has no cached records. Re-running extraction.")
             
             # 5. Perform Extraction
             print(f"[Process] Processing '{literature.title}' via LLM...")
@@ -888,9 +1010,54 @@ async def process_file_safe(
             llm_summary = result.get("extraction_summary", {}) or {}
             trace_candidates = result.get("trace_candidates", []) or []
 
+            fallback_metadata = extract_metadata_fallback(content)
+            if fallback_metadata:
+                metadata = {
+                    **fallback_metadata,
+                    **{k: v for k, v in (metadata or {}).items() if v not in (None, "", [])},
+                }
+
             # Deterministic IL backfill for unknown labels using PDF caption/page text context.
             if isinstance(records, list) and records:
                 _backfill_unknown_il_records(records, resolved_file_path)
+            elif content:
+                fallback_records, fallback_info = extract_table_fallback_records(content, resolved_file_path)
+                if fallback_records:
+                    print(
+                        "[FallbackExtraction] Recovered "
+                        f"{len(fallback_records)} records from {fallback_info.get('matched_table')} "
+                        f"on page {fallback_info.get('matched_page')}"
+                    )
+                    records = fallback_records
+                    trace_candidates.extend(
+                        [
+                            {
+                                "stage": "fallback_table",
+                                "modality": "text",
+                                "page": item.get("source_page"),
+                                "source_figure": item.get("source_figure"),
+                                "raw": item,
+                                "normalized": item,
+                                "drop_reason": None,
+                                "merged_into": None,
+                            }
+                            for item in fallback_records
+                        ]
+                    )
+                    llm_summary = {
+                        **llm_summary,
+                        "candidate_count": max(
+                            int(llm_summary.get("candidate_count") or 0),
+                            len(fallback_records),
+                        ),
+                        "final_count": len(fallback_records),
+                        "dropped_by_reason": llm_summary.get("dropped_by_reason") or {},
+                        "fallback_extraction": fallback_info,
+                    }
+
+            if isinstance(records, list) and records:
+                _apply_default_temperature(records)
+                _normalize_record_chemistry(records)
             
             # 5. Save Results
             if records:
@@ -1268,6 +1435,9 @@ async def reprocess_literature(
         
         metadata_dict = extraction_result.get("metadata", {})
         data_list = extraction_result.get("data", [])
+        if isinstance(data_list, list) and data_list:
+            _apply_default_temperature(data_list)
+            _normalize_record_chemistry(data_list)
         data_list, _merge_report, _ = _final_merge_records(data_list)
         
         # Step 5: Atomic Replace
@@ -1334,8 +1504,10 @@ async def reprocess_literature(
         
         return {
             "success": True,
+            "literature_id": literature_id,
             "reprocessed_count": len(new_records),
-            "message": f"Successfully reprocessed {len(new_records)} records"
+            "message": f"Successfully reprocessed {len(new_records)} records",
+            "metadata": metadata_dict,
         }
         
     except Exception as e:

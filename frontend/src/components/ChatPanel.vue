@@ -76,20 +76,20 @@ function formatTime(date: Date) {
 </script>
 
 <template>
-  <div class="h-full flex flex-col bg-card bg-white">
+  <div class="flex h-full flex-col bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
     <!-- Header -->
-    <div class="px-5 py-4 border-b flex items-center justify-between bg-white shrink-0 shadow-sm z-10">
+    <div class="z-10 flex shrink-0 items-center justify-between border-b border-slate-200 bg-white/95 px-5 py-4 shadow-sm dark:border-slate-800 dark:bg-slate-950/90">
       <div class="flex items-center gap-2">
-        <Sparkles class="h-[18px] w-[18px] text-indigo-500" />
-        <h3 class="font-bold text-[14.5px] text-gray-800">IonicLink AI Assistant</h3>
+        <Sparkles class="h-[18px] w-[18px] text-indigo-500 dark:text-indigo-300" />
+        <h3 class="text-[14.5px] font-bold text-gray-800 dark:text-slate-100">IonicLink AI Assistant</h3>
       </div>
       <div class="flex items-center gap-1.5">
         <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-        <span class="text-[12px] text-gray-500 font-medium tracking-wide">Online</span>
+        <span class="text-[12px] font-medium tracking-wide text-gray-500 dark:text-slate-400">Online</span>
       </div>
     </div>
     
-    <div class="flex-1 flex flex-col overflow-hidden bg-white">
+    <div class="flex flex-1 flex-col overflow-hidden bg-white dark:bg-slate-950">
       <!-- Message List -->
       <div 
         ref="messagesContainer"
@@ -104,13 +104,13 @@ function formatTime(date: Date) {
           <!-- Avatar -->
           <div
             v-if="message.role === 'assistant'"
-            class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center bg-indigo-50 text-indigo-500 mt-1"
+            class="mt-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-indigo-50 text-indigo-500 dark:bg-indigo-500/15 dark:text-indigo-300"
           >
             <Sparkles class="w-4 h-4" />
           </div>
           <div
             v-else
-            class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center bg-gray-100 text-gray-500 mt-1"
+            class="mt-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-500 dark:bg-slate-800 dark:text-slate-300"
           >
             <User class="w-4 h-4" />
           </div>
@@ -118,17 +118,17 @@ function formatTime(date: Date) {
           <!-- Message Content -->
           <div class="flex flex-col" :class="message.role === 'user' ? 'items-end' : 'items-start'">
             <div
-              class="max-w-[100%] rounded-2xl px-5 py-4 shadow-sm border border-gray-100/50"
+              class="max-w-[100%] rounded-2xl border px-5 py-4 shadow-sm"
               :class="message.role === 'user'
-                ? 'bg-primary text-primary-foreground rounded-br-sm'
-                : 'bg-white rounded-tl-sm text-gray-700'"
+                ? 'rounded-br-sm border-blue-500/20 bg-primary text-primary-foreground shadow-blue-500/20'
+                : 'rounded-tl-sm border-slate-200 bg-white text-gray-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200'"
             >
               <!-- eslint-disable-next-line vue/no-v-html -->
               <p class="text-[13.5px] leading-relaxed whitespace-pre-wrap" v-html="message.content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')"></p>
             </div>
             <p 
               class="text-[11px] mt-2 font-medium"
-              :class="message.role === 'user' ? 'text-gray-400' : 'text-gray-400 pl-1'"
+              :class="message.role === 'user' ? 'text-gray-400 dark:text-slate-500' : 'pl-1 text-gray-400 dark:text-slate-500'"
             >
               {{ formatTime(message.timestamp) }}
             </p>
@@ -137,22 +137,22 @@ function formatTime(date: Date) {
         
         <!-- Quick Actions (Only show after the first welcome message if it's the only message) -->
         <div v-if="messages.length === 1" class="pl-11 space-y-3">
-           <button class="flex items-center justify-between px-4 py-2.5 bg-white border border-gray-200 rounded-full text-[13px] text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-colors shadow-sm w-[260px]" @click="inputMessage = 'Extract wear rate data from current doc'; sendMessage()">
+           <button class="flex w-[260px] items-center justify-between rounded-full border border-gray-200 bg-white px-4 py-2.5 text-[13px] text-gray-600 shadow-sm transition-colors hover:border-gray-300 hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-600 dark:hover:bg-slate-800/90" @click="inputMessage = 'Extract wear rate data from current doc'; sendMessage()">
               <span>Extract wear rate data</span>
-              <ChevronRight class="w-3.5 h-3.5 text-gray-400" />
+              <ChevronRight class="h-3.5 w-3.5 text-gray-400 dark:text-slate-500" />
            </button>
-           <button class="flex items-center justify-between px-4 py-2.5 bg-white border border-gray-200 rounded-full text-[13px] text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-colors shadow-sm w-[260px]" @click="inputMessage = 'Summarize ionic liquid synthesis methods'; sendMessage()">
+           <button class="flex w-[260px] items-center justify-between rounded-full border border-gray-200 bg-white px-4 py-2.5 text-[13px] text-gray-600 shadow-sm transition-colors hover:border-gray-300 hover:bg-gray-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-slate-600 dark:hover:bg-slate-800/90" @click="inputMessage = 'Summarize ionic liquid synthesis methods'; sendMessage()">
               <span>Summarize synthesis methods</span>
-              <ChevronRight class="w-3.5 h-3.5 text-gray-400" />
+              <ChevronRight class="h-3.5 w-3.5 text-gray-400 dark:text-slate-500" />
            </button>
         </div>
         
         <!-- Loading Animation -->
         <div v-if="loading" class="flex gap-3">
-          <div class="w-8 h-8 rounded-full bg-indigo-50 flex items-center justify-center mt-1">
-            <Sparkles class="w-4 h-4 text-indigo-500" />
+          <div class="mt-1 flex h-8 w-8 items-center justify-center rounded-full bg-indigo-50 dark:bg-indigo-500/15">
+            <Sparkles class="h-4 w-4 text-indigo-500 dark:text-indigo-300" />
           </div>
-          <div class="bg-white border border-gray-100/50 shadow-sm rounded-2xl rounded-tl-sm px-5 py-4">
+          <div class="rounded-2xl rounded-tl-sm border border-gray-100/50 bg-white px-5 py-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <div class="flex gap-1">
               <span class="w-2 h-2 bg-muted-foreground/50 rounded-full animate-bounce [animation-delay:0ms]"></span>
               <span class="w-2 h-2 bg-muted-foreground/50 rounded-full animate-bounce [animation-delay:150ms]"></span>
@@ -163,19 +163,19 @@ function formatTime(date: Date) {
       </div>
       
       <!-- Input Area -->
-      <div class="p-4 bg-white shrink-0">
-        <div class="relative bg-gray-50 border border-gray-100 rounded-xl overflow-hidden focus-within:ring-1 focus-within:ring-blue-500 focus-within:border-blue-500 transition-all shadow-sm">
+      <div class="shrink-0 bg-white p-4 dark:bg-slate-950">
+        <div class="relative overflow-hidden rounded-xl border border-gray-100 bg-gray-50 shadow-sm transition-all focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 dark:border-slate-800 dark:bg-slate-900/90 dark:shadow-[0_0_0_1px_rgba(15,23,42,0.3)]">
           <Textarea
             v-model="inputMessage"
             placeholder="Type a message or command..."
-            class="min-h-[44px] max-h-32 resize-none border-0 bg-transparent shadow-none focus-visible:ring-0 px-4 py-3.5 text-[13px] text-gray-700 placeholder:text-gray-400"
+            class="min-h-[44px] max-h-32 resize-none border-0 bg-transparent px-4 py-3.5 text-[13px] text-gray-700 shadow-none placeholder:text-gray-400 focus-visible:ring-0 dark:text-slate-200 dark:placeholder:text-slate-500"
             :rows="1"
             @keydown="handleKeydown"
           />
           <Button
             size="sm"
             variant="ghost"
-            class="absolute bottom-2.5 right-2 h-8 w-8 p-0 rounded-full text-gray-400 hover:text-blue-500 hover:bg-blue-50"
+            class="absolute bottom-2.5 right-2 h-8 w-8 rounded-full p-0 text-gray-400 hover:bg-blue-50 hover:text-blue-500 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-blue-300"
             :disabled="isInputEmpty || loading"
             @click="sendMessage"
           >
@@ -184,10 +184,10 @@ function formatTime(date: Date) {
           </Button>
         </div>
         <div class="flex items-center justify-between mt-2.5 px-1">
-          <div class="text-[11px] text-gray-400 flex items-center gap-1">
+          <div class="flex items-center gap-1 text-[11px] text-gray-400 dark:text-slate-500">
             Press Enter to send, Shift + Enter for new line
           </div>
-          <div class="text-[11px] text-gray-400">Powered by AI</div>
+          <div class="text-[11px] text-gray-400 dark:text-slate-500">Powered by AI</div>
         </div>
       </div>
     </div>

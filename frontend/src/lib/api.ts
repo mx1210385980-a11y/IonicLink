@@ -134,6 +134,8 @@ export interface ExtractionRunDetail {
     }>
     summary: Record<string, any>
     error_message?: string | null
+    created_at?: string
+    updated_at?: string
 }
 
 export interface ExtractionRunCandidatesResponse {
@@ -309,9 +311,11 @@ export interface LiteratureMetadata {
 
 export interface ExtractionResponse {
     success: boolean
+    status?: string
     metadata?: LiteratureMetadata
     data: TribologyData[]
     extraction_summary?: ExtractionSummary
+    agent_workflow?: AgentWorkflow
     message?: string
 }
 
@@ -339,6 +343,48 @@ export interface ExtractionSummary {
 export interface ChatResponse {
     success: boolean
     response: string
+}
+
+export interface AgentMessage {
+    sender: string
+    receiver: string
+    task_id: string
+    message_type: string
+    payload: Record<string, any>
+    timestamp: string
+}
+
+export interface AgentStatusItem {
+    name: string
+    capabilities: string[]
+    handled_tasks: number
+    last_task_type?: string | null
+    last_task_at?: string | null
+}
+
+export interface AgentWorkflow {
+    validation?: {
+        record_count?: number
+        missing_material_count?: number
+        missing_lubricant_count?: number
+        missing_cof_count?: number
+        duplicate_count?: number
+        quality_gate_passed?: boolean
+        warnings?: string[]
+    }
+    insight?: {
+        title?: string
+        record_count?: number
+        top_materials?: Array<{ name: string, count: number }>
+        top_lubricants?: Array<{ name: string, count: number }>
+        warnings?: string[]
+    }
+    messages: AgentMessage[]
+}
+
+export interface AgentStatusResponse {
+    agents: AgentStatusItem[]
+    recent_messages: AgentMessage[]
 }
 
 export interface SyncResult {
@@ -464,6 +510,7 @@ export interface BatchFile {
     name: string
     status: FileExtractionStatus
     progress: number // 0-100
+    progressMessage?: string
     metadata?: LiteratureMetadata  // Literature Metadata
     records: TribologyData[]
     errorMessage?: string
@@ -582,6 +629,7 @@ export interface ReprocessResult {
     message: string
     metadata?: LiteratureMetadata
     needsUpload?: boolean
+    agent_workflow?: AgentWorkflow
 }
 
 // Get all literature list
@@ -602,6 +650,11 @@ export async function getLiteratureDetails(literatureId: number) {
 export async function reprocessLiterature(literatureId: number) {
     const response = await api.post(`/api/sync/literature/${literatureId}/reprocess`)
     return response.data as ReprocessResult
+}
+
+export async function getAgentStatus(): Promise<AgentStatusResponse> {
+    const response = await api.get('/api/agents/status')
+    return response.data
 }
 
 // Re-run IL resolution for all existing records in the database (without calling LLM)

@@ -1142,19 +1142,19 @@ watch(
 </script>
 
 <template>
-  <div class="flex h-full flex-col overflow-hidden bg-slate-50">
-    <div class="border-b bg-white px-6 py-4">
+  <div class="flex h-full flex-col overflow-hidden bg-slate-50 dark:bg-[#07111d] dark:text-slate-100">
+    <div class="border-b bg-white px-6 py-4 dark:border-slate-800 dark:bg-slate-950/80">
       <div class="mb-6 flex items-start justify-between">
         <div>
           <div class="flex items-center gap-2">
             <BookOpen class="h-6 w-6 text-blue-600" />
-            <h1 class="text-xl font-bold text-slate-900">IonicLink Sourcing</h1>
+            <h1 class="text-xl font-bold text-slate-900 dark:text-slate-100">IonicLink Sourcing</h1>
           </div>
-          <p class="mt-1 text-xs text-slate-500">Automatically locate data sources; dual verification ensures extraction precision.</p>
+          <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Automatically locate data sources; dual verification ensures extraction precision.</p>
         </div>
         <div class="flex items-center gap-3">
           <button
-            class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+            class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
             @click="emit('view-literature')"
           >
             <BookOpen class="h-4 w-4" /> Literature Mgmt
@@ -1170,25 +1170,25 @@ watch(
             </button>
             <div
               v-if="showExportMenu"
-              class="absolute right-0 z-20 mt-2 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg"
+              class="absolute right-0 z-20 mt-2 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900"
             >
               <button
                 type="button"
-                class="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                class="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
                 @click="exportVerifiedData('json')"
               >
                 Export as JSON
               </button>
               <button
                 type="button"
-                class="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                class="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
                 @click="exportVerifiedData('csv')"
               >
                 Export as CSV
               </button>
               <button
                 type="button"
-                class="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50"
+                class="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
                 @click="exportVerifiedData('ndjson')"
               >
                 Export as NDJSON
@@ -1199,10 +1199,10 @@ watch(
       </div>
 
       <div class="mb-6 flex flex-wrap items-center gap-2 text-xs">
-        <span v-if="props.selectedFileId && props.sourceName" class="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-blue-700">
+        <span v-if="props.selectedFileId && props.sourceName" class="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300">
           Source: {{ props.sourceName }}
         </span>
-        <span v-else class="shrink-0 rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-slate-500">
+        <span v-else class="shrink-0 rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
           Showing all data
         </span>
 
@@ -1211,12 +1211,12 @@ watch(
             v-model="searchDoi"
             type="text"
             placeholder="Search by Literature DOI..."
-            class="w-full rounded-full border border-slate-200 bg-white py-1.5 pl-3 pr-8 text-xs text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            class="w-full rounded-full border border-slate-200 bg-white py-1.5 pl-3 pr-8 text-xs text-slate-700 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:placeholder:text-slate-500"
             @keydown.enter="handleSearch"
           />
           <button
             v-if="searchDoi"
-            class="absolute right-2.5 text-slate-400 hover:text-slate-600"
+            class="absolute right-2.5 text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
             @click="clearDoiFilter"
           >
             <Trash2 class="h-3.5 w-3.5" />
@@ -1226,94 +1226,94 @@ watch(
 
       <div class="mb-2 flex items-center gap-2">
         <svg class="h-4 w-4 text-blue-500" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M4 6H20M4 12H20M4 18H20" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <h2 class="text-sm font-bold text-slate-800">Advanced Search</h2>
+        <h2 class="text-sm font-bold text-slate-800 dark:text-slate-200">Advanced Search</h2>
       </div>
 
       <div class="flex flex-wrap items-end gap-4">
         <div class="w-48">
-          <label class="mb-1.5 block text-xs text-slate-400">Ionic Liquid</label>
-          <select v-model="selectedLubricant" class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" @change="handleSearch">
+          <label class="mb-1.5 block text-xs text-slate-400 dark:text-slate-500">Ionic Liquid</label>
+          <select v-model="selectedLubricant" class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200" @change="handleSearch">
             <option value="">All</option>
             <option v-for="l in filterOptions.lubricants" :key="l" :value="l">{{ l }}</option>
           </select>
         </div>
 
         <div class="w-48">
-          <label class="mb-1.5 block text-xs text-slate-400">Surface Type</label>
-          <select v-model="selectedMaterial" class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" @change="handleSearch">
+          <label class="mb-1.5 block text-xs text-slate-400 dark:text-slate-500">Surface Type</label>
+          <select v-model="selectedMaterial" class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200" @change="handleSearch">
             <option value="">All</option>
             <option v-for="m in filterOptions.materials" :key="m" :value="m">{{ m }}</option>
           </select>
         </div>
 
         <div>
-          <label class="mb-1.5 block text-xs text-slate-400">COF Range</label>
+          <label class="mb-1.5 block text-xs text-slate-400 dark:text-slate-500">COF Range</label>
           <div class="flex items-center gap-2">
-            <input v-model="cofMin" type="text" placeholder="Min" class="w-24 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
-            <span class="text-slate-300">-</span>
-            <input v-model="cofMax" type="text" placeholder="Max" class="w-24 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm" />
+            <input v-model="cofMin" type="text" placeholder="Min" class="w-24 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:placeholder:text-slate-500" />
+            <span class="text-slate-300 dark:text-slate-600">-</span>
+            <input v-model="cofMax" type="text" placeholder="Max" class="w-24 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:placeholder:text-slate-500" />
           </div>
         </div>
 
-        <button class="inline-flex h-[38px] w-[38px] items-center justify-center rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200" @click="handleSearch">
+        <button class="inline-flex h-[38px] w-[38px] items-center justify-center rounded-lg bg-slate-100 text-slate-500 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800" @click="handleSearch">
           <Search class="h-4 w-4" />
         </button>
       </div>
     </div>
 
     <div class="flex-1 overflow-auto px-6 py-4">
-      <div class="overflow-hidden rounded-xl border bg-white">
+      <div class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950/85 dark:shadow-[0_10px_30px_rgba(2,8,23,0.35)]">
         <table class="w-full text-left text-sm">
-          <thead class="bg-slate-50 text-xs text-slate-500">
+          <thead class="bg-slate-50 text-xs text-slate-500 dark:bg-slate-900 dark:text-slate-400">
             <tr>
-              <th class="px-4 py-4 font-medium text-slate-500">ID</th>
-              <th class="px-4 py-4 font-medium text-slate-500">IONIC LIQUID</th>
-              <th class="px-4 py-4 font-medium text-slate-500">SURFACE</th>
-              <th class="px-4 py-4 font-medium text-slate-500">TEMPERATURE (K)</th>
-              <th class="px-4 py-4 font-medium text-slate-500">CONDITION</th>
+              <th class="px-4 py-4 font-medium text-slate-500 dark:text-slate-400">ID</th>
+              <th class="px-4 py-4 font-medium text-slate-500 dark:text-slate-400">IONIC LIQUID</th>
+              <th class="px-4 py-4 font-medium text-slate-500 dark:text-slate-400">SURFACE</th>
+              <th class="px-4 py-4 font-medium text-slate-500 dark:text-slate-400">TEMPERATURE (K)</th>
+              <th class="px-4 py-4 font-medium text-slate-500 dark:text-slate-400">CONDITION</th>
               <th class="px-4 py-4 font-medium text-blue-600">COF</th>
-              <th class="px-4 py-4 font-medium text-slate-500 text-right">ACTIONS</th>
+              <th class="px-4 py-4 text-right font-medium text-slate-500 dark:text-slate-400">ACTIONS</th>
             </tr>
           </thead>
           <tbody>
             <tr v-if="loading">
-              <td colspan="7" class="px-4 py-8 text-center text-slate-400">Loading...</td>
+              <td colspan="7" class="px-4 py-8 text-center text-slate-400 dark:text-slate-500">Loading...</td>
             </tr>
             <template v-else-if="result.items.length">
               <template v-for="record in result.items" :key="record.id">
-                <tr class="border-t hover:bg-blue-50/20 cursor-pointer" @click="toggleRow(record)">
-                  <td class="px-4 py-4 text-slate-500">{{ record.id }}</td>
-                  <td class="px-4 py-4 font-semibold text-slate-800">{{ record.lubricant || '--' }}</td>
-                  <td class="px-4 py-4 text-slate-600">{{ record.materialName || '--' }}</td>
-                  <td class="px-4 py-4 text-slate-600">{{ record.temperature || '--' }}</td>
+                <tr class="cursor-pointer border-t border-slate-100 hover:bg-blue-50/20 dark:border-slate-800 dark:hover:bg-blue-500/6" @click="toggleRow(record)">
+                  <td class="px-4 py-4 text-slate-500 dark:text-slate-400">{{ record.id }}</td>
+                  <td class="px-4 py-4 font-semibold text-slate-800 dark:text-slate-100">{{ record.lubricant || '--' }}</td>
+                  <td class="px-4 py-4 text-slate-600 dark:text-slate-300">{{ record.materialName || '--' }}</td>
+                  <td class="px-4 py-4 text-slate-600 dark:text-slate-300">{{ record.temperature || '--' }}</td>
                   <td class="px-4 py-4">
                     <div class="flex flex-wrap gap-1.5">
-                      <span v-for="tag in conditionTags(record)" :key="tag" class="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-600">
+                      <span v-for="tag in conditionTags(record)" :key="tag" class="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                         {{ tag }}
                       </span>
-                      <span v-if="!conditionTags(record).length" class="text-slate-400">--</span>
+                      <span v-if="!conditionTags(record).length" class="text-slate-400 dark:text-slate-500">--</span>
                     </div>
                   </td>
                   <td class="px-4 py-4">
                     <div class="font-bold text-blue-600">{{ cofDisplay(record) }}</div>
-                    <div class="mt-0.5 text-[11px] text-slate-400">Conf: {{ confidenceDisplay(confidenceValueFor(record)) }}</div>
+                    <div class="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">Conf: {{ confidenceDisplay(confidenceValueFor(record)) }}</div>
                   </td>
                   <td class="px-4 py-4">
                     <div class="flex items-center justify-end gap-1.5" @click.stop>
                       <button
-                        class="inline-flex h-7 w-7 items-center justify-center rounded text-blue-500 hover:bg-blue-50"
+                        class="inline-flex h-7 w-7 items-center justify-center rounded text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10"
                         @click="toggleRow(record)"
                       >
                         <Eye class="h-4 w-4" />
                       </button>
                       <button
-                        class="inline-flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                        class="inline-flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-300"
                         @click="toggleRow(record)"
                       >
                         <Edit class="h-4 w-4" />
                       </button>
                       <button
-                        class="inline-flex h-7 w-7 items-center justify-center rounded text-red-400 hover:bg-red-50 hover:text-red-600"
+                        class="inline-flex h-7 w-7 items-center justify-center rounded text-red-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
                         :disabled="deletingRowId === record.id"
                         @click="removeRecord(record)"
                       >
@@ -1323,34 +1323,34 @@ watch(
                   </td>
                 </tr>
 
-                <tr v-if="expandedRowId === record.id" class="border-t bg-slate-50/50">
+                <tr v-if="expandedRowId === record.id" class="border-t bg-slate-50/50 dark:border-slate-800 dark:bg-slate-900/50">
                   <td colspan="7" class="px-4 py-4">
                     <div class="grid gap-4 md:grid-cols-3">
-                      <div class="rounded-lg border border-slate-200 bg-white p-4">
-                        <div class="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-800">
+                      <div class="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+                        <div class="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-200">
                           <BookOpen class="h-4 w-4" /> Reference Details
                         </div>
 
                         <div class="mb-4">
-                          <div class="mb-1 text-xs text-slate-400">Title</div>
-                          <div class="text-sm font-medium text-slate-900">{{ record.literature?.title || '--' }}</div>
+                          <div class="mb-1 text-xs text-slate-400 dark:text-slate-500">Title</div>
+                          <div class="text-sm font-medium text-slate-900 dark:text-slate-100">{{ record.literature?.title || '--' }}</div>
                         </div>
 
                         <div class="mb-4 grid grid-cols-2 gap-4">
                           <div>
-                            <div class="mb-1 text-xs text-slate-400">Authors</div>
-                            <div class="text-sm text-slate-900">{{ record.literature?.authors || '--' }}</div>
+                            <div class="mb-1 text-xs text-slate-400 dark:text-slate-500">Authors</div>
+                            <div class="text-sm text-slate-900 dark:text-slate-200">{{ record.literature?.authors || '--' }}</div>
                           </div>
                           <div>
-                            <div class="mb-1 text-xs text-slate-400">Journal</div>
-                            <div class="text-sm text-slate-900">
+                            <div class="mb-1 text-xs text-slate-400 dark:text-slate-500">Journal</div>
+                            <div class="text-sm text-slate-900 dark:text-slate-200">
                               {{ record.literature?.journal || '--' }}
                             </div>
                           </div>
                         </div>
 
                         <div>
-                          <div class="mb-1 text-xs text-slate-400">DOI</div>
+                          <div class="mb-1 text-xs text-slate-400 dark:text-slate-500">DOI</div>
                           <div class="text-sm text-blue-600">
                             <a
                               v-if="record.literature?.doi"
@@ -1361,19 +1361,19 @@ watch(
                               {{ record.literature.doi }}
                               <ExternalLink class="h-3.5 w-3.5" />
                             </a>
-                            <span v-else class="text-slate-900">--</span>
+                            <span v-else class="text-slate-900 dark:text-slate-200">--</span>
                           </div>
                         </div>
 
                       </div>
 
-                      <div class="relative rounded-lg border border-slate-200 bg-white p-3" @click.stop>
+                      <div class="relative rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950" @click.stop>
                         <div class="mb-2 flex items-center justify-between">
                           <p class="text-xs font-semibold uppercase tracking-wide text-blue-700">Data Verification</p>
                           <div class="relative" data-confidence-popover-root="true">
                             <button
                               type="button"
-                              class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-100 transition hover:bg-emerald-100"
+                              class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-100 transition hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-500/20 dark:hover:bg-emerald-500/15"
                               @click.stop="toggleConfidencePopover(record.id)"
                             >
                               <span class="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500"></span>
@@ -1382,13 +1382,13 @@ watch(
 
                             <div
                               v-if="activeConfidencePopoverId === record.id"
-                              class="absolute right-0 z-20 mt-2 w-[340px] overflow-hidden rounded-2xl border border-emerald-50 bg-[linear-gradient(135deg,#ffffff_0%,#e8fcf5_100%)] shadow-[0_20px_60px_rgba(15,23,42,0.12)]"
+                              class="absolute right-0 z-20 mt-2 w-[340px] overflow-hidden rounded-2xl border border-emerald-50 bg-[linear-gradient(135deg,#ffffff_0%,#e8fcf5_100%)] shadow-[0_20px_60px_rgba(15,23,42,0.12)] dark:border-emerald-500/20 dark:bg-[linear-gradient(135deg,rgba(15,23,42,0.98)_0%,rgba(8,65,54,0.82)_100%)]"
                             >
                               <div class="px-5 py-5">
                                 <!-- Header -->
                                 <div class="mb-4 flex items-center gap-2">
                                   <ShieldCheck class="h-5 w-5 text-emerald-600" />
-                                  <span class="text-sm font-bold text-slate-800">AI Confidence Score</span>
+                                  <span class="text-sm font-bold text-slate-800 dark:text-slate-100">AI Confidence Score</span>
                                 </div>
 
                                 <!-- Big Score & Delta -->
@@ -1416,7 +1416,7 @@ watch(
                                       </div>
                                       <div
                                         v-else
-                                        class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-bold text-slate-600 bg-slate-100/80"
+                                        class="inline-flex items-center gap-0.5 rounded bg-slate-100/80 px-1.5 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800/80 dark:text-slate-300"
                                       >
                                         Synced with stored confidence
                                       </div>
@@ -1425,17 +1425,17 @@ watch(
                                 </div>
 
                                 <!-- Box Breakdown -->
-                                <div class="rounded-xl bg-white/70 p-1 ring-1 ring-slate-100/50 backdrop-blur-sm">
+                                <div class="rounded-xl bg-white/70 p-1 ring-1 ring-slate-100/50 backdrop-blur-sm dark:bg-slate-950/50 dark:ring-slate-700/70">
                                   <div class="flex flex-col gap-0.5">
                                     <div class="flex items-center justify-between px-3 py-2">
-                                      <div class="flex items-center gap-2 text-slate-500">
-                                        <Flag class="h-4 w-4 text-slate-400" />
+                                      <div class="flex items-center gap-2 text-slate-500 dark:text-slate-400">
+                                        <Flag class="h-4 w-4 text-slate-400 dark:text-slate-500" />
                                         <span class="text-[13px] font-medium">Base Score</span>
                                       </div>
-                                      <span class="text-[14px] font-bold text-slate-700">{{ confidenceDetailsFor(record).base_percent.toFixed(0) }}</span>
+                                      <span class="text-[14px] font-bold text-slate-700 dark:text-slate-200">{{ confidenceDetailsFor(record).base_percent.toFixed(0) }}</span>
                                     </div>
 
-                                    <div class="mx-3 h-px bg-slate-100"></div>
+                                    <div class="mx-3 h-px bg-slate-100 dark:bg-slate-800"></div>
 
                                     <template v-if="confidenceDetailsFor(record).penalties?.length">
                                       <div
@@ -1491,7 +1491,7 @@ watch(
                               </div>
 
                               <div class="px-5 pb-5">
-                                <div class="h-1.5 w-full overflow-hidden rounded-full bg-slate-100 flex">
+                                <div class="flex h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                                   <div
                                     class="h-full rounded-full bg-emerald-500 transition-all"
                                     :style="{ width: `${confidencePercentNumber(confidenceValueFor(record))}%` }"
@@ -1504,22 +1504,22 @@ watch(
                         <div class="grid grid-cols-1 gap-2">
                           <div class="grid grid-cols-2 gap-2">
                             <div>
-                              <label class="mb-1 block text-[11px] font-medium text-slate-500">IONIC LIQUID</label>
+                              <label class="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">IONIC LIQUID</label>
                               <input
                                 :value="editingValues[record.id]?.lubricant ?? ''"
                                 @input="(e: Event) => updateEditingField(record.id, 'lubricant', (e.target as HTMLInputElement).value)"
                                 type="text"
-                                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+                                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:placeholder:text-slate-500"
                                 placeholder="Ionic liquid"
                               />
                             </div>
                             <div>
-                              <label class="mb-1 block text-[11px] font-medium text-slate-500">SURFACE</label>
+                              <label class="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">SURFACE</label>
                               <input
                                 :value="editingValues[record.id]?.materialName ?? ''"
                                 @input="(e: Event) => updateEditingField(record.id, 'materialName', (e.target as HTMLInputElement).value)"
                                 type="text"
-                                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+                                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:placeholder:text-slate-500"
                                 placeholder="Surface"
                               />
                             </div>
@@ -1527,22 +1527,22 @@ watch(
 
                           <div class="grid grid-cols-2 gap-2">
                             <div>
-                              <label class="mb-1 block text-[11px] font-medium text-slate-500">COND · Temperature</label>
+                              <label class="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">COND · Temperature</label>
                               <input
                                 :value="editingValues[record.id]?.temperature ?? ''"
                                 @input="(e: Event) => updateEditingField(record.id, 'temperature', (e.target as HTMLInputElement).value)"
                                 type="text"
-                                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+                                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:placeholder:text-slate-500"
                                 placeholder="e.g. 298.15 K"
                               />
                             </div>
                             <div>
-                              <label class="mb-1 block text-[11px] font-medium text-slate-500">COND · Potential</label>
+                              <label class="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">COND · Potential</label>
                               <input
                                 :value="editingValues[record.id]?.potential ?? ''"
                                 @input="(e: Event) => updateEditingField(record.id, 'potential', (e.target as HTMLInputElement).value)"
                                 type="text"
-                                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+                                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:placeholder:text-slate-500"
                                 placeholder="e.g. +1.5 V / OCP"
                               />
                             </div>
@@ -1550,22 +1550,22 @@ watch(
 
                           <div class="grid grid-cols-2 gap-2">
                             <div>
-                              <label class="mb-1 block text-[11px] font-medium text-slate-500">COND · Water</label>
+                              <label class="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">COND · Water</label>
                               <input
                                 :value="editingValues[record.id]?.waterContent ?? ''"
                                 @input="(e: Event) => updateEditingField(record.id, 'waterContent', (e.target as HTMLInputElement).value)"
                                 type="text"
-                                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+                                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:placeholder:text-slate-500"
                                 placeholder="e.g. 50 ppm"
                               />
                             </div>
                             <div>
-                              <label class="mb-1 block text-[11px] font-medium text-slate-500">COND · Speed</label>
+                              <label class="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">COND · Speed</label>
                               <input
                                 :value="editingValues[record.id]?.speedValue ?? ''"
                                 @input="(e: Event) => updateEditingField(record.id, 'speedValue', (e.target as HTMLInputElement).value)"
                                 type="text"
-                                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+                                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:placeholder:text-slate-500"
                                 placeholder="e.g. 1 μm/s"
                               />
                             </div>
@@ -1573,46 +1573,46 @@ watch(
 
                           <div class="grid grid-cols-2 gap-2">
                             <div>
-                              <label class="mb-1 block text-[11px] font-medium text-slate-500">COND · Load</label>
+                              <label class="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">COND · Load</label>
                               <input
                                 :value="editingValues[record.id]?.loadValue ?? ''"
                                 @input="(e: Event) => updateEditingField(record.id, 'loadValue', (e.target as HTMLInputElement).value)"
                                 type="text"
-                                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+                                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:placeholder:text-slate-500"
                                 placeholder="e.g. 25 nN"
                               />
                             </div>
                             <div>
-                              <label class="mb-1 block text-[11px] font-medium text-slate-500">COND · Surface Roughness</label>
+                              <label class="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">COND · Surface Roughness</label>
                               <input
                                 :value="editingValues[record.id]?.surfaceRoughness ?? ''"
                                 @input="(e: Event) => updateEditingField(record.id, 'surfaceRoughness', (e.target as HTMLInputElement).value)"
                                 type="text"
-                                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+                                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:placeholder:text-slate-500"
                                 placeholder="e.g. RMS 4.9 nm"
                               />
                             </div>
                           </div>
 
                           <div>
-                            <label class="mb-1 block text-[11px] font-medium text-slate-500">COND · Roughness (Film)</label>
+                            <label class="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">COND · Roughness (Film)</label>
                             <input
                               :value="editingValues[record.id]?.filmThickness ?? ''"
                               @input="(e: Event) => updateEditingField(record.id, 'filmThickness', (e.target as HTMLInputElement).value)"
                               type="text"
-                              class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm"
+                              class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:placeholder:text-slate-500"
                               placeholder='e.g. RMS 4.9 nm (BB5-1-M)'
                             />
                           </div>
 
                           <div class="flex items-end gap-2">
                             <div class="flex-1">
-                              <label class="mb-1 block text-[11px] font-medium text-slate-500">COF</label>
+                              <label class="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">COF</label>
                               <input
                                 :value="editingValues[record.id]?.cof ?? ''"
                                 @input="(e: Event) => updateEditingField(record.id, 'cof', (e.target as HTMLInputElement).value)"
                                 type="text"
-                                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm font-mono"
+                                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm font-mono dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
                                 placeholder="COF raw value"
                               />
                             </div>
@@ -1627,33 +1627,33 @@ watch(
                         </div>
                       </div>
 
-                      <div class="rounded-lg border border-slate-200 bg-white p-3" @click.stop>
+                      <div class="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950" @click.stop>
                         <div class="mb-2 flex items-center justify-between">
-                          <p class="text-xs font-semibold uppercase tracking-wide text-slate-700">Source Evidence</p>
+                          <p class="text-xs font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-300">Source Evidence</p>
                           <button
                             v-if="record.literatureId"
                             type="button"
-                            class="text-xs text-blue-600 hover:underline"
+                            class="text-xs text-blue-600 hover:underline dark:text-blue-300"
                             @click="openRecordPdf(record)"
                           >
                             Open PDF
                           </button>
                         </div>
 
-                        <p v-if="evidenceLoading[record.id]" class="text-xs text-slate-400">Locating evidence...</p>
+                        <p v-if="evidenceLoading[record.id]" class="text-xs text-slate-400 dark:text-slate-500">Locating evidence...</p>
                         <p v-else-if="evidenceError[record.id]" class="text-xs text-red-500">{{ evidenceError[record.id] }}</p>
                         <template v-else-if="evidenceData[record.id]">
-                          <p v-if="evidenceData[record.id] && !evidenceData[record.id]?.has_pdf" class="mb-2 text-xs text-amber-600">
+                          <p v-if="evidenceData[record.id] && !evidenceData[record.id]?.has_pdf" class="mb-2 text-xs text-amber-600 dark:text-amber-300">
                             PDF file not found on backend disk; evidence image cannot be generated.
                           </p>
-                          <div class="mb-2 text-xs text-slate-600">
+                          <div class="mb-2 text-xs text-slate-600 dark:text-slate-300">
                             <div><span class="font-semibold">Type:</span> {{ isTextEvidence(record.id) ? 'text snippet' : (evidenceData[record.id]?.has_image ? 'image region' : 'text only') }}</div>
                             <div><span class="font-semibold">Source:</span> {{ evidenceData[record.id]?.source || '--' }}</div>
                             <div><span class="font-semibold">Page:</span> {{ evidenceData[record.id]?.page ?? '--' }}</div>
                           </div>
 
                           <div
-                            class="mb-2 max-h-40 overflow-auto rounded border border-slate-200 bg-slate-50 p-2 text-xs leading-6 text-slate-700"
+                            class="mb-2 max-h-40 overflow-auto rounded border border-slate-200 bg-slate-50 p-2 text-xs leading-6 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
                             @click="(e) => onEvidenceSnippetClick(e, record)"
                           >
                             <p class="whitespace-pre-wrap" v-html="highlightEvidenceHtml(record)"></p>
@@ -1663,7 +1663,7 @@ watch(
                             <button
                               v-for="chip in evidenceTermChips(record)"
                               :key="`${record.id}-${chip.term}`"
-                              class="rounded px-1.5 py-0.5 text-[10px] text-slate-800 hover:opacity-80"
+                              class="rounded px-1.5 py-0.5 text-[10px] text-slate-800 hover:opacity-80 dark:text-slate-900"
                               :class="chip.colorClass"
                               :title="`Locate '${chip.term}' in PDF`"
                               @click="openTermInPdf(record, chip.term)"
@@ -1672,7 +1672,7 @@ watch(
                             </button>
                           </div>
 
-                          <div v-if="evidencePagePreviewSrc(record.id)" class="max-h-80 overflow-auto rounded border border-slate-200 bg-white">
+                          <div v-if="evidencePagePreviewSrc(record.id)" class="max-h-80 overflow-auto rounded border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
                             <img
                               :src="evidencePagePreviewSrc(record.id) as string"
                               alt="Evidence page preview"
@@ -1684,14 +1684,14 @@ watch(
                             v-else-if="evidenceImageSrc(record.id)"
                             :src="evidenceImageSrc(record.id) as string"
                             alt="Evidence crop"
-                            class="max-h-48 w-full cursor-zoom-in rounded border border-slate-200 object-contain"
+                            class="max-h-48 w-full cursor-zoom-in rounded border border-slate-200 object-contain dark:border-slate-700 dark:bg-slate-900"
                             @click="openImagePreview(evidenceImageSrc(record.id) as string, `Evidence Crop · Page ${evidenceData[record.id]?.page ?? '--'}`)"
                           />
-                          <div v-else class="flex h-24 items-center justify-center rounded border border-dashed border-slate-300 text-xs text-slate-400">
+                          <div v-else class="flex h-24 items-center justify-center rounded border border-dashed border-slate-300 text-xs text-slate-400 dark:border-slate-700 dark:text-slate-500">
                             No evidence image available
                           </div>
                         </template>
-                        <p v-else class="text-xs text-slate-400">No evidence available</p>
+                        <p v-else class="text-xs text-slate-400 dark:text-slate-500">No evidence available</p>
                       </div>
                     </div>
                   </td>
@@ -1699,14 +1699,14 @@ watch(
               </template>
             </template>
             <tr v-else>
-              <td colspan="7" class="px-4 py-8 text-center text-slate-400">No matching data</td>
+              <td colspan="7" class="px-4 py-8 text-center text-slate-400 dark:text-slate-500">No matching data</td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
 
-    <div class="flex items-center justify-between border-t bg-white px-6 py-3 text-sm text-slate-500">
+    <div class="flex items-center justify-between border-t bg-white px-6 py-3 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-950/80 dark:text-slate-400">
       <div>
         <template v-if="result.total > 0">
           Showing {{ rangeStart }} to {{ rangeEnd }} (Total {{ result.total }})
@@ -1717,7 +1717,7 @@ watch(
       </div>
       <div class="flex items-center gap-1">
         <button
-          class="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 hover:bg-slate-50 disabled:opacity-40"
+          class="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:hover:bg-slate-800"
           :disabled="currentPage === 1"
           @click="goToPage(currentPage - 1)"
         >
@@ -1725,7 +1725,7 @@ watch(
         </button>
         <span class="px-2">{{ currentPage }} / {{ totalPages }}</span>
         <button
-          class="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 hover:bg-slate-50 disabled:opacity-40"
+          class="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:hover:bg-slate-800"
           :disabled="currentPage >= totalPages"
           @click="goToPage(currentPage + 1)"
         >
@@ -1737,12 +1737,12 @@ watch(
     <Modal :show="pdfLocate.open" max-width="full" @close="closePdfLocate">
       <template #header>
         <div class="flex items-center justify-between gap-4">
-          <span class="text-base font-semibold text-slate-900">{{ pdfLocate.title || 'Source Locator' }}</span>
+          <span class="text-base font-semibold text-slate-900 dark:text-slate-100">{{ pdfLocate.title || 'Source Locator' }}</span>
         </div>
       </template>
 
       <div class="h-[78vh] min-h-[520px]">
-        <div v-if="pdfLocate.notice" class="mb-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <div v-if="pdfLocate.notice" class="mb-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
           {{ pdfLocate.notice }}
         </div>
         <PdfViewerWithHighlight
@@ -1755,24 +1755,24 @@ watch(
       </div>
     </Modal>
 
-    <div v-if="imagePreview.open" class="fixed inset-0 z-50 bg-black/70 p-6" @click.self="closeImagePreview">
-      <div class="mx-auto flex h-full max-w-6xl flex-col rounded-lg bg-white shadow-2xl">
-        <div class="flex items-center justify-between border-b px-4 py-3">
-          <div class="text-sm font-medium text-slate-700">{{ imagePreview.title }}</div>
+    <div v-if="imagePreview.open" class="fixed inset-0 z-50 bg-black/70 p-6 dark:bg-slate-950/85" @click.self="closeImagePreview">
+      <div class="mx-auto flex h-full max-w-6xl flex-col rounded-lg bg-white shadow-2xl dark:border dark:border-slate-800 dark:bg-slate-950">
+        <div class="flex items-center justify-between border-b px-4 py-3 dark:border-slate-800">
+          <div class="text-sm font-medium text-slate-700 dark:text-slate-200">{{ imagePreview.title }}</div>
           <div class="flex items-center gap-2 text-xs">
-            <button class="rounded border px-2 py-1 hover:bg-slate-50" @click="zoomOutPreview">-</button>
+            <button class="rounded border px-2 py-1 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800" @click="zoomOutPreview">-</button>
             <span class="w-12 text-center">{{ Math.round(imagePreview.scale * 100) }}%</span>
-            <button class="rounded border px-2 py-1 hover:bg-slate-50" @click="zoomInPreview">+</button>
-            <button class="rounded border px-2 py-1 hover:bg-slate-50" @click="resetPreviewZoom">Reset</button>
-            <button class="rounded border px-2 py-1 hover:bg-slate-50" @click="closeImagePreview">Close</button>
+            <button class="rounded border px-2 py-1 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800" @click="zoomInPreview">+</button>
+            <button class="rounded border px-2 py-1 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800" @click="resetPreviewZoom">Reset</button>
+            <button class="rounded border px-2 py-1 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800" @click="closeImagePreview">Close</button>
           </div>
         </div>
-        <div class="flex-1 overflow-auto bg-slate-100 p-4" @wheel.prevent="onPreviewWheel">
+        <div class="flex-1 overflow-auto bg-slate-100 p-4 dark:bg-slate-900" @wheel.prevent="onPreviewWheel">
           <div class="mx-auto w-fit">
             <img
               :src="imagePreview.src"
               alt="Evidence preview"
-              class="block max-w-none rounded border border-slate-300 bg-white shadow"
+              class="block max-w-none rounded border border-slate-300 bg-white shadow dark:border-slate-700 dark:bg-slate-950"
               :style="{ transform: `scale(${imagePreview.scale})`, transformOrigin: 'top center' }"
             />
           </div>

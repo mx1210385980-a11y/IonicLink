@@ -8,7 +8,9 @@ Two-tier strategy:
 """
 
 import re
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Iterable, Tuple
+
+from knowledge_base import normalize_ionic_liquid
 
 # Try importing pubchempy; gracefully degrade if not installed
 try:
@@ -30,6 +32,7 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
     # Imidazolium-based
     "EMIM": {
         "smiles": "CCn1cc[n+](C)c1",
+        "display_name": "EMIM",
         "full_name": "1-ethyl-3-methylimidazolium",
         "family": "imidazolium",
         "alkyl_chain_length": 2,
@@ -37,6 +40,7 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
     },
     "BMIM": {
         "smiles": "CCCCn1cc[n+](C)c1",
+        "display_name": "BMIM",
         "full_name": "1-butyl-3-methylimidazolium",
         "family": "imidazolium",
         "alkyl_chain_length": 4,
@@ -44,6 +48,7 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
     },
     "HMIM": {
         "smiles": "CCCCCCn1cc[n+](C)c1",
+        "display_name": "HMIM",
         "full_name": "1-hexyl-3-methylimidazolium",
         "family": "imidazolium",
         "alkyl_chain_length": 6,
@@ -51,6 +56,7 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
     },
     "OMIM": {
         "smiles": "CCCCCCCCn1cc[n+](C)c1",
+        "display_name": "OMIM",
         "full_name": "1-octyl-3-methylimidazolium",
         "family": "imidazolium",
         "alkyl_chain_length": 8,
@@ -58,6 +64,7 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
     },
     "DMIM": {
         "smiles": "CCCCCCCCCCn1cc[n+](C)c1",
+        "display_name": "DMIM",
         "full_name": "1-decyl-3-methylimidazolium",
         "family": "imidazolium",
         "alkyl_chain_length": 10,
@@ -65,6 +72,7 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
     },
     "MMIM": {
         "smiles": "Cn1cc[n+](C)c1",
+        "display_name": "MMIM",
         "full_name": "1,3-dimethylimidazolium",
         "family": "imidazolium",
         "alkyl_chain_length": 1,
@@ -73,6 +81,7 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
     # Pyridinium-based
     "BuPy": {
         "smiles": "CCCC[n+]1ccccc1",
+        "display_name": "BuPy",
         "full_name": "N-butylpyridinium",
         "family": "pyridinium",
         "alkyl_chain_length": 4,
@@ -81,6 +90,7 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
     # Pyrrolidinium-based
     "Pyr13": {
         "smiles": "CCC[N+]1(C)CCCC1",
+        "display_name": "Pyr13",
         "full_name": "N-methyl-N-propylpyrrolidinium",
         "family": "pyrrolidinium",
         "alkyl_chain_length": 3,
@@ -88,6 +98,7 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
     },
     "Pyr14": {
         "smiles": "CCCC[N+]1(C)CCCC1",
+        "display_name": "Pyr14",
         "full_name": "N-methyl-N-butylpyrrolidinium",
         "family": "pyrrolidinium",
         "alkyl_chain_length": 4,
@@ -96,6 +107,7 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
     # Piperidinium-based
     "PIP14": {
         "smiles": "CCCC[N+]1(C)CCCCC1",
+        "display_name": "PIP14",
         "full_name": "N-methyl-N-butylpiperidinium",
         "family": "piperidinium",
         "alkyl_chain_length": 4,
@@ -104,28 +116,40 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
     # Phosphonium-based
     "P66614": {
         "smiles": "CCCCCCCCCCCCCC[P+](CCCCCC)(CCCCCC)CCCCCC",
+        "display_name": "P6,6,6,14",
         "full_name": "trihexyl(tetradecyl)phosphonium",
         "family": "phosphonium",
         "alkyl_chain_length": 14,
-        "aliases": ["P6,6,6,14", "p66614", "P 66614"],
+        "aliases": ["P6,6,6,14", "p66614", "P 66614", "[P66614]", "[P6,6,6,14]"],
+    },
+    "P4441": {
+        "smiles": "C[P+](CCCC)(CCCC)CCCC",
+        "display_name": "P4,4,4,1",
+        "full_name": "tributyl(methyl)phosphonium",
+        "family": "phosphonium",
+        "alkyl_chain_length": 4,
+        "aliases": ["P4,4,4,1", "p4441", "P 4441", "[P4441]", "[P4,4,4,1]"],
     },
     "P4444": {
         "smiles": "CCCC[P+](CCCC)(CCCC)CCCC",
+        "display_name": "P4,4,4,4",
         "full_name": "tetrabutylphosphonium",
         "family": "phosphonium",
         "alkyl_chain_length": 4,
-        "aliases": ["P4,4,4,4", "p4444"],
+        "aliases": ["P4,4,4,4", "p4444", "[P4444]", "[P4,4,4,4]"],
     },
     "P4448": {
         "smiles": "CCCCCCCC[P+](CCCC)(CCCC)CCCC",
+        "display_name": "P4,4,4,8",
         "full_name": "tributyl(octyl)phosphonium",
         "family": "phosphonium",
         "alkyl_chain_length": 8,
-        "aliases": ["P4,4,4,8", "p4448", "[P4,4,4,8]"],
+        "aliases": ["P4,4,4,8", "p4448", "[P4448]", "[P4,4,4,8]"],
     },
     # Ammonium-based
     "N4444": {
         "smiles": "CCCC[N+](CCCC)(CCCC)CCCC",
+        "display_name": "N4,4,4,4",
         "full_name": "tetrabutylammonium",
         "family": "ammonium",
         "alkyl_chain_length": 4,
@@ -134,6 +158,7 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
     # Morpholinium-based
     "MOR11": {
         "smiles": "C[N+]1(C)CCOCC1",
+        "display_name": "MOR11",
         "full_name": "N,N-dimethylmorpholinium",
         "family": "morpholinium",
         "alkyl_chain_length": 1,
@@ -142,6 +167,7 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
     # Guanidinium-based
     "hC3C1C1": {
         "smiles": "CCCN=C(NC)[NH2+]C",
+        "display_name": "hC3C1C1",
         "full_name": "N,N,N',N'-tetramethyl-N''-propylguanidinium",
         "family": "guanidinium",
         "alkyl_chain_length": 3,
@@ -163,7 +189,10 @@ ANION_DB: Dict[str, Dict[str, Any]] = {
     "TFSI": {
         "smiles": "O=S(=O)([N-]S(=O)(=O)C(F)(F)F)C(F)(F)F",
         "full_name": "bis(trifluoromethylsulfonyl)imide",
-        "aliases": ["tfsi", "NTf2", "ntf2", "Tf2N", "tf2n", "TFSI-", "NTf2-", "BTA", "bta"],
+        "aliases": [
+            "tfsi", "NTf2", "ntf2", "Tf2N", "tf2n", "TFSI-", "NTf2-", "BTA", "bta",
+            "bis(trifluoromethanesulfonyl)imide", "bis(trifluoromethane)sulfonamide",
+        ],
     },
     "BOB": {
         "smiles": "[B-]1(OC(=O)C(=O)O1)OC(=O)C(=O)O",
@@ -220,6 +249,11 @@ ANION_DB: Dict[str, Dict[str, Any]] = {
         "full_name": "bis(salicylato)borate",
         "aliases": ["bscb", "BScB-", "bis(salicylato)borate"],
     },
+    "(iC8)2PO2": {
+        "smiles": "",
+        "full_name": "bis(2,4,4-trimethylpentyl)phosphinate",
+        "aliases": ["(iC8)2PO2", "(C8)2PO2", "iC8 2PO2", "2PO2", "PO2", "bis(2,4,4-trimethylpentyl)phosphinate"],
+    },
 }
 
 
@@ -232,6 +266,10 @@ def _build_lookup(db: Dict[str, Dict]) -> Dict[str, str]:
     lookup = {}
     for canonical, info in db.items():
         lookup[canonical.lower()] = canonical
+        if info.get("display_name"):
+            lookup[str(info["display_name"]).lower()] = canonical
+        if info.get("full_name"):
+            lookup[str(info["full_name"]).lower()] = canonical
         for alias in info.get("aliases", []):
             # Strip charge symbols for matching
             clean = alias.replace("+", "").replace("-", "").strip().lower()
@@ -241,6 +279,52 @@ def _build_lookup(db: Dict[str, Dict]) -> Dict[str, str]:
 
 _cation_lookup = _build_lookup(CATION_DB)
 _anion_lookup = _build_lookup(ANION_DB)
+
+
+def _normalize_lookup_key(value: str) -> str:
+    text = str(value or "").strip().lower()
+    text = text.replace("+", "").replace("-", "")
+    text = re.sub(r"[\[\]\(\),/]", " ", text)
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _iter_component_terms(db: Dict[str, Dict[str, Any]]) -> Iterable[Tuple[str, str]]:
+    for canonical, info in db.items():
+        yield canonical, canonical
+        if info.get("display_name"):
+            yield canonical, str(info["display_name"])
+        if info.get("full_name"):
+            yield canonical, str(info["full_name"])
+        for alias in info.get("aliases", []):
+            yield canonical, str(alias)
+
+
+def _match_component_from_text(name: str, db: Dict[str, Dict[str, Any]]) -> Optional[str]:
+    normalized_name = _normalize_lookup_key(name)
+    if not normalized_name:
+        return None
+
+    best_match: Optional[str] = None
+    best_length = 0
+    for canonical, term in _iter_component_terms(db):
+        normalized_term = _normalize_lookup_key(term)
+        if not normalized_term or len(normalized_term) < 2:
+            continue
+        if normalized_term in normalized_name and len(normalized_term) > best_length:
+            best_match = canonical
+            best_length = len(normalized_term)
+    return best_match
+
+
+def _format_cation_display(cation: Optional[str]) -> Optional[str]:
+    if not cation:
+        return None
+    return str(CATION_DB.get(cation, {}).get("display_name") or cation)
+
+
+def _format_anion_display(anion: Optional[str]) -> Optional[str]:
+    return str(anion) if anion else None
 
 
 # ============================================================
@@ -257,7 +341,7 @@ def _find_cation(name: str) -> Optional[str]:
         return _cation_lookup[clean]
     if clean_no_comma in _cation_lookup:
         return _cation_lookup[clean_no_comma]
-    return None
+    return _match_component_from_text(name, CATION_DB)
 
 
 def _find_anion(name: str) -> Optional[str]:
@@ -266,7 +350,7 @@ def _find_anion(name: str) -> Optional[str]:
     
     if clean in _anion_lookup:
         return _anion_lookup[clean]
-    return None
+    return _match_component_from_text(name, ANION_DB)
 
 
 def parse_il_notation(name: str) -> Dict[str, Optional[str]]:
@@ -399,11 +483,18 @@ def resolve_il(name: str) -> Dict[str, Any]:
     
     if not name or not name.strip() or name.strip().lower() in ("unknown il", "unknown", "-", "n/a", "none", ""):
         return result
-    
+
+    normalized_name = normalize_ionic_liquid(name) or name
+
     # Step 1: Parse into cation/anion
-    parsed = parse_il_notation(name)
+    parsed = parse_il_notation(normalized_name)
     cation_raw = parsed["cation_raw"]
     anion_raw = parsed["anion_raw"]
+
+    if not cation_raw:
+        cation_raw = _match_component_from_text(normalized_name, CATION_DB)
+    if not anion_raw:
+        anion_raw = _match_component_from_text(normalized_name, ANION_DB)
     
     # Step 2: Resolve cation
     cation_canonical = _find_cation(cation_raw) if cation_raw else None
@@ -422,7 +513,7 @@ def resolve_il(name: str) -> Dict[str, Any]:
     
     # Step 4: Build canonical name
     if result["cation"] and result["anion"]:
-        result["canonical_name"] = f"[{result['cation']}][{result['anion']}]"
+        result["canonical_name"] = f"[{_format_cation_display(result['cation'])}][{_format_anion_display(result['anion'])}]"
     
     # Step 5: Build full IL SMILES (cation.anion salt notation)
     if result["cation_smiles"] and result["anion_smiles"]:
@@ -459,19 +550,19 @@ def resolve_and_enrich_records(data_items: List[dict]) -> List[dict]:
         Enriched data items list
     """
     for item in data_items:
-        il_name = item.get("ionic_liquid", "")
+        il_name = item.get("ionic_liquid") or item.get("lubricant") or ""
         if not il_name or il_name.strip().lower() in ("unknown il", "unknown", "-"):
             continue
         
         resolved = resolve_il(il_name)
         
         # Enrich the record (only set if resolved, don't overwrite existing values)
-        if resolved["cation"] and not item.get("cation"):
-            item["cation"] = resolved["cation"]
+        if resolved["cation"]:
+            item["cation"] = _format_cation_display(resolved["cation"])
         
         # Always set these new fields
         if resolved["anion"]:
-            item["anion"] = resolved["anion"]
+            item["anion"] = _format_anion_display(resolved["anion"])
         if resolved["cation_smiles"]:
             item["cation_smiles"] = resolved["cation_smiles"]
         if resolved["anion_smiles"]:
@@ -486,6 +577,7 @@ def resolve_and_enrich_records(data_items: List[dict]) -> List[dict]:
         # Update canonical name if resolved
         if resolved["canonical_name"]:
             item["ionic_liquid"] = resolved["canonical_name"]
+            item["lubricant"] = resolved["canonical_name"]
         
         print(f"[IL Resolver] '{il_name}' → cation={resolved['cation']}, anion={resolved['anion']}, "
               f"chain={resolved['alkyl_chain_length']}, inchikey={resolved['il_inchikey']}")

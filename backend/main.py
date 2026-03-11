@@ -5,13 +5,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_db
-from routers import data_explorer, extraction, sync_router
+from routers import agent_system, data_explorer, extraction, sync_router
+from services.agent_runtime_service import get_agent_runtime
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle hooks."""
     await init_db()
+    get_agent_runtime()
     print("Database initialized")
     yield
 
@@ -49,6 +51,7 @@ app.add_middleware(
 app.include_router(extraction.router)
 app.include_router(sync_router.router)
 app.include_router(data_explorer.router)
+app.include_router(agent_system.router)
 
 
 @app.get("/")

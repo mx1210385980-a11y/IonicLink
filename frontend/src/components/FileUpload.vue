@@ -1,21 +1,21 @@
 <template>
-  <div class="h-full flex flex-col bg-white">
+  <div class="flex h-full flex-col bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
     <!-- Sidebar Header -->
-    <div class="px-6 py-4 border-b border-slate-100 flex-shrink-0">
+    <div class="shrink-0 border-b border-slate-100 px-6 py-4 dark:border-slate-800">
       <div class="flex items-center gap-2">
         <BookOpen class="w-5 h-5 text-blue-600" />
-        <h2 class="text-base font-bold text-slate-800">Literature Library</h2>
+        <h2 class="text-base font-bold text-slate-800 dark:text-slate-100">Literature Library</h2>
       </div>
     </div>
 
-    <div class="p-5 flex-1 flex flex-col min-h-0 overflow-y-auto">
+    <div class="flex flex-1 flex-col overflow-y-auto p-5 min-h-0">
       <!-- Upload Area -->
       <div
-        class="relative border-2 border-dashed rounded-2xl p-6 text-center transition-all cursor-pointer bg-slate-50/50 mb-6"
+        class="relative mb-6 cursor-pointer rounded-2xl border-2 border-dashed bg-slate-50/50 p-6 text-center transition-all dark:bg-slate-900/60"
         :class="[
           isDragging 
-            ? 'border-blue-500 bg-blue-50' 
-            : 'border-slate-200 hover:border-blue-400 hover:bg-white'
+            ? 'border-blue-500 bg-blue-50 dark:bg-blue-500/10' 
+            : 'border-slate-200 hover:border-blue-400 hover:bg-white dark:border-slate-700 dark:hover:bg-slate-900 dark:hover:border-blue-400'
         ]"
         @dragover="handleDragOver"
         @dragleave="handleDragLeave"
@@ -33,15 +33,15 @@
         
         <div v-if="isUploading" class="flex flex-col items-center gap-2 py-2">
           <Spinner size="default" class="text-blue-500" />
-          <span class="text-xs text-slate-500 font-medium tracking-tight">Uploading...</span>
+          <span class="text-xs font-medium tracking-tight text-slate-500 dark:text-slate-400">Uploading...</span>
         </div>
         
         <template v-else>
-          <div class="mx-auto w-10 h-10 rounded-xl bg-blue-100/50 flex items-center justify-center mb-3">
+          <div class="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100/50 dark:bg-blue-500/12">
             <CloudUpload class="h-5 w-5 text-blue-600" />
           </div>
-          <p class="text-sm font-bold text-slate-700">Click or drag to upload</p>
-          <p class="text-[10px] text-slate-400 mt-1 uppercase tracking-wider font-semibold">Supports PDF, TXT, MD</p>
+          <p class="text-sm font-bold text-slate-700 dark:text-slate-200">Click or drag to upload</p>
+          <p class="mt-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Supports PDF, TXT, MD</p>
         </template>
       </div>
       
@@ -72,11 +72,11 @@
           <div
             v-for="file in files"
             :key="file.id"
-            class="group relative flex flex-col p-3 rounded-2xl border transition-all cursor-pointer"
+            class="group relative flex cursor-pointer flex-col rounded-2xl border p-3 transition-all"
             :class="[
               activeId === file.id 
-                ? 'bg-blue-50 border-blue-200 shadow-md shadow-blue-500/5 ring-1 ring-blue-50' 
-                : 'bg-white border-slate-100 hover:border-slate-200 hover:bg-slate-50/50'
+                ? 'border-blue-200 bg-blue-50 shadow-md shadow-blue-500/5 ring-1 ring-blue-50 dark:border-blue-500/40 dark:bg-blue-500/10 dark:ring-blue-500/10' 
+                : 'border-slate-100 bg-white hover:border-slate-200 hover:bg-slate-50/50 dark:border-slate-800 dark:bg-slate-900/80 dark:hover:border-slate-700 dark:hover:bg-slate-900'
             ]"
             @click="emit('select', file.id)"
           >
@@ -84,32 +84,43 @@
               <!-- Checkbox -->
               <div 
                 class="mt-1 w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition-colors"
-                :class="selectedIds.includes(file.id) ? 'bg-blue-500 border-blue-500' : 'bg-white border-slate-200 group-hover:border-blue-400'"
+                :class="selectedIds.includes(file.id) ? 'bg-blue-500 border-blue-500' : 'bg-white border-slate-200 group-hover:border-blue-400 dark:bg-slate-950 dark:border-slate-700'"
                 @click.stop="toggleSelect(file.id)"
               >
                 <div v-if="selectedIds.includes(file.id)" class="w-2 h-2 bg-white rounded-full" />
               </div>
 
               <!-- PDF Icon -->
-              <div class="w-10 h-10 rounded-xl bg-red-50 flex-shrink-0 flex items-center justify-center">
+              <div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-red-50 dark:bg-rose-500/12">
                 <FileText class="w-5 h-5 text-red-500" />
               </div>
               
               <div class="flex-1 min-w-0 pr-6">
-                <p class="text-sm font-bold truncate leading-tight transition-colors" :class="activeId === file.id ? 'text-blue-900' : 'text-slate-600'">
+                <p class="truncate text-sm font-bold leading-tight transition-colors" :class="activeId === file.id ? 'text-blue-900 dark:text-blue-200' : 'text-slate-600 dark:text-slate-200'">
                   {{ file.name }}
                 </p>
-                <div class="flex items-center gap-2 mt-1">
-                  <span class="text-[10px] font-semibold text-slate-400">PDF Document</span>
-                  <span v-if="file.status === 'success'" class="flex items-center gap-1 text-[10px] font-bold text-green-500">
-                    <CheckCircle class="w-2.5 h-2.5" /> Extracted
+                <div class="mt-1 flex items-center gap-2">
+                  <span class="text-[10px] font-semibold text-slate-400 dark:text-slate-500">PDF Document</span>
+                  <span
+                    class="flex items-center gap-1 text-[10px] font-bold"
+                    :class="statusTone(file)"
+                  >
+                    <CheckCircle v-if="file.status === 'success'" class="w-2.5 h-2.5" />
+                    <span>{{ statusLabel(file) }}</span>
                   </span>
                 </div>
+                <p
+                  v-if="file.progressMessage || file.errorMessage"
+                  class="mt-1 truncate text-[11px]"
+                  :class="file.status === 'error' ? 'text-rose-500' : 'text-slate-500 dark:text-slate-400'"
+                >
+                  {{ file.errorMessage || file.progressMessage }}
+                </p>
               </div>
 
               <!-- Delete Button -->
               <button 
-                class="absolute top-3 right-3 p-1 text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all bg-white rounded-full shadow-sm border border-slate-100"
+                class="absolute top-3 right-3 rounded-full border border-slate-100 bg-white p-1 text-slate-300 opacity-0 shadow-sm transition-all group-hover:opacity-100 hover:text-red-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-500"
                 @click.stop="emit('remove', file.id)"
               >
                 <X class="w-3 h-3" />
@@ -117,7 +128,7 @@
             </div>
 
             <!-- Individual Extract Button (Hidden if in batch) -->
-            <div v-if="activeId === file.id && file.status !== 'success' && selectedIds.length <= 1" class="mt-3">
+            <div v-if="activeId === file.id && file.status !== 'processing' && selectedIds.length <= 1" class="mt-3">
               <button 
                 @click.stop="emit('extract', file.id)"
                 :disabled="file.status === 'processing'"
@@ -130,7 +141,7 @@
             </div>
 
             <!-- Progress Bar -->
-            <div v-if="file.status === 'processing'" class="mt-3 h-1 bg-slate-100 rounded-full overflow-hidden">
+            <div v-if="file.status === 'processing'" class="mt-3 h-1 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
               <div class="h-full bg-blue-500 transition-all duration-300 shadow-[0_0_8px_rgba(59,130,246,0.5)]" :style="{ width: `${file.progress}%` }" />
             </div>
           </div>
@@ -138,13 +149,13 @@
       </div>
       
       <!-- Empty State -->
-      <div v-else class="flex-1 flex flex-col items-center justify-center text-slate-300 gap-3 opacity-40">
+      <div v-else class="flex flex-1 flex-col items-center justify-center gap-3 text-slate-300 opacity-40 dark:text-slate-600">
         <BookOpen class="w-12 h-12" />
         <p class="text-xs font-bold uppercase tracking-widest">No files uploaded</p>
       </div>
 
       <!-- Batch Extract Floating Footer -->
-      <div v-if="selectedIds.length > 1" class="pt-4 border-t border-slate-100 mt-auto">
+      <div v-if="selectedIds.length > 1" class="mt-auto border-t border-slate-100 pt-4 dark:border-slate-800">
         <button 
           @click="emit('batchExtract', selectedIds)"
           class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-sm font-bold transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-500/30 ring-2 ring-blue-500/10"
@@ -161,6 +172,7 @@
 import { ref, watch } from 'vue'
 import { CloudUpload, FileText, X, BookOpen, CheckCircle, Beaker } from 'lucide-vue-next'
 import Spinner from '@/components/ui/Spinner.vue'
+import type { BatchFile } from '@/lib/api'
 
 const emit = defineEmits<{
   'upload': [file: File]
@@ -204,6 +216,26 @@ function toggleAll() {
   } else {
     selectedIds.value = props.files.map(f => f.id)
   }
+}
+
+function statusLabel(file: BatchFile): string {
+  if (file.status === 'success') {
+    return file.records?.length ? `Extracted ${file.records.length}` : 'Completed'
+  }
+  if (file.status === 'processing') {
+    return `${Math.max(1, Math.round(file.progress || 0))}% running`
+  }
+  if (file.status === 'error') {
+    return 'Needs review'
+  }
+  return 'Ready'
+}
+
+function statusTone(file: BatchFile): string {
+  if (file.status === 'success') return 'text-green-500'
+  if (file.status === 'processing') return 'text-blue-500'
+  if (file.status === 'error') return 'text-rose-500'
+  return 'text-slate-400'
 }
 
 defineExpose({

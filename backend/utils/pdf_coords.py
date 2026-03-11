@@ -464,6 +464,7 @@ def find_figure_bbox(
     label_clean = label_norm.strip()
 
     variants = [label_clean]
+    is_table_label = label_clean.lower().startswith("table")
     panel_letter = None
     fig_number = None
     fig_match = re.search(
@@ -503,6 +504,75 @@ def find_figure_bbox(
     try:
         doc = fitz.open(pdf_path)
 
+        def _find_table_caption_rect(page: fitz.Page, label_text: str) -> Optional[fitz.Rect]:
+            normalized = normalize_source_label(label_text) or label_text.strip()
+            match = re.search(r"\btable\s+([a-z]?\d+[a-z]?)\b", normalized, re.IGNORECASE)
+            if not match:
+                return None
+
+            table_idx = match.group(1)
+            caption_re = re.compile(
+                rf"^\s*(?:table|tab\.?)\s*{re.escape(table_idx)}(?:\b|[.:])",
+                re.IGNORECASE,
+            )
+
+            best_rect = None
+            best_score = float("-inf")
+            try:
+                text_dict = page.get_text("dict") or {}
+                page_width = float(page.rect.width)
+                page_height = float(page.rect.height)
+
+                for block in text_dict.get("blocks", []):
+                    if block.get("type") != 0:
+                        continue
+                    for line in block.get("lines", []):
+                        spans = line.get("spans") or []
+                        if not spans:
+                            continue
+                        line_text = "".join(str(span.get("text") or "") for span in spans).strip()
+                        if not line_text or not caption_re.match(line_text):
+                            continue
+
+                        bbox = line.get("bbox") or block.get("bbox")
+                        if not bbox or len(bbox) != 4:
+                            continue
+                        rect = fitz.Rect(float(bbox[0]), float(bbox[1]), float(bbox[2]), float(bbox[3]))
+                        if rect.width <= 0 or rect.height <= 0:
+                            continue
+
+                        score = 100.0
+                        if rect.y0 <= page_height * 0.55:
+                            score += 8.0
+                        if rect.width <= page_width * 0.7:
+                            score += 4.0
+                        if any("bold" in str(span.get("font") or "").lower() for span in spans):
+                            score += 24.0
+                        if re.match(r"^\s*table\s", line_text, re.IGNORECASE):
+                            score += 8.0
+
+                        below_clip = fitz.Rect(
+                            max(0, rect.x0 - page_width * 0.18),
+                            max(0, rect.y1 + 4),
+                            min(page_width, rect.x1 + page_width * 0.18),
+                            min(page_height, rect.y1 + 260),
+                        )
+                        below_text = page.get_text("text", clip=below_clip) or ""
+                        short_lines = [
+                            ln.strip()
+                            for ln in below_text.splitlines()
+                            if 1 <= len(ln.strip()) <= 40
+                        ]
+                        score += min(20.0, len(short_lines) * 2.0)
+
+                        if score > best_score:
+                            best_score = score
+                            best_rect = rect
+            except Exception:
+                return None
+
+            return best_rect
+
         page_order = list(range(len(doc)))
         if isinstance(page_hint, int) and 1 <= page_hint <= len(doc):
             hinted = page_hint - 1
@@ -517,15 +587,61 @@ def find_figure_bbox(
             page_width = page.rect.width
 
             for variant in variants:
-                rects = page.search_for(variant)
-                if not rects:
-                    continue
+                caption_rect = _find_table_caption_rect(page, variant) if is_table_label else None
+                if caption_rect is None:
+                    if is_table_label:
+                        continue
+                    rects = page.search_for(variant)
+                    if not rects:
+                        continue
 
-                # Use the lowest caption hit for this variant (figure captions are commonly below visuals).
-                caption_rect = sorted(rects, key=lambda r: r.y0)[-1]
+                    # Use the lowest caption hit for this variant (figure captions are commonly below visuals).
+                    caption_rect = sorted(rects, key=lambda r: r.y0)[-1]
 
                 def _collect_visual_rects() -> list[fitz.Rect]:
                     out: list[fitz.Rect] = []
+                    cap_cx = (caption_rect.x0 + caption_rect.x1) / 2.0
+                    if is_table_label:
+                        try:
+                            for block in page.get_text("blocks") or []:
+                                if len(block) < 5:
+                                    continue
+                                x0, y0, x1, y1, block_text = block[:5]
+                                rr = fitz.Rect(float(x0), float(y0), float(x1), float(y1))
+                                text = str(block_text or "").strip()
+                                if not text:
+                                    continue
+                                if rr.y0 < caption_rect.y1 - 4 or rr.y0 > caption_rect.y1 + 340:
+                                    continue
+                                if rr.height < 6:
+                                    continue
+                                center_ok = abs(((rr.x0 + rr.x1) / 2.0) - cap_cx) <= page_width * 0.24
+                                narrow_ok = rr.width <= page_width * 0.62
+                                if not (center_ok or narrow_ok):
+                                    continue
+                                out.append(rr)
+                        except Exception:
+                            pass
+
+                        try:
+                            for d in page.get_drawings() or []:
+                                rr = d.get("rect")
+                                if not rr:
+                                    continue
+                                rr = fitz.Rect(rr)
+                                if rr.y0 < caption_rect.y1 - 4 or rr.y0 > caption_rect.y1 + 340:
+                                    continue
+                                if rr.width < page_width * 0.08 or rr.height < 1.0:
+                                    continue
+                                center_ok = abs(((rr.x0 + rr.x1) / 2.0) - cap_cx) <= page_width * 0.28
+                                wide_ok = rr.width <= page_width * 0.68
+                                if not (center_ok or wide_ok):
+                                    continue
+                                out.append(rr)
+                        except Exception:
+                            pass
+                        return out
+
                     try:
                         text_dict = page.get_text("dict") or {}
                         for b in text_dict.get("blocks", []):
@@ -567,7 +683,9 @@ def find_figure_bbox(
                 if visual_rects:
                     # For panel-level labels, keep all candidate visual rects first, then refine by panel.
                     # Caption token centers (e.g., just "Fig. 3") are too narrow and can wrongly drop sibling panels.
-                    if panel_letter:
+                    if is_table_label:
+                        filtered = visual_rects
+                    elif panel_letter:
                         filtered = visual_rects
                     else:
                         cap_cx = (caption_rect.x0 + caption_rect.x1) / 2.0
@@ -585,20 +703,31 @@ def find_figure_bbox(
                     y0 = min(r.y0 for r in filtered)
                     x1 = max(r.x1 for r in filtered)
                     y1 = max(r.y1 for r in filtered)
+                    pad_x = 10 if is_table_label else 8
+                    pad_y = 10 if is_table_label else 8
                     figure_rect = fitz.Rect(
-                        max(0, x0 - 8),
-                        max(0, y0 - 8),
-                        min(page_width, x1 + 8),
-                        min(page_height, y1 + 8),
+                        max(0, x0 - pad_x),
+                        max(0, y0 - pad_y),
+                        min(page_width, x1 + pad_x),
+                        min(page_height, y1 + pad_y),
                     )
                 else:
-                    # Fallback: caption-above region.
-                    figure_rect = fitz.Rect(
-                        max(0, caption_rect.x0 - 20),
-                        max(0, caption_rect.y0 - 420),
-                        min(page_width, caption_rect.x1 + 100),
-                        min(page_height, caption_rect.y1 + 20),
-                    )
+                    if is_table_label:
+                        cap_cx = (caption_rect.x0 + caption_rect.x1) / 2.0
+                        figure_rect = fitz.Rect(
+                            max(0, cap_cx - page_width * 0.24),
+                            max(0, caption_rect.y1 + 6),
+                            min(page_width, cap_cx + page_width * 0.24),
+                            min(page_height, caption_rect.y1 + 280),
+                        )
+                    else:
+                        # Fallback: caption-above region.
+                        figure_rect = fitz.Rect(
+                            max(0, caption_rect.x0 - 20),
+                            max(0, caption_rect.y0 - 420),
+                            min(page_width, caption_rect.x1 + 100),
+                            min(page_height, caption_rect.y1 + 20),
+                        )
 
                 # Optional panel refinement (e.g., Fig. 3F) using nearby panel labels.
                 if panel_letter:

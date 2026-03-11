@@ -32,7 +32,30 @@ class TribologyData(BaseModel):
                 elif data.get('cof_value') is not None:
                     data['cof'] = str(data['cof_value'])
         return data
-    
+
+    @field_validator("potential", mode="before")
+    @classmethod
+    def normalize_potential(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return str(value)
+        if isinstance(value, (int, float)):
+            numeric = float(value)
+            text = str(int(numeric)) if numeric.is_integer() else str(value)
+            return f"{text} V"
+
+        text = str(value).strip()
+        if not text:
+            return None
+
+        try:
+            numeric = float(text)
+            normalized = str(int(numeric)) if numeric.is_integer() else text
+            return f"{normalized} V"
+        except Exception:
+            return text
+
     friction_force: Optional[str] = Field(None, description="摩擦力 (带单位，如 '1.1 nN')")
     normal_load: Optional[str] = Field(None, description="法向载荷 (带单位，如 '55 nN')")
     wear_rate: Optional[str] = Field(None, description="磨损率")

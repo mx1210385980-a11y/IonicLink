@@ -23,6 +23,7 @@ from utils.pdf_utils import process_pdf_to_base64, extract_pdf_text_fitz
 from services.file_service import save_upload_entry, process_file_safe, process_file_background
 from services.extraction_trace_service import get_extraction_run, list_extraction_candidates
 from services.extraction_trace_service import get_latest_extraction_run_by_literature
+from services.agent_runtime_service import get_agent_runtime
 
 router = APIRouter(prefix="/api", tags=["extraction"])
 
@@ -209,6 +210,112 @@ def _build_visual_focus_queries(record: TribologyDataDB) -> list[str]:
             q_seen.add(key)
             queries.append(q)
     return queries
+
+
+def _tighten_table_bbox_by_row(
+    pdf_path: str,
+    page_num: int | None,
+    bbox: list | None,
+    record: TribologyDataDB,
+) -> list | None:
+    if not pdf_path or not os.path.exists(pdf_path) or not page_num or not bbox or len(bbox) != 4:
+        return bbox
+
+    from utils.pdf_coords import find_text_coordinates
+
+    cof_raw = str(getattr(record, "cof_raw", "") or "").strip()
+    cof_value = getattr(record, "cof_value", None)
+    lubricant = str(getattr(record, "lubricant", "") or "").strip()
+
+    query_items: list[dict] = []
+    cof_queries: list[str] = []
+    if cof_raw:
+        cof_queries.extend(_build_term_query_variants(cof_raw))
+    if cof_value is not None:
+        try:
+            val = float(cof_value)
+            for fmt in (f"{val:.1f}", f"{val:.2f}", f"{val:.3f}", f"{val:.4f}"):
+                cof_queries.extend(_build_term_query_variants(fmt.rstrip("0").rstrip(".")))
+        except Exception:
+            pass
+    cof_queries = list(dict.fromkeys(q for q in cof_queries if q and len(q.strip()) >= 2))
+    if cof_queries:
+        query_items.append(
+            {
+                "id": "cof",
+                "queries": cof_queries,
+                "page_hint": int(page_num),
+                "restrict_to_page_hint": True,
+                "anchor_bbox": bbox,
+                "restrict_to_anchor_bbox": True,
+            }
+        )
+
+    lubricant_queries: list[str] = []
+    if lubricant:
+        for candidate in [
+            lubricant,
+            lubricant.strip("()[]"),
+            re.sub(r"[\[\]\(\)]", "", lubricant),
+        ]:
+            lubricant_queries.extend(_build_term_query_variants(candidate))
+    lubricant_queries = list(dict.fromkeys(q for q in lubricant_queries if q and len(q.strip()) >= 2))
+    if lubricant_queries:
+        query_items.append(
+            {
+                "id": "lubricant",
+                "queries": lubricant_queries,
+                "page_hint": int(page_num),
+                "restrict_to_page_hint": True,
+                "anchor_bbox": bbox,
+                "restrict_to_anchor_bbox": True,
+            }
+        )
+
+    if not query_items:
+        return bbox
+
+    hits = find_text_coordinates(pdf_path, query_items)
+    hit_map: dict[str, dict] = {}
+    for hit in hits:
+        if (hit.get("w") or 0) <= 0 or (hit.get("h") or 0) <= 0:
+            continue
+        hit_map.setdefault(str(hit.get("id") or ""), hit)
+
+    cof_hit = hit_map.get("cof")
+    lubricant_hit = hit_map.get("lubricant")
+
+    def _to_rect(hit: dict) -> list[float]:
+        x0 = float(hit.get("x") or 0)
+        y0 = float(hit.get("y") or 0)
+        w = float(hit.get("w") or 0)
+        h = float(hit.get("h") or 0)
+        return [x0, y0, x0 + w, y0 + h]
+
+    if cof_hit and lubricant_hit:
+        cx0, cy0, cx1, cy1 = _to_rect(cof_hit)
+        lx0, ly0, lx1, ly1 = _to_rect(lubricant_hit)
+        cof_cy = (cy0 + cy1) / 2.0
+        lub_cy = (ly0 + ly1) / 2.0
+        same_row_tol = max(10.0, max(cy1 - cy0, ly1 - ly0) * 2.2)
+        if abs(cof_cy - lub_cy) <= same_row_tol:
+            return [
+                round(max(0.0, min(cx0, lx0) - 10.0), 2),
+                round(max(0.0, min(cy0, ly0) - 6.0), 2),
+                round(max(cx1, lx1) + 10.0, 2),
+                round(max(cy1, ly1) + 6.0, 2),
+            ]
+
+    if cof_hit:
+        x0, y0, x1, y1 = _to_rect(cof_hit)
+        return [
+            round(max(0.0, x0 - 8.0), 2),
+            round(max(0.0, y0 - 6.0), 2),
+            round(x1 + 8.0, 2),
+            round(y1 + 6.0, 2),
+        ]
+
+    return bbox
 
 
 def _pick_visual_source_label(source: str | None, source_figure: str | None) -> str:
@@ -631,12 +738,15 @@ async def get_record_evidence(
         if source_type == "visual":
             # Ignore stale persisted text bbox for visual records; recompute from figure locator.
             bbox = None
+            is_table_source = bool(
+                source_label_norm and str(source_label_norm).strip().lower().startswith("table")
+            )
             if source_label_norm and source_label_norm not in ("Text", "Unknown"):
                 fig_page, fig_bbox = find_figure_bbox(
                     pdf_path,
                     source_label_norm,
                     page_hint=int(source_page) if source_page else (int(page) if page else None),
-                    restrict_to_page_hint=bool(source_page),
+                    restrict_to_page_hint=bool(source_page) and not is_table_source,
                 )
                 if fig_page and fig_bbox:
                     page = fig_page
@@ -646,46 +756,49 @@ async def get_record_evidence(
 
             # Refine visual focus to local μ/COF marker within the figure region.
             if page and bbox:
-                focus_queries = _build_visual_focus_queries(record)
-                if focus_queries:
-                    focus_hits = find_text_coordinates(
-                        pdf_path,
-                        [
-                            {
-                                "id": "visual_focus",
-                                "queries": focus_queries,
-                                "page_hint": int(page),
-                                "restrict_to_page_hint": True,
-                                "anchor_bbox": bbox,
-                                "restrict_to_anchor_bbox": True,
-                            }
-                        ],
-                    )
-                    focus_hit = next(
-                        (
-                            h for h in focus_hits
-                            if (h.get("w") or 0) > 0 and (h.get("h") or 0) > 0
-                        ),
-                        None,
-                    )
-                    if focus_hit:
-                        fx0 = float(focus_hit["x"])
-                        fy0 = float(focus_hit["y"])
-                        fw = float(focus_hit["w"])
-                        fh = float(focus_hit["h"])
-                        # Slightly enlarge local box for readability in preview.
-                        bbox = [
-                            max(0.0, fx0 - 22.0),
-                            max(0.0, fy0 - 12.0),
-                            fx0 + fw + 22.0,
-                            fy0 + fh + 12.0,
-                        ]
+                if is_table_source:
+                    bbox = _tighten_table_bbox_by_row(pdf_path, int(page), bbox, record)
+                else:
+                    focus_queries = _build_visual_focus_queries(record)
+                    if focus_queries:
+                        focus_hits = find_text_coordinates(
+                            pdf_path,
+                            [
+                                {
+                                    "id": "visual_focus",
+                                    "queries": focus_queries,
+                                    "page_hint": int(page),
+                                    "restrict_to_page_hint": True,
+                                    "anchor_bbox": bbox,
+                                    "restrict_to_anchor_bbox": True,
+                                }
+                            ],
+                        )
+                        focus_hit = next(
+                            (
+                                h for h in focus_hits
+                                if (h.get("w") or 0) > 0 and (h.get("h") or 0) > 0
+                            ),
+                            None,
+                        )
+                        if focus_hit:
+                            fx0 = float(focus_hit["x"])
+                            fy0 = float(focus_hit["y"])
+                            fw = float(focus_hit["w"])
+                            fh = float(focus_hit["h"])
+                            # Slightly enlarge local box for readability in preview.
+                            bbox = [
+                                max(0.0, fx0 - 22.0),
+                                max(0.0, fy0 - 12.0),
+                                fx0 + fw + 22.0,
+                                fy0 + fh + 12.0,
+                            ]
 
             if bbox and page:
                 image_b64 = crop_region_to_base64(pdf_path, page, bbox)
 
             # Visual fallback only when figure box is unavailable.
-            if not image_b64 and evidence_text:
+            if not image_b64 and evidence_text and not is_table_source:
                 ev_page, ev_bbox = find_evidence_coordinates(pdf_path, evidence_text, page_hint=page)
                 if ev_page and ev_bbox:
                     page = ev_page
@@ -924,12 +1037,16 @@ async def extract_data(
         # 2. Process Safely (Synchronous Wait)
         print(f"[Extraction] Starting safe processing for Lit ID: {lit_id}")
 
-        metadata, data_list, extraction_summary = await process_file_safe(
+        workflow_result = await get_agent_runtime().run_extraction_workflow(
             file_id=lit_id,
             force=force,
             profile=profile,
             strict_cof_mode=strict_cof_mode,
         )
+        metadata = workflow_result.get("metadata") or {}
+        data_list = workflow_result.get("data") or []
+        extraction_summary = workflow_result.get("extraction_summary") or {}
+        agent_workflow = workflow_result.get("agent_workflow") or {}
 
         if (extraction_summary or {}).get("dropped_by_reason", {}).get("in_progress"):
             return {
@@ -938,6 +1055,7 @@ async def extract_data(
                 "metadata": {},
                 "data": [],
                 "extraction_summary": extraction_summary,
+                "agent_workflow": agent_workflow,
                 "message": "Extraction is still running in the background. Please retry shortly."
             }
 
@@ -961,6 +1079,7 @@ async def extract_data(
                 "metadata": meta_obj,
                 "data": data_list,
                 "extraction_summary": extraction_summary,
+                "agent_workflow": agent_workflow,
                 "message": f"Successfully extracted {len(data_list)} records."
             }
         else:
@@ -969,6 +1088,7 @@ async def extract_data(
                 "metadata": {},
                 "data": [],
                 "extraction_summary": extraction_summary,
+                "agent_workflow": agent_workflow,
                 "message": "No data extracted or processing failed."
             }
 

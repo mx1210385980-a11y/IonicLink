@@ -51,7 +51,7 @@ const maxWidthClass = {
     leave-from-class="opacity-100"
     leave-to-class="opacity-0"
   >
-    <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" @click.self="$emit('close')">
+    <div v-if="show" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm dark:bg-slate-950/80" @click.self="$emit('close')">
       <Transition
         enter-active-class="transition ease-out duration-300"
         enter-from-class="opacity-0 scale-95 translate-y-4"
@@ -61,11 +61,11 @@ const maxWidthClass = {
         leave-to-class="opacity-0 scale-95 translate-y-4"
       >
         <div 
-          class="relative w-full bg-white border rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] text-slate-950"
+          class="relative flex max-h-[90vh] w-full flex-col overflow-hidden rounded-xl border bg-white text-slate-950 shadow-2xl dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100"
           :class="[maxWidthClass[maxWidth || '2xl']]"
         >
           <!-- Header -->
-          <div class="flex items-center justify-between px-6 py-4 border-b">
+          <div class="flex items-center justify-between border-b px-6 py-4 dark:border-slate-800">
             <h3 class="text-lg font-semibold tracking-tight">
               <slot name="header">{{ title }}</slot>
             </h3>
@@ -83,7 +83,7 @@ const maxWidthClass = {
           </div>
 
           <!-- Footer -->
-          <div v-if="$slots.footer" class="px-6 py-4 border-t bg-muted/20">
+          <div v-if="$slots.footer" class="border-t bg-muted/20 px-6 py-4 dark:border-slate-800">
             <slot name="footer" />
           </div>
         </div>
