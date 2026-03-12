@@ -13,6 +13,7 @@ from agents.moderator_agent import ModeratorAgent
 from agents.query_agent import QueryAgent
 from agents.registry import AgentRegistry
 from services.media_workflow_service import MediaWorkflowService
+from services.usage_metrics_service import get_usage_metrics_service
 
 
 class AgentRuntimeService:
@@ -20,6 +21,7 @@ class AgentRuntimeService:
         self.registry = AgentRegistry()
         self.bus = InMemoryAgentBus(self.registry)
         self._media_workflow = MediaWorkflowService()
+        self._usage_metrics = get_usage_metrics_service()
 
         self.registry.register(QueryAgent())
         self.registry.register(MediaAgent(self._media_workflow))
@@ -34,6 +36,13 @@ class AgentRuntimeService:
         profile: str = "high_accuracy",
         strict_cof_mode: bool | None = None,
     ) -> dict[str, Any]:
+        self._usage_metrics.record_api_call(endpoint="/api/extract/{file_id}")
+        self._usage_metrics.record_agent_call(
+            receiver="moderator",
+            task_type="orchestrate_extraction",
+            sender="runtime",
+            via="runtime.direct",
+        )
         result = await self.registry.get("moderator").handle_task(
             AgentTask(
                 task_type="orchestrate_extraction",
@@ -55,6 +64,13 @@ class AgentRuntimeService:
         skip: int = 0,
         limit: int = 20,
     ) -> dict[str, Any]:
+        self._usage_metrics.record_api_call(endpoint="/api/records/search")
+        self._usage_metrics.record_agent_call(
+            receiver="moderator",
+            task_type="orchestrate_search",
+            sender="runtime",
+            via="runtime.direct",
+        )
         result = await self.registry.get("moderator").handle_task(
             AgentTask(
                 task_type="orchestrate_search",
@@ -69,6 +85,13 @@ class AgentRuntimeService:
         return result.data or {}
 
     async def get_filter_options(self, *, session: AsyncSession) -> dict[str, Any]:
+        self._usage_metrics.record_api_call(endpoint="/api/records/options")
+        self._usage_metrics.record_agent_call(
+            receiver="moderator",
+            task_type="orchestrate_filter_options",
+            sender="runtime",
+            via="runtime.direct",
+        )
         result = await self.registry.get("moderator").handle_task(
             AgentTask(
                 task_type="orchestrate_filter_options",
@@ -84,6 +107,13 @@ class AgentRuntimeService:
         db: AsyncSession,
         file_content: str | None = None,
     ) -> dict[str, Any]:
+        self._usage_metrics.record_api_call(endpoint="/api/sync/literature/{literature_id}/reprocess")
+        self._usage_metrics.record_agent_call(
+            receiver="moderator",
+            task_type="orchestrate_reprocess",
+            sender="runtime",
+            via="runtime.direct",
+        )
         result = await self.registry.get("moderator").handle_task(
             AgentTask(
                 task_type="orchestrate_reprocess",
@@ -97,6 +127,13 @@ class AgentRuntimeService:
         return result.data or {}
 
     async def get_stats(self, *, session: AsyncSession) -> dict[str, Any]:
+        self._usage_metrics.record_api_call(endpoint="/api/records/stats")
+        self._usage_metrics.record_agent_call(
+            receiver="moderator",
+            task_type="orchestrate_stats",
+            sender="runtime",
+            via="runtime.direct",
+        )
         result = await self.registry.get("moderator").handle_task(
             AgentTask(
                 task_type="orchestrate_stats",

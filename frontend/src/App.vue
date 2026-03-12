@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Beaker, Github, Moon, Sun } from 'lucide-vue-next'
+import { Beaker, Github, Moon, Sun, PieChart, Search, Server, BookOpen } from 'lucide-vue-next'
 import FileUpload from '@/components/FileUpload.vue'
 import ChatPanel from '@/components/ChatPanel.vue'
 import AgentStatusPanel from '@/components/AgentStatusPanel.vue'
 import IntegratedExplorer from '@/components/IntegratedExplorer.vue'
 import Dashboard from '@/components/Dashboard.vue'
+import MonitorView from '@/components/MonitorView.vue'
 import LiteratureList from '@/components/LiteratureList.vue'
 import SourceGroundingView from '@/components/SourceGroundingView.vue'
+import GettingStarted from '@/components/GettingStarted.vue'
 import Button from '@/components/ui/Button.vue'
 import {
   chat,
@@ -24,7 +26,7 @@ import {
 } from '@/lib/api'
 import type { HighlightRect } from '@/types/pdf-highlight'
 
-const currentView = ref<'dashboard' | 'workspace' | 'literature' | 'grounding'>('workspace')
+const currentView = ref<'dashboard' | 'workspace' | 'monitor' | 'literature' | 'grounding' | 'guide'>('guide')
 const sidebarTab = ref<'chat' | 'agents'>('chat')
 const isDark = ref(false)
 
@@ -662,20 +664,43 @@ onBeforeUnmount(() => {
           <label class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">IonicLink</label>
         </div>
 
-        <nav class="hidden md:flex items-center gap-6 ml-6">
+        <nav class="hidden md:flex items-center ml-6 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-full p-1 shadow-sm h-10">
+          <button
+            @click="currentView = 'guide'"
+            class="flex items-center gap-2 px-4 py-1.5 text-[13px] font-semibold transition-all rounded-full h-full"
+            :class="currentView === 'guide' ? 'bg-[#eef2ff] text-[#4f46e5] dark:bg-indigo-500/10 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'"
+          >
+            <BookOpen class="w-[15px] h-[15px]" stroke-width="2.5" />
+            Guide
+          </button>
+
           <button
             @click="currentView = 'workspace'"
-            class="text-sm font-medium transition-colors hover:text-primary"
-            :class="currentView === 'workspace' ? 'text-primary' : 'text-muted-foreground'"
+            class="flex items-center gap-2 px-4 py-1.5 text-[13px] font-semibold transition-all rounded-full h-full"
+            :class="currentView === 'workspace' ? 'bg-[#eef2ff] text-[#4f46e5] dark:bg-indigo-500/10 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'"
           >
+            <Search class="w-[15px] h-[15px]" stroke-width="2.5" />
             Workspace
           </button>
+
           <button
             @click="currentView = 'dashboard'"
-            class="text-sm font-medium transition-colors hover:text-primary"
-            :class="currentView === 'dashboard' ? 'text-primary' : 'text-muted-foreground'"
+            class="flex items-center gap-2 px-4 py-1.5 text-[13px] font-semibold transition-all rounded-full h-full"
+            :class="currentView === 'dashboard' ? 'bg-[#eef2ff] text-[#4f46e5] dark:bg-indigo-500/10 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'"
           >
-            Overview
+            <PieChart class="w-[15px] h-[15px]" stroke-width="2.5" />
+            Dashboard
+          </button>
+
+          <div class="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-1"></div>
+
+          <button
+            @click="currentView = 'monitor'"
+            class="flex items-center gap-2 px-4 py-1.5 text-[13px] font-semibold transition-all rounded-full h-full"
+            :class="currentView === 'monitor' ? 'bg-[#eef2ff] text-[#4f46e5] dark:bg-indigo-500/10 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'"
+          >
+            <Server class="w-[15px] h-[15px]" stroke-width="2.5" />
+            Monitor
           </button>
         </nav>
 
@@ -697,7 +722,7 @@ onBeforeUnmount(() => {
         <Dashboard @open-library="currentView = 'literature'" />
       </div>
 
-      <div v-if="currentView === 'workspace'" class="flex h-[calc(100vh-56px)] bg-slate-100/70 dark:bg-[#06101c]">
+      <div v-else-if="currentView === 'workspace'" class="flex h-[calc(100vh-56px)] bg-slate-100/70 dark:bg-[#06101c]">
         <aside class="flex w-80 flex-shrink-0 flex-col overflow-hidden border-r border-slate-200/80 bg-white/95 dark:border-slate-800/80 dark:bg-slate-950/85">
           <FileUpload
             ref="fileUploadRef"
@@ -765,12 +790,24 @@ onBeforeUnmount(() => {
         </aside>
       </div>
 
+      <div v-else-if="currentView === 'monitor'" class="h-[calc(100vh-56px)]">
+        <MonitorView
+          :workflow="latestAgentWorkflow"
+          :active-run="activeExtractionRun"
+          :active-file-name="activeExtractionFileName"
+        />
+      </div>
+
       <div v-else-if="currentView === 'literature'" class="h-[calc(100vh-88px)]">
         <LiteratureList />
       </div>
 
       <div v-else-if="currentView === 'grounding'" class="h-[calc(100vh-56px)]">
         <SourceGroundingView :pdf-url="groundingPdfUrl" :highlight-data="groundingHighlightData" />
+      </div>
+
+      <div v-else-if="currentView === 'guide'" class="h-[calc(100vh-56px)]">
+        <GettingStarted />
       </div>
     </main>
   </div>

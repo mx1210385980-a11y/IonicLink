@@ -456,6 +456,100 @@ function normalizeTermKey(input: string): string {
     .replace(/[()=:,.;]/g, '')
 }
 
+function normalizeEvidenceChipKey(input: string): string {
+  return String(input || '')
+    .toLowerCase()
+    .replace(/[\u03bc\u00b5]/g, 'u')
+    .replace(/μ/g, 'u')
+    .replace(/[\[\]\(\)\{\},;:'"]/g, '')
+    .replace(/\s+/g, '')
+    .replace(/[+=/\\|]/g, '')
+}
+
+function normalizeIlCationToken(input: string): string {
+  const token = String(input || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  if (!token) return ''
+  if (/^p\d+$/.test(token)) return token
+  if (token === '1ethyl3methylimidazolium' || token === 'ethyl3methylimidazolium') return 'emim'
+  if (token === '1butyl3methylimidazolium' || token === 'butyl3methylimidazolium') return 'bmim'
+  if (token === '1hexyl3methylimidazolium' || token === 'hexyl3methylimidazolium') return 'hmim'
+  if (token === 'tributylmethylphosphonium') return 'p4441'
+  if (token === 'trihexyltetradecylphosphonium') return 'p66614'
+  return token
+}
+
+function normalizeIlAnionToken(input: string): string {
+  const token = String(input || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+  if (!token) return ''
+  if (token === 'tfsi' || token === 'ntf2') return 'tfsi'
+  if (token === 'fap' || token === 'tris(pentafluoroethyl)trifluorophosphate'.replace(/[^a-z0-9]/g, '')) return 'fap'
+  if (
+    token === 'bistrifluoromethanesulfonamide'
+    || token === 'bistrifluoromethylsulfonylimide'
+    || token === 'bistrifluoromethanesulfonylimide'
+  ) {
+    return 'tfsi'
+  }
+  return token
+}
+
+function inferIlAliasKeyFromName(input: string): string {
+  const lower = String(input || '').toLowerCase()
+  if (!lower) return ''
+
+  let cation = ''
+  if (lower.includes('imidazolium')) {
+    if (/1?\s*[-]?\s*ethyl\s*[-]?\s*3\s*[-]?\s*methyl/.test(lower) || /ethyl\s*methylimidazolium/.test(lower)) cation = 'emim'
+    if (/1?\s*[-]?\s*butyl\s*[-]?\s*3\s*[-]?\s*methyl/.test(lower) || /butyl\s*methylimidazolium/.test(lower)) cation = 'bmim'
+    if (/1?\s*[-]?\s*hexyl\s*[-]?\s*3\s*[-]?\s*methyl/.test(lower) || /hexyl\s*methylimidazolium/.test(lower)) cation = 'hmim'
+  }
+  if (lower.includes('phosphonium')) {
+    if (lower.includes('tributyl') && lower.includes('methyl')) cation = 'p4441'
+    if (lower.includes('trihexyl') && lower.includes('tetradecyl')) cation = 'p66614'
+  }
+
+  let anion = ''
+  if (lower.includes('tris(pentafluoroethyl)trifluorophosphate') || /\bfap\b/.test(lower)) {
+    anion = 'fap'
+  }
+  if (
+    lower.includes('ntf2')
+    || (lower.includes('bis(trifluoromethane') && lower.includes('sulfonamide'))
+    || (lower.includes('bis(trifluoromethylsulfonyl') && lower.includes('imide'))
+  ) {
+    anion = 'tfsi'
+  }
+
+  if (!cation || !anion) return ''
+  return `${cation}|${anion}`
+}
+
+function normalizeIlAliasKey(input: string): string {
+  const raw = String(input || '').trim()
+  if (!raw) return ''
+
+  const bracketPair = raw.match(/\[([^\]]+)\]\s*\[([^\]]+)\]/i)
+  if (bracketPair) {
+    const cation = normalizeIlCationToken(bracketPair[1] || '')
+    const anion = normalizeIlAnionToken(bracketPair[2] || '')
+    if (cation && anion) return `${cation}|${anion}`
+  }
+
+  return inferIlAliasKeyFromName(raw)
+}
+
+function termsEquivalent(a: string, b: string): boolean {
+  const ilA = normalizeIlAliasKey(a)
+  const ilB = normalizeIlAliasKey(b)
+  if (ilA && ilB && ilA === ilB) return true
+
+  const aKey = normalizeTermKey(a)
+  const bKey = normalizeTermKey(b)
+  if (!aKey || !bKey) return false
+  if (aKey === bKey) return true
+  return aKey.includes(bKey) || bKey.includes(aKey)
+}
+
 function extractNumberTokens(input: string): string[] {
   return (String(input || '').match(/\d+(?:\.\d+)?/g) || []).map((v) => String(v))
 }
@@ -497,9 +591,20 @@ function findBestTermHit(ev: EvidenceResult | null | undefined, term: string): E
   if (!hits.length) return null
 
   const termRaw = String(term || '').trim()
+  const termIlKey = normalizeIlAliasKey(termRaw)
   const key = normalizeTermKey(termRaw)
   const keyWithoutPrefix = key.replace(/^[a-z]+/, '')
   const termNums = extractNumberTokens(termRaw)
+
+  if (termIlKey) {
+    const ilExact = hits.find((h) => {
+      const hk = normalizeIlAliasKey(h.term)
+      const mk = normalizeIlAliasKey(h.matched_text || '')
+      return hk === termIlKey || mk === termIlKey
+    })
+    if (ilExact && !ilExact.inferred) return ilExact
+    if (ilExact) return ilExact
+  }
 
   const exact = hits.find((h) => {
     const hk = normalizeTermKey(h.term)
@@ -605,6 +710,24 @@ function escapeHtml(input: string): string {
     .replace(/'/g, '&#39;')
 }
 
+function renderDigitsAsSubscriptHtml(input: string): string {
+  return input.replace(/(\d+)/g, '<sub>$1</sub>')
+}
+
+function formatIonicLiquidHtml(input: string | null | undefined): string {
+  const value = String(input || '').trim()
+  if (!value) return '--'
+  return renderDigitsAsSubscriptHtml(escapeHtml(value))
+}
+
+function formatEvidenceChipTermHtml(input: string): string {
+  const raw = String(input || '').trim()
+  if (!raw) return ''
+  const safe = escapeHtml(raw)
+  if (!normalizeIlAliasKey(raw)) return safe
+  return renderDigitsAsSubscriptHtml(safe)
+}
+
 function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
@@ -613,20 +736,64 @@ type EvidenceTermSpec = {
   term: string
   colorClass: string
   pdfColor: string
+  aliases?: string[]
 }
 
 function buildEvidenceTermSpecs(record: RecordResponse): EvidenceTermSpec[] {
   const ev = evidenceData.value[record.id]
   const specs: EvidenceTermSpec[] = []
   const seen = new Set<string>()
+  const keyToIndex = new Map<string, number>()
+  const lubricantDisplay = String(record.lubricant || '').trim()
+  const lubricantKey = normalizeTermKey(lubricantDisplay)
+  const lubricantIlKey = normalizeIlAliasKey(lubricantDisplay)
 
   const push = (term: string | null | undefined, colorClass: string, pdfColor: string) => {
-    const normalized = String(term || '').trim()
-    if (normalized.length < 2) return
-    const key = normalized.toLowerCase()
-    if (seen.has(key)) return
+    const raw = String(term || '').trim()
+    if (raw.length < 2) return
+
+    const normalizedKey = normalizeTermKey(raw)
+    if (!normalizedKey) return
+    const ilKey = normalizeIlAliasKey(raw)
+
+    // Keep only the current row's ionic liquid term; drop other IL names from evidence terms.
+    if (ilKey) {
+      if (lubricantIlKey) {
+        if (ilKey !== lubricantIlKey) return
+      } else if (!termsEquivalent(raw, lubricantDisplay)) {
+        return
+      }
+    }
+
+    // Keep IL aliases consistent with the IONIC LIQUID field display.
+    const display = (
+      (ilKey && lubricantIlKey && ilKey === lubricantIlKey)
+      || (lubricantDisplay && lubricantKey && normalizedKey === lubricantKey)
+    )
+      ? lubricantDisplay
+      : raw
+
+    const displayIlKey = normalizeIlAliasKey(display)
+    const key = displayIlKey ? `il:${displayIlKey}` : `txt:${normalizeEvidenceChipKey(display)}`
+    if (!key) return
+
+    if (seen.has(key)) {
+      const existingIndex = keyToIndex.get(key)
+      if (existingIndex == null) return
+      const existing = specs[existingIndex]
+      if (!existing) return
+      if (!termsEquivalent(existing.term, raw)) {
+        const aliases = new Set(existing.aliases || [])
+        aliases.add(raw)
+        existing.aliases = Array.from(aliases)
+      }
+      return
+    }
+
     seen.add(key)
-    specs.push({ term: normalized, colorClass, pdfColor })
+    keyToIndex.set(key, specs.length)
+    const aliases = termsEquivalent(display, raw) ? [] : [raw]
+    specs.push({ term: display, colorClass, pdfColor, aliases })
   }
 
   push(record.cofRaw || (record.cofValue != null ? String(record.cofValue) : ''), 'bg-yellow-200/90', 'rgba(250, 204, 21, 0.35)')
@@ -683,18 +850,33 @@ function highlightEvidenceHtml(record: RecordResponse): string {
   const raw = evidenceSnippet(record)
   if (!raw) return 'No quote text available.'
 
-  const specs = buildEvidenceTermSpecs(record).sort((a, b) => b.term.length - a.term.length)
+  const specs = buildEvidenceTermSpecs(record)
   let html = escapeHtml(raw)
   const tokens: Record<string, string> = {}
   let tokenCounter = 0
 
-  for (const spec of specs) {
-    const safeTerm = escapeHtml(spec.term)
+  const entries = specs
+    .flatMap((spec) => {
+      const allTerms = [spec.term, ...(spec.aliases || [])]
+      const seenTerms = new Set<string>()
+      const uniqueTerms: string[] = []
+      for (const t of allTerms) {
+        const normalized = normalizeTermKey(t)
+        if (!normalized || seenTerms.has(normalized)) continue
+        seenTerms.add(normalized)
+        uniqueTerms.push(t)
+      }
+      return uniqueTerms.map((matchTerm) => ({ spec, matchTerm }))
+    })
+    .sort((a, b) => b.matchTerm.length - a.matchTerm.length)
+
+  for (const entry of entries) {
+    const safeTerm = escapeHtml(entry.matchTerm)
     const pattern = new RegExp(escapeRegExp(safeTerm), 'gi')
     html = html.replace(pattern, (matched) => {
       const token = `__EVIDENCE_HL_${tokenCounter++}__`
       tokens[token] =
-        `<mark data-term="${escapeHtml(spec.term)}" class="cursor-pointer rounded px-0.5 text-slate-900 ${spec.colorClass}" title="Click to locate in PDF">${matched}</mark>`
+        `<mark data-term="${escapeHtml(entry.spec.term)}" class="cursor-pointer rounded px-0.5 text-slate-900 ${entry.spec.colorClass}" title="Click to locate in PDF">${matched}</mark>`
       return token
     })
   }
@@ -716,35 +898,33 @@ async function openTermInPdf(record: RecordResponse, term: string) {
     // Use cached evidence if refresh fails.
   }
   const hit = findBestTermHit(ev, term)
+  const specs = buildEvidenceTermSpecs(record)
   const termKey = normalizeTermKey(term)
-  const spec = buildEvidenceTermSpecs(record).find((s) => normalizeTermKey(s.term) === termKey)
-    || buildEvidenceTermSpecs(record).find((s) => {
+  const spec = specs.find((s) => termsEquivalent(s.term, term) || (s.aliases || []).some((a) => termsEquivalent(a, term)))
+    || specs.find((s) => {
       const k = normalizeTermKey(s.term)
       return k.includes(termKey) || termKey.includes(k)
     })
   const pdfColor = spec?.pdfColor || 'rgba(250, 204, 21, 0.35)'
   const isVisualSource = isVisualEvidenceSource(ev)
   let targetPage = hit?.page || ev?.page || 1
+  const previewSrc = evidenceImageSrc(record.id) || evidencePagePreviewSrc(record.id)
 
-  // Image/figure sourced values: open image preview directly by default.
-  // This avoids misleading text-based jumps for visual-only evidence.
-  if (isVisualSource) {
+  // If backend has no PDF available, fall back to image preview mode.
+  if (isVisualSource && !ev?.has_pdf && previewSrc) {
     targetPage = ev?.page || record.sourcePage || targetPage
-    // Prefer local crop image first; page thumbnail is fallback.
-    const previewSrc = evidenceImageSrc(record.id) || evidencePagePreviewSrc(record.id)
-    if (previewSrc) {
-      openImagePreview(
-        previewSrc,
-        `${ev?.source || 'Figure Evidence'} · Page ${targetPage}`,
-      )
-      return
-    }
+    openImagePreview(
+      previewSrc,
+      `${ev?.source || 'Figure Evidence'} · Page ${targetPage}`,
+    )
+    return
   }
 
   let highlight: HighlightRect
   if (isVisualSource) {
-    targetPage = ev?.page || record.sourcePage || 1
+    targetPage = hit?.page || ev?.page || record.sourcePage || 1
     highlight =
+      buildHighlightRect(`${record.id}-visual-term-${Date.now()}`, hit?.page || 0, hit?.bbox, pdfColor) ||
       buildHighlightRect(`${record.id}-visual-${Date.now()}`, ev?.page || 0, ev?.bbox, pdfColor) ||
       buildPageAnchorHighlight(`${record.id}-visual-page-${targetPage}-${Date.now()}`, targetPage, pdfColor)
   } else {
@@ -765,7 +945,9 @@ async function openTermInPdf(record: RecordResponse, term: string) {
   pdfLocate.value.notice = ''
 
   if (isVisualSource) {
-    if (ev?.bbox && ev?.bbox.length === 4) {
+    if (hit?.bbox && hit?.bbox.length === 4) {
+      pdfLocate.value.notice = `Visual evidence detected (${ev?.source || 'Figure'}). Positioned using "${term}" in the grounded region.`
+    } else if (ev?.bbox && ev?.bbox.length === 4) {
       pdfLocate.value.notice = `Visual evidence detected (${ev?.source || 'Figure'}). Positioned to the source image region.`
     } else {
       pdfLocate.value.notice = `Visual evidence detected (${ev?.source || 'Figure'}), but no exact figure bbox was found. Positioned to page ${targetPage}.`
@@ -1283,7 +1465,7 @@ watch(
               <template v-for="record in result.items" :key="record.id">
                 <tr class="cursor-pointer border-t border-slate-100 hover:bg-blue-50/20 dark:border-slate-800 dark:hover:bg-blue-500/6" @click="toggleRow(record)">
                   <td class="px-4 py-4 text-slate-500 dark:text-slate-400">{{ record.id }}</td>
-                  <td class="px-4 py-4 font-semibold text-slate-800 dark:text-slate-100">{{ record.lubricant || '--' }}</td>
+                  <td class="px-4 py-4 font-semibold text-slate-800 dark:text-slate-100" v-html="formatIonicLiquidHtml(record.lubricant || '--')"></td>
                   <td class="px-4 py-4 text-slate-600 dark:text-slate-300">{{ record.materialName || '--' }}</td>
                   <td class="px-4 py-4 text-slate-600 dark:text-slate-300">{{ record.temperature || '--' }}</td>
                   <td class="px-4 py-4">
@@ -1668,7 +1850,7 @@ watch(
                               :title="`Locate '${chip.term}' in PDF`"
                               @click="openTermInPdf(record, chip.term)"
                             >
-                              {{ chip.term }}
+                              <span v-html="formatEvidenceChipTermHtml(chip.term)"></span>
                             </button>
                           </div>
 

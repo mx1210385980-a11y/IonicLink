@@ -387,6 +387,27 @@ export interface AgentStatusResponse {
     recent_messages: AgentMessage[]
 }
 
+export interface UsageMetricEvent {
+    timestamp: string
+    category: string
+    action: string
+    detail?: Record<string, any>
+}
+
+export interface UsageMetricsResponse {
+    started_at: string
+    uptime_seconds: number
+    totals: {
+        agent_calls: number
+        db_queries: number
+        api_calls: number
+    }
+    agent_calls_by_receiver: Record<string, number>
+    agent_calls_by_task: Record<string, number>
+    db_queries_by_operation: Record<string, number>
+    recent_events: UsageMetricEvent[]
+}
+
 export interface SyncResult {
     success: boolean
     literatureId: number
@@ -654,6 +675,11 @@ export async function reprocessLiterature(literatureId: number) {
 
 export async function getAgentStatus(): Promise<AgentStatusResponse> {
     const response = await api.get('/api/agents/status')
+    return response.data
+}
+
+export async function getUsageMetrics(): Promise<UsageMetricsResponse> {
+    const response = await api.get('/api/agents/usage')
     return response.data
 }
 

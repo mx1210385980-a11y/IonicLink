@@ -19,10 +19,12 @@ import CardHeader from '@/components/ui/CardHeader.vue'
 import CardTitle from '@/components/ui/CardTitle.vue'
 import {
   getAgentStatus,
+  getUsageMetrics,
   type AgentMessage,
   type AgentStatusItem,
   type AgentWorkflow,
   type ExtractionRunDetail,
+  type UsageMetricsResponse,
 } from '@/lib/api'
 
 const props = defineProps<{
@@ -35,11 +37,23 @@ const loading = ref(true)
 const errorMessage = ref('')
 const statusItems = ref<AgentStatusItem[]>([])
 const recentMessages = ref<AgentMessage[]>([])
+const usageMetrics = ref<UsageMetricsResponse | null>(null)
 const lastUpdated = ref<string | null>(null)
 
 let refreshTimer: ReturnType<typeof setInterval> | null = null
 
 const handledTotal = computed(() => statusItems.value.reduce((sum, item) => sum + (item.handled_tasks || 0), 0))
+const behaviorTotals = computed(() => usageMetrics.value?.totals || { agent_calls: 0, db_queries: 0, api_calls: 0 })
+const topDbOperations = computed(() =>
+  Object.entries(usageMetrics.value?.db_queries_by_operation || {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4),
+)
+const topAgentTasks = computed(() =>
+  Object.entries(usageMetrics.value?.agent_calls_by_task || {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4),
+)
 const workflowMessages = computed(() => props.workflow?.messages || [])
 const validationSummary = computed(() => props.workflow?.validation || null)
 const insightSummary = computed(() => props.workflow?.insight || null)
@@ -110,9 +124,15 @@ const agentCards = computed(() => {
 
 async function fetchAgentStatus() {
   try {
-    const payload = await getAgentStatus()
+    const [payload, usagePayload] = await Promise.all([
+      getAgentStatus(),
+      getUsageMetrics().catch(() => null),
+    ])
     statusItems.value = payload.agents || []
     recentMessages.value = payload.recent_messages || []
+    if (usagePayload) {
+      usageMetrics.value = usagePayload
+    }
     lastUpdated.value = new Date().toLocaleTimeString()
     errorMessage.value = ''
   } catch (error: any) {
@@ -295,6 +315,54 @@ onBeforeUnmount(() => {
           <div class="rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-sm dark:border-slate-800 dark:bg-slate-900/90">
             <div class="text-[10px] uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Warnings</div>
             <div class="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">{{ validationSummary?.warnings?.length || 0 }}</div>
+          </div>
+        </div>
+
+        <div class="rounded-3xl border border-slate-200 bg-white p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900/90">
+          <div class="mb-2 flex items-center justify-between">
+            <div class="flex items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-200">
+              <Database class="h-4 w-4 text-slate-500 dark:text-slate-400" />
+              Backend Usage Metrics
+            </div>
+            <div class="text-[10px] uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">
+              runtime
+            </div>
+          </div>
+          <div class="grid grid-cols-3 gap-2">
+            <div class="rounded-2xl bg-slate-50 px-3 py-2 dark:bg-slate-800/80">
+              <div class="text-[10px] uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Agent Calls</div>
+              <div class="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">{{ behaviorTotals.agent_calls }}</div>
+            </div>
+            <div class="rounded-2xl bg-slate-50 px-3 py-2 dark:bg-slate-800/80">
+              <div class="text-[10px] uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">DB Queries</div>
+              <div class="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">{{ behaviorTotals.db_queries }}</div>
+            </div>
+            <div class="rounded-2xl bg-slate-50 px-3 py-2 dark:bg-slate-800/80">
+              <div class="text-[10px] uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">API Calls</div>
+              <div class="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">{{ behaviorTotals.api_calls }}</div>
+            </div>
+          </div>
+          <div class="mt-2 grid grid-cols-2 gap-2">
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-800/70">
+              <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Top DB Ops</div>
+              <div v-if="topDbOperations.length" class="space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+                <div v-for="[name, count] in topDbOperations" :key="`db-${name}`" class="flex items-center justify-between gap-2">
+                  <span class="truncate">{{ name }}</span>
+                  <span class="font-semibold text-slate-900 dark:text-slate-100">{{ count }}</span>
+                </div>
+              </div>
+              <div v-else class="text-[11px] text-slate-400 dark:text-slate-500">No DB metrics yet</div>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-800/70">
+              <div class="mb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Top Agent Tasks</div>
+              <div v-if="topAgentTasks.length" class="space-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+                <div v-for="[name, count] in topAgentTasks" :key="`agent-${name}`" class="flex items-center justify-between gap-2">
+                  <span class="truncate">{{ name }}</span>
+                  <span class="font-semibold text-slate-900 dark:text-slate-100">{{ count }}</span>
+                </div>
+              </div>
+              <div v-else class="text-[11px] text-slate-400 dark:text-slate-500">No agent metrics yet</div>
+            </div>
           </div>
         </div>
 

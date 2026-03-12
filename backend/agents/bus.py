@@ -6,12 +6,14 @@ from typing import Any
 
 from .contracts import AgentExecutionResult, AgentMessage, AgentTask
 from .registry import AgentRegistry
+from services.usage_metrics_service import get_usage_metrics_service
 
 
 class InMemoryAgentBus:
     def __init__(self, registry: AgentRegistry, history_limit: int = 200):
         self._registry = registry
         self._history: deque[AgentMessage] = deque(maxlen=history_limit)
+        self._usage_metrics = get_usage_metrics_service()
 
     async def request(
         self,
@@ -29,6 +31,12 @@ class InMemoryAgentBus:
             payload=payload or {},
             context={**(context or {}), "started_at": started_at},
             task_id=task_id or AgentTask(task_type=task_type).task_id,
+        )
+        self._usage_metrics.record_agent_call(
+            receiver=receiver,
+            task_type=task_type,
+            sender=sender,
+            via="agent_bus.request",
         )
         self._history.append(
             AgentMessage(

@@ -10,6 +10,12 @@ from sqlalchemy.orm import selectinload
 from models.db_models import Literature, TribologyData
 from services.file_service import _normalize_record_chemistry
 from services.score_service import calculate_confidence, calculate_confidence_details
+from services.usage_metrics_service import get_usage_metrics_service
+
+
+async def _execute_counted(session: AsyncSession, stmt: Any, *, operation: str):
+    get_usage_metrics_service().record_db_query(operation=operation)
+    return await session.execute(stmt)
 
 
 def _build_conditions(filter_params: Any):
@@ -178,7 +184,7 @@ async def search_records(
             stmt = stmt.where(and_(*conditions))
         stmt = stmt.order_by(TribologyData.id)
 
-        result = await session.execute(stmt)
+        result = await _execute_counted(session, stmt, operation="search_records.load_filtered")
         all_records = result.scalars().all()
 
         filtered_records = []
@@ -198,7 +204,7 @@ async def search_records(
         count_stmt = select(func.count(TribologyData.id)).join(TribologyData.literature)
         if conditions:
             count_stmt = count_stmt.where(and_(*conditions))
-        total_result = await session.execute(count_stmt)
+        total_result = await _execute_counted(session, count_stmt, operation="search_records.count")
         total = total_result.scalar() or 0
 
         stmt = (
@@ -210,7 +216,7 @@ async def search_records(
             stmt = stmt.where(and_(*conditions))
         stmt = stmt.order_by(TribologyData.id).offset(skip).limit(limit)
 
-        result = await session.execute(stmt)
+        result = await _execute_counted(session, stmt, operation="search_records.page")
         records = result.scalars().all()
 
     return {
@@ -222,10 +228,18 @@ async def search_records(
 
 
 async def get_filter_options(session: AsyncSession) -> dict[str, list[str]]:
-    result_materials = await session.execute(select(TribologyData.material_name).distinct())
+    result_materials = await _execute_counted(
+        session,
+        select(TribologyData.material_name).distinct(),
+        operation="filter_options.materials",
+    )
     materials = result_materials.scalars().all()
 
-    result_lubricants = await session.execute(select(TribologyData.lubricant).distinct())
+    result_lubricants = await _execute_counted(
+        session,
+        select(TribologyData.lubricant).distinct(),
+        operation="filter_options.lubricants",
+    )
     lubricants = result_lubricants.scalars().all()
 
     normalized_lubricants: list[str] = []
@@ -297,7 +311,7 @@ def validate_extraction_result(records: list[dict[str, Any]], extraction_summary
 
 
 async def summarize_confidence_buckets(session: AsyncSession) -> dict[str, Any]:
-    conf_records = (await session.execute(select(TribologyData))).scalars().all()
+    conf_records = (await _execute_counted(session, select(TribologyData), operation="confidence_buckets.records")).scalars().all()
     runtime_conf = []
     bucket_scores = {
         "text_grounded": [],
@@ -353,7 +367,7 @@ async def top_entities(session: AsyncSession) -> dict[str, Any]:
         .where(TribologyData.material_name != "")
         .limit(5)
     )
-    mat_res = await session.execute(mat_stmt)
+    mat_res = await _execute_counted(session, mat_stmt, operation="top_entities.materials")
 
     il_stmt = (
         select(TribologyData.lubricant, func.count("*"))
@@ -365,7 +379,7 @@ async def top_entities(session: AsyncSession) -> dict[str, Any]:
         .where(~func.lower(TribologyData.lubricant).like("%chcl%"))
         .limit(5)
     )
-    il_res = await session.execute(il_stmt)
+    il_res = await _execute_counted(session, il_stmt, operation="top_entities.liquids")
 
     return {
         "materials_ratio": [{"name": row[0], "count": row[1]} for row in mat_res.all() if row[0]],

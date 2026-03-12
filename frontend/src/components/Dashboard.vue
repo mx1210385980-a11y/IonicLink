@@ -279,7 +279,7 @@ onMounted(() => {
               <div v-for="bucket in confidenceBreakdownItems" :key="bucket.key">
                 <div class="mb-1 flex items-center justify-between text-[11px]">
                   <span class="font-semibold text-slate-600">{{ confidenceBucketLabel(bucket.key) }}</span>
-                  <span class="text-slate-500">{{ bucket.count }} rec · {{ formatConfidencePercent(bucket.avg_percent) }}</span>
+                  <span class="text-slate-500">{{ bucket.count }} rec / {{ formatConfidencePercent(bucket.avg_percent) }}</span>
                 </div>
                 <div class="h-1.5 overflow-hidden rounded-full bg-slate-100">
                   <div
@@ -309,7 +309,6 @@ onMounted(() => {
               <span class="w-2 h-2 rounded-full bg-blue-500" />
               Publication & Data Trend
             </CardTitle>
-            <Button variant="ghost" size="sm" class="text-sm text-blue-500 hover:text-blue-600">View Report</Button>
           </div>
         </CardHeader>
         <CardContent>
@@ -450,3 +449,4 @@ onMounted(() => {
 <style scoped>
 /* Scoped styles if necessary, layout relies mainly on Tailwind classes */
 </style>
+
