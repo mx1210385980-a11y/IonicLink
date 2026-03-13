@@ -10,7 +10,7 @@ Two-tier strategy:
 import re
 from typing import Optional, Dict, List, Any, Iterable, Tuple
 
-from knowledge_base import normalize_ionic_liquid
+from knowledge_base import il_kb, normalize_ionic_liquid
 
 # Try importing pubchempy; gracefully degrade if not installed
 try:
@@ -155,6 +155,14 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
         "alkyl_chain_length": 4,
         "aliases": ["N4,4,4,4", "n4444"],
     },
+    "EA": {
+        "smiles": "CC[NH3+]",
+        "display_name": "EA",
+        "full_name": "ethylammonium",
+        "family": "ammonium",
+        "alkyl_chain_length": 2,
+        "aliases": ["ea", "ethylammonium", "ethyl ammonium", "EtNH3", "EtNH3+"],
+    },
     # Morpholinium-based
     "MOR11": {
         "smiles": "C[N+]1(C)CCOCC1",
@@ -244,6 +252,11 @@ ANION_DB: Dict[str, Dict[str, Any]] = {
         "full_name": "thiocyanate",
         "aliases": ["scn", "SCN-"],
     },
+    "NO3": {
+        "smiles": "[O-][N+](=O)[O-]",
+        "full_name": "nitrate",
+        "aliases": ["no3", "NO3-", "nitrate"],
+    },
     "BScB": {
         "smiles": "[B-]1(OC2=CC=CC=C2C(=O)O1)OC3=CC=CC=C3C(=O)O",
         "full_name": "bis(salicylato)borate",
@@ -279,6 +292,18 @@ def _build_lookup(db: Dict[str, Dict]) -> Dict[str, str]:
 
 _cation_lookup = _build_lookup(CATION_DB)
 _anion_lookup = _build_lookup(ANION_DB)
+
+_NON_IL_PATTERNS = [
+    r"^\s*\d+(?:\.\d+)?\s*(?:wt\.?%|mass\.?%|vol\.?%)?\s*water\s*$",
+    r"^\s*water\s*$",
+    r"\bdeep eutectic\b",
+    r"\bdes\b",
+    r"\bethaline\b",
+    r"\bcholine chloride\b.*\bethylene glycol\b",
+    r"\bethylene glycol\b.*\bcholine chloride\b",
+    r"\bchcl\b.*\beg\b",
+    r"\beg\b.*\bchcl\b",
+]
 
 
 def _normalize_lookup_key(value: str) -> str:
@@ -487,9 +512,13 @@ def resolve_il(name: str) -> Dict[str, Any]:
     normalized_name = normalize_ionic_liquid(name) or name
 
     # Step 1: Parse into cation/anion
-    parsed = parse_il_notation(normalized_name)
-    cation_raw = parsed["cation_raw"]
-    anion_raw = parsed["anion_raw"]
+    if normalized_name.strip().lower() == "ean" or "ethylammonium nitrate" in normalized_name.strip().lower():
+        cation_raw = "EA"
+        anion_raw = "NO3"
+    else:
+        parsed = parse_il_notation(normalized_name)
+        cation_raw = parsed["cation_raw"]
+        anion_raw = parsed["anion_raw"]
 
     if not cation_raw:
         cation_raw = _match_component_from_text(normalized_name, CATION_DB)
@@ -534,6 +563,60 @@ def resolve_il(name: str) -> Dict[str, Any]:
             print(f"[IL Resolver] PubChemPy hit: SMILES={result['il_smiles']}")
     
     return result
+
+
+def is_supported_ionic_liquid_name(name: Optional[str]) -> bool:
+    """
+    Return True when the provided lubricant string represents an ionic liquid
+    that should be kept in extraction/sync flows.
+
+    This explicitly rejects DES / water-only modifiers while preserving IL
+    names that can be recognized from the knowledge base or cation/anion
+    matching logic.
+    """
+    raw = str(name or "").strip()
+    if not raw or raw.lower() in {"unknown il", "unknown", "-", "n/a", "none", "--"}:
+        return False
+
+    normalized = normalize_ionic_liquid(raw) or raw
+    normalized_lower = normalized.lower()
+
+    if normalized_lower == "ean" or "ethylammonium nitrate" in normalized_lower:
+        return True
+
+    info = il_kb.get_term_info(normalized)
+    if info:
+        return not bool(info.get("is_des"))
+
+    for pattern in _NON_IL_PATTERNS:
+        if re.search(pattern, normalized_lower, flags=re.IGNORECASE):
+            return False
+
+    parsed = parse_il_notation(normalized)
+    cation_raw = parsed.get("cation_raw") or _match_component_from_text(normalized, CATION_DB)
+    anion_raw = parsed.get("anion_raw") or _match_component_from_text(normalized, ANION_DB)
+
+    cation_canonical = _find_cation(cation_raw) if cation_raw else None
+    anion_canonical = _find_anion(anion_raw) if anion_raw else None
+
+    return bool(cation_canonical and anion_canonical)
+
+
+def filter_to_supported_ionic_liquid_records(data_items: List[dict]) -> tuple[List[dict], List[dict]]:
+    """
+    Keep only ionic-liquid records and return (kept, dropped).
+    """
+    kept: List[dict] = []
+    dropped: List[dict] = []
+
+    for item in data_items or []:
+        lubricant = item.get("ionic_liquid") or item.get("lubricant") or ""
+        if is_supported_ionic_liquid_name(lubricant):
+            kept.append(item)
+        else:
+            dropped.append(item)
+
+    return kept, dropped
 
 
 def resolve_and_enrich_records(data_items: List[dict]) -> List[dict]:

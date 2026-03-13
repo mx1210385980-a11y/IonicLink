@@ -30,7 +30,7 @@ from services.llm.utils import normalize_record_value
 from knowledge_base import normalize_ionic_liquid
 from services.score_service import calculate_confidence
 from services.fallback_extraction_service import extract_metadata_fallback, extract_table_fallback_records
-from services.il_resolver_service import resolve_il
+from services.il_resolver_service import filter_to_supported_ionic_liquid_records, resolve_il
 from services.extraction_trace_service import (
     add_extraction_candidates,
     create_extraction_run,
@@ -38,6 +38,7 @@ from services.extraction_trace_service import (
     update_extraction_run_progress,
 )
 from models.tribology import TribologyData as ExtractTribologyData
+from security import AuthPrincipal, RequestScope, build_scope_key, can_manage_literature
 
 TEMP_UPLOAD_DIR = "temp_uploads"
 
@@ -80,6 +81,9 @@ def _extract_doi_candidates(text_content: str, filename: str) -> list[str]:
 async def _find_existing_by_title_fallback(
     db: AsyncSession,
     filename: str,
+    *,
+    group_id: int,
+    scope_key: str,
 ) -> Optional[Literature]:
     filename_key = _title_key(filename)
     if not filename_key or len(filename_key) < 24:
@@ -87,7 +91,13 @@ async def _find_existing_by_title_fallback(
 
     candidates = (
         await db.execute(
-            select(Literature).where(~Literature.doi.like("temp-%")).order_by(Literature.created_at.desc())
+            select(Literature)
+            .where(
+                Literature.group_id == group_id,
+                Literature.scope_key == scope_key,
+                ~Literature.doi.like("temp-%"),
+            )
+            .order_by(Literature.created_at.desc())
         )
     ).scalars().all()
 
@@ -539,13 +549,20 @@ async def _load_cached_extraction_result(
     }
     return metadata, data_list, cache_summary
 
-async def save_upload_entry(db: AsyncSession, file: UploadFile) -> Literature:
+async def save_upload_entry(
+    db: AsyncSession,
+    file: UploadFile,
+    *,
+    principal: AuthPrincipal,
+    scope: RequestScope,
+) -> Literature:
     """
     Save upload entry to DB.
     Non-destructive: If DOI exists with completed status, returns it.
     Uses DOI as unique identifier for deduplication.
     """
     try:
+        scope_key = build_scope_key(scope.scope_type, scope.workspace.id if scope.workspace else None)
         # 1. Read file content
         content_bytes = await file.read()
         await file.seek(0)
@@ -563,11 +580,19 @@ async def save_upload_entry(db: AsyncSession, file: UploadFile) -> Literature:
             for normalized_doi in doi_candidates:
                 print(f"[Upload] Extracted DOI candidate: {normalized_doi}")
                 existing_doi_match = (
-                    await db.execute(select(Literature).where(Literature.doi == normalized_doi))
+                    await db.execute(
+                        select(Literature).where(
+                            Literature.group_id == principal.group.id,
+                            Literature.scope_key == scope_key,
+                            Literature.doi == normalized_doi,
+                        )
+                    )
                 ).scalar_one_or_none()
                 if not existing_doi_match:
                     continue
                 print(f"[Upload] DOI Cache HIT ({normalized_doi}) -> existing ID {existing_doi_match.id} status={existing_doi_match.status}")
+                if not can_manage_literature(principal, existing_doi_match):
+                    return existing_doi_match
                 existing_doi_match.content = text_content or existing_doi_match.content
                 if file.filename.lower().endswith('.pdf') and (not existing_doi_match.file_path or not os.path.exists(existing_doi_match.file_path)):
                     pdf_dir = os.path.join(TEMP_UPLOAD_DIR, "pdfs")
@@ -582,8 +607,15 @@ async def save_upload_entry(db: AsyncSession, file: UploadFile) -> Literature:
                     existing_doi_match.error_message = None
                 await db.commit()
                 return existing_doi_match
-            fallback_match = await _find_existing_by_title_fallback(db, file.filename)
+            fallback_match = await _find_existing_by_title_fallback(
+                db,
+                file.filename,
+                group_id=principal.group.id,
+                scope_key=scope_key,
+            )
             if fallback_match:
+                if not can_manage_literature(principal, fallback_match):
+                    return fallback_match
                 fallback_match.content = text_content or fallback_match.content
                 if file.filename.lower().endswith('.pdf') and (not fallback_match.file_path or not os.path.exists(fallback_match.file_path)):
                     pdf_dir = os.path.join(TEMP_UPLOAD_DIR, "pdfs")
@@ -615,7 +647,12 @@ async def save_upload_entry(db: AsyncSession, file: UploadFile) -> Literature:
             year=0,
             file_path=None, 
             content=text_content,
-            status="pending" 
+            status="pending",
+            group_id=principal.group.id,
+            workspace_id=scope.workspace.id if scope.workspace else None,
+            created_by_user_id=principal.user.id,
+            scope_type=scope.scope_type,
+            scope_key=scope_key,
         )
         db.add(new_lit)
         await db.commit()
@@ -656,7 +693,9 @@ async def _safe_update_doi(db: AsyncSession, literature, new_doi: str) -> bool:
     result = await db.execute(
         select(Literature).where(
             Literature.doi == norm,
-            Literature.id != literature.id
+            Literature.id != literature.id,
+            Literature.group_id == literature.group_id,
+            Literature.scope_key == literature.scope_key,
         )
     )
     conflict = result.scalar_one_or_none()
@@ -1058,6 +1097,9 @@ async def process_file_safe(
             if isinstance(records, list) and records:
                 _apply_default_temperature(records)
                 _normalize_record_chemistry(records)
+                records, dropped_non_il = filter_to_supported_ionic_liquid_records(records)
+                if dropped_non_il:
+                    print(f"[IL Filter] Dropped {len(dropped_non_il)} non-ionic-liquid records before persistence.")
             
             # 5. Save Results
             if records:
@@ -1438,6 +1480,9 @@ async def reprocess_literature(
         if isinstance(data_list, list) and data_list:
             _apply_default_temperature(data_list)
             _normalize_record_chemistry(data_list)
+            data_list, dropped_non_il = filter_to_supported_ionic_liquid_records(data_list)
+            if dropped_non_il:
+                print(f"[Reprocess][IL Filter] Dropped {len(dropped_non_il)} non-ionic-liquid records before persistence.")
         data_list, _merge_report, _ = _final_merge_records(data_list)
         
         # Step 5: Atomic Replace

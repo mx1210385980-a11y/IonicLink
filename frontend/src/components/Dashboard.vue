@@ -10,6 +10,7 @@ import Card from '@/components/ui/Card.vue'
 import CardHeader from '@/components/ui/CardHeader.vue'
 import CardTitle from '@/components/ui/CardTitle.vue'
 import CardContent from '@/components/ui/CardContent.vue'
+import { getDashboardStats } from '@/lib/api'
 
 // --- Register Chart.js Components ---
 ChartJS.register(
@@ -22,7 +23,7 @@ interface DashboardStats {
   total_records: number
   literature_count: number
   distinct_il_count: number
-  cof_stats: { min: number, max: number, avg: number }
+  cof_stats: { min: number | null, max: number | null, avg: number | null }
   confidence_stats?: {
     avg: number | null
     avg_percent: number | null
@@ -65,10 +66,7 @@ const CHAT_COLORS = [
 // --- Methods ---
 async function fetchStats() {
   try {
-    const res = await fetch('/api/records/stats')
-    if (res.ok) {
-      stats.value = await res.json()
-    }
+    stats.value = await getDashboardStats()
   } catch (e) {
     console.error('Failed to fetch stats:', e)
   } finally {

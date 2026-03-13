@@ -32,6 +32,7 @@ import {
 } from 'lucide-vue-next'
 import Modal from '@/components/ui/Modal.vue'
 import PdfViewerWithHighlight from '@/components/PdfViewerWithHighlight.vue'
+import MoleculeViewer from '@/components/MoleculeViewer.vue'
 import type { HighlightRect } from '@/types/pdf-highlight'
 
 const props = defineProps<{
@@ -104,6 +105,23 @@ const imagePreview = ref<{
   src: '',
   title: '',
   scale: 1,
+})
+const structurePreview = ref<{
+  open: boolean
+  rowId: number | null
+  title: string
+  cationSmiles: string | null
+  anionSmiles: string | null
+  cationLabel: string
+  anionLabel: string
+}>({
+  open: false,
+  rowId: null,
+  title: '',
+  cationSmiles: null,
+  anionSmiles: null,
+  cationLabel: 'Cation',
+  anionLabel: 'Anion',
 })
 type EvidenceTermHit = {
   term: string
@@ -375,6 +393,26 @@ function toggleRow(record: RecordResponse) {
   fetchEvidence(record)
 }
 
+function openStructurePreview(record: RecordResponse) {
+  if (expandedRowId.value !== record.id) {
+    toggleRow(record)
+  }
+  structurePreview.value = {
+    open: true,
+    rowId: record.id,
+    title: record.lubricant || 'Chemical Structure',
+    cationSmiles: record.cationSmiles || null,
+    anionSmiles: record.anionSmiles || null,
+    cationLabel: record.cation ? `Cation: ${record.cation}` : 'Cation',
+    anionLabel: record.anion ? `Anion: ${record.anion}` : 'Anion',
+  }
+}
+
+function closeStructurePreview() {
+  structurePreview.value.open = false
+  structurePreview.value.rowId = null
+}
+
 function updateEditingField(recordId: number, field: keyof EditableRecordValues, value: string) {
   const target = editingValues.value[recordId]
   if (!target) return
@@ -435,6 +473,7 @@ function onGlobalKeydown(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
   if (showExportMenu.value) showExportMenu.value = false
   if (imagePreview.value.open) closeImagePreview()
+  if (structurePreview.value.open) closeStructurePreview()
   if (pdfLocate.value.open) closePdfLocate()
   activeConfidencePopoverId.value = null
 }
@@ -710,14 +749,28 @@ function escapeHtml(input: string): string {
     .replace(/'/g, '&#39;')
 }
 
-function renderDigitsAsSubscriptHtml(input: string): string {
-  return input.replace(/(\d+)/g, '<sub>$1</sub>')
+function renderChemicalDigitsAsSubscriptHtml(input: string): string {
+  // Subscript digits only inside chemical-looking tokens.
+  // This preserves normal prose like "30 wt.% water" while still formatting
+  // PF6, H2O, C8mim, [P6,6,6,14], [N1,8,8,8], etc.
+  return input.replace(/(\[[A-Za-z][A-Za-z0-9,+\-\s]*\]|[A-Za-z][A-Za-z0-9,+\-\[\]\(\)]*)/g, (token) => {
+    if (!/[A-Za-z]/.test(token) || !/\d/.test(token)) {
+      return token
+    }
+
+    // Skip plain measurement/value phrases that only start with digits or are not chemical tokens.
+    if (/^\d/.test(token)) {
+      return token
+    }
+
+    return token.replace(/(\d+)/g, '<sub>$1</sub>')
+  })
 }
 
 function formatIonicLiquidHtml(input: string | null | undefined): string {
   const value = String(input || '').trim()
   if (!value) return '--'
-  return renderDigitsAsSubscriptHtml(escapeHtml(value))
+  return renderChemicalDigitsAsSubscriptHtml(escapeHtml(value))
 }
 
 function formatEvidenceChipTermHtml(input: string): string {
@@ -725,7 +778,7 @@ function formatEvidenceChipTermHtml(input: string): string {
   if (!raw) return ''
   const safe = escapeHtml(raw)
   if (!normalizeIlAliasKey(raw)) return safe
-  return renderDigitsAsSubscriptHtml(safe)
+  return renderChemicalDigitsAsSubscriptHtml(safe)
 }
 
 function escapeRegExp(input: string): string {
@@ -1465,7 +1518,43 @@ watch(
               <template v-for="record in result.items" :key="record.id">
                 <tr class="cursor-pointer border-t border-slate-100 hover:bg-blue-50/20 dark:border-slate-800 dark:hover:bg-blue-500/6" @click="toggleRow(record)">
                   <td class="px-4 py-4 text-slate-500 dark:text-slate-400">{{ record.id }}</td>
-                  <td class="px-4 py-4 font-semibold text-slate-800 dark:text-slate-100" v-html="formatIonicLiquidHtml(record.lubricant || '--')"></td>
+                  <td class="px-4 py-4">
+                    <div class="flex items-center gap-2">
+                      <div v-if="record.cationSmiles || record.anionSmiles" class="flex gap-1 shrink-0">
+                        <button
+                          v-if="record.cationSmiles"
+                          type="button"
+                          class="rounded-md transition hover:scale-[1.02]"
+                          :class="structurePreview.open && structurePreview.rowId === record.id ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-950' : ''"
+                          title="Show chemical structures"
+                          @click.stop="openStructurePreview(record)"
+                        >
+                          <MoleculeViewer
+                            :smiles="record.cationSmiles"
+                            size="thumbnail"
+                            :width="40"
+                            :height="30"
+                          />
+                        </button>
+                        <button
+                          v-if="record.anionSmiles"
+                          type="button"
+                          class="rounded-md transition hover:scale-[1.02]"
+                          :class="structurePreview.open && structurePreview.rowId === record.id ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-950' : ''"
+                          title="Show chemical structures"
+                          @click.stop="openStructurePreview(record)"
+                        >
+                          <MoleculeViewer
+                            :smiles="record.anionSmiles"
+                            size="thumbnail"
+                            :width="40"
+                            :height="30"
+                          />
+                        </button>
+                      </div>
+                      <div class="font-semibold text-slate-800 dark:text-slate-100" v-html="formatIonicLiquidHtml(record.lubricant || '--')"></div>
+                    </div>
+                  </td>
                   <td class="px-4 py-4 text-slate-600 dark:text-slate-300">{{ record.materialName || '--' }}</td>
                   <td class="px-4 py-4 text-slate-600 dark:text-slate-300">{{ record.temperature || '--' }}</td>
                   <td class="px-4 py-4">
@@ -1507,7 +1596,7 @@ watch(
 
                 <tr v-if="expandedRowId === record.id" class="border-t bg-slate-50/50 dark:border-slate-800 dark:bg-slate-900/50">
                   <td colspan="7" class="px-4 py-4">
-                    <div class="grid gap-4 md:grid-cols-3">
+                    <div class="grid gap-4 lg:grid-cols-3">
                       <div class="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
                         <div class="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-200">
                           <BookOpen class="h-4 w-4" /> Reference Details
@@ -1876,6 +1965,7 @@ watch(
                         <p v-else class="text-xs text-slate-400 dark:text-slate-500">No evidence available</p>
                       </div>
                     </div>
+
                   </td>
                 </tr>
               </template>
@@ -1934,6 +2024,33 @@ watch(
           :active-id="pdfLocate.activeHighlightId"
           @highlight-click="onPdfLocateHighlightClick"
         />
+      </div>
+    </Modal>
+
+    <Modal :show="structurePreview.open" max-width="4xl" @close="closeStructurePreview">
+      <template #header>
+        <div class="flex items-center justify-between gap-4">
+          <span class="text-base font-semibold text-slate-900 dark:text-slate-100">
+            Chemical Structure · {{ structurePreview.title || 'Preview' }}
+          </span>
+        </div>
+      </template>
+
+      <div class="grid gap-4 md:grid-cols-2">
+        <div v-if="structurePreview.cationSmiles">
+          <MoleculeViewer
+            :smiles="structurePreview.cationSmiles"
+            :label="structurePreview.cationLabel"
+            size="full"
+          />
+        </div>
+        <div v-if="structurePreview.anionSmiles">
+          <MoleculeViewer
+            :smiles="structurePreview.anionSmiles"
+            :label="structurePreview.anionLabel"
+            size="full"
+          />
+        </div>
       </div>
     </Modal>
 

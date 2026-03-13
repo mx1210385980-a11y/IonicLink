@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.db_models import TribologyData
 from schemas import SyncPayload
+from security import AuthPrincipal, RequestScope, scope_filters
 from services.agent_runtime_service import get_agent_runtime
 from services.data_sync_service import (
     delete_literature,
@@ -40,6 +41,10 @@ def _literature_to_payload(literature) -> dict[str, Any]:
         "issue": literature.issue,
         "pages": literature.pages,
         "filePath": literature.file_path or "",
+        "groupId": getattr(literature, "group_id", None),
+        "workspaceId": getattr(literature, "workspace_id", None),
+        "createdByUserId": getattr(literature, "created_by_user_id", None),
+        "scopeType": getattr(literature, "scope_type", None),
         "created_at": literature.created_at,
     }
 
@@ -80,38 +85,56 @@ def _record_to_payload(record) -> dict[str, Any]:
     }
 
 
-async def sync_payload(db: AsyncSession, payload: SyncPayload, *, replace: bool = False):
-    result = await (sync_batch_data_with_replacement(db, payload) if replace else sync_batch_data(db, payload))
+async def sync_payload(
+    db: AsyncSession,
+    payload: SyncPayload,
+    *,
+    principal: AuthPrincipal,
+    scope: RequestScope,
+    replace: bool = False,
+):
+    result = await (
+        sync_batch_data_with_replacement(db, payload, principal=principal, scope=scope)
+        if replace
+        else sync_batch_data(db, payload, principal=principal, scope=scope)
+    )
     if not result.success:
         raise HTTPException(status_code=500, detail=result.message)
     return result
 
 
-async def list_literature_payload(db: AsyncSession, *, skip: int = 0, limit: int = 100) -> list[dict[str, Any]]:
-    literature_list = await get_all_literature(db, skip=skip, limit=limit)
+async def list_literature_payload(
+    db: AsyncSession,
+    *,
+    scope: RequestScope,
+    skip: int = 0,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    literature_list = await get_all_literature(db, skip=skip, limit=limit, scope_filter_values=scope_filters(scope))
     return [_literature_to_payload(item) for item in literature_list]
 
 
-async def get_literature_detail_payload(db: AsyncSession, literature_id: int) -> dict[str, Any]:
-    literature = await get_literature_by_id(db, literature_id)
+async def get_literature_detail_payload(db: AsyncSession, literature_id: int, *, scope: RequestScope) -> dict[str, Any]:
+    filters = scope_filters(scope)
+    literature = await get_literature_by_id(db, literature_id, scope_filter_values=filters)
     if not literature:
         raise HTTPException(status_code=404, detail=f"Literature ID={literature_id} not found")
 
-    records = await get_records_by_literature(db, literature_id)
+    records = await get_records_by_literature(db, literature_id, scope_filter_values=filters)
     payload = _literature_to_payload(literature)
     payload["tribologyData"] = [_record_to_payload(record) for record in records]
     return payload
 
 
-async def get_literature_by_doi_payload(db: AsyncSession, doi: str) -> dict[str, Any]:
-    literature = await get_literature_by_doi(db, doi)
+async def get_literature_by_doi_payload(db: AsyncSession, doi: str, *, scope: RequestScope) -> dict[str, Any]:
+    literature = await get_literature_by_doi(db, doi, scope_filter_values=scope_filters(scope))
     if not literature:
         raise HTTPException(status_code=404, detail=f"Literature with DOI={doi} not found")
     return _literature_to_payload(literature)
 
 
-async def delete_literature_payload(db: AsyncSession, literature_id: int) -> dict[str, Any]:
-    deleted = await delete_literature(db, literature_id)
+async def delete_literature_payload(db: AsyncSession, literature_id: int, *, scope: RequestScope) -> dict[str, Any]:
+    deleted = await delete_literature(db, literature_id, scope_filter_values=scope_filters(scope))
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Literature ID={literature_id} not found")
     return {"success": True, "message": f"Deleted Literature ID={literature_id} and all related data"}
@@ -171,11 +194,12 @@ async def patch_il_resolution_payload(db: AsyncSession) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Patch failed: {str(exc)}") from exc
 
 
-async def get_tribology_records_payload(db: AsyncSession, literature_id: int) -> list[dict[str, Any]]:
-    literature = await get_literature_by_id(db, literature_id)
+async def get_tribology_records_payload(db: AsyncSession, literature_id: int, *, scope: RequestScope) -> list[dict[str, Any]]:
+    filters = scope_filters(scope)
+    literature = await get_literature_by_id(db, literature_id, scope_filter_values=filters)
     if not literature:
         raise HTTPException(status_code=404, detail=f"Literature ID={literature_id} not found")
-    records = await get_records_by_literature(db, literature_id)
+    records = await get_records_by_literature(db, literature_id, scope_filter_values=filters)
     return [_record_to_payload(record) for record in records]
 
 

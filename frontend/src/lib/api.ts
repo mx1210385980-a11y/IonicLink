@@ -1,6 +1,40 @@
 import axios from 'axios'
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+import {
+    clearSession,
+    getAuthHeaders,
+    getSessionToken,
+    type AuthUser,
+} from './session'
+
+export const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '')
+
+function normalizeApiPath(path: string) {
+    const normalizedPath = path.startsWith('/') ? path : `/${path}`
+    const basePath = (() => {
+        try {
+            if (!API_BASE_URL) return ''
+            if (/^https?:\/\//i.test(API_BASE_URL)) {
+                return new URL(API_BASE_URL).pathname.replace(/\/$/, '')
+            }
+            return API_BASE_URL.replace(/\/$/, '')
+        } catch {
+            return API_BASE_URL.replace(/\/$/, '')
+        }
+    })()
+
+    if (basePath === '/api' && normalizedPath.startsWith('/api/')) {
+        return normalizedPath.slice(4)
+    }
+
+    return normalizedPath
+}
+
+export function resolveApiUrl(path: string) {
+    if (/^https?:\/\//i.test(path)) return path
+    const normalizedPath = normalizeApiPath(path)
+    return `${API_BASE_URL}${normalizedPath}`
+}
 
 export const api = axios.create({
     baseURL: API_BASE_URL,
@@ -8,6 +42,46 @@ export const api = axios.create({
         'Content-Type': 'application/json',
     },
 })
+
+api.interceptors.request.use((config) => {
+    if (config.url) {
+        config.url = normalizeApiPath(config.url)
+    }
+    const authHeaders = getAuthHeaders()
+    if (!config.headers) {
+        config.headers = {} as any
+    }
+    Object.entries(authHeaders).forEach(([key, value]) => {
+        ;(config.headers as any)[key] = value
+    })
+    return config
+})
+
+api.interceptors.response.use(
+    (response) => response,
+    (error) => {
+        if (error?.response?.status === 401) {
+            clearSession()
+        }
+        return Promise.reject(error)
+    },
+)
+
+export interface LoginResponse {
+    accessToken: string
+    tokenType: string
+    user: AuthUser
+}
+
+export async function login(username: string, password: string) {
+    const response = await api.post('/api/auth/login', { username, password })
+    return response.data as LoginResponse
+}
+
+export async function getCurrentUser() {
+    const response = await api.get('/api/auth/me')
+    return response.data as AuthUser
+}
 
 // File Upload
 export async function uploadFile(file: File) {
@@ -529,6 +603,7 @@ export type FileExtractionStatus = 'uploaded' | 'processing' | 'success' | 'erro
 export interface BatchFile {
     id: string
     name: string
+    scopeKey?: string
     status: FileExtractionStatus
     progress: number // 0-100
     progressMessage?: string
@@ -580,6 +655,14 @@ export interface RecordResponse {
     residualFilmThicknessD?: string | null
     layerSpacingDelta?: string | null
     filmThickness: string | null
+    molRatio?: string | null
+    cation?: string | null
+    anion?: string | null
+    cationSmiles?: string | null
+    anionSmiles?: string | null
+    ilSmiles?: string | null
+    ilInchikey?: string | null
+    alkylChainLength?: number | null
     confidence: number
     confidenceDetails?: {
         base_score?: number
@@ -636,6 +719,10 @@ export interface Literature {
     authors: string
     journal: string
     year: number
+    groupId?: number | null
+    workspaceId?: number | null
+    createdByUserId?: number | null
+    scopeType?: 'workspace' | 'group_library' | string | null
     volume?: string | null
     issue?: string | null
     pages?: string | null
@@ -681,6 +768,190 @@ export async function getAgentStatus(): Promise<AgentStatusResponse> {
 export async function getUsageMetrics(): Promise<UsageMetricsResponse> {
     const response = await api.get('/api/agents/usage')
     return response.data
+}
+
+export async function getDashboardStats() {
+    const response = await api.get('/api/records/stats')
+    return response.data as {
+        total_records: number
+        literature_count: number
+        distinct_il_count: number
+        cof_stats: { min: number | null, max: number | null, avg: number | null }
+        confidence_stats?: {
+            avg: number | null
+            avg_percent: number | null
+            min_percent: number | null
+            max_percent: number | null
+            count: number
+            breakdown?: Record<string, {
+                count: number
+                share_percent: number
+                avg: number | null
+                avg_percent: number | null
+            }>
+        }
+        materials_ratio: Array<{ name: string, count: number }>
+        top_liquids: Array<{ name: string, count: number }>
+        publication_trend: Array<{ year: number, count: number }>
+        top_journals: Array<{ name: string, count: number }>
+        cof_ranges: Array<{ name: string, min: number, max: number }>
+    }
+}
+
+export interface ModelTrainingFeatureOption {
+    key: string
+    label: string
+    group: string
+    description: string
+    default_enabled: boolean
+    available_count: number
+    coverage: number
+    disabled: boolean
+}
+
+export interface ModelTrainingTargetOption {
+    key: string
+    label: string
+    available_count: number
+}
+
+export interface ModelTrainingAlgorithmOption {
+    key: string
+    label: string
+    description: string
+}
+
+export interface ModelTrainingMetricPoint {
+    round: number
+    progress: number
+    train_r2: number
+    val_r2: number
+    train_rmse: number
+    val_rmse: number
+    train_mae: number
+    val_mae: number
+}
+
+export interface ModelTrainingTaskSnapshot {
+    task_id: string
+    status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+    status_message: string
+    error: string | null
+    created_at: string
+    started_at: string | null
+    finished_at: string | null
+    total_rounds: number
+    current_round: number
+    current: ModelTrainingMetricPoint | null
+    dataset: {
+        total_records: number
+        usable_records: number
+        dropped_records: number
+        train_size: number
+        validation_size: number
+        feature_dimensions: number
+        selected_feature_count: number
+        target: {
+            key: string
+            label: string
+        }
+        filters: {
+            min_confidence: number
+            max_records: number | null
+            validation_split: number
+        }
+    }
+    warnings: string[]
+    feature_blocks: Array<{
+        key: string
+        label: string
+        dimensions: number
+        features?: string[]
+    }>
+    config: {
+        target: string
+        algorithm: string
+        features: ModelTrainingFeatureSelection
+        hyperparameters: ModelTrainingHyperparameters
+        data_options: ModelTrainingDataOptions
+    }
+    history: ModelTrainingMetricPoint[]
+}
+
+export interface ModelTrainingSummary {
+    dataset: {
+        total_records: number
+        rdkit_enabled: boolean
+    }
+    targets: ModelTrainingTargetOption[]
+    algorithms: ModelTrainingAlgorithmOption[]
+    features: ModelTrainingFeatureOption[]
+    defaults: {
+        target: string
+        algorithm: string
+        features: ModelTrainingFeatureSelection
+        hyperparameters: ModelTrainingHyperparameters
+        data_options: ModelTrainingDataOptions
+    }
+}
+
+export interface ModelTrainingFeatureSelection {
+    cation_fingerprint: boolean
+    anion_fingerprint: boolean
+    temperature: boolean
+    speed: boolean
+    load: boolean
+    potential: boolean
+    water_content: boolean
+    film_thickness: boolean
+    alkyl_chain_length: boolean
+}
+
+export interface ModelTrainingHyperparameters {
+    n_estimators: number
+    learning_rate: number
+    max_depth: number
+}
+
+export interface ModelTrainingDataOptions {
+    validation_split: number
+    min_confidence: number
+    max_records: number | null
+    random_seed: number
+}
+
+export interface ModelTrainingStartPayload {
+    target: string
+    algorithm: string
+    features: ModelTrainingFeatureSelection
+    hyperparameters: ModelTrainingHyperparameters
+    data_options: ModelTrainingDataOptions
+}
+
+export async function getModelTrainingSummary() {
+    const response = await api.get('/api/model-training/summary')
+    return response.data as ModelTrainingSummary
+}
+
+export async function startModelTraining(payload: ModelTrainingStartPayload) {
+    const response = await api.post('/api/model-training/start', payload)
+    return response.data as { task: ModelTrainingTaskSnapshot }
+}
+
+export async function getModelTrainingTask(taskId: string) {
+    const response = await api.get(`/api/model-training/tasks/${taskId}`)
+    return response.data as { task: ModelTrainingTaskSnapshot }
+}
+
+export async function cancelModelTraining(taskId: string) {
+    const response = await api.post(`/api/model-training/tasks/${taskId}/cancel`)
+    return response.data as { task: ModelTrainingTaskSnapshot }
+}
+
+export function buildModelTrainingWebSocketUrl(taskId: string) {
+    const token = getSessionToken()
+    const httpUrl = resolveApiUrl(`/api/model-training/ws/${taskId}?token=${encodeURIComponent(token)}`)
+    return httpUrl.replace(/^http/i, 'ws')
 }
 
 // Re-run IL resolution for all existing records in the database (without calling LLM)

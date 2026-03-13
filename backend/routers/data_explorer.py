@@ -13,6 +13,14 @@ from sqlalchemy.orm import selectinload
 
 from database import get_db_session
 from models.db_models import TribologyData, Literature
+from security import (
+    AuthPrincipal,
+    RequestScope,
+    get_current_principal,
+    get_request_scope,
+    require_record_access,
+    scope_filters,
+)
 from services.score_service import calculate_confidence, calculate_confidence_details
 from services.agent_runtime_service import get_agent_runtime
 from services.file_service import _normalize_record_chemistry
@@ -76,6 +84,14 @@ class RecordResponse(BaseModel):
     residual_film_thickness_d: Optional[str] = Field(None, alias="residualFilmThicknessD")
     layer_spacing_delta: Optional[str] = Field(None, alias="layerSpacingDelta")
     film_thickness: Optional[str] = Field(None, alias="filmThickness")
+    mol_ratio: Optional[str] = Field(None, alias="molRatio")
+    cation: Optional[str] = None
+    anion: Optional[str] = None
+    cation_smiles: Optional[str] = Field(None, alias="cationSmiles")
+    anion_smiles: Optional[str] = Field(None, alias="anionSmiles")
+    il_smiles: Optional[str] = Field(None, alias="ilSmiles")
+    il_inchikey: Optional[str] = Field(None, alias="ilInchikey")
+    alkyl_chain_length: Optional[int] = Field(None, alias="alkylChainLength")
     
     # Evidence / Source fields
     evidence: Optional[str] = None
@@ -282,6 +298,14 @@ def _record_to_response(r: TribologyData) -> RecordResponse:
         "residual_film_thickness_d": r.residual_film_thickness_d,
         "layer_spacing_delta": r.layer_spacing_delta,
         "film_thickness": r.film_thickness,
+        "mol_ratio": r.mol_ratio,
+        "cation": r.cation,
+        "anion": r.anion,
+        "cation_smiles": r.cation_smiles,
+        "anion_smiles": r.anion_smiles,
+        "il_smiles": r.il_smiles,
+        "il_inchikey": r.il_inchikey,
+        "alkyl_chain_length": r.alkyl_chain_length,
         "evidence": getattr(r, 'evidence', None),
         "evidence_page": getattr(r, 'evidence_page', None),
         "evidence_bbox": getattr(r, 'evidence_bbox', None),
@@ -307,7 +331,8 @@ async def search_records(
     filter_params: SearchFilter,
     skip: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(20, ge=1, le=200, description="Max records to return"),
-    session: AsyncSession = Depends(get_db_session)
+    session: AsyncSession = Depends(get_db_session),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """
     鎼滅储鎽╂摝瀛︽暟鎹褰曪紙鏀寔鍒嗛〉锛?
@@ -318,6 +343,7 @@ async def search_records(
         filter_params=filter_params,
         skip=skip,
         limit=limit,
+        scope_filter_values=scope_filters(scope),
     )
     return PaginatedRecordResponse(
         total=result.get("total", 0),
@@ -327,38 +353,38 @@ async def search_records(
     )
 
 @router.get("/options", response_model=dict)
-async def get_filter_options(session: AsyncSession = Depends(get_db_session)):
+async def get_filter_options(
+    session: AsyncSession = Depends(get_db_session),
+    scope: RequestScope = Depends(get_request_scope),
+):
     """
     鑾峰彇鍙敤鐨勮繃婊ら€夐」锛堟潗鏂欏垪琛ㄣ€佹鼎婊戝墏鍒楄〃绛夛級
     """
-    return await get_agent_runtime().get_filter_options(session=session)
+    return await get_agent_runtime().get_filter_options(session=session, scope_filter_values=scope_filters(scope))
 
 
 @router.get("/stats", response_model=dict)
-async def get_stats(session: AsyncSession = Depends(get_db_session)):
+async def get_stats(
+    session: AsyncSession = Depends(get_db_session),
+    scope: RequestScope = Depends(get_request_scope),
+):
     """
     鑾峰彇鏁版嵁缁熻淇℃伅
     """
-    return await get_agent_runtime().get_stats(session=session)
+    return await get_agent_runtime().get_stats(session=session, scope_filter_values=scope_filters(scope))
 
 
 @router.put("/{record_id}", response_model=dict, response_model_by_alias=True)
 async def update_record(
     record_id: int,
     payload: RecordUpdatePayload,
-    session: AsyncSession = Depends(get_db_session)
+    session: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
 ):
     """
     鏇存柊鍗曟潯鎽╂摝瀛︽暟鎹褰曪紙鐢ㄤ簬鍓嶇鍐呰仈缂栬緫纭锛?
     """
-    from fastapi import HTTPException
-
-    result = await session.execute(
-        select(TribologyData).where(TribologyData.id == record_id)
-    )
-    record = result.scalar_one_or_none()
-    if not record:
-        raise HTTPException(status_code=404, detail=f"Record {record_id} not found")
+    record = await require_record_access(session, principal, record_id, write=True)
 
     update_data = payload.dict(exclude_none=True, by_alias=False)
     for field, value in update_data.items():
@@ -376,16 +402,10 @@ async def update_record(
 async def promote_record_confidence(
     record_id: int,
     payload: ConfidencePromotePayload,
-    session: AsyncSession = Depends(get_db_session)
+    session: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
 ):
-    from fastapi import HTTPException
-
-    result = await session.execute(
-        select(TribologyData).where(TribologyData.id == record_id)
-    )
-    record = result.scalar_one_or_none()
-    if not record:
-        raise HTTPException(status_code=404, detail=f"Record {record_id} not found")
+    record = await require_record_access(session, principal, record_id, write=True)
 
     incoming = payload.dict(exclude_none=True, by_alias=False)
 
@@ -425,19 +445,13 @@ async def promote_record_confidence(
 @router.delete("/{record_id}", response_model=dict)
 async def delete_record(
     record_id: int,
-    session: AsyncSession = Depends(get_db_session)
+    session: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
 ):
     """
     鍒犻櫎鍗曟潯鎽╂摝瀛︽暟鎹褰?
     """
-    from fastapi import HTTPException
-
-    result = await session.execute(
-        select(TribologyData).where(TribologyData.id == record_id)
-    )
-    record = result.scalar_one_or_none()
-    if not record:
-        raise HTTPException(status_code=404, detail=f"Record {record_id} not found")
+    record = await require_record_access(session, principal, record_id, write=True)
 
     await session.delete(record)
     await session.commit()
@@ -445,7 +459,10 @@ async def delete_record(
 
 
 @router.get("/il/resolve", response_model=dict)
-async def resolve_ionic_liquid(name: str = Query(..., description="Ionic liquid name to resolve")):
+async def resolve_ionic_liquid(
+    name: str = Query(..., description="Ionic liquid name to resolve"),
+    _principal: AuthPrincipal = Depends(get_current_principal),
+):
     """
     Resolve an IL name to its structural components and chemical identifiers.
     """

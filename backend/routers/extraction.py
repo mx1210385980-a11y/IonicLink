@@ -19,6 +19,17 @@ from services.llm_service import llm_service
 from services.data_sync_service import get_records_by_literature, get_all_literature
 from services.score_service import calculate_confidence
 from database import get_db
+from security import (
+    AuthPrincipal,
+    RequestScope,
+    ensure_scope_writable,
+    get_current_principal,
+    get_request_scope,
+    literature_scope_conditions,
+    require_literature_access,
+    require_record_access,
+    scope_filters,
+)
 from utils.pdf_utils import process_pdf_to_base64, extract_pdf_text_fitz
 from services.file_service import save_upload_entry, process_file_safe, process_file_background
 from services.extraction_trace_service import get_extraction_run, list_extraction_candidates
@@ -596,11 +607,13 @@ def _extract_text_snippet(
 
 
 @router.get("/pdf/{literature_id}")
-async def serve_pdf(literature_id: int, db: AsyncSession = Depends(get_db)):
+async def serve_pdf(
+    literature_id: int,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
     """Serve the uploaded PDF file for the Source Grounding PDF viewer."""
-    literature = await db.get(Literature, literature_id)
-    if not literature:
-        raise HTTPException(status_code=404, detail="Literature not found")
+    literature = await require_literature_access(db, principal, literature_id)
 
     pdf_path = _resolve_existing_path(literature.file_path)
     if not pdf_path:
@@ -617,16 +630,18 @@ async def serve_pdf(literature_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/pdf/{literature_id}/highlights")
-async def get_pdf_highlights(literature_id: int, db: AsyncSession = Depends(get_db)):
+async def get_pdf_highlights(
+    literature_id: int,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
     """
     Return bounding-box coordinates for extracted data text found in the PDF.
     Uses fitz (PyMuPDF) text search to locate each TribologyData record's text.
     """
     from utils.pdf_coords import find_text_coordinates, build_search_queries_for_record
 
-    literature = await db.get(Literature, literature_id)
-    if not literature:
-        raise HTTPException(status_code=404, detail="Literature not found")
+    literature = await require_literature_access(db, principal, literature_id)
 
     pdf_path = _resolve_existing_path(literature.file_path)
     if not pdf_path:
@@ -661,6 +676,7 @@ async def get_record_evidence(
     literature_id: int,
     record_id: int,
     db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
 ):
     """
     Return evidence details for a specific TribologyData record:
@@ -682,19 +698,11 @@ async def get_record_evidence(
 
     # 1. Fetch record
     from sqlalchemy import select as sa_select
-    stmt = sa_select(TribologyDataDB).where(
-        TribologyDataDB.id == record_id,
-        TribologyDataDB.literature_id == literature_id
-    )
-    result = await db.execute(stmt)
-    record = result.scalar_one_or_none()
+    literature = await require_literature_access(db, principal, literature_id)
+    record = await require_record_access(db, principal, record_id)
 
-    if not record:
+    if record.literature_id != literature_id:
         raise HTTPException(status_code=404, detail="Record not found")
-
-    literature = await db.get(Literature, literature_id)
-    if not literature:
-        raise HTTPException(status_code=404, detail="Literature not found")
 
     evidence_text = getattr(record, 'evidence', None)
     evidence_page = getattr(record, 'evidence_page', None)
@@ -986,7 +994,9 @@ async def get_record_evidence(
 async def upload_file(
     file: UploadFile = File(...),
     background_tasks: BackgroundTasks = BackgroundTasks(),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """
     Upload file, persist to DB, and trigger background extraction if new.
@@ -995,8 +1005,10 @@ async def upload_file(
     if not file.filename:
         raise HTTPException(status_code=400, detail="文件名不能为空")
 
+    ensure_scope_writable(principal, scope)
+
     # 1. Save or Retrieve Entry (non-destructive)
-    literature = await save_upload_entry(db, file)
+    literature = await save_upload_entry(db, file, principal=principal, scope=scope)
 
     # 2. Trigger Extraction ONLY if it's a NEW file (pending)
     if literature.status == "pending":
@@ -1020,7 +1032,8 @@ async def extract_data(
     force: bool = False,
     profile: str = Query("high_accuracy", pattern="^(high_accuracy|standard)$"),
     strict_cof_mode: bool | None = Query(None),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
 ):
     """
     Synchronous Extraction/Retrieval.
@@ -1033,6 +1046,8 @@ async def extract_data(
             lit_id = int(file_id)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid File ID format (expected integer)")
+
+        await require_literature_access(db, principal, lit_id, write=True)
 
         # 2. Process Safely (Synchronous Wait)
         print(f"[Extraction] Starting safe processing for Lit ID: {lit_id}")
@@ -1101,11 +1116,27 @@ async def extract_data(
 
 
 @router.get("/data/{file_id}", response_model=List[TribologyData])
-async def get_extracted_data(file_id: str, db: AsyncSession = Depends(get_db)):
+async def get_extracted_data(
+    file_id: str,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
     """获取已提取的数据"""
     try:
         lit_id = int(file_id)
-        records = await get_records_by_literature(db, lit_id)
+        literature = await require_literature_access(db, principal, lit_id)
+        records = await get_records_by_literature(
+            db,
+            lit_id,
+            scope_filter_values=scope_filters(
+                RequestScope(
+                    scope_type=literature.scope_type,
+                    group_id=literature.group_id,
+                    scope_key=literature.scope_key,
+                    workspace=literature.workspace,
+                )
+            ),
+        )
         return records
     except ValueError:
         if file_id in extracted_data_store:
@@ -1116,19 +1147,32 @@ async def get_extracted_data(file_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/data")
-async def get_all_data():
+async def get_all_data(
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
     """获取所有提取的数据"""
-    all_data = []
-    for data_list in extracted_data_store.values():
-        all_data.extend(data_list)
-    return all_data
+    from sqlalchemy import select as sa_select
+
+    stmt = (
+        sa_select(TribologyDataDB)
+        .join(TribologyDataDB.literature)
+        .where(*literature_scope_conditions(scope_filters(scope)))
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
 
 
 @router.get("/extraction-runs/{run_id}")
-async def get_extraction_run_detail(run_id: str, db: AsyncSession = Depends(get_db)):
+async def get_extraction_run_detail(
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
     run = await get_extraction_run(db, run_id)
     if not run:
         raise HTTPException(status_code=404, detail=f"Extraction run '{run_id}' not found")
+    await require_literature_access(db, principal, run.literature_id)
 
     def _parse_json(value):
         if not value:
@@ -1158,7 +1202,12 @@ async def get_extraction_run_detail(run_id: str, db: AsyncSession = Depends(get_
 
 
 @router.get("/extraction-runs/latest/{literature_id}")
-async def get_latest_extraction_run_detail(literature_id: int, db: AsyncSession = Depends(get_db)):
+async def get_latest_extraction_run_detail(
+    literature_id: int,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    await require_literature_access(db, principal, literature_id)
     run = await get_latest_extraction_run_by_literature(db, literature_id)
     if not run:
         raise HTTPException(status_code=404, detail=f"No extraction runs for literature '{literature_id}'")
@@ -1196,7 +1245,12 @@ async def get_extraction_run_candidates(
     skip: int = 0,
     limit: int = 200,
     db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
 ):
+    run = await get_extraction_run(db, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Extraction run '{run_id}' not found")
+    await require_literature_access(db, principal, run.literature_id)
     total, rows = await list_extraction_candidates(db, run_id, skip=skip, limit=limit)
 
     def _parse_json(value):
@@ -1232,7 +1286,11 @@ async def get_extraction_run_candidates(
 
 
 @router.post("/chat")
-async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
+async def chat(
+    request: ChatRequest,
+    db: AsyncSession = Depends(get_db),
+    scope: RequestScope = Depends(get_request_scope),
+):
     """与AI助手对话"""
 
     context = None
@@ -1243,7 +1301,7 @@ async def chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
             latest_file = list(uploaded_files_store.values())[-1]
             context = latest_file["content"][:3000]
         else:
-            recent_lits = await get_all_literature(db, limit=1)
+            recent_lits = await get_all_literature(db, limit=1, scope_filter_values=scope_filters(scope))
             if recent_lits:
                 context = recent_lits[0].content[:3000] if recent_lits[0].content else ""
 

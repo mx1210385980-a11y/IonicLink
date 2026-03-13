@@ -20,7 +20,10 @@ from services.cleaning_service import (
     set_default_temperature,
 )
 from services.doi_service import DOIService
-from services.il_resolver_service import resolve_and_enrich_records
+from services.il_resolver_service import (
+    filter_to_supported_ionic_liquid_records,
+    resolve_and_enrich_records,
+)
 from services.score_service import calculate_confidence
 from services.llm.prompts import (
     ABBREV_MAPPING_PROMPT,
@@ -1049,6 +1052,12 @@ class LLMService:
                     item["material_name"] = mat_candidates[0]
 
         converted_data = resolve_and_enrich_records(converted_data)
+        converted_data, dropped_non_il = filter_to_supported_ionic_liquid_records(converted_data)
+        if dropped_non_il:
+            await _log_progress(
+                "stage_d.il_filter",
+                f"dropped_non_il={len(dropped_non_il)}, kept_il={len(converted_data)}",
+            )
 
         valid_records: List[TribologyData] = []
         for item in converted_data:

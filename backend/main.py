@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_db
-from routers import agent_system, data_explorer, extraction, sync_router
+from routers import agent_system, auth_router, data_explorer, extraction, model_training, sync_router
 from services.agent_runtime_service import get_agent_runtime
 
 
@@ -30,7 +30,7 @@ cors_allow_origins = [
     o.strip()
     for o in os.getenv(
         "CORS_ALLOW_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173",
+        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080",
     ).split(",")
     if o.strip()
 ]
@@ -51,7 +51,9 @@ app.add_middleware(
 app.include_router(extraction.router)
 app.include_router(sync_router.router)
 app.include_router(data_explorer.router)
+app.include_router(model_training.router)
 app.include_router(agent_system.router)
+app.include_router(auth_router.router)
 
 
 @app.get("/")

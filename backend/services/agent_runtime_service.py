@@ -63,6 +63,7 @@ class AgentRuntimeService:
         filter_params: Any,
         skip: int = 0,
         limit: int = 20,
+        scope_filter_values: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self._usage_metrics.record_api_call(endpoint="/api/records/search")
         self._usage_metrics.record_agent_call(
@@ -79,12 +80,18 @@ class AgentRuntimeService:
                     "filter_params": filter_params,
                     "skip": skip,
                     "limit": limit,
+                    "scope_filter_values": scope_filter_values,
                 },
             )
         )
         return result.data or {}
 
-    async def get_filter_options(self, *, session: AsyncSession) -> dict[str, Any]:
+    async def get_filter_options(
+        self,
+        *,
+        session: AsyncSession,
+        scope_filter_values: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         self._usage_metrics.record_api_call(endpoint="/api/records/options")
         self._usage_metrics.record_agent_call(
             receiver="moderator",
@@ -95,7 +102,7 @@ class AgentRuntimeService:
         result = await self.registry.get("moderator").handle_task(
             AgentTask(
                 task_type="orchestrate_filter_options",
-                payload={"session": session},
+                payload={"session": session, "scope_filter_values": scope_filter_values},
             )
         )
         return result.data or {}
@@ -126,7 +133,12 @@ class AgentRuntimeService:
         )
         return result.data or {}
 
-    async def get_stats(self, *, session: AsyncSession) -> dict[str, Any]:
+    async def get_stats(
+        self,
+        *,
+        session: AsyncSession,
+        scope_filter_values: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         self._usage_metrics.record_api_call(endpoint="/api/records/stats")
         self._usage_metrics.record_agent_call(
             receiver="moderator",
@@ -137,7 +149,7 @@ class AgentRuntimeService:
         result = await self.registry.get("moderator").handle_task(
             AgentTask(
                 task_type="orchestrate_stats",
-                payload={"session": session},
+                payload={"session": session, "scope_filter_values": scope_filter_values},
             )
         )
         return result.data or {}

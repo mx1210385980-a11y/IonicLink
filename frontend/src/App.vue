@@ -1,21 +1,25 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Beaker, Github, Moon, Sun, PieChart, Search, Server, BookOpen } from 'lucide-vue-next'
+import { Beaker, FlaskConical, Github, Moon, Sun, PieChart, Search, Server, BookOpen, Library, LogOut, UserCircle2 } from 'lucide-vue-next'
 import FileUpload from '@/components/FileUpload.vue'
 import ChatPanel from '@/components/ChatPanel.vue'
 import AgentStatusPanel from '@/components/AgentStatusPanel.vue'
 import IntegratedExplorer from '@/components/IntegratedExplorer.vue'
 import Dashboard from '@/components/Dashboard.vue'
+import ModelTrainingWorkbench from '@/components/ModelTrainingWorkbench.vue'
 import MonitorView from '@/components/MonitorView.vue'
 import LiteratureList from '@/components/LiteratureList.vue'
 import SourceGroundingView from '@/components/SourceGroundingView.vue'
 import GettingStarted from '@/components/GettingStarted.vue'
+import LoginScreen from '@/components/LoginScreen.vue'
 import Button from '@/components/ui/Button.vue'
 import {
   chat,
   extractData,
   getLatestExtractionRun,
+  getCurrentUser,
   getPdfHighlights,
+  login,
   syncBatchData,
   uploadFile,
   type AgentWorkflow,
@@ -24,9 +28,18 @@ import {
   type ExtractionRunDetail,
   type TribologyData,
 } from '@/lib/api'
+import {
+  clearSession,
+  getActiveScope,
+  markSessionReady,
+  sessionState,
+  setActiveScope,
+  setCurrentUser,
+  setSession,
+} from '@/lib/session'
 import type { HighlightRect } from '@/types/pdf-highlight'
 
-const currentView = ref<'dashboard' | 'workspace' | 'monitor' | 'literature' | 'grounding' | 'guide'>('guide')
+const currentView = ref<'dashboard' | 'workspace' | 'predict' | 'monitor' | 'literature' | 'grounding' | 'guide'>('guide')
 const sidebarTab = ref<'chat' | 'agents'>('chat')
 const isDark = ref(false)
 
@@ -40,6 +53,18 @@ const latestAgentWorkflow = ref<AgentWorkflow | null>(null)
 const activeExtractionFileId = ref<string | null>(null)
 const activeExtractionRun = ref<ExtractionRunDetail | null>(null)
 const isChatting = ref(false)
+const isAuthenticating = ref(false)
+const authError = ref('')
+
+const activeScope = computed(() => getActiveScope())
+const availableScopes = computed(() => sessionState.user?.availableScopes || [])
+const selectedScopeKey = computed({
+  get: () => activeScope.value?.key || '',
+  set: (scopeKey: string) => {
+    const scope = availableScopes.value.find((item) => item.key === scopeKey) || null
+    setActiveScope(scope)
+  },
+})
 
 const activeExtractionFileName = computed(() => {
   if (!activeExtractionFileId.value) return null
@@ -99,17 +124,63 @@ function toggleDarkMode() {
   isDark.value = !isDark.value
 }
 
+function resetWorkspaceSessionState() {
+  batchFiles.value = []
+  selectedFileId.value = null
+  explorerDoi.value = ''
+  latestAgentWorkflow.value = null
+  resetExtractionState()
+}
+
+async function initializeSession() {
+  if (!sessionState.token) {
+    markSessionReady()
+    return
+  }
+
+  try {
+    const user = await getCurrentUser()
+    setCurrentUser(user)
+  } catch (error) {
+    console.warn('[Auth] Session restore failed:', error)
+    clearSession()
+    authError.value = '登录状态已失效，请重新登录。'
+  } finally {
+    markSessionReady()
+  }
+}
+
+async function handleLogin(credentials: { username: string; password: string }) {
+  try {
+    isAuthenticating.value = true
+    authError.value = ''
+    const response = await login(credentials.username, credentials.password)
+    setSession(response.accessToken, response.user)
+    resetWorkspaceSessionState()
+    currentView.value = 'guide'
+  } catch (error: any) {
+    authError.value = error?.response?.data?.detail || error?.message || '登录失败'
+  } finally {
+    isAuthenticating.value = false
+  }
+}
+
+function handleLogout() {
+  clearSession()
+  authError.value = ''
+  resetWorkspaceSessionState()
+}
+
 onMounted(() => {
   const storedTheme = window.localStorage.getItem(DARK_MODE_STORAGE_KEY)
   if (storedTheme === 'dark') {
     isDark.value = true
-    return
-  }
-  if (storedTheme === 'light') {
+  } else if (storedTheme === 'light') {
     isDark.value = false
-    return
+  } else {
+    isDark.value = false
   }
-  isDark.value = false
+  void initializeSession()
 })
 
 watch(
@@ -119,6 +190,14 @@ watch(
     window.localStorage.setItem(DARK_MODE_STORAGE_KEY, enabled ? 'dark' : 'light')
   },
   { immediate: true }
+)
+
+watch(
+  () => sessionState.activeScopeKey,
+  (nextScopeKey, previousScopeKey) => {
+    if (!nextScopeKey || nextScopeKey === previousScopeKey) return
+    resetWorkspaceSessionState()
+  },
 )
 
 function findBatchFile(fileId: string) {
@@ -501,6 +580,7 @@ async function handleUpload(file: File) {
       batchFiles.value.push({
         id: response.file_id,
         name: response.filename,
+        scopeKey: activeScope.value?.key,
         status: 'uploaded',
         progress: 0,
         progressMessage: 'Ready to extract',
@@ -535,6 +615,7 @@ async function handleBatchUpload(files: File[]) {
         batchFiles.value.push({
           id: response.file_id,
           name: response.filename,
+          scopeKey: activeScope.value?.key,
           status: 'uploaded',
           progress: 0,
           progressMessage: 'Ready to extract',
@@ -654,7 +735,21 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="flex min-h-screen flex-col bg-background text-foreground">
+  <div v-if="!sessionState.ready" class="flex min-h-screen items-center justify-center bg-slate-950 text-white">
+    <div class="rounded-3xl border border-slate-800 bg-slate-900/80 px-8 py-6 text-center shadow-2xl">
+      <p class="text-xs font-bold uppercase tracking-[0.28em] text-sky-300">IonicLink</p>
+      <p class="mt-3 text-lg font-semibold">Restoring secure session...</p>
+    </div>
+  </div>
+
+  <LoginScreen
+    v-else-if="!sessionState.user"
+    :loading="isAuthenticating"
+    :error="authError"
+    @submit="handleLogin"
+  />
+
+  <div v-else class="flex min-h-screen flex-col bg-background text-foreground">
     <header class="sticky top-0 z-50 w-full border-b border-slate-200/80 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/70 dark:border-slate-800/80 dark:bg-slate-950/85">
       <div class="flex h-14 items-center px-4">
         <div class="flex items-center gap-2">
@@ -692,6 +787,15 @@ onBeforeUnmount(() => {
             Dashboard
           </button>
 
+          <button
+            @click="currentView = 'predict'"
+            class="flex items-center gap-2 px-4 py-1.5 text-[13px] font-semibold transition-all rounded-full h-full"
+            :class="currentView === 'predict' ? 'bg-[#eef2ff] text-[#4f46e5] dark:bg-indigo-500/10 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'"
+          >
+            <FlaskConical class="w-[15px] h-[15px]" stroke-width="2.5" />
+            Predict
+          </button>
+
           <div class="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-1"></div>
 
           <button
@@ -705,13 +809,49 @@ onBeforeUnmount(() => {
         </nav>
 
         <div class="ml-auto flex items-center gap-2">
+          <div class="hidden lg:flex items-center gap-3 rounded-full border border-slate-200/80 bg-white/90 px-4 py-1.5 text-sm shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
+            <Library class="h-4 w-4 text-sky-500" />
+            <div class="flex flex-col leading-tight">
+              <span class="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Scope</span>
+              <select
+                v-model="selectedScopeKey"
+                class="bg-transparent text-sm font-semibold text-slate-700 outline-none dark:text-slate-200"
+              >
+                <option
+                  v-for="scope in availableScopes"
+                  :key="scope.key"
+                  :value="scope.key"
+                >
+                  {{ scope.label }}
+                </option>
+              </select>
+            </div>
+          </div>
+
+          <div class="hidden md:flex items-center gap-3 rounded-full border border-slate-200/80 bg-white/90 px-4 py-1.5 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
+            <UserCircle2 class="h-5 w-5 text-slate-400" />
+            <div class="flex flex-col leading-tight">
+              <span class="text-sm font-semibold text-slate-700 dark:text-slate-200">{{ sessionState.user.displayName }}</span>
+              <span class="text-[11px] uppercase tracking-[0.18em] text-slate-400">{{ sessionState.user.role }}</span>
+            </div>
+          </div>
+
           <Button variant="ghost" size="icon" @click="toggleDarkMode">
             <Sun v-if="isDark" class="h-5 w-5" />
             <Moon v-else class="h-5 w-5" />
           </Button>
 
-          <Button variant="ghost" size="icon" as="a" href="https://github.com" target="_blank">
+          <a
+            href="https://github.com/mx1210385980-a11y/IonicLink/tree/main"
+            target="_blank"
+            rel="noreferrer"
+            class="inline-flex h-10 w-10 items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          >
             <Github class="h-5 w-5" />
+          </a>
+
+          <Button variant="ghost" size="icon" @click="handleLogout">
+            <LogOut class="h-5 w-5" />
           </Button>
         </div>
       </div>
@@ -719,7 +859,11 @@ onBeforeUnmount(() => {
 
     <main class="flex-1 overflow-hidden">
       <div v-if="currentView === 'dashboard'" class="h-[calc(100vh-56px)]">
-        <Dashboard @open-library="currentView = 'literature'" />
+        <Dashboard :key="sessionState.activeScopeKey" @open-library="currentView = 'literature'" />
+      </div>
+
+      <div v-else-if="currentView === 'predict'" class="h-[calc(100vh-56px)]">
+        <ModelTrainingWorkbench :key="sessionState.activeScopeKey" />
       </div>
 
       <div v-else-if="currentView === 'workspace'" class="flex h-[calc(100vh-56px)] bg-slate-100/70 dark:bg-[#06101c]">
@@ -740,6 +884,7 @@ onBeforeUnmount(() => {
 
         <main class="flex-1 overflow-hidden">
           <IntegratedExplorer
+            :key="sessionState.activeScopeKey"
             :initial-doi="explorerDoi"
             :selected-file-id="selectedFileId"
             :source-name="batchFiles.find((file) => file.id === selectedFileId)?.name"
@@ -799,7 +944,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-else-if="currentView === 'literature'" class="h-[calc(100vh-88px)]">
-        <LiteratureList />
+        <LiteratureList :key="sessionState.activeScopeKey" />
       </div>
 
       <div v-else-if="currentView === 'grounding'" class="h-[calc(100vh-56px)]">

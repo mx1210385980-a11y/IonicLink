@@ -1,31 +1,34 @@
 """
-Data Sync Service for IonicLink (Refactored)
-Implements batch data sync logic with Literature get-or-create pattern.
+Data Sync Service for IonicLink.
 
-Main Features:
-- Get-or-create Literature by DOI or title
-- Bulk insert TribologyData records linked to Literature
-- Transaction management with rollback on failure
+Implements scoped batch sync logic:
+- Literature is deduplicated within the active scope only
+- Personal workspaces are isolated by workspace id
+- Shared group library is isolated by group id and shared scope key
 """
 
-from datetime import datetime
-from typing import List, Optional, Tuple
-import traceback
-import re
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from __future__ import annotations
 
+import re
+import traceback
+from typing import List, Optional, Tuple
+
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from knowledge_base import normalize_ionic_liquid
 from models.db_models import Literature, TribologyData
-from schemas import (
-    LiteratureCreate,
-    TribologyDataCreate,
-    SyncPayload,
-    SyncResult
+from schemas import LiteratureCreate, SyncPayload, SyncResult, TribologyDataCreate
+from security import (
+    AuthPrincipal,
+    RequestScope,
+    build_scope_key,
+    can_manage_literature,
+    literature_scope_conditions,
 )
 from services.doi_service import DOIService
-from knowledge_base import normalize_ionic_liquid
+from services.il_resolver_service import is_supported_ionic_liquid_name
 
-# DOI normalizer instance
 _doi_service = DOIService()
 
 
@@ -42,10 +45,9 @@ def _canonicalize_il(value: Optional[str]) -> str:
         return "EAN"
     if "ethaline" in text_l:
         return "Ethaline"
-    m = re.search(r"(\[[^\[\]]+?\]\s*(?:i\s*)?\[[^\[\]]+?\])", text)
-    if m:
-        return re.sub(r"\s+", "", m.group(1)).replace("]i[", "][")
-    # Avoid writing long sentence-like strings into lubricant field.
+    match = re.search(r"(\[[^\[\]]+?\]\s*(?:i\s*)?\[[^\[\]]+?\])", text)
+    if match:
+        return re.sub(r"\s+", "", match.group(1)).replace("]i[", "][")
     if len(text) > 80:
         return ""
     return text
@@ -56,302 +58,197 @@ def _infer_lubricant(record: TribologyDataCreate) -> str:
     if current and not _is_unknown_il(current):
         return current
 
-    spaces = [
+    candidate_spaces = [
         str(getattr(record, "evidence", "") or ""),
         str(getattr(record, "source", "") or ""),
         str(getattr(record, "source_figure", "") or ""),
         str(getattr(record, "film_thickness", "") or ""),
     ]
-    for text in spaces:
+    for text in candidate_spaces:
         candidate = _canonicalize_il(normalize_ionic_liquid(text))
         if candidate and not _is_unknown_il(candidate):
             return candidate
     return current
 
 
-# ============== Core Sync Logic ==============
-
 async def get_or_create_literature(
     db: AsyncSession,
-    metadata: LiteratureCreate
+    metadata: LiteratureCreate,
+    *,
+    principal: AuthPrincipal,
+    scope: RequestScope,
 ) -> Tuple[Literature, bool]:
-    """
-    Get existing Literature by DOI, or create new one.
-    
-    Deduplication strategy:
-    1. Primary: Match by DOI (unique identifier)
-    2. Fallback: Match by title (if DOIs differ)
-    
-    Args:
-        db: Database session
-        metadata: Literature metadata from frontend
-    
-    Returns:
-        Tuple of (Literature instance, is_new: bool)
-    """
-    # Normalize DOI before lookup (remove prefixes like http://doi.org/, doi:)
     raw_doi = metadata.doi.strip() if metadata.doi else ""
     normalized_doi = _doi_service._normalize_doi(raw_doi) if raw_doi else ""
-    
-    # CRITICAL: Empty DOI must be None (NULL) to avoid UNIQUE constraint violation
-    # SQL allows multiple NULLs but not multiple empty strings
     final_doi = normalized_doi if normalized_doi else None
-    
-    print(f"[Sync] DOI processing: raw='{raw_doi}' -> normalized='{normalized_doi}' -> final={repr(final_doi)}")
-    
-    # Try to find by DOI first (primary key for deduplication)
+    scope_key = build_scope_key(scope.scope_type, scope.workspace.id if scope.workspace else None)
+
     if final_doi:
-        query = select(Literature).where(Literature.doi == final_doi)
-        result = await db.execute(query)
-        existing = result.scalar_one_or_none()
-        
+        query = select(Literature).where(
+            Literature.group_id == principal.group.id,
+            Literature.scope_key == scope_key,
+            Literature.doi == final_doi,
+        )
+        existing = (await db.execute(query)).scalar_one_or_none()
         if existing:
-            print(f"[Sync] Found existing Literature ID={existing.id} with DOI={final_doi}")
             return existing, False
-    
-    # Create new Literature entry
-    # Generate temporary DOI if not provided
+
     if not final_doi:
         import time
+
         final_doi = f"temp-{int(time.time() * 1000)}"
-    
-    print(f"[Sync] Creating new Literature: title='{metadata.title[:50] if metadata.title else 'N/A'}...'")
-    new_literature = Literature(
+
+    literature = Literature(
         doi=final_doi,
         title=metadata.title,
         authors=metadata.authors,
         journal=metadata.journal,
-        issn=getattr(metadata, 'issn', None),
+        issn=getattr(metadata, "issn", None),
         year=metadata.year,
-        volume=getattr(metadata, 'volume', None),
-        issue=getattr(metadata, 'issue', None),
-        pages=getattr(metadata, 'pages', None),
-        file_path=getattr(metadata, 'file_path', None)
+        volume=getattr(metadata, "volume", None),
+        issue=getattr(metadata, "issue", None),
+        pages=getattr(metadata, "pages", None),
+        file_path=getattr(metadata, "file_path", None),
+        group_id=principal.group.id,
+        workspace_id=scope.workspace.id if scope.workspace else None,
+        created_by_user_id=principal.user.id,
+        scope_type=scope.scope_type,
+        scope_key=scope_key,
     )
-    
-    db.add(new_literature)
-    await db.flush()  # Get the ID without committing
-    print(f"[Sync] Created new Literature ID={new_literature.id}")
-    
-    return new_literature, True
+    db.add(literature)
+    await db.flush()
+    return literature, True
 
 
 async def sync_batch_data(
     db: AsyncSession,
-    payload: SyncPayload
+    payload: SyncPayload,
+    *,
+    principal: AuthPrincipal,
+    scope: RequestScope,
 ) -> SyncResult:
-    """
-    Batch sync tribology data to database.
-    
-    Strategy:
-    1. Get or create Literature from metadata
-    2. (Optional) Delete existing TribologyData for this Literature
-    3. Bulk insert new TribologyData records
-    4. Commit or rollback
-    
-    Args:
-        db: Database session
-        payload: SyncPayload containing metadata and records
-    
-    Returns:
-        SyncResult with operation status
-    """
     try:
-        # Step 1: Get or create Literature
-        literature, is_new = await get_or_create_literature(db, payload.metadata)
-        
-        # Step 2: 【关键修复】If Literature exists, clear old data to prevent duplicates
+        literature, is_new = await get_or_create_literature(db, payload.metadata, principal=principal, scope=scope)
+
         if not is_new:
-            print(f"[Sync Debug] Overwriting data for Literature ID: {literature.id}")
-            delete_stmt = delete(TribologyData).where(
-                TribologyData.literature_id == literature.id
-            )
-            delete_result = await db.execute(delete_stmt)
-            print(f"[Sync Debug] Deleted {delete_result.rowcount} old records for Literature ID: {literature.id}")
-        
-        # Step 3: Bulk insert new TribologyData records (do not deduplicate again here).
+            if not can_manage_literature(principal, literature):
+                return SyncResult(
+                    success=True,
+                    literature_id=literature.id,
+                    synced_count=0,
+                    message="Literature already exists in this scope and is read-only for your role.",
+                )
+            await db.execute(delete(TribologyData).where(TribologyData.literature_id == literature.id))
+
         new_records: List[TribologyData] = []
-        
+        dropped_non_il = 0
         for record in payload.records:
             lubricant = _infer_lubricant(record)
-            tribology_record = TribologyData(
-                literature_id=literature.id,
-                material_name=record.material_name,
-                lubricant=lubricant,
-                cof_value=record.cof_value,
-                cof_operator=record.cof_operator,
-                cof_raw=record.cof_raw,
-                load_value=record.load_value,
-                load_raw=record.load_raw,
-                speed_value=getattr(record, 'speed_raw', None) or record.speed_value,
-                temperature=getattr(record, 'temperature', None),
-                # Environmental variables
-                potential=getattr(record, 'potential', None),
-                water_content=getattr(record, 'water_content', None),
-                surface_roughness=getattr(record, 'surface_roughness', None),
-                residual_film_thickness_d=getattr(record, 'residual_film_thickness_d', None),
-                layer_spacing_delta=getattr(record, 'layer_spacing_delta', None),
-                film_thickness=getattr(record, 'film_thickness', None),
-                mol_ratio=getattr(record, 'mol_ratio', None),
-                cation=getattr(record, 'cation', None),
-                anion=getattr(record, 'anion', None),
-                cation_smiles=getattr(record, 'cation_smiles', None),
-                anion_smiles=getattr(record, 'anion_smiles', None),
-                il_smiles=getattr(record, 'il_smiles', None),
-                il_inchikey=getattr(record, 'il_inchikey', None),
-                alkyl_chain_length=getattr(record, 'alkyl_chain_length', None),
-                evidence=getattr(record, 'evidence', None),
-                source=getattr(record, 'source', None),
-                source_page=getattr(record, 'source_page', None),
-                source_figure=getattr(record, 'source_figure', None),
-                confidence=record.confidence,
+            if not is_supported_ionic_liquid_name(lubricant):
+                dropped_non_il += 1
+                continue
+            new_records.append(
+                TribologyData(
+                    literature_id=literature.id,
+                    material_name=record.material_name,
+                    lubricant=lubricant,
+                    cof_value=record.cof_value,
+                    cof_operator=record.cof_operator,
+                    cof_raw=record.cof_raw,
+                    load_value=record.load_value,
+                    load_raw=record.load_raw,
+                    speed_value=getattr(record, "speed_raw", None) or record.speed_value,
+                    temperature=getattr(record, "temperature", None),
+                    potential=getattr(record, "potential", None),
+                    water_content=getattr(record, "water_content", None),
+                    surface_roughness=getattr(record, "surface_roughness", None),
+                    residual_film_thickness_d=getattr(record, "residual_film_thickness_d", None),
+                    layer_spacing_delta=getattr(record, "layer_spacing_delta", None),
+                    film_thickness=getattr(record, "film_thickness", None),
+                    mol_ratio=getattr(record, "mol_ratio", None),
+                    cation=getattr(record, "cation", None),
+                    anion=getattr(record, "anion", None),
+                    cation_smiles=getattr(record, "cation_smiles", None),
+                    anion_smiles=getattr(record, "anion_smiles", None),
+                    il_smiles=getattr(record, "il_smiles", None),
+                    il_inchikey=getattr(record, "il_inchikey", None),
+                    alkyl_chain_length=getattr(record, "alkyl_chain_length", None),
+                    evidence=getattr(record, "evidence", None),
+                    source=getattr(record, "source", None),
+                    source_page=getattr(record, "source_page", None),
+                    source_figure=getattr(record, "source_figure", None),
+                    confidence=record.confidence,
+                )
             )
-            new_records.append(tribology_record)
-        
+
         db.add_all(new_records)
-        
-        # Step 4: Commit transaction
         await db.commit()
-        
         return SyncResult(
             success=True,
             literature_id=literature.id,
             synced_count=len(new_records),
-            message=f"成功同步 {len(new_records)} 条记录到文献 ID={literature.id}"
+            message=(
+                f"Scoped sync completed: {len(new_records)} records saved to literature ID={literature.id}, "
+                f"filtered out {dropped_non_il} non-ionic-liquid records."
+            ),
         )
-        
-    except Exception as e:
-        print(f"[Sync] ERROR: {str(e)}")
-        traceback.print_exc()  # Print full stack trace for debugging
+    except Exception as exc:
+        print(f"[Sync] ERROR: {exc}")
+        traceback.print_exc()
         await db.rollback()
-        # Return a failed result - use literature_id=0 to indicate failure
         return SyncResult(
             success=False,
             literature_id=0,
             synced_count=0,
-            message=f"同步失败: {str(e)}"
+            message=f"Sync failed: {str(exc)}",
         )
 
 
 async def sync_batch_data_with_replacement(
     db: AsyncSession,
-    payload: SyncPayload
+    payload: SyncPayload,
+    *,
+    principal: AuthPrincipal,
+    scope: RequestScope,
 ) -> SyncResult:
-    """
-    Batch sync with FULL REPLACEMENT strategy.
-    Deletes all existing TribologyData for the Literature before inserting new.
-    
-    Args:
-        db: Database session
-        payload: SyncPayload containing metadata and records
-    
-    Returns:
-        SyncResult with operation status
-    """
-    try:
-        # Step 1: Get or create Literature
-        literature, is_new = await get_or_create_literature(db, payload.metadata)
-        
-        deleted_count = 0
-        # Step 2: Delete existing TribologyData if Literature exists
-        if not is_new:
-            delete_stmt = delete(TribologyData).where(
-                TribologyData.literature_id == literature.id
-            )
-            delete_result = await db.execute(delete_stmt)
-            deleted_count = delete_result.rowcount
-        
-        # Step 3: Bulk insert new TribologyData records (single dedup happens in extraction pipeline).
-        new_records: List[TribologyData] = []
-        
-        for record in payload.records:
-            lubricant = _infer_lubricant(record)
-            tribology_record = TribologyData(
-                literature_id=literature.id,
-                material_name=record.material_name,
-                lubricant=lubricant,
-                cof_value=record.cof_value,
-                cof_operator=record.cof_operator,
-                cof_raw=record.cof_raw,
-                load_value=record.load_value,
-                load_raw=record.load_raw,
-                speed_value=getattr(record, 'speed_raw', None) or record.speed_value,
-                temperature=getattr(record, 'temperature', None),
-                # Environmental variables
-                potential=getattr(record, 'potential', None),
-                water_content=getattr(record, 'water_content', None),
-                surface_roughness=getattr(record, 'surface_roughness', None),
-                residual_film_thickness_d=getattr(record, 'residual_film_thickness_d', None),
-                layer_spacing_delta=getattr(record, 'layer_spacing_delta', None),
-                film_thickness=getattr(record, 'film_thickness', None),
-                mol_ratio=getattr(record, 'mol_ratio', None),
-                cation=getattr(record, 'cation', None),
-                anion=getattr(record, 'anion', None),
-                cation_smiles=getattr(record, 'cation_smiles', None),
-                anion_smiles=getattr(record, 'anion_smiles', None),
-                il_smiles=getattr(record, 'il_smiles', None),
-                il_inchikey=getattr(record, 'il_inchikey', None),
-                alkyl_chain_length=getattr(record, 'alkyl_chain_length', None),
-                evidence=getattr(record, 'evidence', None),
-                source=getattr(record, 'source', None),
-                source_page=getattr(record, 'source_page', None),
-                source_figure=getattr(record, 'source_figure', None),
-                confidence=record.confidence,
-            )
-            new_records.append(tribology_record)
-        
-        db.add_all(new_records)
-        
-        # Step 4: Commit transaction
-        await db.commit()
-        
-        return SyncResult(
-            success=True,
-            literature_id=literature.id,
-            synced_count=len(new_records),
-            message=f"成功同步 {len(new_records)} 条记录 (删除 {deleted_count} 条旧记录)"
-        )
-        
-    except Exception as e:
-        await db.rollback()
-        return SyncResult(
-            success=False,
-            literature_id=0,
-            synced_count=0,
-            message=f"同步失败: {str(e)}"
-        )
+    return await sync_batch_data(db, payload, principal=principal, scope=scope)
 
-
-# ============== Query Functions ==============
 
 async def get_literature_by_id(
     db: AsyncSession,
-    literature_id: int
+    literature_id: int,
+    *,
+    scope_filter_values: dict | None = None,
 ) -> Optional[Literature]:
-    """Get Literature by ID with eager loading of tribology_data."""
     query = select(Literature).where(Literature.id == literature_id)
+    if scope_filter_values:
+        query = query.where(*literature_scope_conditions(scope_filter_values))
     result = await db.execute(query)
     return result.scalar_one_or_none()
 
 
 async def get_literature_by_doi(
     db: AsyncSession,
-    doi: str
+    doi: str,
+    *,
+    scope_filter_values: dict | None = None,
 ) -> Optional[Literature]:
-    """Get Literature by DOI."""
     query = select(Literature).where(Literature.doi == doi)
+    if scope_filter_values:
+        query = query.where(*literature_scope_conditions(scope_filter_values))
     result = await db.execute(query)
     return result.scalar_one_or_none()
 
 
 async def get_records_by_literature(
     db: AsyncSession,
-    literature_id: int
+    literature_id: int,
+    *,
+    scope_filter_values: dict | None = None,
 ) -> List[TribologyData]:
-    """Get all TribologyData for a Literature."""
-    query = select(TribologyData).where(
-        TribologyData.literature_id == literature_id
-    )
+    query = select(TribologyData).join(TribologyData.literature).where(TribologyData.literature_id == literature_id)
+    if scope_filter_values:
+        query = query.where(*literature_scope_conditions(scope_filter_values))
     result = await db.execute(query)
     return list(result.scalars().all())
 
@@ -359,33 +256,27 @@ async def get_records_by_literature(
 async def get_all_literature(
     db: AsyncSession,
     skip: int = 0,
-    limit: int = 100
+    limit: int = 100,
+    *,
+    scope_filter_values: dict | None = None,
 ) -> List[Literature]:
-    """Get all Literature records with pagination."""
-    query = (
-        select(Literature)
-        .order_by(Literature.created_at.desc())
-        .offset(skip)
-        .limit(limit)
-    )
+    query = select(Literature)
+    if scope_filter_values:
+        query = query.where(*literature_scope_conditions(scope_filter_values))
+    query = query.order_by(Literature.created_at.desc()).offset(skip).limit(limit)
     result = await db.execute(query)
     return list(result.scalars().all())
 
 
 async def delete_literature(
     db: AsyncSession,
-    literature_id: int
+    literature_id: int,
+    *,
+    scope_filter_values: dict | None = None,
 ) -> bool:
-    """
-    Delete a Literature and all its TribologyData (cascade).
-    
-    Returns:
-        True if deleted, False if not found
-    """
-    literature = await get_literature_by_id(db, literature_id)
+    literature = await get_literature_by_id(db, literature_id, scope_filter_values=scope_filter_values)
     if not literature:
         return False
-    
     await db.delete(literature)
     await db.commit()
     return True

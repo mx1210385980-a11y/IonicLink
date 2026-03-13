@@ -20,12 +20,16 @@ class QueryAgent(BaseAgent):
                 filter_params=task.payload["filter_params"],
                 skip=task.payload.get("skip", 0),
                 limit=task.payload.get("limit", 20),
+                scope_filter_values=task.payload.get("scope_filter_values"),
             )
             return AgentExecutionResult(agent=self.name, task_id=task.task_id, data=result)
 
         if task.task_type == "get_filter_options":
             session = task.payload["session"]
-            result = await query_service.get_filter_options(session)
+            result = await query_service.get_filter_options(
+                session,
+                scope_filter_values=task.payload.get("scope_filter_values"),
+            )
             return AgentExecutionResult(agent=self.name, task_id=task.task_id, data=result)
 
         if task.task_type == "validate_extraction":

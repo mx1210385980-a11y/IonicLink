@@ -1,0 +1,40 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: ioniclink-backend
+    environment:
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,http://localhost:8080,http://127.0.0.1:8080}
+      CORS_ALLOW_CREDENTIALS: "true"
+      JWT_SECRET: ${JWT_SECRET:-ioniclink-dev-secret-change-me}
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-720}
+      IONICLINK_GROUP_NAME: ${IONICLINK_GROUP_NAME:-IonicLink Research Group}
+      IONICLINK_GROUP_SLUG: ${IONICLINK_GROUP_SLUG:-ioniclink-research-group}
+      IONICLINK_ADMIN_USERNAME: ${IONICLINK_ADMIN_USERNAME:-admin}
+      IONICLINK_ADMIN_DISPLAY_NAME: ${IONICLINK_ADMIN_DISPLAY_NAME:-Group Admin}
+      IONICLINK_ADMIN_PASSWORD: ${IONICLINK_ADMIN_PASSWORD:-ChangeMe123!}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LLM_TEXT_MODEL: ${LLM_TEXT_MODEL:-Pro/deepseek-ai/DeepSeek-V3.2}
+      LLM_VISION_MODEL: ${LLM_VISION_MODEL:-Qwen/Qwen3-VL-32B-Instruct}
+      LLM_VISION_API_KEY: ${LLM_VISION_API_KEY:-}
+    volumes:
+      - ./backend/data:/app/backend/data
+      - ./temp_uploads:/app/backend/temp_uploads
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_URL: ""
+    container_name: ioniclink-frontend
+    depends_on:
+      - backend
+    ports:
+      - "8080:80"
+    restart: unless-stopped

@@ -1,19 +1,72 @@
-﻿"""SQLAlchemy ORM models for IonicLink."""
+"""SQLAlchemy ORM models for IonicLink."""
 
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
 
 
-class Literature(Base):
-    __tablename__ = "literature"
+class ResearchGroup(Base):
+    __tablename__ = "research_groups"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    doi: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    slug: Mapped[str] = mapped_column(String(120), unique=True, index=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    users: Mapped[List["User"]] = relationship("User", back_populates="group")
+    workspaces: Mapped[List["Workspace"]] = relationship(
+        "Workspace",
+        back_populates="group",
+        cascade="all, delete-orphan",
+    )
+    literature: Mapped[List["Literature"]] = relationship("Literature", back_populates="group")
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(80), unique=True, index=True, nullable=False)
+    display_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(40), default="researcher", index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("research_groups.id"), index=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    group: Mapped["ResearchGroup"] = relationship("ResearchGroup", back_populates="users")
+    workspaces: Mapped[List["Workspace"]] = relationship("Workspace", back_populates="owner")
+    created_literature: Mapped[List["Literature"]] = relationship("Literature", back_populates="created_by")
+
+
+class Workspace(Base):
+    __tablename__ = "workspaces"
+    __table_args__ = (UniqueConstraint("group_id", "slug", name="uq_workspaces_group_slug"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("research_groups.id"), index=True, nullable=False)
+    owner_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), index=True, nullable=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    slug: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_personal: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    group: Mapped["ResearchGroup"] = relationship("ResearchGroup", back_populates="workspaces")
+    owner: Mapped[Optional["User"]] = relationship("User", back_populates="workspaces")
+    literature: Mapped[List["Literature"]] = relationship("Literature", back_populates="workspace")
+
+
+class Literature(Base):
+    __tablename__ = "literature"
+    __table_args__ = (UniqueConstraint("group_id", "scope_key", "doi", name="uq_literature_scope_doi"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    doi: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
 
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     authors: Mapped[str] = mapped_column(Text, nullable=False)
@@ -28,11 +81,20 @@ class Literature(Base):
     content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
+    group_id: Mapped[Optional[int]] = mapped_column(ForeignKey("research_groups.id"), index=True, nullable=True)
+    workspace_id: Mapped[Optional[int]] = mapped_column(ForeignKey("workspaces.id"), index=True, nullable=True)
+    created_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), index=True, nullable=True)
+    scope_type: Mapped[str] = mapped_column(String(32), default="group_library", index=True)
+    scope_key: Mapped[str] = mapped_column(String(64), default="group_library")
+
     status: Mapped[str] = mapped_column(String(50), default="pending", index=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(default=func.now())
 
+    group: Mapped[Optional["ResearchGroup"]] = relationship("ResearchGroup", back_populates="literature")
+    workspace: Mapped[Optional["Workspace"]] = relationship("Workspace", back_populates="literature")
+    created_by: Mapped[Optional["User"]] = relationship("User", back_populates="created_literature")
     tribology_data: Mapped[List["TribologyData"]] = relationship(
         "TribologyData",
         back_populates="literature",

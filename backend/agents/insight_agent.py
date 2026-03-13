@@ -15,7 +15,10 @@ class InsightAgent(BaseAgent):
     async def execute_task(self, task: AgentTask) -> AgentExecutionResult:
         if task.task_type == "get_stats":
             session = task.payload["session"]
-            result = await insight_service.get_stats(session)
+            result = await insight_service.get_stats(
+                session,
+                scope_filter_values=task.payload.get("scope_filter_values"),
+            )
             return AgentExecutionResult(agent=self.name, task_id=task.task_id, data=result)
 
         if task.task_type == "summarize_extraction":

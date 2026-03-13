@@ -30,6 +30,10 @@ class LiteratureCreate(LiteratureBase):
 
 class LiteratureSchema(LiteratureBase):
     id: int
+    group_id: Optional[int] = Field(None, alias="groupId")
+    workspace_id: Optional[int] = Field(None, alias="workspaceId")
+    created_by_user_id: Optional[int] = Field(None, alias="createdByUserId")
+    scope_type: Optional[str] = Field(None, alias="scopeType")
     created_at: datetime
 
     class Config:

@@ -15,6 +15,8 @@ import * as pdfjsLib from 'pdfjs-dist'
 import PdfHighlightOverlay from './PdfHighlightOverlay.vue'
 import type { HighlightRect } from '@/types/pdf-highlight'
 import type { HighlightItem } from './PdfHighlightOverlay.vue'
+import { resolveApiUrl } from '@/lib/api'
+import { authFetch } from '@/lib/session'
 
 // ─── Worker (Vite-local, no CDN) ─────────────────────────────────────────────
 import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
@@ -127,7 +129,7 @@ async function loadPdf() {
     // messages like “a.toHex is not a function”.
     let loadingTask: any
     if (typeof props.src === 'string') {
-      const resp = await fetch(props.src, { mode: 'cors' })
+      const resp = await authFetch(resolveApiUrl(props.src), { mode: 'cors' })
       console.log('[PdfViewer] fetched URL', props.src, 'status', resp.status, 'headers', [...resp.headers.entries()])
       if (!resp.ok) {
         throw new Error(`PDF fetch failed: ${resp.status} ${resp.statusText}`)

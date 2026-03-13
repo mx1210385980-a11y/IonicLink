@@ -26,6 +26,14 @@ from services.sync_facade_service import (
     reprocess_literature_payload,
     sync_payload,
 )
+from security import (
+    AuthPrincipal,
+    RequestScope,
+    ensure_scope_writable,
+    get_current_principal,
+    get_request_scope,
+    require_literature_access,
+)
 
 
 
@@ -37,7 +45,9 @@ router = APIRouter(prefix="/api/sync", tags=["sync"])
 @router.post("/", response_model=SyncResult)
 async def sync_data(
     payload: SyncPayload,
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """
     Sync tribology data to database (APPEND mode).
@@ -51,13 +61,16 @@ async def sync_data(
     Returns:
         SyncResult with literature_id and synced count
     """
-    return await sync_payload(db, payload, replace=False)
+    ensure_scope_writable(principal, scope)
+    return await sync_payload(db, payload, principal=principal, scope=scope, replace=False)
 
 
 @router.post("/replace", response_model=SyncResult)
 async def sync_data_replace(
     payload: SyncPayload,
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """
     Sync tribology data to database (REPLACE mode).
@@ -71,7 +84,8 @@ async def sync_data_replace(
     Returns:
         SyncResult with literature_id and synced count
     """
-    return await sync_payload(db, payload, replace=True)
+    ensure_scope_writable(principal, scope)
+    return await sync_payload(db, payload, principal=principal, scope=scope, replace=True)
 
 
 # ============== Literature Endpoints ==============
@@ -80,7 +94,8 @@ async def sync_data_replace(
 async def list_literature(
     skip: int = 0,
     limit: int = 100,
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """
     Get all literature records with pagination.
@@ -92,14 +107,15 @@ async def list_literature(
     Returns:
         List of LiteratureSchema
     """
-    payload = await list_literature_payload(db, skip=skip, limit=limit)
+    payload = await list_literature_payload(db, scope=scope, skip=skip, limit=limit)
     return [LiteratureSchema(**item) for item in payload]
 
 
 @router.get("/literature/{literature_id}", response_model=LiteratureWithRecords)
 async def get_literature(
     literature_id: int,
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
 ):
     """
     Get a specific Literature with all its TribologyData records.
@@ -110,14 +126,25 @@ async def get_literature(
     Returns:
         LiteratureWithRecords including nested tribology_data
     """
-    payload = await get_literature_detail_payload(db, literature_id)
+    literature = await require_literature_access(db, principal, literature_id)
+    payload = await get_literature_detail_payload(
+        db,
+        literature_id,
+        scope=RequestScope(
+            scope_type=literature.scope_type,
+            group_id=literature.group_id,
+            scope_key=literature.scope_key,
+            workspace=literature.workspace,
+        ),
+    )
     return LiteratureWithRecords(**payload)
 
 
 @router.get("/literature/doi/{doi:path}", response_model=LiteratureSchema)
 async def get_literature_by_doi_endpoint(
     doi: str,
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    scope: RequestScope = Depends(get_request_scope),
 ):
     """
     Get Literature by DOI.
@@ -128,14 +155,15 @@ async def get_literature_by_doi_endpoint(
     Returns:
         LiteratureSchema
     """
-    payload = await get_literature_by_doi_payload(db, doi)
+    payload = await get_literature_by_doi_payload(db, doi, scope=scope)
     return LiteratureSchema(**payload)
 
 
 @router.delete("/literature/{literature_id}")
 async def delete_literature_endpoint(
     literature_id: int,
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
 ):
     """
     Delete a Literature and all its TribologyData records (cascade).
@@ -146,14 +174,25 @@ async def delete_literature_endpoint(
     Returns:
         Success message
     """
-    return await delete_literature_payload(db, literature_id)
+    literature = await require_literature_access(db, principal, literature_id, write=True)
+    return await delete_literature_payload(
+        db,
+        literature_id,
+        scope=RequestScope(
+            scope_type=literature.scope_type,
+            group_id=literature.group_id,
+            scope_key=literature.scope_key,
+            workspace=literature.workspace,
+        ),
+    )
 
 
 # ============== IL Re-Resolution Patch Endpoint ==============
 
 @router.post("/patch-il-resolution")
 async def patch_il_resolution(
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
 ):
     """
     Re-run IL resolution on all existing TribologyData records.
@@ -165,6 +204,8 @@ async def patch_il_resolution(
     Returns:
         Summary of updated records
     """
+    if principal.user.role not in {"principal_investigator", "group_admin"}:
+        raise HTTPException(status_code=403, detail="Admin permission required")
     return await patch_il_resolution_payload(db)
 
 
@@ -173,7 +214,8 @@ async def patch_il_resolution(
 @router.get("/literature/{literature_id}/records", response_model=List[TribologyDataSchema])
 async def get_tribology_records(
     literature_id: int,
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
 ):
     """
     Get all TribologyData records for a specific Literature.
@@ -184,7 +226,17 @@ async def get_tribology_records(
     Returns:
         List of TribologyDataSchema
     """
-    payload = await get_tribology_records_payload(db, literature_id)
+    literature = await require_literature_access(db, principal, literature_id)
+    payload = await get_tribology_records_payload(
+        db,
+        literature_id,
+        scope=RequestScope(
+            scope_type=literature.scope_type,
+            group_id=literature.group_id,
+            scope_key=literature.scope_key,
+            workspace=literature.workspace,
+        ),
+    )
     return [TribologyDataSchema(**item) for item in payload]
 
 
@@ -194,7 +246,8 @@ async def get_tribology_records(
 async def reprocess_literature_endpoint(
     literature_id: int,
     file: UploadFile = File(None),  # Optional file upload
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
 ):
     """
     Re-extract data from an existing Literature record.
@@ -238,6 +291,7 @@ async def reprocess_literature_endpoint(
     ```
     """
     try:
+        await require_literature_access(db, principal, literature_id, write=True)
         file_content = await read_optional_upload_text(file)
         return await reprocess_literature_payload(
             db,

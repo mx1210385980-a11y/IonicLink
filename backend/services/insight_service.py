@@ -7,23 +7,36 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.db_models import Literature, TribologyData
+from security import literature_scope_conditions
 from services.query_service import summarize_confidence_buckets, top_entities
 
 
-async def get_stats(session: AsyncSession) -> dict[str, Any]:
-    total_records = await session.execute(select(func.count(TribologyData.id)))
+async def get_stats(
+    session: AsyncSession,
+    scope_filter_values: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    scoped_conditions = literature_scope_conditions(scope_filter_values) if scope_filter_values else []
+
+    total_records_stmt = select(func.count(TribologyData.id)).join(TribologyData.literature)
+    if scoped_conditions:
+        total_records_stmt = total_records_stmt.where(*scoped_conditions)
+    total_records = await session.execute(total_records_stmt)
     total = total_records.scalar() or 0
 
-    total_lit = await session.execute(select(func.count(Literature.id)))
+    total_lit_stmt = select(func.count(Literature.id))
+    if scoped_conditions:
+        total_lit_stmt = total_lit_stmt.where(*scoped_conditions)
+    total_lit = await session.execute(total_lit_stmt)
     literature_count = total_lit.scalar() or 0
 
-    cof_stats = await session.execute(
-        select(
-            func.min(TribologyData.cof_value),
-            func.max(TribologyData.cof_value),
-            func.avg(TribologyData.cof_value),
-        )
-    )
+    cof_stmt = select(
+        func.min(TribologyData.cof_value),
+        func.max(TribologyData.cof_value),
+        func.avg(TribologyData.cof_value),
+    ).join(TribologyData.literature)
+    if scoped_conditions:
+        cof_stmt = cof_stmt.where(*scoped_conditions)
+    cof_stats = await session.execute(cof_stmt)
     cof_row = cof_stats.one()
 
     year_stmt = (
@@ -32,6 +45,8 @@ async def get_stats(session: AsyncSession) -> dict[str, Any]:
         .order_by(Literature.year)
         .where(Literature.year.is_not(None))
     )
+    if scoped_conditions:
+        year_stmt = year_stmt.where(*scoped_conditions)
     year_res = await session.execute(year_stmt)
 
     journal_stmt = (
@@ -42,15 +57,20 @@ async def get_stats(session: AsyncSession) -> dict[str, Any]:
         .where(Literature.journal != "")
         .limit(5)
     )
+    if scoped_conditions:
+        journal_stmt = journal_stmt.where(*scoped_conditions)
     journal_res = await session.execute(journal_stmt)
 
     distinct_il_count_stmt = (
         select(func.count(func.distinct(TribologyData.lubricant)))
+        .join(TribologyData.literature)
         .where(TribologyData.lubricant.is_not(None))
         .where(TribologyData.lubricant != "")
         .where(~func.lower(TribologyData.lubricant).like("%ethaline%"))
         .where(~func.lower(TribologyData.lubricant).like("%chcl%"))
     )
+    if scoped_conditions:
+        distinct_il_count_stmt = distinct_il_count_stmt.where(*scoped_conditions)
     distinct_il_count_res = await session.execute(distinct_il_count_stmt)
 
     cof_range_stmt = (
@@ -59,15 +79,18 @@ async def get_stats(session: AsyncSession) -> dict[str, Any]:
             func.min(TribologyData.cof_value),
             func.max(TribologyData.cof_value),
         )
+        .join(TribologyData.literature)
         .group_by(TribologyData.material_name)
         .where(TribologyData.material_name.is_not(None))
         .where(TribologyData.material_name != "")
         .where(TribologyData.cof_value.is_not(None))
     )
+    if scoped_conditions:
+        cof_range_stmt = cof_range_stmt.where(*scoped_conditions)
     cof_range_res = await session.execute(cof_range_stmt)
 
-    entity_summary = await top_entities(session)
-    confidence_stats = await summarize_confidence_buckets(session)
+    entity_summary = await top_entities(session, scope_filter_values=scope_filter_values)
+    confidence_stats = await summarize_confidence_buckets(session, scope_filter_values=scope_filter_values)
 
     return {
         "total_records": total,

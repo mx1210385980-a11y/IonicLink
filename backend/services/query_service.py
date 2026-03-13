@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from models.db_models import Literature, TribologyData
+from security import literature_scope_conditions
 from services.file_service import _normalize_record_chemistry
 from services.score_service import calculate_confidence, calculate_confidence_details
 from services.usage_metrics_service import get_usage_metrics_service
@@ -146,6 +147,14 @@ def _record_to_payload(record: TribologyData) -> dict[str, Any]:
         "residual_film_thickness_d": record.residual_film_thickness_d,
         "layer_spacing_delta": record.layer_spacing_delta,
         "film_thickness": record.film_thickness,
+        "mol_ratio": record.mol_ratio,
+        "cation": record.cation,
+        "anion": record.anion,
+        "cation_smiles": record.cation_smiles,
+        "anion_smiles": record.anion_smiles,
+        "il_smiles": record.il_smiles,
+        "il_inchikey": record.il_inchikey,
+        "alkyl_chain_length": record.alkyl_chain_length,
         "evidence": getattr(record, "evidence", None),
         "evidence_page": getattr(record, "evidence_page", None),
         "evidence_bbox": getattr(record, "evidence_bbox", None),
@@ -167,8 +176,10 @@ async def search_records(
     *,
     skip: int = 0,
     limit: int = 20,
+    scope_filter_values: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     conditions = _build_conditions(filter_params)
+    scope_conditions = literature_scope_conditions(scope_filter_values) if scope_filter_values else []
     use_load_filter = (
         getattr(filter_params, "load_min", None) is not None
         or getattr(filter_params, "load_max", None) is not None
@@ -180,6 +191,8 @@ async def search_records(
             .join(TribologyData.literature)
             .options(selectinload(TribologyData.literature))
         )
+        if scope_conditions:
+            stmt = stmt.where(*scope_conditions)
         if conditions:
             stmt = stmt.where(and_(*conditions))
         stmt = stmt.order_by(TribologyData.id)
@@ -202,6 +215,8 @@ async def search_records(
         records = filtered_records[skip : skip + limit]
     else:
         count_stmt = select(func.count(TribologyData.id)).join(TribologyData.literature)
+        if scope_conditions:
+            count_stmt = count_stmt.where(*scope_conditions)
         if conditions:
             count_stmt = count_stmt.where(and_(*conditions))
         total_result = await _execute_counted(session, count_stmt, operation="search_records.count")
@@ -212,6 +227,8 @@ async def search_records(
             .join(TribologyData.literature)
             .options(selectinload(TribologyData.literature))
         )
+        if scope_conditions:
+            stmt = stmt.where(*scope_conditions)
         if conditions:
             stmt = stmt.where(and_(*conditions))
         stmt = stmt.order_by(TribologyData.id).offset(skip).limit(limit)
@@ -227,17 +244,27 @@ async def search_records(
     }
 
 
-async def get_filter_options(session: AsyncSession) -> dict[str, list[str]]:
+async def get_filter_options(
+    session: AsyncSession,
+    scope_filter_values: dict[str, Any] | None = None,
+) -> dict[str, list[str]]:
+    materials_stmt = select(TribologyData.material_name).distinct()
+    lubricants_stmt = select(TribologyData.lubricant).distinct()
+    if scope_filter_values:
+        conditions = literature_scope_conditions(scope_filter_values)
+        materials_stmt = materials_stmt.join(TribologyData.literature).where(*conditions)
+        lubricants_stmt = lubricants_stmt.join(TribologyData.literature).where(*conditions)
+
     result_materials = await _execute_counted(
         session,
-        select(TribologyData.material_name).distinct(),
+        materials_stmt,
         operation="filter_options.materials",
     )
     materials = result_materials.scalars().all()
 
     result_lubricants = await _execute_counted(
         session,
-        select(TribologyData.lubricant).distinct(),
+        lubricants_stmt,
         operation="filter_options.lubricants",
     )
     lubricants = result_lubricants.scalars().all()
@@ -310,8 +337,14 @@ def validate_extraction_result(records: list[dict[str, Any]], extraction_summary
     }
 
 
-async def summarize_confidence_buckets(session: AsyncSession) -> dict[str, Any]:
-    conf_records = (await _execute_counted(session, select(TribologyData), operation="confidence_buckets.records")).scalars().all()
+async def summarize_confidence_buckets(
+    session: AsyncSession,
+    scope_filter_values: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    stmt = select(TribologyData)
+    if scope_filter_values:
+        stmt = stmt.join(TribologyData.literature).where(*literature_scope_conditions(scope_filter_values))
+    conf_records = (await _execute_counted(session, stmt, operation="confidence_buckets.records")).scalars().all()
     runtime_conf = []
     bucket_scores = {
         "text_grounded": [],
@@ -358,19 +391,26 @@ async def summarize_confidence_buckets(session: AsyncSession) -> dict[str, Any]:
     }
 
 
-async def top_entities(session: AsyncSession) -> dict[str, Any]:
+async def top_entities(
+    session: AsyncSession,
+    scope_filter_values: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     mat_stmt = (
         select(TribologyData.material_name, func.count("*"))
+        .join(TribologyData.literature)
         .group_by(TribologyData.material_name)
         .order_by(desc(func.count("*")))
         .where(TribologyData.material_name.is_not(None))
         .where(TribologyData.material_name != "")
         .limit(5)
     )
+    if scope_filter_values:
+        mat_stmt = mat_stmt.where(*literature_scope_conditions(scope_filter_values))
     mat_res = await _execute_counted(session, mat_stmt, operation="top_entities.materials")
 
     il_stmt = (
         select(TribologyData.lubricant, func.count("*"))
+        .join(TribologyData.literature)
         .group_by(TribologyData.lubricant)
         .order_by(desc(func.count("*")))
         .where(TribologyData.lubricant.is_not(None))
@@ -379,6 +419,8 @@ async def top_entities(session: AsyncSession) -> dict[str, Any]:
         .where(~func.lower(TribologyData.lubricant).like("%chcl%"))
         .limit(5)
     )
+    if scope_filter_values:
+        il_stmt = il_stmt.where(*literature_scope_conditions(scope_filter_values))
     il_res = await _execute_counted(session, il_stmt, operation="top_entities.liquids")
 
     return {
