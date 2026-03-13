@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import re
 import uuid
@@ -18,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from models.db_models import TribologyData
+from models.db_models import CleanedDataset, TribologyData
 from security import literature_scope_conditions
 from services.unit_converter import parse_force_to_newtons, parse_speed_to_mps
 
@@ -138,6 +139,12 @@ DEFAULT_DATA_OPTIONS = {
     "random_seed": 42,
 }
 
+DEFAULT_CLEANING_OPTIONS = {
+    "source_mode": "group_library_fallback",
+    "drop_missing_target": True,
+    "require_dual_smiles": True,
+}
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -250,18 +257,32 @@ def _fingerprint_from_smiles(smiles: str | None, fp_size: int = 128) -> np.ndarr
 
 def _feature_value(record: dict[str, Any], key: str) -> float | None:
     if key == "temperature":
+        if _safe_float(record.get("normalized_temperature_c")) is not None:
+            return _safe_float(record.get("normalized_temperature_c"))
         return _parse_temperature_celsius(record.get("temperature"))
     if key == "speed":
+        if _safe_float(record.get("normalized_speed_mps")) is not None:
+            return _safe_float(record.get("normalized_speed_mps"))
         return parse_speed_to_mps(_normalize_microunit_text(record.get("speed_value")))
     if key == "load":
+        if _safe_float(record.get("normalized_load_n")) is not None:
+            return _safe_float(record.get("normalized_load_n"))
         return parse_force_to_newtons(_normalize_microunit_text(record.get("load_value") or record.get("load_raw")))
     if key == "potential":
+        if _safe_float(record.get("normalized_potential_v")) is not None:
+            return _safe_float(record.get("normalized_potential_v"))
         return _parse_potential_volts(record.get("potential"))
     if key == "water_content":
+        if _safe_float(record.get("normalized_water_content_ppm")) is not None:
+            return _safe_float(record.get("normalized_water_content_ppm"))
         return _parse_water_content_ppm(record.get("water_content"))
     if key == "film_thickness":
+        if _safe_float(record.get("normalized_film_thickness_nm")) is not None:
+            return _safe_float(record.get("normalized_film_thickness_nm"))
         return _parse_film_thickness_nm(record.get("film_thickness"))
     if key == "alkyl_chain_length":
+        if _safe_float(record.get("normalized_alkyl_chain_length")) is not None:
+            return _safe_float(record.get("normalized_alkyl_chain_length"))
         return _safe_float(record.get("alkyl_chain_length"))
     return None
 
@@ -358,24 +379,63 @@ class ModelTrainingService:
     def __init__(self) -> None:
         self._tasks: dict[str, TrainingTaskState] = {}
 
-    async def summarize_scope(self, session: AsyncSession, scope_filter_values: dict[str, Any]) -> dict[str, Any]:
-        records = await self._load_scope_records(session, scope_filter_values)
+    async def summarize_scope(
+        self,
+        session: AsyncSession,
+        scope_filter_values: dict[str, Any],
+        cleaning_options: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        resolved = await self._resolve_records_for_cleaning(session, scope_filter_values, cleaning_options)
+        cleaning_profile = self._build_cleaning_profile(
+            resolved["records"],
+            target_key="cof",
+            cleaning_options=resolved["cleaning_options"],
+        )
+        return self._build_summary_payload(
+            cleaning_profile["summary_records"],
+            total_records=len(resolved["records"]),
+            cleaning_summary=cleaning_profile["summary"],
+            source_scope=resolved["source_scope"],
+        )
+
+    def summarize_saved_dataset(self, dataset: CleanedDataset) -> dict[str, Any]:
+        rows = json.loads(dataset.rows_json)
+        summary_payload = json.loads(dataset.summary_json)
+        return self._build_summary_payload(
+            rows,
+            total_records=int(dataset.row_count),
+            cleaning_summary=summary_payload.get("summary", {}),
+            source_scope=summary_payload.get("source_scope", {}),
+            defaults_override={
+                "cleaned_dataset_id": dataset.id,
+            },
+        )
+
+    def _build_summary_payload(
+        self,
+        summary_records: list[dict[str, Any]],
+        *,
+        total_records: int,
+        cleaning_summary: dict[str, Any],
+        source_scope: dict[str, Any],
+        defaults_override: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         feature_options = []
         for feature in FEATURE_DEFINITIONS:
             key = feature["key"]
-            available_count = self._feature_available_count(records, key)
+            available_count = self._feature_available_count(summary_records, key)
             feature_options.append(
                 {
                     **feature,
                     "available_count": available_count,
-                    "coverage": available_count / len(records) if records else 0.0,
+                    "coverage": available_count / len(summary_records) if summary_records else 0.0,
                     "disabled": available_count == 0,
                 }
             )
 
         target_options = []
         for key, target in TARGET_DEFINITIONS.items():
-            available_count = sum(1 for record in records if _safe_float(record.get(target["field"])) is not None)
+            available_count = sum(1 for record in summary_records if _safe_float(record.get(target["field"])) is not None)
             target_options.append(
                 {
                     "key": key,
@@ -391,18 +451,23 @@ class ModelTrainingService:
 
         return {
             "dataset": {
-                "total_records": len(records),
+                "total_records": total_records,
+                "cleaned_records": len(summary_records),
                 "rdkit_enabled": RDKit_AVAILABLE,
+                "source_scope": source_scope,
             },
             "targets": target_options,
             "algorithms": algorithm_options,
             "features": feature_options,
+            "cleaning": cleaning_summary,
             "defaults": {
                 "target": "cof",
                 "algorithm": "gradient_boosting",
                 "features": DEFAULT_FEATURE_SELECTION,
                 "hyperparameters": DEFAULT_HYPERPARAMETERS,
                 "data_options": DEFAULT_DATA_OPTIONS,
+                "cleaning_options": DEFAULT_CLEANING_OPTIONS,
+                **(defaults_override or {}),
             },
         }
 
@@ -415,8 +480,19 @@ class ModelTrainingService:
         group_id: int,
         scope_key: str,
         config: dict[str, Any],
+        saved_dataset: CleanedDataset | None = None,
     ) -> TrainingTaskState:
-        records = await self._load_scope_records(session, scope_filter_values)
+        if saved_dataset is not None:
+            resolved = {
+                "records": json.loads(saved_dataset.rows_json),
+                "source_scope": json.loads(saved_dataset.summary_json).get("source_scope", {}),
+            }
+        else:
+            resolved = await self._resolve_records_for_cleaning(
+                session,
+                scope_filter_values,
+                (config or {}).get("cleaning_options"),
+            )
         task_id = uuid.uuid4().hex
         task = TrainingTaskState(
             task_id=task_id,
@@ -426,7 +502,7 @@ class ModelTrainingService:
             config=config,
         )
         self._tasks[task_id] = task
-        asyncio.create_task(self._run_training(task, records))
+        asyncio.create_task(self._run_training(task, resolved["records"], resolved["source_scope"]))
         return task
 
     def get_task(self, task_id: str, requester_user_id: int) -> TrainingTaskState:
@@ -473,12 +549,114 @@ class ModelTrainingService:
         result = await session.execute(stmt)
         return [_serialize_record(record) for record in result.scalars().all()]
 
+    def _normalize_cleaning_options(self, cleaning_options: dict[str, Any] | None) -> dict[str, Any]:
+        options = {**DEFAULT_CLEANING_OPTIONS, **(cleaning_options or {})}
+        source_mode = str(options.get("source_mode") or DEFAULT_CLEANING_OPTIONS["source_mode"]).strip().lower()
+        if source_mode not in {"current_scope", "group_library", "group_library_fallback"}:
+            source_mode = DEFAULT_CLEANING_OPTIONS["source_mode"]
+        options["source_mode"] = source_mode
+        options["drop_missing_target"] = bool(options.get("drop_missing_target", True))
+        options["require_dual_smiles"] = bool(options.get("require_dual_smiles", True))
+        return options
+
+    def _group_library_scope(self, scope_filter_values: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "group_id": scope_filter_values["group_id"],
+            "scope_type": "group_library",
+            "scope_key": "group_library",
+            "workspace_id": None,
+        }
+
+    def _scope_label(self, scope_filter_values: dict[str, Any], current_scope_key: str) -> str:
+        if scope_filter_values["scope_key"] == "group_library":
+            return "Group library"
+        if scope_filter_values["scope_key"] == current_scope_key:
+            return "Current workspace"
+        return "Workspace"
+
+    async def _resolve_records_for_cleaning(
+        self,
+        session: AsyncSession,
+        scope_filter_values: dict[str, Any],
+        cleaning_options: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        normalized_options = self._normalize_cleaning_options(cleaning_options)
+        current_records = await self._load_scope_records(session, scope_filter_values)
+        resolved_scope = scope_filter_values
+        records = current_records
+
+        if normalized_options["source_mode"] == "group_library":
+            resolved_scope = self._group_library_scope(scope_filter_values)
+            records = await self._load_scope_records(session, resolved_scope)
+        elif normalized_options["source_mode"] == "group_library_fallback" and not current_records:
+            resolved_scope = self._group_library_scope(scope_filter_values)
+            records = await self._load_scope_records(session, resolved_scope)
+
+        return {
+            "records": records,
+            "cleaning_options": normalized_options,
+            "source_scope": {
+                "requested_mode": normalized_options["source_mode"],
+                "resolved_scope_key": resolved_scope["scope_key"],
+                "resolved_scope_type": resolved_scope["scope_type"],
+                "label": self._scope_label(resolved_scope, scope_filter_values["scope_key"]),
+                "used_fallback": resolved_scope["scope_key"] != scope_filter_values["scope_key"],
+            },
+        }
+
     def _feature_available_count(self, records: list[dict[str, Any]], key: str) -> int:
         if key == "cation_fingerprint":
             return sum(1 for record in records if str(record.get("cation_smiles") or "").strip())
         if key == "anion_fingerprint":
             return sum(1 for record in records if str(record.get("anion_smiles") or "").strip())
         return sum(1 for record in records if _feature_value(record, key) is not None)
+
+    def _build_cleaning_profile(
+        self,
+        records: list[dict[str, Any]],
+        *,
+        target_key: str,
+        cleaning_options: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        target_def = TARGET_DEFINITIONS.get(target_key)
+        if not target_def:
+            raise ValueError(f"Unsupported target '{target_key}'.")
+
+        options = self._normalize_cleaning_options(cleaning_options)
+        target_ready = [record for record in records if _safe_float(record.get(target_def["field"])) is not None]
+        chemistry_ready = [
+            record
+            for record in records
+            if str(record.get("cation_smiles") or "").strip() and str(record.get("anion_smiles") or "").strip()
+        ]
+
+        cleaned_records = target_ready if options["drop_missing_target"] else list(records)
+        if options["require_dual_smiles"]:
+            cleaned_records = [
+                record
+                for record in cleaned_records
+                if str(record.get("cation_smiles") or "").strip() and str(record.get("anion_smiles") or "").strip()
+            ]
+
+        return {
+            "summary_records": cleaned_records,
+            "summary": {
+                "source_mode": options["source_mode"],
+                "raw_records": len(records),
+                "target_ready_records": len(target_ready),
+                "chemistry_ready_records": len(chemistry_ready),
+                "training_ready_records": len(cleaned_records),
+                "dropped_by_reason": {
+                    "missing_target": sum(1 for record in records if _safe_float(record.get(target_def["field"])) is None),
+                    "missing_cation_smiles": sum(1 for record in records if not str(record.get("cation_smiles") or "").strip()),
+                    "missing_anion_smiles": sum(1 for record in records if not str(record.get("anion_smiles") or "").strip()),
+                },
+                "rules": {
+                    "drop_missing_target": options["drop_missing_target"],
+                    "require_dual_smiles": options["require_dual_smiles"],
+                },
+            },
+        }
 
     def _prepare_dataset(self, records: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]:
         target_key = config.get("target", "cof")
@@ -501,8 +679,14 @@ class ModelTrainingService:
         validation_split = float(data_options.get("validation_split", 0.2) or 0.2)
         validation_split = min(0.4, max(0.1, validation_split))
 
+        cleaning_profile = self._build_cleaning_profile(
+            records,
+            target_key=target_key,
+            cleaning_options=(config or {}).get("cleaning_options"),
+        )
+
         eligible_records = []
-        for record in records:
+        for record in cleaning_profile["summary_records"]:
             target_value = _safe_float(record.get(target_def["field"]))
             confidence = _safe_float(record.get("confidence")) or 0.0
             if target_value is None:
@@ -515,6 +699,7 @@ class ModelTrainingService:
             eligible_records = eligible_records[:max_records]
 
         total_records = len(records)
+        cleaned_records = len(cleaning_profile["summary_records"])
         usable_records = len(eligible_records)
         if usable_records < 10:
             raise ValueError(
@@ -608,6 +793,7 @@ class ModelTrainingService:
             "total_rounds": total_rounds,
             "dataset": {
                 "total_records": total_records,
+                "cleaned_records": cleaned_records,
                 "usable_records": usable_records,
                 "dropped_records": total_records - usable_records,
                 "train_size": int(len(X_train)),
@@ -623,6 +809,7 @@ class ModelTrainingService:
                     "max_records": max_records,
                     "validation_split": validation_split,
                 },
+                "cleaning": cleaning_profile["summary"],
             },
             "feature_blocks": feature_blocks,
             "warnings": warnings,
@@ -634,14 +821,14 @@ class ModelTrainingService:
                 return feature["label"]
         return key.replace("_", " ").title()
 
-    async def _run_training(self, task: TrainingTaskState, records: list[dict[str, Any]]) -> None:
+    async def _run_training(self, task: TrainingTaskState, records: list[dict[str, Any]], source_scope: dict[str, Any]) -> None:
         try:
             prepared = self._prepare_dataset(records, task.config)
             X_train = prepared["X_train"]
             X_val = prepared["X_val"]
             y_train = prepared["y_train"]
             y_val = prepared["y_val"]
-            task.dataset = prepared["dataset"]
+            task.dataset = {**prepared["dataset"], "source_scope": source_scope}
             task.feature_blocks = prepared["feature_blocks"]
             task.warnings = prepared["warnings"]
             task.total_rounds = prepared["total_rounds"]

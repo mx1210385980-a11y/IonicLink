@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from database import get_db_session
-from models.db_models import Literature, ResearchGroup, TribologyData, User, Workspace
+from models.db_models import CleanedDataset, Literature, ResearchGroup, TribologyData, User, Workspace
 
 ROLE_PRINCIPAL_INVESTIGATOR = "principal_investigator"
 ROLE_GROUP_ADMIN = "group_admin"
@@ -223,6 +223,28 @@ def can_manage_literature(principal: AuthPrincipal, literature: Literature | Non
     return literature.created_by_user_id == principal.user.id
 
 
+def can_view_cleaned_dataset(principal: AuthPrincipal, dataset: CleanedDataset | None) -> bool:
+    if dataset is None or dataset.group_id != principal.group.id:
+        return False
+    if is_admin(principal):
+        return True
+    if dataset.scope_type == "group_library":
+        return True
+    return dataset.workspace_id == getattr(principal.personal_workspace, "id", None)
+
+
+def can_manage_cleaned_dataset(principal: AuthPrincipal, dataset: CleanedDataset | None) -> bool:
+    if dataset is None or dataset.group_id != principal.group.id:
+        return False
+    if is_admin(principal):
+        return True
+    if principal.user.role not in WORKSPACE_WRITE_ROLES:
+        return False
+    if dataset.scope_type == "workspace":
+        return dataset.workspace_id == getattr(principal.personal_workspace, "id", None)
+    return dataset.created_by_user_id == principal.user.id
+
+
 def ensure_scope_writable(principal: AuthPrincipal, scope: RequestScope) -> None:
     if not can_write_scope(principal, scope):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have write access to this scope")
@@ -331,6 +353,21 @@ async def require_record_access(
     if write and not can_manage_literature(principal, record.literature):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to modify this record")
     return record
+
+
+async def require_cleaned_dataset_access(
+    db: AsyncSession,
+    principal: AuthPrincipal,
+    dataset_id: int,
+    *,
+    write: bool = False,
+) -> CleanedDataset:
+    dataset = await db.get(CleanedDataset, dataset_id)
+    if not dataset or not can_view_cleaned_dataset(principal, dataset):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cleaned dataset not found")
+    if write and not can_manage_cleaned_dataset(principal, dataset):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to modify this cleaned dataset")
+    return dataset
 
 
 async def list_accessible_workspaces(db: AsyncSession, principal: AuthPrincipal) -> list[Workspace]:

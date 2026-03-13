@@ -1,9 +1,11 @@
 ﻿from models.tribology import TribologyData
 from services.llm.deduplication import deduplicate_records_with_report
+from services.llm_service import _normalize_quantitative_thickness
 from services.llm.prompts import (
     ABBREV_MAPPING_PROMPT,
     FIGURE_TABLE_EXTRACTION_PROMPT,
     TEXT_EXTRACTION_PROMPT,
+    TRIBOLOGY_EXTRACTION_PROMPT,
 )
 
 
@@ -69,3 +71,11 @@ def test_prompts_include_required_provenance_constraints():
         assert token in FIGURE_TABLE_EXTRACTION_PROMPT
 
     assert "sample_id" in ABBREV_MAPPING_PROMPT
+    assert "Never place sample abbreviations" in TRIBOLOGY_EXTRACTION_PROMPT
+    assert "Thickness fields must stay quantitative" in FIGURE_TABLE_EXTRACTION_PROMPT
+
+
+def test_llm_thickness_normalizer_rejects_ionic_liquid_labels():
+    assert _normalize_quantitative_thickness("(HMIM FAP)") is None
+    assert _normalize_quantitative_thickness("(P6,6,6,14 TFSI)") is None
+    assert _normalize_quantitative_thickness("12 nm (BB5-1-M)") == "12 nm"

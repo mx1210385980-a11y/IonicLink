@@ -53,6 +53,37 @@ def _canonicalize_il(value: Optional[str]) -> str:
     return text
 
 
+def _format_thickness_nm(value: float) -> str:
+    if float(value).is_integer():
+        return f"{int(value)} nm"
+    return f"{value:.3f}".rstrip("0").rstrip(".") + " nm"
+
+
+def _normalize_quantitative_thickness(value: Optional[str]) -> Optional[str]:
+    text = str(value or "").strip()
+    if not text or text.lower() in {"-", "--", "n/a", "none", "unknown"}:
+        return None
+
+    match = re.search(
+        r"([-+]?\d*\.?\d+)\s*(nm|μm|µm|um|pm|å|a\b|angstrom(?:s)?)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    magnitude = float(match.group(1))
+    unit = match.group(2).lower()
+    if unit in {"μm", "µm", "um"}:
+        magnitude *= 1000.0
+    elif unit == "pm":
+        magnitude /= 1000.0
+    elif unit in {"å", "a", "angstrom", "angstroms"}:
+        magnitude /= 10.0
+
+    return _format_thickness_nm(magnitude)
+
+
 def _infer_lubricant(record: TribologyDataCreate) -> str:
     current = _canonicalize_il(getattr(record, "lubricant", ""))
     if current and not _is_unknown_il(current):
@@ -62,7 +93,6 @@ def _infer_lubricant(record: TribologyDataCreate) -> str:
         str(getattr(record, "evidence", "") or ""),
         str(getattr(record, "source", "") or ""),
         str(getattr(record, "source_figure", "") or ""),
-        str(getattr(record, "film_thickness", "") or ""),
     ]
     for text in candidate_spaces:
         candidate = _canonicalize_il(normalize_ionic_liquid(text))
@@ -147,6 +177,11 @@ async def sync_batch_data(
             if not is_supported_ionic_liquid_name(lubricant):
                 dropped_non_il += 1
                 continue
+            film_thickness = _normalize_quantitative_thickness(getattr(record, "film_thickness", None))
+            residual_film_thickness_d = _normalize_quantitative_thickness(
+                getattr(record, "residual_film_thickness_d", None)
+            )
+            layer_spacing_delta = _normalize_quantitative_thickness(getattr(record, "layer_spacing_delta", None))
             new_records.append(
                 TribologyData(
                     literature_id=literature.id,
@@ -162,9 +197,9 @@ async def sync_batch_data(
                     potential=getattr(record, "potential", None),
                     water_content=getattr(record, "water_content", None),
                     surface_roughness=getattr(record, "surface_roughness", None),
-                    residual_film_thickness_d=getattr(record, "residual_film_thickness_d", None),
-                    layer_spacing_delta=getattr(record, "layer_spacing_delta", None),
-                    film_thickness=getattr(record, "film_thickness", None),
+                    residual_film_thickness_d=residual_film_thickness_d,
+                    layer_spacing_delta=layer_spacing_delta,
+                    film_thickness=film_thickness,
                     mol_ratio=getattr(record, "mol_ratio", None),
                     cation=getattr(record, "cation", None),
                     anion=getattr(record, "anion", None),

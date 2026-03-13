@@ -1,5 +1,6 @@
 from services.file_service import _normalize_record_chemistry
 from services.il_resolver_service import resolve_il
+from services.data_sync_service import _normalize_quantitative_thickness
 
 
 def test_resolve_il_normalizes_full_name_and_phosphonium_display():
@@ -40,3 +41,9 @@ def test_normalize_record_chemistry_clears_il_from_film_field_and_uses_bracket_n
 
     assert records[2]["ionic_liquid"] == "[P4,4,4,1][TFSI]"
     assert records[2]["film_thickness"] == "12 nm"
+
+
+def test_sync_thickness_normalizer_drops_non_quantitative_labels():
+    assert _normalize_quantitative_thickness("(EMIM FAP)") is None
+    assert _normalize_quantitative_thickness("P4,4,4,1 TFSI") is None
+    assert _normalize_quantitative_thickness("0.7 nm") == "0.7 nm"

@@ -24,6 +24,7 @@ class ResearchGroup(Base):
         cascade="all, delete-orphan",
     )
     literature: Mapped[List["Literature"]] = relationship("Literature", back_populates="group")
+    cleaned_datasets: Mapped[List["CleanedDataset"]] = relationship("CleanedDataset", back_populates="group")
 
 
 class User(Base):
@@ -41,6 +42,7 @@ class User(Base):
     group: Mapped["ResearchGroup"] = relationship("ResearchGroup", back_populates="users")
     workspaces: Mapped[List["Workspace"]] = relationship("Workspace", back_populates="owner")
     created_literature: Mapped[List["Literature"]] = relationship("Literature", back_populates="created_by")
+    cleaned_datasets: Mapped[List["CleanedDataset"]] = relationship("CleanedDataset", back_populates="created_by")
 
 
 class Workspace(Base):
@@ -59,6 +61,35 @@ class Workspace(Base):
     group: Mapped["ResearchGroup"] = relationship("ResearchGroup", back_populates="workspaces")
     owner: Mapped[Optional["User"]] = relationship("User", back_populates="workspaces")
     literature: Mapped[List["Literature"]] = relationship("Literature", back_populates="workspace")
+    cleaned_datasets: Mapped[List["CleanedDataset"]] = relationship("CleanedDataset", back_populates="workspace")
+
+
+class CleanedDataset(Base):
+    __tablename__ = "cleaned_datasets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    target_key: Mapped[str] = mapped_column(String(40), default="cof", nullable=False)
+
+    source_scope_type: Mapped[str] = mapped_column(String(32), nullable=False, default="group_library")
+    source_scope_key: Mapped[str] = mapped_column(String(64), nullable=False, default="group_library")
+
+    group_id: Mapped[int] = mapped_column(ForeignKey("research_groups.id"), index=True, nullable=False)
+    workspace_id: Mapped[Optional[int]] = mapped_column(ForeignKey("workspaces.id"), index=True, nullable=True)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    scope_type: Mapped[str] = mapped_column(String(32), default="workspace", index=True, nullable=False)
+    scope_key: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+
+    row_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    config_json: Mapped[str] = mapped_column(Text, nullable=False)
+    summary_json: Mapped[str] = mapped_column(Text, nullable=False)
+    rows_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    group: Mapped["ResearchGroup"] = relationship("ResearchGroup", back_populates="cleaned_datasets")
+    workspace: Mapped[Optional["Workspace"]] = relationship("Workspace", back_populates="cleaned_datasets")
+    created_by: Mapped["User"] = relationship("User", back_populates="cleaned_datasets")
 
 
 class Literature(Base):

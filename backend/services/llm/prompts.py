@@ -33,7 +33,7 @@ Return JSON with top-level key `data`:
       "potential": "OCP",
       "water_content": "44%",
       "surface_roughness": "RMS 0.3 nm",
-      "film_thickness": "12 nm (BB5-1-M)",
+      "film_thickness": "12 nm",
       "residual_film_thickness_d": "3.0 nm",
       "layer_spacing_delta": "0.7 nm",
       "mol_ratio": "1:70",
@@ -53,8 +53,9 @@ Rules:
 - Keep AFM / force-distance / layering records even when COF is absent.
 - Valid quantitative fields include cof, friction_force, load/normal_load, film_thickness,
   residual_film_thickness_d, layer_spacing_delta, surface_roughness, wear_rate.
-- Preserve sample abbreviations and attach them to film_thickness when available:
-  e.g. "12 nm (BB5-1-M)" or "(BP3-1-H)".
+- `film_thickness`, `residual_film_thickness_d`, and `layer_spacing_delta` must be numeric thickness values with units only.
+- Never place sample abbreviations, ionic-liquid names, or condition labels into thickness fields.
+- Keep sample abbreviations in `evidence`, `notes`, or abbreviation mappings instead.
 - `source`, `source_page`, `source_figure`, `evidence` are mandatory provenance fields.
 - `evidence` must include distinguishing condition/sample identifiers, not generic statements.
 - If a value is unclear, set it to null.
@@ -105,7 +106,8 @@ Figure/table-specific rules:
   X axis -> film_thickness, Y axis -> cof.
 - Exhaust clear points on each curve; for unreadable points set null.
 - Keep source labels exact: e.g., "Fig. 3b", "Table 1".
-- Keep sample abbreviations exactly as shown and include them in film_thickness when possible.
+- Thickness fields must stay quantitative; do not place sample abbreviations or ionic-liquid names into them.
+- Keep sample abbreviations exactly as shown in evidence text or notes.
 - Evidence should quote caption text or nearby explicit statements linking condition and value.
 """
 

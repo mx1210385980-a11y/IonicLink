@@ -1,6 +1,7 @@
 import axios from 'axios'
 
 import {
+    authFetch,
     clearSession,
     getAuthHeaders,
     getSessionToken,
@@ -845,6 +846,7 @@ export interface ModelTrainingTaskSnapshot {
     current: ModelTrainingMetricPoint | null
     dataset: {
         total_records: number
+        cleaned_records: number
         usable_records: number
         dropped_records: number
         train_size: number
@@ -860,6 +862,8 @@ export interface ModelTrainingTaskSnapshot {
             max_records: number | null
             validation_split: number
         }
+        cleaning?: ModelTrainingCleaningSummary
+        source_scope?: ModelTrainingSourceScope
     }
     warnings: string[]
     feature_blocks: Array<{
@@ -874,6 +878,7 @@ export interface ModelTrainingTaskSnapshot {
         features: ModelTrainingFeatureSelection
         hyperparameters: ModelTrainingHyperparameters
         data_options: ModelTrainingDataOptions
+        cleaning_options: ModelTrainingCleaningOptions
     }
     history: ModelTrainingMetricPoint[]
 }
@@ -881,8 +886,11 @@ export interface ModelTrainingTaskSnapshot {
 export interface ModelTrainingSummary {
     dataset: {
         total_records: number
+        cleaned_records: number
         rdkit_enabled: boolean
+        source_scope: ModelTrainingSourceScope
     }
+    cleaning: ModelTrainingCleaningSummary
     targets: ModelTrainingTargetOption[]
     algorithms: ModelTrainingAlgorithmOption[]
     features: ModelTrainingFeatureOption[]
@@ -892,6 +900,33 @@ export interface ModelTrainingSummary {
         features: ModelTrainingFeatureSelection
         hyperparameters: ModelTrainingHyperparameters
         data_options: ModelTrainingDataOptions
+        cleaning_options: ModelTrainingCleaningOptions
+        cleaned_dataset_id?: number | null
+    }
+}
+
+export interface ModelTrainingSourceScope {
+    requested_mode: string
+    resolved_scope_key: string
+    resolved_scope_type: string
+    label: string
+    used_fallback: boolean
+}
+
+export interface ModelTrainingCleaningSummary {
+    source_mode: string
+    raw_records: number
+    target_ready_records: number
+    chemistry_ready_records: number
+    training_ready_records: number
+    dropped_by_reason: {
+        missing_target: number
+        missing_cation_smiles: number
+        missing_anion_smiles: number
+    }
+    rules: {
+        drop_missing_target: boolean
+        require_dual_smiles: boolean
     }
 }
 
@@ -920,17 +955,157 @@ export interface ModelTrainingDataOptions {
     random_seed: number
 }
 
+export interface ModelTrainingCleaningOptions {
+    source_mode: 'current_scope' | 'group_library' | 'group_library_fallback'
+    drop_missing_target: boolean
+    require_dual_smiles: boolean
+}
+
 export interface ModelTrainingStartPayload {
     target: string
     algorithm: string
     features: ModelTrainingFeatureSelection
     hyperparameters: ModelTrainingHyperparameters
     data_options: ModelTrainingDataOptions
+    cleaning_options: ModelTrainingCleaningOptions
+    cleaned_dataset_id?: number | null
 }
 
-export async function getModelTrainingSummary() {
-    const response = await api.get('/api/model-training/summary')
+export async function getModelTrainingSummary(cleanedDatasetId?: number | null) {
+    const suffix = cleanedDatasetId ? `?cleaned_dataset_id=${cleanedDatasetId}` : ''
+    const response = await api.get(`/api/model-training/summary${suffix}`)
     return response.data as ModelTrainingSummary
+}
+
+export async function getModelTrainingCleaningSummary(payload: ModelTrainingCleaningOptions) {
+    const response = await api.post('/api/model-training/cleaning/summary', payload)
+    return response.data as ModelTrainingSummary
+}
+
+export interface ModelCleaningOptions {
+    source_mode: 'current_scope' | 'group_library' | 'group_library_fallback'
+    drop_missing_target: boolean
+    require_dual_smiles: boolean
+    missing_value_strategy: 'keep' | 'median' | 'zero'
+    remove_target_outliers: boolean
+    iqr_multiplier: number
+}
+
+export interface ModelCleaningPreviewRow {
+    record_id: number
+    literature_id: number
+    material_name: string
+    lubricant: string
+    cof_value: number | null
+    cation_smiles: string | null
+    anion_smiles: string | null
+    temperature: string | null
+    speed_value: string | null
+    load_raw: string | null
+    potential: string | null
+    water_content: string | null
+    film_thickness: string | null
+    alkyl_chain_length: number | null
+    normalized_temperature_c: number | null
+    normalized_speed_mps: number | null
+    normalized_load_n: number | null
+    normalized_potential_v: number | null
+    normalized_water_content_ppm: number | null
+    normalized_film_thickness_nm: number | null
+    normalized_alkyl_chain_length: number | null
+    confidence: number
+    is_target_outlier: boolean
+    repaired_fields: string[]
+}
+
+export interface ModelCleaningPreview {
+    target: {
+        key: string
+        label: string
+    }
+    options: ModelCleaningOptions
+    source_scope: ModelTrainingSourceScope
+    summary: {
+        raw_records: number
+        target_ready_records: number
+        chemistry_ready_records: number
+        training_ready_records: number
+        missing_value_repairs: Record<string, number>
+        outliers_detected: number
+        outliers_removed: number
+        dropped_by_reason: {
+            missing_target: number
+            missing_cation_smiles: number
+            missing_anion_smiles: number
+        }
+        rules: {
+            drop_missing_target: boolean
+            require_dual_smiles: boolean
+            missing_value_strategy: string
+            remove_target_outliers: boolean
+            iqr_multiplier: number
+        }
+    }
+    feature_coverage: Array<{
+        key: string
+        label: string
+        group: string
+        available_count: number
+        coverage: number
+    }>
+    rows: ModelCleaningPreviewRow[]
+    preview_rows: ModelCleaningPreviewRow[]
+    normalization_preview: ModelCleaningPreviewRow[]
+}
+
+export interface SavedCleanedDatasetSummary {
+    id: number
+    name: string
+    description: string | null
+    target_key: string
+    row_count: number
+    created_at: string | null
+    source_scope: ModelTrainingSourceScope
+    summary: ModelCleaningPreview['summary']
+    feature_coverage: ModelCleaningPreview['feature_coverage']
+    target: {
+        key: string
+        label: string
+    }
+}
+
+export interface SavedCleanedDatasetDetail extends SavedCleanedDatasetSummary {
+    rows: ModelCleaningPreviewRow[]
+    config: ModelCleaningOptions
+}
+
+export async function previewModelCleaning(payload: ModelCleaningOptions) {
+    const response = await api.post('/api/model-cleaning/preview', payload)
+    return response.data as ModelCleaningPreview
+}
+
+export async function listCleanedDatasets() {
+    const response = await api.get('/api/model-cleaning/datasets')
+    return response.data as { items: SavedCleanedDatasetSummary[] }
+}
+
+export async function saveCleanedDataset(payload: { name: string; description?: string; target_key?: string; cleaning_options: ModelCleaningOptions }) {
+    const response = await api.post('/api/model-cleaning/datasets', payload)
+    return response.data as { dataset: SavedCleanedDatasetDetail }
+}
+
+export async function getCleanedDataset(datasetId: number) {
+    const response = await api.get(`/api/model-cleaning/datasets/${datasetId}`)
+    return response.data as { dataset: SavedCleanedDatasetDetail }
+}
+
+export async function downloadCleanedDataset(datasetId: number) {
+    const response = await authFetch(resolveApiUrl(`/api/model-cleaning/datasets/${datasetId}/export`))
+    if (!response.ok) {
+        throw new Error(`Export failed with status ${response.status}`)
+    }
+    const blob = await response.blob()
+    return blob
 }
 
 export async function startModelTraining(payload: ModelTrainingStartPayload) {

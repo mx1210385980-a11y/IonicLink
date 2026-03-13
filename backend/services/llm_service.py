@@ -47,6 +47,43 @@ from utils.pdf_utils import classify_pdf_pages
 load_dotenv(override=True)
 
 
+def _format_thickness_nm(value: float) -> str:
+    if float(value).is_integer():
+        return f"{int(value)} nm"
+    return f"{value:.3f}".rstrip("0").rstrip(".") + " nm"
+
+
+def _normalize_quantitative_thickness(value: Any) -> Optional[str]:
+    text = str(value or "").strip()
+    if not text or text.lower() in {"-", "--", "n/a", "none", "unknown"}:
+        return None
+
+    match = re.search(
+        r"([-+]?\d*\.?\d+)\s*(nm|μm|µm|um|pm|å|a\b|angstrom(?:s)?)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    magnitude = float(match.group(1))
+    unit = match.group(2).lower()
+    if unit in {"μm", "µm", "um"}:
+        magnitude *= 1000.0
+    elif unit == "pm":
+        magnitude /= 1000.0
+    elif unit in {"å", "a", "angstrom", "angstroms"}:
+        magnitude /= 10.0
+
+    return _format_thickness_nm(magnitude)
+
+
+def _sanitize_thickness_fields(item: dict[str, Any]) -> None:
+    for field in ("film_thickness", "residual_film_thickness_d", "layer_spacing_delta"):
+        if field in item:
+            item[field] = _normalize_quantitative_thickness(item.get(field))
+
+
 class LLMService:
     def __init__(self):
         self.base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
@@ -234,9 +271,6 @@ class LLMService:
                 record["ionic_liquid"] = mapped["ionic_liquid"]
             if not record.get("material_name") and mapped.get("material_name"):
                 record["material_name"] = mapped["material_name"]
-            ft = str(record.get("film_thickness") or "").strip()
-            if matched_sid and matched_sid not in ft:
-                record["film_thickness"] = f"{ft} ({matched_sid})".strip()
         return record
 
     def _split_legend_entries(self, row: dict[str, Any]) -> List[dict[str, Any]]:
@@ -463,6 +497,7 @@ class LLMService:
         for key in ("cof", "load", "normal_load", "speed", "temperature", "film_thickness", "friction_force"):
             if key in item and item[key] is not None:
                 item[key] = re.sub(r"\s+", " ", str(item[key]).replace("µ", "μ").replace("渭", "μ").replace("碌", "μ")).strip()
+        _sanitize_thickness_fields(item)
         if item.get("temperature"):
             item["temperature"] = normalize_temperature(str(item["temperature"]))
         if fallback_page and not item.get("source_page"):

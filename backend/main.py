@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_db
-from routers import agent_system, auth_router, data_explorer, extraction, model_training, sync_router
+from routers import agent_system, auth_router, data_explorer, extraction, model_cleaning, model_training, sync_router
 from services.agent_runtime_service import get_agent_runtime
 
 
@@ -51,6 +51,7 @@ app.add_middleware(
 app.include_router(extraction.router)
 app.include_router(sync_router.router)
 app.include_router(data_explorer.router)
+app.include_router(model_cleaning.router)
 app.include_router(model_training.router)
 app.include_router(agent_system.router)
 app.include_router(auth_router.router)

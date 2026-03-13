@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Beaker, FlaskConical, Github, Moon, Sun, PieChart, Search, Server, BookOpen, Library, LogOut, UserCircle2 } from 'lucide-vue-next'
+import { Beaker, Database, FlaskConical, Github, Moon, Sun, PieChart, Search, Server, BookOpen, Library, LogOut, UserCircle2 } from 'lucide-vue-next'
 import FileUpload from '@/components/FileUpload.vue'
 import ChatPanel from '@/components/ChatPanel.vue'
 import AgentStatusPanel from '@/components/AgentStatusPanel.vue'
 import IntegratedExplorer from '@/components/IntegratedExplorer.vue'
 import Dashboard from '@/components/Dashboard.vue'
+import DataCleaningWorkbench from '@/components/DataCleaningWorkbench.vue'
 import ModelTrainingWorkbench from '@/components/ModelTrainingWorkbench.vue'
 import MonitorView from '@/components/MonitorView.vue'
 import LiteratureList from '@/components/LiteratureList.vue'
@@ -39,7 +40,7 @@ import {
 } from '@/lib/session'
 import type { HighlightRect } from '@/types/pdf-highlight'
 
-const currentView = ref<'dashboard' | 'workspace' | 'predict' | 'monitor' | 'literature' | 'grounding' | 'guide'>('guide')
+const currentView = ref<'dashboard' | 'workspace' | 'cleaning' | 'predict' | 'monitor' | 'literature' | 'grounding' | 'guide'>('guide')
 const sidebarTab = ref<'chat' | 'agents'>('chat')
 const isDark = ref(false)
 
@@ -52,6 +53,7 @@ const explorerDoi = ref('')
 const latestAgentWorkflow = ref<AgentWorkflow | null>(null)
 const activeExtractionFileId = ref<string | null>(null)
 const activeExtractionRun = ref<ExtractionRunDetail | null>(null)
+const preferredTrainingDatasetId = ref<number | null>(null)
 const isChatting = ref(false)
 const isAuthenticating = ref(false)
 const authError = ref('')
@@ -129,7 +131,13 @@ function resetWorkspaceSessionState() {
   selectedFileId.value = null
   explorerDoi.value = ''
   latestAgentWorkflow.value = null
+  preferredTrainingDatasetId.value = null
   resetExtractionState()
+}
+
+function openTrainingWorkbench(datasetId: number | null = null) {
+  preferredTrainingDatasetId.value = datasetId
+  currentView.value = 'predict'
 }
 
 async function initializeSession() {
@@ -788,7 +796,16 @@ onBeforeUnmount(() => {
           </button>
 
           <button
-            @click="currentView = 'predict'"
+            @click="currentView = 'cleaning'"
+            class="flex items-center gap-2 px-4 py-1.5 text-[13px] font-semibold transition-all rounded-full h-full"
+            :class="currentView === 'cleaning' ? 'bg-[#eef2ff] text-[#4f46e5] dark:bg-indigo-500/10 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'"
+          >
+            <Database class="w-[15px] h-[15px]" stroke-width="2.5" />
+            Cleaning
+          </button>
+
+          <button
+            @click="openTrainingWorkbench(null)"
             class="flex items-center gap-2 px-4 py-1.5 text-[13px] font-semibold transition-all rounded-full h-full"
             :class="currentView === 'predict' ? 'bg-[#eef2ff] text-[#4f46e5] dark:bg-indigo-500/10 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'"
           >
@@ -862,8 +879,12 @@ onBeforeUnmount(() => {
         <Dashboard :key="sessionState.activeScopeKey" @open-library="currentView = 'literature'" />
       </div>
 
+      <div v-else-if="currentView === 'cleaning'" class="h-[calc(100vh-56px)]">
+        <DataCleaningWorkbench :key="sessionState.activeScopeKey" @open-training="openTrainingWorkbench" />
+      </div>
+
       <div v-else-if="currentView === 'predict'" class="h-[calc(100vh-56px)]">
-        <ModelTrainingWorkbench :key="sessionState.activeScopeKey" />
+        <ModelTrainingWorkbench :key="sessionState.activeScopeKey" :preselected-cleaned-dataset-id="preferredTrainingDatasetId" />
       </div>
 
       <div v-else-if="currentView === 'workspace'" class="flex h-[calc(100vh-56px)] bg-slate-100/70 dark:bg-[#06101c]">
