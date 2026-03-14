@@ -28,6 +28,7 @@ from security import (
 )
 from services.doi_service import DOIService
 from services.il_resolver_service import is_supported_ionic_liquid_name
+from utils.tribopair import derive_legacy_material_name, derive_legacy_surface_roughness
 
 _doi_service = DOIService()
 
@@ -182,10 +183,21 @@ async def sync_batch_data(
                 getattr(record, "residual_film_thickness_d", None)
             )
             layer_spacing_delta = _normalize_quantitative_thickness(getattr(record, "layer_spacing_delta", None))
+            probe_material = getattr(record, "probe_material", None)
+            probe_geometry = getattr(record, "probe_geometry", None)
+            probe_radius = getattr(record, "probe_radius", None)
+            probe_roughness = getattr(record, "probe_roughness", None)
+            substrate_material = getattr(record, "substrate_material", None)
+            substrate_coating = getattr(record, "substrate_coating", None)
+            substrate_roughness = getattr(record, "substrate_roughness", None)
             new_records.append(
                 TribologyData(
                     literature_id=literature.id,
-                    material_name=record.material_name,
+                    material_name=derive_legacy_material_name(
+                        probe_material=probe_material,
+                        substrate_material=substrate_material,
+                        legacy_material_name=record.material_name,
+                    ),
                     lubricant=lubricant,
                     cof_value=record.cof_value,
                     cof_operator=record.cof_operator,
@@ -196,7 +208,18 @@ async def sync_batch_data(
                     temperature=getattr(record, "temperature", None),
                     potential=getattr(record, "potential", None),
                     water_content=getattr(record, "water_content", None),
-                    surface_roughness=getattr(record, "surface_roughness", None),
+                    probe_material=probe_material,
+                    probe_geometry=probe_geometry,
+                    probe_radius=probe_radius,
+                    probe_roughness=probe_roughness,
+                    substrate_material=substrate_material,
+                    substrate_coating=substrate_coating,
+                    substrate_roughness=substrate_roughness,
+                    surface_roughness=derive_legacy_surface_roughness(
+                        probe_roughness=probe_roughness,
+                        substrate_roughness=substrate_roughness,
+                        legacy_surface_roughness=getattr(record, "surface_roughness", None),
+                    ),
                     residual_film_thickness_d=residual_film_thickness_d,
                     layer_spacing_delta=layer_spacing_delta,
                     film_thickness=film_thickness,

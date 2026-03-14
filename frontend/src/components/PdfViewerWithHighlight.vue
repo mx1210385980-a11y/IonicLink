@@ -22,6 +22,14 @@ import { authFetch } from '@/lib/session'
 import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
 
+function resolvePdfContentUrl(src: string): string {
+  const normalized = String(src || '').trim()
+  if (/\/api\/pdf\/\d+$/i.test(normalized)) {
+    return `${normalized}/content`
+  }
+  return normalized
+}
+
 // ─── Props ───────────────────────────────────────────────────────────────────
 const props = withDefaults(defineProps<{
   /** PDF source: URL string, Uint8Array, or ArrayBuffer */
@@ -60,6 +68,7 @@ const pageCount = ref(0)
 const currentScale = ref(1)
 const isLoading = ref(true)
 const errorMsg = ref('')
+const authenticatedPdfBlobUrl = ref('')
 
 // Per-page metadata: store each page's native size (in PDF points)
 interface PageMeta {
@@ -102,12 +111,67 @@ onBeforeUnmount(() => {
     pdfDoc.value.destroy()
     pdfDoc.value = null
   }
+  revokeAuthenticatedBlobUrl()
 })
 
 // Re-load when src changes
 watch(() => props.src, () => {
   loadPdf()
 })
+
+function revokeAuthenticatedBlobUrl() {
+  if (!authenticatedPdfBlobUrl.value) return
+  URL.revokeObjectURL(authenticatedPdfBlobUrl.value)
+  authenticatedPdfBlobUrl.value = ''
+}
+
+async function fetchPdfBytes(): Promise<Uint8Array> {
+  if (typeof props.src !== 'string') {
+    return props.src instanceof Uint8Array ? props.src : new Uint8Array(props.src)
+  }
+
+  const pdfContentPath = resolvePdfContentUrl(props.src)
+  const resp = await authFetch(resolveApiUrl(pdfContentPath), { mode: 'cors' })
+  console.log('[PdfViewer] fetched URL', pdfContentPath, 'status', resp.status, 'headers', [...resp.headers.entries()])
+
+  if (resp.status === 401) {
+    throw new Error('Not authenticated. Please sign in again.')
+  }
+  if (resp.status === 403) {
+    throw new Error('You do not have access to this PDF.')
+  }
+  if (!resp.ok) {
+    throw new Error(`PDF fetch failed: ${resp.status} ${resp.statusText}`)
+  }
+
+  const payload = await resp.json()
+  const dataB64 = String(payload?.data_b64 || '')
+  if (!dataB64) {
+    throw new Error('PDF content payload is empty.')
+  }
+  const binary = window.atob(dataB64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  revokeAuthenticatedBlobUrl()
+  authenticatedPdfBlobUrl.value = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }))
+  return bytes
+}
+
+async function openPdfInNewTab() {
+  try {
+    if (!authenticatedPdfBlobUrl.value) {
+      await fetchPdfBytes()
+    }
+    if (authenticatedPdfBlobUrl.value) {
+      window.open(authenticatedPdfBlobUrl.value, '_blank', 'noopener,noreferrer')
+    }
+  } catch (err: any) {
+    errorMsg.value = err?.message || 'Failed to open PDF'
+    emit('error', errorMsg.value)
+  }
+}
 
 // ─── Core: Load PDF ──────────────────────────────────────────────────────────
 async function loadPdf() {
@@ -127,23 +191,8 @@ async function loadPdf() {
     // better control over errors (network/CORS) and avoids pdfjs attempting
     // to stream/parse an HTML error page and then blowing up with obscure
     // messages like “a.toHex is not a function”.
-    let loadingTask: any
-    if (typeof props.src === 'string') {
-      const resp = await authFetch(resolveApiUrl(props.src), { mode: 'cors' })
-      console.log('[PdfViewer] fetched URL', props.src, 'status', resp.status, 'headers', [...resp.headers.entries()])
-      if (!resp.ok) {
-        throw new Error(`PDF fetch failed: ${resp.status} ${resp.statusText}`)
-      }
-      const contentType = resp.headers.get('content-type')
-      if (!contentType || !contentType.includes('pdf')) {
-        console.warn('[PdfViewer] unexpected content-type', contentType)
-      }
-      const buf = await resp.arrayBuffer()
-      const data = new Uint8Array(buf)
-      loadingTask = pdfjsLib.getDocument({ data })
-    } else {
-      loadingTask = pdfjsLib.getDocument({ data: props.src })
-    }
+    const data = await fetchPdfBytes()
+    const loadingTask = pdfjsLib.getDocument({ data })
 
     const pdf = await loadingTask.promise
     pdfDoc.value = pdf
@@ -285,15 +334,14 @@ defineExpose({ scrollToHighlight })
     >
       <div class="text-center p-6 rounded-lg bg-destructive/10 border border-destructive/30 max-w-md">
         <p class="text-sm font-medium text-destructive">{{ errorMsg }}</p>
-        <p class="mt-2 text-xs">
-          <a
+        <div class="mt-2 text-xs">
+          <button
             v-if="typeof props.src === 'string'"
-            :href="props.src"
-            target="_blank"
-            rel="noopener noreferrer"
+            type="button"
             class="underline"
-          >Open PDF in new tab</a>
-        </p>
+            @click="openPdfInNewTab"
+          >Open PDF in new tab</button>
+        </div>
       </div>
     </div>
 

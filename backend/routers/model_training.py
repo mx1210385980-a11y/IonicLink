@@ -12,8 +12,8 @@ from security import require_cleaned_dataset_access
 from services.model_training_service import (
     DEFAULT_CLEANING_OPTIONS,
     DEFAULT_DATA_OPTIONS,
-    DEFAULT_FEATURE_SELECTION,
     DEFAULT_HYPERPARAMETERS,
+    target_column_name,
     get_model_training_service,
 )
 
@@ -22,19 +22,6 @@ router = APIRouter(
     tags=["Model Training"],
     responses={404: {"description": "Not found"}},
 )
-
-
-class FeatureSelectionPayload(BaseModel):
-    cation_fingerprint: bool = DEFAULT_FEATURE_SELECTION["cation_fingerprint"]
-    anion_fingerprint: bool = DEFAULT_FEATURE_SELECTION["anion_fingerprint"]
-    temperature: bool = DEFAULT_FEATURE_SELECTION["temperature"]
-    speed: bool = DEFAULT_FEATURE_SELECTION["speed"]
-    load: bool = DEFAULT_FEATURE_SELECTION["load"]
-    potential: bool = DEFAULT_FEATURE_SELECTION["potential"]
-    water_content: bool = DEFAULT_FEATURE_SELECTION["water_content"]
-    film_thickness: bool = DEFAULT_FEATURE_SELECTION["film_thickness"]
-    alkyl_chain_length: bool = DEFAULT_FEATURE_SELECTION["alkyl_chain_length"]
-
 
 class HyperparameterPayload(BaseModel):
     n_estimators: int = Field(DEFAULT_HYPERPARAMETERS["n_estimators"], ge=20, le=300)
@@ -56,12 +43,10 @@ class CleaningOptionPayload(BaseModel):
 
 
 class TrainingStartPayload(BaseModel):
-    target: str = "cof"
+    target: str = target_column_name("cof")
     algorithm: str = "gradient_boosting"
-    features: FeatureSelectionPayload = Field(default_factory=FeatureSelectionPayload)
     hyperparameters: HyperparameterPayload = Field(default_factory=HyperparameterPayload)
     data_options: DataOptionPayload = Field(default_factory=DataOptionPayload)
-    cleaning_options: CleaningOptionPayload = Field(default_factory=CleaningOptionPayload)
     cleaned_dataset_id: int | None = None
 
 
@@ -115,8 +100,9 @@ async def start_training(
     scope: RequestScope = Depends(get_request_scope),
 ):
     saved_dataset = None
-    if payload.cleaned_dataset_id is not None:
-        saved_dataset = await require_cleaned_dataset_access(session, principal, payload.cleaned_dataset_id)
+    if payload.cleaned_dataset_id is None:
+        raise HTTPException(status_code=400, detail="Select a saved cleaned dataset before starting training.")
+    saved_dataset = await require_cleaned_dataset_access(session, principal, payload.cleaned_dataset_id)
     task = await get_model_training_service().create_training_task(
         session,
         scope_filter_values={

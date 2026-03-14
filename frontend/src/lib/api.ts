@@ -136,6 +136,13 @@ export async function syncData(fileId: string, records: TribologyData[]) {
         cofRaw: r.cof,
         loadRaw: r.load,
         speedRaw: r.speed,
+        probeMaterial: r.probe_material,
+        probeGeometry: r.probe_geometry,
+        probeRadius: r.probe_radius,
+        probeRoughness: r.probe_roughness,
+        substrateMaterial: r.substrate_material,
+        substrateCoating: r.substrate_coating,
+        substrateRoughness: r.substrate_roughness,
         validationStatus: r.validationStatus,
         adminComment: r.notes
     }))
@@ -334,6 +341,13 @@ export interface TribologyData {
     // Environmental variables
     potential?: string  // Electrochemical potential/voltage (e.g. '+1.5V', 'OCP')
     water_content?: string  // Water content or humidity (e.g. '50 ppm', 'Dry')
+    probe_material?: string
+    probe_geometry?: string
+    probe_radius?: string
+    probe_roughness?: string
+    substrate_material?: string
+    substrate_coating?: string
+    substrate_roughness?: string
     surface_roughness?: string  // Surface roughness (e.g. 'RMS 4.9 nm')
     residual_film_thickness_d?: string
     layer_spacing_delta?: string
@@ -491,6 +505,27 @@ export interface SyncResult {
     literature_id?: number
     synced_count?: number
 }
+
+export function formatTribopairLabel(input: {
+    probeMaterial?: string | null
+    substrateMaterial?: string | null
+    substrateCoating?: string | null
+    materialName?: string | null
+}) {
+    const probe = String(input.probeMaterial || '').trim()
+    const substrate = String(input.substrateMaterial || '').trim()
+    const coating = String(input.substrateCoating || '').trim()
+    const legacy = String(input.materialName || '').trim()
+
+    if (probe && substrate) {
+        return coating && coating.toLowerCase() !== 'none'
+            ? `${probe} vs. ${substrate} (${coating})`
+            : `${probe} vs. ${substrate}`
+    }
+    if (substrate) return substrate
+    if (probe) return probe
+    return legacy || '--'
+}
 // Sync data to DB (New version: includes literature metadata)
 export async function syncWithLiterature(metadata: LiteratureMetadata, records: TribologyData[]): Promise<SyncResult> {
     // Build SyncPayload format
@@ -522,6 +557,13 @@ export async function syncWithLiterature(metadata: LiteratureMetadata, records: 
             // Environmental variables
             potential: r.potential,
             waterContent: r.water_content,
+            probeMaterial: r.probe_material,
+            probeGeometry: r.probe_geometry,
+            probeRadius: r.probe_radius,
+            probeRoughness: r.probe_roughness,
+            substrateMaterial: r.substrate_material,
+            substrateCoating: r.substrate_coating,
+            substrateRoughness: r.substrate_roughness,
             surfaceRoughness: r.surface_roughness,
             residualFilmThicknessD: r.residual_film_thickness_d,
             layerSpacingDelta: r.layer_spacing_delta,
@@ -574,6 +616,13 @@ export async function syncBatchData(metadata: LiteratureMetadata, records: Tribo
             // Environmental variables
             potential: r.potential,
             waterContent: r.water_content,
+            probeMaterial: r.probe_material,
+            probeGeometry: r.probe_geometry,
+            probeRadius: r.probe_radius,
+            probeRoughness: r.probe_roughness,
+            substrateMaterial: r.substrate_material,
+            substrateCoating: r.substrate_coating,
+            substrateRoughness: r.substrate_roughness,
             surfaceRoughness: r.surface_roughness,
             residualFilmThicknessD: r.residual_film_thickness_d,
             layerSpacingDelta: r.layer_spacing_delta,
@@ -652,6 +701,14 @@ export interface RecordResponse {
     temperature: string | null
     potential: string | null
     waterContent: string | null
+    probeMaterial: string | null
+    probeGeometry: string | null
+    probeRadius: string | null
+    probeRoughness: string | null
+    substrateMaterial: string | null
+    substrateCoating: string | null
+    substrateRoughness: string | null
+    tribopairLabel: string | null
     surfaceRoughness: string | null
     residualFilmThicknessD?: string | null
     layerSpacingDelta?: string | null
@@ -701,6 +758,13 @@ export interface RecordUpdatePayload {
     temperature?: string
     potential?: string
     waterContent?: string
+    probeMaterial?: string
+    probeGeometry?: string
+    probeRadius?: string
+    probeRoughness?: string
+    substrateMaterial?: string
+    substrateCoating?: string
+    substrateRoughness?: string
     speedValue?: string
     loadValue?: string
     surfaceRoughness?: string
@@ -799,23 +863,6 @@ export async function getDashboardStats() {
     }
 }
 
-export interface ModelTrainingFeatureOption {
-    key: string
-    label: string
-    group: string
-    description: string
-    default_enabled: boolean
-    available_count: number
-    coverage: number
-    disabled: boolean
-}
-
-export interface ModelTrainingTargetOption {
-    key: string
-    label: string
-    available_count: number
-}
-
 export interface ModelTrainingAlgorithmOption {
     key: string
     label: string
@@ -831,6 +878,73 @@ export interface ModelTrainingMetricPoint {
     val_rmse: number
     train_mae: number
     val_mae: number
+}
+
+export interface ModelTrainingSourceScope {
+    requested_mode: string
+    resolved_scope_key: string
+    resolved_scope_type: string
+    label: string
+    used_fallback: boolean
+}
+
+export interface ModelCleaningFeatureConfig {
+    use_pca: boolean
+    n_components: number
+    keep_features: string[]
+}
+
+export interface ModelCleaningPcaInfo {
+    enabled: boolean
+    requested_components: number
+    actual_components: number
+    explained_variance_ratio: number | null
+}
+
+export interface ModelTrainingCleaningSummary {
+    source_mode: string
+    raw_records: number
+    target_ready_records: number
+    chemistry_ready_records: number
+    training_ready_records: number
+    missing_value_repairs?: Record<string, number>
+    outliers_detected?: number
+    outliers_removed?: number
+    final_feature_count?: number
+    final_feature_columns?: string[]
+    dropped_by_reason: {
+        missing_target: number
+        missing_cation_smiles: number
+        missing_anion_smiles: number
+    }
+    rules: {
+        drop_missing_target: boolean
+        require_dual_smiles: boolean
+        missing_value_strategy?: string
+        remove_target_outliers?: boolean
+        iqr_multiplier?: number
+        feature_config?: ModelCleaningFeatureConfig
+    }
+}
+
+export interface ModelTrainingDatasetSummary {
+    id?: number | null
+    name?: string | null
+    description?: string | null
+    total_records: number
+    cleaned_records: number
+    usable_records: number
+    feature_dimensions: number
+    target_column: string
+    feature_columns: string[]
+    columns: string[]
+    rdkit_enabled: boolean
+    source_scope: ModelTrainingSourceScope
+    target?: {
+        key: string
+        label: string
+        column?: string
+    }
 }
 
 export interface ModelTrainingTaskSnapshot {
@@ -864,6 +978,10 @@ export interface ModelTrainingTaskSnapshot {
         }
         cleaning?: ModelTrainingCleaningSummary
         source_scope?: ModelTrainingSourceScope
+        target_column?: string
+        feature_columns?: string[]
+        columns?: string[]
+        pca_info?: ModelCleaningPcaInfo | null
     }
     warnings: string[]
     feature_blocks: Array<{
@@ -875,71 +993,25 @@ export interface ModelTrainingTaskSnapshot {
     config: {
         target: string
         algorithm: string
-        features: ModelTrainingFeatureSelection
         hyperparameters: ModelTrainingHyperparameters
         data_options: ModelTrainingDataOptions
-        cleaning_options: ModelTrainingCleaningOptions
+        cleaned_dataset_id?: number | null
     }
     history: ModelTrainingMetricPoint[]
 }
 
 export interface ModelTrainingSummary {
-    dataset: {
-        total_records: number
-        cleaned_records: number
-        rdkit_enabled: boolean
-        source_scope: ModelTrainingSourceScope
-    }
+    dataset: ModelTrainingDatasetSummary
     cleaning: ModelTrainingCleaningSummary
-    targets: ModelTrainingTargetOption[]
     algorithms: ModelTrainingAlgorithmOption[]
-    features: ModelTrainingFeatureOption[]
+    pca_info: ModelCleaningPcaInfo | null
     defaults: {
         target: string
         algorithm: string
-        features: ModelTrainingFeatureSelection
         hyperparameters: ModelTrainingHyperparameters
         data_options: ModelTrainingDataOptions
-        cleaning_options: ModelTrainingCleaningOptions
         cleaned_dataset_id?: number | null
     }
-}
-
-export interface ModelTrainingSourceScope {
-    requested_mode: string
-    resolved_scope_key: string
-    resolved_scope_type: string
-    label: string
-    used_fallback: boolean
-}
-
-export interface ModelTrainingCleaningSummary {
-    source_mode: string
-    raw_records: number
-    target_ready_records: number
-    chemistry_ready_records: number
-    training_ready_records: number
-    dropped_by_reason: {
-        missing_target: number
-        missing_cation_smiles: number
-        missing_anion_smiles: number
-    }
-    rules: {
-        drop_missing_target: boolean
-        require_dual_smiles: boolean
-    }
-}
-
-export interface ModelTrainingFeatureSelection {
-    cation_fingerprint: boolean
-    anion_fingerprint: boolean
-    temperature: boolean
-    speed: boolean
-    load: boolean
-    potential: boolean
-    water_content: boolean
-    film_thickness: boolean
-    alkyl_chain_length: boolean
 }
 
 export interface ModelTrainingHyperparameters {
@@ -964,10 +1036,8 @@ export interface ModelTrainingCleaningOptions {
 export interface ModelTrainingStartPayload {
     target: string
     algorithm: string
-    features: ModelTrainingFeatureSelection
     hyperparameters: ModelTrainingHyperparameters
     data_options: ModelTrainingDataOptions
-    cleaning_options: ModelTrainingCleaningOptions
     cleaned_dataset_id?: number | null
 }
 
@@ -989,63 +1059,20 @@ export interface ModelCleaningOptions {
     missing_value_strategy: 'keep' | 'median' | 'zero'
     remove_target_outliers: boolean
     iqr_multiplier: number
+    feature_config: ModelCleaningFeatureConfig
 }
 
-export interface ModelCleaningPreviewRow {
-    record_id: number
-    literature_id: number
-    material_name: string
-    lubricant: string
-    cof_value: number | null
-    cation_smiles: string | null
-    anion_smiles: string | null
-    temperature: string | null
-    speed_value: string | null
-    load_raw: string | null
-    potential: string | null
-    water_content: string | null
-    film_thickness: string | null
-    alkyl_chain_length: number | null
-    normalized_temperature_c: number | null
-    normalized_speed_mps: number | null
-    normalized_load_n: number | null
-    normalized_potential_v: number | null
-    normalized_water_content_ppm: number | null
-    normalized_film_thickness_nm: number | null
-    normalized_alkyl_chain_length: number | null
-    confidence: number
-    is_target_outlier: boolean
-    repaired_fields: string[]
-}
+export type ModelCleaningMatrixRow = Record<string, number | null>
 
 export interface ModelCleaningPreview {
     target: {
         key: string
         label: string
+        column_name?: string
     }
     options: ModelCleaningOptions
     source_scope: ModelTrainingSourceScope
-    summary: {
-        raw_records: number
-        target_ready_records: number
-        chemistry_ready_records: number
-        training_ready_records: number
-        missing_value_repairs: Record<string, number>
-        outliers_detected: number
-        outliers_removed: number
-        dropped_by_reason: {
-            missing_target: number
-            missing_cation_smiles: number
-            missing_anion_smiles: number
-        }
-        rules: {
-            drop_missing_target: boolean
-            require_dual_smiles: boolean
-            missing_value_strategy: string
-            remove_target_outliers: boolean
-            iqr_multiplier: number
-        }
-    }
+    summary: ModelTrainingCleaningSummary
     feature_coverage: Array<{
         key: string
         label: string
@@ -1053,9 +1080,13 @@ export interface ModelCleaningPreview {
         available_count: number
         coverage: number
     }>
-    rows: ModelCleaningPreviewRow[]
-    preview_rows: ModelCleaningPreviewRow[]
-    normalization_preview: ModelCleaningPreviewRow[]
+    pca_info: ModelCleaningPcaInfo | null
+    matrix_columns: string[]
+    feature_columns: string[]
+    target_column: string
+    rows: ModelCleaningMatrixRow[]
+    preview_rows: ModelCleaningMatrixRow[]
+    normalization_preview: ModelCleaningMatrixRow[]
 }
 
 export interface SavedCleanedDatasetSummary {
@@ -1068,6 +1099,10 @@ export interface SavedCleanedDatasetSummary {
     source_scope: ModelTrainingSourceScope
     summary: ModelCleaningPreview['summary']
     feature_coverage: ModelCleaningPreview['feature_coverage']
+    pca_info: ModelCleaningPcaInfo | null
+    matrix_columns: string[]
+    feature_columns: string[]
+    target_column: string
     target: {
         key: string
         label: string
@@ -1075,7 +1110,7 @@ export interface SavedCleanedDatasetSummary {
 }
 
 export interface SavedCleanedDatasetDetail extends SavedCleanedDatasetSummary {
-    rows: ModelCleaningPreviewRow[]
+    rows: ModelCleaningMatrixRow[]
     config: ModelCleaningOptions
 }
 
@@ -1155,6 +1190,14 @@ export interface TribologyRecord {
     temperature: string | null
     potential: string | null
     waterContent: string | null
+    probeMaterial: string | null
+    probeGeometry: string | null
+    probeRadius: string | null
+    probeRoughness: string | null
+    substrateMaterial: string | null
+    substrateCoating: string | null
+    substrateRoughness: string | null
+    tribopairLabel: string | null
     surfaceRoughness: string | null
     // Film Thickness
     residualFilmThicknessD: string | null

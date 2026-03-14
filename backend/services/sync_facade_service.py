@@ -22,6 +22,7 @@ from services.data_sync_service import (
     sync_batch_data_with_replacement,
 )
 from services.il_resolver_service import resolve_il
+from utils.tribopair import compose_tribopair_label
 
 
 def _safe_year(year: int | None) -> int | None:
@@ -64,6 +65,18 @@ def _record_to_payload(record) -> dict[str, Any]:
         "temperature": record.temperature,
         "potential": record.potential,
         "waterContent": record.water_content,
+        "probeMaterial": record.probe_material,
+        "probeGeometry": record.probe_geometry,
+        "probeRadius": record.probe_radius,
+        "probeRoughness": record.probe_roughness,
+        "substrateMaterial": record.substrate_material,
+        "substrateCoating": record.substrate_coating,
+        "substrateRoughness": record.substrate_roughness,
+        "tribopairLabel": compose_tribopair_label(
+            record.probe_material,
+            record.substrate_material,
+            record.substrate_coating,
+        ),
         "surfaceRoughness": record.surface_roughness,
         "residualFilmThicknessD": record.residual_film_thickness_d,
         "layerSpacingDelta": record.layer_spacing_delta,

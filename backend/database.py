@@ -142,6 +142,13 @@ async def _run_additive_migrations(conn) -> None:
         "ALTER TABLE tribology_data ADD COLUMN source VARCHAR(200)",
         "ALTER TABLE tribology_data ADD COLUMN source_page INTEGER",
         "ALTER TABLE tribology_data ADD COLUMN source_figure VARCHAR(120)",
+        "ALTER TABLE tribology_data ADD COLUMN probe_material VARCHAR(255)",
+        "ALTER TABLE tribology_data ADD COLUMN probe_geometry VARCHAR(100)",
+        "ALTER TABLE tribology_data ADD COLUMN probe_radius VARCHAR(100)",
+        "ALTER TABLE tribology_data ADD COLUMN probe_roughness VARCHAR(100)",
+        "ALTER TABLE tribology_data ADD COLUMN substrate_material VARCHAR(255)",
+        "ALTER TABLE tribology_data ADD COLUMN substrate_coating VARCHAR(255)",
+        "ALTER TABLE tribology_data ADD COLUMN substrate_roughness VARCHAR(100)",
     ]
 
     for stmt in additive_migrations:
@@ -149,6 +156,52 @@ async def _run_additive_migrations(conn) -> None:
             await conn.execute(text(stmt))
         except Exception:
             pass
+
+    # Backfill new tribopair columns from the legacy single-surface fields where possible.
+    try:
+        await conn.execute(
+            text(
+                """
+                UPDATE tribology_data
+                SET substrate_material = COALESCE(NULLIF(substrate_material, ''), material_name)
+                WHERE material_name IS NOT NULL AND TRIM(material_name) != ''
+                """
+            )
+        )
+    except Exception:
+        pass
+
+    try:
+        await conn.execute(
+            text(
+                """
+                UPDATE tribology_data
+                SET probe_material = COALESCE(NULLIF(probe_material, ''), substrate_material, material_name)
+                WHERE TRIM(COALESCE(probe_material, '')) = ''
+                  AND TRIM(COALESCE(substrate_material, '')) != ''
+                  AND TRIM(COALESCE(material_name, '')) != ''
+                  AND LOWER(TRIM(substrate_material)) = LOWER(TRIM(material_name))
+                  AND TRIM(COALESCE(probe_geometry, '')) = ''
+                  AND TRIM(COALESCE(probe_radius, '')) = ''
+                  AND TRIM(COALESCE(probe_roughness, '')) = ''
+                """
+            )
+        )
+    except Exception:
+        pass
+
+    try:
+        await conn.execute(
+            text(
+                """
+                UPDATE tribology_data
+                SET substrate_roughness = COALESCE(NULLIF(substrate_roughness, ''), surface_roughness)
+                WHERE surface_roughness IS NOT NULL AND TRIM(surface_roughness) != ''
+                """
+            )
+        )
+    except Exception:
+        pass
 
 
 async def _ensure_bootstrap_security_state() -> None:

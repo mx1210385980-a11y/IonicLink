@@ -7,16 +7,24 @@ import {
   promoteTribologyRecordConfidence,
   deleteTribologyRecord,
   getRecordEvidence,
+  formatTribopairLabel,
   type SearchFilter,
   type RecordResponse,
   type PaginatedRecordResponse,
   type EvidenceResult,
 } from '@/lib/api'
+import type {
+  EvidenceSnippet as InteractiveEvidenceSnippet,
+  EvidenceTagType as InteractiveEvidenceTagType,
+  RowData as InteractiveEvidenceRow,
+} from '@/components/InteractiveEvidencePanel'
 import {
   Search,
   Trash2,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   BookOpen,
   Save,
   ExternalLink,
@@ -31,6 +39,7 @@ import {
   ArrowDown
 } from 'lucide-vue-next'
 import Modal from '@/components/ui/Modal.vue'
+import InteractiveEvidencePanelHost from '@/components/InteractiveEvidencePanelHost.vue'
 import PdfViewerWithHighlight from '@/components/PdfViewerWithHighlight.vue'
 import MoleculeViewer from '@/components/MoleculeViewer.vue'
 import type { HighlightRect } from '@/types/pdf-highlight'
@@ -72,25 +81,33 @@ const cofMin = ref('')
 const cofMax = ref('')
 
 const currentPage = ref(1)
-const expandedRowId = ref<number | null>(null)
 const activeConfidencePopoverId = ref<number | null>(null)
+const evidenceModalRecord = ref<RecordResponse | null>(null)
+const editDrawerRecord = ref<RecordResponse | null>(null)
 const showExportMenu = ref(false)
 const exporting = ref(false)
 type ExportFormat = 'json' | 'csv' | 'ndjson'
 type EditableRecordValues = {
   lubricant: string
-  materialName: string
   temperature: string
   potential: string
   waterContent: string
   speedValue: string
   loadValue: string
-  surfaceRoughness: string
+  probeMaterial: string
+  probeGeometry: string
+  probeRadius: string
+  probeRoughness: string
+  substrateMaterial: string
+  substrateCoating: string
+  substrateRoughness: string
   filmThickness: string
   cof: string
 }
 
 const editingValues = ref<Record<number, EditableRecordValues>>({})
+const parameterEditorOpen = ref<Record<number, boolean>>({})
+const confidenceCardOpen = ref<Record<number, boolean>>({})
 const evidenceData = ref<Record<number, EvidenceResult | null>>({})
 const evidenceLoading = ref<Record<number, boolean>>({})
 const evidenceError = ref<Record<number, string | null>>({})
@@ -163,9 +180,26 @@ const pdfLocate = ref<{
 })
 
 const totalPages = computed(() => Math.max(1, Math.ceil(result.value.total / PAGE_SIZE)))
+const activeEvidenceRow = computed<InteractiveEvidenceRow | null>(() => {
+  if (!evidenceModalRecord.value) return null
+  return buildInteractiveEvidenceRow(evidenceModalRecord.value)
+})
+const activeEditValues = computed<EditableRecordValues | null>(() => {
+  if (!editDrawerRecord.value) return null
+  return editingValues.value[editDrawerRecord.value.id] ?? null
+})
 
 const rangeStart = computed(() => (result.value.total === 0 ? 0 : result.value.skip + 1))
 const rangeEnd = computed(() => Math.min(result.value.skip + PAGE_SIZE, result.value.total))
+
+type ConditionGroupTone = 'env' | 'dyn' | 'surf'
+
+type ConditionGroup = {
+  key: ConditionGroupTone
+  label: string
+  summary: string
+  title: string
+}
 
 function cofDisplay(record: RecordResponse): string {
   if (record.cofValue != null && !isNaN(Number(record.cofValue))) {
@@ -185,8 +219,8 @@ function confidencePenaltyLabel(reason: string): string {
   const labels: Record<string, string> = {
     missing_lubricant: 'Missing ionic liquid',
     unknown_lubricant: 'Unresolved ionic liquid',
-    missing_material: 'Missing surface',
-    unknown_material: 'Unresolved surface',
+    missing_material: 'Missing tribopair material',
+    unknown_material: 'Unresolved tribopair material',
     missing_cof: 'Missing COF value',
     cof_uncertain: 'Uncertain COF notation',
     cof_out_of_range: 'COF out of physical range',
@@ -347,56 +381,159 @@ async function persistPromotedConfidence(record: RecordResponse, previousStoredS
   }
 }
 
-function conditionTags(record: RecordResponse): string[] {
-  const tags: string[] = []
-  if (record.potential) tags.push(`Potential: ${record.potential}`)
-  if (record.waterContent) tags.push(`Water: ${record.waterContent}`)
-  if (record.speedValue) tags.push(`Speed: ${record.speedValue}`)
-  if (record.loadValue) tags.push(`Load: ${record.loadValue}`)
-  if (record.surfaceRoughness) tags.push(`Roughness: ${record.surfaceRoughness}`)
-
-  const filmRaw = String(record.filmThickness || '').trim()
-  if (filmRaw) {
-    const thicknessValue = filmRaw.replace(/\([A-Za-z0-9-]+\)/g, '').trim()
-    if (thicknessValue) {
-      tags.push(`Film: ${thicknessValue}`)
-    } else {
-      tags.push(`Film: ${filmRaw}`)
-    }
+function conditionGroupClass(key: ConditionGroupTone): string {
+  if (key === 'env') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-300'
   }
-
-  return tags
+  if (key === 'dyn') {
+    return 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/25 dark:bg-blue-500/10 dark:text-blue-300'
+  }
+  return 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'
 }
 
-function toggleRow(record: RecordResponse) {
-  if (expandedRowId.value === record.id) {
-    expandedRowId.value = null
-    activeConfidencePopoverId.value = null
-    return
+function summarizeConditionGroup(items: string[], maxItems: number = 2): string {
+  if (!items.length) return ''
+  const compact = items.slice(0, maxItems).join(' · ')
+  const remaining = items.length - maxItems
+  return remaining > 0 ? `${compact} · +${remaining}` : compact
+}
+
+function conditionGroups(record: RecordResponse): ConditionGroup[] {
+  const groups: ConditionGroup[] = []
+
+  const envItems = [
+    record.temperature ? `${record.temperature}` : '',
+    record.waterContent ? `${record.waterContent}` : '',
+    record.potential ? `${record.potential}` : '',
+  ].filter(Boolean)
+
+  const dynItems = [
+    record.speedValue ? `${record.speedValue}` : '',
+    record.loadValue ? `${record.loadValue}` : '',
+  ].filter(Boolean)
+
+  const filmRaw = String(record.filmThickness || '').trim()
+  const filmValue = filmRaw ? filmRaw.replace(/\([A-Za-z0-9-]+\)/g, '').trim() || filmRaw : ''
+  const surfItems = [
+    record.probeGeometry ? `${record.probeGeometry}` : '',
+    record.probeRadius ? `${record.probeRadius}` : '',
+    record.probeRoughness ? `Probe ${record.probeRoughness}` : '',
+    record.substrateCoating ? `${record.substrateCoating}` : '',
+    record.substrateRoughness ? `Sub ${record.substrateRoughness}` : '',
+    filmValue ? `Film ${filmValue}` : '',
+  ].filter(Boolean)
+
+  if (envItems.length) {
+    groups.push({
+      key: 'env',
+      label: 'ENV',
+      summary: summarizeConditionGroup(envItems, 2),
+      title: envItems.join(' · '),
+    })
   }
-  expandedRowId.value = record.id
-  activeConfidencePopoverId.value = null
+
+  if (dynItems.length) {
+    groups.push({
+      key: 'dyn',
+      label: 'DYN',
+      summary: summarizeConditionGroup(dynItems, 2),
+      title: dynItems.join(' · '),
+    })
+  }
+
+  if (surfItems.length) {
+    groups.push({
+      key: 'surf',
+      label: 'SURF',
+      summary: summarizeConditionGroup(surfItems, 2),
+      title: surfItems.join(' · '),
+    })
+  }
+
+  return groups
+}
+
+function normalizeOptionalTagValue(value: string | null | undefined): string {
+  const normalized = String(value || '').trim()
+  if (!normalized) return ''
+  if (['none', 'null', 'n/a', 'na', '-'].includes(normalized.toLowerCase())) return ''
+  return normalized
+}
+
+function tribopairParts(record: RecordResponse): { probe: string, substrate: string, coating: string } {
+  return {
+    probe: String(record.probeMaterial || '').trim() || 'Probe N/A',
+    substrate: String(record.substrateMaterial || record.materialName || '').trim() || 'Substrate N/A',
+    coating: normalizeOptionalTagValue(record.substrateCoating),
+  }
+}
+
+function tribopairDisplay(record: RecordResponse): string {
+  return formatTribopairLabel({
+    probeMaterial: record.probeMaterial,
+    substrateMaterial: record.substrateMaterial,
+    substrateCoating: record.substrateCoating,
+    materialName: record.materialName,
+  })
+}
+
+function ensureEditingValues(record: RecordResponse) {
   if (!editingValues.value[record.id]) {
     editingValues.value[record.id] = {
       lubricant: record.lubricant ?? '',
-      materialName: record.materialName ?? '',
       temperature: record.temperature ?? '',
       potential: record.potential ?? '',
       waterContent: record.waterContent ?? '',
       speedValue: record.speedValue ?? '',
       loadValue: record.loadValue ?? '',
-      surfaceRoughness: record.surfaceRoughness ?? '',
+      probeMaterial: record.probeMaterial ?? '',
+      probeGeometry: record.probeGeometry ?? '',
+      probeRadius: record.probeRadius ?? '',
+      probeRoughness: record.probeRoughness ?? '',
+      substrateMaterial: record.substrateMaterial ?? record.materialName ?? '',
+      substrateCoating: record.substrateCoating ?? '',
+      substrateRoughness: record.substrateRoughness ?? record.surfaceRoughness ?? '',
       filmThickness: record.filmThickness ?? '',
       cof: record.cofRaw ?? (record.cofValue != null ? String(record.cofValue) : ''),
     }
   }
+}
+
+function openEvidenceModal(record: RecordResponse) {
+  editDrawerRecord.value = null
+  evidenceModalRecord.value = record
   fetchEvidence(record)
 }
 
+function closeEvidenceModal() {
+  evidenceModalRecord.value = null
+}
+
+function openEditModal(record: RecordResponse) {
+  ensureEditingValues(record)
+  evidenceModalRecord.value = null
+  editDrawerRecord.value = record
+}
+
+function closeEditDrawer() {
+  editDrawerRecord.value = null
+}
+
+function updateActiveEditingField(field: keyof EditableRecordValues, value: string) {
+  if (!editDrawerRecord.value) return
+  updateEditingField(editDrawerRecord.value.id, field, value)
+}
+
+function saveActiveEditRecord() {
+  if (!editDrawerRecord.value) return
+  saveRecord(editDrawerRecord.value)
+}
+
+function isSavingActiveEditRecord(): boolean {
+  return !!editDrawerRecord.value && savingRowId.value === editDrawerRecord.value.id
+}
+
 function openStructurePreview(record: RecordResponse) {
-  if (expandedRowId.value !== record.id) {
-    toggleRow(record)
-  }
   structurePreview.value = {
     open: true,
     rowId: record.id,
@@ -423,6 +560,22 @@ function toggleConfidencePopover(recordId: number) {
   activeConfidencePopoverId.value = activeConfidencePopoverId.value === recordId ? null : recordId
 }
 
+function isParameterEditorOpen(recordId: number): boolean {
+  return Boolean(parameterEditorOpen.value[recordId])
+}
+
+function toggleParameterEditor(recordId: number) {
+  parameterEditorOpen.value[recordId] = !parameterEditorOpen.value[recordId]
+}
+
+function isConfidenceCardOpen(recordId: number): boolean {
+  return Boolean(confidenceCardOpen.value[recordId])
+}
+
+function toggleConfidenceCard(recordId: number) {
+  confidenceCardOpen.value[recordId] = !confidenceCardOpen.value[recordId]
+}
+
 function evidenceImageSrc(recordId: number): string | null {
   const ev = evidenceData.value[recordId]
   if (!ev?.image_b64) return null
@@ -433,6 +586,163 @@ function evidencePagePreviewSrc(recordId: number): string | null {
   const ev = evidenceData.value[recordId]
   if (!ev?.page_preview_b64) return null
   return `data:image/png;base64,${ev.page_preview_b64}`
+}
+
+function firstNonEmpty(...values: Array<string | null | undefined>): string | undefined {
+  for (const value of values) {
+    const normalized = String(value || '').trim()
+    if (normalized) return normalized
+  }
+  return undefined
+}
+
+function normalizeEvidencePage(...values: Array<number | null | undefined>): number {
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      return Math.max(1, Math.floor(value))
+    }
+  }
+  return 1
+}
+
+function buildInteractiveEvidenceSnippet(
+  record: RecordResponse,
+  section: string,
+  target: string | null | undefined,
+  options?: {
+    fallbackPage?: number | null
+    preferImage?: boolean
+  },
+): InteractiveEvidenceSnippet | undefined {
+  const ev = evidenceData.value[record.id]
+  const normalizedTarget = firstNonEmpty(target)
+  const hit = normalizedTarget ? findBestTermHit(ev, normalizedTarget) : null
+  const page = normalizeEvidencePage(hit?.page, options?.fallbackPage, ev?.page, record.evidencePage, record.sourcePage)
+  const text = firstNonEmpty(ev?.text_snippet, ev?.evidence_text, record.evidence)
+  const previewSrc = evidencePagePreviewSrc(record.id) || evidenceImageSrc(record.id)
+  const shouldUseImage = Boolean(options?.preferImage && previewSrc && isVisualEvidenceSource(ev))
+
+  if (shouldUseImage) {
+    return {
+      page,
+      section,
+      type: 'image',
+      target: normalizedTarget,
+      imageUrl: previewSrc || undefined,
+      boundingBox: hit?.bbox || ev?.bbox || undefined,
+    }
+  }
+
+  if (!text || !normalizedTarget) return undefined
+
+  return {
+    page,
+    section,
+    type: 'text',
+    text,
+    target: normalizedTarget,
+  }
+}
+
+function buildInteractiveEvidenceRow(record: RecordResponse): InteractiveEvidenceRow | null {
+  const ev = evidenceData.value[record.id]
+  const primaryPage = normalizeEvidencePage(ev?.page, record.evidencePage, record.sourcePage)
+  const cofTarget = firstNonEmpty(record.cofRaw, record.cofValue != null ? String(record.cofValue) : undefined)
+  const cof =
+    buildInteractiveEvidenceSnippet(record, firstNonEmpty(ev?.source, record.sourceFigure, 'Primary evidence') || 'Primary evidence', cofTarget, {
+      fallbackPage: primaryPage,
+      preferImage: true,
+    }) ||
+    buildInteractiveEvidenceSnippet(record, 'Primary evidence', cofTarget, {
+      fallbackPage: primaryPage,
+    })
+
+  if (!cof) return null
+
+  const ionicLiquid = buildInteractiveEvidenceSnippet(record, 'Ionic liquid', record.lubricant, {
+    fallbackPage: primaryPage,
+  })
+  const surface = buildInteractiveEvidenceSnippet(
+    record,
+    'Surface / substrate',
+    firstNonEmpty(record.substrateMaterial, record.substrateCoating, record.materialName),
+    { fallbackPage: primaryPage },
+  )
+  const condition = buildInteractiveEvidenceSnippet(
+    record,
+    'Condition',
+    firstNonEmpty(record.potential, record.waterContent, record.speedValue, record.loadValue),
+    { fallbackPage: primaryPage },
+  )
+  const temperature = buildInteractiveEvidenceSnippet(record, 'Temperature', record.temperature, {
+    fallbackPage: primaryPage,
+  })
+
+  return {
+    id: record.id,
+    evidenceType: 'multi-snippet',
+    evidenceMap: {
+      cof,
+      ionicLiquid,
+      surface,
+      condition,
+      temperature,
+    },
+    highlight:
+      firstNonEmpty(record.evidence, ev?.text_snippet, ev?.evidence_text, ev?.source, record.sourceFigure)
+      || 'Source-grounded evidence synthesized from the current record.',
+  }
+}
+
+function interactiveEvidenceHighlightColor(tag: InteractiveEvidenceTagType): string {
+  if (tag === 'ionicLiquid') return 'rgba(99, 102, 241, 0.35)'
+  if (tag === 'surface') return 'rgba(249, 115, 22, 0.35)'
+  if (tag === 'condition') return 'rgba(16, 185, 129, 0.35)'
+  if (tag === 'temperature') return 'rgba(244, 63, 94, 0.35)'
+  return 'rgba(59, 130, 246, 0.35)'
+}
+
+function openInteractiveEvidencePdf(
+  record: RecordResponse,
+  payload: {
+    page: number
+    snippet: InteractiveEvidenceSnippet
+    activeTag: InteractiveEvidenceTagType
+  },
+) {
+  if (!record.literatureId) return
+
+  const highlight =
+    buildHighlightRect(
+      `${record.id}-${payload.activeTag}-${Date.now()}`,
+      payload.page,
+      payload.snippet.boundingBox,
+      interactiveEvidenceHighlightColor(payload.activeTag),
+    ) ||
+    buildPageAnchorHighlight(
+      `${record.id}-${payload.activeTag}-page-${payload.page}-${Date.now()}`,
+      payload.page,
+      interactiveEvidenceHighlightColor(payload.activeTag),
+    )
+
+  pdfLocate.value.open = true
+  pdfLocate.value.title = `Evidence Locator · ${payload.activeTag} · Page ${payload.page}`
+  pdfLocate.value.pdfUrl = `/api/pdf/${record.literatureId}`
+  pdfLocate.value.highlights = [highlight]
+  pdfLocate.value.activeHighlightId = highlight.id
+  pdfLocate.value.notice =
+    payload.activeTag !== 'cof' && payload.page !== normalizeEvidencePage(evidenceData.value[record.id]?.page, record.evidencePage, record.sourcePage)
+      ? `Cross-page evidence jump: ${payload.activeTag} is grounded on page ${payload.page}.`
+      : ''
+}
+
+function handleEvidenceModalPdfOpen(payload: {
+  page: number
+  snippet: InteractiveEvidenceSnippet
+  activeTag: InteractiveEvidenceTagType
+}) {
+  if (!evidenceModalRecord.value) return
+  openInteractiveEvidencePdf(evidenceModalRecord.value, payload)
 }
 
 function openImagePreview(src: string, title: string) {
@@ -475,14 +785,7 @@ function onGlobalKeydown(e: KeyboardEvent) {
   if (imagePreview.value.open) closeImagePreview()
   if (structurePreview.value.open) closeStructurePreview()
   if (pdfLocate.value.open) closePdfLocate()
-  activeConfidencePopoverId.value = null
-}
-
-function onGlobalPointerdown(e: PointerEvent) {
-  const target = e.target as HTMLElement | null
-  if (!target) return
-  if (target.closest('[data-confidence-popover-root="true"]')) return
-  activeConfidencePopoverId.value = null
+  if (editDrawerRecord.value) closeEditDrawer()
 }
 
 function normalizeTermKey(input: string): string {
@@ -493,16 +796,6 @@ function normalizeTermKey(input: string): string {
     .replace(/[^a-z0-9]/g, '')
     .replace(/\s+/g, '')
     .replace(/[()=:,.;]/g, '')
-}
-
-function normalizeEvidenceChipKey(input: string): string {
-  return String(input || '')
-    .toLowerCase()
-    .replace(/[\u03bc\u00b5]/g, 'u')
-    .replace(/μ/g, 'u')
-    .replace(/[\[\]\(\)\{\},;:'"]/g, '')
-    .replace(/\s+/g, '')
-    .replace(/[+=/\\|]/g, '')
 }
 
 function normalizeIlCationToken(input: string): string {
@@ -577,18 +870,6 @@ function normalizeIlAliasKey(input: string): string {
   return inferIlAliasKeyFromName(raw)
 }
 
-function termsEquivalent(a: string, b: string): boolean {
-  const ilA = normalizeIlAliasKey(a)
-  const ilB = normalizeIlAliasKey(b)
-  if (ilA && ilB && ilA === ilB) return true
-
-  const aKey = normalizeTermKey(a)
-  const bKey = normalizeTermKey(b)
-  if (!aKey || !bKey) return false
-  if (aKey === bKey) return true
-  return aKey.includes(bKey) || bKey.includes(aKey)
-}
-
 function extractNumberTokens(input: string): string[] {
   return (String(input || '').match(/\d+(?:\.\d+)?/g) || []).map((v) => String(v))
 }
@@ -609,11 +890,6 @@ function commonPrefixLen(a: string, b: string): number {
   let i = 0
   while (i < n && a[i] === b[i]) i += 1
   return i
-}
-
-function looksLikeTemperatureTerm(input: string): boolean {
-  const t = String(input || '').toLowerCase()
-  return t.includes('k') || t.includes('c') || t.includes('temp') || t.includes('temperature')
 }
 
 function closePdfLocate() {
@@ -773,107 +1049,6 @@ function formatIonicLiquidHtml(input: string | null | undefined): string {
   return renderChemicalDigitsAsSubscriptHtml(escapeHtml(value))
 }
 
-function formatEvidenceChipTermHtml(input: string): string {
-  const raw = String(input || '').trim()
-  if (!raw) return ''
-  const safe = escapeHtml(raw)
-  if (!normalizeIlAliasKey(raw)) return safe
-  return renderChemicalDigitsAsSubscriptHtml(safe)
-}
-
-function escapeRegExp(input: string): string {
-  return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-type EvidenceTermSpec = {
-  term: string
-  colorClass: string
-  pdfColor: string
-  aliases?: string[]
-}
-
-function buildEvidenceTermSpecs(record: RecordResponse): EvidenceTermSpec[] {
-  const ev = evidenceData.value[record.id]
-  const specs: EvidenceTermSpec[] = []
-  const seen = new Set<string>()
-  const keyToIndex = new Map<string, number>()
-  const lubricantDisplay = String(record.lubricant || '').trim()
-  const lubricantKey = normalizeTermKey(lubricantDisplay)
-  const lubricantIlKey = normalizeIlAliasKey(lubricantDisplay)
-
-  const push = (term: string | null | undefined, colorClass: string, pdfColor: string) => {
-    const raw = String(term || '').trim()
-    if (raw.length < 2) return
-
-    const normalizedKey = normalizeTermKey(raw)
-    if (!normalizedKey) return
-    const ilKey = normalizeIlAliasKey(raw)
-
-    // Keep only the current row's ionic liquid term; drop other IL names from evidence terms.
-    if (ilKey) {
-      if (lubricantIlKey) {
-        if (ilKey !== lubricantIlKey) return
-      } else if (!termsEquivalent(raw, lubricantDisplay)) {
-        return
-      }
-    }
-
-    // Keep IL aliases consistent with the IONIC LIQUID field display.
-    const display = (
-      (ilKey && lubricantIlKey && ilKey === lubricantIlKey)
-      || (lubricantDisplay && lubricantKey && normalizedKey === lubricantKey)
-    )
-      ? lubricantDisplay
-      : raw
-
-    const displayIlKey = normalizeIlAliasKey(display)
-    const key = displayIlKey ? `il:${displayIlKey}` : `txt:${normalizeEvidenceChipKey(display)}`
-    if (!key) return
-
-    if (seen.has(key)) {
-      const existingIndex = keyToIndex.get(key)
-      if (existingIndex == null) return
-      const existing = specs[existingIndex]
-      if (!existing) return
-      if (!termsEquivalent(existing.term, raw)) {
-        const aliases = new Set(existing.aliases || [])
-        aliases.add(raw)
-        existing.aliases = Array.from(aliases)
-      }
-      return
-    }
-
-    seen.add(key)
-    keyToIndex.set(key, specs.length)
-    const aliases = termsEquivalent(display, raw) ? [] : [raw]
-    specs.push({ term: display, colorClass, pdfColor, aliases })
-  }
-
-  push(record.cofRaw || (record.cofValue != null ? String(record.cofValue) : ''), 'bg-yellow-200/90', 'rgba(250, 204, 21, 0.35)')
-  push(record.lubricant, 'bg-cyan-200/90', 'rgba(103, 232, 249, 0.35)')
-  push(record.materialName, 'bg-emerald-200/90', 'rgba(110, 231, 183, 0.35)')
-
-  // Condition-related fields in distinct colors
-  push(record.temperature, 'bg-orange-200/90', 'rgba(253, 186, 116, 0.35)')
-  push(record.potential, 'bg-violet-200/90', 'rgba(196, 181, 253, 0.35)')
-  push(record.waterContent, 'bg-sky-200/90', 'rgba(125, 211, 252, 0.35)')
-  push(record.speedValue, 'bg-lime-200/90', 'rgba(190, 242, 100, 0.35)')
-  push(record.loadValue, 'bg-rose-200/90', 'rgba(254, 205, 211, 0.35)')
-  push(record.surfaceRoughness, 'bg-amber-200/90', 'rgba(253, 230, 138, 0.35)')
-  push(record.filmThickness, 'bg-fuchsia-200/90', 'rgba(245, 208, 254, 0.35)')
-
-  // Include any backend-provided highlight terms not already covered
-  for (const term of ev?.highlight_terms || []) {
-    push(term, 'bg-slate-200/90', 'rgba(226, 232, 240, 0.35)')
-  }
-
-  return specs
-}
-
-function evidenceTermChips(record: RecordResponse): EvidenceTermSpec[] {
-  return buildEvidenceTermSpecs(record).slice(0, 14)
-}
-
 function isVisualEvidenceSource(ev: EvidenceResult | null | undefined): boolean {
   const sourceType = String(ev?.source_type || '').trim().toLowerCase()
   if (sourceType === 'visual') return true
@@ -887,136 +1062,6 @@ function isVisualEvidenceSource(ev: EvidenceResult | null | undefined): boolean 
     || source.startsWith('image')
     || source.startsWith('plot')
   )
-}
-
-function isTextEvidence(recordId: number): boolean {
-  return !isVisualEvidenceSource(evidenceData.value[recordId])
-}
-
-function evidenceSnippet(record: RecordResponse): string {
-  const ev = evidenceData.value[record.id]
-  const snippet = ev?.text_snippet || ev?.evidence_text || record.evidence || ''
-  return String(snippet).trim()
-}
-
-function highlightEvidenceHtml(record: RecordResponse): string {
-  const raw = evidenceSnippet(record)
-  if (!raw) return 'No quote text available.'
-
-  const specs = buildEvidenceTermSpecs(record)
-  let html = escapeHtml(raw)
-  const tokens: Record<string, string> = {}
-  let tokenCounter = 0
-
-  const entries = specs
-    .flatMap((spec) => {
-      const allTerms = [spec.term, ...(spec.aliases || [])]
-      const seenTerms = new Set<string>()
-      const uniqueTerms: string[] = []
-      for (const t of allTerms) {
-        const normalized = normalizeTermKey(t)
-        if (!normalized || seenTerms.has(normalized)) continue
-        seenTerms.add(normalized)
-        uniqueTerms.push(t)
-      }
-      return uniqueTerms.map((matchTerm) => ({ spec, matchTerm }))
-    })
-    .sort((a, b) => b.matchTerm.length - a.matchTerm.length)
-
-  for (const entry of entries) {
-    const safeTerm = escapeHtml(entry.matchTerm)
-    const pattern = new RegExp(escapeRegExp(safeTerm), 'gi')
-    html = html.replace(pattern, (matched) => {
-      const token = `__EVIDENCE_HL_${tokenCounter++}__`
-      tokens[token] =
-        `<mark data-term="${escapeHtml(entry.spec.term)}" class="cursor-pointer rounded px-0.5 text-slate-900 ${entry.spec.colorClass}" title="Click to locate in PDF">${matched}</mark>`
-      return token
-    })
-  }
-
-  for (const [token, markup] of Object.entries(tokens)) {
-    html = html.split(token).join(markup)
-  }
-  return html
-}
-
-async function openTermInPdf(record: RecordResponse, term: string) {
-  if (!record.literatureId) return
-  let ev = evidenceData.value[record.id]
-  try {
-    const fresh = await getRecordEvidence(record.literatureId, record.id)
-    evidenceData.value[record.id] = fresh
-    ev = fresh
-  } catch {
-    // Use cached evidence if refresh fails.
-  }
-  const hit = findBestTermHit(ev, term)
-  const specs = buildEvidenceTermSpecs(record)
-  const termKey = normalizeTermKey(term)
-  const spec = specs.find((s) => termsEquivalent(s.term, term) || (s.aliases || []).some((a) => termsEquivalent(a, term)))
-    || specs.find((s) => {
-      const k = normalizeTermKey(s.term)
-      return k.includes(termKey) || termKey.includes(k)
-    })
-  const pdfColor = spec?.pdfColor || 'rgba(250, 204, 21, 0.35)'
-  const isVisualSource = isVisualEvidenceSource(ev)
-  let targetPage = hit?.page || ev?.page || 1
-  const previewSrc = evidenceImageSrc(record.id) || evidencePagePreviewSrc(record.id)
-
-  // If backend has no PDF available, fall back to image preview mode.
-  if (isVisualSource && !ev?.has_pdf && previewSrc) {
-    targetPage = ev?.page || record.sourcePage || targetPage
-    openImagePreview(
-      previewSrc,
-      `${ev?.source || 'Figure Evidence'} · Page ${targetPage}`,
-    )
-    return
-  }
-
-  let highlight: HighlightRect
-  if (isVisualSource) {
-    targetPage = hit?.page || ev?.page || record.sourcePage || 1
-    highlight =
-      buildHighlightRect(`${record.id}-visual-term-${Date.now()}`, hit?.page || 0, hit?.bbox, pdfColor) ||
-      buildHighlightRect(`${record.id}-visual-${Date.now()}`, ev?.page || 0, ev?.bbox, pdfColor) ||
-      buildPageAnchorHighlight(`${record.id}-visual-page-${targetPage}-${Date.now()}`, targetPage, pdfColor)
-  } else {
-    // Important: do not fallback to record-level bbox when a text term has no own hit.
-    // Otherwise unrelated fields (e.g. speed) can be highlighted as COF bbox.
-    highlight =
-      buildHighlightRect(`${record.id}-${Date.now()}`, hit?.page || 0, hit?.bbox, pdfColor) ||
-      buildPageAnchorHighlight(`${record.id}-p-${targetPage}-${Date.now()}`, targetPage, pdfColor)
-  }
-
-  pdfLocate.value.open = true
-  pdfLocate.value.title = isVisualSource
-    ? `Source Locator · Figure Page ${targetPage}`
-    : `Source Locator · Page ${targetPage}`
-  pdfLocate.value.pdfUrl = `/api/pdf/${record.literatureId}`
-  pdfLocate.value.highlights = [highlight]
-  pdfLocate.value.activeHighlightId = highlight.id
-  pdfLocate.value.notice = ''
-
-  if (isVisualSource) {
-    if (hit?.bbox && hit?.bbox.length === 4) {
-      pdfLocate.value.notice = `Visual evidence detected (${ev?.source || 'Figure'}). Positioned using "${term}" in the grounded region.`
-    } else if (ev?.bbox && ev?.bbox.length === 4) {
-      pdfLocate.value.notice = `Visual evidence detected (${ev?.source || 'Figure'}). Positioned to the source image region.`
-    } else {
-      pdfLocate.value.notice = `Visual evidence detected (${ev?.source || 'Figure'}), but no exact figure bbox was found. Positioned to page ${targetPage}.`
-    }
-    return
-  }
-
-  const snippet = (ev?.text_snippet || ev?.evidence_text || '').toLowerCase()
-  const roomTempMentioned = snippet.includes('room temperature') || snippet.includes('ambient temperature')
-  if (hit?.inferred || (looksLikeTemperatureTerm(term) && roomTempMentioned && !hit)) {
-    pdfLocate.value.notice =
-      `This value may be model-inferred. Located evidence matched "${hit?.matched_text || 'room temperature'}" rather than exact "${term}".`
-  } else if (!hit) {
-    pdfLocate.value.notice =
-      `No exact text hit found for "${term}". Positioned to page ${targetPage}; please verify manually.`
-  }
 }
 
 function openRecordPdf(record: RecordResponse) {
@@ -1043,15 +1088,6 @@ function openRecordPdf(record: RecordResponse) {
   pdfLocate.value.highlights = [highlight]
   pdfLocate.value.activeHighlightId = highlight.id
   pdfLocate.value.notice = ''
-}
-
-function onEvidenceSnippetClick(e: Event, record: RecordResponse) {
-  const target = e.target as HTMLElement | null
-  if (!target) return
-  const mark = target.closest('mark[data-term]') as HTMLElement | null
-  const term = mark?.dataset?.term?.trim()
-  if (!term) return
-  openTermInPdf(record, term)
 }
 
 function onPdfLocateHighlightClick(id: string) {
@@ -1146,13 +1182,19 @@ function toCsv(records: RecordResponse[]): string {
     'doi',
     'title',
     'lubricant',
-    'materialName',
+    'tribopairLabel',
+    'probeMaterial',
+    'probeGeometry',
+    'probeRadius',
+    'probeRoughness',
+    'substrateMaterial',
+    'substrateCoating',
+    'substrateRoughness',
     'temperature',
     'potential',
     'waterContent',
     'speedValue',
     'loadValue',
-    'surfaceRoughness',
     'filmThickness',
     'cofRaw',
     'cofValue',
@@ -1166,13 +1208,19 @@ function toCsv(records: RecordResponse[]): string {
     r.literature?.doi || '',
     r.literature?.title || '',
     r.lubricant || '',
-    r.materialName || '',
+    tribopairDisplay(r),
+    r.probeMaterial || '',
+    r.probeGeometry || '',
+    r.probeRadius || '',
+    r.probeRoughness || '',
+    r.substrateMaterial || '',
+    r.substrateCoating || '',
+    r.substrateRoughness || '',
     r.temperature || '',
     r.potential || '',
     r.waterContent || '',
     r.speedValue || '',
     r.loadValue || '',
-    r.surfaceRoughness || '',
     r.filmThickness || '',
     r.cofRaw || '',
     r.cofValue ?? '',
@@ -1274,37 +1322,60 @@ async function saveRecord(record: RecordResponse) {
     const cofRaw = vals.cof.trim()
     const parsed = cofRaw ? parseFloat(cofRaw.replace(/[<>~=]/g, '')) : undefined
     const lubricant = vals.lubricant.trim()
-    const materialName = vals.materialName.trim()
     const temperature = vals.temperature.trim()
     const potential = vals.potential.trim()
     const waterContent = vals.waterContent.trim()
     const speedValue = vals.speedValue.trim()
     const loadValue = vals.loadValue.trim()
-    const surfaceRoughness = vals.surfaceRoughness.trim()
+    const probeMaterial = vals.probeMaterial.trim()
+    const probeGeometry = vals.probeGeometry.trim()
+    const probeRadius = vals.probeRadius.trim()
+    const probeRoughness = vals.probeRoughness.trim()
+    const substrateMaterial = vals.substrateMaterial.trim()
+    const substrateCoating = vals.substrateCoating.trim()
+    const substrateRoughness = vals.substrateRoughness.trim()
     const filmThickness = vals.filmThickness.trim()
 
     const updated = await updateTribologyRecord(record.id, {
       lubricant,
-      materialName,
       temperature,
       potential,
       waterContent,
       speedValue,
       loadValue,
-      surfaceRoughness,
+      probeMaterial,
+      probeGeometry,
+      probeRadius,
+      probeRoughness,
+      substrateMaterial,
+      substrateCoating,
+      substrateRoughness,
       filmThickness,
       cofRaw,
       cofValue: isNaN(parsed as number) ? undefined : parsed,
     })
 
     record.lubricant = lubricant
-    record.materialName = materialName
     record.temperature = temperature
     record.potential = potential
     record.waterContent = waterContent
     record.speedValue = speedValue
     record.loadValue = loadValue
-    record.surfaceRoughness = surfaceRoughness
+    record.probeMaterial = probeMaterial || null
+    record.probeGeometry = probeGeometry || null
+    record.probeRadius = probeRadius || null
+    record.probeRoughness = probeRoughness || null
+    record.substrateMaterial = substrateMaterial || null
+    record.substrateCoating = substrateCoating || null
+    record.substrateRoughness = substrateRoughness || null
+    record.materialName = substrateMaterial || record.materialName
+    record.surfaceRoughness = substrateRoughness || probeRoughness || null
+    record.tribopairLabel = formatTribopairLabel({
+      probeMaterial: record.probeMaterial,
+      substrateMaterial: record.substrateMaterial,
+      substrateCoating: record.substrateCoating,
+      materialName: record.materialName,
+    })
     record.filmThickness = filmThickness
     record.cofRaw = cofRaw
     if (!isNaN(parsed as number)) {
@@ -1319,7 +1390,9 @@ async function saveRecord(record: RecordResponse) {
     if (evidenceData.value[record.id]) {
       promoteRecordConfidence(record)
     }
-    expandedRowId.value = null
+    if (editDrawerRecord.value?.id === record.id) {
+      closeEditDrawer()
+    }
   } catch (err) {
     console.error('Failed to save record', err)
     alert('Save failed')
@@ -1337,7 +1410,8 @@ async function removeRecord(record: RecordResponse) {
     if (resp?.success) {
       result.value.items = result.value.items.filter((r) => r.id !== record.id)
       result.value.total = Math.max(0, result.value.total - 1)
-      if (expandedRowId.value === record.id) expandedRowId.value = null
+      if (evidenceModalRecord.value?.id === record.id) closeEvidenceModal()
+      if (editDrawerRecord.value?.id === record.id) closeEditDrawer()
     }
   } catch (err) {
     console.error('Failed to delete record', err)
@@ -1351,12 +1425,10 @@ onMounted(async () => {
   await loadOptions()
   await fetchData()
   window.addEventListener('keydown', onGlobalKeydown)
-  window.addEventListener('pointerdown', onGlobalPointerdown)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalKeydown)
-  window.removeEventListener('pointerdown', onGlobalPointerdown)
 })
 
 watch(
@@ -1474,7 +1546,7 @@ watch(
         </div>
 
         <div class="w-48">
-          <label class="mb-1.5 block text-xs text-slate-400 dark:text-slate-500">Surface Type</label>
+          <label class="mb-1.5 block text-xs text-slate-400 dark:text-slate-500">Tribopair Term</label>
           <select v-model="selectedMaterial" class="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200" @change="handleSearch">
             <option value="">All</option>
             <option v-for="m in filterOptions.materials" :key="m" :value="m">{{ m }}</option>
@@ -1503,20 +1575,19 @@ watch(
             <tr>
               <th class="px-4 py-4 font-medium text-slate-500 dark:text-slate-400">ID</th>
               <th class="px-4 py-4 font-medium text-slate-500 dark:text-slate-400">IONIC LIQUID</th>
-              <th class="px-4 py-4 font-medium text-slate-500 dark:text-slate-400">SURFACE</th>
-              <th class="px-4 py-4 font-medium text-slate-500 dark:text-slate-400">TEMPERATURE (K)</th>
-              <th class="px-4 py-4 font-medium text-slate-500 dark:text-slate-400">CONDITION</th>
+              <th class="px-4 py-4 font-medium text-slate-500 dark:text-slate-400">TRIBOPAIR</th>
+              <th class="px-4 py-4 font-medium text-slate-500 dark:text-slate-400">CONDITIONS</th>
               <th class="px-4 py-4 font-medium text-blue-600">COF</th>
               <th class="px-4 py-4 text-right font-medium text-slate-500 dark:text-slate-400">ACTIONS</th>
             </tr>
           </thead>
           <tbody>
             <tr v-if="loading">
-              <td colspan="7" class="px-4 py-8 text-center text-slate-400 dark:text-slate-500">Loading...</td>
+              <td colspan="6" class="px-4 py-8 text-center text-slate-400 dark:text-slate-500">Loading...</td>
             </tr>
             <template v-else-if="result.items.length">
               <template v-for="record in result.items" :key="record.id">
-                <tr class="cursor-pointer border-t border-slate-100 hover:bg-blue-50/20 dark:border-slate-800 dark:hover:bg-blue-500/6" @click="toggleRow(record)">
+                <tr class="border-t border-slate-100 transition-colors hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900/70">
                   <td class="px-4 py-4 text-slate-500 dark:text-slate-400">{{ record.id }}</td>
                   <td class="px-4 py-4">
                     <div class="flex items-center gap-2">
@@ -1555,14 +1626,38 @@ watch(
                       <div class="font-semibold text-slate-800 dark:text-slate-100" v-html="formatIonicLiquidHtml(record.lubricant || '--')"></div>
                     </div>
                   </td>
-                  <td class="px-4 py-4 text-slate-600 dark:text-slate-300">{{ record.materialName || '--' }}</td>
-                  <td class="px-4 py-4 text-slate-600 dark:text-slate-300">{{ record.temperature || '--' }}</td>
                   <td class="px-4 py-4">
-                    <div class="flex flex-wrap gap-1.5">
-                      <span v-for="tag in conditionTags(record)" :key="tag" class="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-                        {{ tag }}
-                      </span>
-                      <span v-if="!conditionTags(record).length" class="text-slate-400 dark:text-slate-500">--</span>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <div class="inline-flex min-w-0 max-w-full items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-700 dark:bg-slate-900/80">
+                        <span class="truncate rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200">
+                          {{ tribopairParts(record).probe }}
+                        </span>
+                        <span class="text-slate-300 dark:text-slate-600">→</span>
+                        <span class="truncate rounded-lg bg-slate-900 px-2.5 py-1 text-xs font-semibold text-white dark:bg-slate-100 dark:text-slate-900">
+                          {{ tribopairParts(record).substrate }}
+                        </span>
+                      </div>
+                      <div
+                        v-if="tribopairParts(record).coating"
+                        class="inline-flex items-center rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700 shadow-sm dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
+                      >
+                        COAT: {{ tribopairParts(record).coating }}
+                      </div>
+                    </div>
+                  </td>
+                  <td class="px-4 py-4">
+                    <div class="flex flex-wrap gap-2">
+                      <div
+                        v-for="group in conditionGroups(record)"
+                        :key="group.key"
+                        :title="group.title"
+                        class="inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold shadow-sm"
+                        :class="conditionGroupClass(group.key)"
+                      >
+                        <span class="tracking-[0.16em]">{{ group.label }}</span>
+                        <span class="truncate border-l border-current/20 pl-2 tracking-normal">{{ group.summary }}</span>
+                      </div>
+                      <span v-if="!conditionGroups(record).length" class="text-slate-400 dark:text-slate-500">--</span>
                     </div>
                   </td>
                   <td class="px-4 py-4">
@@ -1572,20 +1667,26 @@ watch(
                   <td class="px-4 py-4">
                     <div class="flex items-center justify-end gap-1.5" @click.stop>
                       <button
-                        class="inline-flex h-7 w-7 items-center justify-center rounded text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10"
-                        @click="toggleRow(record)"
+                        type="button"
+                        class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-blue-200 bg-blue-50 text-blue-600 transition hover:border-blue-300 hover:bg-blue-100 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/15"
+                        title="Open evidence workspace"
+                        @click="openEvidenceModal(record)"
                       >
                         <Eye class="h-4 w-4" />
                       </button>
                       <button
-                        class="inline-flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-800 dark:hover:text-slate-300"
-                        @click="toggleRow(record)"
+                        type="button"
+                        class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:bg-slate-100 hover:text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                        title="Edit extracted parameters"
+                        @click="openEditModal(record)"
                       >
                         <Edit class="h-4 w-4" />
                       </button>
                       <button
-                        class="inline-flex h-7 w-7 items-center justify-center rounded text-red-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+                        type="button"
+                        class="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 bg-red-50 text-red-500 transition hover:border-red-300 hover:bg-red-100 hover:text-red-600 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/15"
                         :disabled="deletingRowId === record.id"
+                        title="Delete record"
                         @click="removeRecord(record)"
                       >
                         <Trash2 class="h-4 w-4" />
@@ -1594,10 +1695,10 @@ watch(
                   </td>
                 </tr>
 
-                <tr v-if="expandedRowId === record.id" class="border-t bg-slate-50/50 dark:border-slate-800 dark:bg-slate-900/50">
-                  <td colspan="7" class="px-4 py-4">
-                    <div class="grid gap-4 lg:grid-cols-3">
-                      <div class="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+                <tr v-if="false" class="border-t bg-slate-50/50 dark:border-slate-800 dark:bg-slate-900/50">
+                  <td colspan="6" class="px-4 py-4">
+                    <div class="grid items-start gap-4 xl:grid-cols-[0.92fr_1.04fr_1.04fr]">
+                      <div class="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
                         <div class="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-200">
                           <BookOpen class="h-4 w-4" /> Reference Details
                         </div>
@@ -1625,11 +1726,11 @@ watch(
                           <div class="text-sm text-blue-600">
                             <a
                               v-if="record.literature?.doi"
-                              :href="`https://doi.org/${record.literature.doi}`"
+                              :href="`https://doi.org/${record.literature?.doi}`"
                               target="_blank"
                               class="inline-flex items-center gap-1 hover:underline cursor-pointer"
                             >
-                              {{ record.literature.doi }}
+                              {{ record.literature?.doi }}
                               <ExternalLink class="h-3.5 w-3.5" />
                             </a>
                             <span v-else class="text-slate-900 dark:text-slate-200">--</span>
@@ -1638,9 +1739,9 @@ watch(
 
                       </div>
 
-                      <div class="relative rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950" @click.stop>
-                        <div class="mb-2 flex items-center justify-between">
-                          <p class="text-xs font-semibold uppercase tracking-wide text-blue-700">Data Verification</p>
+                      <div class="relative xl:col-span-2 rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950" @click.stop>
+                        <div class="mb-3 flex items-center justify-between">
+                          <p class="text-xs font-semibold uppercase tracking-[0.2em] text-blue-700">Extracted Parameters</p>
                           <div class="relative" data-confidence-popover-root="true">
                             <button
                               type="button"
@@ -1772,27 +1873,161 @@ watch(
                             </div>
                           </div>
                         </div>
-                        <div class="grid grid-cols-1 gap-2">
-                          <div class="grid grid-cols-2 gap-2">
-                            <div>
-                              <label class="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">IONIC LIQUID</label>
-                              <input
-                                :value="editingValues[record.id]?.lubricant ?? ''"
-                                @input="(e: Event) => updateEditingField(record.id, 'lubricant', (e.target as HTMLInputElement).value)"
-                                type="text"
-                                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:placeholder:text-slate-500"
-                                placeholder="Ionic liquid"
-                              />
+                        <div class="space-y-4">
+                          <div class="grid gap-3 xl:grid-cols-[1.2fr_1.1fr_0.72fr]">
+                            <div class="rounded-2xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-800 dark:bg-slate-900/60">
+                              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Ionic Liquid</p>
+                              <p class="mt-2 text-lg font-semibold text-slate-900 dark:text-slate-100">{{ editingValues[record.id]?.lubricant || '--' }}</p>
                             </div>
+                            <div class="rounded-2xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-800 dark:bg-slate-900/60">
+                              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">Tribopair</p>
+                              <p class="mt-2 text-base font-semibold text-slate-900 dark:text-slate-100">{{ tribopairDisplay(record) }}</p>
+                              <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                {{ editingValues[record.id]?.probeGeometry || 'Geometry --' }} · {{ editingValues[record.id]?.probeRadius || 'Radius --' }}
+                              </p>
+                            </div>
+                            <div class="rounded-2xl border border-blue-200 bg-blue-50/70 p-3 dark:border-blue-500/20 dark:bg-blue-500/10">
+                              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-700 dark:text-blue-300">COF</p>
+                              <p class="mt-2 text-3xl font-black tracking-tight text-blue-700 dark:text-blue-200">{{ editingValues[record.id]?.cof || '--' }}</p>
+                            </div>
+                          </div>
+
+                          <div class="flex flex-wrap gap-2">
+                            <div
+                              v-for="group in conditionGroups(record)"
+                              :key="`${record.id}-${group.key}`"
+                              class="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs"
+                              :class="conditionGroupClass(group.key)"
+                              :title="group.title"
+                            >
+                              <span class="font-semibold tracking-[0.16em]">{{ group.label }}</span>
+                              <span class="font-medium">{{ group.summary }}</span>
+                            </div>
+                            <span
+                              v-if="!conditionGroups(record).length"
+                              class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-500"
+                            >
+                              No condition summary
+                            </span>
+                          </div>
+
+                          <div class="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-900/60">
                             <div>
-                              <label class="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">SURFACE</label>
-                              <input
-                                :value="editingValues[record.id]?.materialName ?? ''"
-                                @input="(e: Event) => updateEditingField(record.id, 'materialName', (e.target as HTMLInputElement).value)"
-                                type="text"
-                                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:placeholder:text-slate-500"
-                                placeholder="Surface"
-                              />
+                              <p class="text-sm font-medium text-slate-700 dark:text-slate-200">Compact mode enabled</p>
+                              <p class="text-xs text-slate-500 dark:text-slate-400">Expand only when you need to edit the full parameter set.</p>
+                            </div>
+                            <button
+                              type="button"
+                              class="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-white px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-50 dark:border-blue-500/20 dark:bg-slate-950 dark:text-blue-300"
+                              @click="toggleParameterEditor(record.id)"
+                            >
+                              {{ isParameterEditorOpen(record.id) ? 'Hide editor' : 'Edit parameters' }}
+                              <ChevronUp v-if="isParameterEditorOpen(record.id)" class="h-3.5 w-3.5" />
+                              <ChevronDown v-else class="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+
+                          <div v-if="isParameterEditorOpen(record.id)" class="grid grid-cols-1 gap-2 rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-900/60">
+                          <div>
+                            <label class="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">IONIC LIQUID</label>
+                            <input
+                              :value="editingValues[record.id]?.lubricant ?? ''"
+                              @input="(e: Event) => updateEditingField(record.id, 'lubricant', (e.target as HTMLInputElement).value)"
+                              type="text"
+                              class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:placeholder:text-slate-500"
+                              placeholder="Ionic liquid"
+                            />
+                          </div>
+
+                          <div class="rounded-2xl border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-800 dark:bg-slate-900/60">
+                            <div class="mb-3 flex items-center justify-between">
+                              <div>
+                                <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Tribopair Configuration</p>
+                                <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">{{ tribopairDisplay(record) }}</p>
+                              </div>
+                            </div>
+                            <div class="grid gap-3 md:grid-cols-2">
+                              <div class="rounded-2xl border border-emerald-200 bg-white p-3 dark:border-emerald-500/20 dark:bg-slate-950">
+                                <p class="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-300">Probe</p>
+                                <div class="grid gap-2">
+                                  <div>
+                                    <label class="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">Material</label>
+                                    <input
+                                      :value="editingValues[record.id]?.probeMaterial ?? ''"
+                                      @input="(e: Event) => updateEditingField(record.id, 'probeMaterial', (e.target as HTMLInputElement).value)"
+                                      type="text"
+                                      class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                                      placeholder="e.g. Silica"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label class="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">Geometry</label>
+                                    <input
+                                      :value="editingValues[record.id]?.probeGeometry ?? ''"
+                                      @input="(e: Event) => updateEditingField(record.id, 'probeGeometry', (e.target as HTMLInputElement).value)"
+                                      type="text"
+                                      class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                                      placeholder="e.g. Sphere"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label class="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">Radius</label>
+                                    <input
+                                      :value="editingValues[record.id]?.probeRadius ?? ''"
+                                      @input="(e: Event) => updateEditingField(record.id, 'probeRadius', (e.target as HTMLInputElement).value)"
+                                      type="text"
+                                      class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                                      placeholder="e.g. 5 μm"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label class="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">Roughness</label>
+                                    <input
+                                      :value="editingValues[record.id]?.probeRoughness ?? ''"
+                                      @input="(e: Event) => updateEditingField(record.id, 'probeRoughness', (e.target as HTMLInputElement).value)"
+                                      type="text"
+                                      class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                                      placeholder="e.g. < 2 nm RMS"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div class="rounded-2xl border border-sky-200 bg-white p-3 dark:border-sky-500/20 dark:bg-slate-950">
+                                <p class="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-700 dark:text-sky-300">Substrate</p>
+                                <div class="grid gap-2">
+                                  <div>
+                                    <label class="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">Material</label>
+                                    <input
+                                      :value="editingValues[record.id]?.substrateMaterial ?? ''"
+                                      @input="(e: Event) => updateEditingField(record.id, 'substrateMaterial', (e.target as HTMLInputElement).value)"
+                                      type="text"
+                                      class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                                      placeholder="e.g. Mica"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label class="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">Coating</label>
+                                    <input
+                                      :value="editingValues[record.id]?.substrateCoating ?? ''"
+                                      @input="(e: Event) => updateEditingField(record.id, 'substrateCoating', (e.target as HTMLInputElement).value)"
+                                      type="text"
+                                      class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                                      placeholder="e.g. PEG-brush"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label class="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">Roughness</label>
+                                    <input
+                                      :value="editingValues[record.id]?.substrateRoughness ?? ''"
+                                      @input="(e: Event) => updateEditingField(record.id, 'substrateRoughness', (e.target as HTMLInputElement).value)"
+                                      type="text"
+                                      class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                                      placeholder="e.g. Atomically flat"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           </div>
 
@@ -1853,16 +2088,7 @@ watch(
                                 placeholder="e.g. 25 nN"
                               />
                             </div>
-                            <div>
-                              <label class="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400">COND · Surface Roughness</label>
-                              <input
-                                :value="editingValues[record.id]?.surfaceRoughness ?? ''"
-                                @input="(e: Event) => updateEditingField(record.id, 'surfaceRoughness', (e.target as HTMLInputElement).value)"
-                                type="text"
-                                class="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:placeholder:text-slate-500"
-                                placeholder="e.g. RMS 4.9 nm"
-                              />
-                            </div>
+                            <div></div>
                           </div>
 
                           <div>
@@ -1897,10 +2123,87 @@ watch(
                           </div>
                         </div>
                       </div>
+                    </div>
 
-                      <div class="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-950" @click.stop>
-                        <div class="mb-2 flex items-center justify-between">
-                          <p class="text-xs font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-300">Source Evidence</p>
+                      <div class="rounded-[28px] border border-emerald-100 bg-[linear-gradient(135deg,#ffffff_0%,#effbf6_60%,#d7f7eb_100%)] p-5 shadow-sm dark:border-emerald-500/15 dark:bg-[linear-gradient(135deg,rgba(15,23,42,0.98)_0%,rgba(5,83,64,0.86)_100%)]">
+                        <div class="flex items-center justify-between gap-3">
+                          <div class="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                            <ShieldCheck class="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
+                            AI Confidence Score
+                          </div>
+                          <button
+                            type="button"
+                            class="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-white/70 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 transition hover:bg-white dark:border-emerald-500/20 dark:bg-slate-950/40 dark:text-emerald-300"
+                            @click="toggleConfidenceCard(record.id)"
+                          >
+                            {{ isConfidenceCardOpen(record.id) ? 'Less' : 'More' }}
+                            <ChevronUp v-if="isConfidenceCardOpen(record.id)" class="h-3.5 w-3.5" />
+                            <ChevronDown v-else class="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+
+                        <div class="mt-4 flex items-end gap-3">
+                          <div class="flex items-baseline text-emerald-600 dark:text-emerald-300">
+                            <span class="text-5xl font-black leading-none tracking-tighter">{{ confidencePercentNumber(confidenceValueFor(record)).toFixed(0) }}</span>
+                            <span class="text-2xl font-bold leading-none">%</span>
+                          </div>
+                          <div class="pb-1 text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-600 dark:text-emerald-300">
+                            {{ confidencePercentNumber(confidenceValueFor(record)) >= 80 ? 'High Confidence' : confidencePercentNumber(confidenceValueFor(record)) >= 50 ? 'Medium Confidence' : 'Low Confidence' }}
+                          </div>
+                        </div>
+
+                        <div class="mt-4 rounded-2xl border border-emerald-100 bg-white/80 p-4 shadow-sm dark:border-emerald-500/15 dark:bg-slate-950/55">
+                          <div class="flex items-center justify-between text-slate-600 dark:text-slate-300">
+                            <span class="text-[13px] font-medium">Base Score</span>
+                            <span class="text-xl font-bold text-slate-800 dark:text-slate-100">{{ confidenceDetailsFor(record).base_percent.toFixed(0) }}</span>
+                          </div>
+
+                          <div class="mt-3 space-y-2">
+                            <div
+                              v-for="(boost, idx) in confidenceDetailsFor(record).boosts?.slice(0, isConfidenceCardOpen(record.id) ? 4 : 2)"
+                              :key="`inline-boost-${idx}`"
+                              class="flex items-start justify-between gap-3 text-emerald-600 dark:text-emerald-300"
+                            >
+                              <div class="flex items-start gap-2">
+                                <PlusCircle class="mt-0.5 h-4 w-4 shrink-0" />
+                                <span class="text-[13px] leading-5">{{ confidenceBoostLabel(boost.reason) }}</span>
+                              </div>
+                              <span class="shrink-0 text-sm font-bold">{{ confidenceBoostValue(boost.value) }}</span>
+                            </div>
+                            <div
+                              v-if="!confidenceDetailsFor(record).boosts?.length"
+                              class="text-[13px] text-slate-500 dark:text-slate-400"
+                            >
+                              No confidence boosts applied
+                            </div>
+                          </div>
+
+                          <div v-if="isConfidenceCardOpen(record.id) && confidenceDetailsFor(record).penalties?.length" class="mt-3 border-t border-slate-100 pt-3 dark:border-slate-800">
+                            <div
+                              v-for="(penalty, idx) in confidenceDetailsFor(record).penalties"
+                              :key="`inline-penalty-${idx}`"
+                              class="flex items-start justify-between gap-3 text-rose-500"
+                            >
+                              <div class="flex items-start gap-2">
+                                <MinusCircle class="mt-0.5 h-4 w-4 shrink-0" />
+                                <span class="text-[13px] leading-5">{{ confidencePenaltyLabel(penalty.reason) }}</span>
+                              </div>
+                              <span class="shrink-0 text-sm font-bold">{{ confidencePenaltyValue(penalty.value) }}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div class="mt-4 h-2 w-full overflow-hidden rounded-full bg-emerald-100/80 dark:bg-slate-800">
+                          <div
+                            class="h-full rounded-full bg-emerald-500 transition-all"
+                            :style="{ width: `${confidencePercentNumber(confidenceValueFor(record))}%` }"
+                          ></div>
+                        </div>
+                      </div>
+
+                      <div class="xl:col-span-2 space-y-2" @click.stop>
+                        <div class="flex items-center justify-between px-1">
+                          <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Context-Aware Evidence</p>
                           <button
                             v-if="record.literatureId"
                             type="button"
@@ -1913,54 +2216,16 @@ watch(
 
                         <p v-if="evidenceLoading[record.id]" class="text-xs text-slate-400 dark:text-slate-500">Locating evidence...</p>
                         <p v-else-if="evidenceError[record.id]" class="text-xs text-red-500">{{ evidenceError[record.id] }}</p>
-                        <template v-else-if="evidenceData[record.id]">
-                          <p v-if="evidenceData[record.id] && !evidenceData[record.id]?.has_pdf" class="mb-2 text-xs text-amber-600 dark:text-amber-300">
+                        <template v-else-if="buildInteractiveEvidenceRow(record)">
+                          <p v-if="evidenceData[record.id] && !evidenceData[record.id]?.has_pdf" class="px-1 text-xs text-amber-600 dark:text-amber-300">
                             PDF file not found on backend disk; evidence image cannot be generated.
                           </p>
-                          <div class="mb-2 text-xs text-slate-600 dark:text-slate-300">
-                            <div><span class="font-semibold">Type:</span> {{ isTextEvidence(record.id) ? 'text snippet' : (evidenceData[record.id]?.has_image ? 'image region' : 'text only') }}</div>
-                            <div><span class="font-semibold">Source:</span> {{ evidenceData[record.id]?.source || '--' }}</div>
-                            <div><span class="font-semibold">Page:</span> {{ evidenceData[record.id]?.page ?? '--' }}</div>
-                          </div>
-
-                          <div
-                            class="mb-2 max-h-40 overflow-auto rounded border border-slate-200 bg-slate-50 p-2 text-xs leading-6 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
-                            @click="(e) => onEvidenceSnippetClick(e, record)"
-                          >
-                            <p class="whitespace-pre-wrap" v-html="highlightEvidenceHtml(record)"></p>
-                          </div>
-
-                          <div class="mb-2 flex flex-wrap gap-1">
-                            <button
-                              v-for="chip in evidenceTermChips(record)"
-                              :key="`${record.id}-${chip.term}`"
-                              class="rounded px-1.5 py-0.5 text-[10px] text-slate-800 hover:opacity-80 dark:text-slate-900"
-                              :class="chip.colorClass"
-                              :title="`Locate '${chip.term}' in PDF`"
-                              @click="openTermInPdf(record, chip.term)"
-                            >
-                              <span v-html="formatEvidenceChipTermHtml(chip.term)"></span>
-                            </button>
-                          </div>
-
-                          <div v-if="evidencePagePreviewSrc(record.id)" class="max-h-80 overflow-auto rounded border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
-                            <img
-                              :src="evidencePagePreviewSrc(record.id) as string"
-                              alt="Evidence page preview"
-                              class="w-full cursor-zoom-in object-contain"
-                              @click="openImagePreview(evidencePagePreviewSrc(record.id) as string, `Page ${evidenceData[record.id]?.page ?? '--'}`)"
-                            />
-                          </div>
-                          <img
-                            v-else-if="evidenceImageSrc(record.id)"
-                            :src="evidenceImageSrc(record.id) as string"
-                            alt="Evidence crop"
-                            class="max-h-48 w-full cursor-zoom-in rounded border border-slate-200 object-contain dark:border-slate-700 dark:bg-slate-900"
-                            @click="openImagePreview(evidenceImageSrc(record.id) as string, `Evidence Crop · Page ${evidenceData[record.id]?.page ?? '--'}`)"
+                          <InteractiveEvidencePanelHost
+                            :row="buildInteractiveEvidenceRow(record) as InteractiveEvidenceRow"
+                            :pdf-url="record.literatureId ? `/api/pdf/${record.literatureId}` : ''"
+                            class-name="rounded-[28px]"
+                            @open-pdf="(payload) => openInteractiveEvidencePdf(record, payload)"
                           />
-                          <div v-else class="flex h-24 items-center justify-center rounded border border-dashed border-slate-300 text-xs text-slate-400 dark:border-slate-700 dark:text-slate-500">
-                            No evidence image available
-                          </div>
                         </template>
                         <p v-else class="text-xs text-slate-400 dark:text-slate-500">No evidence available</p>
                       </div>
@@ -1970,9 +2235,9 @@ watch(
                 </tr>
               </template>
             </template>
-            <tr v-else>
-              <td colspan="7" class="px-4 py-8 text-center text-slate-400 dark:text-slate-500">No matching data</td>
-            </tr>
+              <tr v-else>
+                <td colspan="6" class="px-4 py-8 text-center text-slate-400 dark:text-slate-500">No matching data</td>
+              </tr>
           </tbody>
         </table>
       </div>
@@ -2005,6 +2270,463 @@ watch(
         </button>
       </div>
     </div>
+
+    <Modal :show="!!evidenceModalRecord" max-width="full" @close="closeEvidenceModal">
+      <template #header>
+        <div v-if="evidenceModalRecord" class="flex w-full items-center justify-between gap-4">
+          <div class="min-w-0">
+            <div class="text-xs font-semibold uppercase tracking-[0.22em] text-blue-500">Evidence Workspace</div>
+            <div class="mt-1 truncate text-base font-semibold text-slate-900 dark:text-slate-100">
+              Record #{{ evidenceModalRecord.id }} · {{ tribopairDisplay(evidenceModalRecord) }}
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              @click="openEditModal(evidenceModalRecord)"
+            >
+              <Edit class="h-4 w-4" /> Edit
+            </button>
+            <button
+              v-if="evidenceModalRecord.literatureId"
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
+              @click="openRecordPdf(evidenceModalRecord)"
+            >
+              <ExternalLink class="h-4 w-4" /> Open PDF
+            </button>
+          </div>
+        </div>
+      </template>
+
+      <div v-if="evidenceModalRecord" class="grid h-[78vh] gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+        <aside class="space-y-4 overflow-auto pr-1">
+          <div class="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+            <div class="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+              <BookOpen class="h-4 w-4" /> Reference Source
+            </div>
+            <div class="mt-4 space-y-4">
+              <div>
+                <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Title</div>
+                <div class="mt-1 text-sm font-medium leading-6 text-slate-900 dark:text-slate-100">
+                  {{ evidenceModalRecord.literature?.title || '--' }}
+                </div>
+              </div>
+              <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                <div>
+                  <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Authors</div>
+                  <div class="mt-1 text-sm text-slate-700 dark:text-slate-300">{{ evidenceModalRecord.literature?.authors || '--' }}</div>
+                </div>
+                <div>
+                  <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Journal</div>
+                  <div class="mt-1 text-sm text-slate-700 dark:text-slate-300">{{ evidenceModalRecord.literature?.journal || '--' }}</div>
+                </div>
+              </div>
+              <div>
+                <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">DOI</div>
+                <div class="mt-1 text-sm">
+                  <a
+                    v-if="evidenceModalRecord.literature?.doi"
+                    :href="`https://doi.org/${evidenceModalRecord.literature?.doi}`"
+                    target="_blank"
+                    class="inline-flex items-center gap-1 text-blue-600 hover:underline dark:text-blue-300"
+                  >
+                    {{ evidenceModalRecord.literature?.doi }}
+                    <ExternalLink class="h-3.5 w-3.5" />
+                  </a>
+                  <span v-else class="text-slate-700 dark:text-slate-300">--</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-[24px] border border-emerald-100 bg-[linear-gradient(135deg,#ffffff_0%,#effbf6_60%,#d7f7eb_100%)] p-5 shadow-sm dark:border-emerald-500/15 dark:bg-[linear-gradient(135deg,rgba(15,23,42,0.98)_0%,rgba(5,83,64,0.86)_100%)]">
+            <div class="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+              <ShieldCheck class="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
+              AI Confidence
+            </div>
+
+            <div class="mt-4 flex items-end gap-3">
+              <div class="flex items-baseline text-emerald-600 dark:text-emerald-300">
+                <span class="text-5xl font-black leading-none tracking-tighter">{{ confidencePercentNumber(confidenceValueFor(evidenceModalRecord)).toFixed(0) }}</span>
+                <span class="text-2xl font-bold leading-none">%</span>
+              </div>
+              <div class="pb-1 text-[11px] font-bold uppercase tracking-[0.18em] text-emerald-600 dark:text-emerald-300">
+                {{ confidencePercentNumber(confidenceValueFor(evidenceModalRecord)) >= 80 ? 'High Confidence' : confidencePercentNumber(confidenceValueFor(evidenceModalRecord)) >= 50 ? 'Medium Confidence' : 'Low Confidence' }}
+              </div>
+            </div>
+
+            <div class="mt-3">
+              <div
+                v-if="confidenceDeltaPercent(evidenceModalRecord) > 0"
+                class="inline-flex items-center gap-1 rounded-full bg-emerald-100/80 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300"
+              >
+                <ArrowUp class="h-3.5 w-3.5" /> Live evidence boosted confidence
+              </div>
+              <div
+                v-else-if="confidenceDeltaPercent(evidenceModalRecord) < 0"
+                class="inline-flex items-center gap-1 rounded-full bg-rose-100/80 px-2.5 py-1 text-[11px] font-semibold text-rose-700 dark:bg-rose-500/15 dark:text-rose-300"
+              >
+                <ArrowDown class="h-3.5 w-3.5" /> Stored score exceeds live evidence
+              </div>
+              <div
+                v-else
+                class="inline-flex items-center gap-1 rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-200/70 dark:bg-slate-950/40 dark:text-slate-300 dark:ring-slate-700/70"
+              >
+                Synced with stored confidence
+              </div>
+            </div>
+
+            <div class="mt-4 rounded-2xl border border-white/80 bg-white/70 p-4 shadow-sm backdrop-blur dark:border-slate-800/80 dark:bg-slate-950/45">
+              <div class="flex items-center justify-between text-sm text-slate-600 dark:text-slate-300">
+                <div class="flex items-center gap-2">
+                  <Flag class="h-4 w-4" />
+                  <span>Base Score</span>
+                </div>
+                <span class="font-bold text-slate-800 dark:text-slate-100">{{ confidenceDetailsFor(evidenceModalRecord).base_percent.toFixed(0) }}</span>
+              </div>
+
+              <div class="mt-4 space-y-2">
+                <div
+                  v-for="(boost, idx) in confidenceDetailsFor(evidenceModalRecord).boosts.slice(0, 3)"
+                  :key="`modal-boost-${idx}`"
+                  class="flex items-start justify-between gap-3 text-emerald-700 dark:text-emerald-300"
+                >
+                  <div class="flex items-start gap-2">
+                    <PlusCircle class="mt-0.5 h-4 w-4 shrink-0" />
+                    <span class="text-[13px] leading-5">{{ confidenceBoostLabel(boost.reason) }}</span>
+                  </div>
+                  <span class="shrink-0 text-sm font-bold">{{ confidenceBoostValue(boost.value) }}</span>
+                </div>
+                <div
+                  v-for="(penalty, idx) in confidenceDetailsFor(evidenceModalRecord).penalties.slice(0, 2)"
+                  :key="`modal-penalty-${idx}`"
+                  class="flex items-start justify-between gap-3 text-rose-600 dark:text-rose-300"
+                >
+                  <div class="flex items-start gap-2">
+                    <MinusCircle class="mt-0.5 h-4 w-4 shrink-0" />
+                    <span class="text-[13px] leading-5">{{ confidencePenaltyLabel(penalty.reason) }}</span>
+                  </div>
+                  <span class="shrink-0 text-sm font-bold">{{ confidencePenaltyValue(penalty.value) }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="mt-4 h-2 overflow-hidden rounded-full bg-emerald-100/80 dark:bg-slate-800">
+              <div
+                class="h-full rounded-full bg-emerald-500 transition-all"
+                :style="{ width: `${confidencePercentNumber(confidenceValueFor(evidenceModalRecord))}%` }"
+              ></div>
+            </div>
+          </div>
+        </aside>
+
+        <section class="flex min-h-0 flex-col rounded-[28px] bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.18),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(168,85,247,0.12),transparent_26%),linear-gradient(135deg,#09101d_0%,#08162f_45%,#0b1530_100%)] p-4">
+          <div class="mb-4 flex flex-wrap items-start justify-between gap-3 px-1">
+            <div>
+              <div class="text-xs font-semibold uppercase tracking-[0.24em] text-blue-200/70">Context-Aware Evidence</div>
+              <div class="mt-1 text-sm text-slate-300">
+                <span class="font-semibold text-white" v-html="formatIonicLiquidHtml(evidenceModalRecord.lubricant || '--')"></span>
+                <span class="mx-2 text-slate-500">·</span>
+                <span>{{ cofDisplay(evidenceModalRecord) }}</span>
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <span
+                v-for="group in conditionGroups(evidenceModalRecord)"
+                :key="`modal-cond-${group.key}`"
+                class="inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold"
+                :class="conditionGroupClass(group.key)"
+              >
+                <span class="tracking-[0.16em]">{{ group.label }}</span>
+                <span class="truncate border-l border-current/20 pl-2 tracking-normal">{{ group.summary }}</span>
+              </span>
+            </div>
+          </div>
+
+          <div class="min-h-0 flex-1 overflow-auto">
+            <p v-if="evidenceLoading[evidenceModalRecord.id]" class="rounded-2xl border border-slate-700/70 bg-slate-900/60 px-4 py-5 text-sm text-slate-300">
+              Locating evidence...
+            </p>
+            <p v-else-if="evidenceError[evidenceModalRecord.id]" class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-5 text-sm text-rose-200">
+              {{ evidenceError[evidenceModalRecord.id] }}
+            </p>
+            <template v-else-if="activeEvidenceRow">
+              <p v-if="evidenceData[evidenceModalRecord.id] && !evidenceData[evidenceModalRecord.id]?.has_pdf" class="mb-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                PDF file not found on backend disk; evidence image cannot be generated.
+              </p>
+              <InteractiveEvidencePanelHost
+                :row="activeEvidenceRow"
+                :pdf-url="evidenceModalRecord.literatureId ? `/api/pdf/${evidenceModalRecord.literatureId}` : ''"
+                class-name="rounded-[26px]"
+                @open-pdf="handleEvidenceModalPdfOpen"
+              />
+            </template>
+            <p v-else class="rounded-2xl border border-slate-700/70 bg-slate-900/60 px-4 py-5 text-sm text-slate-300">
+              No evidence available for this record.
+            </p>
+          </div>
+        </section>
+      </div>
+    </Modal>
+
+    <Transition
+      enter-active-class="transition ease-out duration-300"
+      enter-from-class="opacity-0"
+      enter-to-class="opacity-100"
+      leave-active-class="transition ease-in duration-200"
+      leave-from-class="opacity-100"
+      leave-to-class="opacity-0"
+    >
+      <div v-if="editDrawerRecord && activeEditValues" class="fixed inset-0 z-50 bg-slate-950/35 backdrop-blur-[2px]" @click.self="closeEditDrawer">
+        <Transition
+          enter-active-class="transition ease-out duration-300"
+          enter-from-class="translate-x-full"
+          enter-to-class="translate-x-0"
+          leave-active-class="transition ease-in duration-200"
+          leave-from-class="translate-x-0"
+          leave-to-class="translate-x-full"
+        >
+          <div class="absolute inset-y-0 right-0 flex w-full max-w-2xl flex-col border-l border-slate-200 bg-white shadow-[0_24px_80px_rgba(15,23,42,0.18)] dark:border-slate-800 dark:bg-slate-950">
+            <div class="border-b border-slate-200 px-6 py-5 dark:border-slate-800">
+              <div class="flex items-start justify-between gap-4">
+                <div class="min-w-0">
+                  <div class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400 dark:text-slate-500">Edit Parameters</div>
+                  <div class="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
+                    Record #{{ editDrawerRecord.id }}
+                  </div>
+                  <div class="mt-2 text-sm text-slate-500 dark:text-slate-400" v-html="formatIonicLiquidHtml(editDrawerRecord.lubricant || '--')"></div>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close editor"
+                  class="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                  @click="closeEditDrawer"
+                >
+                  <span class="text-lg leading-none">×</span>
+                </button>
+              </div>
+
+              <div class="mt-4 flex flex-wrap gap-2 text-[11px] font-semibold">
+                <span class="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
+                  COF {{ cofDisplay(editDrawerRecord) }}
+                </span>
+                <span class="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300">
+                  Confidence {{ confidenceDisplay(confidenceValueFor(editDrawerRecord)) }}
+                </span>
+                <span class="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                  {{ tribopairDisplay(editDrawerRecord) }}
+                </span>
+              </div>
+            </div>
+
+            <div class="flex-1 overflow-auto px-6 py-5">
+              <div class="space-y-5">
+                <section class="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-900/60">
+                  <div class="mb-4 text-sm font-semibold text-slate-900 dark:text-slate-100">Core Fields</div>
+                  <div class="grid gap-4 md:grid-cols-2">
+                    <div class="md:col-span-2">
+                      <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Ionic Liquid</label>
+                      <input
+                        :value="activeEditValues.lubricant"
+                        @input="(e: Event) => updateActiveEditingField('lubricant', (e.target as HTMLInputElement).value)"
+                        type="text"
+                        class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                        placeholder="[EMIM][TFSI]"
+                      />
+                    </div>
+                    <div>
+                      <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">COF</label>
+                      <input
+                        :value="activeEditValues.cof"
+                        @input="(e: Event) => updateActiveEditingField('cof', (e.target as HTMLInputElement).value)"
+                        type="text"
+                        class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-mono dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                        placeholder="0.020"
+                      />
+                    </div>
+                    <div>
+                      <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Temperature</label>
+                      <input
+                        :value="activeEditValues.temperature"
+                        @input="(e: Event) => updateActiveEditingField('temperature', (e.target as HTMLInputElement).value)"
+                        type="text"
+                        class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+                        placeholder="298.15 K"
+                      />
+                    </div>
+                  </div>
+                </section>
+
+                <section class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+                  <div class="mb-4 text-sm font-semibold text-slate-900 dark:text-slate-100">Tribopair</div>
+                  <div class="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Probe Material</label>
+                      <input
+                        :value="activeEditValues.probeMaterial"
+                        @input="(e: Event) => updateActiveEditingField('probeMaterial', (e.target as HTMLInputElement).value)"
+                        type="text"
+                        class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        placeholder="Silica"
+                      />
+                    </div>
+                    <div>
+                      <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Substrate Material</label>
+                      <input
+                        :value="activeEditValues.substrateMaterial"
+                        @input="(e: Event) => updateActiveEditingField('substrateMaterial', (e.target as HTMLInputElement).value)"
+                        type="text"
+                        class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        placeholder="Mica"
+                      />
+                    </div>
+                    <div>
+                      <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Probe Geometry</label>
+                      <input
+                        :value="activeEditValues.probeGeometry"
+                        @input="(e: Event) => updateActiveEditingField('probeGeometry', (e.target as HTMLInputElement).value)"
+                        type="text"
+                        class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        placeholder="Sphere"
+                      />
+                    </div>
+                    <div>
+                      <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Probe Radius</label>
+                      <input
+                        :value="activeEditValues.probeRadius"
+                        @input="(e: Event) => updateActiveEditingField('probeRadius', (e.target as HTMLInputElement).value)"
+                        type="text"
+                        class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        placeholder="5 μm"
+                      />
+                    </div>
+                  </div>
+                </section>
+
+                <section class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+                  <div class="mb-4 text-sm font-semibold text-slate-900 dark:text-slate-100">Experimental Conditions</div>
+                  <div class="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Potential</label>
+                      <input
+                        :value="activeEditValues.potential"
+                        @input="(e: Event) => updateActiveEditingField('potential', (e.target as HTMLInputElement).value)"
+                        type="text"
+                        class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        placeholder="+1.5 V / OCP"
+                      />
+                    </div>
+                    <div>
+                      <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Water Content</label>
+                      <input
+                        :value="activeEditValues.waterContent"
+                        @input="(e: Event) => updateActiveEditingField('waterContent', (e.target as HTMLInputElement).value)"
+                        type="text"
+                        class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        placeholder="IL-0%"
+                      />
+                    </div>
+                    <div>
+                      <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Speed</label>
+                      <input
+                        :value="activeEditValues.speedValue"
+                        @input="(e: Event) => updateActiveEditingField('speedValue', (e.target as HTMLInputElement).value)"
+                        type="text"
+                        class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        placeholder="1 μm/s"
+                      />
+                    </div>
+                    <div>
+                      <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Load</label>
+                      <input
+                        :value="activeEditValues.loadValue"
+                        @input="(e: Event) => updateActiveEditingField('loadValue', (e.target as HTMLInputElement).value)"
+                        type="text"
+                        class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        placeholder="15-75 nN"
+                      />
+                    </div>
+                  </div>
+                </section>
+
+                <details class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+                  <summary class="cursor-pointer list-none text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    Advanced Surface Metadata
+                  </summary>
+                  <div class="mt-4 grid gap-4 md:grid-cols-2">
+                    <div>
+                      <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Probe Roughness</label>
+                      <input
+                        :value="activeEditValues.probeRoughness"
+                        @input="(e: Event) => updateActiveEditingField('probeRoughness', (e.target as HTMLInputElement).value)"
+                        type="text"
+                        class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        placeholder="< 2 nm RMS"
+                      />
+                    </div>
+                    <div>
+                      <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Substrate Coating</label>
+                      <input
+                        :value="activeEditValues.substrateCoating"
+                        @input="(e: Event) => updateActiveEditingField('substrateCoating', (e.target as HTMLInputElement).value)"
+                        type="text"
+                        class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        placeholder="None"
+                      />
+                    </div>
+                    <div>
+                      <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Substrate Roughness</label>
+                      <input
+                        :value="activeEditValues.substrateRoughness"
+                        @input="(e: Event) => updateActiveEditingField('substrateRoughness', (e.target as HTMLInputElement).value)"
+                        type="text"
+                        class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        placeholder="Atomically flat"
+                      />
+                    </div>
+                    <div>
+                      <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Film / Roughness Note</label>
+                      <input
+                        :value="activeEditValues.filmThickness"
+                        @input="(e: Event) => updateActiveEditingField('filmThickness', (e.target as HTMLInputElement).value)"
+                        type="text"
+                        class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        placeholder="RMS 4.9 nm (BB5-1-M)"
+                      />
+                    </div>
+                  </div>
+                </details>
+              </div>
+            </div>
+
+            <div class="border-t border-slate-200 px-6 py-4 dark:border-slate-800">
+              <div class="flex items-center justify-between gap-3">
+                <p class="text-xs text-slate-500 dark:text-slate-400">Focused editor for correcting extracted values without expanding the table.</p>
+                <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    class="inline-flex h-10 items-center rounded-xl border border-slate-300 px-4 text-sm font-medium text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                    @click="closeEditDrawer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex h-10 items-center gap-1.5 rounded-xl bg-blue-600 px-4 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-60"
+                    :disabled="isSavingActiveEditRecord()"
+                    @click="saveActiveEditRecord"
+                  >
+                    <Save class="h-4 w-4" /> Save Changes
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Transition>
+      </div>
+    </Transition>
 
     <Modal :show="pdfLocate.open" max-width="full" @close="closePdfLocate">
       <template #header>

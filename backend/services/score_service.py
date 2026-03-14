@@ -123,7 +123,17 @@ def calculate_confidence_details(record: Dict[str, Any]) -> Dict[str, Any]:
         boosts.append((reason, value))
 
     lubricant = _pick(record, "lubricant", "ionic_liquid")
-    material = _pick(record, "material_name", "materialName")
+    material = _pick(
+        record,
+        "tribopair_label",
+        "tribopairLabel",
+        "substrate_material",
+        "substrateMaterial",
+        "material_name",
+        "materialName",
+    )
+    probe_material = _pick(record, "probe_material", "probeMaterial")
+    substrate_material = _pick(record, "substrate_material", "substrateMaterial")
     cof_value = _pick(record, "cof_value", "cofValue")
     cof_raw = _pick(record, "cof_raw", "cofRaw", "cof")
     cof_operator = _pick(record, "cof_operator", "cofOperator")
@@ -141,7 +151,7 @@ def calculate_confidence_details(record: Dict[str, Any]) -> Dict[str, Any]:
     elif _looks_unknown(lubricant):
         penalize("unknown_lubricant", 0.10)
 
-    if _is_missing(material):
+    if _is_missing(material) and (_is_missing(probe_material) or _is_missing(substrate_material)):
         penalize("missing_material", 0.16)
     elif _looks_unknown(material):
         penalize("unknown_material", 0.08)
@@ -201,6 +211,8 @@ def calculate_confidence_details(record: Dict[str, Any]) -> Dict[str, Any]:
         _pick(record, "temperature"),
         _pick(record, "potential"),
         _pick(record, "water_content", "waterContent"),
+        _pick(record, "probe_roughness", "probeRoughness"),
+        _pick(record, "substrate_roughness", "substrateRoughness"),
         _pick(record, "surface_roughness", "surfaceRoughness"),
         _pick(record, "film_thickness", "filmThickness"),
     ]

@@ -1,16 +1,39 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { AlertTriangle, ArrowRightLeft, Database, Download, RefreshCcw, Save, Sparkles, TableProperties, WandSparkles } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import {
+  AlertTriangle,
+  ArrowRightLeft,
+  Database,
+  Download,
+  RefreshCcw,
+  Save,
+  SlidersHorizontal,
+  Sparkles,
+  TableProperties,
+  WandSparkles,
+} from 'lucide-vue-next'
 import {
   downloadCleanedDataset,
   listCleanedDatasets,
   previewModelCleaning,
   saveCleanedDataset,
+  type ModelCleaningMatrixRow,
   type ModelCleaningOptions,
   type ModelCleaningPreview,
-  type ModelCleaningPreviewRow,
   type SavedCleanedDatasetSummary,
 } from '@/lib/api'
+
+const PROCESS_FEATURE_OPTIONS = [
+  { key: 'temperature', label: 'Temperature', description: 'Keep normalized temperature in degrees Celsius.' },
+  { key: 'speed', label: 'Speed', description: 'Keep sliding speed after unit conversion.' },
+  { key: 'load', label: 'Load', description: 'Keep applied load converted to Newtons.' },
+  { key: 'potential', label: 'Potential', description: 'Keep electrochemical potential values.' },
+  { key: 'water_content', label: 'Water Content', description: 'Keep water content normalized to ppm.' },
+  { key: 'film_thickness', label: 'Film Thickness', description: 'Keep normalized film thickness in nm.' },
+  { key: 'alkyl_chain_length', label: 'Alkyl Chain Length', description: 'Keep resolved alkyl chain length metadata.' },
+] as const
+
+const DEFAULT_KEEP_FEATURES = PROCESS_FEATURE_OPTIONS.map((feature) => feature.key)
 
 const emit = defineEmits<{
   (e: 'open-training', datasetId: number | null): void
@@ -23,6 +46,11 @@ const form = reactive<ModelCleaningOptions>({
   missing_value_strategy: 'median',
   remove_target_outliers: false,
   iqr_multiplier: 1.5,
+  feature_config: {
+    use_pca: false,
+    n_components: 10,
+    keep_features: [...DEFAULT_KEEP_FEATURES],
+  },
 })
 
 const preview = ref<ModelCleaningPreview | null>(null)
@@ -36,6 +64,9 @@ const statusMessage = ref('')
 const datasetName = ref('')
 const datasetDescription = ref('')
 const lastSavedDatasetId = ref<number | null>(null)
+const autoPreviewReady = ref(false)
+
+let autoPreviewTimer: ReturnType<typeof setTimeout> | null = null
 
 const repairRows = computed(() => {
   const repairs = preview.value?.summary.missing_value_repairs || {}
@@ -47,10 +78,42 @@ const repairRows = computed(() => {
 const cleanedRows = computed(() => preview.value?.rows || [])
 const previewRows = computed(() => preview.value?.preview_rows || [])
 const normalizationRows = computed(() => preview.value?.normalization_preview || [])
+const explainedVariancePercent = computed(() => {
+  const ratio = preview.value?.pca_info?.explained_variance_ratio
+  return ratio == null || Number.isNaN(Number(ratio)) ? null : Math.round(Number(ratio) * 100)
+})
+const finalFeatureCount = computed(() => preview.value?.feature_columns.length || 0)
+const normalizationColumns = computed(() => {
+  const columns = preview.value?.matrix_columns || []
+  const limit = preview.value?.pca_info?.enabled ? 8 : 6
+  return columns.slice(0, Math.min(limit, columns.length))
+})
+const matrixPreviewColumns = computed(() => {
+  const columns = preview.value?.matrix_columns || []
+  const limit = preview.value?.pca_info?.enabled ? 12 : 10
+  return columns.slice(0, Math.min(limit, columns.length))
+})
+const autoPreviewSignature = computed(() => JSON.stringify(buildOptionsPayload()))
+
+function buildOptionsPayload(): ModelCleaningOptions {
+  return {
+    source_mode: form.source_mode,
+    drop_missing_target: Boolean(form.drop_missing_target),
+    require_dual_smiles: Boolean(form.require_dual_smiles),
+    missing_value_strategy: form.missing_value_strategy,
+    remove_target_outliers: Boolean(form.remove_target_outliers),
+    iqr_multiplier: Number(form.iqr_multiplier),
+    feature_config: {
+      use_pca: Boolean(form.feature_config.use_pca),
+      n_components: Number(form.feature_config.n_components),
+      keep_features: [...form.feature_config.keep_features],
+    },
+  }
+}
 
 function formatMetric(value: number | null | undefined, digits: number = 4) {
   if (value == null || Number.isNaN(Number(value))) return '--'
-  return Number(value).toFixed(digits)
+  return Number(value).toFixed(digits).replace(/\.?0+$/, '')
 }
 
 function formatCoverage(value: number) {
@@ -60,6 +123,10 @@ function formatCoverage(value: number) {
 function formatDateTime(value: string | null | undefined) {
   if (!value) return '--'
   return new Date(value).toLocaleString()
+}
+
+function formatColumnLabel(column: string) {
+  return column.replace(/_/g, ' ')
 }
 
 function defaultDatasetName() {
@@ -75,33 +142,10 @@ function csvEscape(value: unknown) {
   return text
 }
 
-function rowsToCsv(rows: ModelCleaningPreviewRow[]) {
-  const fields = [
-    'record_id',
-    'literature_id',
-    'material_name',
-    'lubricant',
-    'cof_value',
-    'normalized_temperature_c',
-    'normalized_speed_mps',
-    'normalized_load_n',
-    'normalized_potential_v',
-    'normalized_water_content_ppm',
-    'normalized_film_thickness_nm',
-    'normalized_alkyl_chain_length',
-    'cation_smiles',
-    'anion_smiles',
-    'confidence',
-    'is_target_outlier',
-    'repaired_fields',
-  ] as const
-
+function rowsToCsv(rows: ModelCleaningMatrixRow[], columns: string[]) {
   const lines = [
-    fields.join(','),
-    ...rows.map((row) => fields.map((field) => {
-      const value = field === 'repaired_fields' ? row.repaired_fields.join('|') : row[field]
-      return csvEscape(value)
-    }).join(',')),
+    columns.join(','),
+    ...rows.map((row) => columns.map((column) => csvEscape(row[column])).join(',')),
   ]
   return lines.join('\n')
 }
@@ -115,17 +159,29 @@ function triggerDownload(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
+function scheduleAutoPreview() {
+  if (!autoPreviewReady.value) return
+  if (autoPreviewTimer) {
+    clearTimeout(autoPreviewTimer)
+  }
+  autoPreviewTimer = setTimeout(() => {
+    void runPreview(true)
+  }, 450)
+}
+
 async function fetchSavedDatasets() {
   const response = await listCleanedDatasets()
   savedDatasets.value = response.items
 }
 
-async function runPreview() {
+async function runPreview(silent: boolean = false) {
   previewLoading.value = true
   errorMessage.value = ''
-  statusMessage.value = ''
+  if (!silent) {
+    statusMessage.value = ''
+  }
   try {
-    preview.value = await previewModelCleaning({ ...form })
+    preview.value = await previewModelCleaning(buildOptionsPayload())
     if (!datasetName.value) {
       datasetName.value = defaultDatasetName()
     }
@@ -140,6 +196,7 @@ async function initialize() {
   loading.value = true
   try {
     await Promise.all([runPreview(), fetchSavedDatasets()])
+    autoPreviewReady.value = true
   } finally {
     loading.value = false
   }
@@ -155,10 +212,10 @@ async function handleSaveDataset() {
       name: datasetName.value || defaultDatasetName(),
       description: datasetDescription.value,
       target_key: 'cof',
-      cleaning_options: { ...form },
+      cleaning_options: buildOptionsPayload(),
     })
     lastSavedDatasetId.value = response.dataset.id
-    statusMessage.value = `Saved cleaned dataset #${response.dataset.id}. Open Training Page to use it immediately.`
+    statusMessage.value = `Saved cleaned dataset #${response.dataset.id}. Open Training Page to train on the matrix immediately.`
     await fetchSavedDatasets()
   } catch (error: any) {
     errorMessage.value = error?.response?.data?.detail || error?.message || 'Failed to save cleaned dataset.'
@@ -172,8 +229,8 @@ function openTraining(datasetId: number | null = lastSavedDatasetId.value) {
 }
 
 function handleExportPreview() {
-  if (!cleanedRows.value.length) return
-  const csv = rowsToCsv(cleanedRows.value)
+  if (!preview.value || !cleanedRows.value.length) return
+  const csv = rowsToCsv(cleanedRows.value, preview.value.matrix_columns)
   triggerDownload(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), 'cleaned-preview.csv')
 }
 
@@ -189,8 +246,18 @@ async function handleExportSaved(dataset: SavedCleanedDatasetSummary) {
   }
 }
 
+watch(autoPreviewSignature, () => {
+  scheduleAutoPreview()
+})
+
 onMounted(() => {
   void initialize()
+})
+
+onBeforeUnmount(() => {
+  if (autoPreviewTimer) {
+    clearTimeout(autoPreviewTimer)
+  }
 })
 </script>
 
@@ -203,7 +270,7 @@ onMounted(() => {
         </div>
         <div>
           <h1 class="text-xl font-bold tracking-tight">Data Cleaning Bridge</h1>
-          <p class="text-sm text-slate-500">Repair, normalize, filter, save, and export cleaned datasets.</p>
+          <p class="text-sm text-slate-500">Repair, engineer, prune, and save ready-to-train matrices.</p>
         </div>
       </div>
 
@@ -259,16 +326,63 @@ onMounted(() => {
                   <label class="font-medium text-slate-600">IQR Multiplier</label>
                   <span class="font-semibold text-cyan-700">{{ form.iqr_multiplier.toFixed(1) }}</span>
                 </div>
-                <input v-model="form.iqr_multiplier" type="range" min="0.5" max="3.0" step="0.1" class="w-full accent-cyan-600" :disabled="!form.remove_target_outliers" />
+                <input v-model.number="form.iqr_multiplier" type="range" min="0.5" max="3.0" step="0.1" class="w-full accent-cyan-600" :disabled="!form.remove_target_outliers" />
+              </div>
+            </div>
+          </section>
+
+          <section class="rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm">
+            <div class="mb-4 flex items-center gap-2">
+              <SlidersHorizontal class="h-4 w-4 text-blue-600" />
+              <h2 class="text-sm font-semibold text-slate-800">Feature Engineering</h2>
+            </div>
+
+            <div class="space-y-4">
+              <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div class="flex items-start justify-between gap-4">
+                  <div>
+                    <p class="text-sm font-semibold text-slate-800">Molecular Features</p>
+                    <p class="mt-1 text-xs leading-5 text-slate-500">Apply PCA to the concatenated 512-dimensional Morgan fingerprint block before saving the cleaned matrix.</p>
+                  </div>
+                  <label class="relative inline-flex cursor-pointer items-center">
+                    <input v-model="form.feature_config.use_pca" type="checkbox" class="peer sr-only" />
+                    <div class="h-6 w-11 rounded-full bg-slate-200 transition peer-checked:bg-cyan-500"></div>
+                    <div class="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition peer-checked:translate-x-5"></div>
+                  </label>
+                </div>
+
+                <div v-if="form.feature_config.use_pca" class="mt-4 rounded-2xl border border-cyan-100 bg-white p-3">
+                  <div class="mb-2 flex items-center justify-between text-sm">
+                    <label class="font-medium text-slate-600">PCA Components</label>
+                    <span class="font-semibold text-cyan-700">{{ form.feature_config.n_components }}</span>
+                  </div>
+                  <input v-model.number="form.feature_config.n_components" type="range" min="2" max="30" step="1" class="w-full accent-cyan-600" />
+                  <p class="mt-2 text-xs text-slate-500">The preview will report how much fingerprint variance these components retain.</p>
+                </div>
+              </div>
+
+              <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p class="text-sm font-semibold text-slate-800">Process Features</p>
+                <p class="mt-1 text-xs leading-5 text-slate-500">Unchecked process variables are dropped from the final matrix before the dataset is saved.</p>
+                <div class="mt-4 grid gap-2">
+                  <label v-for="feature in PROCESS_FEATURE_OPTIONS" :key="feature.key" class="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700">
+                    <input v-model="form.feature_config.keep_features" type="checkbox" :value="feature.key" class="mt-1 h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />
+                    <div class="min-w-0">
+                      <p class="font-semibold text-slate-800">{{ feature.label }}</p>
+                      <p class="mt-1 text-xs leading-5 text-slate-500">{{ feature.description }}</p>
+                    </div>
+                  </label>
+                </div>
+                <p class="mt-3 text-xs text-slate-500">{{ form.feature_config.keep_features.length }} process features will be kept in the cleaned matrix.</p>
               </div>
             </div>
 
             <div class="mt-4 space-y-3">
-              <button class="inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 text-sm font-semibold text-white shadow-lg shadow-cyan-200/80 transition hover:translate-y-[-1px] disabled:opacity-60" :disabled="previewLoading" @click="runPreview">
+              <button class="inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 text-sm font-semibold text-white shadow-lg shadow-cyan-200/80 transition hover:translate-y-[-1px] disabled:opacity-60" :disabled="previewLoading" @click="runPreview()">
                 <RefreshCcw class="h-4 w-4" />
                 {{ previewLoading ? 'Refreshing Preview...' : 'Build Cleaning Preview' }}
               </button>
-              <button class="inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60" :disabled="!cleanedRows.length" @click="handleExportPreview">
+              <button class="inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60" :disabled="!preview?.rows.length" @click="handleExportPreview">
                 <Download class="h-4 w-4" />
                 Export Preview CSV
               </button>
@@ -286,7 +400,7 @@ onMounted(() => {
             </label>
             <label class="block">
               <span class="mb-2 block text-sm font-medium text-slate-600">Description</span>
-              <textarea v-model="datasetDescription" rows="3" class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100" placeholder="Optional notes about cleaning rules and intended training use." />
+              <textarea v-model="datasetDescription" rows="3" class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100" placeholder="Optional notes about feature pruning, PCA, and intended training use." />
             </label>
             <button class="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60" :disabled="saveLoading || !preview" @click="handleSaveDataset">
               <Save class="h-4 w-4" />
@@ -311,7 +425,12 @@ onMounted(() => {
                 <div class="flex items-start justify-between gap-3">
                   <div class="min-w-0">
                     <p class="truncate text-sm font-semibold text-slate-800">{{ dataset.name }}</p>
-                    <p class="mt-1 text-xs text-slate-500">{{ dataset.row_count }} rows - {{ formatDateTime(dataset.created_at) }}</p>
+                    <p class="mt-1 text-xs text-slate-500">
+                      {{ dataset.row_count }} rows · {{ dataset.feature_columns.length }} features · {{ formatDateTime(dataset.created_at) }}
+                    </p>
+                    <p v-if="dataset.pca_info?.enabled && dataset.pca_info.explained_variance_ratio != null" class="mt-1 text-[11px] font-semibold text-cyan-700">
+                      PCA variance retained: {{ Math.round(dataset.pca_info.explained_variance_ratio * 100) }}%
+                    </p>
                   </div>
                   <div class="flex items-center gap-2">
                     <button class="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50" @click="openTraining(dataset.id)">
@@ -347,12 +466,19 @@ onMounted(() => {
         </section>
 
         <section v-if="preview" class="rounded-[30px] border border-slate-200/80 bg-white/90 px-8 py-6 shadow-[0_24px_80px_-48px_rgba(15,23,42,0.45)]">
-          <div class="flex flex-col gap-5 xl:flex-row xl:items-center xl:justify-between">
+          <div class="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
             <div>
-              <h2 class="text-2xl font-bold tracking-tight">Cleaning Summary</h2>
+              <div class="flex flex-wrap items-center gap-3">
+                <h2 class="text-2xl font-bold tracking-tight">Cleaning Summary</h2>
+                <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{{ finalFeatureCount }} final features</span>
+                <span v-if="preview.pca_info?.enabled && explainedVariancePercent != null" class="rounded-full bg-cyan-100 px-3 py-1 text-xs font-semibold text-cyan-700">
+                  PCA Explained Variance: {{ explainedVariancePercent }}%
+                </span>
+                <span v-else class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">PCA disabled</span>
+              </div>
               <p class="mt-2 text-sm text-slate-500">
                 Active source: {{ preview.source_scope.label }}
-                <span v-if="preview.source_scope.used_fallback"> - Group library fallback applied.</span>
+                <span v-if="preview.source_scope.used_fallback"> · Group library fallback applied.</span>
               </p>
             </div>
             <div class="grid grid-cols-2 gap-3 md:grid-cols-5">
@@ -374,7 +500,7 @@ onMounted(() => {
               </div>
               <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
                 <p class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Outliers</p>
-                <p class="mt-2 text-2xl font-bold">{{ preview.summary.outliers_detected }}</p>
+                <p class="mt-2 text-2xl font-bold">{{ preview.summary.outliers_detected || 0 }}</p>
               </div>
             </div>
           </div>
@@ -383,26 +509,29 @@ onMounted(() => {
         <section v-if="preview" class="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
           <div class="rounded-[30px] border border-slate-200/80 bg-white/90 p-6 shadow-[0_24px_80px_-48px_rgba(15,23,42,0.45)]">
             <h3 class="text-lg font-bold">Missing Value Repair</h3>
-            <p class="mt-2 text-sm text-slate-500">Counts of repaired numeric process fields after normalization.</p>
+            <p class="mt-2 text-sm text-slate-500">Counts of repaired process fields that remain in the final matrix.</p>
             <div v-if="repairRows.length === 0" class="mt-5 rounded-3xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-400">
               No repairs were needed with the current rules.
             </div>
             <div v-else class="mt-5 space-y-3">
               <div v-for="item in repairRows" :key="item.key" class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
                 <div class="flex items-center justify-between gap-2">
-                  <span class="text-sm font-semibold text-slate-800">{{ item.key }}</span>
+                  <span class="text-sm font-semibold text-slate-800">{{ formatColumnLabel(item.key) }}</span>
                   <span class="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">{{ item.count }}</span>
                 </div>
               </div>
             </div>
 
             <div class="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <h4 class="text-sm font-semibold text-slate-800">Feature Coverage After Cleaning</h4>
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <h4 class="text-sm font-semibold text-slate-800">Feature Coverage After Cleaning</h4>
+                <span class="text-xs text-slate-400">{{ preview.summary.training_ready_records }} cleaned rows</span>
+              </div>
               <div class="mt-3 space-y-3">
                 <div v-for="feature in preview.feature_coverage" :key="feature.key">
-                  <div class="mb-1 flex items-center justify-between text-xs">
+                  <div class="mb-1 flex items-center justify-between gap-3 text-xs">
                     <span class="font-medium text-slate-600">{{ feature.label }}</span>
-                    <span class="text-slate-400">{{ feature.available_count }} - {{ formatCoverage(feature.coverage) }}</span>
+                    <span class="text-right text-slate-400">{{ feature.available_count }} / {{ preview.summary.training_ready_records }} · {{ formatCoverage(feature.coverage) }}</span>
                   </div>
                   <div class="h-2 overflow-hidden rounded-full bg-slate-100">
                     <div class="h-full rounded-full bg-gradient-to-r from-cyan-500 to-blue-500" :style="{ width: `${Math.max(4, feature.coverage * 100)}%` }"></div>
@@ -413,45 +542,28 @@ onMounted(() => {
           </div>
 
           <div class="rounded-[30px] border border-slate-200/80 bg-white/90 p-6 shadow-[0_24px_80px_-48px_rgba(15,23,42,0.45)]">
-            <h3 class="text-lg font-bold">Unit Normalization Preview</h3>
-            <p class="mt-2 text-sm text-slate-500">Raw experimental conditions aligned to model-friendly numeric units.</p>
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 class="text-lg font-bold">Unit Normalization Preview</h3>
+                <p class="mt-2 text-sm text-slate-500">Preview the final cleaned matrix shape after feature pruning and optional PCA.</p>
+              </div>
+              <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
+                Showing {{ normalizationColumns.length }} of {{ preview.matrix_columns.length }} columns
+              </span>
+            </div>
             <div class="mt-5 overflow-x-auto">
               <table class="min-w-full text-left text-sm">
                 <thead>
                   <tr class="border-b border-slate-200 text-xs uppercase tracking-[0.16em] text-slate-400">
-                    <th class="px-3 py-3 font-semibold">Record</th>
-                    <th class="px-3 py-3 font-semibold">Temperature</th>
-                    <th class="px-3 py-3 font-semibold">Speed</th>
-                    <th class="px-3 py-3 font-semibold">Load</th>
-                    <th class="px-3 py-3 font-semibold">Water</th>
-                    <th class="px-3 py-3 font-semibold">Film</th>
+                    <th class="px-3 py-3 font-semibold">Row</th>
+                    <th v-for="column in normalizationColumns" :key="column" class="px-3 py-3 font-semibold">{{ formatColumnLabel(column) }}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr v-for="row in normalizationRows" :key="row.record_id" class="border-b border-slate-100 align-top">
-                    <td class="px-3 py-3">
-                      <div class="font-semibold text-slate-800">#{{ row.record_id }}</div>
-                      <div class="text-xs text-slate-400">{{ row.lubricant }}</div>
-                    </td>
-                    <td class="px-3 py-3">
-                      <div>{{ row.temperature || '--' }}</div>
-                      <div class="text-xs text-blue-600">{{ formatMetric(row.normalized_temperature_c, 3) }}</div>
-                    </td>
-                    <td class="px-3 py-3">
-                      <div>{{ row.speed_value || '--' }}</div>
-                      <div class="text-xs text-blue-600">{{ formatMetric(row.normalized_speed_mps, 6) }}</div>
-                    </td>
-                    <td class="px-3 py-3">
-                      <div>{{ row.load_raw || '--' }}</div>
-                      <div class="text-xs text-blue-600">{{ formatMetric(row.normalized_load_n, 6) }}</div>
-                    </td>
-                    <td class="px-3 py-3">
-                      <div>{{ row.water_content || '--' }}</div>
-                      <div class="text-xs text-blue-600">{{ formatMetric(row.normalized_water_content_ppm, 2) }}</div>
-                    </td>
-                    <td class="px-3 py-3">
-                      <div>{{ row.film_thickness || '--' }}</div>
-                      <div class="text-xs text-blue-600">{{ formatMetric(row.normalized_film_thickness_nm, 2) }}</div>
+                  <tr v-for="(row, rowIndex) in normalizationRows" :key="rowIndex" class="border-b border-slate-100 align-top">
+                    <td class="px-3 py-3 font-semibold text-slate-800">#{{ rowIndex + 1 }}</td>
+                    <td v-for="column in normalizationColumns" :key="column" class="px-3 py-3 text-slate-700">
+                      {{ formatMetric(row[column], column.startsWith('PCA_') ? 5 : 4) }}
                     </td>
                   </tr>
                 </tbody>
@@ -461,43 +573,36 @@ onMounted(() => {
         </section>
 
         <section v-if="preview" class="rounded-[30px] border border-slate-200/80 bg-white/90 p-6 shadow-[0_24px_80px_-48px_rgba(15,23,42,0.45)]">
-          <h3 class="text-lg font-bold">Cleaned Dataset Table</h3>
-          <p class="mt-2 text-sm text-slate-500">Preview of rows that can be saved and imported into the training page.</p>
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 class="text-lg font-bold">Ready-to-Train Matrix Preview</h3>
+              <p class="mt-2 text-sm text-slate-500">Every saved row is numeric only: target plus retained process columns and molecular features.</p>
+            </div>
+            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
+              Target: {{ formatColumnLabel(preview.target_column) }}
+            </span>
+          </div>
           <div class="mt-5 overflow-x-auto">
             <table class="min-w-full text-left text-sm">
               <thead>
                 <tr class="border-b border-slate-200 text-xs uppercase tracking-[0.16em] text-slate-400">
-                  <th class="px-3 py-3 font-semibold">Record</th>
-                  <th class="px-3 py-3 font-semibold">Surface</th>
-                  <th class="px-3 py-3 font-semibold">Lubricant</th>
-                  <th class="px-3 py-3 font-semibold">COF</th>
-                  <th class="px-3 py-3 font-semibold">Normalized Fields</th>
-                  <th class="px-3 py-3 font-semibold">Flags</th>
+                  <th class="px-3 py-3 font-semibold">Row</th>
+                  <th v-for="column in matrixPreviewColumns" :key="column" class="px-3 py-3 font-semibold">{{ formatColumnLabel(column) }}</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="row in previewRows" :key="row.record_id" class="border-b border-slate-100 align-top">
-                  <td class="px-3 py-3 font-semibold text-slate-800">#{{ row.record_id }}</td>
-                  <td class="px-3 py-3">{{ row.material_name }}</td>
-                  <td class="px-3 py-3">{{ row.lubricant }}</td>
-                  <td class="px-3 py-3 font-semibold text-blue-700">{{ formatMetric(row.cof_value, 4) }}</td>
-                  <td class="px-3 py-3 text-xs leading-6 text-slate-600">
-                    T {{ formatMetric(row.normalized_temperature_c, 2) }} ·
-                    v {{ formatMetric(row.normalized_speed_mps, 6) }} ·
-                    F {{ formatMetric(row.normalized_load_n, 6) }} ·
-                    H2O {{ formatMetric(row.normalized_water_content_ppm, 1) }}
-                  </td>
-                  <td class="px-3 py-3">
-                    <div class="flex flex-wrap gap-2">
-                      <span v-if="row.is_target_outlier" class="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold text-rose-700">Outlier</span>
-                      <span v-for="flag in row.repaired_fields" :key="flag" class="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">{{ flag }}</span>
-                      <span v-if="!row.is_target_outlier && row.repaired_fields.length === 0" class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">Clean</span>
-                    </div>
+                <tr v-for="(row, rowIndex) in previewRows" :key="rowIndex" class="border-b border-slate-100 align-top">
+                  <td class="px-3 py-3 font-semibold text-slate-800">#{{ rowIndex + 1 }}</td>
+                  <td v-for="column in matrixPreviewColumns" :key="column" class="px-3 py-3 text-slate-700">
+                    {{ formatMetric(row[column], column.startsWith('PCA_') ? 5 : 4) }}
                   </td>
                 </tr>
               </tbody>
             </table>
           </div>
+          <p v-if="preview.matrix_columns.length > matrixPreviewColumns.length" class="mt-3 text-xs text-slate-400">
+            Showing the first {{ matrixPreviewColumns.length }} columns. The saved CSV and database matrix contain all {{ preview.matrix_columns.length }} columns.
+          </p>
         </section>
       </div>
     </main>

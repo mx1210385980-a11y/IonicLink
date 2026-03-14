@@ -629,6 +629,32 @@ async def serve_pdf(
     )
 
 
+@router.get("/pdf/{literature_id}/content")
+async def serve_pdf_content(
+    literature_id: int,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    """Serve the uploaded PDF file as base64 JSON to avoid browser/extension PDF interception."""
+    literature = await require_literature_access(db, principal, literature_id)
+
+    pdf_path = _resolve_existing_path(literature.file_path)
+    if not pdf_path:
+        raise HTTPException(status_code=404, detail="PDF file not available on disk")
+
+    try:
+        with open(pdf_path, "rb") as f:
+            pdf_bytes = f.read()
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read PDF file: {exc}") from exc
+
+    return {
+        "filename": os.path.basename(pdf_path),
+        "content_type": "application/pdf",
+        "data_b64": base64.b64encode(pdf_bytes).decode("ascii"),
+    }
+
+
 @router.get("/pdf/{literature_id}/highlights")
 async def get_pdf_highlights(
     literature_id: int,

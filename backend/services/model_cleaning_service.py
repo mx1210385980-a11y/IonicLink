@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 import numpy as np
+from sklearn.decomposition import PCA
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -14,10 +15,15 @@ from models.db_models import CleanedDataset, TribologyData
 from security import AuthPrincipal, RequestScope, ensure_scope_writable, literature_scope_conditions
 from services.model_training_service import (
     DEFAULT_CLEANING_OPTIONS,
-    FEATURE_DEFINITIONS,
+    DEFAULT_FEATURE_CONFIG,
+    MOLECULAR_FEATURE_DEFINITIONS,
+    PROCESS_FEATURE_DEFINITIONS,
+    PROCESS_FEATURE_LOOKUP,
     TARGET_DEFINITIONS,
+    _fingerprint_from_smiles,
     _feature_value,
     _safe_float,
+    target_column_name,
 )
 
 
@@ -26,43 +32,12 @@ DEFAULT_CLEANING_WORKBENCH_OPTIONS = {
     "missing_value_strategy": "median",
     "remove_target_outliers": False,
     "iqr_multiplier": 1.5,
+    "feature_config": DEFAULT_FEATURE_CONFIG,
 }
 
 NUMERIC_PREVIEW_FIELDS = [
-    ("normalized_temperature_c", "Temperature (C)"),
-    ("normalized_speed_mps", "Speed (m/s)"),
-    ("normalized_load_n", "Load (N)"),
-    ("normalized_potential_v", "Potential (V)"),
-    ("normalized_water_content_ppm", "Water Content (ppm)"),
-    ("normalized_film_thickness_nm", "Film Thickness (nm)"),
-    ("normalized_alkyl_chain_length", "Alkyl Chain Length"),
-]
-
-CSV_EXPORT_FIELDS = [
-    "record_id",
-    "literature_id",
-    "material_name",
-    "lubricant",
-    "cof_value",
-    "cation_smiles",
-    "anion_smiles",
-    "temperature",
-    "normalized_temperature_c",
-    "speed_value",
-    "normalized_speed_mps",
-    "load_raw",
-    "normalized_load_n",
-    "potential",
-    "normalized_potential_v",
-    "water_content",
-    "normalized_water_content_ppm",
-    "film_thickness",
-    "normalized_film_thickness_nm",
-    "alkyl_chain_length",
-    "normalized_alkyl_chain_length",
-    "confidence",
-    "is_target_outlier",
-    "repaired_fields",
+    (feature["normalized_field"], feature["label"], feature["key"])
+    for feature in PROCESS_FEATURE_DEFINITIONS
 ]
 
 
@@ -83,16 +58,29 @@ class ModelCleaningService:
         resolved = await self._resolve_source_records(session, scope_filter_values, normalized_options)
         base_rows = [self._serialize_record(record) for record in resolved["records"]]
         cleaned_rows, cleaning_summary = self._clean_rows(base_rows, target_key=target_key, options=normalized_options)
+        matrix_payload = self._build_matrix_payload(cleaned_rows, target_key=target_key, options=normalized_options)
 
         return {
-            "target": {"key": target_key, "label": target["label"]},
+            "target": {
+                "key": target_key,
+                "label": target["label"],
+                "column_name": matrix_payload["target_column"],
+            },
             "options": normalized_options,
             "source_scope": resolved["source_scope"],
-            "summary": cleaning_summary,
-            "feature_coverage": self._feature_coverage(cleaned_rows),
-            "rows": cleaned_rows,
-            "preview_rows": cleaned_rows[:25],
-            "normalization_preview": cleaned_rows[:12],
+            "summary": {
+                **cleaning_summary,
+                "final_feature_count": len(matrix_payload["feature_columns"]),
+                "final_feature_columns": matrix_payload["feature_columns"],
+            },
+            "feature_coverage": matrix_payload["feature_coverage"],
+            "pca_info": matrix_payload["pca_info"],
+            "matrix_columns": matrix_payload["matrix_columns"],
+            "feature_columns": matrix_payload["feature_columns"],
+            "target_column": matrix_payload["target_column"],
+            "rows": matrix_payload["rows"],
+            "preview_rows": matrix_payload["rows"][:25],
+            "normalization_preview": matrix_payload["rows"][:12],
         }
 
     async def save_dataset(
@@ -133,6 +121,10 @@ class ModelCleaningService:
                 "source_scope": preview["source_scope"],
                 "feature_coverage": preview["feature_coverage"],
                 "target": preview["target"],
+                "pca_info": preview["pca_info"],
+                "matrix_columns": preview["matrix_columns"],
+                "feature_columns": preview["feature_columns"],
+                "target_column": preview["target_column"],
             }, ensure_ascii=False),
             rows_json=json.dumps(rows, ensure_ascii=False),
         )
@@ -168,19 +160,23 @@ class ModelCleaningService:
             "summary": summary_payload.get("summary", {}),
             "feature_coverage": summary_payload.get("feature_coverage", []),
             "target": summary_payload.get("target", {}),
+            "pca_info": summary_payload.get("pca_info"),
+            "matrix_columns": summary_payload.get("matrix_columns", []),
+            "feature_columns": summary_payload.get("feature_columns", []),
+            "target_column": summary_payload.get("target_column"),
             "rows": rows,
             "config": json.loads(dataset.config_json),
         }
 
     def export_dataset_csv(self, dataset: CleanedDataset) -> str:
+        summary_payload = json.loads(dataset.summary_json)
         rows = json.loads(dataset.rows_json)
+        fieldnames = list(summary_payload.get("matrix_columns") or [])
         output = io.StringIO()
-        writer = csv.DictWriter(output, fieldnames=CSV_EXPORT_FIELDS)
+        writer = csv.DictWriter(output, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
-            export_row = dict(row)
-            export_row["repaired_fields"] = ",".join(export_row.get("repaired_fields", []))
-            writer.writerow({field: export_row.get(field) for field in CSV_EXPORT_FIELDS})
+            writer.writerow({field: row.get(field) for field in fieldnames})
         return output.getvalue()
 
     def _normalize_options(self, options: dict[str, Any] | None) -> dict[str, Any]:
@@ -191,12 +187,21 @@ class ModelCleaningService:
         strategy = str(merged.get("missing_value_strategy") or "median").strip().lower()
         if strategy not in {"keep", "median", "zero"}:
             strategy = "median"
+        raw_feature_config = merged.get("feature_config") or {}
+        feature_config = {**DEFAULT_FEATURE_CONFIG, **raw_feature_config}
+        keep_features_source = raw_feature_config.get("keep_features", DEFAULT_FEATURE_CONFIG["keep_features"])
+        keep_features = [str(item).strip() for item in keep_features_source]
+        keep_features = [item for item in keep_features if item in PROCESS_FEATURE_LOOKUP]
+        feature_config["keep_features"] = keep_features
+        feature_config["use_pca"] = bool(feature_config.get("use_pca", False))
+        feature_config["n_components"] = max(2, min(30, int(feature_config.get("n_components", DEFAULT_FEATURE_CONFIG["n_components"]) or DEFAULT_FEATURE_CONFIG["n_components"])))
         merged["source_mode"] = source_mode
         merged["missing_value_strategy"] = strategy
         merged["drop_missing_target"] = bool(merged.get("drop_missing_target", True))
         merged["require_dual_smiles"] = bool(merged.get("require_dual_smiles", True))
         merged["remove_target_outliers"] = bool(merged.get("remove_target_outliers", False))
         merged["iqr_multiplier"] = max(0.5, min(5.0, float(merged.get("iqr_multiplier", 1.5) or 1.5)))
+        merged["feature_config"] = feature_config
         return merged
 
     async def _resolve_source_records(
@@ -318,7 +323,11 @@ class ModelCleaningService:
                 if str(row.get("cation_smiles") or "").strip() and str(row.get("anion_smiles") or "").strip()
             ]
 
-        repair_counts = self._apply_missing_value_strategy(working_rows, options["missing_value_strategy"])
+        repair_counts = self._apply_missing_value_strategy(
+            working_rows,
+            options["missing_value_strategy"],
+            options["feature_config"]["keep_features"],
+        )
         outlier_count = self._flag_outliers(working_rows, target_def["field"], options["iqr_multiplier"])
         if options["remove_target_outliers"]:
             working_rows = [row for row in working_rows if not row.get("is_target_outlier")]
@@ -342,24 +351,34 @@ class ModelCleaningService:
                 "missing_value_strategy": options["missing_value_strategy"],
                 "remove_target_outliers": options["remove_target_outliers"],
                 "iqr_multiplier": options["iqr_multiplier"],
+                "feature_config": options["feature_config"],
             },
         }
         return working_rows, summary
 
-    def _apply_missing_value_strategy(self, rows: list[dict[str, Any]], strategy: str) -> dict[str, int]:
-        repair_counts = {field: 0 for field, _ in NUMERIC_PREVIEW_FIELDS}
+    def _apply_missing_value_strategy(self, rows: list[dict[str, Any]], strategy: str, keep_features: list[str]) -> dict[str, int]:
+        selected_fields = {
+            PROCESS_FEATURE_LOOKUP[key]["normalized_field"]
+            for key in keep_features
+            if key in PROCESS_FEATURE_LOOKUP
+        }
+        repair_counts = {field: 0 for field, _label, _key in NUMERIC_PREVIEW_FIELDS if field in selected_fields}
         if strategy == "keep" or not rows:
             return repair_counts
 
         medians: dict[str, float] = {}
-        for field, _label in NUMERIC_PREVIEW_FIELDS:
+        for field, _label, _key in NUMERIC_PREVIEW_FIELDS:
+            if field not in selected_fields:
+                continue
             values = [_safe_float(row.get(field)) for row in rows]
             usable_values = [value for value in values if value is not None]
             if usable_values:
                 medians[field] = float(np.median(usable_values))
 
         for row in rows:
-            for field, _label in NUMERIC_PREVIEW_FIELDS:
+            for field, _label, _key in NUMERIC_PREVIEW_FIELDS:
+                if field not in selected_fields:
+                    continue
                 if _safe_float(row.get(field)) is not None:
                     continue
                 replacement: float | None = None
@@ -394,25 +413,132 @@ class ModelCleaningService:
                 count += 1
         return count
 
-    def _feature_coverage(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        feature_rows = []
+    def _build_matrix_payload(self, rows: list[dict[str, Any]], *, target_key: str, options: dict[str, Any]) -> dict[str, Any]:
+        target_column = target_column_name(target_key)
+        keep_features = list(options["feature_config"]["keep_features"])
         total = len(rows)
-        for feature in FEATURE_DEFINITIONS:
-            key = feature["key"]
-            if key == "cation_fingerprint":
-                available = sum(1 for row in rows if str(row.get("cation_smiles") or "").strip())
-            elif key == "anion_fingerprint":
-                available = sum(1 for row in rows if str(row.get("anion_smiles") or "").strip())
-            else:
-                available = sum(1 for row in rows if _safe_float(_feature_value(row, key)) is not None)
-            feature_rows.append({
+
+        process_columns = [PROCESS_FEATURE_LOOKUP[key]["column_name"] for key in keep_features if key in PROCESS_FEATURE_LOOKUP]
+        process_coverage = [
+            {
                 "key": key,
-                "label": feature["label"],
-                "group": feature["group"],
-                "available_count": available,
-                "coverage": available / total if total else 0.0,
-            })
-        return feature_rows
+                "label": PROCESS_FEATURE_LOOKUP[key]["label"],
+                "group": PROCESS_FEATURE_LOOKUP[key]["group"],
+                "available_count": sum(
+                    1
+                    for row in rows
+                    if _safe_float(row.get(PROCESS_FEATURE_LOOKUP[key]["normalized_field"])) is not None
+                ),
+                "coverage": (
+                    sum(1 for row in rows if _safe_float(row.get(PROCESS_FEATURE_LOOKUP[key]["normalized_field"])) is not None) / total
+                    if total
+                    else 0.0
+                ),
+            }
+            for key in keep_features
+            if key in PROCESS_FEATURE_LOOKUP
+        ]
+
+        cation_matrix = np.vstack([_fingerprint_from_smiles(row.get("cation_smiles")) for row in rows]) if rows else np.zeros((0, 256), dtype=np.float32)
+        anion_matrix = np.vstack([_fingerprint_from_smiles(row.get("anion_smiles")) for row in rows]) if rows else np.zeros((0, 256), dtype=np.float32)
+        combined_fingerprint = np.concatenate([cation_matrix, anion_matrix], axis=1) if rows else np.zeros((0, 512), dtype=np.float32)
+
+        feature_coverage: list[dict[str, Any]] = []
+        pca_info = {
+            "enabled": bool(options["feature_config"]["use_pca"]),
+            "requested_components": int(options["feature_config"]["n_components"]),
+            "actual_components": 0,
+            "explained_variance_ratio": None,
+        }
+        fingerprint_columns: list[str] = []
+        fingerprint_matrix = np.zeros((len(rows), 0), dtype=np.float32)
+
+        if options["feature_config"]["use_pca"]:
+            requested_components = int(options["feature_config"]["n_components"])
+            if rows:
+                actual_components = min(requested_components, combined_fingerprint.shape[0], combined_fingerprint.shape[1])
+                actual_components = max(1, actual_components)
+                pca = PCA(n_components=actual_components, random_state=42)
+                fingerprint_matrix = pca.fit_transform(combined_fingerprint).astype(np.float32)
+                pca_info["actual_components"] = actual_components
+                pca_info["explained_variance_ratio"] = float(np.sum(pca.explained_variance_ratio_))
+            else:
+                pca_info["actual_components"] = requested_components
+                fingerprint_matrix = np.zeros((0, requested_components), dtype=np.float32)
+
+            fingerprint_columns = [f"PCA_{index + 1}" for index in range(pca_info["actual_components"])]
+            feature_coverage.extend(
+                {
+                    "key": f"fp_pca_{index + 1}",
+                    "label": f"FP_PCA_{index + 1}",
+                    "group": "Molecular",
+                    "available_count": total,
+                    "coverage": 1.0 if total else 0.0,
+                }
+                for index in range(pca_info["actual_components"])
+            )
+        else:
+            cation_count = sum(1 for row in rows if str(row.get("cation_smiles") or "").strip())
+            anion_count = sum(1 for row in rows if str(row.get("anion_smiles") or "").strip())
+            fingerprint_columns = [f"Cation_FP_{index + 1:03d}" for index in range(cation_matrix.shape[1])]
+            fingerprint_columns.extend(f"Anion_FP_{index + 1:03d}" for index in range(anion_matrix.shape[1]))
+            fingerprint_matrix = combined_fingerprint
+            feature_coverage.extend(
+                [
+                    {
+                        "key": MOLECULAR_FEATURE_DEFINITIONS[0]["key"],
+                        "label": MOLECULAR_FEATURE_DEFINITIONS[0]["label"],
+                        "group": MOLECULAR_FEATURE_DEFINITIONS[0]["group"],
+                        "available_count": cation_count,
+                        "coverage": cation_count / total if total else 0.0,
+                    },
+                    {
+                        "key": MOLECULAR_FEATURE_DEFINITIONS[1]["key"],
+                        "label": MOLECULAR_FEATURE_DEFINITIONS[1]["label"],
+                        "group": MOLECULAR_FEATURE_DEFINITIONS[1]["group"],
+                        "available_count": anion_count,
+                        "coverage": anion_count / total if total else 0.0,
+                    },
+                ]
+            )
+
+        feature_coverage.extend(process_coverage)
+        feature_columns = [*process_columns, *fingerprint_columns]
+        matrix_columns = [target_column, *feature_columns]
+        matrix_rows = [self._matrix_row(row, target_column, keep_features, process_columns, fingerprint_columns, fingerprint_matrix[index]) for index, row in enumerate(rows)]
+
+        return {
+            "target_column": target_column,
+            "feature_columns": feature_columns,
+            "matrix_columns": matrix_columns,
+            "rows": matrix_rows,
+            "feature_coverage": feature_coverage,
+            "pca_info": pca_info,
+        }
+
+    def _matrix_row(
+        self,
+        row: dict[str, Any],
+        target_column: str,
+        keep_features: list[str],
+        process_columns: list[str],
+        fingerprint_columns: list[str],
+        fingerprint_values: np.ndarray,
+    ) -> dict[str, float | None]:
+        matrix_row: dict[str, float | None] = {
+            target_column: self._jsonable_number(row.get("cof_value")),
+        }
+        for key, column_name in zip(keep_features, process_columns):
+            matrix_row[column_name] = self._jsonable_number(row.get(PROCESS_FEATURE_LOOKUP[key]["normalized_field"]))
+        for column_name, value in zip(fingerprint_columns, fingerprint_values.tolist()):
+            matrix_row[column_name] = self._jsonable_number(value)
+        return matrix_row
+
+    def _jsonable_number(self, value: Any) -> float | None:
+        numeric = _safe_float(value)
+        if numeric is None:
+            return None
+        return float(numeric)
 
     def _dataset_to_summary(self, dataset: CleanedDataset) -> dict[str, Any]:
         summary_payload = json.loads(dataset.summary_json)
@@ -427,6 +553,10 @@ class ModelCleaningService:
             "summary": summary_payload.get("summary", {}),
             "feature_coverage": summary_payload.get("feature_coverage", []),
             "target": summary_payload.get("target", {}),
+            "pca_info": summary_payload.get("pca_info"),
+            "matrix_columns": summary_payload.get("matrix_columns", []),
+            "feature_columns": summary_payload.get("feature_columns", []),
+            "target_column": summary_payload.get("target_column"),
         }
 
 _model_cleaning_service: ModelCleaningService | None = None

@@ -3,15 +3,18 @@ from __future__ import annotations
 import re
 from typing import Any, Optional
 
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from models.db_models import Literature, TribologyData
 from security import literature_scope_conditions
 from services.file_service import _normalize_record_chemistry
+from services.il_resolver_service import resolve_il
 from services.score_service import calculate_confidence, calculate_confidence_details
 from services.usage_metrics_service import get_usage_metrics_service
+from knowledge_base import normalize_ionic_liquid
+from utils.tribopair import compose_tribopair_label
 
 
 async def _execute_counted(session: AsyncSession, stmt: Any, *, operation: str):
@@ -22,9 +25,38 @@ async def _execute_counted(session: AsyncSession, stmt: Any, *, operation: str):
 def _build_conditions(filter_params: Any):
     conditions = []
     if getattr(filter_params, "materials", None):
-        conditions.append(TribologyData.material_name.in_(filter_params.materials))
+        terms = [term for term in getattr(filter_params, "materials", None) or [] if str(term or "").strip()]
+        if terms:
+            conditions.append(
+                or_(
+                    TribologyData.probe_material.in_(terms),
+                    TribologyData.substrate_material.in_(terms),
+                    TribologyData.substrate_coating.in_(terms),
+                    TribologyData.material_name.in_(terms),
+                )
+            )
     if getattr(filter_params, "lubricants", None):
-        conditions.append(TribologyData.lubricant.in_(filter_params.lubricants))
+        lubricant_terms: set[str] = set()
+        for raw_value in getattr(filter_params, "lubricants", None) or []:
+            raw_text = str(raw_value or "").strip()
+            if not raw_text:
+                continue
+
+            lubricant_terms.add(raw_text)
+
+            normalized = str(normalize_ionic_liquid(raw_text) or "").strip()
+            if normalized:
+                lubricant_terms.add(normalized)
+
+            resolved = resolve_il(raw_text)
+            canonical_name = str(resolved.get("canonical_name") or "").strip()
+            if canonical_name:
+                lubricant_terms.add(canonical_name)
+                if canonical_name == "[EA][NO3]":
+                    lubricant_terms.add("EAN")
+
+        if lubricant_terms:
+            conditions.append(TribologyData.lubricant.in_(sorted(lubricant_terms)))
     if getattr(filter_params, "cof_min", None) is not None:
         conditions.append(TribologyData.cof_value >= filter_params.cof_min)
     if getattr(filter_params, "cof_max", None) is not None:
@@ -60,6 +92,9 @@ def _parse_load_numeric(value: Optional[str]) -> Optional[float]:
 def build_confidence_input(record: TribologyData) -> dict[str, Any]:
     return {
         "material_name": record.material_name,
+        "probe_material": record.probe_material,
+        "substrate_material": record.substrate_material,
+        "substrate_coating": record.substrate_coating,
         "lubricant": record.lubricant,
         "cof_value": record.cof_value,
         "cof_raw": record.cof_raw,
@@ -69,6 +104,8 @@ def build_confidence_input(record: TribologyData) -> dict[str, Any]:
         "temperature": record.temperature,
         "potential": record.potential,
         "water_content": record.water_content,
+        "probe_roughness": record.probe_roughness,
+        "substrate_roughness": record.substrate_roughness,
         "surface_roughness": record.surface_roughness,
         "film_thickness": record.film_thickness,
         "evidence": getattr(record, "evidence", None),
@@ -143,6 +180,18 @@ def _record_to_payload(record: TribologyData) -> dict[str, Any]:
         "temperature": record.temperature,
         "potential": record.potential,
         "water_content": record.water_content,
+        "probe_material": record.probe_material,
+        "probe_geometry": record.probe_geometry,
+        "probe_radius": record.probe_radius,
+        "probe_roughness": record.probe_roughness,
+        "substrate_material": record.substrate_material,
+        "substrate_coating": record.substrate_coating,
+        "substrate_roughness": record.substrate_roughness,
+        "tribopair_label": compose_tribopair_label(
+            record.probe_material,
+            record.substrate_material,
+            record.substrate_coating,
+        ),
         "surface_roughness": record.surface_roughness,
         "residual_film_thickness_d": record.residual_film_thickness_d,
         "layer_spacing_delta": record.layer_spacing_delta,
@@ -248,19 +297,23 @@ async def get_filter_options(
     session: AsyncSession,
     scope_filter_values: dict[str, Any] | None = None,
 ) -> dict[str, list[str]]:
-    materials_stmt = select(TribologyData.material_name).distinct()
     lubricants_stmt = select(TribologyData.lubricant).distinct()
-    if scope_filter_values:
-        conditions = literature_scope_conditions(scope_filter_values)
-        materials_stmt = materials_stmt.join(TribologyData.literature).where(*conditions)
+    material_fields = [
+        ("filter_options.materials.probe", TribologyData.probe_material),
+        ("filter_options.materials.substrate", TribologyData.substrate_material),
+        ("filter_options.materials.coating", TribologyData.substrate_coating),
+        ("filter_options.materials.legacy", TribologyData.material_name),
+    ]
+    material_values: set[str] = set()
+    conditions = literature_scope_conditions(scope_filter_values) if scope_filter_values else []
+    if conditions:
         lubricants_stmt = lubricants_stmt.join(TribologyData.literature).where(*conditions)
-
-    result_materials = await _execute_counted(
-        session,
-        materials_stmt,
-        operation="filter_options.materials",
-    )
-    materials = result_materials.scalars().all()
+    for operation, column in material_fields:
+        stmt = select(column).distinct()
+        if conditions:
+            stmt = stmt.join(TribologyData.literature).where(*conditions)
+        result_materials = await _execute_counted(session, stmt, operation=operation)
+        material_values.update(str(item).strip() for item in result_materials.scalars().all() if str(item or "").strip())
 
     result_lubricants = await _execute_counted(
         session,
@@ -278,7 +331,7 @@ async def get_filter_options(
             normalized_lubricants.append(normalized)
 
     return {
-        "materials": sorted([item for item in materials if item]),
+        "materials": sorted(material_values),
         "lubricants": sorted(set(normalized_lubricants)),
     }
 

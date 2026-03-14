@@ -159,6 +159,13 @@ class TribologyData(Base):
 
     potential: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     water_content: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    probe_material: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    probe_geometry: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    probe_radius: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    probe_roughness: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    substrate_material: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    substrate_coating: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    substrate_roughness: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     surface_roughness: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     residual_film_thickness_d: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

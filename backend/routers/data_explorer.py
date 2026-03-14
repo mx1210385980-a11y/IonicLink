@@ -5,10 +5,10 @@ API endpoints for searching and exploring tribology data.
 
 from typing import List, Optional
 import re
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func, desc
+from sqlalchemy import select, and_, func, desc, or_
 from sqlalchemy.orm import selectinload
 
 from database import get_db_session
@@ -24,6 +24,9 @@ from security import (
 from services.score_service import calculate_confidence, calculate_confidence_details
 from services.agent_runtime_service import get_agent_runtime
 from services.file_service import _normalize_record_chemistry
+from services.il_resolver_service import resolve_il
+from knowledge_base import normalize_ionic_liquid
+from utils.tribopair import compose_tribopair_label, derive_legacy_material_name, derive_legacy_surface_roughness
 
 
 router = APIRouter(
@@ -37,7 +40,7 @@ router = APIRouter(
 
 class SearchFilter(BaseModel):
     """Filter parameters for searching tribology records"""
-    materials: List[str] = Field(default_factory=list, description="List of material names")
+    materials: List[str] = Field(default_factory=list, description="Probe/substrate/coating search terms")
     lubricants: List[str] = Field(default_factory=list, description="List of lubricants")
     load_min: Optional[float] = Field(None, alias="loadMin", description="Min load (N)")
     load_max: Optional[float] = Field(None, alias="loadMax", description="Max load (N)")
@@ -80,6 +83,14 @@ class RecordResponse(BaseModel):
     temperature: Optional[str] = None
     potential: Optional[str] = None
     water_content: Optional[str] = Field(None, alias="waterContent")
+    probe_material: Optional[str] = Field(None, alias="probeMaterial")
+    probe_geometry: Optional[str] = Field(None, alias="probeGeometry")
+    probe_radius: Optional[str] = Field(None, alias="probeRadius")
+    probe_roughness: Optional[str] = Field(None, alias="probeRoughness")
+    substrate_material: Optional[str] = Field(None, alias="substrateMaterial")
+    substrate_coating: Optional[str] = Field(None, alias="substrateCoating")
+    substrate_roughness: Optional[str] = Field(None, alias="substrateRoughness")
+    tribopair_label: Optional[str] = Field(None, alias="tribopairLabel")
     surface_roughness: Optional[str] = Field(None, alias="surfaceRoughness")
     residual_film_thickness_d: Optional[str] = Field(None, alias="residualFilmThicknessD")
     layer_spacing_delta: Optional[str] = Field(None, alias="layerSpacingDelta")
@@ -126,6 +137,13 @@ class RecordUpdatePayload(BaseModel):
     temperature: Optional[str] = None
     potential: Optional[str] = None
     water_content: Optional[str] = Field(None, alias="waterContent")
+    probe_material: Optional[str] = Field(None, alias="probeMaterial")
+    probe_geometry: Optional[str] = Field(None, alias="probeGeometry")
+    probe_radius: Optional[str] = Field(None, alias="probeRadius")
+    probe_roughness: Optional[str] = Field(None, alias="probeRoughness")
+    substrate_material: Optional[str] = Field(None, alias="substrateMaterial")
+    substrate_coating: Optional[str] = Field(None, alias="substrateCoating")
+    substrate_roughness: Optional[str] = Field(None, alias="substrateRoughness")
     speed_value: Optional[str] = Field(None, alias="speedValue")
     load_value: Optional[str] = Field(None, alias="loadValue")
     surface_roughness: Optional[str] = Field(None, alias="surfaceRoughness")
@@ -155,9 +173,36 @@ class ConfidencePromotePayload(BaseModel):
 def _build_conditions(filter_params: SearchFilter):
     conditions = []
     if filter_params.materials:
-        conditions.append(TribologyData.material_name.in_(filter_params.materials))
+        conditions.append(
+            or_(
+                TribologyData.probe_material.in_(filter_params.materials),
+                TribologyData.substrate_material.in_(filter_params.materials),
+                TribologyData.substrate_coating.in_(filter_params.materials),
+                TribologyData.material_name.in_(filter_params.materials),
+            )
+        )
     if filter_params.lubricants:
-        conditions.append(TribologyData.lubricant.in_(filter_params.lubricants))
+        lubricant_terms: set[str] = set()
+        for raw_value in filter_params.lubricants:
+            raw_text = str(raw_value or "").strip()
+            if not raw_text:
+                continue
+
+            lubricant_terms.add(raw_text)
+
+            normalized = str(normalize_ionic_liquid(raw_text) or "").strip()
+            if normalized:
+                lubricant_terms.add(normalized)
+
+            resolved = resolve_il(raw_text)
+            canonical_name = str(resolved.get("canonical_name") or "").strip()
+            if canonical_name:
+                lubricant_terms.add(canonical_name)
+                if canonical_name == "[EA][NO3]":
+                    lubricant_terms.add("EAN")
+
+        if lubricant_terms:
+            conditions.append(TribologyData.lubricant.in_(sorted(lubricant_terms)))
     if filter_params.cof_min is not None:
         conditions.append(TribologyData.cof_value >= filter_params.cof_min)
     if filter_params.cof_max is not None:
@@ -197,6 +242,9 @@ def _parse_load_numeric(value: Optional[str]) -> Optional[float]:
 def _confidence_input_from_record(r: TribologyData) -> dict:
     return {
         "material_name": r.material_name,
+        "probe_material": r.probe_material,
+        "substrate_material": r.substrate_material,
+        "substrate_coating": r.substrate_coating,
         "lubricant": r.lubricant,
         "cof_value": r.cof_value,
         "cof_raw": r.cof_raw,
@@ -206,6 +254,8 @@ def _confidence_input_from_record(r: TribologyData) -> dict:
         "temperature": r.temperature,
         "potential": r.potential,
         "water_content": r.water_content,
+        "probe_roughness": r.probe_roughness,
+        "substrate_roughness": r.substrate_roughness,
         "surface_roughness": r.surface_roughness,
         "film_thickness": r.film_thickness,
         "evidence": getattr(r, "evidence", None),
@@ -294,6 +344,18 @@ def _record_to_response(r: TribologyData) -> RecordResponse:
         "temperature": r.temperature,
         "potential": r.potential,
         "water_content": r.water_content,
+        "probe_material": r.probe_material,
+        "probe_geometry": r.probe_geometry,
+        "probe_radius": r.probe_radius,
+        "probe_roughness": r.probe_roughness,
+        "substrate_material": r.substrate_material,
+        "substrate_coating": r.substrate_coating,
+        "substrate_roughness": r.substrate_roughness,
+        "tribopair_label": compose_tribopair_label(
+            r.probe_material,
+            r.substrate_material,
+            r.substrate_coating,
+        ),
         "surface_roughness": r.surface_roughness,
         "residual_film_thickness_d": r.residual_film_thickness_d,
         "layer_spacing_delta": r.layer_spacing_delta,
@@ -390,6 +452,21 @@ async def update_record(
     for field, value in update_data.items():
         if hasattr(record, field):
             setattr(record, field, value)
+
+    record.material_name = derive_legacy_material_name(
+        probe_material=record.probe_material,
+        substrate_material=record.substrate_material,
+        legacy_material_name=record.material_name,
+    )
+    record.surface_roughness = derive_legacy_surface_roughness(
+        probe_roughness=record.probe_roughness,
+        substrate_roughness=record.substrate_roughness,
+        legacy_surface_roughness=record.surface_roughness,
+    )
+    if any(getattr(record, field) for field in ("probe_geometry", "probe_radius", "probe_roughness")) and not record.probe_material:
+        raise HTTPException(status_code=422, detail="probeMaterial is required when probe details are recorded.")
+    if any(getattr(record, field) for field in ("substrate_coating", "substrate_roughness")) and not record.substrate_material:
+        raise HTTPException(status_code=422, detail="substrateMaterial is required when substrate details are recorded.")
 
     details = calculate_confidence_details(_confidence_input_from_record(record))
     record.confidence = max(float(getattr(record, "confidence", 0.0) or 0.0), float(details.get("score") or 0.0))

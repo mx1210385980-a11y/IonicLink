@@ -21,6 +21,16 @@ router = APIRouter(
 )
 
 
+class FeatureConfigPayload(BaseModel):
+    use_pca: bool = DEFAULT_CLEANING_WORKBENCH_OPTIONS["feature_config"]["use_pca"]
+    n_components: int = Field(
+        DEFAULT_CLEANING_WORKBENCH_OPTIONS["feature_config"]["n_components"],
+        ge=2,
+        le=30,
+    )
+    keep_features: list[str] = Field(default_factory=lambda: list(DEFAULT_CLEANING_WORKBENCH_OPTIONS["feature_config"]["keep_features"]))
+
+
 class CleaningOptionPayload(BaseModel):
     source_mode: str = DEFAULT_CLEANING_WORKBENCH_OPTIONS["source_mode"]
     drop_missing_target: bool = DEFAULT_CLEANING_WORKBENCH_OPTIONS["drop_missing_target"]
@@ -28,6 +38,7 @@ class CleaningOptionPayload(BaseModel):
     missing_value_strategy: str = DEFAULT_CLEANING_WORKBENCH_OPTIONS["missing_value_strategy"]
     remove_target_outliers: bool = DEFAULT_CLEANING_WORKBENCH_OPTIONS["remove_target_outliers"]
     iqr_multiplier: float = Field(DEFAULT_CLEANING_WORKBENCH_OPTIONS["iqr_multiplier"], ge=0.5, le=5.0)
+    feature_config: FeatureConfigPayload = Field(default_factory=FeatureConfigPayload)
 
 
 class SaveCleanedDatasetPayload(BaseModel):

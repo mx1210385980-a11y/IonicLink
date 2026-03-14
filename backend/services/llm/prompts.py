@@ -23,11 +23,18 @@ Return JSON with top-level key `data`:
   "data": [
     {
       "material_name": "Mica",
+      "probe_material": "Silica",
+      "probe_geometry": "Sphere",
+      "probe_radius": "5 µm",
+      "probe_roughness": null,
+      "substrate_material": "Mica",
+      "substrate_coating": null,
+      "substrate_roughness": "< 2 nm",
       "ionic_liquid": "[EMIM][TFSI]",
       "cof": "0.02",
       "friction_force": "1.2 nN",
-      "normal_load": "60 nN",
-      "load": "60 nN",
+      "normal_load": "15-75 nN",
+      "load": "15-75 nN",
       "speed": "1 um/s",
       "temperature": "298.15 K",
       "potential": "OCP",
@@ -51,8 +58,14 @@ Rules:
 - Keep one record per unique experimental condition/sample trace.
 - If multiple conditions appear in one paragraph or figure, split into multiple records.
 - Keep AFM / force-distance / layering records even when COF is absent.
+- When contact geometry is stated, extract tribopair fields explicitly:
+  `probe_material`, `probe_geometry`, `probe_radius`, `probe_roughness`,
+  `substrate_material`, `substrate_coating`, `substrate_roughness`.
+- Do not collapse the tribopair into `material_name` only. Keep `material_name` as the legacy substrate label if needed.
 - Valid quantitative fields include cof, friction_force, load/normal_load, film_thickness,
   residual_film_thickness_d, layer_spacing_delta, surface_roughness, wear_rate.
+- If a friction coefficient is reported as the slope of friction vs load over a sweep,
+  store the investigated load interval in `load`/`normal_load` (for example `15-75 nN`).
 - `film_thickness`, `residual_film_thickness_d`, and `layer_spacing_delta` must be numeric thickness values with units only.
 - Never place sample abbreviations, ionic-liquid names, or condition labels into thickness fields.
 - Keep sample abbreviations in `evidence`, `notes`, or abbreviation mappings instead.
@@ -83,6 +96,9 @@ Text-specific rules:
 - Never infer figure/table labels unless explicitly mentioned.
 - If a condition value is inferred from wording (e.g., room temperature), still include it,
   but ensure evidence supports that inference.
+- When the text explicitly says a probe/slider/sphere/colloid and substrate/surface,
+  fill the tribopair fields instead of only `material_name`.
+- When a caption or paragraph states a load sweep/range, preserve it as a range string in `load`/`normal_load`.
 """
 
 
@@ -109,6 +125,9 @@ Figure/table-specific rules:
 - Thickness fields must stay quantitative; do not place sample abbreviations or ionic-liquid names into them.
 - Keep sample abbreviations exactly as shown in evidence text or notes.
 - Evidence should quote caption text or nearby explicit statements linking condition and value.
+- Extract tribopair descriptors from captions and panel text, including probe material/geometry/radius and substrate material/coating/roughness.
+- If the figure/caption reports a load sweep such as "normal load ranging from 15 to 75 nN",
+  store `load` and `normal_load` as `15-75 nN` for the derived record.
 """
 
 

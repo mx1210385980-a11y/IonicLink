@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { Download, ChevronDown, ChevronUp, Beaker, ThermometerSun, Gauge, Timer, Layers } from 'lucide-vue-next'
-import type { TribologyData } from '@/lib/api'
+import { formatTribopairLabel, type TribologyData } from '@/lib/api'
 import Card from '@/components/ui/Card.vue'
 import CardHeader from '@/components/ui/CardHeader.vue'
 import CardTitle from '@/components/ui/CardTitle.vue'
@@ -58,6 +58,15 @@ function exportData() {
   a.download = `tribology_data_${Date.now()}.json`
   a.click()
   URL.revokeObjectURL(url)
+}
+
+function tribopairDisplay(item: TribologyData) {
+  return formatTribopairLabel({
+    probeMaterial: item.probe_material,
+    substrateMaterial: item.substrate_material,
+    substrateCoating: item.substrate_coating,
+    materialName: item.material_name,
+  })
 }
 </script>
 
@@ -121,9 +130,9 @@ function exportData() {
                 <h4 class="font-semibold text-base truncate">
                   {{ item.ionic_liquid || '-' }}
                 </h4>
-                <!-- Material name/surface -->
+                <!-- Tribopair -->
                 <p class="text-sm text-muted-foreground mt-0.5">
-                  {{ item.material_name }}
+                  {{ tribopairDisplay(item) }}
                 </p>
                 
                 <!-- Condition labels -->
@@ -194,9 +203,17 @@ function exportData() {
                 <span class="text-muted-foreground">Water / Humidity:</span>
                 <span class="ml-2">{{ item.water_content }}</span>
               </div>
-              <div v-if="item.surface_roughness">
-                <span class="text-muted-foreground">Roughness:</span>
-                <span class="ml-2">{{ item.surface_roughness }}</span>
+              <div v-if="item.probe_material || item.substrate_material" class="col-span-2">
+                <span class="text-muted-foreground">Tribopair:</span>
+                <span class="ml-2">{{ tribopairDisplay(item) }}</span>
+              </div>
+              <div v-if="item.probe_roughness">
+                <span class="text-muted-foreground">Probe Roughness:</span>
+                <span class="ml-2">{{ item.probe_roughness }}</span>
+              </div>
+              <div v-if="item.substrate_roughness">
+                <span class="text-muted-foreground">Substrate Roughness:</span>
+                <span class="ml-2">{{ item.substrate_roughness }}</span>
               </div>
               <div v-if="item.wear_rate">
                 <span class="text-muted-foreground">Wear Rate:</span>

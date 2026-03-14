@@ -5,7 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from utils.tribopair import compose_tribopair_label, derive_legacy_material_name, derive_legacy_surface_roughness
 
 
 class LiteratureBase(BaseModel):
@@ -42,7 +44,7 @@ class LiteratureSchema(LiteratureBase):
 
 
 class TribologyDataBase(BaseModel):
-    material_name: str = Field(..., alias="materialName")
+    material_name: Optional[str] = Field(None, alias="materialName")
     lubricant: str = Field("")
 
     cof_value: Optional[float] = Field(None, alias="cofValue")
@@ -59,6 +61,13 @@ class TribologyDataBase(BaseModel):
 
     potential: Optional[str] = None
     water_content: Optional[str] = Field(None, alias="waterContent")
+    probe_material: Optional[str] = Field(None, alias="probeMaterial")
+    probe_geometry: Optional[str] = Field(None, alias="probeGeometry")
+    probe_radius: Optional[str] = Field(None, alias="probeRadius")
+    probe_roughness: Optional[str] = Field(None, alias="probeRoughness")
+    substrate_material: Optional[str] = Field(None, alias="substrateMaterial")
+    substrate_coating: Optional[str] = Field(None, alias="substrateCoating")
+    substrate_roughness: Optional[str] = Field(None, alias="substrateRoughness")
     surface_roughness: Optional[str] = Field(None, alias="surfaceRoughness")
 
     residual_film_thickness_d: Optional[str] = Field(None, alias="residualFilmThicknessD")
@@ -81,6 +90,31 @@ class TribologyDataBase(BaseModel):
 
     confidence: float = Field(0.9, ge=0.0, le=1.0)
 
+    @model_validator(mode="after")
+    def validate_tribopair(self) -> "TribologyDataBase":
+        self.material_name = derive_legacy_material_name(
+            probe_material=self.probe_material,
+            substrate_material=self.substrate_material,
+            legacy_material_name=self.material_name,
+        )
+        self.surface_roughness = derive_legacy_surface_roughness(
+            probe_roughness=self.probe_roughness,
+            substrate_roughness=self.substrate_roughness,
+            legacy_surface_roughness=self.surface_roughness,
+        )
+
+        has_probe_details = any(
+            value for value in (self.probe_geometry, self.probe_radius, self.probe_roughness)
+        )
+        has_substrate_details = any(
+            value for value in (self.substrate_coating, self.substrate_roughness)
+        )
+        if has_probe_details and not self.probe_material:
+            raise ValueError("probeMaterial is required when probe details are recorded.")
+        if has_substrate_details and not self.substrate_material:
+            raise ValueError("substrateMaterial is required when substrate details are recorded.")
+        return self
+
     class Config:
         populate_by_name = True
 
@@ -93,6 +127,16 @@ class TribologyDataSchema(TribologyDataBase):
     id: int
     literature_id: int = Field(..., alias="literatureId")
     extracted_at: datetime = Field(..., alias="extractedAt")
+    tribopair_label: Optional[str] = Field(None, alias="tribopairLabel")
+
+    @model_validator(mode="after")
+    def populate_tribopair_label(self) -> "TribologyDataSchema":
+        self.tribopair_label = compose_tribopair_label(
+            self.probe_material,
+            self.substrate_material,
+            self.substrate_coating,
+        )
+        return self
 
     class Config:
         from_attributes = True

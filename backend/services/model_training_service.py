@@ -14,7 +14,6 @@ from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -28,7 +27,6 @@ try:
     from rdkit.Chem import rdFingerprintGenerator
 
     RDKit_AVAILABLE = True
-    MORGAN_GENERATOR = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=128)
 except Exception:
     Chem = None
     DataStructs = None
@@ -37,10 +35,18 @@ except Exception:
     MORGAN_GENERATOR = None
 
 
+MORGAN_FINGERPRINT_SIZE = 256
+DEFAULT_PCA_COMPONENTS = 10
+
+if RDKit_AVAILABLE and rdFingerprintGenerator is not None:
+    MORGAN_GENERATOR = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=MORGAN_FINGERPRINT_SIZE)
+
+
 TARGET_DEFINITIONS: dict[str, dict[str, Any]] = {
     "cof": {
         "label": "Coefficient of Friction (COF)",
         "field": "cof_value",
+        "column_name": "Target_COF",
     },
 }
 
@@ -55,75 +61,86 @@ ALGORITHM_DEFINITIONS: dict[str, dict[str, Any]] = {
     },
 }
 
-FEATURE_DEFINITIONS: list[dict[str, Any]] = [
-    {
-        "key": "cation_fingerprint",
-        "label": "Cation Morgan fingerprint",
-        "group": "Molecular",
-        "description": "128-bit Morgan fingerprint derived from cation SMILES.",
-        "default_enabled": True,
-    },
-    {
-        "key": "anion_fingerprint",
-        "label": "Anion Morgan fingerprint",
-        "group": "Molecular",
-        "description": "128-bit Morgan fingerprint derived from anion SMILES.",
-        "default_enabled": True,
-    },
+PROCESS_FEATURE_DEFINITIONS: list[dict[str, Any]] = [
     {
         "key": "temperature",
         "label": "Temperature",
         "group": "Process",
         "description": "Normalized temperature converted to degrees Celsius.",
-        "default_enabled": True,
+        "column_name": "Temperature",
+        "normalized_field": "normalized_temperature_c",
     },
     {
         "key": "speed",
         "label": "Speed",
         "group": "Process",
         "description": "Sliding speed converted to m/s when units are present.",
-        "default_enabled": False,
+        "column_name": "Speed",
+        "normalized_field": "normalized_speed_mps",
     },
     {
         "key": "load",
         "label": "Load",
         "group": "Process",
         "description": "Applied load converted to Newtons.",
-        "default_enabled": False,
+        "column_name": "Load",
+        "normalized_field": "normalized_load_n",
     },
     {
         "key": "potential",
         "label": "Potential",
         "group": "Process",
         "description": "Electrochemical potential parsed from the source record.",
-        "default_enabled": False,
+        "column_name": "Potential",
+        "normalized_field": "normalized_potential_v",
     },
     {
         "key": "water_content",
-        "label": "Water content",
+        "label": "Water Content",
         "group": "Process",
         "description": "Water content normalized to ppm when possible.",
-        "default_enabled": False,
+        "column_name": "Water_Content",
+        "normalized_field": "normalized_water_content_ppm",
     },
     {
         "key": "film_thickness",
-        "label": "Film thickness",
+        "label": "Film Thickness",
         "group": "Process",
         "description": "Film thickness converted to nm when units are available.",
-        "default_enabled": False,
+        "column_name": "Film_Thickness",
+        "normalized_field": "normalized_film_thickness_nm",
     },
     {
         "key": "alkyl_chain_length",
-        "label": "Alkyl chain length",
-        "group": "Chemistry",
+        "label": "Alkyl Chain Length",
+        "group": "Process",
         "description": "Resolved alkyl chain length from the ionic liquid metadata.",
-        "default_enabled": True,
+        "column_name": "Alkyl_Chain_Length",
+        "normalized_field": "normalized_alkyl_chain_length",
     },
 ]
 
-DEFAULT_FEATURE_SELECTION = {
-    feature["key"]: bool(feature["default_enabled"])
-    for feature in FEATURE_DEFINITIONS
+PROCESS_FEATURE_LOOKUP = {feature["key"]: feature for feature in PROCESS_FEATURE_DEFINITIONS}
+
+MOLECULAR_FEATURE_DEFINITIONS: list[dict[str, Any]] = [
+    {
+        "key": "cation_fingerprint",
+        "label": "Cation Morgan fingerprint",
+        "group": "Molecular",
+        "description": f"{MORGAN_FINGERPRINT_SIZE}-bit Morgan fingerprint derived from cation SMILES.",
+    },
+    {
+        "key": "anion_fingerprint",
+        "label": "Anion Morgan fingerprint",
+        "group": "Molecular",
+        "description": f"{MORGAN_FINGERPRINT_SIZE}-bit Morgan fingerprint derived from anion SMILES.",
+    },
+]
+
+DEFAULT_FEATURE_CONFIG = {
+    "use_pca": False,
+    "n_components": DEFAULT_PCA_COMPONENTS,
+    "keep_features": [feature["key"] for feature in PROCESS_FEATURE_DEFINITIONS],
 }
 
 DEFAULT_HYPERPARAMETERS = {
@@ -234,7 +251,7 @@ def _parse_film_thickness_nm(raw: str | None) -> float | None:
     return numeric
 
 
-def _fingerprint_from_smiles(smiles: str | None, fp_size: int = 128) -> np.ndarray:
+def _fingerprint_from_smiles(smiles: str | None, fp_size: int = MORGAN_FINGERPRINT_SIZE) -> np.ndarray:
     text = str(smiles or "").strip()
     if not text:
         return np.zeros(fp_size, dtype=np.float32)
@@ -285,6 +302,13 @@ def _feature_value(record: dict[str, Any], key: str) -> float | None:
             return _safe_float(record.get("normalized_alkyl_chain_length"))
         return _safe_float(record.get("alkyl_chain_length"))
     return None
+
+
+def target_column_name(target_key: str) -> str:
+    target = TARGET_DEFINITIONS.get(target_key)
+    if not target:
+        raise ValueError(f"Unsupported target '{target_key}'.")
+    return str(target["column_name"])
 
 
 def _metric_point(round_index: int, total_rounds: int, y_train: np.ndarray, train_pred: np.ndarray, y_val: np.ndarray, val_pred: np.ndarray) -> dict[str, Any]:
@@ -391,85 +415,84 @@ class ModelTrainingService:
             target_key="cof",
             cleaning_options=resolved["cleaning_options"],
         )
-        return self._build_summary_payload(
-            cleaning_profile["summary_records"],
+        return self._build_scope_summary_payload(
             total_records=len(resolved["records"]),
+            cleaned_records=len(cleaning_profile["summary_records"]),
             cleaning_summary=cleaning_profile["summary"],
             source_scope=resolved["source_scope"],
         )
 
     def summarize_saved_dataset(self, dataset: CleanedDataset) -> dict[str, Any]:
-        rows = json.loads(dataset.rows_json)
-        summary_payload = json.loads(dataset.summary_json)
-        return self._build_summary_payload(
-            rows,
-            total_records=int(dataset.row_count),
-            cleaning_summary=summary_payload.get("summary", {}),
-            source_scope=summary_payload.get("source_scope", {}),
-            defaults_override={
-                "cleaned_dataset_id": dataset.id,
-            },
-        )
-
-    def _build_summary_payload(
-        self,
-        summary_records: list[dict[str, Any]],
-        *,
-        total_records: int,
-        cleaning_summary: dict[str, Any],
-        source_scope: dict[str, Any],
-        defaults_override: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        feature_options = []
-        for feature in FEATURE_DEFINITIONS:
-            key = feature["key"]
-            available_count = self._feature_available_count(summary_records, key)
-            feature_options.append(
-                {
-                    **feature,
-                    "available_count": available_count,
-                    "coverage": available_count / len(summary_records) if summary_records else 0.0,
-                    "disabled": available_count == 0,
-                }
-            )
-
-        target_options = []
-        for key, target in TARGET_DEFINITIONS.items():
-            available_count = sum(1 for record in summary_records if _safe_float(record.get(target["field"])) is not None)
-            target_options.append(
-                {
-                    "key": key,
-                    "label": target["label"],
-                    "available_count": available_count,
-                }
-            )
-
-        algorithm_options = [
-            {"key": key, **value}
-            for key, value in ALGORITHM_DEFINITIONS.items()
-        ]
+        rows, metadata = self._load_saved_dataset_rows(dataset)
+        feature_columns = self._feature_columns_from_dataset_metadata(rows, metadata)
+        target_column = self._target_column_from_metadata(metadata)
+        usable_records = self._usable_saved_rows(rows, target_column, feature_columns)
 
         return {
             "dataset": {
+                "id": dataset.id,
+                "name": dataset.name,
+                "description": dataset.description,
+                "total_records": int(dataset.row_count),
+                "cleaned_records": int(dataset.row_count),
+                "usable_records": usable_records,
+                "feature_dimensions": len(feature_columns),
+                "target_column": target_column,
+                "feature_columns": feature_columns,
+                "columns": [target_column, *feature_columns],
+                "rdkit_enabled": RDKit_AVAILABLE,
+                "source_scope": metadata.get("source_scope", {}),
+            },
+            "algorithms": self._algorithm_options(),
+            "cleaning": metadata.get("summary", {}),
+            "pca_info": metadata.get("pca_info"),
+            "defaults": {
+                "target": target_column,
+                "algorithm": "gradient_boosting",
+                "hyperparameters": DEFAULT_HYPERPARAMETERS,
+                "data_options": DEFAULT_DATA_OPTIONS,
+                "cleaned_dataset_id": dataset.id,
+            },
+        }
+
+    def _build_scope_summary_payload(
+        self,
+        *,
+        total_records: int,
+        cleaned_records: int,
+        cleaning_summary: dict[str, Any],
+        source_scope: dict[str, Any],
+    ) -> dict[str, Any]:
+        target_column = target_column_name("cof")
+        return {
+            "dataset": {
+                "id": None,
+                "name": "Live cleaned scope",
+                "description": "Save a cleaned dataset before starting a training run.",
                 "total_records": total_records,
-                "cleaned_records": len(summary_records),
+                "cleaned_records": cleaned_records,
+                "usable_records": cleaned_records,
+                "feature_dimensions": 0,
+                "target_column": target_column,
+                "feature_columns": [],
+                "columns": [target_column],
                 "rdkit_enabled": RDKit_AVAILABLE,
                 "source_scope": source_scope,
             },
-            "targets": target_options,
-            "algorithms": algorithm_options,
-            "features": feature_options,
+            "algorithms": self._algorithm_options(),
             "cleaning": cleaning_summary,
+            "pca_info": None,
             "defaults": {
-                "target": "cof",
+                "target": target_column,
                 "algorithm": "gradient_boosting",
-                "features": DEFAULT_FEATURE_SELECTION,
                 "hyperparameters": DEFAULT_HYPERPARAMETERS,
                 "data_options": DEFAULT_DATA_OPTIONS,
-                "cleaning_options": DEFAULT_CLEANING_OPTIONS,
-                **(defaults_override or {}),
+                "cleaned_dataset_id": None,
             },
         }
+
+    def _algorithm_options(self) -> list[dict[str, Any]]:
+        return [{"key": key, **value} for key, value in ALGORITHM_DEFINITIONS.items()]
 
     async def create_training_task(
         self,
@@ -482,17 +505,10 @@ class ModelTrainingService:
         config: dict[str, Any],
         saved_dataset: CleanedDataset | None = None,
     ) -> TrainingTaskState:
-        if saved_dataset is not None:
-            resolved = {
-                "records": json.loads(saved_dataset.rows_json),
-                "source_scope": json.loads(saved_dataset.summary_json).get("source_scope", {}),
-            }
-        else:
-            resolved = await self._resolve_records_for_cleaning(
-                session,
-                scope_filter_values,
-                (config or {}).get("cleaning_options"),
-            )
+        if saved_dataset is None:
+            raise ValueError("Select a saved cleaned dataset before starting training.")
+
+        rows, metadata = self._load_saved_dataset_rows(saved_dataset)
         task_id = uuid.uuid4().hex
         task = TrainingTaskState(
             task_id=task_id,
@@ -502,7 +518,7 @@ class ModelTrainingService:
             config=config,
         )
         self._tasks[task_id] = task
-        asyncio.create_task(self._run_training(task, resolved["records"], resolved["source_scope"]))
+        asyncio.create_task(self._run_training(task, rows, metadata.get("source_scope", {}), metadata))
         return task
 
     def get_task(self, task_id: str, requester_user_id: int) -> TrainingTaskState:
@@ -604,13 +620,6 @@ class ModelTrainingService:
             },
         }
 
-    def _feature_available_count(self, records: list[dict[str, Any]], key: str) -> int:
-        if key == "cation_fingerprint":
-            return sum(1 for record in records if str(record.get("cation_smiles") or "").strip())
-        if key == "anion_fingerprint":
-            return sum(1 for record in records if str(record.get("anion_smiles") or "").strip())
-        return sum(1 for record in records if _feature_value(record, key) is not None)
-
     def _build_cleaning_profile(
         self,
         records: list[dict[str, Any]],
@@ -658,119 +667,77 @@ class ModelTrainingService:
             },
         }
 
-    def _prepare_dataset(self, records: list[dict[str, Any]], config: dict[str, Any]) -> dict[str, Any]:
-        target_key = config.get("target", "cof")
-        target_def = TARGET_DEFINITIONS.get(target_key)
-        if not target_def:
-            raise ValueError(f"Unsupported target '{target_key}'.")
+    def _load_saved_dataset_rows(self, dataset: CleanedDataset) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        rows = json.loads(dataset.rows_json)
+        metadata = json.loads(dataset.summary_json)
+        return rows, metadata
 
-        selected_features = {
-            key: bool(value)
-            for key, value in (config.get("features") or {}).items()
-        }
-        if not any(selected_features.values()):
-            raise ValueError("Select at least one feature before starting training.")
+    def _target_column_from_metadata(self, metadata: dict[str, Any]) -> str:
+        return str(metadata.get("target_column") or target_column_name("cof"))
+
+    def _feature_columns_from_dataset_metadata(
+        self,
+        rows: list[dict[str, Any]],
+        metadata: dict[str, Any],
+    ) -> list[str]:
+        feature_columns = metadata.get("feature_columns")
+        if isinstance(feature_columns, list) and feature_columns:
+            return [str(column) for column in feature_columns]
+
+        target_column = self._target_column_from_metadata(metadata)
+        if not rows:
+            return []
+        return [str(column) for column in rows[0].keys() if str(column) != target_column]
+
+    def _usable_saved_rows(
+        self,
+        rows: list[dict[str, Any]],
+        target_column: str,
+        feature_columns: list[str],
+    ) -> int:
+        count = 0
+        for row in rows:
+            if _safe_float(row.get(target_column)) is None:
+                continue
+            if not feature_columns:
+                continue
+            count += 1
+        return count
+
+    def _prepare_saved_dataset(self, rows: list[dict[str, Any]], config: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
+        target_column = self._target_column_from_metadata(metadata)
+        feature_columns = self._feature_columns_from_dataset_metadata(rows, metadata)
+        if not feature_columns:
+            raise ValueError("The saved dataset does not contain any feature columns.")
 
         data_options = config.get("data_options") or {}
-        min_confidence = max(0.0, min(1.0, float(data_options.get("min_confidence", 0.0) or 0.0)))
         max_records = data_options.get("max_records")
         max_records = int(max_records) if max_records not in (None, "", 0) else None
-        random_seed = int(data_options.get("random_seed", 42) or 42)
-        validation_split = float(data_options.get("validation_split", 0.2) or 0.2)
+        random_seed = int(data_options.get("random_seed", DEFAULT_DATA_OPTIONS["random_seed"]) or DEFAULT_DATA_OPTIONS["random_seed"])
+        validation_split = float(data_options.get("validation_split", DEFAULT_DATA_OPTIONS["validation_split"]) or DEFAULT_DATA_OPTIONS["validation_split"])
         validation_split = min(0.4, max(0.1, validation_split))
 
-        cleaning_profile = self._build_cleaning_profile(
-            records,
-            target_key=target_key,
-            cleaning_options=(config or {}).get("cleaning_options"),
-        )
-
-        eligible_records = []
-        for record in cleaning_profile["summary_records"]:
-            target_value = _safe_float(record.get(target_def["field"]))
-            confidence = _safe_float(record.get("confidence")) or 0.0
+        eligible_rows = []
+        for row in rows:
+            target_value = _safe_float(row.get(target_column))
             if target_value is None:
                 continue
-            if confidence < min_confidence:
-                continue
-            eligible_records.append({**record, "_target_value": target_value})
+            eligible_rows.append({**row, "_target_value": target_value})
 
         if max_records:
-            eligible_records = eligible_records[:max_records]
+            eligible_rows = eligible_rows[:max_records]
 
-        total_records = len(records)
-        cleaned_records = len(cleaning_profile["summary_records"])
-        usable_records = len(eligible_records)
+        usable_records = len(eligible_rows)
         if usable_records < 10:
-            raise ValueError(
-                f"Only {usable_records} records are usable after filtering. At least 10 records are required."
-            )
+            raise ValueError(f"Only {usable_records} rows are usable. At least 10 rows are required for training.")
 
-        selected_numeric_keys = [
-            feature["key"]
-            for feature in FEATURE_DEFINITIONS
-            if feature["key"] not in {"cation_fingerprint", "anion_fingerprint"} and selected_features.get(feature["key"])
-        ]
-
-        blocks: list[np.ndarray] = []
-        feature_blocks: list[dict[str, Any]] = []
-        warnings: list[str] = []
-
-        if selected_features.get("cation_fingerprint"):
-            cation_block = np.vstack([_fingerprint_from_smiles(record.get("cation_smiles")) for record in eligible_records])
-            blocks.append(cation_block)
-            feature_blocks.append(
-                {
-                    "key": "cation_fingerprint",
-                    "label": "Cation Morgan fingerprint",
-                    "dimensions": int(cation_block.shape[1]),
-                }
-            )
-
-        if selected_features.get("anion_fingerprint"):
-            anion_block = np.vstack([_fingerprint_from_smiles(record.get("anion_smiles")) for record in eligible_records])
-            blocks.append(anion_block)
-            feature_blocks.append(
-                {
-                    "key": "anion_fingerprint",
-                    "label": "Anion Morgan fingerprint",
-                    "dimensions": int(anion_block.shape[1]),
-                }
-            )
-
-        numeric_columns: list[list[float | None]] = []
-        numeric_labels: list[str] = []
-        for key in selected_numeric_keys:
-            values = [_feature_value(record, key) for record in eligible_records]
-            available_count = sum(1 for value in values if value is not None)
-            if available_count == 0:
-                warnings.append(f"{self._feature_label(key)} has no usable values in the current scope and was skipped.")
-                continue
-            numeric_columns.append(values)
-            numeric_labels.append(key)
-
-        if numeric_columns:
-            numeric_matrix = np.array(numeric_columns, dtype=object).T
-            imputed = SimpleImputer(strategy="median").fit_transform(numeric_matrix)
-            scaled = StandardScaler().fit_transform(imputed)
-            blocks.append(scaled.astype(np.float32))
-            feature_blocks.append(
-                {
-                    "key": "numeric_conditions",
-                    "label": "Normalized process conditions",
-                    "dimensions": int(scaled.shape[1]),
-                    "features": [self._feature_label(key) for key in numeric_labels],
-                }
-            )
-
-        if not blocks:
-            raise ValueError("The selected features produced an empty feature matrix.")
-
-        X = np.concatenate(blocks, axis=1).astype(np.float32)
-        y = np.array([record["_target_value"] for record in eligible_records], dtype=np.float32)
+        matrix = np.array([[row.get(column) for column in feature_columns] for row in eligible_rows], dtype=object)
+        missing_before_imputation = int(sum(1 for value in matrix.ravel() if _safe_float(value) is None))
+        X = SimpleImputer(strategy="median").fit_transform(matrix).astype(np.float32)
+        y = np.array([row["_target_value"] for row in eligible_rows], dtype=np.float32)
 
         if X.shape[0] < 10 or X.shape[1] == 0:
-            raise ValueError("The selected configuration did not produce enough training data.")
+            raise ValueError("The selected dataset did not produce a usable training matrix.")
 
         X_train, X_val, y_train, y_val = train_test_split(
             X,
@@ -780,10 +747,19 @@ class ModelTrainingService:
         )
 
         if len(X_train) < 5 or len(X_val) < 2:
-            raise ValueError("The validation split is too aggressive for the current dataset. Increase max records or reduce validation split.")
+            raise ValueError("The validation split is too aggressive for the selected dataset.")
 
-        n_estimators = int((config.get("hyperparameters") or {}).get("n_estimators", DEFAULT_HYPERPARAMETERS["n_estimators"]) or DEFAULT_HYPERPARAMETERS["n_estimators"])
+        n_estimators = int(
+            (config.get("hyperparameters") or {}).get("n_estimators", DEFAULT_HYPERPARAMETERS["n_estimators"])
+            or DEFAULT_HYPERPARAMETERS["n_estimators"]
+        )
         total_rounds = min(300, max(20, n_estimators))
+
+        warnings: list[str] = []
+        if missing_before_imputation:
+            warnings.append("Missing numeric values in the saved matrix were median-imputed during training.")
+
+        target_label = metadata.get("target", {}).get("label") or TARGET_DEFINITIONS["cof"]["label"]
 
         return {
             "X_train": X_train,
@@ -792,38 +768,50 @@ class ModelTrainingService:
             "y_val": y_val,
             "total_rounds": total_rounds,
             "dataset": {
-                "total_records": total_records,
-                "cleaned_records": cleaned_records,
+                "total_records": len(rows),
+                "cleaned_records": len(rows),
                 "usable_records": usable_records,
-                "dropped_records": total_records - usable_records,
+                "dropped_records": max(0, len(rows) - usable_records),
                 "train_size": int(len(X_train)),
                 "validation_size": int(len(X_val)),
                 "feature_dimensions": int(X.shape[1]),
-                "selected_feature_count": int(sum(bool(value) for value in selected_features.values())),
+                "selected_feature_count": int(len(feature_columns)),
                 "target": {
-                    "key": target_key,
-                    "label": target_def["label"],
+                    "key": str(metadata.get("target", {}).get("key") or "cof"),
+                    "label": str(target_label),
+                    "column": target_column,
                 },
+                "target_column": target_column,
+                "feature_columns": feature_columns,
+                "columns": [target_column, *feature_columns],
                 "filters": {
-                    "min_confidence": min_confidence,
+                    "min_confidence": 0.0,
                     "max_records": max_records,
                     "validation_split": validation_split,
                 },
-                "cleaning": cleaning_profile["summary"],
+                "cleaning": metadata.get("summary", {}),
+                "pca_info": metadata.get("pca_info"),
             },
-            "feature_blocks": feature_blocks,
+            "feature_blocks": [
+                {
+                    "key": "saved_matrix",
+                    "label": "Saved cleaned feature matrix",
+                    "dimensions": int(X.shape[1]),
+                    "features": feature_columns,
+                }
+            ],
             "warnings": warnings,
         }
 
-    def _feature_label(self, key: str) -> str:
-        for feature in FEATURE_DEFINITIONS:
-            if feature["key"] == key:
-                return feature["label"]
-        return key.replace("_", " ").title()
-
-    async def _run_training(self, task: TrainingTaskState, records: list[dict[str, Any]], source_scope: dict[str, Any]) -> None:
+    async def _run_training(
+        self,
+        task: TrainingTaskState,
+        rows: list[dict[str, Any]],
+        source_scope: dict[str, Any],
+        metadata: dict[str, Any],
+    ) -> None:
         try:
-            prepared = self._prepare_dataset(records, task.config)
+            prepared = self._prepare_saved_dataset(rows, task.config, metadata)
             X_train = prepared["X_train"]
             X_val = prepared["X_val"]
             y_train = prepared["y_train"]

@@ -4,7 +4,7 @@ import {
   Download, ChevronDown, ChevronUp, Gauge, ThermometerSun, 
   Timer, Layers, AlertCircle, CheckCircle2, RefreshCw, Check, Zap, Search, FileText, FileSearch
 } from 'lucide-vue-next'
-import type { BatchFile, TribologyData, LiteratureMetadata } from '@/lib/api'
+import { formatTribopairLabel, type BatchFile, type TribologyData, type LiteratureMetadata } from '@/lib/api'
 import { useValidation } from '@/composables/useValidation'
 import LiteratureMetadataCard from '@/components/LiteratureMetadataCard.vue'
 import Button from '@/components/ui/Button.vue'
@@ -171,6 +171,15 @@ function isSuperlubricity(cofStr: string | undefined): boolean {
   
   // If there is a "<" symbol and value <= 0.01, or value is strictly < 0.01, it is judged as superlubricity
   return hasLessThan ? cof <= 0.01 : cof < 0.01
+}
+
+function tribopairDisplay(item: TribologyData) {
+  return formatTribopairLabel({
+    probeMaterial: item.probe_material,
+    substrateMaterial: item.substrate_material,
+    substrateCoating: item.substrate_coating,
+    materialName: item.material_name,
+  })
 }
 
 
@@ -482,9 +491,9 @@ function markAllAsVerified() {
                           C{{ item.alkyl_chain_length }}
                         </Badge>
                       </div>
-                      <!-- Material name/surface -->
+                      <!-- Tribopair -->
                       <p class="text-sm text-muted-foreground mt-0.5">
-                        {{ item.material_name }}
+                        {{ tribopairDisplay(item) }}
                       </p>
                       
                       <!-- Condition labels -->
@@ -633,9 +642,17 @@ function markAllAsVerified() {
                       <span class="text-muted-foreground">Water / Humidity:</span>
                       <span class="ml-2">{{ item.water_content }}</span>
                     </div>
-                    <div v-if="item.surface_roughness">
-                      <span class="text-muted-foreground">Roughness:</span>
-                      <span class="ml-2">{{ item.surface_roughness }}</span>
+                    <div v-if="item.probe_material || item.substrate_material" class="col-span-2">
+                      <span class="text-muted-foreground">Tribopair:</span>
+                      <span class="ml-2">{{ tribopairDisplay(item) }}</span>
+                    </div>
+                    <div v-if="item.probe_roughness">
+                      <span class="text-muted-foreground">Probe Roughness:</span>
+                      <span class="ml-2">{{ item.probe_roughness }}</span>
+                    </div>
+                    <div v-if="item.substrate_roughness">
+                      <span class="text-muted-foreground">Substrate Roughness:</span>
+                      <span class="ml-2">{{ item.substrate_roughness }}</span>
                     </div>
                     <div v-if="item.wear_rate">
                       <span class="text-muted-foreground">Wear Rate:</span>

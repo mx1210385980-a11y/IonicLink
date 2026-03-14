@@ -84,6 +84,30 @@ def _sanitize_thickness_fields(item: dict[str, Any]) -> None:
             item[field] = _normalize_quantitative_thickness(item.get(field))
 
 
+def _normalize_range_text(text: Any, unit_hint: str = "") -> Optional[str]:
+    raw = str(text or "").strip()
+    if not raw:
+        return None
+    normalized = (
+        raw.replace("–", "-")
+        .replace("—", "-")
+        .replace("−", "-")
+        .replace(" to ", "-")
+        .replace(" µ", " µ")
+    )
+    match = re.search(
+        r"(\d+(?:\.\d+)?)\s*(?:-|~\s*|to\s+)\s*(\d+(?:\.\d+)?)\s*([a-zA-Zµμ/]+)?",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    low = match.group(1)
+    high = match.group(2)
+    unit = (match.group(3) or unit_hint or "").strip()
+    return f"{low}-{high} {unit}".strip()
+
+
 class LLMService:
     def __init__(self):
         self.base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
@@ -352,6 +376,16 @@ class LLMService:
                 if item.get(alias) not in (None, ""):
                     item["material_name"] = item.get(alias)
                     break
+        if not item.get("substrate_material"):
+            for alias in ("substrate", "surface", "surface_material", "material", "material_name"):
+                if item.get(alias) not in (None, ""):
+                    item["substrate_material"] = item.get(alias)
+                    break
+        if not item.get("probe_material"):
+            for alias in ("probe", "slider", "upper_specimen", "counterface"):
+                if item.get(alias) not in (None, ""):
+                    item["probe_material"] = item.get(alias)
+                    break
         if not item.get("ionic_liquid"):
             for alias in ("il", "ionicLiquid", "ionic_liquid_name"):
                 if item.get(alias) not in (None, ""):
@@ -488,7 +522,96 @@ class LLMService:
             for pat, label in surface_patterns:
                 if re.search(pat, space_l):
                     item["material_name"] = label
+                    item.setdefault("substrate_material", label)
                     break
+
+        tribo_space = " ".join(
+            [
+                str(item.get("evidence") or ""),
+                str(item.get("notes") or ""),
+                str(item.get("source") or ""),
+                str(item.get("source_figure") or ""),
+                panel_ctx,
+                page_ctx[:2500],
+            ]
+        )
+        tribo_space_norm = re.sub(r"\s+", " ", tribo_space).strip()
+        tribo_l = tribo_space_norm.lower()
+
+        if not item.get("probe_material"):
+            if re.search(r"\bsilica\s+(?:colloid|sphere|probe)\b", tribo_l):
+                item["probe_material"] = "Silica"
+            elif re.search(r"\bsteel\s+(?:ball|sphere|probe|pin)\b", tribo_l):
+                item["probe_material"] = "Steel"
+
+        if not item.get("probe_geometry"):
+            if re.search(r"\bcolloid(?:al)?\s+probe\b", tribo_l):
+                item["probe_geometry"] = "Colloid probe"
+            elif re.search(r"\bsilica\s+sphere\b|\bsphere\b", tribo_l):
+                item["probe_geometry"] = "Sphere"
+            elif re.search(r"\btip\b", tribo_l):
+                item["probe_geometry"] = "Tip"
+
+        if not item.get("probe_radius"):
+            radius_match = re.search(
+                r"(\d+(?:\.\d+)?)\s*-\s*(?:µ|μ|u)m\s+(?:silica\s+)?sphere",
+                tribo_space_norm,
+                flags=re.IGNORECASE,
+            )
+            if radius_match:
+                item["probe_radius"] = f"{radius_match.group(1)} µm"
+            else:
+                diameter_match = re.search(
+                    r"(\d+(?:\.\d+)?)\s*(?:µ|μ|u)m\s+(?:silica\s+)?sphere",
+                    tribo_space_norm,
+                    flags=re.IGNORECASE,
+                )
+                if diameter_match:
+                    item["probe_radius"] = f"{diameter_match.group(1)} µm"
+
+        if not item.get("substrate_material"):
+            if re.search(r"\bmica\b", tribo_l):
+                item["substrate_material"] = "Mica"
+            elif re.search(r"\bsilica\b", tribo_l):
+                item["substrate_material"] = "Silica"
+
+        if not item.get("substrate_coating"):
+            if re.search(r"\bpeg(?:-brush|-coated|-il)?\b|\bpll-g-peg\b", tribo_l):
+                item["substrate_coating"] = "PEG-brush"
+            elif item.get("substrate_material") and re.search(r"\bbare\b|\buncoated\b", tribo_l):
+                item["substrate_coating"] = "None"
+
+        if not item.get("substrate_roughness"):
+            rough_match = re.search(r"(?:roughness|rms)\s*[:=]?\s*([<>≤≥]?\s*\d+(?:\.\d+)?\s*nm)", tribo_space_norm, flags=re.IGNORECASE)
+            if rough_match:
+                item["substrate_roughness"] = rough_match.group(1).strip()
+
+        if item.get("substrate_material") and not item.get("material_name"):
+            item["material_name"] = item["substrate_material"]
+        if item.get("substrate_roughness") and not item.get("surface_roughness"):
+            item["surface_roughness"] = item["substrate_roughness"]
+
+        load_space = " ".join(
+            [
+                str(item.get("load") or ""),
+                str(item.get("normal_load") or ""),
+                str(item.get("evidence") or ""),
+                page_ctx[:2500],
+            ]
+        )
+        if not item.get("load"):
+            load_range = _normalize_range_text(load_space, "nN")
+            if load_range:
+                item["load"] = load_range
+        if not item.get("normal_load"):
+            load_range = _normalize_range_text(load_space, "nN")
+            if load_range:
+                item["normal_load"] = load_range
+        elif str(item.get("normal_load") or "").strip().isdigit() and "ranging from" in load_space.lower():
+            load_range = _normalize_range_text(load_space, "nN")
+            if load_range:
+                item["normal_load"] = load_range
+                item["load"] = load_range
 
         if not item.get("normal_load") and item.get("load"):
             item["normal_load"] = item.get("load")
@@ -1228,6 +1351,13 @@ class LLMService:
                 "contact_type": r.contact_type,
                 "potential": r.potential,
                 "water_content": r.water_content,
+                "probe_material": r.probe_material,
+                "probe_geometry": r.probe_geometry,
+                "probe_radius": r.probe_radius,
+                "probe_roughness": r.probe_roughness,
+                "substrate_material": r.substrate_material,
+                "substrate_coating": r.substrate_coating,
+                "substrate_roughness": r.substrate_roughness,
                 "surface_roughness": r.surface_roughness,
                 "residual_film_thickness_d": r.residual_film_thickness_d,
                 "layer_spacing_delta": r.layer_spacing_delta,
