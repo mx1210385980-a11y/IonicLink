@@ -30,6 +30,11 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Runtime monitor state
+backend/data/literature_monitor_state.json
+backend/data/literature_monitor_proxy_queue.json
+backend/data/literature_monitor_pdfs/
+
 # OS files
 .DS_Store
 Thumbs.db

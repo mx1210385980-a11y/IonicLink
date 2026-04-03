@@ -259,6 +259,69 @@ const moduleTabs = computed(() => [
   },
 ])
 
+const cleaningComparisonCards = computed(() => {
+  const rawRecords = Number(preview.value?.summary.raw_records || 0)
+  const readyRecords = Number(preview.value?.summary.training_ready_records || 0)
+  const blockedRecords = Math.max(0, rawRecords - readyRecords)
+  const descriptorFeatures = Number((descriptorSummary.value?.descriptor_count || 0) + (descriptorSummary.value?.macro_feature_count || 0))
+  const retainedFeatures = retainedFeatureColumns.value.length
+  const latestSavedDataset = savedDatasets.value[0] || null
+
+  return [
+    {
+      key: 'retained_rows',
+      label: 'Retained Rows',
+      beforeLabel: 'Raw scope',
+      beforeValue: rawRecords,
+      afterLabel: 'Training-ready',
+      afterValue: readyRecords,
+      badge: rawRecords ? `${readyRecords}/${rawRecords} retained` : 'No rows yet',
+      tone: 'sky',
+      note: 'How many rows survive the default cleaning path.',
+    },
+    {
+      key: 'missing_blockers',
+      label: 'Missing-Field Reduction',
+      beforeLabel: 'Blocked rows',
+      beforeValue: blockedRecords,
+      afterLabel: 'After cleaning',
+      afterValue: 0,
+      badge: `${blockedRecords} blockers removed`,
+      tone: 'emerald',
+      note: 'Rows excluded because required targets or chemistry fields are missing.',
+    },
+    {
+      key: 'feature_reduction',
+      label: 'Feature Reduction',
+      beforeLabel: 'Candidate features',
+      beforeValue: descriptorFeatures,
+      afterLabel: 'Retained features',
+      afterValue: retainedFeatures,
+      badge: `${Math.max(0, descriptorFeatures - retainedFeatures)} reduced`,
+      tone: 'amber',
+      note: 'From descriptor generation down to the representative feature set.',
+    },
+    {
+      key: 'saved_outputs',
+      label: 'Saved Outputs',
+      beforeLabel: 'Saved datasets',
+      beforeValue: savedDatasets.value.length,
+      afterLabel: 'Latest rows',
+      afterValue: Number(latestSavedDataset?.row_count || 0),
+      badge: latestSavedDataset ? `Latest: ${latestSavedDataset.name}` : 'No saved dataset yet',
+      tone: 'violet',
+      note: 'Concrete outputs the mentor can inspect or hand into training.',
+    },
+  ]
+})
+
+function comparisonTone(tone: string) {
+  if (tone === 'emerald') return 'from-emerald-500/15 to-teal-500/10 border-emerald-200 dark:border-emerald-500/20'
+  if (tone === 'amber') return 'from-amber-500/15 to-orange-500/10 border-amber-200 dark:border-amber-500/20'
+  if (tone === 'violet') return 'from-violet-500/15 to-fuchsia-500/10 border-violet-200 dark:border-violet-500/20'
+  return 'from-sky-500/15 to-cyan-500/10 border-sky-200 dark:border-sky-500/20'
+}
+
 const autoPreviewSignature = computed(() => JSON.stringify(form))
 
 function defaultBundleName() {
@@ -585,6 +648,36 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div>
+        </section>
+
+        <section class="mt-6 grid gap-4 xl:grid-cols-2">
+          <article
+            v-for="card in cleaningComparisonCards"
+            :key="card.key"
+            class="rounded-[28px] border bg-gradient-to-br p-5"
+            :class="comparisonTone(card.tone)"
+          >
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">{{ card.label }}</p>
+                <p class="mt-2 text-sm leading-6 text-slate-600">{{ card.note }}</p>
+              </div>
+              <span class="rounded-full bg-white/80 px-3 py-1 text-[10px] font-semibold text-slate-600 ring-1 ring-slate-200">
+                {{ card.badge }}
+              </span>
+            </div>
+
+            <div class="mt-5 grid grid-cols-2 gap-3">
+              <div class="rounded-2xl border border-slate-200 bg-white/80 p-4">
+                <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">{{ card.beforeLabel }}</p>
+                <p class="mt-2 text-3xl font-semibold text-slate-950">{{ card.beforeValue }}</p>
+              </div>
+              <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">{{ card.afterLabel }}</p>
+                <p class="mt-2 text-3xl font-semibold text-slate-950">{{ card.afterValue }}</p>
+              </div>
+            </div>
+          </article>
         </section>
 
         <section class="mt-6">

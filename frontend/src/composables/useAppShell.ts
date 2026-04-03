@@ -27,7 +27,7 @@ import {
 import { useI18n } from '@/composables/useI18n'
 import type { HighlightRect } from '@/types/pdf-highlight'
 
-type AppView = 'dashboard' | 'workspace' | 'cleaning' | 'predict' | 'monitor' | 'literature' | 'grounding' | 'guide'
+type AppView = 'dashboard' | 'workspace' | 'cleaning' | 'predict' | 'monitor' | 'literature' | 'grounding' | 'guide' | 'mentor'
 type SidebarTab = 'chat' | 'agents'
 
 type FileUploadBridge = {
@@ -93,6 +93,7 @@ export function useAppShell(
       || view === 'cleaning'
       || view === 'predict'
       || view === 'monitor'
+      || view === 'mentor'
       || view === 'literature'
       || view === 'grounding'
       || view === 'guide'

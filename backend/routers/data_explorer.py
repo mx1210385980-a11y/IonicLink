@@ -6,7 +6,7 @@ API endpoints for searching and exploring tribology data.
 import logging
 from typing import List, Optional, Literal
 import re
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func, desc, or_
@@ -22,6 +22,7 @@ from security import (
     require_record_access,
     scope_filters,
 )
+from services.activity_logging_service import log_activity
 from services.score_service import calculate_confidence, calculate_confidence_details
 from services.agent_runtime_service import get_agent_runtime
 from services.file_service import _normalize_record_chemistry
@@ -650,6 +651,7 @@ async def get_relationship_graph_drilldown(
 async def update_record(
     record_id: int,
     payload: RecordUpdatePayload,
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
     principal: AuthPrincipal = Depends(get_current_principal),
 ):
@@ -683,6 +685,20 @@ async def update_record(
         record.confidence = max(float(getattr(record, "confidence", 0.0) or 0.0), float(details.get("score") or 0.0))
 
         await session.commit()
+        await log_activity(
+            db=session,
+            user_id=principal.user.id,
+            group_id=principal.group.id,
+            action_type="edit_record",
+            action_detail={
+                "record_id": record.id,
+                "literature_id": record.literature_id,
+                "updated_fields": sorted(update_data.keys()),
+            },
+            resource_type="record",
+            resource_id=record.id,
+            request=request,
+        )
         return {"success": True, "id": record_id, "confidence": record.confidence, "confidenceDetails": _effective_confidence_details(record)}
     except HTTPException:
         raise
@@ -695,6 +711,7 @@ async def update_record(
 async def promote_record_confidence(
     record_id: int,
     payload: ConfidencePromotePayload,
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
     principal: AuthPrincipal = Depends(get_current_principal),
 ):
@@ -732,6 +749,21 @@ async def promote_record_confidence(
 
         await session.commit()
         await session.refresh(record)
+        await log_activity(
+            db=session,
+            user_id=principal.user.id,
+            group_id=principal.group.id,
+            action_type="edit_record",
+            action_detail={
+                "record_id": record.id,
+                "literature_id": record.literature_id,
+                "promotion": True,
+                "confidence": record.confidence,
+            },
+            resource_type="record",
+            resource_id=record.id,
+            request=request,
+        )
         details = _effective_confidence_details(record)
         return {"success": True, "id": record_id, "confidence": record.confidence, "confidenceDetails": details}
     except HTTPException:

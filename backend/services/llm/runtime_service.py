@@ -2,9 +2,12 @@
 
 import asyncio
 import base64
+import copy
+import json
 import logging
 import os
 import re
+import threading
 import time
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
@@ -51,19 +54,33 @@ from utils.pdf_utils import classify_pdf_pages
 
 load_dotenv(override=True)
 logger = logging.getLogger(__name__)
+RUNTIME_BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+RUNTIME_DATA_DIR = os.path.join(RUNTIME_BASE_DIR, "data")
+LLM_RUNTIME_CONFIG_PATH = os.path.join(RUNTIME_DATA_DIR, "llm_runtime_config.json")
+DEFAULT_LLM_PROVIDER = "openai-compatible"
+DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
+DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_OPENROUTER_APP_NAME = "IonicLink"
+DEFAULT_TEXT_MODEL = "Pro/deepseek-ai/DeepSeek-V3.2"
+DEFAULT_VISION_MODEL = "Qwen/Qwen3-VL-32B-Instruct"
+
+
+def _normalize_runtime_string(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _serialize_llm_provider(value: Any) -> str:
+    normalized = _normalize_runtime_string(value).lower()
+    if normalized == "openrouter":
+        return "openrouter"
+    return DEFAULT_LLM_PROVIDER
 
 
 class LLMService:
     def __init__(self):
-        self.base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-        self.default_api_key = os.getenv("OPENAI_API_KEY", "")
-        self.vision_model = os.getenv("LLM_VISION_MODEL", "Qwen/Qwen3-VL-32B-Instruct")
-        self.text_model = os.getenv("LLM_TEXT_MODEL", "Pro/deepseek-ai/DeepSeek-V3.2")
-        self.vision_api_key = os.getenv("LLM_VISION_API_KEY", self.default_api_key)
-
-        self.vision_client = AsyncOpenAI(api_key=self.vision_api_key, base_url=self.base_url, timeout=240.0)
-        self.text_client = AsyncOpenAI(api_key=self.default_api_key, base_url=self.base_url, timeout=180.0)
-
+        self._config_lock = threading.RLock()
+        os.makedirs(RUNTIME_DATA_DIR, exist_ok=True)
+        self._config = self._load_runtime_config()
         self._last_extraction_debug: Dict[str, Any] = {
             "candidate_count": 0,
             "kept_count": 0,
@@ -75,12 +92,176 @@ class LLMService:
             "page_candidate_counts": {},
             "progress_log": [],
         }
+        self._apply_runtime_config(self._config)
+
+    def _build_default_headers(self) -> Dict[str, str]:
+        if self.provider != "openrouter":
+            return {}
+
+        headers: Dict[str, str] = {}
+        if self.openrouter_site_url:
+            headers["HTTP-Referer"] = self.openrouter_site_url
+        if self.openrouter_app_name:
+            headers["X-OpenRouter-Title"] = self.openrouter_app_name
+        return headers
+
+    def _default_runtime_config(self) -> Dict[str, Any]:
+        provider = _serialize_llm_provider(os.getenv("LLM_PROVIDER"))
+        openai_api_key = _normalize_runtime_string(os.getenv("OPENAI_API_KEY", ""))
+        openai_base_url = _normalize_runtime_string(os.getenv("OPENAI_BASE_URL", DEFAULT_OPENAI_BASE_URL)) or DEFAULT_OPENAI_BASE_URL
+        openrouter_api_key = _normalize_runtime_string(os.getenv("OPENROUTER_API_KEY", ""))
+
+        if provider != "openrouter" and openrouter_api_key and not openai_api_key and openai_base_url == DEFAULT_OPENAI_BASE_URL:
+            provider = "openrouter"
+
+        return {
+            "provider": provider,
+            "openai_base_url": openai_base_url,
+            "openai_api_key": openai_api_key,
+            "openrouter_base_url": _normalize_runtime_string(os.getenv("OPENROUTER_BASE_URL", DEFAULT_OPENROUTER_BASE_URL)) or DEFAULT_OPENROUTER_BASE_URL,
+            "openrouter_api_key": openrouter_api_key,
+            "openrouter_site_url": _normalize_runtime_string(os.getenv("OPENROUTER_SITE_URL", "")),
+            "openrouter_app_name": _normalize_runtime_string(os.getenv("OPENROUTER_APP_NAME", DEFAULT_OPENROUTER_APP_NAME)) or DEFAULT_OPENROUTER_APP_NAME,
+            "text_model": _normalize_runtime_string(os.getenv("LLM_TEXT_MODEL", DEFAULT_TEXT_MODEL)) or DEFAULT_TEXT_MODEL,
+            "vision_model": _normalize_runtime_string(os.getenv("LLM_VISION_MODEL", DEFAULT_VISION_MODEL)) or DEFAULT_VISION_MODEL,
+            "vision_api_key": _normalize_runtime_string(os.getenv("LLM_VISION_API_KEY", "")),
+            "updated_at": None,
+        }
+
+    def _serialize_runtime_config(self, value: Any, existing: Dict[str, Any] | None = None) -> Dict[str, Any]:
+        raw = value if isinstance(value, dict) else {}
+        current = copy.deepcopy(existing or self._default_runtime_config())
+
+        openai_api_key = current.get("openai_api_key", "")
+        if raw.get("clear_openai_api_key"):
+            openai_api_key = ""
+        elif raw.get("openai_api_key") is not None and _normalize_runtime_string(raw.get("openai_api_key")):
+            openai_api_key = _normalize_runtime_string(raw.get("openai_api_key"))
+
+        openrouter_api_key = current.get("openrouter_api_key", "")
+        if raw.get("clear_openrouter_api_key"):
+            openrouter_api_key = ""
+        elif raw.get("openrouter_api_key") is not None and _normalize_runtime_string(raw.get("openrouter_api_key")):
+            openrouter_api_key = _normalize_runtime_string(raw.get("openrouter_api_key"))
+
+        vision_api_key = current.get("vision_api_key", "")
+        if raw.get("clear_vision_api_key"):
+            vision_api_key = ""
+        elif raw.get("vision_api_key") is not None and _normalize_runtime_string(raw.get("vision_api_key")):
+            vision_api_key = _normalize_runtime_string(raw.get("vision_api_key"))
+
+        return {
+            "provider": _serialize_llm_provider(raw.get("provider", current.get("provider"))),
+            "openai_base_url": _normalize_runtime_string(raw.get("openai_base_url", current.get("openai_base_url", DEFAULT_OPENAI_BASE_URL))) or DEFAULT_OPENAI_BASE_URL,
+            "openai_api_key": openai_api_key,
+            "openrouter_base_url": _normalize_runtime_string(raw.get("openrouter_base_url", current.get("openrouter_base_url", DEFAULT_OPENROUTER_BASE_URL))) or DEFAULT_OPENROUTER_BASE_URL,
+            "openrouter_api_key": openrouter_api_key,
+            "openrouter_site_url": _normalize_runtime_string(raw.get("openrouter_site_url", current.get("openrouter_site_url", ""))),
+            "openrouter_app_name": _normalize_runtime_string(raw.get("openrouter_app_name", current.get("openrouter_app_name", DEFAULT_OPENROUTER_APP_NAME))) or DEFAULT_OPENROUTER_APP_NAME,
+            "text_model": _normalize_runtime_string(raw.get("text_model", current.get("text_model", DEFAULT_TEXT_MODEL))) or DEFAULT_TEXT_MODEL,
+            "vision_model": _normalize_runtime_string(raw.get("vision_model", current.get("vision_model", DEFAULT_VISION_MODEL))) or DEFAULT_VISION_MODEL,
+            "vision_api_key": vision_api_key,
+            "updated_at": current.get("updated_at"),
+        }
+
+    def _load_runtime_config(self) -> Dict[str, Any]:
+        defaults = self._default_runtime_config()
+        if not os.path.exists(LLM_RUNTIME_CONFIG_PATH):
+            return defaults
+        try:
+            with open(LLM_RUNTIME_CONFIG_PATH, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            return self._serialize_runtime_config(payload, defaults)
+        except Exception as exc:
+            logger.warning("Failed to load LLM runtime config: %s", exc)
+            return defaults
+
+    def _save_runtime_config(self) -> None:
+        payload = copy.deepcopy(self._config)
+        with open(LLM_RUNTIME_CONFIG_PATH, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+
+    def _apply_runtime_config(self, config: Dict[str, Any]) -> None:
+        self.provider = _serialize_llm_provider(config.get("provider"))
+        self.openrouter_base_url = _normalize_runtime_string(config.get("openrouter_base_url")) or DEFAULT_OPENROUTER_BASE_URL
+        self.openrouter_api_key = _normalize_runtime_string(config.get("openrouter_api_key"))
+        self.openrouter_site_url = _normalize_runtime_string(config.get("openrouter_site_url"))
+        self.openrouter_app_name = _normalize_runtime_string(config.get("openrouter_app_name")) or DEFAULT_OPENROUTER_APP_NAME
+        self.openai_base_url = _normalize_runtime_string(config.get("openai_base_url")) or DEFAULT_OPENAI_BASE_URL
+        self.openai_api_key = _normalize_runtime_string(config.get("openai_api_key"))
+
+        if self.provider == "openrouter":
+            self.base_url = self.openrouter_base_url
+            self.default_api_key = self.openrouter_api_key
+        else:
+            self.base_url = self.openai_base_url
+            self.default_api_key = self.openai_api_key
+
+        self.vision_model = _normalize_runtime_string(config.get("vision_model")) or DEFAULT_VISION_MODEL
+        self.text_model = _normalize_runtime_string(config.get("text_model")) or DEFAULT_TEXT_MODEL
+        self.vision_api_key = _normalize_runtime_string(config.get("vision_api_key")) or self.default_api_key
+        self.default_headers = self._build_default_headers()
+
+        self.vision_client = AsyncOpenAI(
+            api_key=self.vision_api_key,
+            base_url=self.base_url,
+            timeout=240.0,
+            default_headers=self.default_headers,
+        )
+        self.text_client = AsyncOpenAI(
+            api_key=self.default_api_key,
+            base_url=self.base_url,
+            timeout=180.0,
+            default_headers=self.default_headers,
+        )
+
         logger.info(
-            "LLM service initialized text_model=%s vision_model=%s base_url=%s",
+            "LLM service initialized provider=%s text_model=%s vision_model=%s base_url=%s",
+            self.provider,
             self.text_model,
             self.vision_model,
             self.base_url,
         )
+
+    def get_runtime_snapshot(self) -> Dict[str, Any]:
+        with self._config_lock:
+            config = copy.deepcopy(self._config)
+        return {
+            "config": {
+                "provider": config.get("provider", DEFAULT_LLM_PROVIDER),
+                "openai_base_url": config.get("openai_base_url", DEFAULT_OPENAI_BASE_URL),
+                "openrouter_base_url": config.get("openrouter_base_url", DEFAULT_OPENROUTER_BASE_URL),
+                "openrouter_site_url": config.get("openrouter_site_url", ""),
+                "openrouter_app_name": config.get("openrouter_app_name", DEFAULT_OPENROUTER_APP_NAME),
+                "text_model": config.get("text_model", DEFAULT_TEXT_MODEL),
+                "vision_model": config.get("vision_model", DEFAULT_VISION_MODEL),
+                "has_openai_api_key": bool(config.get("openai_api_key")),
+                "has_openrouter_api_key": bool(config.get("openrouter_api_key")),
+                "has_vision_api_key": bool(config.get("vision_api_key")),
+                "updated_at": config.get("updated_at"),
+            },
+            "runtime": {
+                "active_provider": self.provider,
+                "active_base_url": self.base_url,
+                "active_text_model": self.text_model,
+                "active_vision_model": self.vision_model,
+                "default_headers": copy.deepcopy(self.default_headers),
+            },
+            "notes": [
+                "Blank secret fields keep the existing stored key.",
+                "Saving here hot-reloads the in-process LLM clients; backend restart is not required.",
+                "OpenRouter uses OpenAI-compatible chat endpoints and supports HTTP-Referer plus X-OpenRouter-Title headers.",
+            ],
+        }
+
+    def update_runtime_config(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        with self._config_lock:
+            next_config = self._serialize_runtime_config(payload, self._config)
+            next_config["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            self._config = next_config
+            self._save_runtime_config()
+            self._apply_runtime_config(self._config)
+        return self.get_runtime_snapshot()
 
     async def _process_vision(self, images: List[str], prompt: str, content: str = "", max_side: int = 2000) -> List[dict]:
         try:

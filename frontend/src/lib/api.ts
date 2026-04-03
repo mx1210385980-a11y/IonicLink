@@ -965,6 +965,81 @@ export async function getDashboardStats() {
     }
 }
 
+export interface MentorProgressStage {
+    key: string
+    label: string
+    total: number
+    delta_count: number
+    last_updated_at: string | null
+    description: string
+}
+
+export interface MentorProgressDelta {
+    key: string
+    label: string
+    baseline_label: string
+    current_label: string
+    baseline_value: number
+    current_value: number
+    change_value: number
+    unit: string
+    trend: 'up' | 'down' | 'flat' | string
+    description: string
+}
+
+export interface MentorTimelineItem {
+    id: string
+    kind: string
+    title: string
+    detail: string
+    timestamp: string | null
+    resource_type: string
+    resource_id?: number | null
+    literature_id?: number | null
+    dataset_id?: number | null
+}
+
+export interface MentorQuickLink {
+    label: string
+    detail: string
+    view: string
+    literature_id?: number
+    record_id?: number
+    dataset_id?: number
+    kind?: string
+}
+
+export interface MentorLatestReadyDataset {
+    id: number
+    name: string
+    usable_records: number
+    feature_dimensions: number
+    created_at: string | null
+}
+
+export interface MentorProgressResponse {
+    window_days: number
+    progress_overview: {
+        stages: MentorProgressStage[]
+    }
+    progress_deltas: {
+        dashboard: MentorProgressDelta[]
+    }
+    timeline: MentorTimelineItem[]
+    quick_links: {
+        latest_processed_paper: MentorQuickLink | null
+        latest_verified_record: MentorQuickLink | null
+        latest_output: MentorQuickLink | null
+    }
+    latest_ready_dataset: MentorLatestReadyDataset | null
+    cleaning_summary: ModelTrainingCleaningSummary | null
+}
+
+export async function getMentorProgress() {
+    const response = await api.get('/api/mentor/progress')
+    return response.data as MentorProgressResponse
+}
+
 export interface ModelTrainingAlgorithmOption {
     key: string
     label: string
@@ -1523,6 +1598,232 @@ export async function getGroupActivitySummary(): Promise<GroupActivitySummary> {
 /** 获取操作类型定义 */
 export async function getActionTypes(): Promise<{ action_types: Array<{ key: string; label: string }> }> {
     const response = await api.get('/api/monitor/action-types')
+    return response.data
+}
+
+export interface LiteratureMonitorSchedule {
+    weekday: number
+    hour: number
+    minute: number
+    timezone: string
+    label?: string
+}
+
+export interface LiteratureMonitorSourceConfig {
+    id: 'crossref' | 'openalex' | 'semantic_scholar' | 'rss' | string
+    label: string
+    kind: 'api' | 'rss' | string
+    enabled: boolean
+    feeds?: string[]
+    last_success_at?: string | null
+    last_error?: string | null
+    last_item_count?: number
+    note?: string | null
+}
+
+export interface LiteratureMonitorPdfConfig {
+    enabled: boolean
+    auto_download_oa: boolean
+    queue_proxy_required: boolean
+    storage_dir?: string
+    proxy_queue_path?: string
+}
+
+export interface LiteratureMonitorCampusProxyConfig {
+    enabled: boolean
+    mode?: string
+    portal_url?: string
+    proxy_url: string
+    username: string
+    has_password?: boolean
+    verify_tls: boolean
+    apply_to_metadata: boolean
+    apply_to_pdf: boolean
+    headless?: boolean
+    webvpn_url_template?: string
+    login_username_selector?: string
+    login_password_selector?: string
+    login_submit_selector?: string
+    post_login_success_selector?: string
+    download_trigger_selector?: string
+}
+
+export interface LiteratureMonitorCampusProxyUpdate extends LiteratureMonitorCampusProxyConfig {
+    password?: string
+    clear_password?: boolean
+}
+
+export interface LiteratureMonitorPdfState {
+    status: 'pending' | 'downloaded' | 'queued_proxy' | 'failed' | 'unavailable' | string
+    access: 'open_access' | 'proxy_required' | 'unavailable' | string
+    is_open_access?: boolean | null
+    source?: string | null
+    best_url?: string | null
+    candidate_urls?: string[]
+    local_path?: string | null
+    filename?: string | null
+    last_error?: string | null
+    last_attempted_at?: string | null
+    downloaded_at?: string | null
+    strategy?: string | null
+    notes?: string[]
+}
+
+export interface LiteratureMonitorItem {
+    id: string
+    title: string
+    abstract: string
+    doi?: string | null
+    link: string
+    journal: string
+    publisher: string
+    authors: string[]
+    published_at: string
+    discovered_at: string
+    source_id: string
+    source_name: string
+    matched_keywords: string[]
+    relevance_score?: number
+    relevance_threshold?: number
+    relevance_reasons?: string[]
+    pdf: LiteratureMonitorPdfState
+}
+
+export interface LiteratureMonitorRun {
+    started_at: string
+    completed_at?: string | null
+    status: string
+    trigger: string
+    new_items: number
+    total_items: number
+    errors: string[]
+}
+
+export interface LiteratureMonitorSummary {
+    total_items: number
+    new_items_last_7_days: number
+    active_keywords: number
+    distinct_publishers: number
+    items_by_source: Array<{ name: string; count: number }>
+    items_by_keyword: Array<{ name: string; count: number }>
+    timeline: Array<{ date: string; count: number }>
+}
+
+export interface LiteratureMonitorSnapshot {
+    config: {
+        keywords: string[]
+        lookback_days: number
+        relevance_threshold: number
+        pdf_download: LiteratureMonitorPdfConfig
+        campus_proxy: LiteratureMonitorCampusProxyConfig
+        schedule: LiteratureMonitorSchedule
+        sources: LiteratureMonitorSourceConfig[]
+        notes: string[]
+    }
+    scheduler: {
+        status: string
+        next_run_at?: string | null
+        last_triggered_slot?: string | null
+        last_error?: string | null
+        running_trigger?: string | null
+    }
+    last_run?: LiteratureMonitorRun | null
+    recent_runs: LiteratureMonitorRun[]
+    summary: LiteratureMonitorSummary
+    pdf_summary: {
+        downloaded_count: number
+        queued_proxy_count: number
+        failed_count: number
+        pending_count: number
+        open_access_count: number
+        storage_dir: string
+        proxy_queue_path: string
+    }
+    items: LiteratureMonitorItem[]
+}
+
+export interface LiteratureMonitorConfigUpdate {
+    keywords?: string[]
+    rss_feeds?: string[]
+    crossref_enabled?: boolean
+    openalex_enabled?: boolean
+    semantic_scholar_enabled?: boolean
+    rss_enabled?: boolean
+    lookback_days?: number
+    relevance_threshold?: number
+    pdf_download?: LiteratureMonitorPdfConfig
+    campus_proxy?: LiteratureMonitorCampusProxyUpdate
+    schedule?: LiteratureMonitorSchedule
+}
+
+export interface LLMRuntimeConfig {
+    provider: 'openai-compatible' | 'openrouter' | string
+    openai_base_url: string
+    openrouter_base_url: string
+    openrouter_site_url: string
+    openrouter_app_name: string
+    text_model: string
+    vision_model: string
+    has_openai_api_key: boolean
+    has_openrouter_api_key: boolean
+    has_vision_api_key: boolean
+    updated_at?: string | null
+}
+
+export interface LLMRuntimeUpdatePayload {
+    provider?: 'openai-compatible' | 'openrouter' | string
+    openai_base_url?: string
+    openai_api_key?: string
+    clear_openai_api_key?: boolean
+    openrouter_base_url?: string
+    openrouter_api_key?: string
+    clear_openrouter_api_key?: boolean
+    openrouter_site_url?: string
+    openrouter_app_name?: string
+    text_model?: string
+    vision_model?: string
+    vision_api_key?: string
+    clear_vision_api_key?: boolean
+}
+
+export interface LLMRuntimeSnapshot {
+    config: LLMRuntimeConfig
+    runtime: {
+        active_provider: string
+        active_base_url: string
+        active_text_model: string
+        active_vision_model: string
+        default_headers: Record<string, string>
+    }
+    notes: string[]
+}
+
+export async function getLiteratureMonitorSnapshot(): Promise<LiteratureMonitorSnapshot> {
+    const response = await api.get('/api/monitor/literature-source')
+    return response.data
+}
+
+export async function runLiteratureMonitor(): Promise<LiteratureMonitorSnapshot> {
+    const response = await api.post('/api/monitor/literature-source/run')
+    return response.data
+}
+
+export async function updateLiteratureMonitorConfig(
+    payload: LiteratureMonitorConfigUpdate,
+): Promise<LiteratureMonitorSnapshot> {
+    const response = await api.put('/api/monitor/literature-source/config', payload)
+    return response.data
+}
+
+export async function getLLMRuntimeSnapshot(): Promise<LLMRuntimeSnapshot> {
+    const response = await api.get('/api/monitor/llm-config')
+    return response.data
+}
+
+export async function updateLLMRuntimeConfig(
+    payload: LLMRuntimeUpdatePayload,
+): Promise<LLMRuntimeSnapshot> {
+    const response = await api.put('/api/monitor/llm-config', payload)
     return response.data
 }
 

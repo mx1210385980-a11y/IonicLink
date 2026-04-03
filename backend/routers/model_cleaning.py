@@ -4,7 +4,7 @@ import json
 import logging
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +18,7 @@ from security import (
     get_request_scope,
     require_cleaned_dataset_access,
 )
+from services.activity_logging_service import log_activity
 from services.model_cleaning_service import DEFAULT_CLEANING_WORKBENCH_OPTIONS, get_model_cleaning_service
 
 router = APIRouter(
@@ -252,6 +253,7 @@ async def list_cleaned_datasets(
 @router.post("/datasets", response_model=dict)
 async def save_cleaned_dataset(
     payload: SaveCleanedDatasetPayload,
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
     principal: AuthPrincipal = Depends(get_current_principal),
     scope: RequestScope = Depends(get_request_scope),
@@ -268,6 +270,20 @@ async def save_cleaned_dataset(
         )
         full_dataset = await require_cleaned_dataset_access(session, principal, dataset.id, write=True)
         full_dataset = await get_model_cleaning_service().upgrade_dataset_if_needed(session, full_dataset)
+        await log_activity(
+            db=session,
+            user_id=principal.user.id,
+            group_id=principal.group.id,
+            action_type="clean_data",
+            action_detail={
+                "dataset_id": full_dataset.id,
+                "dataset_name": full_dataset.name,
+                "row_count": full_dataset.row_count,
+            },
+            resource_type="cleaned_dataset",
+            resource_id=full_dataset.id,
+            request=request,
+        )
         return {"dataset": get_model_cleaning_service().dataset_payload(full_dataset)}
     except HTTPException:
         raise
@@ -284,6 +300,7 @@ async def import_cleaned_dataset_csv(
     name: str = Form(...),
     description: str | None = Form(None),
     target_column: str | None = Form(None),
+    request: Request = None,
     session: AsyncSession = Depends(get_db_session),
     principal: AuthPrincipal = Depends(get_current_principal),
     scope: RequestScope = Depends(get_request_scope),
@@ -327,6 +344,21 @@ async def import_cleaned_dataset_csv(
         _raise_internal_error("Import cleaned dataset CSV", exc)
 
     dataset = await require_cleaned_dataset_access(session, principal, dataset.id, write=True)
+    await log_activity(
+        db=session,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="clean_data",
+        action_detail={
+            "dataset_id": dataset.id,
+            "dataset_name": dataset.name,
+            "row_count": dataset.row_count,
+            "mode": "import_csv",
+        },
+        resource_type="cleaned_dataset",
+        resource_id=dataset.id,
+        request=request,
+    )
     return {"dataset": get_model_cleaning_service().dataset_payload(dataset)}
 
 
@@ -349,6 +381,7 @@ async def get_cleaned_dataset(
 @router.get("/datasets/{dataset_id}/export")
 async def export_cleaned_dataset(
     dataset_id: int,
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
     principal: AuthPrincipal = Depends(get_current_principal),
 ):
@@ -357,6 +390,21 @@ async def export_cleaned_dataset(
         dataset = await get_model_cleaning_service().upgrade_dataset_if_needed(session, dataset)
         csv_text = get_model_cleaning_service().export_dataset_csv(dataset)
         filename = f"cleaned-dataset-{dataset.id}.csv"
+        await log_activity(
+            db=session,
+            user_id=principal.user.id,
+            group_id=principal.group.id,
+            action_type="export_dataset",
+            action_detail={
+                "dataset_id": dataset.id,
+                "dataset_name": dataset.name,
+                "row_count": dataset.row_count,
+                "filename": filename,
+            },
+            resource_type="cleaned_dataset",
+            resource_id=dataset.id,
+            request=request,
+        )
         return Response(
             content=csv_text,
             media_type="text/csv",

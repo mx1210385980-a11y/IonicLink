@@ -27,6 +27,7 @@ ACTION_TYPES = {
     "sync_data": "同步数据",
     "train_model": "模型训练",
     "clean_data": "数据清洗",
+    "export_dataset": "导出数据集",
     "view_dashboard": "访问仪表板",
     "view_literature": "查看文献",
     "create_user": "创建用户",

@@ -189,6 +189,11 @@ http://localhost:5173
 ```env
 OPENAI_API_KEY=your_api_key
 OPENAI_BASE_URL=https://api.openai.com/v1
+LLM_PROVIDER=
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_API_KEY=
+OPENROUTER_SITE_URL=
+OPENROUTER_APP_NAME=IonicLink
 
 LLM_TEXT_MODEL=Pro/deepseek-ai/DeepSeek-V3.2
 LLM_VISION_MODEL=Qwen/Qwen3-VL-32B-Instruct
@@ -203,6 +208,17 @@ CORS_ALLOW_CREDENTIALS=true
 - `OPENAI_BASE_URL` 采用 OpenAI Compatible 方式，可指向兼容网关或代理服务。
 - `LLM_VISION_API_KEY` 为空时会回退到 `OPENAI_API_KEY`。
 - SQLite 数据库会自动创建在 `backend/data/ioniclink.db`。
+
+OpenRouter example:
+
+```bash
+LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=sk-or-...
+OPENROUTER_SITE_URL=https://your-domain.example
+OPENROUTER_APP_NAME=IonicLink
+LLM_TEXT_MODEL=openai/gpt-4.1-mini
+LLM_VISION_MODEL=google/gemini-2.5-flash
+```
 
 ### Frontend `.env`
 
