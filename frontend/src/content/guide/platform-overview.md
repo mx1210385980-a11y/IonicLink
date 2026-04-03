@@ -3,7 +3,7 @@ title: 平台说明总览
 summary: 这篇文章定义整个博客系统的定位，以及为什么要把平台解释和学习记录都放到 Markdown 里维护。
 date: 2026-04-03
 tags: 平台, Markdown, 文档系统
-order: 1
+order: 2
 section: guide
 ---
 

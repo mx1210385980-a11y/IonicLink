@@ -39,6 +39,16 @@ const articlePaneRef = ref<HTMLElement | null>(null)
 const searchQuery = ref('')
 const activeHeadingId = ref('')
 const activeSlug = ref(resolveInitialSlug())
+const expandedArticles = ref<Record<string, boolean>>({
+  'platform-architecture': true,
+})
+const platformChildSlugs = [
+  'platform-home',
+  'platform-pipeline',
+  'platform-review',
+  'platform-knowledge',
+  'platform-modeling',
+] as const
 
 const topNav = [
   { key: 'home', label: '首页' },
@@ -57,14 +67,37 @@ const spaceNotices = [
 const filteredSections = computed(() => {
   const keyword = searchQuery.value.trim().toLowerCase()
   if (!keyword) {
-    return blogSections
+    return blogSections.map((section) => ({
+      ...section,
+      articles: section.articles.filter((article) => !isPlatformChildArticle(article.slug)),
+    }))
   }
 
   return blogSections
-    .map((section) => ({
-      ...section,
-      articles: section.articles.filter((article) => article.searchText.includes(keyword)),
-    }))
+    .map((section) => {
+      const matchedArticles = section.articles.filter((article) => article.searchText.includes(keyword))
+      if (section.key !== 'guide') {
+        return {
+          ...section,
+          articles: matchedArticles,
+        }
+      }
+
+      const hasPlatformChildMatch = matchedArticles.some((article) => isPlatformChildArticle(article.slug))
+      const topLevelArticles = matchedArticles.filter((article) => !isPlatformChildArticle(article.slug))
+
+      if (hasPlatformChildMatch && !topLevelArticles.some((article) => article.slug === 'platform-architecture')) {
+        const parentArticle = section.articles.find((article) => article.slug === 'platform-architecture')
+        if (parentArticle) {
+          topLevelArticles.unshift(parentArticle)
+        }
+      }
+
+      return {
+        ...section,
+        articles: topLevelArticles,
+      }
+    })
     .filter((section) => section.articles.length > 0)
 })
 
@@ -91,6 +124,19 @@ const activeSection = computed(() => {
   return blogSections.find((section) => section.key === activeArticle.value.sectionKey) || blogSections[0]
 })
 
+const platformModules = computed(() => {
+  const modules = platformChildSlugs
+    .map((slug) => blogArticles.find((article) => article.slug === slug) || null)
+    .filter((article): article is BlogArticle => Boolean(article))
+
+  const keyword = searchQuery.value.trim().toLowerCase()
+  if (!keyword) {
+    return modules
+  }
+
+  return modules.filter((article) => article.searchText.includes(keyword))
+})
+
 watch(visibleArticles, (articles) => {
   if (!articles.some((article) => article.slug === activeSlug.value) && articles[0]) {
     activeSlug.value = articles[0].slug
@@ -98,8 +144,16 @@ watch(visibleArticles, (articles) => {
 }, { immediate: true })
 
 watch(activeArticle, async () => {
+  if (articleHasModules(activeArticle.value) || isPlatformChildArticle(activeArticle.value.slug)) {
+    expandedArticles.value = {
+      ...expandedArticles.value,
+      'platform-architecture': true,
+    }
+  }
+
   await nextTick()
   updateActiveHeading()
+  syncHeadingFromRoute()
 }, { immediate: true })
 
 function resolveInitialSlug() {
@@ -116,14 +170,19 @@ function resolveInitialSlug() {
   return initialArticle.slug
 }
 
-function syncLocation(slug: string) {
+function normalizeHash(hashValue: string) {
+  const normalized = hashValue.replace(/^#/, '').trim()
+  return normalized ? `#${normalized}` : ''
+}
+
+function syncLocation(slug: string, hash = '') {
   void router.replace({
     name: 'blog',
     query: {
       ...route.query,
       article: slug,
     },
-    hash: '',
+    hash: normalizeHash(hash),
   })
 }
 
@@ -131,6 +190,38 @@ function selectArticle(slug: string) {
   activeSlug.value = slug
   syncLocation(slug)
   articlePaneRef.value?.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function articleHasModules(article: BlogArticle) {
+  return article.slug === 'platform-architecture' && platformModules.value.length > 0
+}
+
+function isPlatformChildArticle(slug: string) {
+  return platformChildSlugs.includes(slug as typeof platformChildSlugs[number])
+}
+
+function isArticleExpanded(slug: string) {
+  return expandedArticles.value[slug] ?? false
+}
+
+function isPlatformBranchActive(slug: string) {
+  return activeArticle.value.slug === slug || isPlatformChildArticle(activeArticle.value.slug)
+}
+
+function toggleArticleModules(article: BlogArticle) {
+  if (!articleHasModules(article)) {
+    selectArticle(article.slug)
+    return
+  }
+
+  expandedArticles.value = {
+    ...expandedArticles.value,
+    [article.slug]: !isArticleExpanded(article.slug),
+  }
+
+  if (activeArticle.value.slug !== article.slug) {
+    selectArticle(article.slug)
+  }
 }
 
 function syncFromRoute() {
@@ -173,24 +264,55 @@ function handleArticleScroll() {
   updateActiveHeading()
 }
 
-function scrollToHeading(id: string) {
+function scrollToHeading(id: string, syncHash = true) {
   const container = articlePaneRef.value
   const target = container?.querySelector<HTMLElement>(`[id="${id}"]`)
   if (!container || !target) {
     return
   }
+
+  if (syncHash) {
+    syncLocation(activeArticle.value.slug, id)
+  }
+
   container.scrollTo({ top: Math.max(0, target.offsetTop - 24), behavior: 'smooth' })
 }
 
+async function selectArticleModule(slug: string) {
+  expandedArticles.value = {
+    ...expandedArticles.value,
+    'platform-architecture': true,
+  }
+  activeSlug.value = slug
+  syncLocation(slug)
+  await nextTick()
+  articlePaneRef.value?.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function syncHeadingFromRoute() {
+  const headingId = decodeURIComponent(String(route.hash || '').replace(/^#/, '').trim())
+  if (!headingId) {
+    return
+  }
+
+  if (activeArticle.value.headings.some((heading) => heading.id === headingId)) {
+    scrollToHeading(headingId, false)
+  }
+}
+
 onMounted(() => {
-  syncLocation(activeSlug.value)
+  syncLocation(activeSlug.value, String(route.hash || ''))
   updateActiveHeading()
+  syncHeadingFromRoute()
 })
 
 watch(
   () => [route.query.article, route.hash] as const,
   () => {
     syncFromRoute()
+    void nextTick().then(() => {
+      syncHeadingFromRoute()
+    })
   },
 )
 </script>
@@ -288,17 +410,49 @@ watch(
                 {{ section.label }}
               </div>
               <div class="mt-4 space-y-1">
-                <button
-                  v-for="article in section.articles"
-                  :key="article.slug"
-                  type="button"
-                  class="space-sidebar-link"
-                  :class="{ 'is-active': article.slug === activeArticle.slug }"
-                  @click="selectArticle(article.slug)"
-                >
-                  <span>{{ article.title }}</span>
-                  <ChevronRight class="h-4 w-4 shrink-0" />
-                </button>
+                <template v-for="article in section.articles" :key="article.slug">
+                  <div v-if="articleHasModules(article)" class="space-sidebar-group">
+                    <button
+                      type="button"
+                      class="space-sidebar-link space-sidebar-toggle"
+                      :class="{
+                        'is-active': isPlatformBranchActive(article.slug),
+                        'is-expanded': isArticleExpanded(article.slug),
+                      }"
+                      @click="toggleArticleModules(article)"
+                    >
+                      <span>{{ article.title }}</span>
+                      <ChevronRight
+                        class="space-sidebar-chevron h-4 w-4 shrink-0"
+                        :class="{ 'is-expanded': isArticleExpanded(article.slug) }"
+                      />
+                    </button>
+
+                    <div v-if="isArticleExpanded(article.slug)" class="space-sidebar-children">
+                      <button
+                        v-for="module in platformModules"
+                        :key="module.slug"
+                        type="button"
+                        class="space-sidebar-sub-link"
+                        :class="{ 'is-active': activeArticle.slug === module.slug }"
+                        @click="selectArticleModule(module.slug)"
+                      >
+                        <span>{{ module.title }}</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    v-else
+                    type="button"
+                    class="space-sidebar-link"
+                    :class="{ 'is-active': article.slug === activeArticle.slug }"
+                    @click="selectArticle(article.slug)"
+                  >
+                    <span>{{ article.title }}</span>
+                    <ChevronRight class="h-4 w-4 shrink-0" />
+                  </button>
+                </template>
               </div>
             </section>
           </div>
@@ -618,6 +772,59 @@ watch(
 .space-sidebar-link:hover,
 .space-sidebar-link.is-active {
   background: rgba(255, 255, 255, 0.74);
+  color: #173042;
+  transform: translateX(2px);
+}
+
+.space-sidebar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.space-sidebar-toggle {
+  position: relative;
+}
+
+.space-sidebar-chevron {
+  transition: transform 180ms ease, color 160ms ease;
+}
+
+.space-sidebar-chevron.is-expanded {
+  transform: rotate(90deg);
+}
+
+.space-sidebar-children {
+  margin-left: 1.1rem;
+  padding: 0.2rem 0 0.15rem 0.95rem;
+  border-left: 1px solid rgba(23, 48, 66, 0.12);
+}
+
+.space-sidebar-sub-link {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0.55rem 0.7rem 0.55rem 0.95rem;
+  border-radius: 0.8rem;
+  text-align: left;
+  color: #6b8394;
+  transition: transform 160ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.space-sidebar-sub-link::before {
+  content: '';
+  position: absolute;
+  left: -0.95rem;
+  top: 50%;
+  width: 0.72rem;
+  height: 1px;
+  background: rgba(23, 48, 66, 0.12);
+  transform: translateY(-50%);
+}
+
+.space-sidebar-sub-link:hover,
+.space-sidebar-sub-link.is-active {
+  background: rgba(255, 255, 255, 0.76);
   color: #173042;
   transform: translateX(2px);
 }

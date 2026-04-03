@@ -3,7 +3,7 @@ title: 如何用 Markdown 维护这个站点
 summary: 这篇文章说明新增文章的最小格式、Frontmatter 字段和适合长期写作的组织方法。
 date: 2026-04-03
 tags: Markdown, 写作, Frontmatter
-order: 2
+order: 4
 section: guide
 ---
 

@@ -3,7 +3,7 @@ title: 平台重构蓝图
 summary: 这份文档重新定义 IonicLink 的平台主线、信息架构、核心对象和实施路线，用来把系统从功能堆叠整理为清晰的智能研究平台。
 date: 2026-04-03
 tags: 平台重构, 信息架构, 智能平台
-order: 2
+order: 3
 section: guide
 ---
 

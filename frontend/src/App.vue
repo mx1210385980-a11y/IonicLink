@@ -76,7 +76,6 @@ const {
   handleBatchUpload,
   handleChat,
   handleClearFiles,
-  handleExploreData,
   handleExtract,
   handleLiteratureView,
   handleLogin,
@@ -125,6 +124,12 @@ const activeScopeLabel = computed(() => {
 const selectedFile = computed(() => batchFiles.value.find((file) => file.id === selectedFileId.value) || null)
 const selectedFileName = computed(() => selectedFile.value?.name || t('common.no_file_selected'))
 const runStateLabel = computed(() => formatMappedLabel(String(activeExtractionRun.value?.status || 'idle'), statusLabelKeys))
+const latestFailedFile = computed(() => [...batchFiles.value].reverse().find((file) => file.status === 'error') || null)
+const latestReviewFile = computed(() => {
+  return [...batchFiles.value].reverse().find((file) => file.status === 'success' && file.hasWarnings)
+    || [...batchFiles.value].reverse().find((file) => file.status === 'success')
+    || null
+})
 
 function formatLabel(value: string) {
   return value
@@ -161,6 +166,34 @@ function bindChatPanelRef(instance: any) {
 
 function clearExplorerDoi() {
   explorerDoi.value = ''
+}
+
+function openLatestReview() {
+  if (latestReviewFile.value) {
+    selectedFileId.value = latestReviewFile.value.id
+  }
+  navigateTo('review', 'inbox')
+}
+
+async function retryLatestFailedRun() {
+  const failedFile = latestFailedFile.value
+  if (!failedFile) {
+    navigateTo('pipeline', 'runs')
+    return
+  }
+
+  selectedFileId.value = failedFile.id
+  setSidebarTab('agents')
+  navigateTo('pipeline', 'runs')
+  await handleExtract(failedFile.id, true)
+}
+
+function openReviewQueue() {
+  navigateTo('review', 'queue')
+}
+
+function openDatasetBuilder() {
+  navigateTo('knowledge', 'datasets')
 }
 </script>
 
@@ -303,14 +336,16 @@ function clearExplorerDoi() {
       <div class="flex h-full min-h-0 flex-col gap-3 px-3 pb-3 pt-3 sm:gap-4 sm:px-4 sm:pb-4">
         <HomePage
           v-if="currentView === 'home'"
-          :current-section="currentSection"
           :active-scope-label="activeScopeLabel"
-          :queue-size-label="queueSizeLabel"
           :operator-name="operatorName"
-          :scope-key="sessionState.activeScopeKey"
-          @change-section="handleSectionChange"
-          @open-review="navigateTo('review', 'inbox')"
-          @open-knowledge="handleExploreData({})"
+          :files="batchFiles"
+          :active-run="activeExtractionRun"
+          :latest-workflow="latestAgentWorkflow"
+          :preferred-training-dataset-id="preferredTrainingDatasetId"
+          @continue-review="openLatestReview"
+          @retry-failed-run="retryLatestFailedRun"
+          @open-review-queue="openReviewQueue"
+          @open-dataset-builder="openDatasetBuilder"
         />
 
         <PipelinePage
