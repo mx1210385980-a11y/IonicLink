@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {
   ArrowLeft,
   BookOpenText,
@@ -13,6 +13,7 @@ import {
   ShieldAlert,
   UserRound,
 } from 'lucide-vue-next'
+import { useRoute, useRouter } from 'vue-router'
 
 import { blogArticles, blogSections, type BlogArticle } from '@/lib/blogContent'
 
@@ -25,6 +26,8 @@ const emit = defineEmits<{
 }>()
 
 const fallbackArticle = blogArticles[0]
+const route = useRoute()
+const router = useRouter()
 
 if (!fallbackArticle) {
   throw new Error('Blog content is empty. Add markdown files under src/content.')
@@ -100,17 +103,12 @@ watch(activeArticle, async () => {
 }, { immediate: true })
 
 function resolveInitialSlug() {
-  if (typeof window === 'undefined') {
-    return initialArticle.slug
-  }
-
-  const params = new URLSearchParams(window.location.search)
-  const articleParam = params.get('article')?.trim()
+  const articleParam = typeof route.query.article === 'string' ? route.query.article.trim() : ''
   if (articleParam && blogArticles.some((article) => article.slug === articleParam)) {
     return articleParam
   }
 
-  const legacyHash = decodeURIComponent(window.location.hash.replace(/^#/, '').trim())
+  const legacyHash = decodeURIComponent(String(route.hash || '').replace(/^#/, '').trim())
   if (legacyHash && blogArticles.some((article) => article.slug === legacyHash)) {
     return legacyHash
   }
@@ -119,18 +117,14 @@ function resolveInitialSlug() {
 }
 
 function syncLocation(slug: string) {
-  if (typeof window === 'undefined') {
-    return
-  }
-
-  const nextUrl = new URL(window.location.href)
-  nextUrl.searchParams.set('view', 'blog')
-  nextUrl.searchParams.set('article', slug)
-  nextUrl.hash = ''
-
-  if (nextUrl.toString() !== window.location.href) {
-    window.history.replaceState({ article: slug }, '', nextUrl)
-  }
+  void router.replace({
+    name: 'blog',
+    query: {
+      ...route.query,
+      article: slug,
+    },
+    hash: '',
+  })
 }
 
 function selectArticle(slug: string) {
@@ -139,7 +133,7 @@ function selectArticle(slug: string) {
   articlePaneRef.value?.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
-function syncFromLocation() {
+function syncFromRoute() {
   activeSlug.value = resolveInitialSlug()
 }
 
@@ -190,13 +184,15 @@ function scrollToHeading(id: string) {
 
 onMounted(() => {
   syncLocation(activeSlug.value)
-  window.addEventListener('popstate', syncFromLocation)
   updateActiveHeading()
 })
 
-onBeforeUnmount(() => {
-  window.removeEventListener('popstate', syncFromLocation)
-})
+watch(
+  () => [route.query.article, route.hash] as const,
+  () => {
+    syncFromRoute()
+  },
+)
 </script>
 
 <template>

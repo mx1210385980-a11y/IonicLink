@@ -13,63 +13,31 @@ import {
   PieChart,
   Search,
   Server,
-  Sparkles,
   Sun,
   UserCircle2,
 } from 'lucide-vue-next'
 
-import AgentStatusPanel from '@/components/AgentStatusPanel.vue'
 import BlogView from '@/components/BlogView.vue'
-import ChatPanel from '@/components/ChatPanel.vue'
-import Dashboard from '@/components/Dashboard.vue'
-import DataCleaningWorkbench from '@/components/DataCleaningWorkbench.vue'
 import FileUpload from '@/components/FileUpload.vue'
-import GettingStarted from '@/components/GettingStarted.vue'
-import IntegratedExplorer from '@/components/IntegratedExplorer.vue'
+import ChatPanel from '@/components/ChatPanel.vue'
 import LanguageToggle from '@/components/LanguageToggle.vue'
-import LiteratureList from '@/components/LiteratureList.vue'
 import LoginScreen from '@/components/LoginScreen.vue'
-import ModelTrainingWorkbench from '@/components/ModelTrainingWorkbench.vue'
-import MonitorView from '@/components/MonitorView.vue'
-import SourceGroundingView from '@/components/SourceGroundingView.vue'
 import Button from '@/components/ui/Button.vue'
 import { useAppShell } from '@/composables/useAppShell'
 import { useI18n } from '@/composables/useI18n'
-import { blogArticles, blogSections } from '@/lib/blogContent'
+import type { AppSection, AppView } from '@/lib/platform'
+import AdminPage from '@/pages/admin/AdminPage.vue'
+import HelpPage from '@/pages/help/HelpPage.vue'
+import HomePage from '@/pages/home/HomePage.vue'
+import KnowledgePage from '@/pages/knowledge/KnowledgePage.vue'
+import ModelingPage from '@/pages/modeling/ModelingPage.vue'
+import PipelinePage from '@/pages/pipeline/PipelinePage.vue'
+import ReviewPage from '@/pages/review/ReviewPage.vue'
 
-type RoutedView =
-  | 'dashboard'
-  | 'workspace'
-  | 'cleaning'
-  | 'predict'
-  | 'monitor'
-  | 'literature'
-  | 'grounding'
-  | 'guide'
-  | 'blog'
-
-type NavView = 'guide' | 'workspace' | 'dashboard' | 'cleaning' | 'predict' | 'monitor'
+type FileUploadBridge = InstanceType<typeof FileUpload>
+type ChatPanelBridge = InstanceType<typeof ChatPanel>
 
 const ADMIN_ROLES = new Set(['principal_investigator', 'group_admin'])
-const NAV_ITEMS: Array<{
-  key: NavView
-  labelKey:
-    | 'nav.guide'
-    | 'nav.workspace'
-    | 'nav.dashboard'
-    | 'nav.cleaning'
-    | 'nav.predict'
-    | 'nav.monitor'
-  icon: Component
-  adminOnly?: boolean
-}> = [
-  { key: 'guide', labelKey: 'nav.guide', icon: BookOpen },
-  { key: 'workspace', labelKey: 'nav.workspace', icon: Search },
-  { key: 'dashboard', labelKey: 'nav.dashboard', icon: PieChart },
-  { key: 'cleaning', labelKey: 'nav.cleaning', icon: Database },
-  { key: 'predict', labelKey: 'nav.predict', icon: FlaskConical },
-  { key: 'monitor', labelKey: 'nav.monitor', icon: Server, adminOnly: true },
-]
 
 const roleLabelKeys = {
   admin: 'role.admin',
@@ -89,9 +57,9 @@ const statusLabelKeys = {
   running: 'status.running',
 } as const
 
-const fileUploadRef = ref<InstanceType<typeof FileUpload>>()
-const chatPanelRef = ref<InstanceType<typeof ChatPanel>>()
-const { t } = useI18n()
+const fileUploadRef = ref<FileUploadBridge>()
+const chatPanelRef = ref<ChatPanelBridge>()
+const { isChinese, t } = useI18n()
 
 const {
   activeExtractionFileName,
@@ -99,6 +67,7 @@ const {
   authError,
   availableScopes,
   batchFiles,
+  currentSection,
   currentView,
   explorerDoi,
   groundingHighlightData,
@@ -118,6 +87,7 @@ const {
   isChatting,
   isDark,
   latestAgentWorkflow,
+  navigateTo,
   openTrainingWorkbench,
   preferredTrainingDatasetId,
   selectedFileId,
@@ -127,189 +97,34 @@ const {
   toggleDarkMode,
 } = useAppShell(fileUploadRef, chatPanelRef)
 
-const canAccessMonitor = computed(() => ADMIN_ROLES.has(String(sessionState.user?.role || '')))
-const isBlogView = computed(() => String(currentView.value) === 'blog')
-const visibleNavItems = computed(() => {
-  return NAV_ITEMS
-    .filter((item) => !item.adminOnly || canAccessMonitor.value)
-    .map((item) => ({ ...item, label: t(item.labelKey) }))
-})
-const selectedFile = computed(() => batchFiles.value.find((file) => file.id === selectedFileId.value) || null)
+const canAccessAdmin = computed(() => ADMIN_ROLES.has(String(sessionState.user?.role || '')))
+const isBlogView = computed(() => currentView.value === 'blog')
+
+const navItems = computed<Array<{ key: AppView; label: string; icon: Component; adminOnly?: boolean }>>(() => [
+  { key: 'home', label: isChinese.value ? '首页' : 'Home', icon: PieChart },
+  { key: 'pipeline', label: isChinese.value ? 'Pipeline' : 'Pipeline', icon: Search },
+  { key: 'review', label: isChinese.value ? 'Review' : 'Review', icon: Library },
+  { key: 'knowledge', label: isChinese.value ? 'Knowledge' : 'Knowledge', icon: Database },
+  { key: 'modeling', label: isChinese.value ? 'Modeling' : 'Modeling', icon: FlaskConical },
+  { key: 'admin', label: isChinese.value ? 'Admin' : 'Admin', icon: Server, adminOnly: true },
+  { key: 'help', label: isChinese.value ? '帮助' : 'Help', icon: BookOpen },
+])
+
+const visibleNavItems = computed(() => navItems.value.filter((item) => !item.adminOnly || canAccessAdmin.value))
+
 const queueSizeLabel = computed(() => {
   const count = batchFiles.value.length
   return count === 1 ? t('common.file_count_singular', { count }) : t('common.file_count_plural', { count })
 })
+
 const operatorName = computed(() => sessionState.user?.displayName || t('common.operator_default'))
 const operatorRole = computed(() => formatMappedLabel(String(sessionState.user?.role || 'member'), roleLabelKeys))
 const activeScopeLabel = computed(() => {
   return availableScopes.value.find((scope) => scope.key === selectedScopeKey.value)?.label || t('common.no_active_scope')
 })
+const selectedFile = computed(() => batchFiles.value.find((file) => file.id === selectedFileId.value) || null)
+const selectedFileName = computed(() => selectedFile.value?.name || t('common.no_file_selected'))
 const runStateLabel = computed(() => formatMappedLabel(String(activeExtractionRun.value?.status || 'idle'), statusLabelKeys))
-const blogArticleCount = computed(() => blogArticles.length)
-const blogSectionCount = computed(() => blogSections.length)
-
-const viewMeta = computed(() => {
-  switch (currentView.value) {
-    case 'workspace':
-      return {
-        eyebrow: t('view.workspace.eyebrow'),
-        title: t('view.workspace.title'),
-        description: t('view.workspace.description'),
-        signals: [
-          { key: 'queue', label: t('signal.queue'), value: queueSizeLabel.value },
-          { key: 'selected_file', label: t('signal.selected_file'), value: selectedFile.value?.name || t('common.no_file_selected') },
-          { key: 'agent_state', label: t('signal.agent_state'), value: runStateLabel.value },
-        ],
-      }
-    case 'dashboard':
-      return {
-        eyebrow: t('view.dashboard.eyebrow'),
-        title: t('view.dashboard.title'),
-        description: t('view.dashboard.description'),
-        signals: [
-          { key: 'scope', label: t('signal.scope'), value: activeScopeLabel.value },
-          { key: 'queued_files', label: t('signal.queued_files'), value: queueSizeLabel.value },
-          { key: 'operator', label: t('signal.operator'), value: operatorName.value },
-        ],
-      }
-    case 'cleaning':
-      return {
-        eyebrow: t('view.cleaning.eyebrow'),
-        title: t('view.cleaning.title'),
-        description: t('view.cleaning.description'),
-        signals: [
-          { key: 'scope', label: t('signal.scope'), value: activeScopeLabel.value },
-          { key: 'queue', label: t('signal.queue'), value: queueSizeLabel.value },
-          { key: 'operator', label: t('signal.operator'), value: operatorName.value },
-        ],
-      }
-    case 'predict':
-      return {
-        eyebrow: t('view.predict.eyebrow'),
-        title: t('view.predict.title'),
-        description: t('view.predict.description'),
-        signals: [
-          {
-            key: 'dataset_handoff',
-            label: t('signal.dataset_handoff'),
-            value: preferredTrainingDatasetId.value !== null
-              ? t('common.dataset', { id: preferredTrainingDatasetId.value })
-              : t('common.awaiting_selection'),
-          },
-          { key: 'scope', label: t('signal.scope'), value: activeScopeLabel.value },
-          { key: 'operator', label: t('signal.operator'), value: operatorName.value },
-        ],
-      }
-    case 'monitor':
-      return {
-        eyebrow: t('view.monitor.eyebrow'),
-        title: t('view.monitor.title'),
-        description: canAccessMonitor.value
-          ? t('view.monitor.description')
-          : t('view.monitor.no_access_description'),
-        signals: [
-          { key: 'access', label: t('signal.access'), value: canAccessMonitor.value ? t('common.granted') : t('common.restricted') },
-          { key: 'scope', label: t('signal.scope'), value: activeScopeLabel.value },
-          { key: 'run_state', label: t('signal.run_state'), value: runStateLabel.value },
-        ],
-      }
-    case 'literature':
-      return {
-        eyebrow: t('view.literature.eyebrow'),
-        title: t('view.literature.title'),
-        description: t('view.literature.description'),
-        signals: [
-          { key: 'scope', label: t('signal.scope'), value: activeScopeLabel.value },
-          { key: 'queue', label: t('signal.queue'), value: queueSizeLabel.value },
-          { key: 'operator', label: t('signal.operator'), value: operatorName.value },
-        ],
-      }
-    case 'grounding':
-      return {
-        eyebrow: t('view.grounding.eyebrow'),
-        title: t('view.grounding.title'),
-        description: t('view.grounding.description'),
-        signals: [
-          { key: 'source', label: t('signal.source'), value: selectedFile.value?.name || t('common.no_file_selected') },
-          { key: 'highlights', label: t('signal.highlights'), value: `${groundingHighlightData.value.length}` },
-          { key: 'scope', label: t('signal.scope'), value: activeScopeLabel.value },
-        ],
-      }
-    case 'blog':
-      return {
-        eyebrow: t('view.blog.eyebrow'),
-        title: t('view.blog.title'),
-        description: t('view.blog.description'),
-        signals: [
-          { key: 'articles', label: t('signal.articles'), value: `${blogArticleCount.value}` },
-          { key: 'sections', label: t('signal.sections'), value: `${blogSectionCount.value}` },
-          { key: 'operator', label: t('signal.operator'), value: operatorName.value },
-        ],
-      }
-    case 'guide':
-    default:
-      return {
-        eyebrow: t('view.guide.eyebrow'),
-        title: t('view.guide.title'),
-        description: t('view.guide.description'),
-        signals: [
-          { key: 'mode', label: t('signal.mode'), value: t('common.mode_quickstart') },
-          { key: 'scope', label: t('signal.scope'), value: activeScopeLabel.value },
-          { key: 'operator', label: t('signal.operator'), value: operatorName.value },
-        ],
-      }
-  }
-})
-
-const primaryActionLabel = computed(() => {
-  switch (currentView.value) {
-    case 'guide':
-      return t('action.open_workspace')
-    case 'dashboard':
-      return t('action.explore_records')
-    case 'workspace':
-      return t('action.open_library')
-    case 'cleaning':
-      return t('action.open_model_studio')
-    case 'predict':
-      return t('action.open_cleaning')
-    case 'monitor':
-      return canAccessMonitor.value ? t('action.open_dashboard') : t('action.open_guide')
-    case 'literature':
-      return t('action.open_workspace')
-    case 'grounding':
-      return t('action.back_to_workspace')
-    case 'blog':
-      return t('action.open_workspace')
-    default:
-      return t('action.open_workspace')
-  }
-})
-
-const secondaryActionLabel = computed(() => {
-  switch (currentView.value) {
-    case 'guide':
-      return t('action.open_blog')
-    case 'dashboard':
-      return t('action.open_library')
-    case 'workspace':
-      return t('action.review_guide')
-    case 'cleaning':
-      return t('action.open_workspace')
-    case 'predict':
-      return t('action.view_dashboard')
-    case 'monitor':
-      return t('action.review_guide')
-    case 'literature':
-      return t('action.view_dashboard')
-    case 'grounding':
-      return t('action.open_library')
-    case 'blog':
-      return t('action.review_guide')
-    default:
-      return t('action.view_dashboard')
-  }
-})
 
 function formatLabel(value: string) {
   return value
@@ -324,76 +139,28 @@ function formatMappedLabel(value: string, map: Record<string, Parameters<typeof 
   return normalized && map[normalized] ? t(map[normalized]) : formatLabel(value)
 }
 
-function setView(view: RoutedView) {
-  if (view === 'predict') {
-    openTrainingWorkbench(null)
-    return
-  }
-  currentView.value = view
+function handleSectionChange(section: string) {
+  navigateTo(currentView.value, section as AppSection)
 }
 
-function handlePrimaryAction() {
-  switch (currentView.value) {
-    case 'guide':
-      setView('workspace')
-      return
-    case 'dashboard':
-      handleExploreData({})
-      return
-    case 'workspace':
-      setView('literature')
-      return
-    case 'cleaning':
-      setView('predict')
-      return
-    case 'predict':
-      setView('cleaning')
-      return
-    case 'monitor':
-      setView(canAccessMonitor.value ? 'dashboard' : 'guide')
-      return
-    case 'literature':
-      setView('workspace')
-      return
-    case 'grounding':
-      setView('workspace')
-      return
-    case 'blog':
-      setView('workspace')
-      return
-  }
+function setSidebarTab(tab: 'chat' | 'agents') {
+  sidebarTab.value = tab
 }
 
-function handleSecondaryAction() {
-  switch (currentView.value) {
-    case 'guide':
-      setView('blog')
-      return
-    case 'dashboard':
-      setView('literature')
-      return
-    case 'workspace':
-      setView('guide')
-      return
-    case 'cleaning':
-      setView('workspace')
-      return
-    case 'predict':
-      setView('dashboard')
-      return
-    case 'monitor':
-      setView('guide')
-      return
-    case 'literature':
-      setView('dashboard')
-      return
-    case 'grounding':
-      setView('literature')
-      return
-    case 'blog':
-      setView('guide')
-      return
-  }
+function setSelectedFile(fileId: string) {
+  selectedFileId.value = fileId
+}
+
+function bindFileUploadRef(instance: any) {
+  fileUploadRef.value = instance as FileUploadBridge | undefined
+}
+
+function bindChatPanelRef(instance: any) {
+  chatPanelRef.value = instance as ChatPanelBridge | undefined
+}
+
+function clearExplorerDoi() {
+  explorerDoi.value = ''
 }
 </script>
 
@@ -419,7 +186,7 @@ function handleSecondaryAction() {
   <BlogView
     v-else-if="isBlogView"
     :operator-name="operatorName"
-    @exit="setView('guide')"
+    @exit="navigateTo('help', 'content')"
   />
 
   <div v-else class="app-shell relative flex min-h-screen flex-col bg-background text-foreground">
@@ -435,12 +202,9 @@ function handleSecondaryAction() {
           <div class="flex items-start gap-4">
             <button
               type="button"
-              :title="t('action.open_blog')"
+              :title="isChinese ? '打开内容中心' : 'Open Content Center'"
               class="group flex h-14 w-14 items-center justify-center rounded-[1.4rem] border border-black/8 bg-[#0d1724] text-[#f4d18f] shadow-[0_16px_40px_-26px_rgba(15,23,42,0.95)] transition hover:-translate-y-0.5 hover:bg-[#162234] dark:border-white/10 dark:bg-[#101b29] dark:hover:bg-[#16263b]"
-              :class="isBlogView
-                ? 'ring-2 ring-[#d79d3e]/80 ring-offset-2 ring-offset-[#f6f0e7] dark:ring-offset-[#08101a]'
-                : ''"
-              @click="setView('blog')"
+              @click="navigateTo('blog', 'articles')"
             >
               <Beaker class="h-6 w-6" />
             </button>
@@ -453,9 +217,9 @@ function handleSecondaryAction() {
               <button
                 type="button"
                 class="mt-2 inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#a46a18] transition hover:text-[#7c4c0d] dark:text-[#f0c67a] dark:hover:text-[#f6d79d]"
-                @click="setView('blog')"
+                @click="navigateTo('blog', 'articles')"
               >
-                {{ t('view.blog.eyebrow') }}
+                {{ isChinese ? '内容中心' : 'Content Center' }}
                 <ArrowUpRight class="h-3.5 w-3.5" />
               </button>
             </div>
@@ -526,7 +290,7 @@ function handleSecondaryAction() {
             :class="currentView === item.key
               ? 'border-transparent bg-[#101b29] text-[#f4d18f] shadow-[0_16px_34px_-24px_rgba(15,23,42,0.9)] dark:bg-[#f4d18f] dark:text-[#111827]'
               : 'border-black/8 bg-white/72 text-slate-600 hover:bg-white hover:text-slate-900 dark:border-white/10 dark:bg-[#0d1825]/78 dark:text-slate-300 dark:hover:bg-[#132131] dark:hover:text-white'"
-            @click="setView(item.key)"
+            @click="navigateTo(item.key)"
           >
             <component :is="item.icon" class="h-4 w-4" />
             {{ item.label }}
@@ -537,163 +301,119 @@ function handleSecondaryAction() {
 
     <main class="relative z-10 flex-1 min-h-0 overflow-hidden">
       <div class="flex h-full min-h-0 flex-col gap-3 px-3 pb-3 pt-3 sm:gap-4 sm:px-4 sm:pb-4">
-        <section class="shell-surface-strong overflow-hidden px-5 py-5 sm:px-6 lg:px-7 lg:py-6">
-          <div class="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)] lg:items-end">
-            <div>
-              <div class="inline-flex items-center gap-2 rounded-full border border-[#d8c39a]/60 bg-[#f8eedb]/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.28em] text-[#9b6b17] dark:border-[#6b5221]/70 dark:bg-[#22190d]/70 dark:text-[#f1ca80]">
-                <Sparkles class="h-3.5 w-3.5" />
-                {{ viewMeta.eyebrow }}
-              </div>
-              <h2 class="mt-4 max-w-4xl text-3xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white sm:text-4xl">
-                {{ viewMeta.title }}
-              </h2>
-              <p class="mt-3 max-w-3xl text-sm leading-7 text-slate-600 dark:text-slate-300 sm:text-[15px]">
-                {{ viewMeta.description }}
-              </p>
+        <HomePage
+          v-if="currentView === 'home'"
+          :current-section="currentSection"
+          :active-scope-label="activeScopeLabel"
+          :queue-size-label="queueSizeLabel"
+          :operator-name="operatorName"
+          :scope-key="sessionState.activeScopeKey"
+          @change-section="handleSectionChange"
+          @open-review="navigateTo('review', 'inbox')"
+          @open-knowledge="handleExploreData({})"
+        />
 
-              <div class="mt-6 flex flex-wrap gap-3">
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-2 rounded-full bg-[#111827] px-5 py-3 text-sm font-semibold text-[#f7d496] transition hover:bg-[#1f2937] dark:bg-[#f1cc82] dark:text-[#111827] dark:hover:bg-[#f6d79d]"
-                  @click="handlePrimaryAction"
-                >
-                  {{ primaryActionLabel }}
-                  <ArrowUpRight class="h-4 w-4" />
-                </button>
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white/72 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-white dark:border-white/10 dark:bg-[#0e1826]/80 dark:text-slate-200 dark:hover:bg-[#132131]"
-                  @click="handleSecondaryAction"
-                >
-                  {{ secondaryActionLabel }}
-                </button>
-              </div>
-            </div>
+        <PipelinePage
+          v-else-if="currentView === 'pipeline'"
+          :current-section="currentSection"
+          :active-scope-label="activeScopeLabel"
+          :queue-size-label="queueSizeLabel"
+          :operator-name="operatorName"
+          :run-state-label="runStateLabel"
+          :selected-file-name="selectedFileName"
+          :selected-file="selectedFile"
+          :selected-file-id="selectedFileId"
+          :explorer-doi="explorerDoi"
+          :session-scope-key="sessionState.activeScopeKey"
+          :files="batchFiles"
+          :active-id="selectedFileId"
+          :bind-file-upload-ref="bindFileUploadRef"
+          :bind-chat-panel-ref="bindChatPanelRef"
+          :sidebar-tab="sidebarTab"
+          :is-chatting="isChatting"
+          :latest-agent-workflow="latestAgentWorkflow"
+          :active-run="activeExtractionRun"
+          :active-file-name="activeExtractionFileName"
+          @change-section="handleSectionChange"
+          @select-file="setSelectedFile"
+          @remove-file="handleRemoveFile"
+          @clear-files="handleClearFiles"
+          @upload="handleUpload"
+          @batch-upload="handleBatchUpload"
+          @extract="handleExtract"
+          @batch-extract="handleBatchExtract"
+          @send-chat="handleChat"
+          @update-sidebar-tab="setSidebarTab"
+          @open-review="navigateTo('review', 'inbox')"
+          @open-knowledge="navigateTo('knowledge', 'explorer')"
+          @clear-doi="clearExplorerDoi"
+        />
 
-            <div class="grid gap-4 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
-              <div
-                v-for="signal in viewMeta.signals"
-                :key="signal.key"
-                class="border-l border-black/10 pl-4 dark:border-white/10"
-              >
-                <p class="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">{{ signal.label }}</p>
-                <p class="mt-2 text-sm font-semibold leading-6 text-slate-800 dark:text-slate-100">{{ signal.value }}</p>
-              </div>
-            </div>
-          </div>
-        </section>
+        <ReviewPage
+          v-else-if="currentView === 'review'"
+          :current-section="currentSection"
+          :active-scope-label="activeScopeLabel"
+          :selected-file-name="selectedFileName"
+          :highlight-count="groundingHighlightData.length"
+          :pdf-url="groundingPdfUrl"
+          :highlight-data="groundingHighlightData"
+          :scope-key="sessionState.activeScopeKey"
+          @change-section="handleSectionChange"
+          @open-pipeline="navigateTo('pipeline', 'upload')"
+          @open-knowledge="navigateTo('knowledge', 'explorer')"
+        />
 
-        <div class="min-h-0 flex-1">
-          <div v-if="currentView === 'dashboard'" class="shell-surface h-full overflow-hidden">
-            <Dashboard :key="sessionState.activeScopeKey" @open-library="currentView = 'literature'" @explore-data="handleExploreData" />
-          </div>
+        <KnowledgePage
+          v-else-if="currentView === 'knowledge'"
+          :current-section="currentSection"
+          :active-scope-label="activeScopeLabel"
+          :operator-name="operatorName"
+          :selected-file-name="selectedFileName"
+          :explorer-doi="explorerDoi"
+          :selected-file="selectedFile"
+          :selected-file-id="selectedFileId"
+          :scope-key="sessionState.activeScopeKey"
+          @change-section="handleSectionChange"
+          @open-training="openTrainingWorkbench"
+          @open-review="handleLiteratureView"
+          @clear-doi="clearExplorerDoi"
+        />
 
-          <div v-else-if="currentView === 'cleaning'" class="shell-surface h-full overflow-hidden">
-            <DataCleaningWorkbench :key="sessionState.activeScopeKey" @open-training="openTrainingWorkbench" />
-          </div>
+        <ModelingPage
+          v-else-if="currentView === 'modeling'"
+          :current-section="currentSection"
+          :active-scope-label="activeScopeLabel"
+          :operator-name="operatorName"
+          :preferred-training-dataset-id="preferredTrainingDatasetId"
+          :scope-key="sessionState.activeScopeKey"
+          @change-section="handleSectionChange"
+          @open-knowledge="navigateTo('knowledge', 'cleaning')"
+        />
 
-          <div v-else-if="currentView === 'predict'" class="shell-surface h-full overflow-hidden">
-            <ModelTrainingWorkbench
-              :key="sessionState.activeScopeKey"
-              :preselected-cleaned-dataset-id="preferredTrainingDatasetId"
-            />
-          </div>
+        <AdminPage
+          v-else-if="currentView === 'admin'"
+          :current-section="currentSection"
+          :active-scope-label="activeScopeLabel"
+          :operator-name="operatorName"
+          :run-state-label="runStateLabel"
+          :can-access-monitor="canAccessAdmin"
+          :latest-agent-workflow="latestAgentWorkflow"
+          :active-run="activeExtractionRun"
+          :active-file-name="activeExtractionFileName"
+          @change-section="handleSectionChange"
+          @open-help="navigateTo('help', 'quick-start')"
+          @open-home="navigateTo('home', 'today')"
+        />
 
-          <div v-else-if="currentView === 'workspace'" class="flex h-full min-h-0 flex-col gap-3 overflow-auto xl:flex-row xl:overflow-hidden">
-            <aside class="shell-surface min-h-[22rem] w-full overflow-hidden xl:min-h-0 xl:w-[21rem]">
-              <FileUpload
-                ref="fileUploadRef"
-                :files="batchFiles"
-                :active-id="selectedFileId"
-                @select="(id) => selectedFileId = id"
-                @remove="handleRemoveFile"
-                @clear="handleClearFiles"
-                @upload="handleUpload"
-                @batch-upload="handleBatchUpload"
-                @extract="handleExtract"
-                @batch-extract="handleBatchExtract"
-              />
-            </aside>
-
-            <main class="shell-surface min-h-[32rem] min-w-0 flex-1 overflow-hidden xl:min-h-0">
-              <IntegratedExplorer
-                :key="sessionState.activeScopeKey"
-                :initial-doi="explorerDoi"
-                :selected-file-id="selectedFileId"
-                :source-name="selectedFile?.name"
-                :literature-metadata="selectedFile?.metadata"
-                @view-literature="handleLiteratureView"
-                @clear-doi="explorerDoi = ''"
-              />
-            </main>
-
-            <aside class="shell-surface min-h-[24rem] w-full overflow-hidden xl:min-h-0 xl:w-[24rem]">
-              <div class="border-b border-black/8 p-2 dark:border-white/10">
-                <div class="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    class="rounded-full px-3 py-2 text-sm font-semibold transition"
-                    :class="sidebarTab === 'chat'
-                      ? 'bg-[#101b29] text-[#f4d18f] shadow-[0_14px_28px_-20px_rgba(15,23,42,0.9)] dark:bg-[#f4d18f] dark:text-[#111827]'
-                      : 'bg-transparent text-slate-500 hover:bg-black/[0.04] hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/[0.05] dark:hover:text-slate-100'"
-                    @click="sidebarTab = 'chat'"
-                  >
-                    {{ t('common.ai_assistant') }}
-                  </button>
-                  <button
-                    type="button"
-                    class="rounded-full px-3 py-2 text-sm font-semibold transition"
-                    :class="sidebarTab === 'agents'
-                      ? 'bg-[#101b29] text-[#f4d18f] shadow-[0_14px_28px_-20px_rgba(15,23,42,0.9)] dark:bg-[#f4d18f] dark:text-[#111827]'
-                      : 'bg-transparent text-slate-500 hover:bg-black/[0.04] hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/[0.05] dark:hover:text-slate-100'"
-                    @click="sidebarTab = 'agents'"
-                  >
-                    {{ t('common.coordination') }}
-                  </button>
-                </div>
-              </div>
-
-              <div class="relative min-h-0 flex-1 bg-white/35 dark:bg-[#050c14]/60">
-                <ChatPanel
-                  v-show="sidebarTab === 'chat'"
-                  ref="chatPanelRef"
-                  class="absolute inset-0"
-                  :loading="isChatting"
-                  @send="handleChat"
-                />
-                <AgentStatusPanel
-                  v-show="sidebarTab === 'agents'"
-                  class="absolute inset-0"
-                  :workflow="latestAgentWorkflow"
-                  :active-run="activeExtractionRun"
-                  :active-file-name="activeExtractionFileName"
-                />
-              </div>
-            </aside>
-          </div>
-
-          <div v-else-if="currentView === 'monitor'" class="shell-surface h-full overflow-hidden">
-            <MonitorView
-              v-if="canAccessMonitor"
-              :workflow="latestAgentWorkflow"
-              :active-run="activeExtractionRun"
-              :active-file-name="activeExtractionFileName"
-            />
-            <GettingStarted v-else />
-          </div>
-
-          <div v-else-if="currentView === 'literature'" class="shell-surface h-full overflow-hidden">
-            <LiteratureList :key="sessionState.activeScopeKey" />
-          </div>
-
-          <div v-else-if="currentView === 'grounding'" class="shell-surface h-full overflow-hidden">
-            <SourceGroundingView :pdf-url="groundingPdfUrl" :highlight-data="groundingHighlightData" />
-          </div>
-
-          <div v-else class="shell-surface h-full overflow-hidden">
-            <GettingStarted />
-          </div>
-        </div>
+        <HelpPage
+          v-else
+          :current-section="currentSection"
+          :active-scope-label="activeScopeLabel"
+          :operator-name="operatorName"
+          @change-section="handleSectionChange"
+          @open-pipeline="navigateTo('pipeline', 'upload')"
+          @open-blog="navigateTo('blog', 'articles')"
+        />
       </div>
     </main>
   </div>

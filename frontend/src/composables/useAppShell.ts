@@ -1,4 +1,5 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import {
   chat,
@@ -24,10 +25,15 @@ import {
   setCurrentUser,
   setSession,
 } from '@/lib/session'
+import {
+  DEFAULT_SECTION_BY_VIEW,
+  normalizeSection,
+  resolveRoute,
+  type AppSection,
+  type AppView,
+} from '@/lib/platform'
 import { useI18n } from '@/composables/useI18n'
 import type { HighlightRect } from '@/types/pdf-highlight'
-
-type AppView = 'dashboard' | 'workspace' | 'cleaning' | 'predict' | 'monitor' | 'literature' | 'grounding' | 'guide' | 'mentor' | 'blog'
 type SidebarTab = 'chat' | 'agents'
 
 type FileUploadBridge = {
@@ -48,7 +54,10 @@ export function useAppShell(
   chatPanelRef: Ref<ChatPanelBridge | undefined>,
 ) {
   const { t } = useI18n()
-  const currentView = ref<AppView>('guide')
+  const route = useRoute()
+  const router = useRouter()
+  const currentView = ref<AppView>('home')
+  const currentSection = ref<AppSection>(DEFAULT_SECTION_BY_VIEW.home)
   const sidebarTab = ref<SidebarTab>('chat')
   const isDark = ref(false)
 
@@ -84,60 +93,30 @@ export function useAppShell(
     return `/api/pdf/${selectedFileId.value}`
   })
 
-  function resolveViewFromUrl(): AppView | null {
-    const params = new URLSearchParams(window.location.search)
-    if (params.get('article')) {
-      return 'blog'
-    }
-    const view = params.get('view')
-    if (
-      view === 'dashboard'
-      || view === 'workspace'
-      || view === 'cleaning'
-      || view === 'predict'
-      || view === 'monitor'
-      || view === 'mentor'
-      || view === 'literature'
-      || view === 'grounding'
-      || view === 'guide'
-      || view === 'blog'
-    ) {
-      return view
-    }
-    return null
+  function syncStateFromRoute() {
+    const resolved = resolveRoute(
+      typeof route.name === 'string' ? route.name : undefined,
+      typeof route.params.section === 'string' ? route.params.section : undefined,
+    )
+    currentView.value = resolved.view
+    currentSection.value = resolved.section
   }
 
-  function restoreViewFromUrl() {
-    const resolvedView = resolveViewFromUrl()
-    if (resolvedView) {
-      currentView.value = resolvedView
+  function navigateTo(view: AppView, section?: AppSection) {
+    const normalizedSection = normalizeSection(view, section)
+    const target = {
+      name: view,
+      params: normalizedSection === DEFAULT_SECTION_BY_VIEW[view]
+        ? {}
+        : { section: normalizedSection },
+      query: view === 'blog' ? route.query : {},
     }
-  }
-
-  function syncViewToUrl(view: AppView) {
-    if (typeof window === 'undefined') {
-      return
-    }
-
-    const nextUrl = new URL(window.location.href)
-    if (view === 'guide') {
-      nextUrl.searchParams.delete('view')
-    } else {
-      nextUrl.searchParams.set('view', view)
-    }
-
-    if (view !== 'blog') {
-      nextUrl.searchParams.delete('article')
-    }
-
-    if (nextUrl.toString() !== window.location.href) {
-      window.history.replaceState({ view }, '', nextUrl)
-    }
+    void router.push(target)
   }
 
   let extractionPollTimer: ReturnType<typeof setInterval> | null = null
 
-  watch([() => selectedFileId.value, () => currentView.value], async ([fileId, view]) => {
+  watch([() => selectedFileId.value, () => currentView.value, () => currentSection.value], async ([fileId, view, section]) => {
     if (!fileId) {
       explorerDoi.value = ''
       return
@@ -152,7 +131,7 @@ export function useAppShell(
       explorerDoi.value = ''
     }
 
-    if (view !== 'grounding') {
+    if (view !== 'review' || section !== 'grounding') {
       groundingHighlightData.value = []
       return
     }
@@ -207,7 +186,7 @@ export function useAppShell(
 
   function openTrainingWorkbench(datasetId: number | null = null) {
     preferredTrainingDatasetId.value = datasetId
-    currentView.value = 'predict'
+    navigateTo('modeling', 'training')
   }
 
   async function initializeSession() {
@@ -240,7 +219,6 @@ export function useAppShell(
       const response = await login(credentials.username, credentials.password)
       setSession(response.accessToken, response.user)
       resetWorkspaceSessionState()
-      currentView.value = resolveViewFromUrl() || 'guide'
     } catch (error: any) {
       authError.value = error?.response?.data?.detail || error?.message || t('auth.sign_in_failed')
     } finally {
@@ -573,7 +551,7 @@ export function useAppShell(
         }
       }
 
-      currentView.value = 'workspace'
+      navigateTo('knowledge', 'explorer')
       if (metadataToSync.doi) {
         explorerDoi.value = metadataToSync.doi
       }
@@ -878,7 +856,7 @@ export function useAppShell(
 
     await Promise.all(Array.from({ length: concurrency }, () => worker()))
 
-    currentView.value = 'workspace'
+    navigateTo('knowledge', 'explorer')
     chatPanelRef.value?.addMessage(
       'assistant',
       t('chat.batch_complete', { success: successCount, fail: failCount, total: totalRecords }),
@@ -907,11 +885,11 @@ export function useAppShell(
 
   function handleLiteratureView() {
     console.log('[App] Switching to literature view')
-    currentView.value = 'literature'
+    navigateTo('review', 'inbox')
   }
 
   onMounted(() => {
-    restoreViewFromUrl()
+    syncStateFromRoute()
     const storedTheme = window.localStorage.getItem(DARK_MODE_STORAGE_KEY)
     if (storedTheme === 'dark') {
       isDark.value = true
@@ -940,21 +918,20 @@ export function useAppShell(
     },
   )
 
-  watch(currentView, (view) => {
-    syncViewToUrl(view)
-  })
+  watch(
+    () => [route.name, route.params.section] as const,
+    () => {
+      syncStateFromRoute()
+    },
+    { immediate: true },
+  )
 
   onBeforeUnmount(() => {
     clearExtractionPolling()
   })
 
-  // Navigate to workspace with dashboard filters applied
   function handleExploreData(_queryParams: Record<string, string>) {
-    // Store query params for the workspace to pick up
-    // The filters are managed by useDashboardFilters composable (shared state)
-    // We just need to switch the view
-    currentView.value = 'workspace'
-    // Clear file selection to show all data
+    navigateTo('knowledge', 'explorer')
     selectedFileId.value = null
   }
 
@@ -962,6 +939,7 @@ export function useAppShell(
     authError,
     availableScopes,
     batchFiles,
+    currentSection,
     currentView,
     explorerDoi,
     groundingHighlightData,
@@ -981,6 +959,7 @@ export function useAppShell(
     isChatting,
     isDark,
     latestAgentWorkflow,
+    navigateTo,
     openTrainingWorkbench,
     preferredTrainingDatasetId,
     selectedFileId,
