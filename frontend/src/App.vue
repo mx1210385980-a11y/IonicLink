@@ -23,6 +23,8 @@ if (!fallbackArticle) {
   throw new Error('Blog content is empty. Add markdown files under src/content.')
 }
 
+const initialArticle: BlogArticle = fallbackArticle
+
 const searchInput = ref<HTMLInputElement | null>(null)
 const mobileMenuOpen = ref(false)
 const searchQuery = ref('')
@@ -66,7 +68,7 @@ const activeArticle = computed<BlogArticle>(() => {
     return current
   }
 
-  return visibleArticles.value[0] ?? fallbackArticle
+  return visibleArticles.value[0] ?? initialArticle
 })
 
 const relatedArticles = computed(() => {
@@ -96,11 +98,21 @@ watch(activeArticle, async () => {
 
 function resolveInitialSlug() {
   if (typeof window === 'undefined') {
-    return blogArticles[0]?.slug ?? ''
+    return initialArticle.slug
   }
 
-  const hash = decodeURIComponent(window.location.hash.replace(/^#/, '').trim())
-  return blogArticles.some((article) => article.slug === hash) ? hash : (blogArticles[0]?.slug ?? '')
+  const params = new URLSearchParams(window.location.search)
+  const articleParam = params.get('article')?.trim()
+  if (articleParam && blogArticles.some((article) => article.slug === articleParam)) {
+    return articleParam
+  }
+
+  const legacyHash = decodeURIComponent(window.location.hash.replace(/^#/, '').trim())
+  if (legacyHash && blogArticles.some((article) => article.slug === legacyHash)) {
+    return legacyHash
+  }
+
+  return initialArticle.slug
 }
 
 function selectArticle(slug: string) {
@@ -108,15 +120,17 @@ function selectArticle(slug: string) {
   mobileMenuOpen.value = false
 
   if (typeof window !== 'undefined') {
-    const nextHash = `#${encodeURIComponent(slug)}`
-    if (window.location.hash !== nextHash) {
-      window.history.replaceState(null, '', nextHash)
+    const nextUrl = new URL(window.location.href)
+    nextUrl.searchParams.set('article', slug)
+    nextUrl.hash = ''
+    if (nextUrl.toString() !== window.location.href) {
+      window.history.pushState({ article: slug }, '', nextUrl)
     }
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 }
 
-function syncFromHash() {
+function syncFromLocation() {
   const slug = resolveInitialSlug()
   if (slug) {
     activeSlug.value = slug
@@ -175,16 +189,16 @@ function updateActiveHeading() {
 }
 
 onMounted(() => {
-  syncFromHash()
+  syncFromLocation()
   heroReady.value = true
-  window.addEventListener('hashchange', syncFromHash)
+  window.addEventListener('popstate', syncFromLocation)
   window.addEventListener('keydown', handleKeydown)
   window.addEventListener('scroll', handleScroll, { passive: true })
   updateActiveHeading()
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('hashchange', syncFromHash)
+  window.removeEventListener('popstate', syncFromLocation)
   window.removeEventListener('keydown', handleKeydown)
   window.removeEventListener('scroll', handleScroll)
 })
