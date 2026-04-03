@@ -27,7 +27,7 @@ import {
 import { useI18n } from '@/composables/useI18n'
 import type { HighlightRect } from '@/types/pdf-highlight'
 
-type AppView = 'dashboard' | 'workspace' | 'cleaning' | 'predict' | 'monitor' | 'literature' | 'grounding' | 'guide' | 'mentor'
+type AppView = 'dashboard' | 'workspace' | 'cleaning' | 'predict' | 'monitor' | 'literature' | 'grounding' | 'guide' | 'mentor' | 'blog'
 type SidebarTab = 'chat' | 'agents'
 
 type FileUploadBridge = {
@@ -84,8 +84,11 @@ export function useAppShell(
     return `/api/pdf/${selectedFileId.value}`
   })
 
-  function restoreViewFromUrl() {
+  function resolveViewFromUrl(): AppView | null {
     const params = new URLSearchParams(window.location.search)
+    if (params.get('article')) {
+      return 'blog'
+    }
     const view = params.get('view')
     if (
       view === 'dashboard'
@@ -97,8 +100,38 @@ export function useAppShell(
       || view === 'literature'
       || view === 'grounding'
       || view === 'guide'
+      || view === 'blog'
     ) {
-      currentView.value = view
+      return view
+    }
+    return null
+  }
+
+  function restoreViewFromUrl() {
+    const resolvedView = resolveViewFromUrl()
+    if (resolvedView) {
+      currentView.value = resolvedView
+    }
+  }
+
+  function syncViewToUrl(view: AppView) {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const nextUrl = new URL(window.location.href)
+    if (view === 'guide') {
+      nextUrl.searchParams.delete('view')
+    } else {
+      nextUrl.searchParams.set('view', view)
+    }
+
+    if (view !== 'blog') {
+      nextUrl.searchParams.delete('article')
+    }
+
+    if (nextUrl.toString() !== window.location.href) {
+      window.history.replaceState({ view }, '', nextUrl)
     }
   }
 
@@ -207,7 +240,7 @@ export function useAppShell(
       const response = await login(credentials.username, credentials.password)
       setSession(response.accessToken, response.user)
       resetWorkspaceSessionState()
-      currentView.value = 'guide'
+      currentView.value = resolveViewFromUrl() || 'guide'
     } catch (error: any) {
       authError.value = error?.response?.data?.detail || error?.message || t('auth.sign_in_failed')
     } finally {
@@ -906,6 +939,10 @@ export function useAppShell(
       resetWorkspaceSessionState()
     },
   )
+
+  watch(currentView, (view) => {
+    syncViewToUrl(view)
+  })
 
   onBeforeUnmount(() => {
     clearExtractionPolling()
