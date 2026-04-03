@@ -47,3 +47,33 @@ def test_sync_thickness_normalizer_drops_non_quantitative_labels():
     assert _normalize_quantitative_thickness("(EMIM FAP)") is None
     assert _normalize_quantitative_thickness("P4,4,4,1 TFSI") is None
     assert _normalize_quantitative_thickness("0.7 nm") == "0.7 nm"
+
+
+def test_normalize_record_chemistry_can_recover_lubricant_from_evidence_text():
+    records = [
+        {
+            "ionic_liquid": "[P6,6,6,14][TFSI]",
+            "lubricant": "[P6,6,6,14][TFSI]",
+            "evidence": "Table 2 lists friction coefficient μ for various conditions. The value for P6,6,6,14 (iC8)2PO2 is 0.40, with errors ±0.10.",
+        }
+    ]
+
+    _normalize_record_chemistry(records)
+
+    assert records[0]["ionic_liquid"] == "[P6,6,6,14][(iC8)2PO2]"
+    assert records[0]["lubricant"] == "[P6,6,6,14][(iC8)2PO2]"
+
+
+def test_normalize_record_chemistry_does_not_replace_with_unparsed_sentence():
+    records = [
+        {
+            "ionic_liquid": "[HMIM][I]",
+            "lubricant": "[HMIM][I]",
+            "evidence": "Table 2 lists friction coefficient μ for various conditions.",
+        }
+    ]
+
+    _normalize_record_chemistry(records)
+
+    assert records[0]["ionic_liquid"] == "[HMIM][I]"
+    assert records[0]["lubricant"] == "[HMIM][I]"

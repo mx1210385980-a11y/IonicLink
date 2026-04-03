@@ -1,752 +1,378 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Beaker, Database, FlaskConical, Github, Moon, Sun, PieChart, Search, Server, BookOpen, Library, LogOut, UserCircle2 } from 'lucide-vue-next'
-import FileUpload from '@/components/FileUpload.vue'
-import ChatPanel from '@/components/ChatPanel.vue'
+import { computed, ref, type Component } from 'vue'
+import {
+  ArrowUpRight,
+  Beaker,
+  BookOpen,
+  Database,
+  FlaskConical,
+  Github,
+  Library,
+  LogOut,
+  Moon,
+  PieChart,
+  Search,
+  Server,
+  Sparkles,
+  Sun,
+  UserCircle2,
+} from 'lucide-vue-next'
+
 import AgentStatusPanel from '@/components/AgentStatusPanel.vue'
-import IntegratedExplorer from '@/components/IntegratedExplorer.vue'
+import ChatPanel from '@/components/ChatPanel.vue'
 import Dashboard from '@/components/Dashboard.vue'
 import DataCleaningWorkbench from '@/components/DataCleaningWorkbench.vue'
+import FileUpload from '@/components/FileUpload.vue'
+import GettingStarted from '@/components/GettingStarted.vue'
+import IntegratedExplorer from '@/components/IntegratedExplorer.vue'
+import LanguageToggle from '@/components/LanguageToggle.vue'
+import LiteratureList from '@/components/LiteratureList.vue'
+import LoginScreen from '@/components/LoginScreen.vue'
 import ModelTrainingWorkbench from '@/components/ModelTrainingWorkbench.vue'
 import MonitorView from '@/components/MonitorView.vue'
-import LiteratureList from '@/components/LiteratureList.vue'
 import SourceGroundingView from '@/components/SourceGroundingView.vue'
-import GettingStarted from '@/components/GettingStarted.vue'
-import LoginScreen from '@/components/LoginScreen.vue'
 import Button from '@/components/ui/Button.vue'
-import {
-  chat,
-  extractData,
-  getLatestExtractionRun,
-  getCurrentUser,
-  getPdfHighlights,
-  login,
-  syncBatchData,
-  uploadFile,
-  type AgentWorkflow,
-  type BatchFile,
-  type ExtractionResponse,
-  type ExtractionRunDetail,
-  type TribologyData,
-} from '@/lib/api'
-import {
-  clearSession,
-  getActiveScope,
-  markSessionReady,
-  sessionState,
-  setActiveScope,
-  setCurrentUser,
-  setSession,
-} from '@/lib/session'
-import type { HighlightRect } from '@/types/pdf-highlight'
+import { useAppShell } from '@/composables/useAppShell'
+import { useI18n } from '@/composables/useI18n'
 
-const currentView = ref<'dashboard' | 'workspace' | 'cleaning' | 'predict' | 'monitor' | 'literature' | 'grounding' | 'guide'>('guide')
-const sidebarTab = ref<'chat' | 'agents'>('chat')
-const isDark = ref(false)
+type RoutedView =
+  | 'dashboard'
+  | 'workspace'
+  | 'cleaning'
+  | 'predict'
+  | 'monitor'
+  | 'literature'
+  | 'grounding'
+  | 'guide'
+
+type NavView = 'guide' | 'workspace' | 'dashboard' | 'cleaning' | 'predict' | 'monitor'
+
+const ADMIN_ROLES = new Set(['principal_investigator', 'group_admin'])
+const NAV_ITEMS: Array<{
+  key: NavView
+  labelKey: 'nav.guide' | 'nav.workspace' | 'nav.dashboard' | 'nav.cleaning' | 'nav.predict' | 'nav.monitor'
+  icon: Component
+  adminOnly?: boolean
+}> = [
+  { key: 'guide', labelKey: 'nav.guide', icon: BookOpen },
+  { key: 'workspace', labelKey: 'nav.workspace', icon: Search },
+  { key: 'dashboard', labelKey: 'nav.dashboard', icon: PieChart },
+  { key: 'cleaning', labelKey: 'nav.cleaning', icon: Database },
+  { key: 'predict', labelKey: 'nav.predict', icon: FlaskConical },
+  { key: 'monitor', labelKey: 'nav.monitor', icon: Server, adminOnly: true },
+]
+
+const roleLabelKeys = {
+  admin: 'role.admin',
+  group_admin: 'role.group_admin',
+  member: 'role.member',
+  principal_investigator: 'role.principal_investigator',
+  viewer: 'role.viewer',
+} as const
+
+const statusLabelKeys = {
+  cancelled: 'status.cancelled',
+  completed: 'status.completed',
+  error: 'status.error',
+  failed: 'status.failed',
+  idle: 'status.idle',
+  processing: 'status.processing',
+  running: 'status.running',
+} as const
 
 const fileUploadRef = ref<InstanceType<typeof FileUpload>>()
 const chatPanelRef = ref<InstanceType<typeof ChatPanel>>()
+const { t } = useI18n()
 
-const batchFiles = ref<BatchFile[]>([])
-const selectedFileId = ref<string | null>(null)
-const explorerDoi = ref('')
-const latestAgentWorkflow = ref<AgentWorkflow | null>(null)
-const activeExtractionFileId = ref<string | null>(null)
-const activeExtractionRun = ref<ExtractionRunDetail | null>(null)
-const preferredTrainingDatasetId = ref<number | null>(null)
-const isChatting = ref(false)
-const isAuthenticating = ref(false)
-const authError = ref('')
-
-const activeScope = computed(() => getActiveScope())
-const availableScopes = computed(() => sessionState.user?.availableScopes || [])
-const selectedScopeKey = computed({
-  get: () => activeScope.value?.key || '',
-  set: (scopeKey: string) => {
-    const scope = availableScopes.value.find((item) => item.key === scopeKey) || null
-    setActiveScope(scope)
-  },
-})
-
-const activeExtractionFileName = computed(() => {
-  if (!activeExtractionFileId.value) return null
-  return batchFiles.value.find((file) => file.id === activeExtractionFileId.value)?.name || null
-})
-
-const groundingPdfUrl = computed(() => {
-  if (!selectedFileId.value) return ''
-  return `/api/pdf/${selectedFileId.value}`
-})
-
-const groundingHighlightData = ref<HighlightRect[]>([])
-let extractionPollTimer: ReturnType<typeof setInterval> | null = null
-
-const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'error', 'cancelled'])
-const DARK_MODE_STORAGE_KEY = 'ioniclink-theme'
-
-watch([() => selectedFileId.value, () => currentView.value], async ([fileId, view]) => {
-  if (!fileId) {
-    explorerDoi.value = ''
-    return
-  }
-
-  const batchFile = batchFiles.value.find((file) => file.id === fileId)
-  if (batchFile?.metadata?.doi) {
-    explorerDoi.value = batchFile.metadata.doi
-  } else if (batchFile?.status === 'success') {
-    explorerDoi.value = `temp-${fileId}`
-  }
-
-  if (view !== 'grounding') {
-    groundingHighlightData.value = []
-    return
-  }
-
-  try {
-    const highlights = await getPdfHighlights(fileId)
-    groundingHighlightData.value = highlights
-      .filter((highlight) => highlight.w > 0 && highlight.h > 0)
-      .map((highlight) => ({
-        id: highlight.id,
-        page: highlight.page,
-        coords: { x: highlight.x, y: highlight.y, w: highlight.w, h: highlight.h },
-      }))
-    console.log(`[Grounding] Loaded ${groundingHighlightData.value.length} highlights`)
-  } catch (error) {
-    console.warn('[Grounding] Failed to fetch highlights:', error)
-    groundingHighlightData.value = []
-  }
-})
-
-function hasWarnings(records: TribologyData[]): boolean {
-  return records.some((record) => !record.cof || record.cof === '-' || record.cof === 'null')
-}
-
-function toggleDarkMode() {
-  isDark.value = !isDark.value
-}
-
-function resetWorkspaceSessionState() {
-  batchFiles.value = []
-  selectedFileId.value = null
-  explorerDoi.value = ''
-  latestAgentWorkflow.value = null
-  preferredTrainingDatasetId.value = null
-  resetExtractionState()
-}
-
-function openTrainingWorkbench(datasetId: number | null = null) {
-  preferredTrainingDatasetId.value = datasetId
-  currentView.value = 'predict'
-}
-
-async function initializeSession() {
-  if (!sessionState.token) {
-    markSessionReady()
-    return
-  }
-
-  try {
-    const user = await getCurrentUser()
-    setCurrentUser(user)
-  } catch (error) {
-    console.warn('[Auth] Session restore failed:', error)
-    clearSession()
-    authError.value = '登录状态已失效，请重新登录。'
-  } finally {
-    markSessionReady()
-  }
-}
-
-async function handleLogin(credentials: { username: string; password: string }) {
-  try {
-    isAuthenticating.value = true
-    authError.value = ''
-    const response = await login(credentials.username, credentials.password)
-    setSession(response.accessToken, response.user)
-    resetWorkspaceSessionState()
-    currentView.value = 'guide'
-  } catch (error: any) {
-    authError.value = error?.response?.data?.detail || error?.message || '登录失败'
-  } finally {
-    isAuthenticating.value = false
-  }
-}
-
-function handleLogout() {
-  clearSession()
-  authError.value = ''
-  resetWorkspaceSessionState()
-}
-
-onMounted(() => {
-  const storedTheme = window.localStorage.getItem(DARK_MODE_STORAGE_KEY)
-  if (storedTheme === 'dark') {
-    isDark.value = true
-  } else if (storedTheme === 'light') {
-    isDark.value = false
-  } else {
-    isDark.value = false
-  }
-  void initializeSession()
-})
-
-watch(
+const {
+  activeExtractionFileName,
+  activeExtractionRun,
+  authError,
+  availableScopes,
+  batchFiles,
+  currentView,
+  explorerDoi,
+  groundingHighlightData,
+  groundingPdfUrl,
+  handleBatchExtract,
+  handleBatchUpload,
+  handleChat,
+  handleClearFiles,
+  handleExploreData,
+  handleExtract,
+  handleLiteratureView,
+  handleLogin,
+  handleLogout,
+  handleRemoveFile,
+  handleUpload,
+  isAuthenticating,
+  isChatting,
   isDark,
-  (enabled) => {
-    document.documentElement.classList.toggle('dark', enabled)
-    window.localStorage.setItem(DARK_MODE_STORAGE_KEY, enabled ? 'dark' : 'light')
-  },
-  { immediate: true }
-)
-
-watch(
-  () => sessionState.activeScopeKey,
-  (nextScopeKey, previousScopeKey) => {
-    if (!nextScopeKey || nextScopeKey === previousScopeKey) return
-    resetWorkspaceSessionState()
-  },
-)
-
-function findBatchFile(fileId: string) {
-  return batchFiles.value.find((file) => file.id === fileId)
-}
-
-function clearExtractionPolling() {
-  if (extractionPollTimer) {
-    clearInterval(extractionPollTimer)
-    extractionPollTimer = null
-  }
-}
-
-function resetExtractionState(fileId?: string | null) {
-  if (!fileId || activeExtractionFileId.value === fileId) {
-    clearExtractionPolling()
-    activeExtractionFileId.value = null
-    activeExtractionRun.value = null
-  }
-}
-
-function isTerminalRunStatus(status?: string | null): boolean {
-  return TERMINAL_RUN_STATUSES.has(String(status || '').toLowerCase())
-}
-
-function formatStageLabel(stage?: string | null): string {
-  const normalized = String(stage || '').trim().toLowerCase()
-  if (!normalized) return 'Queued'
-  if (normalized.startsWith('stage_a')) return 'Profiling document'
-  if (normalized.startsWith('stage_b')) return 'Resolving abbreviations'
-  if (normalized.startsWith('stage_c.figure_retry')) return 'Retrying figure extraction'
-  if (normalized.startsWith('stage_c.figure')) return 'Reading figures and tables'
-  if (normalized.startsWith('stage_c.text')) return 'Mining text candidates'
-  if (normalized.startsWith('fallback_table')) return 'Recovering table data'
-  if (normalized.startsWith('stage_d')) return 'Validating candidates'
-  if (normalized.startsWith('stage_e')) return 'Finalizing records'
-  return String(stage || '').replace(/[_\.]+/g, ' ')
-}
-
-function mapStageToProgress(stage?: string | null, status?: string | null): number {
-  if (String(status || '').toLowerCase() === 'completed') return 100
-
-  const normalized = String(stage || '').trim().toLowerCase()
-  if (!normalized) return 8
-  if (normalized.startsWith('stage_a')) return 14
-  if (normalized.startsWith('stage_b')) return 24
-  if (normalized.startsWith('stage_c.figure_retry')) return 50
-  if (normalized.startsWith('stage_c.figure')) return 44
-  if (normalized.startsWith('stage_c.text')) return 62
-  if (normalized.startsWith('fallback_table')) return 74
-  if (normalized.startsWith('stage_d')) return 82
-  if (normalized.startsWith('stage_e')) return 94
-  return 18
-}
-
-function getRunSnapshot(run?: ExtractionRunDetail | null) {
-  const progressLog = run?.progress_log || []
-  const lastEntry = progressLog[progressLog.length - 1]
-  const summary = run?.summary || {}
-  const stage = String(summary.current_stage || lastEntry?.stage || '')
-  const message = String(summary.current_message || lastEntry?.message || '')
-  let progress = mapStageToProgress(stage, run?.status)
-
-  if (run?.candidate_count && progress < 48) {
-    progress = 48
-  }
-  if (run?.final_count && progress < 94 && !isTerminalRunStatus(run?.status)) {
-    progress = 94
-  }
-
-  return {
-    stage,
-    message: message || formatStageLabel(stage),
-    progress,
-  }
-}
-
-function setFileProcessing(batchFile: BatchFile | undefined, progress: number, message: string) {
-  if (!batchFile) return
-  batchFile.status = 'processing'
-  batchFile.progress = Math.min(96, Math.max(batchFile.progress || 0, progress))
-  batchFile.progressMessage = message
-  batchFile.errorMessage = undefined
-}
-
-function setFileError(batchFile: BatchFile | undefined, message: string) {
-  if (!batchFile) return
-  batchFile.status = 'error'
-  batchFile.progress = 0
-  batchFile.progressMessage = 'Needs review'
-  batchFile.errorMessage = message
-}
-
-function setFileSuccess(batchFile: BatchFile | undefined, message: string) {
-  if (!batchFile) return
-  batchFile.status = 'success'
-  batchFile.progress = 100
-  batchFile.progressMessage = message
-  batchFile.errorMessage = undefined
-}
-
-function normalizeExtractionPayload(fileId: string, response: ExtractionResponse) {
-  const metadata = (response.metadata || undefined) as BatchFile['metadata']
-  const rawRecords = Array.isArray(response.data) ? response.data : []
-  const records = rawRecords.map((record: any, index: number) => ({
-    ...record,
-    id: record.id || `${fileId}-${index}-${Date.now()}`,
-    fileId,
-  }))
-
-  return {
-    metadata,
-    records,
-  }
-}
-
-function syncActiveRunFromResponse(
-  fileId: string,
-  response: ExtractionResponse,
-  finalRecordCount: number,
-  forcedStatus?: 'running' | 'completed' | 'failed',
-) {
-  const summary: any = response.extraction_summary || {}
-  const existing = activeExtractionRun.value
-  const inferredStatus =
-    forcedStatus ||
-    (response.status === 'processing'
-      ? 'running'
-      : response.success
-        ? 'completed'
-        : 'failed')
-
-  const progressLog = [...((summary.progress_log as ExtractionRunDetail['progress_log']) || existing?.progress_log || [])]
-  if (inferredStatus === 'completed') {
-    const finalMessage = finalRecordCount
-      ? `Saved ${finalRecordCount} extracted records`
-      : 'Extraction finished without usable records'
-    const lastEntry = progressLog[progressLog.length - 1]
-    if (!lastEntry || lastEntry.stage !== 'stage_e.finalize' || lastEntry.message !== finalMessage) {
-      progressLog.push({ stage: 'stage_e.finalize', message: finalMessage })
-    }
-  }
-
-  activeExtractionRun.value = {
-    run_id: String(summary.run_id || existing?.run_id || `${fileId}-local`),
-    literature_id: Number(fileId) || existing?.literature_id || 0,
-    profile: existing?.profile || 'high_accuracy',
-    status: inferredStatus,
-    candidate_count: Number(summary.candidate_count ?? existing?.candidate_count ?? finalRecordCount ?? 0),
-    final_count: Number(summary.final_count ?? (inferredStatus === 'completed' ? finalRecordCount : existing?.final_count ?? 0)),
-    dropped_by_reason: summary.dropped_by_reason || existing?.dropped_by_reason || {},
-    page_coverage: summary.page_coverage || existing?.page_coverage || {},
-    page_candidate_counts: summary.page_candidate_counts || existing?.page_candidate_counts || {},
-    progress_log: progressLog,
-    summary: {
-      ...(existing?.summary || {}),
-      ...(summary || {}),
-      current_stage:
-        inferredStatus === 'completed'
-          ? 'stage_e.finalize'
-          : summary.current_stage || existing?.summary?.current_stage,
-      current_message:
-        inferredStatus === 'completed'
-          ? (finalRecordCount ? `Saved ${finalRecordCount} extracted records` : 'Extraction finished without usable records')
-          : summary.current_message || existing?.summary?.current_message,
-    },
-    error_message: inferredStatus === 'failed' ? response.message || existing?.error_message || null : null,
-    created_at: existing?.created_at,
-    updated_at: new Date().toISOString(),
-  }
-}
-
-async function refreshLatestRun(fileId: string, silentNotFound: boolean = true) {
-  const literatureId = Number(fileId)
-  if (!Number.isFinite(literatureId)) return null
-
-  try {
-    const run = await getLatestExtractionRun(literatureId)
-    activeExtractionRun.value = run
-    const batchFile = findBatchFile(fileId)
-    const snapshot = getRunSnapshot(run)
-
-    if (run.status === 'running' || run.status === 'processing') {
-      setFileProcessing(batchFile, snapshot.progress, snapshot.message)
-    }
-
-    if (isTerminalRunStatus(run.status)) {
-      clearExtractionPolling()
-    }
-
-    return run
-  } catch (error: any) {
-    if (silentNotFound && error?.response?.status === 404) {
-      return null
-    }
-    throw error
-  }
-}
-
-function startExtractionTracking(fileId: string) {
-  clearExtractionPolling()
-  activeExtractionFileId.value = fileId
-  activeExtractionRun.value = null
-  sidebarTab.value = 'agents'
-  void refreshLatestRun(fileId, true)
-  extractionPollTimer = setInterval(() => {
-    if (!activeExtractionFileId.value) return
-    void refreshLatestRun(activeExtractionFileId.value, true)
-  }, 2500)
-}
-
-async function waitForExtractionCompletion(fileId: string, timeoutMs: number = 180000) {
-  const startedAt = Date.now()
-
-  while (Date.now() - startedAt < timeoutMs) {
-    const run = await refreshLatestRun(fileId, true)
-    if (run && isTerminalRunStatus(run.status)) {
-      return run
-    }
-    await new Promise((resolve) => setTimeout(resolve, 2500))
-  }
-
-  return null
-}
-
-function buildMetadataToSync(fileId: string, metadata: any) {
-  const hasValidMetadata = metadata?.title || metadata?.doi
-  if (hasValidMetadata) {
-    return {
-      doi: metadata.doi || '',
-      title: metadata.title || '',
-      authors: metadata.authors || '',
-      journal: metadata.journal || '',
-      year: metadata.year || new Date().getFullYear(),
-      issn: metadata.issn || null,
-      volume: metadata.volume || null,
-      issue: metadata.issue || null,
-      pages: metadata.pages || null,
-      file_hash: metadata.file_hash || metadata.fileHash || null,
-    }
-  }
-
-  return {
-    doi: `temp-${fileId}`,
-    title: 'Untitled',
-    authors: '',
-    journal: '',
-    year: new Date().getFullYear(),
-    file_hash: metadata?.file_hash || metadata?.fileHash || null,
-  }
-}
-
-async function syncExtractedRecords(
-  batchFile: BatchFile,
-  originalFileId: string,
-  metadata: any,
-  records: TribologyData[],
-  logPrefix: string,
-) {
-  const metadataToSync: any = buildMetadataToSync(originalFileId, metadata)
-  setFileProcessing(batchFile, 96, `Syncing ${records.length} extracted records`)
-
-  try {
-    const syncResult = await syncBatchData(metadataToSync, records)
-    const canonicalLitId = syncResult?.literatureId ?? syncResult?.literature_id
-
-    if (canonicalLitId) {
-      const canonicalId = String(canonicalLitId)
-      if (batchFile.id !== canonicalId) {
-        console.log(`[${logPrefix}] Updating file_id: ${batchFile.id} -> ${canonicalId}`)
-        batchFile.id = canonicalId
-      }
-      if (selectedFileId.value === originalFileId) {
-        selectedFileId.value = canonicalId
-      }
-      if (activeExtractionFileId.value === originalFileId) {
-        activeExtractionFileId.value = canonicalId
-      }
-    }
-
-    currentView.value = 'workspace'
-    if (metadataToSync.doi) {
-      explorerDoi.value = metadataToSync.doi
-    }
-  } catch (error: any) {
-    console.error(`${logPrefix} failed:`, error)
-    batchFile.errorMessage = `Auto-sync failed: ${error?.message || 'Unknown error'}`
-  }
-}
-
-async function executeExtraction(fileId: string, force: boolean = false) {
-  const batchFile = findBatchFile(fileId)
-  if (!batchFile) {
-    throw new Error(`File ${fileId} not found`)
-  }
-
-  latestAgentWorkflow.value = null
-  startExtractionTracking(fileId)
-  setFileProcessing(
-    batchFile,
-    8,
-    force ? 'Re-analyzing document with the agent runtime' : 'Dispatching extraction workflow',
-  )
-
-  let response = await extractData(fileId, force)
-  latestAgentWorkflow.value = response.agent_workflow || null
-  syncActiveRunFromResponse(fileId, response, 0, response.status === 'processing' ? 'running' : undefined)
-
-  if (response.status === 'processing') {
-    setFileProcessing(batchFile, 16, response.message || 'Agent workflow is still running')
-    const terminalRun = await waitForExtractionCompletion(fileId)
-
-    if (!terminalRun) {
-      throw new Error('Extraction is still running. Wait a moment and retry.')
-    }
-    if (terminalRun.status !== 'completed') {
-      throw new Error(terminalRun.error_message || 'Extraction failed while running in the background.')
-    }
-
-    response = await extractData(fileId, false)
-    latestAgentWorkflow.value = response.agent_workflow || latestAgentWorkflow.value
-    syncActiveRunFromResponse(fileId, response, 0)
-  }
-
-  await refreshLatestRun(fileId, true)
-
-  const { metadata, records } = normalizeExtractionPayload(fileId, response)
-  syncActiveRunFromResponse(fileId, response, records.length)
-  batchFile.metadata = metadata
-  batchFile.records = records
-  batchFile.hasWarnings = hasWarnings(records)
-
-  if (!response.success || records.length === 0) {
-    const message = response.message || 'No tribology data found.'
-    syncActiveRunFromResponse(fileId, { ...response, success: false, message }, records.length, 'failed')
-    setFileError(batchFile, message)
-    return {
-      success: false,
-      message,
-      recordCount: 0,
-    }
-  }
-
-  await syncExtractedRecords(batchFile, fileId, metadata, records, force ? 'Sync Reprocess' : 'Sync')
-  setFileSuccess(batchFile, `Extracted ${records.length} records`)
-
-  return {
-    success: true,
-    message: response.message || `Successfully extracted ${records.length} records.`,
-    recordCount: records.length,
-  }
-}
-
-function handleClearFiles() {
-  if (confirm('Are you sure you want to clear all files?')) {
-    batchFiles.value = []
-    selectedFileId.value = null
-    latestAgentWorkflow.value = null
-    resetExtractionState()
-  }
-}
-
-function handleRemoveFile(fileId: string) {
-  const index = batchFiles.value.findIndex((file) => file.id === fileId)
-  if (index !== -1) {
-    batchFiles.value.splice(index, 1)
-  }
-  if (selectedFileId.value === fileId) {
-    selectedFileId.value = null
-  }
-  resetExtractionState(fileId)
-}
-
-async function handleUpload(file: File) {
-  try {
-    fileUploadRef.value?.setUploading(true)
-    const response = await uploadFile(file)
-
-    if (response.success) {
-      batchFiles.value.push({
-        id: response.file_id,
-        name: response.filename,
-        scopeKey: activeScope.value?.key,
-        status: 'uploaded',
-        progress: 0,
-        progressMessage: 'Ready to extract',
-        records: [],
-        hasWarnings: false,
-      })
-
-      if (!selectedFileId.value) {
-        selectedFileId.value = response.file_id
-      }
-
-      chatPanelRef.value?.addMessage('assistant', `File "${response.filename}" uploaded successfully.`)
-    }
-  } catch (error: any) {
-    chatPanelRef.value?.addMessage('assistant', `Upload failed: ${error.message || 'Unknown error'}`)
-  } finally {
-    fileUploadRef.value?.setUploading(false)
-  }
-}
-
-async function handleBatchUpload(files: File[]) {
-  fileUploadRef.value?.setUploading(true)
-
-  let successCount = 0
-  let failCount = 0
-
-  for (const file of files) {
-    try {
-      const response = await uploadFile(file)
-
-      if (response.success) {
-        batchFiles.value.push({
-          id: response.file_id,
-          name: response.filename,
-          scopeKey: activeScope.value?.key,
-          status: 'uploaded',
-          progress: 0,
-          progressMessage: 'Ready to extract',
-          records: [],
-          hasWarnings: false,
-        })
-
-        successCount++
-      } else {
-        failCount++
-      }
-    } catch {
-      failCount++
-    }
-  }
-
-  fileUploadRef.value?.setUploading(false)
-  chatPanelRef.value?.addMessage('assistant', `Batch upload complete. Success: ${successCount}, Fail: ${failCount}.`)
-}
-
-async function handleExtract(fileId: string, force: boolean = false) {
-  const batchFile = findBatchFile(fileId)
-  if (!batchFile) return
-
-  try {
-    chatPanelRef.value?.addMessage(
-      'assistant',
-      force ? 'Forcing re-analysis of literature...' : 'Analyzing literature and extracting data...',
-    )
-
-    const result = await executeExtraction(fileId, force)
-
-    if (result.success) {
-      chatPanelRef.value?.addMessage(
-        'assistant',
-        `${result.message}\n\nExtracted data is now shown in the results panel.`,
-      )
-    } else {
-      chatPanelRef.value?.addMessage(
-        'assistant',
-        `Extraction complete, but no usable tribology records were produced: ${result.message}`,
-      )
-    }
-  } catch (error: any) {
-    setFileError(batchFile, error.message || 'Unknown error')
-    chatPanelRef.value?.addMessage('assistant', `Extraction failed: ${error.message || 'Unknown error'}`)
-  } finally {
-    clearExtractionPolling()
-  }
-}
-
-async function handleBatchExtract(fileIds: string[]) {
-  chatPanelRef.value?.addMessage('assistant', `Starting batch extraction of ${fileIds.length} files...`)
-
-  let successCount = 0
-  let failCount = 0
-  let totalRecords = 0
-
-  for (const fileId of fileIds) {
-    const batchFile = findBatchFile(fileId)
-    if (!batchFile) {
-      failCount++
-      continue
-    }
-
-    try {
-      const result = await executeExtraction(fileId, false)
-      if (result.success) {
-        totalRecords += result.recordCount
-        successCount++
-      } else {
-        failCount++
-      }
-    } catch (error: any) {
-      setFileError(batchFile, error.message || 'Unknown error')
-      failCount++
-    } finally {
-      clearExtractionPolling()
-    }
-  }
-
-  currentView.value = 'workspace'
-  chatPanelRef.value?.addMessage(
-    'assistant',
-    `Batch extraction complete. Success: ${successCount}, Fail: ${failCount}.\n\nTotal records extracted: ${totalRecords}`,
-  )
-}
-
-async function handleChat(message: string) {
-  chatPanelRef.value?.addMessage('user', message)
-
-  try {
-    isChatting.value = true
-    const response = await chat(message)
-
-    if (response.success) {
-      chatPanelRef.value?.addMessage('assistant', response.response)
-    }
-  } catch (error: any) {
-    chatPanelRef.value?.addMessage(
-      'assistant',
-      `Request failed: ${error.message || 'Please check if backend is running'}`,
-    )
-  } finally {
-    isChatting.value = false
-  }
-}
-
-function handleLiteratureView() {
-  console.log('[App] Switching to literature view')
-  currentView.value = 'literature'
-}
-
-onBeforeUnmount(() => {
-  clearExtractionPolling()
+  latestAgentWorkflow,
+  openTrainingWorkbench,
+  preferredTrainingDatasetId,
+  selectedFileId,
+  selectedScopeKey,
+  sessionState,
+  sidebarTab,
+  toggleDarkMode,
+} = useAppShell(fileUploadRef, chatPanelRef)
+
+const canAccessMonitor = computed(() => ADMIN_ROLES.has(String(sessionState.user?.role || '')))
+const visibleNavItems = computed(() => {
+  return NAV_ITEMS
+    .filter((item) => !item.adminOnly || canAccessMonitor.value)
+    .map((item) => ({ ...item, label: t(item.labelKey) }))
 })
+const selectedFile = computed(() => batchFiles.value.find((file) => file.id === selectedFileId.value) || null)
+const queueSizeLabel = computed(() => {
+  const count = batchFiles.value.length
+  return count === 1 ? t('common.file_count_singular', { count }) : t('common.file_count_plural', { count })
+})
+const operatorName = computed(() => sessionState.user?.displayName || t('common.operator_default'))
+const operatorRole = computed(() => formatMappedLabel(String(sessionState.user?.role || 'member'), roleLabelKeys))
+const activeScopeLabel = computed(() => {
+  return availableScopes.value.find((scope) => scope.key === selectedScopeKey.value)?.label || t('common.no_active_scope')
+})
+const runStateLabel = computed(() => formatMappedLabel(String(activeExtractionRun.value?.status || 'idle'), statusLabelKeys))
+
+const viewMeta = computed(() => {
+  switch (currentView.value) {
+    case 'workspace':
+      return {
+        eyebrow: t('view.workspace.eyebrow'),
+        title: t('view.workspace.title'),
+        description: t('view.workspace.description'),
+        signals: [
+          { key: 'queue', label: t('signal.queue'), value: queueSizeLabel.value },
+          { key: 'selected_file', label: t('signal.selected_file'), value: selectedFile.value?.name || t('common.no_file_selected') },
+          { key: 'agent_state', label: t('signal.agent_state'), value: runStateLabel.value },
+        ],
+      }
+    case 'dashboard':
+      return {
+        eyebrow: t('view.dashboard.eyebrow'),
+        title: t('view.dashboard.title'),
+        description: t('view.dashboard.description'),
+        signals: [
+          { key: 'scope', label: t('signal.scope'), value: activeScopeLabel.value },
+          { key: 'queued_files', label: t('signal.queued_files'), value: queueSizeLabel.value },
+          { key: 'operator', label: t('signal.operator'), value: operatorName.value },
+        ],
+      }
+    case 'cleaning':
+      return {
+        eyebrow: t('view.cleaning.eyebrow'),
+        title: t('view.cleaning.title'),
+        description: t('view.cleaning.description'),
+        signals: [
+          { key: 'scope', label: t('signal.scope'), value: activeScopeLabel.value },
+          { key: 'queue', label: t('signal.queue'), value: queueSizeLabel.value },
+          { key: 'operator', label: t('signal.operator'), value: operatorName.value },
+        ],
+      }
+    case 'predict':
+      return {
+        eyebrow: t('view.predict.eyebrow'),
+        title: t('view.predict.title'),
+        description: t('view.predict.description'),
+        signals: [
+          {
+            key: 'dataset_handoff',
+            label: t('signal.dataset_handoff'),
+            value: preferredTrainingDatasetId.value !== null
+              ? t('common.dataset', { id: preferredTrainingDatasetId.value })
+              : t('common.awaiting_selection'),
+          },
+          { key: 'scope', label: t('signal.scope'), value: activeScopeLabel.value },
+          { key: 'operator', label: t('signal.operator'), value: operatorName.value },
+        ],
+      }
+    case 'monitor':
+      return {
+        eyebrow: t('view.monitor.eyebrow'),
+        title: t('view.monitor.title'),
+        description: canAccessMonitor.value
+          ? t('view.monitor.description')
+          : t('view.monitor.no_access_description'),
+        signals: [
+          { key: 'access', label: t('signal.access'), value: canAccessMonitor.value ? t('common.granted') : t('common.restricted') },
+          { key: 'scope', label: t('signal.scope'), value: activeScopeLabel.value },
+          { key: 'run_state', label: t('signal.run_state'), value: runStateLabel.value },
+        ],
+      }
+    case 'literature':
+      return {
+        eyebrow: t('view.literature.eyebrow'),
+        title: t('view.literature.title'),
+        description: t('view.literature.description'),
+        signals: [
+          { key: 'scope', label: t('signal.scope'), value: activeScopeLabel.value },
+          { key: 'queue', label: t('signal.queue'), value: queueSizeLabel.value },
+          { key: 'operator', label: t('signal.operator'), value: operatorName.value },
+        ],
+      }
+    case 'grounding':
+      return {
+        eyebrow: t('view.grounding.eyebrow'),
+        title: t('view.grounding.title'),
+        description: t('view.grounding.description'),
+        signals: [
+          { key: 'source', label: t('signal.source'), value: selectedFile.value?.name || t('common.no_file_selected') },
+          { key: 'highlights', label: t('signal.highlights'), value: `${groundingHighlightData.value.length}` },
+          { key: 'scope', label: t('signal.scope'), value: activeScopeLabel.value },
+        ],
+      }
+    case 'guide':
+    default:
+      return {
+        eyebrow: t('view.guide.eyebrow'),
+        title: t('view.guide.title'),
+        description: t('view.guide.description'),
+        signals: [
+          { key: 'mode', label: t('signal.mode'), value: t('common.mode_quickstart') },
+          { key: 'scope', label: t('signal.scope'), value: activeScopeLabel.value },
+          { key: 'operator', label: t('signal.operator'), value: operatorName.value },
+        ],
+      }
+  }
+})
+
+const primaryActionLabel = computed(() => {
+  switch (currentView.value) {
+    case 'guide':
+      return t('action.open_workspace')
+    case 'dashboard':
+      return t('action.explore_records')
+    case 'workspace':
+      return t('action.open_library')
+    case 'cleaning':
+      return t('action.open_model_studio')
+    case 'predict':
+      return t('action.open_cleaning')
+    case 'monitor':
+      return canAccessMonitor.value ? t('action.open_dashboard') : t('action.open_guide')
+    case 'literature':
+      return t('action.open_workspace')
+    case 'grounding':
+      return t('action.back_to_workspace')
+    default:
+      return t('action.open_workspace')
+  }
+})
+
+const secondaryActionLabel = computed(() => {
+  switch (currentView.value) {
+    case 'guide':
+      return t('action.view_dashboard')
+    case 'dashboard':
+      return t('action.open_library')
+    case 'workspace':
+      return t('action.review_guide')
+    case 'cleaning':
+      return t('action.open_workspace')
+    case 'predict':
+      return t('action.view_dashboard')
+    case 'monitor':
+      return t('action.review_guide')
+    case 'literature':
+      return t('action.view_dashboard')
+    case 'grounding':
+      return t('action.open_library')
+    default:
+      return t('action.view_dashboard')
+  }
+})
+
+function formatLabel(value: string) {
+  return value
+    .split(/[_\-\s]+/)
+    .filter(Boolean)
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(' ')
+}
+
+function formatMappedLabel(value: string, map: Record<string, Parameters<typeof t>[0]>) {
+  const normalized = String(value || '').trim().toLowerCase()
+  return normalized && map[normalized] ? t(map[normalized]) : formatLabel(value)
+}
+
+function setView(view: RoutedView) {
+  if (view === 'predict') {
+    openTrainingWorkbench(null)
+    return
+  }
+  currentView.value = view
+}
+
+function handlePrimaryAction() {
+  switch (currentView.value) {
+    case 'guide':
+      setView('workspace')
+      return
+    case 'dashboard':
+      handleExploreData({})
+      return
+    case 'workspace':
+      setView('literature')
+      return
+    case 'cleaning':
+      setView('predict')
+      return
+    case 'predict':
+      setView('cleaning')
+      return
+    case 'monitor':
+      setView(canAccessMonitor.value ? 'dashboard' : 'guide')
+      return
+    case 'literature':
+      setView('workspace')
+      return
+    case 'grounding':
+      setView('workspace')
+      return
+  }
+}
+
+function handleSecondaryAction() {
+  switch (currentView.value) {
+    case 'guide':
+      setView('dashboard')
+      return
+    case 'dashboard':
+      setView('literature')
+      return
+    case 'workspace':
+      setView('guide')
+      return
+    case 'cleaning':
+      setView('workspace')
+      return
+    case 'predict':
+      setView('dashboard')
+      return
+    case 'monitor':
+      setView('guide')
+      return
+    case 'literature':
+      setView('dashboard')
+      return
+    case 'grounding':
+      setView('literature')
+      return
+  }
+}
 </script>
 
 <template>
-  <div v-if="!sessionState.ready" class="flex min-h-screen items-center justify-center bg-slate-950 text-white">
-    <div class="rounded-3xl border border-slate-800 bg-slate-900/80 px-8 py-6 text-center shadow-2xl">
-      <p class="text-xs font-bold uppercase tracking-[0.28em] text-sky-300">IonicLink</p>
-      <p class="mt-3 text-lg font-semibold">Restoring secure session...</p>
+  <div v-if="!sessionState.ready" class="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#07111a] px-6 text-white">
+    <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(232,185,104,0.18),transparent_32%),radial-gradient(circle_at_bottom_right,_rgba(56,189,248,0.12),transparent_28%)]" />
+    <div class="shell-surface-strong relative w-full max-w-xl px-8 py-8 text-center">
+      <p class="text-[11px] font-semibold uppercase tracking-[0.32em] text-[#d9b266]">IonicLink</p>
+      <h1 class="brand-serif mt-4 text-4xl text-white">{{ t('loading.restore_title') }}</h1>
+      <p class="mt-3 text-sm leading-7 text-slate-300">
+        {{ t('loading.restore_description') }}
+      </p>
     </div>
   </div>
 
@@ -757,223 +383,262 @@ onBeforeUnmount(() => {
     @submit="handleLogin"
   />
 
-  <div v-else class="flex min-h-screen flex-col bg-background text-foreground">
-    <header class="sticky top-0 z-50 w-full border-b border-slate-200/80 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/70 dark:border-slate-800/80 dark:bg-slate-950/85">
-      <div class="flex h-14 items-center px-4">
-        <div class="flex items-center gap-2">
-          <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center">
-            <Beaker class="w-5 h-5 text-white" />
+  <div v-else class="app-shell relative flex min-h-screen flex-col bg-background text-foreground">
+    <div class="pointer-events-none absolute inset-0 overflow-hidden">
+      <div class="absolute left-[-10rem] top-[-12rem] h-[30rem] w-[30rem] rounded-full bg-[#e4bf78]/18 blur-3xl dark:bg-[#e4bf78]/8" />
+      <div class="absolute right-[-12rem] top-[8rem] h-[26rem] w-[26rem] rounded-full bg-sky-300/16 blur-3xl dark:bg-sky-400/10" />
+      <div class="absolute bottom-[-14rem] left-[20%] h-[28rem] w-[28rem] rounded-full bg-emerald-200/18 blur-3xl dark:bg-emerald-300/8" />
+    </div>
+
+    <header class="relative z-40 border-b border-black/8 bg-[rgba(251,248,242,0.72)] backdrop-blur-2xl dark:border-white/10 dark:bg-[rgba(8,16,26,0.78)]">
+      <div class="px-4 py-4 sm:px-6">
+        <div class="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div class="flex items-start gap-4">
+            <div class="flex h-14 w-14 items-center justify-center rounded-[1.4rem] border border-black/8 bg-[#0d1724] text-[#f4d18f] shadow-[0_16px_40px_-26px_rgba(15,23,42,0.95)] dark:border-white/10 dark:bg-[#101b29]">
+              <Beaker class="h-6 w-6" />
+            </div>
+            <div>
+              <p class="text-[11px] font-semibold uppercase tracking-[0.32em] text-slate-500 dark:text-slate-400">{{ t('header.platform_eyebrow') }}</p>
+              <h1 class="brand-serif text-[2rem] leading-none text-slate-950 dark:text-white">IonicLink</h1>
+              <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
+                {{ t('header.platform_description') }}
+              </p>
+            </div>
           </div>
-          <label class="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">IonicLink</label>
+
+          <div class="flex flex-wrap items-center gap-2 xl:justify-end">
+            <div class="inline-flex min-w-[14rem] items-center gap-3 rounded-full border border-black/8 bg-white/75 px-4 py-2.5 text-sm shadow-[0_10px_30px_-24px_rgba(15,23,42,0.45)] dark:border-white/10 dark:bg-[#0d1825]/85">
+              <Library class="h-4 w-4 text-[#c79237]" />
+              <label class="min-w-0 flex-1">
+                <span class="block text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">{{ t('common.active_scope') }}</span>
+                <select
+                  v-model="selectedScopeKey"
+                  class="mt-0.5 w-full appearance-none bg-transparent text-sm font-semibold text-slate-800 outline-none dark:text-slate-100"
+                >
+                  <option v-for="scope in availableScopes" :key="scope.key" :value="scope.key">
+                    {{ scope.label }}
+                  </option>
+                </select>
+              </label>
+            </div>
+
+            <div class="hidden min-w-[14rem] items-center gap-3 rounded-full border border-black/8 bg-white/75 px-4 py-2.5 text-sm shadow-[0_10px_30px_-24px_rgba(15,23,42,0.45)] dark:border-white/10 dark:bg-[#0d1825]/85 md:inline-flex">
+              <UserCircle2 class="h-5 w-5 text-slate-400" />
+              <div class="min-w-0">
+                <p class="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{{ operatorName }}</p>
+                <p class="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">{{ operatorRole }}</p>
+              </div>
+            </div>
+
+            <LanguageToggle />
+
+            <Button
+              variant="ghost"
+              size="icon"
+              class="h-11 w-11 rounded-full border border-black/8 bg-white/75 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-[#0d1825]/85 dark:text-slate-200 dark:hover:bg-[#132131]"
+              @click="toggleDarkMode"
+            >
+              <Sun v-if="isDark" class="h-5 w-5" />
+              <Moon v-else class="h-5 w-5" />
+            </Button>
+
+            <a
+              href="https://github.com/mx1210385980-a11y/IonicLink/tree/main"
+              target="_blank"
+              rel="noreferrer"
+              class="inline-flex h-11 w-11 items-center justify-center rounded-full border border-black/8 bg-white/75 text-slate-700 transition hover:bg-white dark:border-white/10 dark:bg-[#0d1825]/85 dark:text-slate-200 dark:hover:bg-[#132131]"
+            >
+              <Github class="h-5 w-5" />
+            </a>
+
+            <Button
+              variant="ghost"
+              size="icon"
+              class="h-11 w-11 rounded-full border border-black/8 bg-white/75 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-[#0d1825]/85 dark:text-slate-200 dark:hover:bg-[#132131]"
+              @click="handleLogout"
+            >
+              <LogOut class="h-5 w-5" />
+            </Button>
+          </div>
         </div>
 
-        <nav class="hidden md:flex items-center ml-6 bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-full p-1 shadow-sm h-10">
+        <nav class="mt-4 flex gap-2 overflow-x-auto pb-1">
           <button
-            @click="currentView = 'guide'"
-            class="flex items-center gap-2 px-4 py-1.5 text-[13px] font-semibold transition-all rounded-full h-full"
-            :class="currentView === 'guide' ? 'bg-[#eef2ff] text-[#4f46e5] dark:bg-indigo-500/10 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'"
+            v-for="item in visibleNavItems"
+            :key="item.key"
+            type="button"
+            class="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition"
+            :class="currentView === item.key
+              ? 'border-transparent bg-[#101b29] text-[#f4d18f] shadow-[0_16px_34px_-24px_rgba(15,23,42,0.9)] dark:bg-[#f4d18f] dark:text-[#111827]'
+              : 'border-black/8 bg-white/72 text-slate-600 hover:bg-white hover:text-slate-900 dark:border-white/10 dark:bg-[#0d1825]/78 dark:text-slate-300 dark:hover:bg-[#132131] dark:hover:text-white'"
+            @click="setView(item.key)"
           >
-            <BookOpen class="w-[15px] h-[15px]" stroke-width="2.5" />
-            Guide
-          </button>
-
-          <button
-            @click="currentView = 'workspace'"
-            class="flex items-center gap-2 px-4 py-1.5 text-[13px] font-semibold transition-all rounded-full h-full"
-            :class="currentView === 'workspace' ? 'bg-[#eef2ff] text-[#4f46e5] dark:bg-indigo-500/10 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'"
-          >
-            <Search class="w-[15px] h-[15px]" stroke-width="2.5" />
-            Workspace
-          </button>
-
-          <button
-            @click="currentView = 'dashboard'"
-            class="flex items-center gap-2 px-4 py-1.5 text-[13px] font-semibold transition-all rounded-full h-full"
-            :class="currentView === 'dashboard' ? 'bg-[#eef2ff] text-[#4f46e5] dark:bg-indigo-500/10 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'"
-          >
-            <PieChart class="w-[15px] h-[15px]" stroke-width="2.5" />
-            Dashboard
-          </button>
-
-          <button
-            @click="currentView = 'cleaning'"
-            class="flex items-center gap-2 px-4 py-1.5 text-[13px] font-semibold transition-all rounded-full h-full"
-            :class="currentView === 'cleaning' ? 'bg-[#eef2ff] text-[#4f46e5] dark:bg-indigo-500/10 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'"
-          >
-            <Database class="w-[15px] h-[15px]" stroke-width="2.5" />
-            Cleaning
-          </button>
-
-          <button
-            @click="openTrainingWorkbench(null)"
-            class="flex items-center gap-2 px-4 py-1.5 text-[13px] font-semibold transition-all rounded-full h-full"
-            :class="currentView === 'predict' ? 'bg-[#eef2ff] text-[#4f46e5] dark:bg-indigo-500/10 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'"
-          >
-            <FlaskConical class="w-[15px] h-[15px]" stroke-width="2.5" />
-            Predict
-          </button>
-
-          <div class="w-px h-5 bg-slate-200 dark:bg-slate-700 mx-1"></div>
-
-          <button
-            @click="currentView = 'monitor'"
-            class="flex items-center gap-2 px-4 py-1.5 text-[13px] font-semibold transition-all rounded-full h-full"
-            :class="currentView === 'monitor' ? 'bg-[#eef2ff] text-[#4f46e5] dark:bg-indigo-500/10 dark:text-indigo-400' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'"
-          >
-            <Server class="w-[15px] h-[15px]" stroke-width="2.5" />
-            Monitor
+            <component :is="item.icon" class="h-4 w-4" />
+            {{ item.label }}
           </button>
         </nav>
-
-        <div class="ml-auto flex items-center gap-2">
-          <div class="hidden lg:flex items-center gap-3 rounded-full border border-slate-200/80 bg-white/90 px-4 py-1.5 text-sm shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
-            <Library class="h-4 w-4 text-sky-500" />
-            <div class="flex flex-col leading-tight">
-              <span class="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Scope</span>
-              <select
-                v-model="selectedScopeKey"
-                class="bg-transparent text-sm font-semibold text-slate-700 outline-none dark:text-slate-200"
-              >
-                <option
-                  v-for="scope in availableScopes"
-                  :key="scope.key"
-                  :value="scope.key"
-                >
-                  {{ scope.label }}
-                </option>
-              </select>
-            </div>
-          </div>
-
-          <div class="hidden md:flex items-center gap-3 rounded-full border border-slate-200/80 bg-white/90 px-4 py-1.5 shadow-sm dark:border-slate-800 dark:bg-slate-900/80">
-            <UserCircle2 class="h-5 w-5 text-slate-400" />
-            <div class="flex flex-col leading-tight">
-              <span class="text-sm font-semibold text-slate-700 dark:text-slate-200">{{ sessionState.user.displayName }}</span>
-              <span class="text-[11px] uppercase tracking-[0.18em] text-slate-400">{{ sessionState.user.role }}</span>
-            </div>
-          </div>
-
-          <Button variant="ghost" size="icon" @click="toggleDarkMode">
-            <Sun v-if="isDark" class="h-5 w-5" />
-            <Moon v-else class="h-5 w-5" />
-          </Button>
-
-          <a
-            href="https://github.com/mx1210385980-a11y/IonicLink/tree/main"
-            target="_blank"
-            rel="noreferrer"
-            class="inline-flex h-10 w-10 items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-          >
-            <Github class="h-5 w-5" />
-          </a>
-
-          <Button variant="ghost" size="icon" @click="handleLogout">
-            <LogOut class="h-5 w-5" />
-          </Button>
-        </div>
       </div>
     </header>
 
-    <main class="flex-1 overflow-hidden">
-      <div v-if="currentView === 'dashboard'" class="h-[calc(100vh-56px)]">
-        <Dashboard :key="sessionState.activeScopeKey" @open-library="currentView = 'literature'" />
-      </div>
+    <main class="relative z-10 flex-1 min-h-0 overflow-hidden">
+      <div class="flex h-full min-h-0 flex-col gap-3 px-3 pb-3 pt-3 sm:gap-4 sm:px-4 sm:pb-4">
+        <section class="shell-surface-strong overflow-hidden px-5 py-5 sm:px-6 lg:px-7 lg:py-6">
+          <div class="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)] lg:items-end">
+            <div>
+              <div class="inline-flex items-center gap-2 rounded-full border border-[#d8c39a]/60 bg-[#f8eedb]/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.28em] text-[#9b6b17] dark:border-[#6b5221]/70 dark:bg-[#22190d]/70 dark:text-[#f1ca80]">
+                <Sparkles class="h-3.5 w-3.5" />
+                {{ viewMeta.eyebrow }}
+              </div>
+              <h2 class="mt-4 max-w-4xl text-3xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white sm:text-4xl">
+                {{ viewMeta.title }}
+              </h2>
+              <p class="mt-3 max-w-3xl text-sm leading-7 text-slate-600 dark:text-slate-300 sm:text-[15px]">
+                {{ viewMeta.description }}
+              </p>
 
-      <div v-else-if="currentView === 'cleaning'" class="h-[calc(100vh-56px)]">
-        <DataCleaningWorkbench :key="sessionState.activeScopeKey" @open-training="openTrainingWorkbench" />
-      </div>
+              <div class="mt-6 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-full bg-[#111827] px-5 py-3 text-sm font-semibold text-[#f7d496] transition hover:bg-[#1f2937] dark:bg-[#f1cc82] dark:text-[#111827] dark:hover:bg-[#f6d79d]"
+                  @click="handlePrimaryAction"
+                >
+                  {{ primaryActionLabel }}
+                  <ArrowUpRight class="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white/72 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-white dark:border-white/10 dark:bg-[#0e1826]/80 dark:text-slate-200 dark:hover:bg-[#132131]"
+                  @click="handleSecondaryAction"
+                >
+                  {{ secondaryActionLabel }}
+                </button>
+              </div>
+            </div>
 
-      <div v-else-if="currentView === 'predict'" class="h-[calc(100vh-56px)]">
-        <ModelTrainingWorkbench :key="sessionState.activeScopeKey" :preselected-cleaned-dataset-id="preferredTrainingDatasetId" />
-      </div>
+            <div class="grid gap-4 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
+              <div
+                v-for="signal in viewMeta.signals"
+                :key="signal.key"
+                class="border-l border-black/10 pl-4 dark:border-white/10"
+              >
+                <p class="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">{{ signal.label }}</p>
+                <p class="mt-2 text-sm font-semibold leading-6 text-slate-800 dark:text-slate-100">{{ signal.value }}</p>
+              </div>
+            </div>
+          </div>
+        </section>
 
-      <div v-else-if="currentView === 'workspace'" class="flex h-[calc(100vh-56px)] bg-slate-100/70 dark:bg-[#06101c]">
-        <aside class="flex w-80 flex-shrink-0 flex-col overflow-hidden border-r border-slate-200/80 bg-white/95 dark:border-slate-800/80 dark:bg-slate-950/85">
-          <FileUpload
-            ref="fileUploadRef"
-            :files="batchFiles"
-            :active-id="selectedFileId"
-            @select="(id) => selectedFileId = id"
-            @remove="handleRemoveFile"
-            @clear="handleClearFiles"
-            @upload="handleUpload"
-            @batch-upload="handleBatchUpload"
-            @extract="handleExtract"
-            @batch-extract="handleBatchExtract"
-          />
-        </aside>
-
-        <main class="flex-1 overflow-hidden">
-          <IntegratedExplorer
-            :key="sessionState.activeScopeKey"
-            :initial-doi="explorerDoi"
-            :selected-file-id="selectedFileId"
-            :source-name="batchFiles.find((file) => file.id === selectedFileId)?.name"
-            :literature-metadata="batchFiles.find((file) => file.id === selectedFileId)?.metadata"
-            @view-literature="handleLiteratureView"
-            @clear-doi="explorerDoi = ''"
-          />
-        </main>
-
-        <aside class="flex w-[400px] flex-shrink-0 flex-col overflow-hidden border-l border-slate-200/80 bg-slate-50/90 dark:border-slate-800/80 dark:bg-[#081523]">
-          <div class="flex shrink-0 items-center gap-1 border-b border-slate-200 bg-white/95 p-2 dark:border-slate-800 dark:bg-slate-950/80">
-            <button
-              @click="sidebarTab = 'chat'"
-              class="flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition flex items-center justify-center gap-2"
-              :class="sidebarTab === 'chat'
-                ? 'bg-slate-100 text-slate-900 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-100 dark:ring-slate-700'
-                : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-900/80 dark:hover:text-slate-200'"
-            >
-              AI Assistant
-            </button>
-            <button
-              @click="sidebarTab = 'agents'"
-              class="flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold transition flex items-center justify-center gap-2"
-              :class="sidebarTab === 'agents'
-                ? 'bg-slate-100 text-slate-900 shadow-sm ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-100 dark:ring-slate-700'
-                : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700 dark:text-slate-400 dark:hover:bg-slate-900/80 dark:hover:text-slate-200'"
-            >
-              Coordination Panel
-            </button>
+        <div class="min-h-0 flex-1">
+          <div v-if="currentView === 'dashboard'" class="shell-surface h-full overflow-hidden">
+            <Dashboard :key="sessionState.activeScopeKey" @open-library="currentView = 'literature'" @explore-data="handleExploreData" />
           </div>
 
-          <div class="relative min-h-0 flex-1 bg-white dark:bg-slate-950">
-            <ChatPanel
-              v-show="sidebarTab === 'chat'"
-              class="absolute inset-0"
-              ref="chatPanelRef"
-              :loading="isChatting"
-              @send="handleChat"
+          <div v-else-if="currentView === 'cleaning'" class="shell-surface h-full overflow-hidden">
+            <DataCleaningWorkbench :key="sessionState.activeScopeKey" @open-training="openTrainingWorkbench" />
+          </div>
+
+          <div v-else-if="currentView === 'predict'" class="shell-surface h-full overflow-hidden">
+            <ModelTrainingWorkbench
+              :key="sessionState.activeScopeKey"
+              :preselected-cleaned-dataset-id="preferredTrainingDatasetId"
             />
-            <AgentStatusPanel
-              v-show="sidebarTab === 'agents'"
-              class="absolute inset-0"
+          </div>
+
+          <div v-else-if="currentView === 'workspace'" class="flex h-full min-h-0 flex-col gap-3 overflow-auto xl:flex-row xl:overflow-hidden">
+            <aside class="shell-surface min-h-[22rem] w-full overflow-hidden xl:min-h-0 xl:w-[21rem]">
+              <FileUpload
+                ref="fileUploadRef"
+                :files="batchFiles"
+                :active-id="selectedFileId"
+                @select="(id) => selectedFileId = id"
+                @remove="handleRemoveFile"
+                @clear="handleClearFiles"
+                @upload="handleUpload"
+                @batch-upload="handleBatchUpload"
+                @extract="handleExtract"
+                @batch-extract="handleBatchExtract"
+              />
+            </aside>
+
+            <main class="shell-surface min-h-[32rem] min-w-0 flex-1 overflow-hidden xl:min-h-0">
+              <IntegratedExplorer
+                :key="sessionState.activeScopeKey"
+                :initial-doi="explorerDoi"
+                :selected-file-id="selectedFileId"
+                :source-name="selectedFile?.name"
+                :literature-metadata="selectedFile?.metadata"
+                @view-literature="handleLiteratureView"
+                @clear-doi="explorerDoi = ''"
+              />
+            </main>
+
+            <aside class="shell-surface min-h-[24rem] w-full overflow-hidden xl:min-h-0 xl:w-[24rem]">
+              <div class="border-b border-black/8 p-2 dark:border-white/10">
+                <div class="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    class="rounded-full px-3 py-2 text-sm font-semibold transition"
+                    :class="sidebarTab === 'chat'
+                      ? 'bg-[#101b29] text-[#f4d18f] shadow-[0_14px_28px_-20px_rgba(15,23,42,0.9)] dark:bg-[#f4d18f] dark:text-[#111827]'
+                      : 'bg-transparent text-slate-500 hover:bg-black/[0.04] hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/[0.05] dark:hover:text-slate-100'"
+                    @click="sidebarTab = 'chat'"
+                  >
+                    {{ t('common.ai_assistant') }}
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded-full px-3 py-2 text-sm font-semibold transition"
+                    :class="sidebarTab === 'agents'
+                      ? 'bg-[#101b29] text-[#f4d18f] shadow-[0_14px_28px_-20px_rgba(15,23,42,0.9)] dark:bg-[#f4d18f] dark:text-[#111827]'
+                      : 'bg-transparent text-slate-500 hover:bg-black/[0.04] hover:text-slate-800 dark:text-slate-400 dark:hover:bg-white/[0.05] dark:hover:text-slate-100'"
+                    @click="sidebarTab = 'agents'"
+                  >
+                    {{ t('common.coordination') }}
+                  </button>
+                </div>
+              </div>
+
+              <div class="relative min-h-0 flex-1 bg-white/35 dark:bg-[#050c14]/60">
+                <ChatPanel
+                  v-show="sidebarTab === 'chat'"
+                  ref="chatPanelRef"
+                  class="absolute inset-0"
+                  :loading="isChatting"
+                  @send="handleChat"
+                />
+                <AgentStatusPanel
+                  v-show="sidebarTab === 'agents'"
+                  class="absolute inset-0"
+                  :workflow="latestAgentWorkflow"
+                  :active-run="activeExtractionRun"
+                  :active-file-name="activeExtractionFileName"
+                />
+              </div>
+            </aside>
+          </div>
+
+          <div v-else-if="currentView === 'monitor'" class="shell-surface h-full overflow-hidden">
+            <MonitorView
+              v-if="canAccessMonitor"
               :workflow="latestAgentWorkflow"
               :active-run="activeExtractionRun"
               :active-file-name="activeExtractionFileName"
             />
+            <GettingStarted v-else />
           </div>
-        </aside>
-      </div>
 
-      <div v-else-if="currentView === 'monitor'" class="h-[calc(100vh-56px)]">
-        <MonitorView
-          :workflow="latestAgentWorkflow"
-          :active-run="activeExtractionRun"
-          :active-file-name="activeExtractionFileName"
-        />
-      </div>
+          <div v-else-if="currentView === 'literature'" class="shell-surface h-full overflow-hidden">
+            <LiteratureList :key="sessionState.activeScopeKey" />
+          </div>
 
-      <div v-else-if="currentView === 'literature'" class="h-[calc(100vh-88px)]">
-        <LiteratureList :key="sessionState.activeScopeKey" />
-      </div>
+          <div v-else-if="currentView === 'grounding'" class="shell-surface h-full overflow-hidden">
+            <SourceGroundingView :pdf-url="groundingPdfUrl" :highlight-data="groundingHighlightData" />
+          </div>
 
-      <div v-else-if="currentView === 'grounding'" class="h-[calc(100vh-56px)]">
-        <SourceGroundingView :pdf-url="groundingPdfUrl" :highlight-data="groundingHighlightData" />
-      </div>
-
-      <div v-else-if="currentView === 'guide'" class="h-[calc(100vh-56px)]">
-        <GettingStarted />
+          <div v-else class="shell-surface h-full overflow-hidden">
+            <GettingStarted />
+          </div>
+        </div>
       </div>
     </main>
   </div>

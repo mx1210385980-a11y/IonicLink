@@ -6,14 +6,19 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@rdkit/rdkit": "^2025.3.4-1.0.0",
+    "@tanstack/vue-virtual": "^3.13.23",
     "axios": "^1.13.4",
     "chart.js": "^4.5.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "echarts": "^5.6.0",
     "lucide-react": "^0.577.0",
     "lucide-vue-next": "^0.563.0",
     "pdfjs-dist": "^5.4.624",
@@ -30,12 +35,15 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-vue": "^6.0.1",
+    "@vitest/coverage-v8": "^3.2.4",
     "@vue/tsconfig": "^0.8.1",
     "autoprefixer": "^10.4.24",
+    "jsdom": "^26.1.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.18",
     "typescript": "~5.9.3",
     "vite": "^7.2.4",
+    "vitest": "^3.2.4",
     "vue-tsc": "^3.1.4"
   }
 }

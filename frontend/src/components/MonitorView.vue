@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { Activity, RefreshCw, Cpu, Database as DbIcon, ShieldCheck, CheckCircle2, Clock, Server } from 'lucide-vue-next'
+import { Activity, RefreshCw, Cpu, Database as DbIcon, ShieldCheck, CheckCircle2, Clock, Server, Users } from 'lucide-vue-next'
 import {
   Chart as ChartJS, Title, Tooltip, Legend, BarElement,
   CategoryScale, LinearScale, PointElement, LineElement, Filler
@@ -16,6 +16,7 @@ import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import CardContent from '@/components/ui/CardContent.vue'
 import Modal from '@/components/ui/Modal.vue'
+import UserManagement from '@/components/monitor/UserManagement.vue'
 import {
   getUsageMetrics,
   type AgentWorkflow,
@@ -29,6 +30,9 @@ defineProps<{
   activeRun?: ExtractionRunDetail | null
   activeFileName?: string | null
 }>()
+
+// Tab state
+const activeTab = ref<'system' | 'users'>('users')
 
 const usageMetrics = ref<UsageMetricsResponse | null>(null)
 const usageLoading = ref(false)
@@ -249,9 +253,46 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex h-full flex-col gap-4 bg-[#f5f6fa] p-4 dark:bg-[#06101c]">
+  <div class="flex h-full flex-col bg-[#f5f6fa] dark:bg-[#06101c]">
+    <!-- Tab Navigation -->
+    <div class="flex-shrink-0 border-b border-slate-200 bg-white px-4">
+      <nav class="flex gap-4">
+        <button
+          @click="activeTab = 'users'"
+          :class="[
+            'flex items-center gap-2 border-b-2 px-1 py-3 text-sm font-medium transition-colors',
+            activeTab === 'users'
+              ? 'border-indigo-500 text-indigo-600'
+              : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700',
+          ]"
+        >
+          <Users class="h-4 w-4" />
+          用户管理
+        </button>
+        <button
+          @click="activeTab = 'system'"
+          :class="[
+            'flex items-center gap-2 border-b-2 px-1 py-3 text-sm font-medium transition-colors',
+            activeTab === 'system'
+              ? 'border-indigo-500 text-indigo-600'
+              : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700',
+          ]"
+        >
+          <Server class="h-4 w-4" />
+          系统监控
+        </button>
+      </nav>
+    </div>
+
+    <!-- User Management Tab -->
+    <div v-if="activeTab === 'users'" class="flex-1 overflow-hidden">
+      <UserManagement />
+    </div>
+
+    <!-- System Monitoring Tab -->
+    <div v-else class="flex-1 overflow-auto p-4">
     <!-- Top Global Box -->
-    <Card class="border-0 shadow-sm rounded-xl flex-shrink-0">
+    <Card class="border-0 shadow-sm rounded-xl flex-shrink-0 mb-4">
       <CardContent class="p-5">
         <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div class="flex items-start gap-3">
@@ -519,5 +560,6 @@ onMounted(() => {
         </div>
       </template>
     </Modal>
+    </div>
   </div>
 </template>

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,6 +25,7 @@ from security import (
     scope_summary_from_workspace,
     verify_password,
 )
+from services.activity_logging_service import log_activity
 
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -40,6 +41,21 @@ class CreateUserRequest(BaseModel):
     password: str = Field(..., min_length=8, max_length=128)
     display_name: str = Field(..., min_length=1, max_length=120, alias="displayName")
     role: str = Field("researcher")
+
+    class Config:
+        populate_by_name = True
+
+
+class UpdateUserRequest(BaseModel):
+    display_name: str | None = Field(None, min_length=1, max_length=120, alias="displayName")
+    role: str | None = None
+
+    class Config:
+        populate_by_name = True
+
+
+class ResetPasswordRequest(BaseModel):
+    new_password: str = Field(..., min_length=8, max_length=128, alias="newPassword")
 
     class Config:
         populate_by_name = True
@@ -71,7 +87,7 @@ def _assert_admin(principal: AuthPrincipal) -> None:
 
 
 @router.post("/login")
-async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db_session)):
+async def login(payload: LoginRequest, request: Request, db: AsyncSession = Depends(get_db_session)):
     stmt = (
         select(User)
         .options(selectinload(User.group), selectinload(User.workspaces))
@@ -86,6 +102,16 @@ async def login(payload: LoginRequest, db: AsyncSession = Depends(get_db_session
     personal_workspace = next((workspace for workspace in user.workspaces if workspace.is_personal), None)
     principal = AuthPrincipal(user=user, group=user.group, personal_workspace=personal_workspace)
     workspaces = await list_accessible_workspaces(db, principal)
+
+    # 记录登录活动
+    await log_activity(
+        db=db,
+        user_id=user.id,
+        group_id=user.group_id,
+        action_type="login",
+        request=request,
+    )
+
     return {
         "accessToken": create_access_token(user),
         "tokenType": "bearer",
@@ -168,4 +194,129 @@ async def create_user(
             "role": user.role,
             "workspaceId": workspace.id,
         },
+    }
+
+
+@router.put("/users/{user_id}")
+async def update_user(
+    user_id: int,
+    payload: UpdateUserRequest,
+    principal: AuthPrincipal = Depends(get_current_principal),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """更新用户信息（显示名、角色）"""
+    _assert_admin(principal)
+
+    # 查找用户
+    stmt = select(User).where(User.id == user_id, User.group_id == principal.group.id)
+    user = (await db.execute(stmt)).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    # 不能修改自己的角色
+    if user.id == principal.user.id and payload.role and payload.role != user.role:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot change your own role")
+
+    # 更新字段
+    if payload.display_name:
+        user.display_name = payload.display_name.strip()
+
+    if payload.role:
+        if payload.role not in ALL_ROLES:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid role")
+        user.role = payload.role
+
+    await db.commit()
+    await db.refresh(user)
+
+    return {
+        "success": True,
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "displayName": user.display_name,
+            "role": user.role,
+            "isActive": user.is_active,
+        },
+    }
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: int,
+    principal: AuthPrincipal = Depends(get_current_principal),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """删除用户"""
+    _assert_admin(principal)
+
+    # 不能删除自己
+    if user_id == principal.user.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot delete yourself")
+
+    # 查找用户
+    stmt = select(User).where(User.id == user_id, User.group_id == principal.group.id)
+    user = (await db.execute(stmt)).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    await db.delete(user)
+    await db.commit()
+
+    return {"success": True, "message": f"User {user.username} deleted"}
+
+
+@router.post("/users/{user_id}/reset-password")
+async def reset_password(
+    user_id: int,
+    payload: ResetPasswordRequest,
+    principal: AuthPrincipal = Depends(get_current_principal),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """重置用户密码"""
+    _assert_admin(principal)
+
+    # 查找用户
+    stmt = select(User).where(User.id == user_id, User.group_id == principal.group.id)
+    user = (await db.execute(stmt)).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    user.password_hash = hash_password(payload.new_password)
+    await db.commit()
+
+    return {"success": True, "message": f"Password reset for {user.username}"}
+
+
+@router.post("/users/{user_id}/toggle-active")
+async def toggle_user_active(
+    user_id: int,
+    principal: AuthPrincipal = Depends(get_current_principal),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """启用/禁用用户账户"""
+    _assert_admin(principal)
+
+    # 不能禁用自己
+    if user_id == principal.user.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot disable yourself")
+
+    # 查找用户
+    stmt = select(User).where(User.id == user_id, User.group_id == principal.group.id)
+    user = (await db.execute(stmt)).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+    user.is_active = not user.is_active
+    await db.commit()
+    await db.refresh(user)
+
+    return {
+        "success": True,
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "isActive": user.is_active,
+        },
+        "message": f"User {user.username} {'enabled' if user.is_active else 'disabled'}",
     }

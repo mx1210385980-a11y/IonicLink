@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, Optional
 
@@ -12,9 +13,12 @@ from security import literature_scope_conditions
 from services.file_service import _normalize_record_chemistry
 from services.il_resolver_service import resolve_il
 from services.score_service import calculate_confidence, calculate_confidence_details
+from services.unit_converter import parse_force_range_to_newtons, parse_force_to_newtons
 from services.usage_metrics_service import get_usage_metrics_service
 from knowledge_base import normalize_ionic_liquid
 from utils.tribopair import compose_tribopair_label
+
+logger = logging.getLogger(__name__)
 
 
 async def _execute_counted(session: AsyncSession, stmt: Any, *, operation: str):
@@ -87,6 +91,38 @@ def _parse_load_numeric(value: Optional[str]) -> Optional[float]:
         return float(match.group(0))
     except ValueError:
         return None
+
+
+def _parse_load_bounds(value: Optional[str]) -> Optional[tuple[float, float]]:
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    range_bounds = parse_force_range_to_newtons(text)
+    if range_bounds is not None:
+        return range_bounds
+
+    scalar = parse_force_to_newtons(text)
+    if scalar is None:
+        return None
+
+    return scalar, scalar
+
+
+def _load_matches_filter(value: Optional[str], load_min: float | None, load_max: float | None) -> bool:
+    bounds = _parse_load_bounds(value)
+    if bounds is None:
+        return False
+
+    record_min, record_max = bounds
+    if load_min is not None and record_max < load_min:
+        return False
+    if load_max is not None and record_min > load_max:
+        return False
+    return True
 
 
 def build_confidence_input(record: TribologyData) -> dict[str, Any]:
@@ -227,6 +263,7 @@ async def search_records(
     limit: int = 20,
     scope_filter_values: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    logger.debug("Executing record search skip=%s limit=%s scope=%s", skip, limit, scope_filter_values)
     conditions = _build_conditions(filter_params)
     scope_conditions = literature_scope_conditions(scope_filter_values) if scope_filter_values else []
     use_load_filter = (
@@ -251,12 +288,11 @@ async def search_records(
 
         filtered_records = []
         for record in all_records:
-            numeric_load = _parse_load_numeric(record.load_value)
-            if numeric_load is None:
-                continue
-            if getattr(filter_params, "load_min", None) is not None and numeric_load < filter_params.load_min:
-                continue
-            if getattr(filter_params, "load_max", None) is not None and numeric_load > filter_params.load_max:
+            if not _load_matches_filter(
+                record.load_value or record.load_raw,
+                getattr(filter_params, "load_min", None),
+                getattr(filter_params, "load_max", None),
+            ):
                 continue
             filtered_records.append(record)
 
@@ -297,23 +333,56 @@ async def get_filter_options(
     session: AsyncSession,
     scope_filter_values: dict[str, Any] | None = None,
 ) -> dict[str, list[str]]:
+    logger.debug("Loading record filter options scope=%s", scope_filter_values)
     lubricants_stmt = select(TribologyData.lubricant).distinct()
-    material_fields = [
+    option_fields = [
         ("filter_options.materials.probe", TribologyData.probe_material),
         ("filter_options.materials.substrate", TribologyData.substrate_material),
         ("filter_options.materials.coating", TribologyData.substrate_coating),
         ("filter_options.materials.legacy", TribologyData.material_name),
+        ("filter_options.conditions.speed", TribologyData.speed_value),
+        ("filter_options.conditions.temperature", TribologyData.temperature),
+        ("filter_options.conditions.potential", TribologyData.potential),
+        ("filter_options.conditions.water_content", TribologyData.water_content),
     ]
-    material_values: set[str] = set()
+    option_values: dict[str, set[str]] = {
+        "materials": set(),
+        "probeMaterials": set(),
+        "substrateMaterials": set(),
+        "substrateCoatings": set(),
+        "speedValues": set(),
+        "temperatureValues": set(),
+        "potentialValues": set(),
+        "waterContentValues": set(),
+    }
     conditions = literature_scope_conditions(scope_filter_values) if scope_filter_values else []
     if conditions:
         lubricants_stmt = lubricants_stmt.join(TribologyData.literature).where(*conditions)
-    for operation, column in material_fields:
+    for operation, column in option_fields:
         stmt = select(column).distinct()
         if conditions:
             stmt = stmt.join(TribologyData.literature).where(*conditions)
-        result_materials = await _execute_counted(session, stmt, operation=operation)
-        material_values.update(str(item).strip() for item in result_materials.scalars().all() if str(item or "").strip())
+        result_values = await _execute_counted(session, stmt, operation=operation)
+        cleaned = {str(item).strip() for item in result_values.scalars().all() if str(item or "").strip()}
+        if column is TribologyData.probe_material:
+            option_values["probeMaterials"].update(cleaned)
+            option_values["materials"].update(cleaned)
+        elif column is TribologyData.substrate_material:
+            option_values["substrateMaterials"].update(cleaned)
+            option_values["materials"].update(cleaned)
+        elif column is TribologyData.substrate_coating:
+            option_values["substrateCoatings"].update(cleaned)
+            option_values["materials"].update(cleaned)
+        elif column is TribologyData.material_name:
+            option_values["materials"].update(cleaned)
+        elif column is TribologyData.speed_value:
+            option_values["speedValues"].update(cleaned)
+        elif column is TribologyData.temperature:
+            option_values["temperatureValues"].update(cleaned)
+        elif column is TribologyData.potential:
+            option_values["potentialValues"].update(cleaned)
+        elif column is TribologyData.water_content:
+            option_values["waterContentValues"].update(cleaned)
 
     result_lubricants = await _execute_counted(
         session,
@@ -331,8 +400,15 @@ async def get_filter_options(
             normalized_lubricants.append(normalized)
 
     return {
-        "materials": sorted(material_values),
+        "materials": sorted(option_values["materials"]),
         "lubricants": sorted(set(normalized_lubricants)),
+        "probeMaterials": sorted(option_values["probeMaterials"]),
+        "substrateMaterials": sorted(option_values["substrateMaterials"]),
+        "substrateCoatings": sorted(option_values["substrateCoatings"]),
+        "speedValues": sorted(option_values["speedValues"]),
+        "temperatureValues": sorted(option_values["temperatureValues"]),
+        "potentialValues": sorted(option_values["potentialValues"]),
+        "waterContentValues": sorted(option_values["waterContentValues"]),
     }
 
 

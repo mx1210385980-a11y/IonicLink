@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db_session
 from security import AuthPrincipal, RequestScope, decode_token, get_current_principal, get_request_scope
 from security import require_cleaned_dataset_access
+from services.activity_logging_service import log_activity
+from services.model_cleaning_service import get_model_cleaning_service
 from services.model_training_service import (
     DEFAULT_CLEANING_OPTIONS,
     DEFAULT_DATA_OPTIONS,
@@ -22,11 +25,19 @@ router = APIRouter(
     tags=["Model Training"],
     responses={404: {"description": "Not found"}},
 )
+logger = logging.getLogger(__name__)
+
+
+def _raise_internal_error(action: str, exc: Exception) -> None:
+    logger.exception("%s failed", action)
+    raise HTTPException(status_code=500, detail=f"{action} failed.") from exc
 
 class HyperparameterPayload(BaseModel):
     n_estimators: int = Field(DEFAULT_HYPERPARAMETERS["n_estimators"], ge=20, le=300)
     learning_rate: float = Field(DEFAULT_HYPERPARAMETERS["learning_rate"], ge=0.01, le=0.3)
     max_depth: int = Field(DEFAULT_HYPERPARAMETERS["max_depth"], ge=1, le=8)
+    l2_leaf_reg: float = Field(DEFAULT_HYPERPARAMETERS["l2_leaf_reg"], ge=0.0, le=20.0)
+    random_strength: float = Field(DEFAULT_HYPERPARAMETERS["random_strength"], ge=0.0, le=10.0)
 
 
 class DataOptionPayload(BaseModel):
@@ -57,20 +68,28 @@ async def get_training_summary(
     principal: AuthPrincipal = Depends(get_current_principal),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    scope_filter_values = {
-        "group_id": scope.group_id,
-        "scope_type": scope.scope_type,
-        "scope_key": scope.scope_key,
-        "workspace_id": scope.workspace.id if scope.workspace else None,
-    }
-    if cleaned_dataset_id is not None:
-        dataset = await require_cleaned_dataset_access(session, principal, cleaned_dataset_id)
-        return get_model_training_service().summarize_saved_dataset(dataset)
-    return await get_model_training_service().summarize_scope(
-        session,
-        scope_filter_values=scope_filter_values,
-        cleaning_options=DEFAULT_CLEANING_OPTIONS,
-    )
+    try:
+        scope_filter_values = {
+            "group_id": scope.group_id,
+            "scope_type": scope.scope_type,
+            "scope_key": scope.scope_key,
+            "workspace_id": scope.workspace.id if scope.workspace else None,
+        }
+        if cleaned_dataset_id is not None:
+            dataset = await require_cleaned_dataset_access(session, principal, cleaned_dataset_id)
+            dataset = await get_model_cleaning_service().upgrade_dataset_if_needed(session, dataset)
+            return get_model_training_service().summarize_saved_dataset(dataset)
+        return await get_model_training_service().summarize_scope(
+            session,
+            scope_filter_values=scope_filter_values,
+            cleaning_options=DEFAULT_CLEANING_OPTIONS,
+        )
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        _raise_internal_error("Get training summary", exc)
 
 
 @router.post("/cleaning/summary", response_model=dict)
@@ -79,45 +98,78 @@ async def get_cleaning_summary(
     session: AsyncSession = Depends(get_db_session),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    scope_filter_values = {
-        "group_id": scope.group_id,
-        "scope_type": scope.scope_type,
-        "scope_key": scope.scope_key,
-        "workspace_id": scope.workspace.id if scope.workspace else None,
-    }
-    return await get_model_training_service().summarize_scope(
-        session,
-        scope_filter_values=scope_filter_values,
-        cleaning_options=payload.dict(),
-    )
+    try:
+        scope_filter_values = {
+            "group_id": scope.group_id,
+            "scope_type": scope.scope_type,
+            "scope_key": scope.scope_key,
+            "workspace_id": scope.workspace.id if scope.workspace else None,
+        }
+        return await get_model_training_service().summarize_scope(
+            session,
+            scope_filter_values=scope_filter_values,
+            cleaning_options=payload.dict(),
+        )
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        _raise_internal_error("Get cleaning summary", exc)
 
 
 @router.post("/start", response_model=dict)
 async def start_training(
     payload: TrainingStartPayload,
+    request: Request,
     session: AsyncSession = Depends(get_db_session),
     principal: AuthPrincipal = Depends(get_current_principal),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    saved_dataset = None
-    if payload.cleaned_dataset_id is None:
-        raise HTTPException(status_code=400, detail="Select a saved cleaned dataset before starting training.")
-    saved_dataset = await require_cleaned_dataset_access(session, principal, payload.cleaned_dataset_id)
-    task = await get_model_training_service().create_training_task(
-        session,
-        scope_filter_values={
-            "group_id": scope.group_id,
-            "scope_type": scope.scope_type,
-            "scope_key": scope.scope_key,
-            "workspace_id": scope.workspace.id if scope.workspace else None,
-        },
-        owner_user_id=principal.user.id,
-        group_id=principal.group.id,
-        scope_key=scope.scope_key,
-        config=payload.dict(),
-        saved_dataset=saved_dataset,
-    )
-    return {"task": task.snapshot(include_history=True)}
+    try:
+        saved_dataset = None
+        if payload.cleaned_dataset_id is None:
+            raise HTTPException(status_code=400, detail="Select a saved cleaned dataset before starting training.")
+        saved_dataset = await require_cleaned_dataset_access(session, principal, payload.cleaned_dataset_id)
+        saved_dataset = await get_model_cleaning_service().upgrade_dataset_if_needed(session, saved_dataset)
+        task = await get_model_training_service().create_training_task(
+            session,
+            scope_filter_values={
+                "group_id": scope.group_id,
+                "scope_type": scope.scope_type,
+                "scope_key": scope.scope_key,
+                "workspace_id": scope.workspace.id if scope.workspace else None,
+            },
+            owner_user_id=principal.user.id,
+            group_id=principal.group.id,
+            scope_key=scope.scope_key,
+            config=payload.dict(),
+            saved_dataset=saved_dataset,
+        )
+
+        # 记录模型训练活动
+        await log_activity(
+            db=session,
+            user_id=principal.user.id,
+            group_id=principal.group.id,
+            action_type="train_model",
+            action_detail={
+                "task_id": task.task_id,
+                "target": payload.target,
+                "algorithm": payload.algorithm,
+                "cleaned_dataset_id": payload.cleaned_dataset_id,
+            },
+            resource_type="model_training",
+            request=request,
+        )
+
+        return {"task": task.snapshot(include_history=True)}
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        _raise_internal_error("Start training", exc)
 
 
 @router.get("/tasks/{task_id}", response_model=dict)
@@ -129,6 +181,8 @@ async def get_training_task(
         task = get_model_training_service().get_task(task_id, principal.user.id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Training task not found.") from exc
+    except Exception as exc:
+        _raise_internal_error("Get training task", exc)
     return {"task": task.snapshot(include_history=True)}
 
 
@@ -141,6 +195,8 @@ async def cancel_training_task(
         task = get_model_training_service().cancel_task(task_id, principal.user.id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Training task not found.") from exc
+    except Exception as exc:
+        _raise_internal_error("Cancel training task", exc)
     return {"task": task.snapshot(include_history=True)}
 
 

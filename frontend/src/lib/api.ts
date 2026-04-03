@@ -75,12 +75,16 @@ export interface LoginResponse {
 }
 
 export async function login(username: string, password: string) {
-    const response = await api.post('/api/auth/login', { username, password })
+    const response = await api.post('/api/auth/login', { username, password }, {
+        timeout: 15000,
+    })
     return response.data as LoginResponse
 }
 
 export async function getCurrentUser() {
-    const response = await api.get('/api/auth/me')
+    const response = await api.get('/api/auth/me', {
+        timeout: 8000,
+    })
     return response.data as AuthUser
 }
 
@@ -128,27 +132,8 @@ export async function chat(message: string, context?: string) {
 
 // Sync data to Database
 export async function syncData(fileId: string, records: TribologyData[]) {
-    // Convert to the format expected by the backend (snake_case conversion is handled in RecordInput, but field names need alignment)
-    const formattedRecords = records.map(r => ({
-        id: r.id,
-        materialName: r.material_name,
-        lubricant: r.ionic_liquid, // Backend DataRecord lubricant field corresponds to frontend ionic_liquid
-        cofRaw: r.cof,
-        loadRaw: r.load,
-        speedRaw: r.speed,
-        probeMaterial: r.probe_material,
-        probeGeometry: r.probe_geometry,
-        probeRadius: r.probe_radius,
-        probeRoughness: r.probe_roughness,
-        substrateMaterial: r.substrate_material,
-        substrateCoating: r.substrate_coating,
-        substrateRoughness: r.substrate_roughness,
-        validationStatus: r.validationStatus,
-        adminComment: r.notes
-    }))
-
     const response = await api.post(`/api/sync/${fileId}`, {
-        records: formattedRecords
+        records: records.map(mapRecordForLegacySync)
     })
     return response.data
 }
@@ -181,7 +166,10 @@ export interface EvidenceResult {
         page: number
         bbox: number[]
         matched_text?: string | null
+        semantic_type?: string | null
         inferred?: boolean
+        snippet_text?: string | null
+        image_b64?: string | null
     }>
     source: string | null
     page: number | null
@@ -272,8 +260,114 @@ export async function searchRecords(filter: SearchFilter, skip: number = 0, limi
     return response.data
 }
 
+export interface RelationshipGraphDimensionSummary {
+    type: string
+    label: string
+    nodeCount: number
+    coveragePct: number
+    nonEmptyCount: number
+    distinctCount: number
+    reason?: string | null
+}
+
+export interface RelationshipGraphNode {
+    id: string
+    type: string
+    label: string
+    count: number
+    coveragePct: number
+    avgCof: number | null
+    minCof: number | null
+    maxCof: number | null
+}
+
+export interface RelationshipGraphEdge {
+    id: string
+    source: string
+    target: string
+    sourceType: string
+    sourceLabel: string
+    targetType: string
+    targetLabel: string
+    count: number
+    avgCof: number | null
+    minCof: number | null
+    maxCof: number | null
+}
+
+export interface RelationshipGraphSummary {
+    totalRecords: number
+    totalLiterature: number
+    avgCof: number | null
+    activeDimensions: RelationshipGraphDimensionSummary[]
+    hiddenDimensions: RelationshipGraphDimensionSummary[]
+}
+
+export interface RelationshipGraphResponse {
+    title: string
+    state: 'ready' | 'empty' | 'insufficient_data' | string
+    summary: RelationshipGraphSummary
+    nodes: RelationshipGraphNode[]
+    edges: RelationshipGraphEdge[]
+}
+
+export interface RelationshipGraphSelection {
+    kind: 'node' | 'edge'
+    nodeType?: string
+    nodeValue?: string
+    sourceType?: string
+    sourceValue?: string
+    targetType?: string
+    targetValue?: string
+}
+
+export interface RelationshipGraphDrilldownSummary {
+    label: string
+    count: number
+    avgCof: number | null
+    minCof: number | null
+    maxCof: number | null
+}
+
+export interface RelationshipGraphLiteratureSummary {
+    id: number
+    doi: string
+    title: string
+    journal: string
+    year: number | null
+    hitCount: number
+}
+
+export interface RelationshipGraphDrilldownResponse {
+    selection: RelationshipGraphSelection
+    summary: RelationshipGraphDrilldownSummary
+    total: number
+    skip: number
+    limit: number
+    items: RecordResponse[]
+    literatureSummaries: RelationshipGraphLiteratureSummary[]
+}
+
+export async function getRelationshipGraph(filter: SearchFilter): Promise<RelationshipGraphResponse> {
+    const response = await api.post('/api/records/relationship-graph', filter)
+    return response.data
+}
+
+export async function getRelationshipGraphDrilldown(
+    filter: SearchFilter,
+    selection: RelationshipGraphSelection,
+    skip: number = 0,
+    limit: number = 20,
+): Promise<RelationshipGraphDrilldownResponse> {
+    const response = await api.post(`/api/records/relationship-graph/drilldown?skip=${skip}&limit=${limit}`, {
+        filter,
+        selection,
+    })
+    return response.data
+}
+
 // Get Filter Options
-export async function getFilterOptions() {
+export async function getFilterOptions(): Promise<RecordFilterOptions> {
     const response = await api.get('/api/records/options')
     return response.data
 }
@@ -526,6 +620,74 @@ export function formatTribopairLabel(input: {
     if (probe) return probe
     return legacy || '--'
 }
+
+function parseNumericValue(raw: string | undefined, stripPattern: RegExp) {
+    if (!raw) return null
+    const parsed = parseFloat(raw.replace(stripPattern, ''))
+    return Number.isFinite(parsed) ? parsed : null
+}
+
+function mapRecordForLegacySync(record: TribologyData) {
+    return {
+        id: record.id,
+        materialName: record.material_name,
+        lubricant: record.ionic_liquid,
+        cofRaw: record.cof,
+        loadRaw: record.load,
+        speedRaw: record.speed,
+        probeMaterial: record.probe_material,
+        probeGeometry: record.probe_geometry,
+        probeRadius: record.probe_radius,
+        probeRoughness: record.probe_roughness,
+        substrateMaterial: record.substrate_material,
+        substrateCoating: record.substrate_coating,
+        substrateRoughness: record.substrate_roughness,
+        validationStatus: record.validationStatus,
+        adminComment: record.notes,
+    }
+}
+
+export function mapRecordToPayload(record: TribologyData) {
+    return {
+        materialName: record.material_name,
+        lubricant: record.ionic_liquid,
+        cofValue: parseNumericValue(record.cof, /[<>~=]/g),
+        cofOperator: record.cof?.match(/[<>~=]/)?.[0] || null,
+        cofRaw: record.cof,
+        loadValue: parseNumericValue(record.load, /[^0-9.]/g),
+        loadRaw: record.load,
+        speedValue: parseNumericValue(record.speed, /[^0-9.]/g),
+        speedRaw: record.speed,
+        temperature: record.temperature,
+        temperatureValue: parseNumericValue(record.temperature, /[^0-9.]/g),
+        potential: record.potential,
+        waterContent: record.water_content,
+        probeMaterial: record.probe_material,
+        probeGeometry: record.probe_geometry,
+        probeRadius: record.probe_radius,
+        probeRoughness: record.probe_roughness,
+        substrateMaterial: record.substrate_material,
+        substrateCoating: record.substrate_coating,
+        substrateRoughness: record.substrate_roughness,
+        surfaceRoughness: record.surface_roughness,
+        residualFilmThicknessD: record.residual_film_thickness_d,
+        layerSpacingDelta: record.layer_spacing_delta,
+        filmThickness: record.film_thickness,
+        molRatio: record.mol_ratio,
+        cation: record.cation,
+        anion: record.anion,
+        cationSmiles: record.cation_smiles,
+        anionSmiles: record.anion_smiles,
+        ilSmiles: record.il_smiles,
+        ilInchikey: record.il_inchikey,
+        alkylChainLength: record.alkyl_chain_length,
+        evidence: record.evidence,
+        source: record.source,
+        sourcePage: record.source_page,
+        sourceFigure: record.source_figure,
+        confidence: 0.9,
+    }
+}
 // Sync data to DB (New version: includes literature metadata)
 export async function syncWithLiterature(metadata: LiteratureMetadata, records: TribologyData[]): Promise<SyncResult> {
     // Build SyncPayload format
@@ -542,46 +704,7 @@ export async function syncWithLiterature(metadata: LiteratureMetadata, records: 
             pages: metadata.pages,
             filePath: ""  // To be filled by backend
         },
-        records: records.map(r => ({
-            materialName: r.material_name,
-            lubricant: r.ionic_liquid,
-            cofValue: r.cof ? parseFloat(r.cof.replace(/[<>~=]/g, '')) : null,
-            cofOperator: r.cof?.match(/[<>~=]/)?.[0] || null,
-            cofRaw: r.cof,
-            loadValue: r.load ? parseFloat(r.load.replace(/[^0-9.]/g, '')) : null,
-            loadRaw: r.load,
-            speedValue: r.speed ? parseFloat(r.speed.replace(/[^0-9.]/g, '')) : null,
-            speedRaw: r.speed,
-            temperature: r.temperature,
-            temperatureValue: r.temperature ? parseFloat(r.temperature.replace(/[^0-9.]/g, '')) : null,
-            // Environmental variables
-            potential: r.potential,
-            waterContent: r.water_content,
-            probeMaterial: r.probe_material,
-            probeGeometry: r.probe_geometry,
-            probeRadius: r.probe_radius,
-            probeRoughness: r.probe_roughness,
-            substrateMaterial: r.substrate_material,
-            substrateCoating: r.substrate_coating,
-            substrateRoughness: r.substrate_roughness,
-            surfaceRoughness: r.surface_roughness,
-            residualFilmThicknessD: r.residual_film_thickness_d,
-            layerSpacingDelta: r.layer_spacing_delta,
-            filmThickness: r.film_thickness,
-            molRatio: r.mol_ratio,
-            cation: r.cation,
-            anion: r.anion,
-            cationSmiles: r.cation_smiles,
-            anionSmiles: r.anion_smiles,
-            ilSmiles: r.il_smiles,
-            ilInchikey: r.il_inchikey,
-            alkylChainLength: r.alkyl_chain_length,
-            evidence: r.evidence,
-            source: r.source,
-            sourcePage: r.source_page,
-            sourceFigure: r.source_figure,
-            confidence: 0.9
-        }))
+        records: records.map(mapRecordToPayload)
     }
 
     const response = await api.post('/api/sync/', payload)
@@ -600,47 +723,7 @@ export async function syncBatchData(metadata: LiteratureMetadata, records: Tribo
             journal: metadata.journal || '',
             year: metadata.year || new Date().getFullYear()
         },
-        records: records.map(r => ({
-            // Map frontend TribologyData to backend TribologyDataCreate
-            materialName: r.material_name,
-            lubricant: r.ionic_liquid,
-            cofValue: r.cof ? parseFloat(r.cof.replace(/[<>~=]/g, '')) : null,
-            cofOperator: r.cof?.match(/[<>~=]/)?.[0] || null,
-            cofRaw: r.cof,
-            loadValue: r.load ? parseFloat(r.load.replace(/[^0-9.]/g, '')) : null,
-            loadRaw: r.load,
-            speedValue: r.speed ? parseFloat(r.speed.replace(/[^0-9.]/g, '')) : null,
-            speedRaw: r.speed,
-            temperature: r.temperature,
-            temperatureValue: r.temperature ? parseFloat(r.temperature.replace(/[^0-9.]/g, '')) : null,
-            // Environmental variables
-            potential: r.potential,
-            waterContent: r.water_content,
-            probeMaterial: r.probe_material,
-            probeGeometry: r.probe_geometry,
-            probeRadius: r.probe_radius,
-            probeRoughness: r.probe_roughness,
-            substrateMaterial: r.substrate_material,
-            substrateCoating: r.substrate_coating,
-            substrateRoughness: r.substrate_roughness,
-            surfaceRoughness: r.surface_roughness,
-            residualFilmThicknessD: r.residual_film_thickness_d,
-            layerSpacingDelta: r.layer_spacing_delta,
-            filmThickness: r.film_thickness,
-            molRatio: r.mol_ratio,
-            cation: r.cation,
-            anion: r.anion,
-            cationSmiles: r.cation_smiles,
-            anionSmiles: r.anion_smiles,
-            ilSmiles: r.il_smiles,
-            ilInchikey: r.il_inchikey,
-            alkylChainLength: r.alkyl_chain_length,
-            evidence: r.evidence,
-            source: r.source,
-            sourcePage: r.source_page,
-            sourceFigure: r.source_figure,
-            confidence: 0.9, // Default confidence, or fetch from frontend tracking
-        }))
+        records: records.map(mapRecordToPayload)
     }
 
     const response = await api.post('/api/sync/', payload)
@@ -665,13 +748,32 @@ export interface BatchFile {
 
 export type SearchFilter = {
     materials?: string[]
+    probe_materials?: string[]
+    substrate_materials?: string[]
+    substrate_coatings?: string[]
     lubricants?: string[]
+    speed_values?: string[]
+    temperature_values?: string[]
+    potential_values?: string[]
+    water_content_values?: string[]
     load_min?: number
     load_max?: number
     cof_min?: number
     cof_max?: number
     doi?: string
     fileId?: string
+}
+
+export interface RecordFilterOptions {
+    materials: string[]
+    lubricants: string[]
+    probeMaterials: string[]
+    substrateMaterials: string[]
+    substrateCoatings: string[]
+    speedValues: string[]
+    temperatureValues: string[]
+    potentialValues: string[]
+    waterContentValues: string[]
 }
 
 export interface SourceFileDTO {
@@ -1018,6 +1120,8 @@ export interface ModelTrainingHyperparameters {
     n_estimators: number
     learning_rate: number
     max_depth: number
+    l2_leaf_reg: number
+    random_strength: number
 }
 
 export interface ModelTrainingDataOptions {
@@ -1087,6 +1191,91 @@ export interface ModelCleaningPreview {
     rows: ModelCleaningMatrixRow[]
     preview_rows: ModelCleaningMatrixRow[]
     normalization_preview: ModelCleaningMatrixRow[]
+    dataset_builder?: {
+        target_column: string
+        descriptor_columns: string[]
+        macro_columns: string[]
+        rows: number
+        descriptor_generation: {
+            input_rows: number
+            usable_rows: number
+            descriptor_count: number
+            macro_feature_count: number
+            fingerprint_bits_per_ion: number
+            total_fingerprint_bits: number
+            descriptor_blocks: Array<{
+                label: string
+                count: number
+            }>
+            macro_features: Array<{
+                key: string
+                label: string
+                column_name: string
+                group: string
+                available_count: number
+                coverage: number
+            }>
+            rdkit_enabled: boolean
+        }
+        screening: {
+            feature_count: number
+            analyzable_rows: number
+            target_label: string
+            heatmap: {
+                features: string[]
+                matrix: Array<Array<number | null>>
+                cells: Array<{
+                    x: number
+                    y: number
+                    value: number | null
+                }>
+            }
+            strongest_to_target: Array<{
+                feature: string
+                correlation: number
+                abs_correlation: number
+            }>
+            ionic_collinearity_groups: Array<{
+                label: string
+                features: string[]
+                size: number
+                max_abs_correlation: number
+            }>
+            surface_bias_alerts: Array<{
+                features: string[]
+                correlation: number
+                message: string
+            }>
+            nonlinear_recommendation: {
+                recommended: boolean
+                reason: string
+                algorithms: string[]
+            }
+            requires_surface_stratified_split: boolean
+        }
+        subsets: {
+            dataset_a: {
+                name: string
+                description: string
+                target_column: string
+                columns: string[]
+                rows: ModelCleaningMatrixRow[]
+                row_count: number
+                feature_count: number
+                preview_rows: ModelCleaningMatrixRow[]
+            }
+            dataset_b: {
+                name: string
+                description: string
+                target_column: string
+                columns: string[]
+                rows: ModelCleaningMatrixRow[]
+                row_count: number
+                feature_count: number
+                preview_rows: ModelCleaningMatrixRow[]
+            }
+        }
+    }
 }
 
 export interface SavedCleanedDatasetSummary {
@@ -1107,11 +1296,22 @@ export interface SavedCleanedDatasetSummary {
         key: string
         label: string
     }
+    dataset_kind?: string
+    import_metadata?: {
+        filename?: string
+        original_columns?: string[]
+        identifier_columns?: string[]
+        feature_columns?: string[]
+        row_count?: number
+    } | null
 }
 
 export interface SavedCleanedDatasetDetail extends SavedCleanedDatasetSummary {
     rows: ModelCleaningMatrixRow[]
-    config: ModelCleaningOptions
+    config: ModelCleaningOptions & {
+        dataset_kind?: string
+        import_config?: Record<string, any>
+    }
 }
 
 export async function previewModelCleaning(payload: ModelCleaningOptions) {
@@ -1126,6 +1326,30 @@ export async function listCleanedDatasets() {
 
 export async function saveCleanedDataset(payload: { name: string; description?: string; target_key?: string; cleaning_options: ModelCleaningOptions }) {
     const response = await api.post('/api/model-cleaning/datasets', payload)
+    return response.data as { dataset: SavedCleanedDatasetDetail }
+}
+
+export async function importCleanedDatasetCsv(payload: {
+    file: File
+    name: string
+    description?: string
+    targetColumn?: string
+}) {
+    const formData = new FormData()
+    formData.append('file', payload.file)
+    formData.append('name', payload.name)
+    if (payload.description) {
+        formData.append('description', payload.description)
+    }
+    if (payload.targetColumn) {
+        formData.append('target_column', payload.targetColumn)
+    }
+
+    const response = await api.post('/api/model-cleaning/datasets/import-csv', formData, {
+        headers: {
+            'Content-Type': 'multipart/form-data',
+        },
+    })
     return response.data as { dataset: SavedCleanedDatasetDetail }
 }
 
@@ -1221,3 +1445,158 @@ export interface LiteratureWithRecords extends Literature {
     tribologyData: TribologyRecord[]
 }
 
+// ============== Monitor API ==============
+
+/** 用户使用统计 */
+export interface UserUsageStats {
+    user_id: number
+    username: string
+    display_name: string
+    role: string
+    is_active: boolean
+    created_at: string | null
+    login_count: number
+    upload_count: number
+    extraction_count: number
+    record_view_count: number
+    record_edit_count: number
+    sync_count: number
+    model_training_count: number
+    total_activities: number
+    last_activity_at: string | null
+}
+
+/** 活动日志条目 */
+export interface ActivityLogEntry {
+    id: number
+    action_type: string
+    action_label: string
+    action_detail: Record<string, any> | null
+    resource_type: string | null
+    resource_id: number | null
+    ip_address: string | null
+    created_at: string | null
+}
+
+/** 研究组活动统计 */
+export interface GroupActivitySummary {
+    total_users: number
+    active_users_today: number
+    active_users_week: number
+    total_uploads: number
+    total_extractions: number
+    total_records_viewed: number
+    total_model_trainings: number
+    activity_by_day: Array<{ date: string; count: number }>
+}
+
+/** 获取所有用户使用统计 */
+export async function getMonitorUsers(): Promise<{ items: UserUsageStats[] }> {
+    const response = await api.get('/api/monitor/users')
+    return response.data
+}
+
+/** 获取单个用户统计 */
+export async function getUserStats(userId: number): Promise<UserUsageStats> {
+    const response = await api.get(`/api/monitor/users/${userId}/stats`)
+    return response.data
+}
+
+/** 获取用户活动时间线 */
+export async function getUserTimeline(
+    userId: number,
+    skip = 0,
+    limit = 50,
+): Promise<{ items: ActivityLogEntry[]; total: number }> {
+    const response = await api.get(`/api/monitor/users/${userId}/timeline`, {
+        params: { skip, limit },
+    })
+    return response.data
+}
+
+/** 获取研究组活动统计 */
+export async function getGroupActivitySummary(): Promise<GroupActivitySummary> {
+    const response = await api.get('/api/monitor/summary')
+    return response.data
+}
+
+/** 获取操作类型定义 */
+export async function getActionTypes(): Promise<{ action_types: Array<{ key: string; label: string }> }> {
+    const response = await api.get('/api/monitor/action-types')
+    return response.data
+}
+
+// ============== User Management API ==============
+
+/** 用户基本信息 */
+export interface UserInfo {
+    id: number
+    username: string
+    displayName: string
+    role: string
+    isActive: boolean
+    createdAt: string
+}
+
+/** 获取所有用户列表 */
+export async function listUsers(): Promise<{ items: UserInfo[] }> {
+    const response = await api.get('/api/auth/users')
+    return response.data
+}
+
+/** 创建用户请求 */
+export interface CreateUserRequest {
+    username: string
+    password: string
+    displayName: string
+    role: string
+}
+
+/** 创建用户 */
+export async function createUser(payload: CreateUserRequest): Promise<{
+    success: boolean
+    user: { id: number; username: string; displayName: string; role: string; workspaceId: number }
+}> {
+    const response = await api.post('/api/auth/users', payload)
+    return response.data
+}
+
+/** 更新用户请求 */
+export interface UpdateUserRequest {
+    displayName?: string
+    role?: string
+}
+
+/** 更新用户 */
+export async function updateUser(
+    userId: number,
+    payload: UpdateUserRequest,
+): Promise<{ success: boolean; user: UserInfo }> {
+    const response = await api.put(`/api/auth/users/${userId}`, payload)
+    return response.data
+}
+
+/** 删除用户 */
+export async function deleteUser(userId: number): Promise<{ success: boolean; message: string }> {
+    const response = await api.delete(`/api/auth/users/${userId}`)
+    return response.data
+}
+
+/** 重置用户密码 */
+export async function resetUserPassword(
+    userId: number,
+    newPassword: string,
+): Promise<{ success: boolean; message: string }> {
+    const response = await api.post(`/api/auth/users/${userId}/reset-password`, {
+        newPassword,
+    })
+    return response.data
+}
+
+/** 切换用户状态 */
+export async function toggleUserActive(
+    userId: number,
+): Promise<{ success: boolean; user: { id: number; username: string; isActive: boolean }; message: string }> {
+    const response = await api.post(`/api/auth/users/${userId}/toggle-active`)
+    return response.data
+}

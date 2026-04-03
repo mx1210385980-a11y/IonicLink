@@ -1,7 +1,10 @@
 # Environment variables
 .env
+.env.*
 .env.local
 .env.*.local
+backend/.env
+frontend/.env
 
 # Python
 __pycache__/

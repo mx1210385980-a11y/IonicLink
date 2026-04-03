@@ -27,6 +27,9 @@ export interface EvidenceSnippet {
   type: 'text' | 'image'
   text?: string
   target?: string
+  highlightTargets?: string[]
+  previewLabel?: string
+  previewHtml?: string
   imageUrl?: string
   boundingBox?: number[]
 }
@@ -35,6 +38,8 @@ export interface EvidenceMap {
   cof: EvidenceSnippet
   ionicLiquid?: EvidenceSnippet
   surface?: EvidenceSnippet
+  speed?: EvidenceSnippet
+  load?: EvidenceSnippet
   condition?: EvidenceSnippet
   temperature?: EvidenceSnippet
 }
@@ -50,6 +55,8 @@ export const evidenceTagOrder = [
   'cof',
   'ionicLiquid',
   'surface',
+  'speed',
+  'load',
   'condition',
   'temperature',
 ] as const
@@ -98,6 +105,26 @@ export const tagColors: Record<EvidenceTagType, TagColorClasses> = {
     pillMutedText: 'text-slate-500',
     glow: 'shadow-[0_0_0_1px_rgba(249,115,22,0.42),0_0_36px_rgba(249,115,22,0.14)]',
   },
+  speed: {
+    bg: 'bg-sky-100/90',
+    text: 'text-sky-700',
+    ring: 'ring-sky-300/80',
+    pillBg: 'bg-sky-50',
+    pillText: 'text-sky-700',
+    pillMutedBg: 'bg-slate-100',
+    pillMutedText: 'text-slate-500',
+    glow: 'shadow-[0_0_0_1px_rgba(14,165,233,0.42),0_0_36px_rgba(14,165,233,0.15)]',
+  },
+  load: {
+    bg: 'bg-cyan-100/90',
+    text: 'text-cyan-700',
+    ring: 'ring-cyan-300/80',
+    pillBg: 'bg-cyan-50',
+    pillText: 'text-cyan-700',
+    pillMutedBg: 'bg-slate-100',
+    pillMutedText: 'text-slate-500',
+    glow: 'shadow-[0_0_0_1px_rgba(6,182,212,0.42),0_0_36px_rgba(6,182,212,0.15)]',
+  },
   condition: {
     bg: 'bg-emerald-100/90',
     text: 'text-emerald-700',
@@ -124,6 +151,8 @@ const tagLabels: Record<EvidenceTagType, string> = {
   cof: 'COF',
   ionicLiquid: 'Lubricant',
   surface: 'Surface',
+  speed: 'Speed',
+  load: 'Load',
   condition: 'Condition',
   temperature: 'Temp',
 }
@@ -144,30 +173,70 @@ function collectMatchRanges(
     const index = haystack.indexOf(needle, cursor)
     if (index === -1) break
 
-    ranges.push({ start: index, end: index + needle.length })
-    cursor = index + needle.length
+    const nextRange = { start: index, end: index + needle.length }
+    if (isAcceptableTextMatch(text, nextRange.start, nextRange.end, target)) {
+      ranges.push(nextRange)
+      cursor = nextRange.end
+      continue
+    }
+
+    cursor = index + 1
   }
 
   return ranges
 }
 
+function isWordCharacter(char: string | undefined): boolean {
+  return Boolean(char && /[A-Za-z0-9]/.test(char))
+}
+
+function shouldRequireWordBoundaries(target: string): boolean {
+  const normalized = target.trim()
+  return /^[A-Za-z]{2,}(?:\s+[A-Za-z]{2,})*$/.test(normalized)
+}
+
+function isAcceptableTextMatch(
+  text: string,
+  start: number,
+  end: number,
+  target: string,
+): boolean {
+  if (!shouldRequireWordBoundaries(target)) return true
+
+  return !isWordCharacter(text[start - 1]) && !isWordCharacter(text[end])
+}
+
 export function renderHighlightedText(
   text: string | undefined,
-  target: string | undefined,
+  target: string | string[] | undefined,
   activeTagType: EvidenceTagType,
   activeTagColors: Record<EvidenceTagType, TagColorClasses>,
 ): ReactNode {
   if (!text) return null
 
-  const normalizedTarget = target?.trim()
-  if (!normalizedTarget) return text
+  const normalizedTargets = (Array.isArray(target) ? target : [target])
+    .map((item) => item?.trim() || '')
+    .filter(Boolean)
+  if (!normalizedTargets.length) return text
 
-  const exactRanges = collectMatchRanges(text, normalizedTarget, false)
-  const resolvedRanges = exactRanges.length
-    ? exactRanges
-    : collectMatchRanges(text, normalizedTarget, true)
+  const resolvedRanges: Array<{ start: number; end: number }> = []
+  for (const candidate of [...normalizedTargets].sort((a, b) => b.length - a.length)) {
+    const exactRanges = collectMatchRanges(text, candidate, false)
+    const candidateRanges = exactRanges.length
+      ? exactRanges
+      : collectMatchRanges(text, candidate, true)
+    for (const range of candidateRanges) {
+      const overlaps = resolvedRanges.some(
+        (existing) => range.start < existing.end && existing.start < range.end,
+      )
+      if (!overlaps) {
+        resolvedRanges.push(range)
+      }
+    }
+  }
 
   if (resolvedRanges.length === 0) return text
+  resolvedRanges.sort((a, b) => a.start - b.start)
 
   const colors = activeTagColors[activeTagType]
   const nodes: ReactNode[] = []
@@ -202,8 +271,14 @@ export function renderHighlightedText(
   return nodes
 }
 
-function getSnippetPreview(snippet?: EvidenceSnippet): string {
+function getSnippetPreview(snippet?: EvidenceSnippet): ReactNode {
   if (!snippet) return '--'
+
+  if (snippet.previewHtml?.trim()) {
+    return <span dangerouslySetInnerHTML={{ __html: snippet.previewHtml }} />
+  }
+
+  if (snippet.previewLabel?.trim()) return snippet.previewLabel.trim()
 
   if (snippet.target?.trim()) return snippet.target.trim()
   if (snippet.text?.trim()) {
@@ -257,6 +332,10 @@ function getPanelGradient(activeTag: EvidenceTagType): string {
   switch (activeTag) {
     case 'surface':
       return 'from-slate-950 via-slate-950 to-orange-950/40'
+    case 'speed':
+      return 'from-slate-950 via-slate-950 to-sky-950/35'
+    case 'load':
+      return 'from-slate-950 via-slate-950 to-cyan-950/35'
     case 'condition':
       return 'from-slate-950 via-slate-950 to-emerald-950/35'
     case 'temperature':
@@ -511,8 +590,8 @@ export function InteractiveEvidencePanel({
                 <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-slate-100">
                   <img
                     src={activeSnippet.imageUrl}
-                    alt={activeSnippet.target || activeSnippet.section}
-                    className="h-auto w-full object-cover"
+                    alt={activeSnippet.previewLabel || activeSnippet.target || activeSnippet.section}
+                    className="h-auto w-full object-contain"
                   />
                   {snippetStyle ? (
                     <div
@@ -541,7 +620,7 @@ export function InteractiveEvidencePanel({
                 <p className="whitespace-pre-wrap pl-5 text-[clamp(1.05rem,1.5vw,1.32rem)] font-medium leading-[2.1] text-slate-500">
                   {renderHighlightedText(
                     activeSnippet.text,
-                    activeSnippet.target,
+                    activeSnippet.highlightTargets || activeSnippet.target,
                     activeTag,
                     tagColors,
                   )}

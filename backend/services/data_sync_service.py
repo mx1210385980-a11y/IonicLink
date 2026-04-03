@@ -9,6 +9,7 @@ Implements scoped batch sync logic:
 
 from __future__ import annotations
 
+import logging
 import re
 import traceback
 from typing import List, Optional, Tuple
@@ -27,14 +28,31 @@ from security import (
     literature_scope_conditions,
 )
 from services.doi_service import DOIService
-from services.il_resolver_service import is_supported_ionic_liquid_name
+from services.il_resolver_service import is_supported_ionic_liquid_name, resolve_il
 from utils.tribopair import derive_legacy_material_name, derive_legacy_surface_roughness
 
 _doi_service = DOIService()
+logger = logging.getLogger(__name__)
 
 
 def _is_unknown_il(value: Optional[str]) -> bool:
     return str(value or "").strip().lower() in {"", "unknown", "unknown il", "n/a", "none", "-", "--"}
+
+
+def _strip_charge_symbols(text: str) -> str:
+    """Strip charge symbols and extra whitespace from bracket notation.
+
+    Converts formats like ``[BMIm]+ [BF4]-`` → ``[BMIm][BF4]``
+    and ``[P4,4,4,1 ]+ [TFSI]-`` → ``[P4,4,4,1][TFSI]``.
+    """
+    # Remove charge symbols adjacent to brackets: ]+ → ], ]- → ], ]2+ → ]
+    text = re.sub(r"\]\s*\d*[+\-]", "]", text)
+    # Remove spaces between ][
+    text = re.sub(r"\]\s+\[", "][", text)
+    # Remove leading/trailing spaces inside brackets: [ X ] → [X]
+    text = re.sub(r"\[\s+", "[", text)
+    text = re.sub(r"\s+\]", "]", text)
+    return text.strip()
 
 
 def _canonicalize_il(value: Optional[str]) -> str:
@@ -46,6 +64,29 @@ def _canonicalize_il(value: Optional[str]) -> str:
         return "EAN"
     if "ethaline" in text_l:
         return "Ethaline"
+
+    # Strip charge symbols first
+    text = _strip_charge_symbols(text)
+
+    # Handle mixture notation: [X][Y] / carrier
+    mixture_match = re.match(r"(\[.+?\]\s*\[.+?\])\s*/\s*(.+)", text)
+    if mixture_match:
+        il_part = mixture_match.group(1).strip()
+        carrier = mixture_match.group(2).strip()
+        resolved = resolve_il(il_part)
+        canonical = resolved.get("canonical_name")
+        if canonical:
+            return f"{canonical} / {carrier}"
+        # Compact whitespace in the IL part even if unresolved
+        il_part = re.sub(r"\s+", "", il_part).replace("]i[", "][")
+        return f"{il_part} / {carrier}"
+
+    # Try full resolve_il() pipeline
+    resolved = resolve_il(text)
+    if resolved.get("canonical_name"):
+        return resolved["canonical_name"]
+
+    # Fallback: compact bracket notation
     match = re.search(r"(\[[^\[\]]+?\]\s*(?:i\s*)?\[[^\[\]]+?\])", text)
     if match:
         return re.sub(r"\s+", "", match.group(1)).replace("]i[", "][")
@@ -109,6 +150,11 @@ async def get_or_create_literature(
     principal: AuthPrincipal,
     scope: RequestScope,
 ) -> Tuple[Literature, bool]:
+    logger.debug(
+        "Resolving literature for scope_key=%s doi=%s",
+        build_scope_key(scope.scope_type, scope.workspace.id if scope.workspace else None),
+        metadata.doi,
+    )
     raw_doi = metadata.doi.strip() if metadata.doi else ""
     normalized_doi = _doi_service._normalize_doi(raw_doi) if raw_doi else ""
     final_doi = normalized_doi if normalized_doi else None
@@ -159,6 +205,12 @@ async def sync_batch_data(
     scope: RequestScope,
 ) -> SyncResult:
     try:
+        logger.info(
+            "Syncing %s records into scope=%s replace=%s",
+            len(payload.records),
+            scope.scope_key,
+            False,
+        )
         literature, is_new = await get_or_create_literature(db, payload.metadata, principal=principal, scope=scope)
 
         if not is_new:
@@ -178,6 +230,19 @@ async def sync_batch_data(
             if not is_supported_ionic_liquid_name(lubricant):
                 dropped_non_il += 1
                 continue
+
+            # Resolve IL chemistry to backfill cation/anion/SMILES
+            resolved = resolve_il(lubricant)
+            rec_cation = getattr(record, "cation", None) or resolved.get("cation")
+            rec_anion = getattr(record, "anion", None) or resolved.get("anion")
+            rec_cation_smiles = getattr(record, "cation_smiles", None) or resolved.get("cation_smiles")
+            rec_anion_smiles = getattr(record, "anion_smiles", None) or resolved.get("anion_smiles")
+            rec_il_smiles = getattr(record, "il_smiles", None) or resolved.get("il_smiles")
+            rec_il_inchikey = getattr(record, "il_inchikey", None) or resolved.get("il_inchikey")
+            rec_alkyl_chain = getattr(record, "alkyl_chain_length", None)
+            if rec_alkyl_chain is None:
+                rec_alkyl_chain = resolved.get("alkyl_chain_length")
+
             film_thickness = _normalize_quantitative_thickness(getattr(record, "film_thickness", None))
             residual_film_thickness_d = _normalize_quantitative_thickness(
                 getattr(record, "residual_film_thickness_d", None)
@@ -224,13 +289,13 @@ async def sync_batch_data(
                     layer_spacing_delta=layer_spacing_delta,
                     film_thickness=film_thickness,
                     mol_ratio=getattr(record, "mol_ratio", None),
-                    cation=getattr(record, "cation", None),
-                    anion=getattr(record, "anion", None),
-                    cation_smiles=getattr(record, "cation_smiles", None),
-                    anion_smiles=getattr(record, "anion_smiles", None),
-                    il_smiles=getattr(record, "il_smiles", None),
-                    il_inchikey=getattr(record, "il_inchikey", None),
-                    alkyl_chain_length=getattr(record, "alkyl_chain_length", None),
+                    cation=rec_cation,
+                    anion=rec_anion,
+                    cation_smiles=rec_cation_smiles,
+                    anion_smiles=rec_anion_smiles,
+                    il_smiles=rec_il_smiles,
+                    il_inchikey=rec_il_inchikey,
+                    alkyl_chain_length=rec_alkyl_chain,
                     evidence=getattr(record, "evidence", None),
                     source=getattr(record, "source", None),
                     source_page=getattr(record, "source_page", None),
@@ -241,6 +306,12 @@ async def sync_batch_data(
 
         db.add_all(new_records)
         await db.commit()
+        logger.info(
+            "Sync completed for literature_id=%s saved=%s dropped_non_il=%s",
+            literature.id,
+            len(new_records),
+            dropped_non_il,
+        )
         return SyncResult(
             success=True,
             literature_id=literature.id,
@@ -251,7 +322,7 @@ async def sync_batch_data(
             ),
         )
     except Exception as exc:
-        print(f"[Sync] ERROR: {exc}")
+        logger.exception("Sync failed")
         traceback.print_exc()
         await db.rollback()
         return SyncResult(
@@ -269,6 +340,7 @@ async def sync_batch_data_with_replacement(
     principal: AuthPrincipal,
     scope: RequestScope,
 ) -> SyncResult:
+    logger.info("Running replacement sync for scope=%s", scope.scope_key)
     return await sync_batch_data(db, payload, principal=principal, scope=scope)
 
 
@@ -337,4 +409,5 @@ async def delete_literature(
         return False
     await db.delete(literature)
     await db.commit()
+    logger.info("Deleted literature_id=%s", literature_id)
     return True

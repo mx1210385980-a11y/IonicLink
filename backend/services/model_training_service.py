@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 import re
 import uuid
@@ -20,7 +21,17 @@ from sqlalchemy.orm import selectinload
 
 from models.db_models import CleanedDataset, TribologyData
 from security import literature_scope_conditions
-from services.unit_converter import parse_force_to_newtons, parse_speed_to_mps
+from services.unit_converter import parse_force_range_to_newtons, parse_force_to_newtons, parse_speed_to_mps
+
+logger = logging.getLogger(__name__)
+
+try:
+    from catboost import CatBoostRegressor
+
+    CATBOOST_AVAILABLE = True
+except Exception:
+    CatBoostRegressor = None
+    CATBOOST_AVAILABLE = False
 
 try:
     from rdkit import Chem, DataStructs
@@ -50,7 +61,7 @@ TARGET_DEFINITIONS: dict[str, dict[str, Any]] = {
     },
 }
 
-ALGORITHM_DEFINITIONS: dict[str, dict[str, Any]] = {
+BASE_ALGORITHM_DEFINITIONS: dict[str, dict[str, Any]] = {
     "gradient_boosting": {
         "label": "Gradient Boosting",
         "description": "Boosted regression trees with staged round-by-round metrics.",
@@ -82,9 +93,41 @@ PROCESS_FEATURE_DEFINITIONS: list[dict[str, Any]] = [
         "key": "load",
         "label": "Load",
         "group": "Process",
-        "description": "Applied load converted to Newtons.",
+        "description": "Applied load converted to Newtons. Range values are represented by their midpoint.",
         "column_name": "Load",
         "normalized_field": "normalized_load_n",
+    },
+    {
+        "key": "load_min",
+        "label": "Load Min",
+        "group": "Process",
+        "description": "Lower bound of the applied load range converted to Newtons.",
+        "column_name": "Load_Min",
+        "normalized_field": "normalized_load_min_n",
+    },
+    {
+        "key": "load_max",
+        "label": "Load Max",
+        "group": "Process",
+        "description": "Upper bound of the applied load range converted to Newtons.",
+        "column_name": "Load_Max",
+        "normalized_field": "normalized_load_max_n",
+    },
+    {
+        "key": "load_span",
+        "label": "Load Span",
+        "group": "Process",
+        "description": "Width of the applied load range converted to Newtons.",
+        "column_name": "Load_Span",
+        "normalized_field": "normalized_load_span_n",
+    },
+    {
+        "key": "load_is_range",
+        "label": "Load Is Range",
+        "group": "Process",
+        "description": "Binary flag indicating whether the source load was recorded as a range.",
+        "column_name": "Load_Is_Range",
+        "normalized_field": "normalized_load_is_range",
     },
     {
         "key": "potential",
@@ -147,6 +190,8 @@ DEFAULT_HYPERPARAMETERS = {
     "n_estimators": 120,
     "learning_rate": 0.06,
     "max_depth": 3,
+    "l2_leaf_reg": 3.0,
+    "random_strength": 1.0,
 }
 
 DEFAULT_DATA_OPTIONS = {
@@ -217,6 +262,35 @@ def _parse_potential_volts(raw: str | None) -> float | None:
     return _extract_first_number(raw)
 
 
+def _parse_load_statistics(raw: str | None) -> dict[str, float] | None:
+    text = _normalize_microunit_text(raw).strip()
+    if not text:
+        return None
+
+    range_bounds = parse_force_range_to_newtons(text)
+    if range_bounds is not None:
+        low, high = range_bounds
+        return {
+            "load": (low + high) / 2.0,
+            "load_min": low,
+            "load_max": high,
+            "load_span": high - low,
+            "load_is_range": 1.0,
+        }
+
+    scalar = parse_force_to_newtons(text)
+    if scalar is None:
+        return None
+
+    return {
+        "load": scalar,
+        "load_min": scalar,
+        "load_max": scalar,
+        "load_span": 0.0,
+        "load_is_range": 0.0,
+    }
+
+
 def _parse_water_content_ppm(raw: str | None) -> float | None:
     text = _normalize_microunit_text(raw).strip().lower()
     if not text:
@@ -226,6 +300,8 @@ def _parse_water_content_ppm(raw: str | None) -> float | None:
     numeric = _extract_first_number(text)
     if numeric is None:
         return None
+    # Labels like "IL-44%" use the hyphen as a separator, not a negative sign.
+    numeric = abs(numeric)
     if "ppm" in text:
         return numeric
     if "%" in text:
@@ -284,7 +360,28 @@ def _feature_value(record: dict[str, Any], key: str) -> float | None:
     if key == "load":
         if _safe_float(record.get("normalized_load_n")) is not None:
             return _safe_float(record.get("normalized_load_n"))
-        return parse_force_to_newtons(_normalize_microunit_text(record.get("load_value") or record.get("load_raw")))
+        stats = _parse_load_statistics(record.get("load_value") or record.get("load_raw"))
+        return stats.get("load") if stats else None
+    if key == "load_min":
+        if _safe_float(record.get("normalized_load_min_n")) is not None:
+            return _safe_float(record.get("normalized_load_min_n"))
+        stats = _parse_load_statistics(record.get("load_value") or record.get("load_raw"))
+        return stats.get("load_min") if stats else None
+    if key == "load_max":
+        if _safe_float(record.get("normalized_load_max_n")) is not None:
+            return _safe_float(record.get("normalized_load_max_n"))
+        stats = _parse_load_statistics(record.get("load_value") or record.get("load_raw"))
+        return stats.get("load_max") if stats else None
+    if key == "load_span":
+        if _safe_float(record.get("normalized_load_span_n")) is not None:
+            return _safe_float(record.get("normalized_load_span_n"))
+        stats = _parse_load_statistics(record.get("load_value") or record.get("load_raw"))
+        return stats.get("load_span") if stats else None
+    if key == "load_is_range":
+        if _safe_float(record.get("normalized_load_is_range")) is not None:
+            return _safe_float(record.get("normalized_load_is_range"))
+        stats = _parse_load_statistics(record.get("load_value") or record.get("load_raw"))
+        return stats.get("load_is_range") if stats else None
     if key == "potential":
         if _safe_float(record.get("normalized_potential_v")) is not None:
             return _safe_float(record.get("normalized_potential_v"))
@@ -409,6 +506,7 @@ class ModelTrainingService:
         scope_filter_values: dict[str, Any],
         cleaning_options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        logger.debug("Summarizing training scope scope=%s", scope_filter_values.get("scope_key"))
         resolved = await self._resolve_records_for_cleaning(session, scope_filter_values, cleaning_options)
         cleaning_profile = self._build_cleaning_profile(
             resolved["records"],
@@ -423,6 +521,7 @@ class ModelTrainingService:
         )
 
     def summarize_saved_dataset(self, dataset: CleanedDataset) -> dict[str, Any]:
+        logger.debug("Summarizing saved dataset dataset_id=%s", dataset.id)
         rows, metadata = self._load_saved_dataset_rows(dataset)
         feature_columns = self._feature_columns_from_dataset_metadata(rows, metadata)
         target_column = self._target_column_from_metadata(metadata)
@@ -492,7 +591,73 @@ class ModelTrainingService:
         }
 
     def _algorithm_options(self) -> list[dict[str, Any]]:
-        return [{"key": key, **value} for key, value in ALGORITHM_DEFINITIONS.items()]
+        definitions = dict(BASE_ALGORITHM_DEFINITIONS)
+        if CATBOOST_AVAILABLE:
+            definitions["catboost"] = {
+                "label": "CatBoost",
+                "description": "Gradient boosting on oblivious trees with strong small-dataset performance.",
+            }
+        return [{"key": key, **value} for key, value in definitions.items()]
+
+    def _fit_round_model(
+        self,
+        *,
+        algorithm: str,
+        round_index: int,
+        learning_rate: float,
+        max_depth: int,
+        l2_leaf_reg: float,
+        random_strength: float,
+        random_seed: int,
+        model: Any | None,
+        X_train: np.ndarray,
+        y_train: np.ndarray,
+    ) -> Any:
+        if algorithm == "gradient_boosting":
+            if model is None:
+                model = GradientBoostingRegressor(
+                    n_estimators=1,
+                    learning_rate=learning_rate,
+                    max_depth=max_depth,
+                    random_state=random_seed,
+                    warm_start=True,
+                )
+            model.set_params(n_estimators=round_index)
+            model.fit(X_train, y_train)
+            return model
+
+        if algorithm == "random_forest":
+            if model is None:
+                model = RandomForestRegressor(
+                    n_estimators=1,
+                    max_depth=max_depth,
+                    random_state=random_seed,
+                    warm_start=True,
+                    n_jobs=1,
+                )
+            model.set_params(n_estimators=round_index)
+            model.fit(X_train, y_train)
+            return model
+
+        if algorithm == "catboost":
+            if not CATBOOST_AVAILABLE or CatBoostRegressor is None:
+                raise ValueError("CatBoost is not installed on the server. Install backend dependencies to enable this model.")
+            model = CatBoostRegressor(
+                iterations=round_index,
+                learning_rate=learning_rate,
+                depth=max_depth,
+                l2_leaf_reg=l2_leaf_reg,
+                random_strength=random_strength,
+                loss_function="RMSE",
+                random_seed=random_seed,
+                verbose=False,
+                allow_writing_files=False,
+                thread_count=1,
+            )
+            model.fit(X_train, y_train, verbose=False)
+            return model
+
+        raise ValueError(f"Unsupported algorithm '{algorithm}'.")
 
     async def create_training_task(
         self,
@@ -508,6 +673,13 @@ class ModelTrainingService:
         if saved_dataset is None:
             raise ValueError("Select a saved cleaned dataset before starting training.")
 
+        logger.info(
+            "Creating training task user_id=%s group_id=%s scope=%s dataset_id=%s",
+            owner_user_id,
+            group_id,
+            scope_key,
+            saved_dataset.id,
+        )
         rows, metadata = self._load_saved_dataset_rows(saved_dataset)
         task_id = uuid.uuid4().hex
         task = TrainingTaskState(
@@ -519,9 +691,11 @@ class ModelTrainingService:
         )
         self._tasks[task_id] = task
         asyncio.create_task(self._run_training(task, rows, metadata.get("source_scope", {}), metadata))
+        logger.info("Training task created task_id=%s", task_id)
         return task
 
     def get_task(self, task_id: str, requester_user_id: int) -> TrainingTaskState:
+        logger.debug("Fetching training task task_id=%s requester_user_id=%s", task_id, requester_user_id)
         task = self._tasks.get(task_id)
         if not task or task.owner_user_id != requester_user_id:
             raise KeyError(task_id)
@@ -533,16 +707,19 @@ class ModelTrainingService:
             return task
         task.cancel_requested = True
         task.status_message = "Cancellation requested. Waiting for the current training step to finish."
+        logger.info("Cancellation requested for task_id=%s", task_id)
         return task
 
     def register_subscriber(self, task_id: str, requester_user_id: int) -> tuple[TrainingTaskState, asyncio.Queue]:
         task = self.get_task(task_id, requester_user_id)
         queue: asyncio.Queue = asyncio.Queue()
         task.subscribers.add(queue)
+        logger.debug("Registered websocket subscriber for task_id=%s", task_id)
         return task, queue
 
     def unregister_subscriber(self, task: TrainingTaskState, queue: asyncio.Queue) -> None:
         task.subscribers.discard(queue)
+        logger.debug("Unregistered websocket subscriber for task_id=%s", task.task_id)
 
     async def _publish(self, task: TrainingTaskState, event: dict[str, Any]) -> None:
         stale: list[asyncio.Queue] = []
@@ -836,26 +1013,10 @@ class ModelTrainingService:
             hyperparameters = task.config.get("hyperparameters") or {}
             learning_rate = float(hyperparameters.get("learning_rate", DEFAULT_HYPERPARAMETERS["learning_rate"]) or DEFAULT_HYPERPARAMETERS["learning_rate"])
             max_depth = int(hyperparameters.get("max_depth", DEFAULT_HYPERPARAMETERS["max_depth"]) or DEFAULT_HYPERPARAMETERS["max_depth"])
+            l2_leaf_reg = float(hyperparameters.get("l2_leaf_reg", DEFAULT_HYPERPARAMETERS["l2_leaf_reg"]) or DEFAULT_HYPERPARAMETERS["l2_leaf_reg"])
+            random_strength = float(hyperparameters.get("random_strength", DEFAULT_HYPERPARAMETERS["random_strength"]) or DEFAULT_HYPERPARAMETERS["random_strength"])
             random_seed = int((task.config.get("data_options") or {}).get("random_seed", DEFAULT_DATA_OPTIONS["random_seed"]) or DEFAULT_DATA_OPTIONS["random_seed"])
-
-            if algorithm == "gradient_boosting":
-                model = GradientBoostingRegressor(
-                    n_estimators=1,
-                    learning_rate=learning_rate,
-                    max_depth=max_depth,
-                    random_state=random_seed,
-                    warm_start=True,
-                )
-            elif algorithm == "random_forest":
-                model = RandomForestRegressor(
-                    n_estimators=1,
-                    max_depth=max_depth,
-                    random_state=random_seed,
-                    warm_start=True,
-                    n_jobs=1,
-                )
-            else:
-                raise ValueError(f"Unsupported algorithm '{algorithm}'.")
+            model: Any | None = None
 
             for round_index in range(1, task.total_rounds + 1):
                 if task.cancel_requested:
@@ -871,8 +1032,18 @@ class ModelTrainingService:
                     )
                     return
 
-                model.set_params(n_estimators=round_index)
-                model.fit(X_train, y_train)
+                model = self._fit_round_model(
+                    algorithm=algorithm,
+                    round_index=round_index,
+                    learning_rate=learning_rate,
+                    max_depth=max_depth,
+                    l2_leaf_reg=l2_leaf_reg,
+                    random_strength=random_strength,
+                    random_seed=random_seed,
+                    model=model,
+                    X_train=X_train,
+                    y_train=y_train,
+                )
 
                 train_pred = model.predict(X_train)
                 val_pred = model.predict(X_val)

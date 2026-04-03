@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import os
 from typing import Any
 
@@ -23,6 +24,8 @@ from services.data_sync_service import (
 )
 from services.il_resolver_service import resolve_il
 from utils.tribopair import compose_tribopair_label
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_year(year: int | None) -> int | None:
@@ -106,6 +109,12 @@ async def sync_payload(
     scope: RequestScope,
     replace: bool = False,
 ):
+    logger.info(
+        "Sync facade invoked replace=%s scope=%s records=%s",
+        replace,
+        scope.scope_key,
+        len(payload.records),
+    )
     result = await (
         sync_batch_data_with_replacement(db, payload, principal=principal, scope=scope)
         if replace
@@ -123,11 +132,13 @@ async def list_literature_payload(
     skip: int = 0,
     limit: int = 100,
 ) -> list[dict[str, Any]]:
+    logger.debug("Listing literature skip=%s limit=%s scope=%s", skip, limit, scope.scope_key)
     literature_list = await get_all_literature(db, skip=skip, limit=limit, scope_filter_values=scope_filters(scope))
     return [_literature_to_payload(item) for item in literature_list]
 
 
 async def get_literature_detail_payload(db: AsyncSession, literature_id: int, *, scope: RequestScope) -> dict[str, Any]:
+    logger.debug("Loading literature detail literature_id=%s scope=%s", literature_id, scope.scope_key)
     filters = scope_filters(scope)
     literature = await get_literature_by_id(db, literature_id, scope_filter_values=filters)
     if not literature:
@@ -147,6 +158,7 @@ async def get_literature_by_doi_payload(db: AsyncSession, doi: str, *, scope: Re
 
 
 async def delete_literature_payload(db: AsyncSession, literature_id: int, *, scope: RequestScope) -> dict[str, Any]:
+    logger.info("Deleting literature via facade literature_id=%s scope=%s", literature_id, scope.scope_key)
     deleted = await delete_literature(db, literature_id, scope_filter_values=scope_filters(scope))
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Literature ID={literature_id} not found")
@@ -155,6 +167,7 @@ async def delete_literature_payload(db: AsyncSession, literature_id: int, *, sco
 
 async def patch_il_resolution_payload(db: AsyncSession) -> dict[str, Any]:
     try:
+        logger.info("Starting IL re-resolution patch")
         query = select(TribologyData).where(TribologyData.lubricant.is_not(None))
         result = await db.execute(query)
         records = list(result.scalars().all())
@@ -195,6 +208,12 @@ async def patch_il_resolution_payload(db: AsyncSession) -> dict[str, Any]:
                 updated_count += 1
 
         await db.commit()
+        logger.info(
+            "IL re-resolution patch completed scanned=%s updated=%s skipped=%s",
+            len(records),
+            updated_count,
+            skipped_count,
+        )
         return {
             "success": True,
             "total_scanned": len(records),
@@ -204,10 +223,12 @@ async def patch_il_resolution_payload(db: AsyncSession) -> dict[str, Any]:
         }
     except Exception as exc:
         await db.rollback()
+        logger.exception("IL re-resolution patch failed")
         raise HTTPException(status_code=500, detail=f"Patch failed: {str(exc)}") from exc
 
 
 async def get_tribology_records_payload(db: AsyncSession, literature_id: int, *, scope: RequestScope) -> list[dict[str, Any]]:
+    logger.debug("Loading tribology records literature_id=%s scope=%s", literature_id, scope.scope_key)
     filters = scope_filters(scope)
     literature = await get_literature_by_id(db, literature_id, scope_filter_values=filters)
     if not literature:
@@ -222,6 +243,7 @@ async def read_optional_upload_text(file: UploadFile | None) -> str | None:
 
     content_bytes = await file.read()
     file_ext = os.path.splitext(file.filename or "")[1].lower()
+    logger.debug("Reading optional upload content filename=%s ext=%s", file.filename, file_ext)
 
     if file_ext == ".pdf":
         from PyPDF2 import PdfReader
@@ -249,6 +271,7 @@ async def reprocess_literature_payload(
     literature_id: int,
     file_content: str | None = None,
 ) -> dict[str, Any]:
+    logger.info("Reprocessing literature via facade literature_id=%s", literature_id)
     result = await get_agent_runtime().reprocess_literature(
         literature_id=literature_id,
         db=db,

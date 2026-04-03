@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import type { Component } from 'vue'
 import { computed, ref } from 'vue'
 import {
@@ -15,10 +15,13 @@ import {
   Upload,
 } from 'lucide-vue-next'
 
+import { useI18n } from '@/composables/useI18n'
+
 const guideVideoRef = ref<HTMLVideoElement | null>(null)
 const isPlaying = ref(false)
 const currentTime = ref(0)
 const duration = ref(0)
+const { t } = useI18n()
 
 const progressPercent = computed(() => {
   if (duration.value <= 0) {
@@ -27,99 +30,99 @@ const progressPercent = computed(() => {
   return Math.min(100, (currentTime.value / duration.value) * 100)
 })
 
-const howItWorks: Array<{
+const howItWorks = computed<Array<{
   title: string
   description: string
   icon: Component
   iconBoxClass: string
   iconClass: string
-}> = [
+}>>(() => [
   {
-    title: '1. Upload Your PDFs',
-    description: 'Navigate to the Workspace and add scientific papers. The system will auto-process them.',
+    title: t('guide.workflow_step_1_title'),
+    description: t('guide.workflow_step_1_description'),
     icon: Upload,
     iconBoxClass: 'bg-indigo-50',
     iconClass: 'text-indigo-600',
   },
   {
-    title: '2. Extract Data',
-    description: 'Click Extract to start the AI-powered process identifying tribology-related data points.',
+    title: t('guide.workflow_step_2_title'),
+    description: t('guide.workflow_step_2_description'),
     icon: Database,
     iconBoxClass: 'bg-emerald-50',
     iconClass: 'text-emerald-600',
   },
   {
-    title: '3. Explore Results',
-    description: 'Use Data Explorer to browse, filter by DOI, and view detailed measurements.',
+    title: t('guide.workflow_step_3_title'),
+    description: t('guide.workflow_step_3_description'),
     icon: Search,
     iconBoxClass: 'bg-violet-50',
     iconClass: 'text-violet-600',
   },
   {
-    title: '4. Chat with Data',
-    description: 'Ask questions in the Chat panel. The AI assistant helps you find specific information.',
+    title: t('guide.workflow_step_4_title'),
+    description: t('guide.workflow_step_4_description'),
     icon: MessageSquare,
     iconBoxClass: 'bg-orange-50',
     iconClass: 'text-orange-600',
   },
-]
+])
 
-const featureBlocks: Array<{
+const featureBlocks = computed<Array<{
   title: string
   description: string
   icon: Component
-}> = [
+}>>(() => [
   {
-    title: 'Dashboard',
-    description: 'View statistics and visualizations for friction coefficients, wear rates, and material distributions.',
+    title: t('guide.feature_dashboard_title'),
+    description: t('guide.feature_dashboard_description'),
     icon: BarChart3,
   },
   {
-    title: 'Data Explorer',
-    description: 'Browse and filter extracted tribology data. Export data for further external analysis.',
+    title: t('guide.feature_explorer_title'),
+    description: t('guide.feature_explorer_description'),
     icon: Database,
   },
   {
-    title: 'Literature Manager',
-    description: 'Manage your collection of scientific papers, view metadata, and track extraction status.',
+    title: t('guide.feature_library_title'),
+    description: t('guide.feature_library_description'),
     icon: BookOpen,
   },
   {
-    title: 'Source Grounding',
-    description: 'View PDF highlights showing exactly where data was extracted from, ensuring traceability.',
+    title: t('guide.feature_grounding_title'),
+    description: t('guide.feature_grounding_description'),
     icon: Search,
   },
-]
+])
 
-const tips = [
-  'Upload high-quality PDF files with clear text (not scanned images).',
-  'Monitor the extraction progress in the Agents tab.',
-  'Use the Monitor view to track agent workflows and system performance.',
-  'Check the Source Grounding view to verify extracted data.',
-  'Export your data from the Data Explorer for external tools.',
-]
+const tips = computed(() => [
+  t('guide.tip_1'),
+  t('guide.tip_2'),
+  t('guide.tip_3'),
+  t('guide.tip_4'),
+  t('guide.tip_5'),
+])
 
-const systemRequirements: Array<{
+const systemRequirements = computed<Array<{
   title: string
   detail: string
   icon: Component
-}> = [
+}>>(() => [
   {
-    title: 'Backend',
-    detail: 'Python 3.8+, FastAPI, SQLite',
+    title: t('guide.requirement_backend_title'),
+    detail: t('guide.requirement_backend_detail'),
     icon: Server,
   },
   {
-    title: 'Frontend',
-    detail: 'Modern web browser with JavaScript enabled',
+    title: t('guide.requirement_frontend_title'),
+    detail: t('guide.requirement_frontend_detail'),
     icon: Monitor,
   },
   {
-    title: 'API Keys',
-    detail: 'OpenAI or Google Generative AI credentials required for LLM features',
+    title: t('guide.requirement_api_title'),
+    detail: t('guide.requirement_api_detail'),
     icon: KeyRound,
   },
-]
+])
 
 const toggleVideo = () => {
   const video = guideVideoRef.value
@@ -190,11 +193,13 @@ const formatTime = (timeInSeconds: number) => {
     <div class="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:py-14">
       <header class="mx-auto mb-10 max-w-3xl text-center lg:mb-14">
         <h1 class="text-5xl font-bold tracking-tight text-slate-900 sm:text-6xl">
-          Welcome to <span class="text-indigo-600">IonicLink</span>
+          {{ t('guide.hero_title_prefix') }} <span class="text-indigo-600">IonicLink</span>
         </h1>
         <p class="mt-4 text-lg leading-8 text-slate-600 sm:text-[1.35rem]">
-          A powerful platform for extracting, analyzing, and exploring tribology research data from scientific
-          literature.
+          {{ t('guide.hero_subtitle') }}
+        </p>
+        <p class="mt-4 max-w-2xl text-sm leading-7 text-slate-400 sm:text-base">
+          {{ t('guide.hero_description') }}
         </p>
       </header>
 
@@ -232,10 +237,10 @@ const formatTime = (timeInSeconds: number) => {
                 <CirclePlay class="h-10 w-10" />
               </span>
               <p class="text-4xl font-semibold text-white sm:text-[2.2rem]">
-                How to use IonicLink
+                {{ t('guide.video_title') }}
               </p>
               <p class="mt-2 text-base text-slate-300 sm:text-lg">
-                Watch this quick start guide
+                {{ t('guide.video_subtitle') }}
               </p>
             </button>
           </div>
@@ -279,7 +284,7 @@ const formatTime = (timeInSeconds: number) => {
 
       <section class="mb-12 lg:mb-14">
         <h2 class="mb-6 text-center text-[2.35rem] font-semibold text-slate-900 sm:mb-8">
-          How it works
+          {{ t('guide.how_it_works') }}
         </h2>
         <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <article
@@ -305,7 +310,7 @@ const formatTime = (timeInSeconds: number) => {
 
       <section class="mb-12 rounded-2xl border border-slate-200 bg-white p-8 shadow-[0_12px_26px_-22px_rgba(15,23,42,0.5)] lg:mb-14">
         <h2 class="mb-8 text-[2.35rem] font-semibold text-slate-900">
-          Key Features
+          {{ t('guide.key_features') }}
         </h2>
         <div class="grid gap-8 md:grid-cols-2">
           <article v-for="feature in featureBlocks" :key="feature.title" class="flex gap-4">
@@ -327,7 +332,7 @@ const formatTime = (timeInSeconds: number) => {
       <section class="grid gap-6 lg:grid-cols-2">
         <article class="rounded-2xl border border-slate-200 bg-white p-8 shadow-[0_12px_26px_-22px_rgba(15,23,42,0.5)]">
           <h2 class="mb-6 text-[2.35rem] font-semibold text-slate-900">
-            Tips for Best Results
+            {{ t('guide.tips_title') }}
           </h2>
           <ul class="space-y-3 text-[17px] leading-7 text-slate-600">
             <li v-for="tip in tips" :key="tip" class="flex gap-3">
@@ -339,7 +344,7 @@ const formatTime = (timeInSeconds: number) => {
 
         <article class="rounded-2xl bg-slate-950 p-8 text-slate-100 shadow-[0_18px_36px_-24px_rgba(15,23,42,0.8)]">
           <h2 class="mb-6 border-b border-slate-700/70 pb-4 text-[2.35rem] font-semibold">
-            System Requirements
+            {{ t('guide.system_requirements') }}
           </h2>
           <div class="space-y-6">
             <div v-for="requirement in systemRequirements" :key="requirement.title" class="flex gap-3">

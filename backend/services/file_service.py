@@ -8,6 +8,7 @@ import os
 import re
 import uuid
 import asyncio
+import logging
 import time
 import fitz
 from difflib import SequenceMatcher
@@ -41,6 +42,7 @@ from models.tribology import TribologyData as ExtractTribologyData
 from security import AuthPrincipal, RequestScope, build_scope_key, can_manage_literature
 
 TEMP_UPLOAD_DIR = "temp_uploads"
+logger = logging.getLogger(__name__)
 
 
 def _resolve_confidence(raw: object, record_like: dict) -> float:
@@ -115,7 +117,7 @@ async def _find_existing_by_title_fallback(
             best_score = score
 
     if best and best_score >= 0.93:
-        print(f"[Upload] Title fallback HIT (score={best_score:.3f}) -> existing ID {best.id}")
+        logger.info("Upload title fallback matched literature_id=%s score=%.3f", best.id, best_score)
         return best
     return None
 
@@ -155,6 +157,28 @@ def _build_record_uniqueness_key(item: dict) -> tuple:
         normalize_record_value(item.get("layer_spacing_delta")),
         normalize_record_value(item.get("source")),
     )
+
+
+def _build_in_progress_summary(run: Optional[ExtractionRun]) -> dict:
+    summary_payload = {}
+    if run and run.summary_json:
+        try:
+            summary_payload = json.loads(run.summary_json)
+        except Exception:
+            summary_payload = {}
+
+    return {
+        "run_id": run.run_id if run else None,
+        "candidate_count": int(run.candidate_count) if run and run.candidate_count is not None else int(summary_payload.get("candidate_count") or 0),
+        "final_count": int(run.final_count) if run and run.final_count is not None else int(summary_payload.get("final_count") or 0),
+        "dropped_by_reason": {
+            **(summary_payload.get("dropped_by_reason") or {}),
+            "in_progress": 1,
+        },
+        "page_coverage": summary_payload.get("page_coverage") or {},
+        "page_candidate_counts": summary_payload.get("page_candidate_counts") or {},
+        "progress_log": summary_payload.get("progress_log") or [],
+    }
 
 
 def _final_merge_records(records: list[dict]) -> tuple[list[dict], dict, list[dict]]:
@@ -480,6 +504,13 @@ async def _load_cached_extraction_result(
                 "temperature": r.temperature,
                 "potential": r.potential,
                 "water_content": r.water_content,
+                "probe_material": r.probe_material,
+                "probe_geometry": r.probe_geometry,
+                "probe_radius": r.probe_radius,
+                "probe_roughness": r.probe_roughness,
+                "substrate_material": r.substrate_material,
+                "substrate_coating": r.substrate_coating,
+                "substrate_roughness": r.substrate_roughness,
                 "surface_roughness": r.surface_roughness,
                 "film_thickness": r.film_thickness,
                 "residual_film_thickness_d": r.residual_film_thickness_d,
@@ -549,6 +580,184 @@ async def _load_cached_extraction_result(
     }
     return metadata, data_list, cache_summary
 
+
+def _filled_text(value: object) -> str:
+    return str(value or "").strip()
+
+
+def _distinct_record_values(records: list[dict], field: str) -> set[str]:
+    values: set[str] = set()
+    for item in records or []:
+        if not isinstance(item, dict):
+            continue
+        if field == "ionic_liquid":
+            candidate = _filled_text(item.get("ionic_liquid") or item.get("lubricant"))
+        else:
+            candidate = _filled_text(item.get(field))
+        if candidate:
+            values.add(candidate.lower())
+    return values
+
+
+def _record_quality_snapshot(records: list[dict]) -> dict[str, int]:
+    probe_values = _distinct_record_values(records, "probe_material")
+    substrate_values = _distinct_record_values(records, "substrate_material")
+    ionic_values = _distinct_record_values(records, "ionic_liquid")
+    return {
+        "count": len(records or []),
+        "probe_present": sum(1 for item in records or [] if _filled_text(item.get("probe_material"))),
+        "substrate_present": sum(1 for item in records or [] if _filled_text(item.get("substrate_material"))),
+        "ionic_present": sum(
+            1 for item in records or [] if _filled_text(item.get("ionic_liquid") or item.get("lubricant"))
+        ),
+        "probe_distinct": len(probe_values),
+        "substrate_distinct": len(substrate_values),
+        "ionic_distinct": len(ionic_values),
+    }
+
+
+def _should_audit_cached_records(records: list[dict]) -> bool:
+    if not records:
+        return False
+    quality = _record_quality_snapshot(records)
+    if quality["probe_present"] < quality["count"]:
+        return True
+    if quality["substrate_present"] < quality["count"]:
+        return True
+    if quality["count"] <= 4 and quality["ionic_distinct"] <= 1:
+        return True
+    return False
+
+
+def _fallback_improves_cached_records(cached_records: list[dict], fallback_records: list[dict]) -> bool:
+    if not fallback_records:
+        return False
+
+    cached = _record_quality_snapshot(cached_records)
+    fallback = _record_quality_snapshot(fallback_records)
+    return any(
+        [
+            fallback["count"] > cached["count"],
+            fallback["probe_present"] > cached["probe_present"],
+            fallback["substrate_present"] > cached["substrate_present"],
+            fallback["ionic_present"] > cached["ionic_present"],
+            fallback["probe_distinct"] > cached["probe_distinct"],
+            fallback["substrate_distinct"] > cached["substrate_distinct"],
+            fallback["ionic_distinct"] > cached["ionic_distinct"],
+        ]
+    )
+
+
+async def _replace_literature_records_from_items(
+    db: AsyncSession,
+    literature: Literature,
+    records: list[dict],
+    *,
+    file_path: Optional[str],
+) -> int:
+    normalized_records = [dict(item) for item in (records or []) if isinstance(item, dict)]
+    if not normalized_records:
+        return 0
+
+    _apply_default_temperature(normalized_records)
+    _normalize_record_chemistry(normalized_records)
+    normalized_records, _ = filter_to_supported_ionic_liquid_records(normalized_records)
+    normalized_records, _, _ = _final_merge_records(normalized_records)
+
+    new_records_db: list[TribologyData] = []
+    for item in normalized_records:
+        cof_raw = item.get("cof")
+        cof_value = _parse_cof_value(cof_raw)
+        if cof_value is None:
+            continue
+
+        db_record = TribologyData(
+            literature_id=literature.id,
+            material_name=item.get("material_name", "Unknown"),
+            lubricant=item.get("ionic_liquid", item.get("lubricant", "")),
+            cof_value=cof_value,
+            cof_operator=item.get("cof_operator"),
+            cof_raw=cof_raw,
+            load_value=item.get("load") or item.get("normal_load"),
+            load_raw=item.get("load") or item.get("normal_load"),
+            speed_value=item.get("speed"),
+            temperature=item.get("temperature"),
+            potential=item.get("potential"),
+            water_content=item.get("water_content"),
+            probe_material=item.get("probe_material"),
+            probe_geometry=item.get("probe_geometry"),
+            probe_radius=item.get("probe_radius"),
+            probe_roughness=item.get("probe_roughness"),
+            substrate_material=item.get("substrate_material"),
+            substrate_coating=item.get("substrate_coating"),
+            substrate_roughness=item.get("substrate_roughness"),
+            surface_roughness=item.get("surface_roughness"),
+            film_thickness=item.get("film_thickness"),
+            residual_film_thickness_d=item.get("residual_film_thickness_d"),
+            layer_spacing_delta=item.get("layer_spacing_delta"),
+            mol_ratio=item.get("mol_ratio"),
+            cation=item.get("cation"),
+            anion=item.get("anion"),
+            cation_smiles=item.get("cation_smiles"),
+            anion_smiles=item.get("anion_smiles"),
+            il_smiles=item.get("il_smiles"),
+            il_inchikey=item.get("il_inchikey"),
+            alkyl_chain_length=item.get("alkyl_chain_length"),
+            confidence=_resolve_confidence(item.get("confidence"), item),
+            evidence=item.get("evidence"),
+            source=item.get("source"),
+            source_page=item.get("source_page"),
+            source_figure=item.get("source_figure"),
+        )
+        _try_resolve_evidence_coords(db_record, item, file_path)
+        new_records_db.append(db_record)
+
+    if not new_records_db:
+        return 0
+
+    await db.execute(delete(TribologyData).where(TribologyData.literature_id == literature.id))
+    db.add_all(new_records_db)
+    literature.status = "completed"
+    literature.error_message = None
+    await db.commit()
+    return len(new_records_db)
+
+
+async def _refresh_cached_records_from_fallback(
+    db: AsyncSession,
+    literature: Literature,
+    cached_records: list[dict],
+    *,
+    file_path: Optional[str],
+    content: str,
+) -> tuple[dict, list[dict], dict] | None:
+    fallback_records, fallback_info = extract_table_fallback_records(content or "", file_path)
+    if not _fallback_improves_cached_records(cached_records, fallback_records):
+        return None
+
+    saved_count = await _replace_literature_records_from_items(
+        db,
+        literature,
+        fallback_records,
+        file_path=file_path,
+    )
+    if saved_count <= 0:
+        return None
+
+    logger.info(
+        "Refreshed stale cached extraction for literature_id=%s using fallback parser=%s saved=%s",
+        literature.id,
+        fallback_info.get("parser"),
+        saved_count,
+    )
+    metadata, data_list, cache_summary = await _load_cached_extraction_result(db, literature)
+    cache_summary = {
+        **cache_summary,
+        "fallback_extraction": fallback_info,
+        "cache_refreshed": True,
+    }
+    return metadata, data_list, cache_summary
+
 async def save_upload_entry(
     db: AsyncSession,
     file: UploadFile,
@@ -562,6 +771,7 @@ async def save_upload_entry(
     Uses DOI as unique identifier for deduplication.
     """
     try:
+        logger.info("Saving upload entry filename=%s scope=%s", file.filename, scope.scope_key)
         scope_key = build_scope_key(scope.scope_type, scope.workspace.id if scope.workspace else None)
         # 1. Read file content
         content_bytes = await file.read()
@@ -578,7 +788,7 @@ async def save_upload_entry(
         try:
             doi_candidates = _extract_doi_candidates(text_content, file.filename)
             for normalized_doi in doi_candidates:
-                print(f"[Upload] Extracted DOI candidate: {normalized_doi}")
+                logger.info("Upload extracted DOI candidate=%s", normalized_doi)
                 existing_doi_match = (
                     await db.execute(
                         select(Literature).where(
@@ -590,7 +800,12 @@ async def save_upload_entry(
                 ).scalar_one_or_none()
                 if not existing_doi_match:
                     continue
-                print(f"[Upload] DOI Cache HIT ({normalized_doi}) -> existing ID {existing_doi_match.id} status={existing_doi_match.status}")
+                logger.info(
+                    "Upload DOI cache hit doi=%s literature_id=%s status=%s",
+                    normalized_doi,
+                    existing_doi_match.id,
+                    existing_doi_match.status,
+                )
                 if not can_manage_literature(principal, existing_doi_match):
                     return existing_doi_match
                 existing_doi_match.content = text_content or existing_doi_match.content
@@ -601,7 +816,7 @@ async def save_upload_entry(
                     with open(pdf_path, 'wb') as f:
                         f.write(content_bytes)
                     existing_doi_match.file_path = pdf_path
-                    print(f"[Upload] Backfilled PDF to {pdf_path}")
+                    logger.info("Backfilled PDF for literature_id=%s path=%s", existing_doi_match.id, pdf_path)
                 if existing_doi_match.status == "failed":
                     existing_doi_match.status = "pending"
                     existing_doi_match.error_message = None
@@ -624,14 +839,14 @@ async def save_upload_entry(
                     with open(pdf_path, 'wb') as f:
                         f.write(content_bytes)
                     fallback_match.file_path = pdf_path
-                    print(f"[Upload] Backfilled PDF to {pdf_path}")
+                    logger.info("Backfilled PDF for literature_id=%s path=%s", fallback_match.id, pdf_path)
                 if fallback_match.status == "failed":
                     fallback_match.status = "pending"
                     fallback_match.error_message = None
                 await db.commit()
                 return fallback_match
         except Exception as e:
-            print(f"[Upload] DOI/Title Check Warning: {e}")
+            logger.warning("Upload DOI/title dedup check failed: %s", e)
         # ---------------------------------------------------
 
 
@@ -657,7 +872,7 @@ async def save_upload_entry(
         db.add(new_lit)
         await db.commit()
         await db.refresh(new_lit)
-        print(f"[Upload] Created new Literature ID {new_lit.id}")
+        logger.info("Created literature upload entry literature_id=%s", new_lit.id)
 
         # Save PDF file to disk for later serving (Source Grounding viewer)
         if file.filename.lower().endswith('.pdf'):
@@ -668,12 +883,12 @@ async def save_upload_entry(
                 f.write(content_bytes)
             new_lit.file_path = pdf_path
             await db.commit()
-            print(f"[Upload] Saved PDF to {pdf_path}")
+            logger.info("Saved uploaded PDF literature_id=%s path=%s", new_lit.id, pdf_path)
 
         return new_lit
         
     except Exception as e:
-        print(f"[Upload] Error saving entry: {e}")
+        logger.exception("Failed to save upload entry filename=%s", file.filename)
         raise e
 
 
@@ -700,8 +915,12 @@ async def _safe_update_doi(db: AsyncSession, literature, new_doi: str) -> bool:
     )
     conflict = result.scalar_one_or_none()
     if conflict:
-        print(f"[DOI Conflict] Skipping DOI update for ID={literature.id}: "
-              f"'{norm}' already owned by ID={conflict.id}")
+        logger.warning(
+            "Skipping DOI update for literature_id=%s because doi=%s is already owned by literature_id=%s",
+            literature.id,
+            norm,
+            conflict.id,
+        )
         return False
     literature.doi = norm
     return True
@@ -750,10 +969,20 @@ def _canonicalize_ionic_liquid_name(value: object) -> tuple[Optional[str], dict]
 
     normalized = normalize_ionic_liquid(text) or text
     resolved = resolve_il(normalized)
-    canonical_name = str(resolved.get("canonical_name") or normalized).strip()
-    if _is_unknown_il(canonical_name):
-        return None, resolved
-    return canonical_name, resolved
+    canonical_name = str(resolved.get("canonical_name") or "").strip()
+    if canonical_name and not _is_unknown_il(canonical_name):
+        return canonical_name, resolved
+
+    normalized_text = str(normalized or "").strip()
+    compact_il_like = bool(
+        re.search(r"\[[^\]]+\]\s*\[[^\]]+\]", normalized_text)
+        or re.fullmatch(r"[A-Za-z0-9(),+\-\[\]]{2,48}", normalized_text)
+        or re.fullmatch(r"[A-Za-z0-9(),+\-\[\]]{2,24}\s+[A-Za-z0-9(),+\-\[\]]{1,24}", normalized_text)
+    )
+    if compact_il_like and not _is_unknown_il(normalized_text):
+        return normalized_text, resolved
+
+    return None, resolved
 
 
 def _normalize_record_chemistry(records: list[dict]) -> None:
@@ -768,6 +997,8 @@ def _normalize_record_chemistry(records: list[dict]) -> None:
 
         il_candidates: list[object] = [
             raw_film_candidate if raw_film_candidate and not item.get("film_thickness") else None,
+            item.get("evidence"),
+            item.get("notes"),
             item.get("ionic_liquid"),
             item.get("lubricant"),
         ]
@@ -821,9 +1052,12 @@ async def process_file_safe(
     if profile not in {"high_accuracy", "standard"}:
         profile = "high_accuracy"
     resolved_strict_cof_mode = (profile == "high_accuracy") if strict_cof_mode is None else bool(strict_cof_mode)
-    print(
-        f"[Process] Starting isolated processing for Literature ID: {file_id}, "
-        f"profile={profile}, strict_cof_mode={resolved_strict_cof_mode}"
+    logger.info(
+        "Starting isolated processing literature_id=%s profile=%s strict_cof_mode=%s force=%s",
+        file_id,
+        profile,
+        resolved_strict_cof_mode,
+        force,
     )
     
     # 1. Open Scoped Session
@@ -835,7 +1069,7 @@ async def process_file_safe(
             # Use distinct session, so re-fetch is necessary
             literature = await db.get(Literature, file_id)
             if not literature:
-                print(f"[Error] Literature {file_id} not found.")
+                logger.warning("Literature %s not found during processing", file_id)
                 return None, [], {}
             resolved_file_path = _resolve_existing_path(literature.file_path)
 
@@ -849,14 +1083,19 @@ async def process_file_safe(
                 data_count = result.scalar() or 0
                 
                 if data_count > 0:
-                     print(f"馃洃 [Safe Process] File {file_id} has {data_count} records. Force=False. treating as COMPLETED.")
+                     logger.info(
+                         "Processing shortcut literature_id=%s existing_records=%s force=%s",
+                         file_id,
+                         data_count,
+                         force,
+                     )
                      # Setup literature as completed in memory for the next check
                      literature.status = 'completed'
                      # Helper: we will fall through to the 'if ... status == completed' block below
             # ------------------------------------------------
 
             # 3. Smart Caching / In-Progress Reuse
-            if literature.status == "extracting":
+            if literature.status in {"processing", "extracting"}:
                 running_run = None
                 run_stmt = (
                     select(ExtractionRun)
@@ -887,52 +1126,46 @@ async def process_file_safe(
                         is_stale = False
 
                 if is_stale:
-                    print(f"[Process] Stale extraction detected for Literature {file_id}, recovering...")
+                    logger.warning("Stale extraction detected for literature_id=%s; recovering", file_id)
                     running_run.status = "failed"
                     running_run.error_message = "Marked stale after 12+ minutes without completion"
                     literature.status = "failed"
                     literature.error_message = "Recovered from stale extraction state"
                     await db.commit()
                 else:
-                    if force:
-                        return {}, [], {
-                            "run_id": running_run_id,
-                            "candidate_count": 0,
-                            "final_count": 0,
-                            "dropped_by_reason": {"in_progress": 1},
-                            "page_coverage": {},
-                        }
-                    print(f"[Process] Literature {file_id} is already extracting. Waiting for current run...")
-                    still_extracting = True
-                    for _ in range(90):  # wait up to ~90s
-                        await asyncio.sleep(1)
-                        await db.refresh(literature)
-                        if literature.status != "extracting":
-                            still_extracting = False
-                            break
+                    if running_run or literature.status == "processing":
+                        logger.info(
+                            "Literature %s already has an active extraction; returning in-progress status",
+                            file_id,
+                        )
+                        return {}, [], _build_in_progress_summary(running_run)
 
-                    if still_extracting:
-                        return {}, [], {
-                            "run_id": running_run_id,
-                            "candidate_count": 0,
-                            "final_count": 0,
-                            "dropped_by_reason": {"in_progress": 1},
-                            "page_coverage": {},
-                        }
-                    if literature.status == "completed":
-                        print(f"[Process] Reusing completed extraction result for Literature {file_id}.")
-                        return await _load_cached_extraction_result(db, literature)
+                    logger.info(
+                        "Literature %s is marked extracting without an active run; continuing with a fresh run",
+                        file_id,
+                    )
 
             # 4. Smart Caching Check
             # If valid, completed, and not forced, return existing data
             if not force and literature.status == 'completed':
                 if data_count > 0:
-                    print(f"[Process] Cache Hit for Lit ID {file_id}. Fetching from DB.")
-                    return await _load_cached_extraction_result(db, literature)
-                print(f"[Process] Completed file {file_id} has no cached records. Re-running extraction.")
+                    cached_result = await _load_cached_extraction_result(db, literature)
+                    if _should_audit_cached_records(cached_result[1]):
+                        refreshed_result = await _refresh_cached_records_from_fallback(
+                            db,
+                            literature,
+                            cached_result[1],
+                            file_path=resolved_file_path,
+                            content=content or literature.content or "",
+                        )
+                        if refreshed_result:
+                            return refreshed_result
+                    logger.info("Returning cached extraction for literature_id=%s", file_id)
+                    return cached_result
+                logger.warning("Completed literature_id=%s has no cached records; rerunning extraction", file_id)
             
             # 5. Perform Extraction
-            print(f"[Process] Processing '{literature.title}' via LLM...")
+            logger.info("Running LLM extraction for literature_id=%s title=%s", file_id, literature.title)
             
             # Ensure content
             if not content and literature.content:
@@ -942,7 +1175,7 @@ async def process_file_safe(
             # LLMService performs page-level profiling and targeted visual extraction from pdf_path.
 
             if not content:
-                 print("[Error] No content to extract.")
+                 logger.warning("No content available for literature_id=%s", file_id)
                  literature.status = "failed"
                  literature.error_message = "No content available"
                  await db.commit()
@@ -999,7 +1232,7 @@ async def process_file_safe(
                     last_progress_flush = now_mono
                 except Exception as progress_err:
                     # Progress persistence must never break extraction.
-                    print(f"[ProgressPersist] Warning: {progress_err}")
+                    logger.warning("Progress persistence failed for run_id=%s: %s", run_id, progress_err)
 
             # Call LLM (smart routing: pass pdf_path so visual pages go to Qwen-VL only)
             extract_timeout_s = 960 if profile == "high_accuracy" else 720
@@ -1028,7 +1261,7 @@ async def process_file_safe(
                         timeout=extract_timeout_s,
                     )
             except asyncio.TimeoutError:
-                print(f"[Process] LLM extraction timed out after {extract_timeout_s}s (Lit ID {file_id}).")
+                logger.warning("LLM extraction timed out after %ss for literature_id=%s", extract_timeout_s, file_id)
                 result = {
                     "metadata": {},
                     "data": [],
@@ -1062,10 +1295,11 @@ async def process_file_safe(
             elif content:
                 fallback_records, fallback_info = extract_table_fallback_records(content, resolved_file_path)
                 if fallback_records:
-                    print(
-                        "[FallbackExtraction] Recovered "
-                        f"{len(fallback_records)} records from {fallback_info.get('matched_table')} "
-                        f"on page {fallback_info.get('matched_page')}"
+                    logger.info(
+                        "Fallback extraction recovered %s records from %s on page %s",
+                        len(fallback_records),
+                        fallback_info.get("matched_table"),
+                        fallback_info.get("matched_page"),
                     )
                     records = fallback_records
                     trace_candidates.extend(
@@ -1099,7 +1333,7 @@ async def process_file_safe(
                 _normalize_record_chemistry(records)
                 records, dropped_non_il = filter_to_supported_ionic_liquid_records(records)
                 if dropped_non_il:
-                    print(f"[IL Filter] Dropped {len(dropped_non_il)} non-ionic-liquid records before persistence.")
+                    logger.info("Dropped %s non-ionic-liquid records before persistence", len(dropped_non_il))
             
             # 5. Save Results
             if records:
@@ -1197,7 +1431,7 @@ async def process_file_safe(
                 
                 literature.status = "completed"
                 literature.error_message = None
-                print(f"[Success] Saved {len(new_records_db)} records.")
+                logger.info("Saved %s extracted records for literature_id=%s", len(new_records_db), literature.id)
 
                 await add_extraction_candidates(
                     db,
@@ -1237,7 +1471,7 @@ async def process_file_safe(
                 await db.commit()
                 return metadata, response_data_list, extraction_summary
             else:
-                print("[Process] No records found.")
+                logger.info("No extractable records found for literature_id=%s", literature.id)
                 # Don't mark failed if just empty? Or maybe finished but empty.
                 literature.status = "completed"
                 literature.error_message = "No tribology data found"
@@ -1291,7 +1525,7 @@ async def process_file_safe(
                 return metadata, [], extraction_summary
                 
         except Exception as e:
-            print(f"[Process] Error: {e}")
+            logger.exception("Processing failed for literature_id=%s", file_id)
             literature.status = "failed"
             literature.error_message = str(e)
             if run_created:
@@ -1314,7 +1548,7 @@ async def process_file_background(file_id: int):
     Background Task for File Processing with Idempotency Check.
     Wraps process_file_safe with an additional status check to prevent overwriting completed files.
     """
-    print(f"--- [START] Background Task for File ID: {file_id} ---")
+    logger.info("Starting background processing for literature_id=%s", file_id)
     
     async with async_session_maker() as db:
         try:
@@ -1323,7 +1557,7 @@ async def process_file_background(file_id: int):
             literature = result.scalar_one_or_none()
             
             if not literature:
-                print(f"[Error] File ID {file_id} not found.")
+                logger.warning("Background processing skipped because literature_id=%s was not found", file_id)
                 return
 
             # --- 鉁?ULTIMATE GUARD: DATA EXISTENCE CHECK ---
@@ -1335,10 +1569,10 @@ async def process_file_background(file_id: int):
             data_count = result.scalar() or 0
             
             if data_count > 0:
-                print(f"馃洃 File {file_id} already has {data_count} records. ABORTING overwrite.")
+                logger.info("Background processing aborted for literature_id=%s existing_records=%s", file_id, data_count)
                 # Self-healing: Ensure status reflects reality
                 if literature.status != 'completed':
-                    print(f"[Self-Healing] updating status to 'completed' for File {file_id}")
+                    logger.info("Updating literature_id=%s status to completed during self-heal", file_id)
                     literature.status = 'completed'
                     await db.commit()
                 return
@@ -1350,11 +1584,11 @@ async def process_file_background(file_id: int):
             
             # 3. Process Logic (Delegate to safe function)
             # process_file_safe will handle the actual extraction, saving, and final status update
-            print(f"[Background] Delegating to process_file_safe for File {file_id}")
+            logger.info("Delegating background processing to process_file_safe for literature_id=%s", file_id)
             await process_file_safe(file_id)
             
         except Exception as e:
-            print(f"[Background Error] {e}")
+            logger.exception("Background processing failed for literature_id=%s", file_id)
             import traceback
             traceback.print_exc()
 
@@ -1433,29 +1667,30 @@ async def reprocess_literature(
     Reprocess an existing Literature record by re-extracting data.
     """
     try:
+        logger.info("Reprocessing literature_id=%s", literature_id)
         # Step 1: Fetch Literature record
         literature = await get_literature_by_id(db, literature_id)
         
         if not literature:
             raise ValueError(f"Literature ID={literature_id} not found")
         
-        print(f"[Reprocess] Found Literature ID={literature_id}, title='{literature.title[:50]}...'")
+        logger.info("Found literature_id=%s title=%s", literature_id, literature.title[:50])
         resolved_file_path = _resolve_existing_path(literature.file_path)
         
         # Step 2: Get file content
         content = None
         
         if file_content:
-            print(f"[Reprocess] Using provided file content ({len(file_content)} characters)")
+            logger.info("Using provided file content for literature_id=%s chars=%s", literature_id, len(file_content))
             content = file_content
             literature.content = content
             
         elif literature.content:
-            print(f"[Reprocess] Using stored content from database ({len(literature.content)} characters)")
+            logger.info("Using stored content from database for literature_id=%s chars=%s", literature_id, len(literature.content))
             content = literature.content
             
         elif resolved_file_path:
-            print(f"[Reprocess] Reading file from: {resolved_file_path}")
+            logger.info("Reading literature file from disk literature_id=%s path=%s", literature_id, resolved_file_path)
             try:
                 content = _read_file_content(resolved_file_path)
                 literature.content = content
@@ -1473,7 +1708,7 @@ async def reprocess_literature(
             raise ValueError("File content is empty or too short")
         
         # Step 3: Re-run LLM
-        print("[Reprocess] Starting LLM extraction...")
+        logger.info("Starting LLM re-extraction for literature_id=%s", literature_id)
         
         extraction_result = await llm_service.extract_with_metadata(
             content=content,
@@ -1489,7 +1724,7 @@ async def reprocess_literature(
             _normalize_record_chemistry(data_list)
             data_list, dropped_non_il = filter_to_supported_ionic_liquid_records(data_list)
             if dropped_non_il:
-                print(f"[Reprocess][IL Filter] Dropped {len(dropped_non_il)} non-ionic-liquid records before persistence.")
+                logger.info("Dropped %s non-ionic-liquid records during reprocess", len(dropped_non_il))
         data_list, _merge_report, _ = _final_merge_records(data_list)
         
         # Step 5: Atomic Replace
@@ -1547,9 +1782,9 @@ async def reprocess_literature(
             delete_stmt = delete(TribologyData).where(TribologyData.literature_id == literature_id)
             await db.execute(delete_stmt)
             db.add_all(new_records)
-            print(f"[Reprocess] Replaced with {len(new_records)} new records.")
+            logger.info("Replaced literature_id=%s with %s reprocessed records", literature_id, len(new_records))
         if no_cof_dropped:
-            print(f"[Reprocess] Dropped {no_cof_dropped} records without COF value.")
+            logger.info("Dropped %s records without COF during reprocess literature_id=%s", no_cof_dropped, literature_id)
         
         # Step 5: Update Metadata
         if _should_update_metadata(literature, metadata_dict):
@@ -1570,7 +1805,7 @@ async def reprocess_literature(
         }
         
     except Exception as e:
-        print(f"[Reprocess] Error: {e}")
+        logger.exception("Reprocessing failed for literature_id=%s", literature_id)
         await db.rollback()
         return {"success": False, "message": str(e)}
 

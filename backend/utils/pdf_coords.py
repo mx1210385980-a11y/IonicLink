@@ -11,9 +11,21 @@ from typing import Optional
 
 import fitz  # PyMuPDF
 
+from services.il_resolver_service import resolve_il
+from utils.cof_guard import cof_search_context_is_compatible
+
 
 def _normalize_term_key(text: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", str(text or "").lower().replace("μ", "u").replace("µ", "u"))
+    return re.sub(
+        r"[^a-z0-9]",
+        "",
+        str(text or "")
+        .lower()
+        .replace("μ", "u")
+        .replace("µ", "u")
+        .replace("¦ě", "u")
+        .replace("¦Ě", "u"),
+    )
 
 
 def _extract_number_tokens(text: str) -> list[str]:
@@ -50,6 +62,138 @@ def _numeric_tokens_match(query: str, matched: str) -> bool:
 
 def _extract_alpha_tokens(text: str) -> list[str]:
     return [t for t in re.findall(r"[a-z]{3,}", str(text or "").lower())]
+
+
+def _extract_word_tokens(text: str) -> list[str]:
+    normalized = (
+        str(text or "")
+        .lower()
+        .replace("μ", "u")
+        .replace("µ", "u")
+        .replace("¦ě", "u")
+        .replace("¦Ě", "u")
+    )
+    return [t for t in re.findall(r"[a-z0-9]+", normalized) if t]
+
+
+def _extract_alpha_sequences(text: str) -> list[str]:
+    normalized = (
+        str(text or "")
+        .lower()
+        .replace("μ", "u")
+        .replace("µ", "u")
+        .replace("¦ě", "u")
+        .replace("¦Ě", "u")
+    )
+    return [t for t in re.findall(r"[a-z]+", normalized) if t]
+
+
+def _alpha_token_matches(token: str, matched_tokens: list[str], matched_key: str) -> bool:
+    token = str(token or "").strip().lower()
+    if not token:
+        return False
+    if token in matched_tokens:
+        return True
+    if len(token) <= 1:
+        return False
+    return token in matched_key
+
+
+def _normalize_context_text(text: str) -> str:
+    return (
+        str(text or "")
+        .lower()
+        .replace("μ", "u")
+        .replace("µ", "u")
+        .replace("¦ě", "u")
+        .replace("¦Ě", "u")
+    )
+
+
+def _search_context_is_compatible(semantic_type: str, query: str, local_context: str) -> bool:
+    semantic = str(semantic_type or "").strip().lower()
+    if not semantic:
+        return True
+
+    if semantic == "cof" and _extract_number_tokens(query):
+        return cof_search_context_is_compatible(local_context)
+
+    haystack = _normalize_context_text(local_context)
+    if semantic == "speed":
+        return any(token in haystack for token in ("um/s", "um s-1", "um s−1"))
+    if semantic == "load":
+        return any(token in haystack for token in ("nn", "nanonewton", "nanonewtons"))
+
+    return True
+
+
+def _expand_il_search_aliases(text: str) -> list[str]:
+    raw = str(text or "").strip()
+    if len(raw) < 2:
+        return []
+
+    variants = [raw]
+    resolved = resolve_il(raw)
+    cation = str(resolved.get("cation") or "").strip()
+    anion = str(resolved.get("anion") or "").strip()
+    canonical_name = str(resolved.get("canonical_name") or "").strip()
+    if cation and anion:
+        variants.extend(
+            [
+                canonical_name,
+                f"[{cation}][{anion}]",
+                f"{cation} {anion}",
+                f"{cation}{anion}",
+                f"{cation} / {anion}",
+            ]
+        )
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in variants:
+        candidate = str(item or "").strip()
+        if len(candidate) < 2:
+            continue
+        key = candidate.lower().replace("μ", "u").replace("µ", "u").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(candidate)
+    return deduped
+
+
+def _query_matches_matched_text(query: str, matched: str) -> bool:
+    query_key = _normalize_term_key(query)
+    matched_key = _normalize_term_key(matched)
+    if not query_key or not matched_key:
+        return False
+
+    if query_key == matched_key:
+        return True
+
+    query_nums = _extract_number_tokens(query)
+    if query_nums:
+        if not _numeric_tokens_match(query, matched):
+            return False
+        alpha_sequences = _extract_alpha_sequences(query)
+        if not alpha_sequences:
+            return True
+        matched_tokens = _extract_word_tokens(matched)
+        return all(_alpha_token_matches(token, matched_tokens, matched_key) for token in alpha_sequences)
+
+    query_tokens = _extract_word_tokens(query)
+    matched_tokens = _extract_word_tokens(matched)
+    if query_tokens and all(token in matched_tokens for token in query_tokens):
+        return True
+
+    query_alpha_tokens = _extract_alpha_sequences(query) if ("[" in query and "]" in query) else _extract_alpha_tokens(query)
+    if query_alpha_tokens and (
+        ("[" in query and "]" in query)
+        or len(query_alpha_tokens) > 1
+    ):
+        return all(_alpha_token_matches(token, matched_tokens, matched_key) for token in query_alpha_tokens)
+
+    return False
 
 
 def _word_level_find_rect(page: fitz.Page, query: str):
@@ -95,17 +239,39 @@ def _word_level_find_rect(page: fitz.Page, query: str):
                     continue
 
             similar = SequenceMatcher(None, q_key, seg_key).ratio()
-            contains_ok = (
-                (len(seg_key) >= max(4, int(len(q_key) * 0.7)) and q_key in seg_key)
-                or (len(seg_key) >= max(5, int(len(q_key) * 0.8)) and seg_key in q_key)
-            )
-            if q_key == seg_key or contains_ok or similar >= 0.86:
+            token_match = _query_matches_matched_text(query, seg_text)
+            if token_match or similar >= 0.86:
                 x0 = min(float(words[k][0]) for k in range(i, j))
                 y0 = min(float(words[k][1]) for k in range(i, j))
                 x1 = max(float(words[k][2]) for k in range(i, j))
                 y1 = max(float(words[k][3]) for k in range(i, j))
                 return fitz.Rect(x0, y0, x1, y1), seg_text
     return None
+
+
+def _extract_local_context(page: fitz.Page, rect: fitz.Rect, padding: float = 28.0) -> str:
+    blocks = page.get_text("blocks") or []
+    if blocks:
+        expanded = fitz.Rect(rect.x0 - padding, rect.y0 - padding, rect.x1 + padding, rect.y1 + padding)
+        for block in blocks:
+            if len(block) < 5:
+                continue
+            bx0, by0, bx1, by1, block_text = block[:5]
+            block_rect = fitz.Rect(float(bx0), float(by0), float(bx1), float(by1))
+            if expanded.intersects(block_rect):
+                return " ".join(str(block_text or "").split()).strip()
+
+    words = page.get_text("words") or []
+    if not words:
+        return ""
+
+    expanded = fitz.Rect(rect.x0 - padding, rect.y0 - padding, rect.x1 + padding, rect.y1 + padding)
+    nearby = []
+    for word in sorted(words, key=lambda w: (w[5], w[6], w[7])):
+        word_rect = fitz.Rect(float(word[0]), float(word[1]), float(word[2]), float(word[3]))
+        if expanded.intersects(word_rect):
+            nearby.append(str(word[4]))
+    return " ".join(nearby).strip()
 
 
 def _normalize_text(text: str) -> str:
@@ -176,8 +342,10 @@ def find_text_coordinates(pdf_path: str, search_terms: list[dict]) -> list[dict]
         for term_info in search_terms:
             term_id = term_info["id"]
             queries = term_info.get("queries", [])
+            semantic_type = str(term_info.get("semantic_type") or "").strip().lower()
             page_hint = term_info.get("page_hint")
             restrict_to_page_hint = bool(term_info.get("restrict_to_page_hint"))
+            max_page_distance = term_info.get("max_page_distance")
             anchor_bbox = term_info.get("anchor_bbox")
             restrict_to_anchor_bbox = bool(term_info.get("restrict_to_anchor_bbox"))
             found = False
@@ -212,7 +380,14 @@ def find_text_coordinates(pdf_path: str, search_terms: list[dict]) -> list[dict]
                     if restrict_to_page_hint:
                         page_order = [hinted]
                     else:
-                        page_order = [hinted] + [p for p in page_order if p != hinted]
+                        remaining = [p for p in page_order if p != hinted]
+                        remaining.sort(key=lambda p: (abs(p - hinted), p))
+                        page_order = [hinted] + remaining
+                        if isinstance(max_page_distance, int) and max_page_distance >= 0:
+                            page_order = [
+                                p for p in page_order
+                                if abs(p - hinted) <= int(max_page_distance)
+                            ]
 
                 for page_num in page_order:
                     page = doc[page_num]
@@ -226,6 +401,12 @@ def find_text_coordinates(pdf_path: str, search_terms: list[dict]) -> list[dict]
                             if not matched_text:
                                 matched_text = query_clean
                             if not _numeric_tokens_match(query_clean, matched_text):
+                                continue
+                            if not _query_matches_matched_text(query_clean, matched_text):
+                                continue
+                            local_context = _extract_local_context(page, rect)
+                            context_text = " ".join(part for part in [matched_text, local_context] if part).strip()
+                            if not _search_context_is_compatible(semantic_type, query_clean, context_text):
                                 continue
                             valid_rects.append((rect, matched_text))
 
@@ -278,6 +459,12 @@ def find_text_coordinates(pdf_path: str, search_terms: list[dict]) -> list[dict]
                         if restrict_to_anchor_bbox and ax0 is not None and not _in_anchor(rect):
                             continue
                         if not _numeric_tokens_match(query_clean, matched_text or ""):
+                            continue
+                        if not _query_matches_matched_text(query_clean, matched_text or ""):
+                            continue
+                        local_context = _extract_local_context(page, rect)
+                        context_text = " ".join(part for part in [matched_text, local_context] if part).strip()
+                        if not _search_context_is_compatible(semantic_type, query_clean, context_text):
                             continue
                         results.append(
                             {
@@ -333,7 +520,7 @@ def build_search_queries_for_record(record) -> list[str]:
         queries.append(record.cof_raw.strip())
 
     if hasattr(record, "lubricant") and record.lubricant:
-        queries.append(record.lubricant.strip())
+        queries.extend(_expand_il_search_aliases(record.lubricant))
 
     if hasattr(record, "material_name") and record.material_name:
         queries.append(record.material_name.strip())
@@ -342,7 +529,19 @@ def build_search_queries_for_record(record) -> list[str]:
         if record.material_name and record.lubricant:
             queries.append(f"{record.material_name.strip()}")
 
-    return queries
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in queries:
+        candidate = str(item or "").strip()
+        if len(candidate) < 2:
+            continue
+        key = candidate.lower().replace("μ", "u").replace("µ", "u").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(candidate)
+
+    return deduped
 
 
 def find_evidence_coordinates(

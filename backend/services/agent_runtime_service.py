@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from typing import Any
 
@@ -15,6 +16,8 @@ from agents.registry import AgentRegistry
 from services.media_workflow_service import MediaWorkflowService
 from services.usage_metrics_service import get_usage_metrics_service
 
+logger = logging.getLogger(__name__)
+
 
 class AgentRuntimeService:
     def __init__(self):
@@ -27,6 +30,7 @@ class AgentRuntimeService:
         self.registry.register(MediaAgent(self._media_workflow))
         self.registry.register(InsightAgent())
         self.registry.register(ModeratorAgent(self.bus))
+        logger.info("Agent runtime initialized with %s agents", len(self.registry.statuses()))
 
     async def run_extraction_workflow(
         self,
@@ -36,6 +40,12 @@ class AgentRuntimeService:
         profile: str = "high_accuracy",
         strict_cof_mode: bool | None = None,
     ) -> dict[str, Any]:
+        logger.info(
+            "Starting extraction workflow for literature_id=%s force=%s profile=%s",
+            file_id,
+            force,
+            profile,
+        )
         self._usage_metrics.record_api_call(endpoint="/api/extract/{file_id}")
         self._usage_metrics.record_agent_call(
             receiver="moderator",
@@ -65,6 +75,12 @@ class AgentRuntimeService:
         limit: int = 20,
         scope_filter_values: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        logger.info(
+            "Searching records skip=%s limit=%s scope=%s",
+            skip,
+            limit,
+            scope_filter_values,
+        )
         self._usage_metrics.record_api_call(endpoint="/api/records/search")
         self._usage_metrics.record_agent_call(
             receiver="moderator",
@@ -92,6 +108,7 @@ class AgentRuntimeService:
         session: AsyncSession,
         scope_filter_values: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        logger.debug("Loading filter options for scope=%s", scope_filter_values)
         self._usage_metrics.record_api_call(endpoint="/api/records/options")
         self._usage_metrics.record_agent_call(
             receiver="moderator",
@@ -114,6 +131,7 @@ class AgentRuntimeService:
         db: AsyncSession,
         file_content: str | None = None,
     ) -> dict[str, Any]:
+        logger.info("Starting reprocess workflow for literature_id=%s", literature_id)
         self._usage_metrics.record_api_call(endpoint="/api/sync/literature/{literature_id}/reprocess")
         self._usage_metrics.record_agent_call(
             receiver="moderator",
@@ -139,6 +157,7 @@ class AgentRuntimeService:
         session: AsyncSession,
         scope_filter_values: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        logger.debug("Loading stats for scope=%s", scope_filter_values)
         self._usage_metrics.record_api_call(endpoint="/api/records/stats")
         self._usage_metrics.record_agent_call(
             receiver="moderator",

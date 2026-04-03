@@ -7,10 +7,13 @@ Two-tier strategy:
 2. PubChemPy fallback (online, slower) — for unknown ILs
 """
 
+import logging
 import re
 from typing import Optional, Dict, List, Any, Iterable, Tuple
 
 from knowledge_base import il_kb, normalize_ionic_liquid
+
+logger = logging.getLogger(__name__)
 
 # Try importing pubchempy; gracefully degrade if not installed
 try:
@@ -18,7 +21,7 @@ try:
     HAS_PUBCHEMPY = True
 except ImportError:
     HAS_PUBCHEMPY = False
-    print("[IL Resolver] PubChemPy not installed. Online fallback disabled.")
+    logger.warning("PubChemPy not installed. Online resolver fallback disabled.")
 
 # Note: RDKit is NOT used here to avoid numpy version incompatibility crashes.
 # InChIKey is obtained via PubChemPy lookup instead.
@@ -161,7 +164,31 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
         "full_name": "ethylammonium",
         "family": "ammonium",
         "alkyl_chain_length": 2,
-        "aliases": ["ea", "ethylammonium", "ethyl ammonium", "EtNH3", "EtNH3+"],
+        "aliases": ["ea", "ethylammonium", "ethyl ammonium", "EtNH3", "EtNH3+", "EtA", "eta", "[EtA]+", "[EA]+"],
+    },
+    "PA": {
+        "smiles": "CCC[NH3+]",
+        "display_name": "PA",
+        "full_name": "propylammonium",
+        "family": "ammonium",
+        "alkyl_chain_length": 3,
+        "aliases": ["pa", "propylammonium", "propyl ammonium", "PrNH3", "PrNH3+", "[PA]+"],
+    },
+    "DMEA": {
+        "smiles": "CC[NH+](C)C",
+        "display_name": "DMEA",
+        "full_name": "dimethylethylammonium",
+        "family": "ammonium",
+        "alkyl_chain_length": 2,
+        "aliases": ["dmea", "dimethylethylammonium", "[DMEA]+"],
+    },
+    "Li(G4)": {
+        "smiles": "",
+        "display_name": "Li(G4)",
+        "full_name": "lithium tetraglyme solvate",
+        "family": "solvate_il",
+        "alkyl_chain_length": None,
+        "aliases": ["li(g4)", "Li(G4)+", "[Li(G4)]+", "LiG4"],
     },
     # Morpholinium-based
     "MOR11": {
@@ -255,7 +282,7 @@ ANION_DB: Dict[str, Dict[str, Any]] = {
     "NO3": {
         "smiles": "[O-][N+](=O)[O-]",
         "full_name": "nitrate",
-        "aliases": ["no3", "NO3-", "nitrate"],
+        "aliases": ["no3", "NO3-", "nitrate", "N"],
     },
     "BScB": {
         "smiles": "[B-]1(OC2=CC=CC=C2C(=O)O1)OC3=CC=CC=C3C(=O)O",
@@ -266,6 +293,36 @@ ANION_DB: Dict[str, Dict[str, Any]] = {
         "smiles": "",
         "full_name": "bis(2,4,4-trimethylpentyl)phosphinate",
         "aliases": ["(iC8)2PO2", "(C8)2PO2", "iC8 2PO2", "2PO2", "PO2", "bis(2,4,4-trimethylpentyl)phosphinate"],
+    },
+    "AOT": {
+        "smiles": "CCCCC(CC)COC(=O)CC(C(=O)OCC(CCCC)CC)S([O-])(=O)=O",
+        "full_name": "bis(2-ethylhexyl) sulfosuccinate",
+        "aliases": ["aot", "AOT-", "dioctylsulfosuccinate"],
+    },
+    "BEHP": {
+        "smiles": "CCCCC(CC)COP(=O)([O-])OCC(CCCC)CC",
+        "full_name": "bis(2-ethylhexyl) phosphate",
+        "aliases": ["behp", "BEHP-", "bis(2-ethylhexyl) hydrogen phosphate"],
+    },
+    "Doc": {
+        "smiles": "CCCCC(CC)COC(=O)CC(C(=O)OCC(CCCC)CC)S([O-])(=O)=O",
+        "full_name": "docusate",
+        "aliases": ["doc", "Doc-", "docusate"],
+    },
+    "DS": {
+        "smiles": "CCCCCCCCCCCCOS([O-])(=O)=O",
+        "full_name": "dodecyl sulfate",
+        "aliases": ["ds", "DS-", "dodecyl sulfate", "SDS"],
+    },
+    "OMs": {
+        "smiles": "CS([O-])(=O)=O",
+        "full_name": "mesylate",
+        "aliases": ["oms", "OMs-", "methanesulfonate", "mesylate"],
+    },
+    "F": {
+        "smiles": "[F-]",
+        "full_name": "fluoride",
+        "aliases": ["f", "F-"],
     },
 }
 
@@ -452,7 +509,7 @@ def _smiles_to_inchikey(smiles: str) -> Optional[str]:
         if compounds and compounds[0].inchikey:
             return compounds[0].inchikey
     except Exception as e:
-        print(f"[IL Resolver] InChIKey lookup failed for SMILES '{smiles[:40]}': {e}")
+        logger.warning("InChIKey lookup failed for SMILES prefix=%s: %s", smiles[:40], e)
     return None
 
 
@@ -469,7 +526,7 @@ def _pubchem_lookup(name: str) -> Optional[Dict[str, str]]:
                 "inchikey": c.inchikey,
             }
     except Exception as e:
-        print(f"[IL Resolver] PubChemPy lookup failed for '{name}': {e}")
+        logger.warning("PubChemPy lookup failed for %s: %s", name, e)
     return None
 
 
@@ -555,12 +612,12 @@ def resolve_il(name: str) -> Dict[str, Any]:
     
     # Step 7: PubChemPy fallback if local resolution is incomplete
     if not result["il_smiles"] and HAS_PUBCHEMPY:
-        print(f"[IL Resolver] Local miss for '{name}', trying PubChemPy...")
+        logger.info("IL resolver local miss for %s; trying PubChemPy", name)
         pubchem_result = _pubchem_lookup(name)
         if pubchem_result:
             result["il_smiles"] = pubchem_result.get("smiles")
             result["il_inchikey"] = pubchem_result.get("inchikey")
-            print(f"[IL Resolver] PubChemPy hit: SMILES={result['il_smiles']}")
+            logger.info("PubChemPy resolved %s to SMILES", name)
     
     return result
 

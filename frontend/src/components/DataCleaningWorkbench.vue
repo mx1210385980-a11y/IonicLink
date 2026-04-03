@@ -1,39 +1,50 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import {
-  AlertTriangle,
-  ArrowRightLeft,
-  Database,
-  Download,
-  RefreshCcw,
-  Save,
-  SlidersHorizontal,
-  Sparkles,
-  TableProperties,
-  WandSparkles,
-} from 'lucide-vue-next'
+import { AlertTriangle, RefreshCcw, Sparkles, Workflow } from 'lucide-vue-next'
 import {
   downloadCleanedDataset,
+  importCleanedDatasetCsv,
   listCleanedDatasets,
   previewModelCleaning,
-  saveCleanedDataset,
   type ModelCleaningMatrixRow,
   type ModelCleaningOptions,
   type ModelCleaningPreview,
   type SavedCleanedDatasetSummary,
 } from '@/lib/api'
+import DatasetBuilderDescriptorModule from './dataset-builder/DatasetBuilderDescriptorModule.vue'
+import DatasetBuilderExportModule from './dataset-builder/DatasetBuilderExportModule.vue'
+import DatasetBuilderReductionStudio from './dataset-builder/DatasetBuilderReductionStudio.vue'
+import type { BuilderSubsetSummary, SubsetCard, SubsetKey } from './dataset-builder/types'
 
-const PROCESS_FEATURE_OPTIONS = [
-  { key: 'temperature', label: 'Temperature', description: 'Keep normalized temperature in degrees Celsius.' },
-  { key: 'speed', label: 'Speed', description: 'Keep sliding speed after unit conversion.' },
-  { key: 'load', label: 'Load', description: 'Keep applied load converted to Newtons.' },
-  { key: 'potential', label: 'Potential', description: 'Keep electrochemical potential values.' },
-  { key: 'water_content', label: 'Water Content', description: 'Keep water content normalized to ppm.' },
-  { key: 'film_thickness', label: 'Film Thickness', description: 'Keep normalized film thickness in nm.' },
-  { key: 'alkyl_chain_length', label: 'Alkyl Chain Length', description: 'Keep resolved alkyl chain length metadata.' },
+type CleaningPresetKey = 'balanced' | 'strict' | 'coverage'
+type BuilderModuleKey = 'descriptor' | 'reduction' | 'export'
+type RepresentativeFeatureSelection = Record<SubsetKey, string[]>
+
+const SOURCE_MODE_OPTIONS = [
+  { value: 'group_library_fallback', label: '当前工作区优先，缺失时回退组库', detail: '适合快速构建覆盖更广的训练集。' },
+  { value: 'current_scope', label: '只使用当前工作区', detail: '适合做严格、可追踪的小范围分析。' },
+  { value: 'group_library', label: '只使用组级共享库', detail: '适合构建跨工作区的统一数据池。' },
 ] as const
 
-const DEFAULT_KEEP_FEATURES = PROCESS_FEATURE_OPTIONS.map((feature) => feature.key)
+const STARTER_PRESETS = [
+  { key: 'balanced', label: '平衡模式', badge: '推荐', summary: '兼顾样本量与完整性。' },
+  { key: 'strict', label: '严格模式', badge: '严格', summary: '更适合复现实验和小样本验证。' },
+  { key: 'coverage', label: '扩展模式', badge: '扩展', summary: '优先保留更多记录，形成更大的总池。' },
+] as const
+
+const DEFAULT_KEEP_FEATURES = [
+  'temperature',
+  'speed',
+  'load',
+  'load_min',
+  'load_max',
+  'load_span',
+  'load_is_range',
+  'potential',
+  'water_content',
+  'film_thickness',
+  'alkyl_chain_length',
+]
 
 const emit = defineEmits<{
   (e: 'open-training', datasetId: number | null): void
@@ -57,97 +68,241 @@ const preview = ref<ModelCleaningPreview | null>(null)
 const savedDatasets = ref<SavedCleanedDatasetSummary[]>([])
 const loading = ref(true)
 const previewLoading = ref(false)
-const saveLoading = ref(false)
-const exportLoadingId = ref<number | null>(null)
 const errorMessage = ref('')
 const statusMessage = ref('')
-const datasetName = ref('')
-const datasetDescription = ref('')
+const exportLoadingId = ref<number | null>(null)
+const subsetSavingKey = ref<SubsetKey | null>(null)
+const bundleName = ref('')
 const lastSavedDatasetId = ref<number | null>(null)
 const autoPreviewReady = ref(false)
+const activeModule = ref<BuilderModuleKey>('descriptor')
+const selectedRepresentativeFeatures = ref<RepresentativeFeatureSelection>({
+  dataset_a: [],
+  dataset_b: [],
+})
+const representativeSelectionDirty = ref<Record<SubsetKey, boolean>>({
+  dataset_a: false,
+  dataset_b: false,
+})
 
 let autoPreviewTimer: ReturnType<typeof setTimeout> | null = null
 
-const repairRows = computed(() => {
-  const repairs = preview.value?.summary.missing_value_repairs || {}
-  return Object.entries(repairs)
-    .map(([key, count]) => ({ key, count }))
-    .filter((item) => item.count > 0)
-})
+const builder = computed(() => preview.value?.dataset_builder || null)
+const descriptorSummary = computed(() => builder.value?.descriptor_generation || null)
+const screeningSummary = computed(() => builder.value?.screening || null)
+const datasetASummary = computed(() => builder.value?.subsets.dataset_a || null)
+const datasetBSummary = computed(() => builder.value?.subsets.dataset_b || null)
 
-const cleanedRows = computed(() => preview.value?.rows || [])
-const previewRows = computed(() => preview.value?.preview_rows || [])
-const normalizationRows = computed(() => preview.value?.normalization_preview || [])
-const explainedVariancePercent = computed(() => {
-  const ratio = preview.value?.pca_info?.explained_variance_ratio
-  return ratio == null || Number.isNaN(Number(ratio)) ? null : Math.round(Number(ratio) * 100)
-})
-const finalFeatureCount = computed(() => preview.value?.feature_columns.length || 0)
-const normalizationColumns = computed(() => {
-  const columns = preview.value?.matrix_columns || []
-  const limit = preview.value?.pca_info?.enabled ? 8 : 6
-  return columns.slice(0, Math.min(limit, columns.length))
-})
-const matrixPreviewColumns = computed(() => {
-  const columns = preview.value?.matrix_columns || []
-  const limit = preview.value?.pca_info?.enabled ? 12 : 10
-  return columns.slice(0, Math.min(limit, columns.length))
-})
-const autoPreviewSignature = computed(() => JSON.stringify(buildOptionsPayload()))
+const availableRepresentativeFeatures = computed<Record<SubsetKey, string[]>>(() => ({
+  dataset_a: datasetASummary.value?.columns.filter((column) => column !== datasetASummary.value?.target_column) || [],
+  dataset_b: datasetBSummary.value?.columns.filter((column) => column !== datasetBSummary.value?.target_column) || [],
+}))
 
-function buildOptionsPayload(): ModelCleaningOptions {
+const recommendedRepresentativeFeatures = computed<RepresentativeFeatureSelection>(() => {
+  const strongest = screeningSummary.value?.strongest_to_target || []
+  const ionicGroups = screeningSummary.value?.ionic_collinearity_groups || []
+  const surfaceAlerts = screeningSummary.value?.surface_bias_alerts || []
+  const correlationMap = new Map(strongest.map((item) => [item.feature, item.abs_correlation]))
+
+  const buildFor = (key: SubsetKey) => {
+    const available = new Set(availableRepresentativeFeatures.value[key])
+    const picked: string[] = []
+    const pickedSet = new Set<string>()
+    const groupedSet = new Set<string>()
+
+    const add = (feature: string) => {
+      if (!available.has(feature) || pickedSet.has(feature)) return
+      picked.push(feature)
+      pickedSet.add(feature)
+    }
+
+    for (const group of ionicGroups) {
+      const features = group.features.filter((feature) => available.has(feature))
+      features.forEach((feature) => groupedSet.add(feature))
+      const representative = [...features].sort((left, right) => (correlationMap.get(right) || 0) - (correlationMap.get(left) || 0))[0]
+      if (representative) add(representative)
+    }
+
+    for (const alert of surfaceAlerts) {
+      const features = alert.features.filter((feature) => available.has(feature))
+      features.forEach((feature) => groupedSet.add(feature))
+      const representative = [...features].sort((left, right) => (correlationMap.get(right) || 0) - (correlationMap.get(left) || 0))[0]
+      if (representative) add(representative)
+    }
+
+    for (const item of strongest) {
+      if (!available.has(item.feature) || groupedSet.has(item.feature)) continue
+      add(item.feature)
+      if (picked.length >= 10) break
+    }
+
+    if (key === 'dataset_b' && available.has('Film_Thickness')) {
+      add('Film_Thickness')
+    }
+
+    return picked.length ? picked : [...availableRepresentativeFeatures.value[key]].slice(0, 10)
+  }
+
   return {
-    source_mode: form.source_mode,
-    drop_missing_target: Boolean(form.drop_missing_target),
-    require_dual_smiles: Boolean(form.require_dual_smiles),
-    missing_value_strategy: form.missing_value_strategy,
-    remove_target_outliers: Boolean(form.remove_target_outliers),
-    iqr_multiplier: Number(form.iqr_multiplier),
-    feature_config: {
-      use_pca: Boolean(form.feature_config.use_pca),
-      n_components: Number(form.feature_config.n_components),
-      keep_features: [...form.feature_config.keep_features],
-    },
+    dataset_a: buildFor('dataset_a'),
+    dataset_b: buildFor('dataset_b'),
+  }
+})
+
+const retainedFeatureColumns = computed(() => [
+  ...selectedRepresentativeFeatures.value.dataset_a,
+  ...selectedRepresentativeFeatures.value.dataset_b,
+])
+
+const selectedSourceMode = computed(() => {
+  return SOURCE_MODE_OPTIONS.find((option) => option.value === form.source_mode)?.label || SOURCE_MODE_OPTIONS[0].label
+})
+
+const rdkitStatusLabel = computed(() => {
+  if (!descriptorSummary.value) return '--'
+  return descriptorSummary.value.rdkit_enabled ? '已启用' : '未启用'
+})
+
+const outlierLabel = computed(() => {
+  return form.remove_target_outliers ? `开启 · IQR ${form.iqr_multiplier.toFixed(1)}` : '关闭'
+})
+
+const activePresetKey = computed<CleaningPresetKey | null>(() => {
+  if (
+    form.source_mode === 'current_scope' &&
+    form.drop_missing_target &&
+    form.require_dual_smiles &&
+    form.remove_target_outliers
+  ) return 'strict'
+
+  if (
+    form.source_mode === 'group_library_fallback' &&
+    form.drop_missing_target &&
+    !form.require_dual_smiles &&
+    !form.remove_target_outliers
+  ) return 'coverage'
+
+  if (
+    form.source_mode === 'group_library_fallback' &&
+    form.drop_missing_target &&
+    form.require_dual_smiles &&
+    !form.remove_target_outliers
+  ) return 'balanced'
+
+  return null
+})
+
+function filterSubsetSummary(key: SubsetKey, summary: BuilderSubsetSummary | null) {
+  if (!summary) return null
+  const selectedSet = new Set(selectedRepresentativeFeatures.value[key])
+  const filteredColumns = summary.columns.filter((column) => column === summary.target_column || selectedSet.has(column))
+  const pickRow = (row: ModelCleaningMatrixRow) => Object.fromEntries(
+    filteredColumns.map((column) => [column, row[column] ?? null]),
+  ) as ModelCleaningMatrixRow
+
+  return {
+    ...summary,
+    columns: filteredColumns,
+    rows: summary.rows.map((row) => pickRow(row)),
+    preview_rows: summary.preview_rows.map((row) => pickRow(row)),
+    feature_count: Math.max(0, filteredColumns.length - 1),
   }
 }
 
-function formatMetric(value: number | null | undefined, digits: number = 4) {
-  if (value == null || Number.isNaN(Number(value))) return '--'
-  return Number(value).toFixed(digits).replace(/\.?0+$/, '')
-}
+const subsetCards = computed<SubsetCard[]>(() => {
+  if (!builder.value) return []
 
-function formatCoverage(value: number) {
-  return `${Math.round(value * 100)}%`
-}
+  return [
+    {
+      key: 'dataset_a',
+      label: 'Dataset-A',
+      title: '通用池',
+      summary: filterSubsetSummary('dataset_a', datasetASummary.value),
+      accent: 'sky',
+      description: '剔除膜厚 h，保留覆盖更广的离子性质、表面与工况特征。',
+    },
+    {
+      key: 'dataset_b',
+      label: 'Dataset-B',
+      title: '机理池',
+      summary: filterSubsetSummary('dataset_b', datasetBSummary.value),
+      accent: 'emerald',
+      description: '保留含膜厚 h 的样本，用于分析成膜相关机制。',
+    },
+  ]
+})
 
-function formatDateTime(value: string | null | undefined) {
-  if (!value) return '--'
-  return new Date(value).toLocaleString()
-}
+const moduleTabs = computed(() => [
+  {
+    key: 'descriptor' as const,
+    step: '01',
+    title: '数据集划分',
+    detail: '先确认 Dataset-A 和 Dataset-B 的样本结构与分布。',
+    metricValue: 2,
+    metricLabel: '双池数据',
+  },
+  {
+    key: 'reduction' as const,
+    step: '02',
+    title: '降维工作站',
+    detail: '基于真实 CSV 识别共线簇，并手动决定每个数据集保留哪些代表特征。',
+    metricValue: retainedFeatureColumns.value.length,
+    metricLabel: '已选特征',
+  },
+  {
+    key: 'export' as const,
+    step: '03',
+    title: '分流与导出',
+    detail: '把处理后的 Dataset-A / Dataset-B 导出或保存到工作区。',
+    metricValue: (datasetASummary.value?.row_count ?? 0) + (datasetBSummary.value?.row_count ?? 0),
+    metricLabel: '导出样本',
+  },
+])
 
-function formatColumnLabel(column: string) {
-  return column.replace(/_/g, ' ')
-}
+const autoPreviewSignature = computed(() => JSON.stringify(form))
 
-function defaultDatasetName() {
+function defaultBundleName() {
   const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ')
-  return `Cleaned COF Dataset ${stamp}`
+  return `Tribology Builder ${stamp}`
+}
+
+function applyStarterPreset(presetKey: CleaningPresetKey) {
+  if (presetKey === 'balanced') {
+    form.source_mode = 'group_library_fallback'
+    form.drop_missing_target = true
+    form.require_dual_smiles = true
+    form.remove_target_outliers = false
+    form.iqr_multiplier = 1.5
+    return
+  }
+
+  if (presetKey === 'strict') {
+    form.source_mode = 'current_scope'
+    form.drop_missing_target = true
+    form.require_dual_smiles = true
+    form.remove_target_outliers = true
+    form.iqr_multiplier = 1.5
+    return
+  }
+
+  form.source_mode = 'group_library_fallback'
+  form.drop_missing_target = true
+  form.require_dual_smiles = false
+  form.remove_target_outliers = false
+  form.iqr_multiplier = 1.5
 }
 
 function csvEscape(value: unknown) {
   const text = value == null ? '' : String(value)
-  if (/[",\n]/.test(text)) {
-    return `"${text.replace(/"/g, '""')}"`
-  }
+  if (/[",\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`
   return text
 }
 
 function rowsToCsv(rows: ModelCleaningMatrixRow[], columns: string[]) {
-  const lines = [
+  return [
     columns.join(','),
     ...rows.map((row) => columns.map((column) => csvEscape(row[column])).join(',')),
-  ]
-  return lines.join('\n')
+  ].join('\n')
 }
 
 function triggerDownload(blob: Blob, filename: string) {
@@ -159,11 +314,13 @@ function triggerDownload(blob: Blob, filename: string) {
   URL.revokeObjectURL(url)
 }
 
+function filteredSubsetByKey(key: SubsetKey) {
+  return subsetCards.value.find((card) => card.key === key)?.summary || null
+}
+
 function scheduleAutoPreview() {
   if (!autoPreviewReady.value) return
-  if (autoPreviewTimer) {
-    clearTimeout(autoPreviewTimer)
-  }
+  if (autoPreviewTimer) clearTimeout(autoPreviewTimer)
   autoPreviewTimer = setTimeout(() => {
     void runPreview(true)
   }, 450)
@@ -177,16 +334,13 @@ async function fetchSavedDatasets() {
 async function runPreview(silent: boolean = false) {
   previewLoading.value = true
   errorMessage.value = ''
-  if (!silent) {
-    statusMessage.value = ''
-  }
+  if (!silent) statusMessage.value = ''
+
   try {
-    preview.value = await previewModelCleaning(buildOptionsPayload())
-    if (!datasetName.value) {
-      datasetName.value = defaultDatasetName()
-    }
+    preview.value = await previewModelCleaning(form)
+    if (!bundleName.value) bundleName.value = defaultBundleName()
   } catch (error: any) {
-    errorMessage.value = error?.response?.data?.detail || error?.message || 'Failed to build cleaning preview.'
+    errorMessage.value = error?.response?.data?.detail || error?.message || '生成数据集构建预览失败。'
   } finally {
     previewLoading.value = false
   }
@@ -202,36 +356,44 @@ async function initialize() {
   }
 }
 
-async function handleSaveDataset() {
-  if (!preview.value) return
-  saveLoading.value = true
+function downloadSubset(key: SubsetKey) {
+  const subset = filteredSubsetByKey(key)
+  if (!subset) return
+  const csv = rowsToCsv(subset.rows, subset.columns)
+  const filename = `${bundleName.value || defaultBundleName()}-${subset.name.toLowerCase()}.csv`
+  triggerDownload(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), filename)
+}
+
+async function saveSubsetToWorkspace(key: SubsetKey) {
+  const subset = filteredSubsetByKey(key)
+  if (!subset) return
+
+  subsetSavingKey.value = key
   errorMessage.value = ''
   statusMessage.value = ''
+
   try {
-    const response = await saveCleanedDataset({
-      name: datasetName.value || defaultDatasetName(),
-      description: datasetDescription.value,
-      target_key: 'cof',
-      cleaning_options: buildOptionsPayload(),
+    const csv = rowsToCsv(subset.rows, subset.columns)
+    const filename = `${bundleName.value || defaultBundleName()}-${subset.name.toLowerCase()}.csv`
+    const file = new File([csv], filename, { type: 'text/csv;charset=utf-8;' })
+    const response = await importCleanedDatasetCsv({
+      file,
+      name: `${bundleName.value || defaultBundleName()} ${subset.name}`,
+      description: `${subset.description} 来源：${selectedSourceMode.value}。`,
+      targetColumn: subset.target_column,
     })
     lastSavedDatasetId.value = response.dataset.id
-    statusMessage.value = `Saved cleaned dataset #${response.dataset.id}. Open Training Page to train on the matrix immediately.`
+    statusMessage.value = `${subset.name} 已保存到工作区，数据集编号 #${response.dataset.id}。`
     await fetchSavedDatasets()
   } catch (error: any) {
-    errorMessage.value = error?.response?.data?.detail || error?.message || 'Failed to save cleaned dataset.'
+    errorMessage.value = error?.response?.data?.detail || error?.message || `${subset.name} 保存失败。`
   } finally {
-    saveLoading.value = false
+    subsetSavingKey.value = null
   }
 }
 
 function openTraining(datasetId: number | null = lastSavedDatasetId.value) {
   emit('open-training', datasetId)
-}
-
-function handleExportPreview() {
-  if (!preview.value || !cleanedRows.value.length) return
-  const csv = rowsToCsv(cleanedRows.value, preview.value.matrix_columns)
-  triggerDownload(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), 'cleaned-preview.csv')
 }
 
 async function handleExportSaved(dataset: SavedCleanedDatasetSummary) {
@@ -240,7 +402,7 @@ async function handleExportSaved(dataset: SavedCleanedDatasetSummary) {
     const blob = await downloadCleanedDataset(dataset.id)
     triggerDownload(blob, `${dataset.name || `cleaned-dataset-${dataset.id}`}.csv`)
   } catch (error: any) {
-    errorMessage.value = error?.message || 'Failed to export saved dataset.'
+    errorMessage.value = error?.message || '导出已保存数据集失败。'
   } finally {
     exportLoadingId.value = null
   }
@@ -250,361 +412,217 @@ watch(autoPreviewSignature, () => {
   scheduleAutoPreview()
 })
 
+watch(
+  [availableRepresentativeFeatures, recommendedRepresentativeFeatures],
+  ([available, recommended]) => {
+    ;(['dataset_a', 'dataset_b'] as SubsetKey[]).forEach((key) => {
+      const availableSet = new Set(available[key])
+      const current = selectedRepresentativeFeatures.value[key].filter((feature) => availableSet.has(feature))
+      if (!representativeSelectionDirty.value[key] || current.length === 0) {
+        selectedRepresentativeFeatures.value[key] = [...recommended[key]]
+        representativeSelectionDirty.value[key] = false
+      } else {
+        selectedRepresentativeFeatures.value[key] = current
+      }
+    })
+  },
+  { immediate: true },
+)
+
+function updateSelectedRepresentativeFeatures(payload: { dataset: SubsetKey; features: string[] }) {
+  const availableSet = new Set(availableRepresentativeFeatures.value[payload.dataset])
+  selectedRepresentativeFeatures.value[payload.dataset] = payload.features.filter((feature) => availableSet.has(feature))
+  representativeSelectionDirty.value[payload.dataset] = true
+}
+
 onMounted(() => {
   void initialize()
 })
 
 onBeforeUnmount(() => {
-  if (autoPreviewTimer) {
-    clearTimeout(autoPreviewTimer)
-  }
+  if (autoPreviewTimer) clearTimeout(autoPreviewTimer)
 })
 </script>
 
 <template>
-  <div class="flex h-full bg-[radial-gradient(circle_at_top_right,_rgba(56,189,248,0.10),_transparent_35%),linear-gradient(180deg,_#f8fafc_0%,_#ecfeff_100%)] text-slate-900">
-    <aside class="flex w-[360px] shrink-0 flex-col border-r border-slate-200/80 bg-white/85 px-6 py-6 backdrop-blur">
-      <div class="mb-8 flex items-center gap-3">
-        <div class="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-600 to-blue-500 text-white shadow-lg shadow-cyan-200/80">
-          <Database class="h-5 w-5" />
+  <div class="min-h-full bg-[#f5f7fb] text-slate-900">
+    <div class="w-full px-4 py-6 sm:px-6 lg:px-8 xl:px-10 2xl:px-12">
+      <section v-if="errorMessage" class="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+        <div class="flex items-center gap-2 font-semibold">
+          <AlertTriangle class="h-4 w-4" />
+          {{ errorMessage }}
         </div>
-        <div>
-          <h1 class="text-xl font-bold tracking-tight">Data Cleaning Bridge</h1>
-          <p class="text-sm text-slate-500">Repair, engineer, prune, and save ready-to-train matrices.</p>
+      </section>
+
+      <section v-if="statusMessage" class="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+        <div class="flex items-center gap-2 font-semibold">
+          <Sparkles class="h-4 w-4" />
+          {{ statusMessage }}
         </div>
-      </div>
+      </section>
 
-      <div v-if="loading" class="rounded-3xl border border-slate-200 bg-slate-50 px-4 py-5 text-sm text-slate-500">
-        Loading cleaning workspace...
-      </div>
+      <section v-if="loading && !preview" class="mt-6 rounded-[28px] border border-slate-200 bg-white px-6 py-8">
+        <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">加载中</p>
+        <h2 class="mt-3 text-2xl font-semibold tracking-tight text-slate-950">正在生成数据集构建预览</h2>
+        <p class="mt-3 max-w-2xl text-sm leading-6 text-slate-500">系统正在拉取样本、计算分子描述符并准备当前构建流程。</p>
+      </section>
 
-      <template v-else>
-        <div class="min-h-0 flex-1 space-y-6 overflow-y-auto pr-1">
-          <section class="rounded-[28px] border border-slate-200 bg-gradient-to-br from-cyan-50 to-sky-50 p-4 shadow-sm">
-            <div class="mb-4 flex items-center gap-2">
-              <WandSparkles class="h-4 w-4 text-cyan-700" />
-              <h2 class="text-sm font-semibold text-slate-800">Cleaning Controls</h2>
+      <template v-else-if="preview && builder">
+        <section class="mt-6 rounded-[28px] border border-slate-200 bg-white p-6">
+          <div class="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-5">
+            <div>
+              <div class="inline-flex flex-wrap gap-2 rounded-2xl bg-slate-100 p-1">
+                <button
+                  v-for="tab in moduleTabs"
+                  :key="tab.key"
+                  type="button"
+                  class="rounded-xl px-3 py-2 text-xs font-semibold transition"
+                  :class="activeModule === tab.key ? 'bg-slate-950 text-white' : 'text-slate-600 hover:bg-white hover:text-slate-950'"
+                  @click="activeModule = tab.key"
+                >
+                  {{ tab.title }}
+                </button>
+              </div>
+              <p class="mt-4 max-w-2xl text-sm leading-6 text-slate-600">
+                先看样本池，再在第二步决定哪些代表特征真正保留；第三步导出和保存时会自动继承这个选择。
+              </p>
             </div>
 
-            <label class="mb-3 block">
-              <span class="mb-2 block text-sm font-medium text-slate-600">Data Source</span>
-              <select v-model="form.source_mode" class="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm shadow-sm outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100">
-                <option value="group_library_fallback">Current scope, fallback to group library</option>
-                <option value="current_scope">Current scope only</option>
-                <option value="group_library">Group library only</option>
-              </select>
-            </label>
-
-            <div class="space-y-2 rounded-2xl border border-slate-200 bg-white p-3">
-              <label class="flex items-start gap-3 text-sm text-slate-700">
-                <input v-model="form.drop_missing_target" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />
-                <span>Drop records without a numeric COF target</span>
-              </label>
-              <label class="flex items-start gap-3 text-sm text-slate-700">
-                <input v-model="form.require_dual_smiles" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />
-                <span>Require both cation and anion SMILES</span>
-              </label>
-            </div>
-
-            <div class="mt-4 grid gap-3">
-              <label class="block">
-                <span class="mb-2 block text-sm font-medium text-slate-600">Missing Value Strategy</span>
-                <select v-model="form.missing_value_strategy" class="h-11 w-full rounded-2xl border border-slate-200 bg-white px-3 text-sm shadow-sm outline-none focus:border-cyan-400 focus:ring-4 focus:ring-cyan-100">
-                  <option value="median">Median repair</option>
-                  <option value="zero">Zero fill</option>
-                  <option value="keep">Keep missing values</option>
-                </select>
-              </label>
-
-              <label class="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700">
-                <input v-model="form.remove_target_outliers" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />
-                <span>Remove COF target outliers with IQR filtering</span>
-              </label>
-
-              <div>
-                <div class="mb-2 flex items-center justify-between text-sm">
-                  <label class="font-medium text-slate-600">IQR Multiplier</label>
-                  <span class="font-semibold text-cyan-700">{{ form.iqr_multiplier.toFixed(1) }}</span>
-                </div>
-                <input v-model.number="form.iqr_multiplier" type="range" min="0.5" max="3.0" step="0.1" class="w-full accent-cyan-600" :disabled="!form.remove_target_outliers" />
+            <div class="grid min-w-[280px] gap-3 sm:grid-cols-3">
+              <div class="border-l border-slate-200 pl-4">
+                <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">可用样本</p>
+                <p class="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{{ descriptorSummary?.usable_rows ?? 0 }}</p>
+              </div>
+              <div class="border-l border-slate-200 pl-4">
+                <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">当前保留</p>
+                <p class="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{{ retainedFeatureColumns.length }}</p>
+              </div>
+              <div class="border-l border-slate-200 pl-4">
+                <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">已保存数据集</p>
+                <p class="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{{ savedDatasets.length }}</p>
               </div>
             </div>
-          </section>
+          </div>
 
-          <section class="rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm">
-            <div class="mb-4 flex items-center gap-2">
-              <SlidersHorizontal class="h-4 w-4 text-blue-600" />
-              <h2 class="text-sm font-semibold text-slate-800">Feature Engineering</h2>
+          <div v-if="activeModule === 'export'" class="grid gap-6 pt-5 xl:grid-cols-[1.3fr_1fr]">
+            <div>
+              <div class="flex items-center gap-2">
+                <Workflow class="h-4 w-4 text-cyan-700" />
+                <h2 class="text-base font-semibold text-slate-950">一步设置</h2>
+              </div>
+
+              <div class="mt-4 grid gap-3 sm:grid-cols-3">
+                <button
+                  v-for="preset in STARTER_PRESETS"
+                  :key="preset.key"
+                  type="button"
+                  class="rounded-2xl border px-4 py-4 text-left transition"
+                  :class="activePresetKey === preset.key ? 'border-cyan-300 bg-cyan-50' : 'border-slate-200 bg-slate-50 hover:bg-white'"
+                  @click="applyStarterPreset(preset.key)"
+                >
+                  <div class="flex items-center justify-between gap-3">
+                    <p class="text-sm font-semibold text-slate-950">{{ preset.label }}</p>
+                    <span class="rounded-full px-2.5 py-1 text-[10px] font-semibold" :class="activePresetKey === preset.key ? 'bg-cyan-600 text-white' : 'bg-white text-slate-500 ring-1 ring-slate-200'">
+                      {{ preset.badge }}
+                    </span>
+                  </div>
+                  <p class="mt-2 text-xs leading-5 text-slate-500">{{ preset.summary }}</p>
+                </button>
+              </div>
             </div>
 
             <div class="space-y-4">
-              <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <div class="flex items-start justify-between gap-4">
-                  <div>
-                    <p class="text-sm font-semibold text-slate-800">Molecular Features</p>
-                    <p class="mt-1 text-xs leading-5 text-slate-500">Apply PCA to the concatenated 512-dimensional Morgan fingerprint block before saving the cleaned matrix.</p>
-                  </div>
-                  <label class="relative inline-flex cursor-pointer items-center">
-                    <input v-model="form.feature_config.use_pca" type="checkbox" class="peer sr-only" />
-                    <div class="h-6 w-11 rounded-full bg-slate-200 transition peer-checked:bg-cyan-500"></div>
-                    <div class="absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition peer-checked:translate-x-5"></div>
-                  </label>
-                </div>
-
-                <div v-if="form.feature_config.use_pca" class="mt-4 rounded-2xl border border-cyan-100 bg-white p-3">
-                  <div class="mb-2 flex items-center justify-between text-sm">
-                    <label class="font-medium text-slate-600">PCA Components</label>
-                    <span class="font-semibold text-cyan-700">{{ form.feature_config.n_components }}</span>
-                  </div>
-                  <input v-model.number="form.feature_config.n_components" type="range" min="2" max="30" step="1" class="w-full accent-cyan-600" />
-                  <p class="mt-2 text-xs text-slate-500">The preview will report how much fingerprint variance these components retain.</p>
-                </div>
-              </div>
-
-              <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <p class="text-sm font-semibold text-slate-800">Process Features</p>
-                <p class="mt-1 text-xs leading-5 text-slate-500">Unchecked process variables are dropped from the final matrix before the dataset is saved.</p>
-                <div class="mt-4 grid gap-2">
-                  <label v-for="feature in PROCESS_FEATURE_OPTIONS" :key="feature.key" class="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700">
-                    <input v-model="form.feature_config.keep_features" type="checkbox" :value="feature.key" class="mt-1 h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />
-                    <div class="min-w-0">
-                      <p class="font-semibold text-slate-800">{{ feature.label }}</p>
-                      <p class="mt-1 text-xs leading-5 text-slate-500">{{ feature.description }}</p>
-                    </div>
-                  </label>
-                </div>
-                <p class="mt-3 text-xs text-slate-500">{{ form.feature_config.keep_features.length }} process features will be kept in the cleaned matrix.</p>
-              </div>
-            </div>
-
-            <div class="mt-4 space-y-3">
-              <button class="inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-cyan-600 to-blue-600 text-sm font-semibold text-white shadow-lg shadow-cyan-200/80 transition hover:translate-y-[-1px] disabled:opacity-60" :disabled="previewLoading" @click="runPreview()">
-                <RefreshCcw class="h-4 w-4" />
-                {{ previewLoading ? 'Refreshing Preview...' : 'Build Cleaning Preview' }}
-              </button>
-              <button class="inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60" :disabled="!preview?.rows.length" @click="handleExportPreview">
-                <Download class="h-4 w-4" />
-                Export Preview CSV
-              </button>
-            </div>
-          </section>
-
-          <section class="rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm">
-            <div class="mb-4 flex items-center gap-2">
-              <Save class="h-4 w-4 text-blue-600" />
-              <h2 class="text-sm font-semibold text-slate-800">Save Cleaned Dataset</h2>
-            </div>
-            <label class="mb-3 block">
-              <span class="mb-2 block text-sm font-medium text-slate-600">Dataset Name</span>
-              <input v-model="datasetName" type="text" class="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100" placeholder="Cleaned COF Dataset" />
-            </label>
-            <label class="block">
-              <span class="mb-2 block text-sm font-medium text-slate-600">Description</span>
-              <textarea v-model="datasetDescription" rows="3" class="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3 text-sm outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100" placeholder="Optional notes about feature pruning, PCA, and intended training use." />
-            </label>
-            <button class="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl bg-slate-900 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60" :disabled="saveLoading || !preview" @click="handleSaveDataset">
-              <Save class="h-4 w-4" />
-              {{ saveLoading ? 'Saving Dataset...' : 'Save Cleaned Dataset' }}
-            </button>
-            <button class="mt-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 transition hover:bg-slate-50" @click="openTraining()">
-              <ArrowRightLeft class="h-4 w-4" />
-              Open Training Page
-            </button>
-          </section>
-
-          <section class="rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm">
-            <div class="mb-4 flex items-center gap-2">
-              <TableProperties class="h-4 w-4 text-amber-500" />
-              <h2 class="text-sm font-semibold text-slate-800">Saved Cleaned Datasets</h2>
-            </div>
-            <div v-if="savedDatasets.length === 0" class="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-sm text-slate-400">
-              No cleaned datasets saved in this scope yet.
-            </div>
-            <div v-else class="space-y-3">
-              <div v-for="dataset in savedDatasets" :key="dataset.id" class="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
-                <div class="flex items-start justify-between gap-3">
-                  <div class="min-w-0">
-                    <p class="truncate text-sm font-semibold text-slate-800">{{ dataset.name }}</p>
-                    <p class="mt-1 text-xs text-slate-500">
-                      {{ dataset.row_count }} rows · {{ dataset.feature_columns.length }} features · {{ formatDateTime(dataset.created_at) }}
-                    </p>
-                    <p v-if="dataset.pca_info?.enabled && dataset.pca_info.explained_variance_ratio != null" class="mt-1 text-[11px] font-semibold text-cyan-700">
-                      PCA variance retained: {{ Math.round(dataset.pca_info.explained_variance_ratio * 100) }}%
-                    </p>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <button class="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50" @click="openTraining(dataset.id)">
-                      Train
-                    </button>
-                    <button class="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60" :disabled="exportLoadingId === dataset.id" @click="handleExportSaved(dataset)">
-                      {{ exportLoadingId === dataset.id ? '...' : 'Export' }}
-                    </button>
-                  </div>
-                </div>
-                <p v-if="dataset.description" class="mt-2 text-xs leading-5 text-slate-500">{{ dataset.description }}</p>
-              </div>
-            </div>
-          </section>
-        </div>
-      </template>
-    </aside>
-
-    <main class="min-w-0 flex-1 overflow-y-auto px-8 py-8">
-      <div class="mx-auto max-w-[1240px] space-y-6">
-        <section v-if="errorMessage" class="rounded-3xl border border-rose-200 bg-rose-50 px-6 py-4 text-sm text-rose-700">
-          <div class="flex items-center gap-2 font-semibold">
-            <AlertTriangle class="h-4 w-4" />
-            {{ errorMessage }}
-          </div>
-        </section>
-
-        <section v-if="statusMessage" class="rounded-3xl border border-emerald-200 bg-emerald-50 px-6 py-4 text-sm text-emerald-700">
-          <div class="flex items-center gap-2 font-semibold">
-            <Sparkles class="h-4 w-4" />
-            {{ statusMessage }}
-          </div>
-        </section>
-
-        <section v-if="preview" class="rounded-[30px] border border-slate-200/80 bg-white/90 px-8 py-6 shadow-[0_24px_80px_-48px_rgba(15,23,42,0.45)]">
-          <div class="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-            <div>
-              <div class="flex flex-wrap items-center gap-3">
-                <h2 class="text-2xl font-bold tracking-tight">Cleaning Summary</h2>
-                <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{{ finalFeatureCount }} final features</span>
-                <span v-if="preview.pca_info?.enabled && explainedVariancePercent != null" class="rounded-full bg-cyan-100 px-3 py-1 text-xs font-semibold text-cyan-700">
-                  PCA Explained Variance: {{ explainedVariancePercent }}%
-                </span>
-                <span v-else class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">PCA disabled</span>
-              </div>
-              <p class="mt-2 text-sm text-slate-500">
-                Active source: {{ preview.source_scope.label }}
-                <span v-if="preview.source_scope.used_fallback"> · Group library fallback applied.</span>
-              </p>
-            </div>
-            <div class="grid grid-cols-2 gap-3 md:grid-cols-5">
-              <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                <p class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Raw</p>
-                <p class="mt-2 text-2xl font-bold">{{ preview.summary.raw_records }}</p>
-              </div>
-              <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                <p class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Target Ready</p>
-                <p class="mt-2 text-2xl font-bold">{{ preview.summary.target_ready_records }}</p>
-              </div>
-              <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                <p class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">SMILES Ready</p>
-                <p class="mt-2 text-2xl font-bold">{{ preview.summary.chemistry_ready_records }}</p>
-              </div>
-              <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                <p class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Training Ready</p>
-                <p class="mt-2 text-2xl font-bold">{{ preview.summary.training_ready_records }}</p>
-              </div>
-              <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                <p class="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">Outliers</p>
-                <p class="mt-2 text-2xl font-bold">{{ preview.summary.outliers_detected || 0 }}</p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section v-if="preview" class="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
-          <div class="rounded-[30px] border border-slate-200/80 bg-white/90 p-6 shadow-[0_24px_80px_-48px_rgba(15,23,42,0.45)]">
-            <h3 class="text-lg font-bold">Missing Value Repair</h3>
-            <p class="mt-2 text-sm text-slate-500">Counts of repaired process fields that remain in the final matrix.</p>
-            <div v-if="repairRows.length === 0" class="mt-5 rounded-3xl border border-dashed border-slate-200 bg-slate-50 px-4 py-10 text-center text-sm text-slate-400">
-              No repairs were needed with the current rules.
-            </div>
-            <div v-else class="mt-5 space-y-3">
-              <div v-for="item in repairRows" :key="item.key" class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <div class="flex items-center justify-between gap-2">
-                  <span class="text-sm font-semibold text-slate-800">{{ formatColumnLabel(item.key) }}</span>
-                  <span class="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-slate-600">{{ item.count }}</span>
-                </div>
-              </div>
-            </div>
-
-            <div class="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div class="flex flex-wrap items-center justify-between gap-3">
-                <h4 class="text-sm font-semibold text-slate-800">Feature Coverage After Cleaning</h4>
-                <span class="text-xs text-slate-400">{{ preview.summary.training_ready_records }} cleaned rows</span>
-              </div>
-              <div class="mt-3 space-y-3">
-                <div v-for="feature in preview.feature_coverage" :key="feature.key">
-                  <div class="mb-1 flex items-center justify-between gap-3 text-xs">
-                    <span class="font-medium text-slate-600">{{ feature.label }}</span>
-                    <span class="text-right text-slate-400">{{ feature.available_count }} / {{ preview.summary.training_ready_records }} · {{ formatCoverage(feature.coverage) }}</span>
-                  </div>
-                  <div class="h-2 overflow-hidden rounded-full bg-slate-100">
-                    <div class="h-full rounded-full bg-gradient-to-r from-cyan-500 to-blue-500" :style="{ width: `${Math.max(4, feature.coverage * 100)}%` }"></div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="rounded-[30px] border border-slate-200/80 bg-white/90 p-6 shadow-[0_24px_80px_-48px_rgba(15,23,42,0.45)]">
-            <div class="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h3 class="text-lg font-bold">Unit Normalization Preview</h3>
-                <p class="mt-2 text-sm text-slate-500">Preview the final cleaned matrix shape after feature pruning and optional PCA.</p>
+                <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">样本来源</label>
+                <select v-model="form.source_mode" class="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100">
+                  <option v-for="option in SOURCE_MODE_OPTIONS" :key="option.value" :value="option.value">
+                    {{ option.label }}
+                  </option>
+                </select>
+                <p class="mt-2 text-xs leading-5 text-slate-500">{{ SOURCE_MODE_OPTIONS.find((option) => option.value === form.source_mode)?.detail }}</p>
               </div>
-              <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
-                Showing {{ normalizationColumns.length }} of {{ preview.matrix_columns.length }} columns
-              </span>
-            </div>
-            <div class="mt-5 overflow-x-auto">
-              <table class="min-w-full text-left text-sm">
-                <thead>
-                  <tr class="border-b border-slate-200 text-xs uppercase tracking-[0.16em] text-slate-400">
-                    <th class="px-3 py-3 font-semibold">Row</th>
-                    <th v-for="column in normalizationColumns" :key="column" class="px-3 py-3 font-semibold">{{ formatColumnLabel(column) }}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="(row, rowIndex) in normalizationRows" :key="rowIndex" class="border-b border-slate-100 align-top">
-                    <td class="px-3 py-3 font-semibold text-slate-800">#{{ rowIndex + 1 }}</td>
-                    <td v-for="column in normalizationColumns" :key="column" class="px-3 py-3 text-slate-700">
-                      {{ formatMetric(row[column], column.startsWith('PCA_') ? 5 : 4) }}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+
+              <div class="grid gap-3 sm:grid-cols-2">
+                <label class="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                  <input v-model="form.drop_missing_target" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />
+                  <span>
+                    <span class="block font-medium text-slate-900">保留有 μ/COF 的样本</span>
+                    <span class="mt-1 block text-xs leading-5 text-slate-500">建议开启</span>
+                  </span>
+                </label>
+
+                <label class="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                  <input v-model="form.require_dual_smiles" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />
+                  <span>
+                    <span class="block font-medium text-slate-900">要求双离子 SMILES</span>
+                    <span class="mt-1 block text-xs leading-5 text-slate-500">保证描述符完整</span>
+                  </span>
+                </label>
+              </div>
+
+              <div class="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-center">
+                <label class="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+                  <input v-model="form.remove_target_outliers" type="checkbox" class="mt-1 h-4 w-4 rounded border-slate-300 text-cyan-600 focus:ring-cyan-500" />
+                  <span>
+                    <span class="block font-medium text-slate-900">移除异常值</span>
+                    <span class="mt-1 block text-xs leading-5 text-slate-500">{{ outlierLabel }}</span>
+                  </span>
+                </label>
+
+                <button
+                  type="button"
+                  class="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
+                  :disabled="previewLoading"
+                  @click="runPreview()"
+                >
+                  <RefreshCcw class="h-4 w-4" />
+                  {{ previewLoading ? '重建中...' : '重建预览' }}
+                </button>
+              </div>
+
+              <div class="rounded-2xl bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-500">
+                当前来源：{{ selectedSourceMode }} · RDKit：{{ rdkitStatusLabel }} · 异常值过滤：{{ outlierLabel }}
+              </div>
             </div>
           </div>
         </section>
 
-        <section v-if="preview" class="rounded-[30px] border border-slate-200/80 bg-white/90 p-6 shadow-[0_24px_80px_-48px_rgba(15,23,42,0.45)]">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 class="text-lg font-bold">Ready-to-Train Matrix Preview</h3>
-              <p class="mt-2 text-sm text-slate-500">Every saved row is numeric only: target plus retained process columns and molecular features.</p>
-            </div>
-            <span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
-              Target: {{ formatColumnLabel(preview.target_column) }}
-            </span>
-          </div>
-          <div class="mt-5 overflow-x-auto">
-            <table class="min-w-full text-left text-sm">
-              <thead>
-                <tr class="border-b border-slate-200 text-xs uppercase tracking-[0.16em] text-slate-400">
-                  <th class="px-3 py-3 font-semibold">Row</th>
-                  <th v-for="column in matrixPreviewColumns" :key="column" class="px-3 py-3 font-semibold">{{ formatColumnLabel(column) }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(row, rowIndex) in previewRows" :key="rowIndex" class="border-b border-slate-100 align-top">
-                  <td class="px-3 py-3 font-semibold text-slate-800">#{{ rowIndex + 1 }}</td>
-                  <td v-for="column in matrixPreviewColumns" :key="column" class="px-3 py-3 text-slate-700">
-                    {{ formatMetric(row[column], column.startsWith('PCA_') ? 5 : 4) }}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <p v-if="preview.matrix_columns.length > matrixPreviewColumns.length" class="mt-3 text-xs text-slate-400">
-            Showing the first {{ matrixPreviewColumns.length }} columns. The saved CSV and database matrix contain all {{ preview.matrix_columns.length }} columns.
-          </p>
+        <section class="mt-6">
+          <DatasetBuilderDescriptorModule
+            v-if="activeModule === 'descriptor'"
+            :descriptor-summary="descriptorSummary"
+            :selected-source-mode="selectedSourceMode"
+            :rdkit-status-label="rdkitStatusLabel"
+            :outlier-label="outlierLabel"
+          />
+
+          <DatasetBuilderReductionStudio
+            v-else-if="activeModule === 'reduction'"
+            :descriptor-summary="descriptorSummary"
+            :screening-summary="screeningSummary"
+            :dataset-a-summary="datasetASummary"
+            :dataset-b-summary="datasetBSummary"
+            :selected-representative-features="selectedRepresentativeFeatures"
+            :recommended-representative-features="recommendedRepresentativeFeatures"
+            @update:selected-representative-features="updateSelectedRepresentativeFeatures"
+          />
+
+          <DatasetBuilderExportModule
+            v-else
+            :subset-cards="subsetCards"
+            :bundle-name="bundleName"
+            :subset-saving-key="subsetSavingKey"
+            :saved-datasets="savedDatasets"
+            :export-loading-id="exportLoadingId"
+            :retained-feature-columns="retainedFeatureColumns"
+            @update:bundle-name="bundleName = $event"
+            @download="downloadSubset"
+            @save="saveSubsetToWorkspace"
+            @open-training="openTraining"
+            @export-saved="handleExportSaved"
+          />
         </section>
-      </div>
-    </main>
+      </template>
+    </div>
   </div>
 </template>

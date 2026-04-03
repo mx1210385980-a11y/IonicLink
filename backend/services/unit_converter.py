@@ -46,6 +46,67 @@ SPEED_UNITS = {
 }
 
 
+def _normalize_force_text(raw: Optional[str]) -> str:
+    return (
+        str(raw or "")
+        .strip()
+        .lower()
+        .replace("μ", "u")
+        .replace("µ", "u")
+        .replace("渭", "u")
+        .replace("碌", "u")
+        .replace("–", "-")
+        .replace("—", "-")
+    )
+
+
+def _force_unit_factor(unit: Optional[str]) -> Optional[float]:
+    unit_lower = str(unit or "").strip().lower()
+    if not unit_lower:
+        return 1.0
+    return FORCE_UNITS.get(unit_lower)
+
+
+def parse_force_range_to_newtons(raw: Optional[str]) -> Optional[Tuple[float, float]]:
+    """
+    Parse a force/load range and convert both bounds to Newtons.
+
+    Examples:
+        '0-250 nN' -> (0.0, 2.5e-7)
+        '15 to 75 nN' -> (1.5e-8, 7.5e-8)
+        '0.1-0.5 mN' -> (1e-4, 5e-4)
+    """
+    text = _normalize_force_text(raw)
+    if not text:
+        return None
+
+    pattern = (
+        r'^\s*'
+        r'([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s*([a-z/]+)?'
+        r'\s*(?:-|to)\s*'
+        r'([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s*([a-z/]+)?'
+        r'\s*$'
+    )
+    match = re.match(pattern, text)
+    if not match:
+        return None
+
+    start_str, start_unit, end_str, end_unit = match.groups()
+    factor = _force_unit_factor(end_unit or start_unit)
+    if factor is None:
+        return None
+
+    try:
+        start_value = float(start_str) * factor
+        end_value = float(end_str) * factor
+    except ValueError:
+        return None
+
+    low = min(start_value, end_value)
+    high = max(start_value, end_value)
+    return low, high
+
+
 def parse_force_to_newtons(raw: Optional[str]) -> Optional[float]:
     """
     将力/载荷字符串解析为 Newtons
@@ -64,8 +125,13 @@ def parse_force_to_newtons(raw: Optional[str]) -> Optional[float]:
     """
     if not raw or not raw.strip():
         return None
-    
-    raw = raw.strip().lower()
+
+    range_bounds = parse_force_range_to_newtons(raw)
+    if range_bounds is not None:
+        low, high = range_bounds
+        return (low + high) / 2.0
+
+    raw = _normalize_force_text(raw)
     
     # 匹配数值和单位: 可选符号 + 数值 + 可选空格 + 可选单位
     pattern = r'^([<>≤≥~±]?\s*)?([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)\s*([a-zμµ/]+)?$'

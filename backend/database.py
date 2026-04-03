@@ -8,6 +8,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
+from services.migration_service import CURRENT_SCHEMA_REVISION, format_schema_error, inspect_schema, stamp_schema_revision
+
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -28,180 +30,6 @@ async_session_maker = async_sessionmaker(
 
 class Base(DeclarativeBase):
     pass
-
-
-async def _table_columns(conn, table_name: str) -> set[str]:
-    result = await conn.execute(text(f"PRAGMA table_info('{table_name}')"))
-    return {str(row[1]) for row in result.fetchall()}
-
-
-async def _index_definitions(conn, table_name: str) -> dict[str, bool]:
-    result = await conn.execute(text(f"PRAGMA index_list('{table_name}')"))
-    return {str(row[1]): bool(row[2]) for row in result.fetchall()}
-
-
-async def _ensure_literature_scope_schema(conn) -> None:
-    columns = await _table_columns(conn, "literature")
-    indexes = await _index_definitions(conn, "literature")
-    required_columns = {"group_id", "workspace_id", "created_by_user_id", "scope_type", "scope_key"}
-    legacy_unique_doi = indexes.get("ix_literature_doi", False)
-
-    if required_columns.issubset(columns) and not legacy_unique_doi:
-        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_literature_group_id ON literature (group_id)"))
-        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_literature_workspace_id ON literature (workspace_id)"))
-        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_literature_scope_type ON literature (scope_type)"))
-        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_literature_created_by_user_id ON literature (created_by_user_id)"))
-        await conn.execute(
-            text("CREATE UNIQUE INDEX IF NOT EXISTS uq_literature_scope_doi ON literature (group_id, scope_key, doi)")
-        )
-        return
-
-    await conn.execute(text("PRAGMA foreign_keys=OFF"))
-    await conn.execute(
-        text(
-            """
-            CREATE TABLE IF NOT EXISTS literature__new (
-                id INTEGER NOT NULL PRIMARY KEY,
-                doi VARCHAR(100) NOT NULL,
-                title VARCHAR(500) NOT NULL,
-                authors TEXT NOT NULL,
-                journal VARCHAR(200) NOT NULL,
-                issn VARCHAR(20),
-                year INTEGER NOT NULL,
-                volume VARCHAR(20),
-                issue VARCHAR(20),
-                pages VARCHAR(50),
-                content TEXT,
-                file_path VARCHAR(500),
-                group_id INTEGER,
-                workspace_id INTEGER,
-                created_by_user_id INTEGER,
-                scope_type VARCHAR(32) NOT NULL DEFAULT 'group_library',
-                scope_key VARCHAR(64) NOT NULL DEFAULT 'group_library',
-                status VARCHAR(50) NOT NULL DEFAULT 'pending',
-                error_message TEXT,
-                created_at DATETIME NOT NULL,
-                FOREIGN KEY(group_id) REFERENCES research_groups(id),
-                FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
-                FOREIGN KEY(created_by_user_id) REFERENCES users(id)
-            )
-            """
-        )
-    )
-    await conn.execute(
-        text(
-            """
-            INSERT INTO literature__new (
-                id, doi, title, authors, journal, issn, year, volume, issue, pages,
-                content, file_path, group_id, workspace_id, created_by_user_id,
-                scope_type, scope_key, status, error_message, created_at
-            )
-            SELECT
-                id,
-                doi,
-                title,
-                authors,
-                journal,
-                issn,
-                year,
-                volume,
-                issue,
-                pages,
-                content,
-                file_path,
-                NULL,
-                NULL,
-                NULL,
-                'group_library',
-                'group_library',
-                status,
-                error_message,
-                created_at
-            FROM literature
-            """
-        )
-    )
-    await conn.execute(text("DROP TABLE literature"))
-    await conn.execute(text("ALTER TABLE literature__new RENAME TO literature"))
-    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_literature_doi ON literature (doi)"))
-    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_literature_status ON literature (status)"))
-    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_literature_group_id ON literature (group_id)"))
-    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_literature_workspace_id ON literature (workspace_id)"))
-    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_literature_scope_type ON literature (scope_type)"))
-    await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_literature_created_by_user_id ON literature (created_by_user_id)"))
-    await conn.execute(
-        text("CREATE UNIQUE INDEX IF NOT EXISTS uq_literature_scope_doi ON literature (group_id, scope_key, doi)")
-    )
-    await conn.execute(text("PRAGMA foreign_keys=ON"))
-
-
-async def _run_additive_migrations(conn) -> None:
-    additive_migrations = [
-        "ALTER TABLE tribology_data ADD COLUMN evidence_page INTEGER",
-        "ALTER TABLE tribology_data ADD COLUMN evidence_bbox VARCHAR(200)",
-        "ALTER TABLE tribology_data ADD COLUMN source VARCHAR(200)",
-        "ALTER TABLE tribology_data ADD COLUMN source_page INTEGER",
-        "ALTER TABLE tribology_data ADD COLUMN source_figure VARCHAR(120)",
-        "ALTER TABLE tribology_data ADD COLUMN probe_material VARCHAR(255)",
-        "ALTER TABLE tribology_data ADD COLUMN probe_geometry VARCHAR(100)",
-        "ALTER TABLE tribology_data ADD COLUMN probe_radius VARCHAR(100)",
-        "ALTER TABLE tribology_data ADD COLUMN probe_roughness VARCHAR(100)",
-        "ALTER TABLE tribology_data ADD COLUMN substrate_material VARCHAR(255)",
-        "ALTER TABLE tribology_data ADD COLUMN substrate_coating VARCHAR(255)",
-        "ALTER TABLE tribology_data ADD COLUMN substrate_roughness VARCHAR(100)",
-    ]
-
-    for stmt in additive_migrations:
-        try:
-            await conn.execute(text(stmt))
-        except Exception:
-            pass
-
-    # Backfill new tribopair columns from the legacy single-surface fields where possible.
-    try:
-        await conn.execute(
-            text(
-                """
-                UPDATE tribology_data
-                SET substrate_material = COALESCE(NULLIF(substrate_material, ''), material_name)
-                WHERE material_name IS NOT NULL AND TRIM(material_name) != ''
-                """
-            )
-        )
-    except Exception:
-        pass
-
-    try:
-        await conn.execute(
-            text(
-                """
-                UPDATE tribology_data
-                SET probe_material = COALESCE(NULLIF(probe_material, ''), substrate_material, material_name)
-                WHERE TRIM(COALESCE(probe_material, '')) = ''
-                  AND TRIM(COALESCE(substrate_material, '')) != ''
-                  AND TRIM(COALESCE(material_name, '')) != ''
-                  AND LOWER(TRIM(substrate_material)) = LOWER(TRIM(material_name))
-                  AND TRIM(COALESCE(probe_geometry, '')) = ''
-                  AND TRIM(COALESCE(probe_radius, '')) = ''
-                  AND TRIM(COALESCE(probe_roughness, '')) = ''
-                """
-            )
-        )
-    except Exception:
-        pass
-
-    try:
-        await conn.execute(
-            text(
-                """
-                UPDATE tribology_data
-                SET substrate_roughness = COALESCE(NULLIF(substrate_roughness, ''), surface_roughness)
-                WHERE surface_roughness IS NOT NULL AND TRIM(surface_roughness) != ''
-                """
-            )
-        )
-    except Exception:
-        pass
 
 
 async def _ensure_bootstrap_security_state() -> None:
@@ -283,7 +111,7 @@ async def _ensure_bootstrap_security_state() -> None:
 
 
 async def init_db():
-    """Initialize database and run lightweight migrations."""
+    """Initialize database connection and verify schema state."""
     async with engine.begin() as conn:
         from models.db_models import (
             ExtractionCandidate,
@@ -294,10 +122,17 @@ async def init_db():
             User,
             Workspace,
         )
+        schema_state = await inspect_schema(conn, Base.metadata)
+        existing_tables = [name for name in schema_state["table_names"] if name != "alembic_version"]
 
-        await conn.run_sync(Base.metadata.create_all)
-        await _ensure_literature_scope_schema(conn)
-        await _run_additive_migrations(conn)
+        if not existing_tables:
+            await conn.run_sync(Base.metadata.create_all)
+            await stamp_schema_revision(conn, CURRENT_SCHEMA_REVISION)
+        else:
+            if schema_state["missing_tables"] or schema_state["missing_columns"]:
+                raise RuntimeError(format_schema_error(schema_state))
+            if schema_state.get("revision") != CURRENT_SCHEMA_REVISION:
+                await stamp_schema_revision(conn, CURRENT_SCHEMA_REVISION)
 
     await _ensure_bootstrap_security_state()
 

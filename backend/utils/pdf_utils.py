@@ -342,3 +342,100 @@ def render_page_preview_with_bbox_to_base64(
     except Exception as e:
         print(f"[PDF Preview] Error: {e}")
         return None
+
+
+def render_region_preview_with_highlight_to_base64(
+    pdf_path: str,
+    page_num: int,
+    region_bbox: list,
+    highlight_bbox: Optional[list] = None,
+    padding: int = 10,
+    dpi: int = 150,
+    max_width: int = 1100,
+) -> Optional[str]:
+    """
+    Render a cropped page region and optionally overlay a highlight for a matched term.
+
+    Args:
+        pdf_path: Path to PDF
+        page_num: 1-based page number
+        region_bbox: [x0,y0,x1,y1] region to display in full
+        highlight_bbox: [x0,y0,x1,y1] bbox to highlight inside the rendered region
+        padding: extra points around the displayed region
+        dpi: render DPI
+        max_width: resize width cap for lighter payload
+
+    Returns:
+        Base64 PNG string (without data URI prefix), or None on error.
+    """
+    if not os.path.exists(pdf_path):
+        print(f"[PDF Region Preview] File not found: {pdf_path}")
+        return None
+
+    try:
+        doc = fitz.open(pdf_path)
+        page_idx = page_num - 1
+        if page_idx < 0 or page_idx >= len(doc):
+            doc.close()
+            return None
+
+        page = doc[page_idx]
+        pw = float(page.rect.width)
+        ph = float(page.rect.height)
+
+        rx0, ry0, rx1, ry1 = [float(v) for v in region_bbox]
+        clip = fitz.Rect(
+            max(0.0, min(rx0, rx1) - padding),
+            max(0.0, min(ry0, ry1) - padding),
+            min(pw, max(rx0, rx1) + padding),
+            min(ph, max(ry0, ry1) + padding),
+        )
+        if clip.width < 5 or clip.height < 5:
+            doc.close()
+            return None
+
+        scale = dpi / 72.0
+        mat = fitz.Matrix(scale, scale)
+        pix = page.get_pixmap(matrix=mat, clip=clip, alpha=False)
+        doc.close()
+
+        img = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+
+        if highlight_bbox and len(highlight_bbox) == 4:
+            hx0, hy0, hx1, hy1 = [float(v) for v in highlight_bbox]
+            rel_x0 = max(0.0, (min(hx0, hx1) - clip.x0) * scale)
+            rel_y0 = max(0.0, (min(hy0, hy1) - clip.y0) * scale)
+            rel_x1 = min(float(img.width - 1), (max(hx0, hx1) - clip.x0) * scale)
+            rel_y1 = min(float(img.height - 1), (max(hy0, hy1) - clip.y0) * scale)
+            if rel_x1 > rel_x0 and rel_y1 > rel_y0:
+                stroke = max(2, int(3 * scale / 1.5))
+                box_w = max(1.0, rel_x1 - rel_x0)
+                box_h = max(1.0, rel_y1 - rel_y0)
+                pad_x = max(8.0, box_w * 0.28)
+                pad_y = max(4.0, box_h * 0.25)
+                ox0 = max(0.0, rel_x0 - pad_x)
+                oy0 = max(0.0, rel_y0 - pad_y)
+                ox1 = min(float(img.width - 1), rel_x1 + pad_x)
+                oy1 = min(float(img.height - 1), rel_y1 + pad_y)
+
+                img_rgba = img.convert("RGBA")
+                overlay = Image.new("RGBA", img_rgba.size, (0, 0, 0, 0))
+                draw_overlay = ImageDraw.Draw(overlay)
+                draw_overlay.rectangle(
+                    [(ox0, oy0), (ox1, oy1)],
+                    fill=(34, 197, 94, 85),
+                    outline=(16, 185, 129, 190),
+                    width=stroke,
+                )
+                img = Image.alpha_composite(img_rgba, overlay).convert("RGB")
+
+        if max_width and img.width > max_width:
+            ratio = max_width / float(img.width)
+            img = img.resize((max_width, int(img.height * ratio)), Image.Resampling.LANCZOS)
+
+        out = io.BytesIO()
+        img.save(out, format="PNG", optimize=True)
+        return base64.b64encode(out.getvalue()).decode("utf-8")
+    except Exception as e:
+        print(f"[PDF Region Preview] Error: {e}")
+        return None

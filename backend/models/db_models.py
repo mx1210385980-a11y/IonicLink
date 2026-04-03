@@ -43,6 +43,11 @@ class User(Base):
     workspaces: Mapped[List["Workspace"]] = relationship("Workspace", back_populates="owner")
     created_literature: Mapped[List["Literature"]] = relationship("Literature", back_populates="created_by")
     cleaned_datasets: Mapped[List["CleanedDataset"]] = relationship("CleanedDataset", back_populates="created_by")
+    activity_logs: Mapped[List["UserActivityLog"]] = relationship(
+        "UserActivityLog",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
 
 class Workspace(Base):
@@ -244,3 +249,33 @@ class ExtractionCandidate(Base):
     created_at: Mapped[datetime] = mapped_column(default=func.now())
 
     run: Mapped["ExtractionRun"] = relationship("ExtractionRun", back_populates="candidates")
+
+
+class UserActivityLog(Base):
+    """用户活动日志表，记录所有用户操作用于监控和统计"""
+    __tablename__ = "user_activity_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    group_id: Mapped[int] = mapped_column(ForeignKey("research_groups.id"), index=True, nullable=False)
+
+    # 操作类型: login, logout, upload_pdf, extract_data, view_record, edit_record,
+    #          delete_record, sync_data, train_model, clean_data, view_dashboard
+    action_type: Mapped[str] = mapped_column(String(50), index=True, nullable=False)
+
+    # JSON格式的详细信息，如 {"literature_id": 123, "filename": "paper.pdf"}
+    action_detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # 关联的资源类型和ID
+    resource_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    resource_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # 请求元数据
+    ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)  # 支持IPv6
+    user_agent: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(default=func.now(), index=True)
+
+    # 关系
+    user: Mapped["User"] = relationship("User", back_populates="activity_logs")
+    group: Mapped["ResearchGroup"] = relationship("ResearchGroup")

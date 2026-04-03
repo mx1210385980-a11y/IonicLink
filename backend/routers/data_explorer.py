@@ -3,7 +3,8 @@ Data Explorer Router for IonicLink
 API endpoints for searching and exploring tribology data.
 """
 
-from typing import List, Optional
+import logging
+from typing import List, Optional, Literal
 import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -25,6 +26,10 @@ from services.score_service import calculate_confidence, calculate_confidence_de
 from services.agent_runtime_service import get_agent_runtime
 from services.file_service import _normalize_record_chemistry
 from services.il_resolver_service import resolve_il
+from services.relationship_graph_service import (
+    build_relationship_graph,
+    drilldown_relationship_graph,
+)
 from knowledge_base import normalize_ionic_liquid
 from utils.tribopair import compose_tribopair_label, derive_legacy_material_name, derive_legacy_surface_roughness
 
@@ -34,6 +39,12 @@ router = APIRouter(
     tags=["Data Explorer"],
     responses={404: {"description": "Not found"}},
 )
+logger = logging.getLogger(__name__)
+
+
+def _raise_internal_error(action: str, exc: Exception) -> None:
+    logger.exception("%s failed", action)
+    raise HTTPException(status_code=500, detail=f"{action} failed.") from exc
 
 
 # --- Pydantic Models ---
@@ -41,7 +52,14 @@ router = APIRouter(
 class SearchFilter(BaseModel):
     """Filter parameters for searching tribology records"""
     materials: List[str] = Field(default_factory=list, description="Probe/substrate/coating search terms")
+    probe_materials: List[str] = Field(default_factory=list, alias="probeMaterials", description="Probe material terms")
+    substrate_materials: List[str] = Field(default_factory=list, alias="substrateMaterials", description="Substrate material terms")
+    substrate_coatings: List[str] = Field(default_factory=list, alias="substrateCoatings", description="Substrate coating terms")
     lubricants: List[str] = Field(default_factory=list, description="List of lubricants")
+    speed_values: List[str] = Field(default_factory=list, alias="speedValues", description="Speed condition terms")
+    temperature_values: List[str] = Field(default_factory=list, alias="temperatureValues", description="Temperature condition terms")
+    potential_values: List[str] = Field(default_factory=list, alias="potentialValues", description="Potential condition terms")
+    water_content_values: List[str] = Field(default_factory=list, alias="waterContentValues", description="Water content condition terms")
     load_min: Optional[float] = Field(None, alias="loadMin", description="Min load (N)")
     load_max: Optional[float] = Field(None, alias="loadMax", description="Max load (N)")
     cof_min: Optional[float] = Field(None, alias="cofMin", description="Min COF")
@@ -130,6 +148,126 @@ class PaginatedRecordResponse(BaseModel):
     items: List[RecordResponse]
 
 
+class RelationshipGraphDimensionSummary(BaseModel):
+    type: str
+    label: str
+    node_count: int = Field(0, alias="nodeCount")
+    coverage_pct: float = Field(0.0, alias="coveragePct")
+    non_empty_count: int = Field(0, alias="nonEmptyCount")
+    distinct_count: int = Field(0, alias="distinctCount")
+    reason: Optional[str] = None
+
+    class Config:
+        populate_by_name = True
+
+
+class RelationshipGraphNode(BaseModel):
+    id: str
+    type: str
+    label: str
+    count: int
+    coverage_pct: float = Field(..., alias="coveragePct")
+    avg_cof: Optional[float] = Field(None, alias="avgCof")
+    min_cof: Optional[float] = Field(None, alias="minCof")
+    max_cof: Optional[float] = Field(None, alias="maxCof")
+
+    class Config:
+        populate_by_name = True
+
+
+class RelationshipGraphEdge(BaseModel):
+    id: str
+    source: str
+    target: str
+    source_type: str = Field(..., alias="sourceType")
+    source_label: str = Field(..., alias="sourceLabel")
+    target_type: str = Field(..., alias="targetType")
+    target_label: str = Field(..., alias="targetLabel")
+    count: int
+    avg_cof: Optional[float] = Field(None, alias="avgCof")
+    min_cof: Optional[float] = Field(None, alias="minCof")
+    max_cof: Optional[float] = Field(None, alias="maxCof")
+
+    class Config:
+        populate_by_name = True
+
+
+class RelationshipGraphSummary(BaseModel):
+    total_records: int = Field(..., alias="totalRecords")
+    total_literature: int = Field(..., alias="totalLiterature")
+    avg_cof: Optional[float] = Field(None, alias="avgCof")
+    active_dimensions: List[RelationshipGraphDimensionSummary] = Field(default_factory=list, alias="activeDimensions")
+    hidden_dimensions: List[RelationshipGraphDimensionSummary] = Field(default_factory=list, alias="hiddenDimensions")
+
+    class Config:
+        populate_by_name = True
+
+
+class RelationshipGraphResponse(BaseModel):
+    title: str
+    state: str
+    summary: RelationshipGraphSummary
+    nodes: List[RelationshipGraphNode]
+    edges: List[RelationshipGraphEdge]
+
+    class Config:
+        populate_by_name = True
+
+
+class RelationshipGraphSelection(BaseModel):
+    kind: Literal["node", "edge"]
+    node_type: Optional[str] = Field(None, alias="nodeType")
+    node_value: Optional[str] = Field(None, alias="nodeValue")
+    source_type: Optional[str] = Field(None, alias="sourceType")
+    source_value: Optional[str] = Field(None, alias="sourceValue")
+    target_type: Optional[str] = Field(None, alias="targetType")
+    target_value: Optional[str] = Field(None, alias="targetValue")
+
+    class Config:
+        populate_by_name = True
+
+
+class RelationshipGraphDrilldownRequest(BaseModel):
+    filter: SearchFilter
+    selection: RelationshipGraphSelection
+
+
+class RelationshipGraphDrilldownSummary(BaseModel):
+    label: str
+    count: int
+    avg_cof: Optional[float] = Field(None, alias="avgCof")
+    min_cof: Optional[float] = Field(None, alias="minCof")
+    max_cof: Optional[float] = Field(None, alias="maxCof")
+
+    class Config:
+        populate_by_name = True
+
+
+class RelationshipGraphLiteratureSummary(BaseModel):
+    id: int
+    doi: str
+    title: str
+    journal: str
+    year: Optional[int] = None
+    hit_count: int = Field(..., alias="hitCount")
+
+    class Config:
+        populate_by_name = True
+
+
+class RelationshipGraphDrilldownResponse(BaseModel):
+    selection: RelationshipGraphSelection
+    summary: RelationshipGraphDrilldownSummary
+    total: int
+    skip: int
+    limit: int
+    items: List[RecordResponse]
+    literature_summaries: List[RelationshipGraphLiteratureSummary] = Field(default_factory=list, alias="literatureSummaries")
+
+    class Config:
+        populate_by_name = True
+
+
 class RecordUpdatePayload(BaseModel):
     """Payload for updating a single tribology record"""
     cof_raw: Optional[str] = Field(None, alias="cofRaw")
@@ -181,6 +319,12 @@ def _build_conditions(filter_params: SearchFilter):
                 TribologyData.material_name.in_(filter_params.materials),
             )
         )
+    if filter_params.probe_materials:
+        conditions.append(TribologyData.probe_material.in_(filter_params.probe_materials))
+    if filter_params.substrate_materials:
+        conditions.append(TribologyData.substrate_material.in_(filter_params.substrate_materials))
+    if filter_params.substrate_coatings:
+        conditions.append(TribologyData.substrate_coating.in_(filter_params.substrate_coatings))
     if filter_params.lubricants:
         lubricant_terms: set[str] = set()
         for raw_value in filter_params.lubricants:
@@ -203,6 +347,14 @@ def _build_conditions(filter_params: SearchFilter):
 
         if lubricant_terms:
             conditions.append(TribologyData.lubricant.in_(sorted(lubricant_terms)))
+    if filter_params.speed_values:
+        conditions.append(TribologyData.speed_value.in_(filter_params.speed_values))
+    if filter_params.temperature_values:
+        conditions.append(TribologyData.temperature.in_(filter_params.temperature_values))
+    if filter_params.potential_values:
+        conditions.append(TribologyData.potential.in_(filter_params.potential_values))
+    if filter_params.water_content_values:
+        conditions.append(TribologyData.water_content.in_(filter_params.water_content_values))
     if filter_params.cof_min is not None:
         conditions.append(TribologyData.cof_value >= filter_params.cof_min)
     if filter_params.cof_max is not None:
@@ -400,19 +552,24 @@ async def search_records(
     鎼滅储鎽╂摝瀛︽暟鎹褰曪紙鏀寔鍒嗛〉锛?
     鏀寔鎸夋潗鏂欍€佹鼎婊戝墏銆佽浇鑽疯寖鍥淬€丆OF鑼冨洿杩囨护
     """
-    result = await get_agent_runtime().search_records(
-        session=session,
-        filter_params=filter_params,
-        skip=skip,
-        limit=limit,
-        scope_filter_values=scope_filters(scope),
-    )
-    return PaginatedRecordResponse(
-        total=result.get("total", 0),
-        skip=result.get("skip", skip),
-        limit=result.get("limit", limit),
-        items=[RecordResponse(**item) for item in result.get("items", [])],
-    )
+    try:
+        result = await get_agent_runtime().search_records(
+            session=session,
+            filter_params=filter_params,
+            skip=skip,
+            limit=limit,
+            scope_filter_values=scope_filters(scope),
+        )
+        return PaginatedRecordResponse(
+            total=result.get("total", 0),
+            skip=result.get("skip", skip),
+            limit=result.get("limit", limit),
+            items=[RecordResponse(**item) for item in result.get("items", [])],
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_internal_error("Search records", exc)
 
 @router.get("/options", response_model=dict)
 async def get_filter_options(
@@ -422,7 +579,12 @@ async def get_filter_options(
     """
     鑾峰彇鍙敤鐨勮繃婊ら€夐」锛堟潗鏂欏垪琛ㄣ€佹鼎婊戝墏鍒楄〃绛夛級
     """
-    return await get_agent_runtime().get_filter_options(session=session, scope_filter_values=scope_filters(scope))
+    try:
+        return await get_agent_runtime().get_filter_options(session=session, scope_filter_values=scope_filters(scope))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_internal_error("Get filter options", exc)
 
 
 @router.get("/stats", response_model=dict)
@@ -433,7 +595,55 @@ async def get_stats(
     """
     鑾峰彇鏁版嵁缁熻淇℃伅
     """
-    return await get_agent_runtime().get_stats(session=session, scope_filter_values=scope_filters(scope))
+    try:
+        return await get_agent_runtime().get_stats(session=session, scope_filter_values=scope_filters(scope))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_internal_error("Get record stats", exc)
+
+
+@router.post("/relationship-graph", response_model=RelationshipGraphResponse, response_model_by_alias=True)
+async def get_relationship_graph(
+    filter_params: SearchFilter,
+    session: AsyncSession = Depends(get_db_session),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    try:
+        payload = await build_relationship_graph(
+            session,
+            filter_params,
+            scope_filter_values=scope_filters(scope),
+        )
+        return RelationshipGraphResponse(**payload)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_internal_error("Build relationship graph", exc)
+
+
+@router.post("/relationship-graph/drilldown", response_model=RelationshipGraphDrilldownResponse, response_model_by_alias=True)
+async def get_relationship_graph_drilldown(
+    payload: RelationshipGraphDrilldownRequest,
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(20, ge=1, le=200, description="Max drilldown records to return"),
+    session: AsyncSession = Depends(get_db_session),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    try:
+        result = await drilldown_relationship_graph(
+            session,
+            payload.filter,
+            payload.selection.model_dump(by_alias=True, exclude_none=True),
+            skip=skip,
+            limit=limit,
+            scope_filter_values=scope_filters(scope),
+        )
+        return RelationshipGraphDrilldownResponse(**result)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_internal_error("Drill down relationship graph", exc)
 
 
 @router.put("/{record_id}", response_model=dict, response_model_by_alias=True)
@@ -446,33 +656,39 @@ async def update_record(
     """
     鏇存柊鍗曟潯鎽╂摝瀛︽暟鎹褰曪紙鐢ㄤ簬鍓嶇鍐呰仈缂栬緫纭锛?
     """
-    record = await require_record_access(session, principal, record_id, write=True)
+    try:
+        record = await require_record_access(session, principal, record_id, write=True)
 
-    update_data = payload.dict(exclude_none=True, by_alias=False)
-    for field, value in update_data.items():
-        if hasattr(record, field):
-            setattr(record, field, value)
+        update_data = payload.dict(exclude_none=True, by_alias=False)
+        for field, value in update_data.items():
+            if hasattr(record, field):
+                setattr(record, field, value)
 
-    record.material_name = derive_legacy_material_name(
-        probe_material=record.probe_material,
-        substrate_material=record.substrate_material,
-        legacy_material_name=record.material_name,
-    )
-    record.surface_roughness = derive_legacy_surface_roughness(
-        probe_roughness=record.probe_roughness,
-        substrate_roughness=record.substrate_roughness,
-        legacy_surface_roughness=record.surface_roughness,
-    )
-    if any(getattr(record, field) for field in ("probe_geometry", "probe_radius", "probe_roughness")) and not record.probe_material:
-        raise HTTPException(status_code=422, detail="probeMaterial is required when probe details are recorded.")
-    if any(getattr(record, field) for field in ("substrate_coating", "substrate_roughness")) and not record.substrate_material:
-        raise HTTPException(status_code=422, detail="substrateMaterial is required when substrate details are recorded.")
+        record.material_name = derive_legacy_material_name(
+            probe_material=record.probe_material,
+            substrate_material=record.substrate_material,
+            legacy_material_name=record.material_name,
+        )
+        record.surface_roughness = derive_legacy_surface_roughness(
+            probe_roughness=record.probe_roughness,
+            substrate_roughness=record.substrate_roughness,
+            legacy_surface_roughness=record.surface_roughness,
+        )
+        if any(getattr(record, field) for field in ("probe_geometry", "probe_radius", "probe_roughness")) and not record.probe_material:
+            raise HTTPException(status_code=422, detail="probeMaterial is required when probe details are recorded.")
+        if any(getattr(record, field) for field in ("substrate_coating", "substrate_roughness")) and not record.substrate_material:
+            raise HTTPException(status_code=422, detail="substrateMaterial is required when substrate details are recorded.")
 
-    details = calculate_confidence_details(_confidence_input_from_record(record))
-    record.confidence = max(float(getattr(record, "confidence", 0.0) or 0.0), float(details.get("score") or 0.0))
+        details = calculate_confidence_details(_confidence_input_from_record(record))
+        record.confidence = max(float(getattr(record, "confidence", 0.0) or 0.0), float(details.get("score") or 0.0))
 
-    await session.commit()
-    return {"success": True, "id": record_id, "confidence": record.confidence, "confidenceDetails": _effective_confidence_details(record)}
+        await session.commit()
+        return {"success": True, "id": record_id, "confidence": record.confidence, "confidenceDetails": _effective_confidence_details(record)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await session.rollback()
+        _raise_internal_error("Update record", exc)
 
 
 @router.post("/{record_id}/promote-confidence", response_model=dict, response_model_by_alias=True)
@@ -482,41 +698,47 @@ async def promote_record_confidence(
     session: AsyncSession = Depends(get_db_session),
     principal: AuthPrincipal = Depends(get_current_principal),
 ):
-    record = await require_record_access(session, principal, record_id, write=True)
+    try:
+        record = await require_record_access(session, principal, record_id, write=True)
 
-    incoming = payload.dict(exclude_none=True, by_alias=False)
+        incoming = payload.dict(exclude_none=True, by_alias=False)
 
-    incoming_source = incoming.get("source")
-    if incoming_source and (_is_blank(record.source) or _is_generic_source_label(record.source)):
-        record.source = incoming_source
+        incoming_source = incoming.get("source")
+        if incoming_source and (_is_blank(record.source) or _is_generic_source_label(record.source)):
+            record.source = incoming_source
 
-    if incoming.get("source_figure") and _is_blank(record.source_figure):
-        record.source_figure = incoming["source_figure"]
+        if incoming.get("source_figure") and _is_blank(record.source_figure):
+            record.source_figure = incoming["source_figure"]
 
-    if incoming.get("source_page") and not getattr(record, "source_page", None):
-        record.source_page = incoming["source_page"]
+        if incoming.get("source_page") and not getattr(record, "source_page", None):
+            record.source_page = incoming["source_page"]
 
-    if incoming.get("evidence_page") and not getattr(record, "evidence_page", None):
-        record.evidence_page = incoming["evidence_page"]
+        if incoming.get("evidence_page") and not getattr(record, "evidence_page", None):
+            record.evidence_page = incoming["evidence_page"]
 
-    if incoming.get("evidence") and _is_blank(record.evidence):
-        record.evidence = incoming["evidence"]
+        if incoming.get("evidence") and _is_blank(record.evidence):
+            record.evidence = incoming["evidence"]
 
-    if incoming.get("evidence_bbox") and _is_blank(record.evidence_bbox):
-        record.evidence_bbox = incoming["evidence_bbox"]
+        if incoming.get("evidence_bbox") and _is_blank(record.evidence_bbox):
+            record.evidence_bbox = incoming["evidence_bbox"]
 
-    recomputed = calculate_confidence_details(_confidence_input_from_record(record))
-    promoted_confidence = float(incoming.get("confidence") or 0.0)
-    record.confidence = max(
-        float(getattr(record, "confidence", 0.0) or 0.0),
-        float(recomputed.get("score") or 0.0),
-        promoted_confidence,
-    )
+        recomputed = calculate_confidence_details(_confidence_input_from_record(record))
+        promoted_confidence = float(incoming.get("confidence") or 0.0)
+        record.confidence = max(
+            float(getattr(record, "confidence", 0.0) or 0.0),
+            float(recomputed.get("score") or 0.0),
+            promoted_confidence,
+        )
 
-    await session.commit()
-    await session.refresh(record)
-    details = _effective_confidence_details(record)
-    return {"success": True, "id": record_id, "confidence": record.confidence, "confidenceDetails": details}
+        await session.commit()
+        await session.refresh(record)
+        details = _effective_confidence_details(record)
+        return {"success": True, "id": record_id, "confidence": record.confidence, "confidenceDetails": details}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await session.rollback()
+        _raise_internal_error("Promote record confidence", exc)
 
 
 @router.delete("/{record_id}", response_model=dict)
@@ -528,11 +750,17 @@ async def delete_record(
     """
     鍒犻櫎鍗曟潯鎽╂摝瀛︽暟鎹褰?
     """
-    record = await require_record_access(session, principal, record_id, write=True)
+    try:
+        record = await require_record_access(session, principal, record_id, write=True)
 
-    await session.delete(record)
-    await session.commit()
-    return {"success": True, "id": record_id}
+        await session.delete(record)
+        await session.commit()
+        return {"success": True, "id": record_id}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await session.rollback()
+        _raise_internal_error("Delete record", exc)
 
 
 @router.get("/il/resolve", response_model=dict)
@@ -543,9 +771,14 @@ async def resolve_ionic_liquid(
     """
     Resolve an IL name to its structural components and chemical identifiers.
     """
-    from services.il_resolver_service import resolve_il
-    result = resolve_il(name)
-    return result
+    try:
+        from services.il_resolver_service import resolve_il
+        result = resolve_il(name)
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_internal_error("Resolve ionic liquid", exc)
 
 
 

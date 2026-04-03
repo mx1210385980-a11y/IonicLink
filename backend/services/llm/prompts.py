@@ -58,6 +58,9 @@ Rules:
 - Keep one record per unique experimental condition/sample trace.
 - If multiple conditions appear in one paragraph or figure, split into multiple records.
 - Keep AFM / force-distance / layering records even when COF is absent.
+- Look for surface roughness descriptors such as RMS, Ra, and Rq in Materials or Experimental sections.
+- If text describes a surface as "atomically flat" or "freshly cleaved" and gives no numeric roughness, store `substrate_roughness` and `surface_roughness` as `~0.1 nm (Estimated)`.
+- If roughness is neither stated nor implied by those descriptors, keep roughness fields null.
 - When contact geometry is stated, extract tribopair fields explicitly:
   `probe_material`, `probe_geometry`, `probe_radius`, `probe_roughness`,
   `substrate_material`, `substrate_coating`, `substrate_roughness`.
@@ -66,6 +69,7 @@ Rules:
   residual_film_thickness_d, layer_spacing_delta, surface_roughness, wear_rate.
 - If a friction coefficient is reported as the slope of friction vs load over a sweep,
   store the investigated load interval in `load`/`normal_load` (for example `15-75 nN`).
+- If a figure only implies COF through a fitted line or slope and does not print the numeric value, set `cof` to null. Do not estimate slope values visually.
 - `film_thickness`, `residual_film_thickness_d`, and `layer_spacing_delta` must be numeric thickness values with units only.
 - Never place sample abbreviations, ionic-liquid names, or condition labels into thickness fields.
 - Keep sample abbreviations in `evidence`, `notes`, or abbreviation mappings instead.
@@ -93,6 +97,9 @@ Text-specific rules:
 - Use sentence-complete evidence quotes; do not output broken words.
 - If text states room/ambient temperature, normalize to "298.15 K" and keep evidence sentence.
 - For symbols μ/µ/u, keep scientific meaning (friction coefficient symbol may appear as μ).
+- Extract roughness from Materials/Experimental text when RMS/Ra/Rq is explicit.
+- Normalize "atomically flat" or "freshly cleaved" surface descriptions to `~0.1 nm (Estimated)` only when no explicit roughness is given.
+- If no roughness statement or implication exists, leave roughness null.
 - Never infer figure/table labels unless explicitly mentioned.
 - If a condition value is inferred from wording (e.g., room temperature), still include it,
   but ensure evidence supports that inference.
@@ -121,6 +128,9 @@ Figure/table-specific rules:
 - Map axes explicitly. For thickness-vs-friction charts:
   X axis -> film_thickness, Y axis -> cof.
 - Exhaust clear points on each curve; for unreadable points set null.
+- Capture explicit RMS/Ra/Rq roughness values from captions and nearby Materials/Experimental text when available.
+- If captions/text only say "atomically flat" or "freshly cleaved", normalize roughness to `~0.1 nm (Estimated)`.
+- If roughness is not stated or implied, return null for roughness fields.
 - Keep source labels exact: e.g., "Fig. 3b", "Table 1".
 - Thickness fields must stay quantitative; do not place sample abbreviations or ionic-liquid names into them.
 - Keep sample abbreviations exactly as shown in evidence text or notes.
@@ -128,6 +138,8 @@ Figure/table-specific rules:
 - Extract tribopair descriptors from captions and panel text, including probe material/geometry/radius and substrate material/coating/roughness.
 - If the figure/caption reports a load sweep such as "normal load ranging from 15 to 75 nN",
   store `load` and `normal_load` as `15-75 nN` for the derived record.
+- Do not invent a shared COF for legend-only condition maps. If a legend lists symbols/conditions but no per-condition numeric coefficient is shown, return no COF row for that legend entry.
+- If a COF would need to be estimated from the slope of a plotted fit line, leave `cof` null unless the figure/text explicitly prints the numeric value.
 """
 
 
@@ -149,6 +161,7 @@ Hard rules:
   - gas/environment label (e.g., in air) -> keep in `notes` or `water_content`
 - Keep `source`, `source_page`, `source_figure`, and `evidence` mandatory.
 - `evidence` must include the exact legend phrase containing μ/cof value.
+- If the legend only maps symbols to conditions and does not show a numeric μ/COF beside that condition, skip it.
 - If a value is uncertain, skip it (do not invent).
 """
 
