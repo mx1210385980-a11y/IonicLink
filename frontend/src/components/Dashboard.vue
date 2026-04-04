@@ -7,6 +7,7 @@ import {
 } from 'chart.js'
 import { Doughnut, Line } from 'vue-chartjs'
 import { FileText, Database, Zap, ShieldCheck, Sparkles, ArrowRight, Filter, X, Download, Share2, Copy } from 'lucide-vue-next'
+import { useRouter } from 'vue-router'
 import Card from '@/components/ui/Card.vue'
 import CardHeader from '@/components/ui/CardHeader.vue'
 import CardTitle from '@/components/ui/CardTitle.vue'
@@ -57,6 +58,7 @@ const materialsRatioChartRef = ref<any>(null)
 const chartExportTarget = ref<'publication' | 'materials'>('publication')
 const shareStatus = ref('')
 const exportStatus = ref('')
+const router = useRouter()
 const { progress: mentorProgress, loading: mentorLoading, error: mentorError, refresh: refreshMentorProgress } = useMentorProgress(false)
 const emit = defineEmits<{
   'open-library': []
@@ -203,14 +205,6 @@ function handleCofRangeSelect(surface: string) {
     removeFilter('cofRange')
   }
   toggleMaterial(surface)
-}
-
-function buildUrlSearchParams(paramsRecord: Record<string, string>) {
-  const params = new URLSearchParams()
-  Object.entries(paramsRecord).forEach(([key, value]) => {
-    if (value) params.set(key, value)
-  })
-  return params
 }
 
 function triggerDownload(filename: string, blob: Blob) {
@@ -475,11 +469,14 @@ function exportDashboardData(format: 'csv' | 'json' | 'excel') {
 }
 
 const shareSnapshotUrl = computed(() => {
-  if (typeof window === 'undefined') return ''
-  const params = buildUrlSearchParams(queryParams.value)
-  params.set('view', 'dashboard')
-  const queryString = params.toString()
-  return `${window.location.origin}${window.location.pathname}${queryString ? `?${queryString}` : ''}`
+  const resolved = router.resolve({
+    name: 'knowledge',
+    params: { section: 'explorer' },
+    query: queryParams.value,
+  })
+
+  if (typeof window === 'undefined') return resolved.href
+  return new URL(resolved.href, window.location.origin).toString()
 })
 
 async function copyShareSnapshot() {

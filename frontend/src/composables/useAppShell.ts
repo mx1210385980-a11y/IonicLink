@@ -670,7 +670,11 @@ export function useAppShell(
   }
 
   async function hydrateCompletedUpload(batchFile: BatchFile) {
-    setFileProcessing(batchFile, 20, t('progress.loading_cached_results'))
+    batchFile.status = 'success'
+    batchFile.progress = 100
+    batchFile.progressMessage = t('progress.loading_cached_results')
+    batchFile.errorMessage = undefined
+    resetExtractionState(batchFile.id)
     const response = await extractData(batchFile.id, false)
     const { metadata, records } = normalizeExtractionPayload(batchFile.id, response)
     batchFile.metadata = metadata

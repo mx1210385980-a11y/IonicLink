@@ -23,6 +23,7 @@ import ChatPanel from '@/components/ChatPanel.vue'
 import LanguageToggle from '@/components/LanguageToggle.vue'
 import LoginScreen from '@/components/LoginScreen.vue'
 import Button from '@/components/ui/Button.vue'
+import type { HomeSuggestedAction } from '@/composables/useHomeSummary'
 import { useAppShell } from '@/composables/useAppShell'
 import { useI18n } from '@/composables/useI18n'
 import type { AppSection, AppView } from '@/lib/platform'
@@ -195,6 +196,32 @@ function openReviewQueue() {
 function openDatasetBuilder() {
   navigateTo('knowledge', 'datasets')
 }
+
+function handleHomeAction(action: HomeSuggestedAction) {
+  switch (action.id) {
+    case 'continue-review':
+      openLatestReview()
+      return
+    case 'retry-failed-run':
+      void retryLatestFailedRun()
+      return
+    case 'open-review-queue':
+      openReviewQueue()
+      return
+    case 'open-dataset-builder':
+      openDatasetBuilder()
+      return
+    default: {
+      if (action.actionType === 'route') {
+        const [viewPart, sectionPart] = String(action.target || '').split('/', 2)
+        const view = viewPart as AppView
+        if (view) {
+          navigateTo(view, sectionPart as AppSection | undefined)
+        }
+      }
+    }
+  }
+}
 </script>
 
 <template>
@@ -230,42 +257,44 @@ function openDatasetBuilder() {
     </div>
 
     <header class="relative z-40 border-b border-black/8 bg-[rgba(251,248,242,0.72)] backdrop-blur-2xl dark:border-white/10 dark:bg-[rgba(8,16,26,0.78)]">
-      <div class="px-4 py-4 sm:px-6">
-        <div class="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div class="flex items-start gap-4">
+      <div class="px-4 py-3 sm:px-5">
+        <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+          <div class="min-w-0 flex items-start gap-3">
             <button
               type="button"
               :title="isChinese ? '打开内容中心' : 'Open Content Center'"
-              class="group flex h-14 w-14 items-center justify-center rounded-[1.4rem] border border-black/8 bg-[#0d1724] text-[#f4d18f] shadow-[0_16px_40px_-26px_rgba(15,23,42,0.95)] transition hover:-translate-y-0.5 hover:bg-[#162234] dark:border-white/10 dark:bg-[#101b29] dark:hover:bg-[#16263b]"
+              class="group flex h-11 w-11 shrink-0 items-center justify-center rounded-[1rem] border border-black/8 bg-[#0d1724] text-[#f4d18f] shadow-[0_14px_30px_-22px_rgba(15,23,42,0.95)] transition hover:-translate-y-0.5 hover:bg-[#162234] dark:border-white/10 dark:bg-[#101b29] dark:hover:bg-[#16263b]"
               @click="navigateTo('blog', 'articles')"
             >
-              <Beaker class="h-6 w-6" />
+              <Beaker class="h-5 w-5" />
             </button>
-            <div>
-              <p class="text-[11px] font-semibold uppercase tracking-[0.32em] text-slate-500 dark:text-slate-400">{{ t('header.platform_eyebrow') }}</p>
-              <h1 class="brand-serif text-[2rem] leading-none text-slate-950 dark:text-white">IonicLink</h1>
-              <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300">
-                {{ t('header.platform_description') }}
-              </p>
+            <div class="min-w-0">
+              <p class="text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-500 dark:text-slate-400">{{ t('header.platform_eyebrow') }}</p>
+              <div class="mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                <h1 class="brand-serif text-[1.85rem] leading-none text-slate-950 dark:text-white">IonicLink</h1>
+                <p class="max-w-3xl text-[15px] leading-6 text-slate-600 dark:text-slate-300">
+                  {{ t('header.platform_description') }}
+                </p>
+              </div>
               <button
                 type="button"
-                class="mt-2 inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#a46a18] transition hover:text-[#7c4c0d] dark:text-[#f0c67a] dark:hover:text-[#f6d79d]"
+                class="mt-1.5 inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-[#a46a18] transition hover:text-[#7c4c0d] dark:text-[#f0c67a] dark:hover:text-[#f6d79d]"
                 @click="navigateTo('blog', 'articles')"
               >
                 {{ isChinese ? '内容中心' : 'Content Center' }}
-                <ArrowUpRight class="h-3.5 w-3.5" />
+                <ArrowUpRight class="h-3 w-3" />
               </button>
             </div>
           </div>
 
-          <div class="flex flex-wrap items-center gap-2 xl:justify-end">
-            <div class="inline-flex min-w-[14rem] items-center gap-3 rounded-full border border-black/8 bg-white/75 px-4 py-2.5 text-sm shadow-[0_10px_30px_-24px_rgba(15,23,42,0.45)] dark:border-white/10 dark:bg-[#0d1825]/85">
-              <Library class="h-4 w-4 text-[#c79237]" />
+          <div class="flex flex-wrap items-center gap-1.5 xl:justify-end">
+            <div class="inline-flex min-w-[13rem] items-center gap-2.5 rounded-full border border-black/8 bg-white/75 px-3.5 py-2 text-sm shadow-[0_10px_24px_-24px_rgba(15,23,42,0.45)] dark:border-white/10 dark:bg-[#0d1825]/85">
+              <Library class="h-3.5 w-3.5 text-[#c79237]" />
               <label class="min-w-0 flex-1">
-                <span class="block text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">{{ t('common.active_scope') }}</span>
+                <span class="block text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400 dark:text-slate-500">{{ t('common.active_scope') }}</span>
                 <select
                   v-model="selectedScopeKey"
-                  class="mt-0.5 w-full appearance-none bg-transparent text-sm font-semibold text-slate-800 outline-none dark:text-slate-100"
+                  class="mt-0.5 w-full appearance-none bg-transparent text-[15px] font-semibold text-slate-800 outline-none dark:text-slate-100"
                 >
                   <option v-for="scope in availableScopes" :key="scope.key" :value="scope.key">
                     {{ scope.label }}
@@ -274,11 +303,11 @@ function openDatasetBuilder() {
               </label>
             </div>
 
-            <div class="hidden min-w-[14rem] items-center gap-3 rounded-full border border-black/8 bg-white/75 px-4 py-2.5 text-sm shadow-[0_10px_30px_-24px_rgba(15,23,42,0.45)] dark:border-white/10 dark:bg-[#0d1825]/85 md:inline-flex">
-              <UserCircle2 class="h-5 w-5 text-slate-400" />
+            <div class="hidden min-w-[13rem] items-center gap-2.5 rounded-full border border-black/8 bg-white/75 px-3.5 py-2 text-sm shadow-[0_10px_24px_-24px_rgba(15,23,42,0.45)] dark:border-white/10 dark:bg-[#0d1825]/85 md:inline-flex">
+              <UserCircle2 class="h-4.5 w-4.5 text-slate-400" />
               <div class="min-w-0">
-                <p class="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{{ operatorName }}</p>
-                <p class="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">{{ operatorRole }}</p>
+                <p class="truncate text-[15px] font-semibold text-slate-800 dark:text-slate-100">{{ operatorName }}</p>
+                <p class="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400 dark:text-slate-500">{{ operatorRole }}</p>
               </div>
             </div>
 
@@ -287,45 +316,45 @@ function openDatasetBuilder() {
             <Button
               variant="ghost"
               size="icon"
-              class="h-11 w-11 rounded-full border border-black/8 bg-white/75 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-[#0d1825]/85 dark:text-slate-200 dark:hover:bg-[#132131]"
+              class="h-9 w-9 rounded-full border border-black/8 bg-white/75 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-[#0d1825]/85 dark:text-slate-200 dark:hover:bg-[#132131]"
               @click="toggleDarkMode"
             >
-              <Sun v-if="isDark" class="h-5 w-5" />
-              <Moon v-else class="h-5 w-5" />
+              <Sun v-if="isDark" class="h-4.5 w-4.5" />
+              <Moon v-else class="h-4.5 w-4.5" />
             </Button>
 
             <a
               href="https://github.com/mx1210385980-a11y/IonicLink/tree/main"
               target="_blank"
               rel="noreferrer"
-              class="inline-flex h-11 w-11 items-center justify-center rounded-full border border-black/8 bg-white/75 text-slate-700 transition hover:bg-white dark:border-white/10 dark:bg-[#0d1825]/85 dark:text-slate-200 dark:hover:bg-[#132131]"
+              class="inline-flex h-9 w-9 items-center justify-center rounded-full border border-black/8 bg-white/75 text-slate-700 transition hover:bg-white dark:border-white/10 dark:bg-[#0d1825]/85 dark:text-slate-200 dark:hover:bg-[#132131]"
             >
-              <Github class="h-5 w-5" />
+              <Github class="h-4.5 w-4.5" />
             </a>
 
             <Button
               variant="ghost"
               size="icon"
-              class="h-11 w-11 rounded-full border border-black/8 bg-white/75 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-[#0d1825]/85 dark:text-slate-200 dark:hover:bg-[#132131]"
+              class="h-9 w-9 rounded-full border border-black/8 bg-white/75 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-[#0d1825]/85 dark:text-slate-200 dark:hover:bg-[#132131]"
               @click="handleLogout"
             >
-              <LogOut class="h-5 w-5" />
+              <LogOut class="h-4.5 w-4.5" />
             </Button>
           </div>
         </div>
 
-        <nav class="mt-4 flex gap-2 overflow-x-auto pb-1">
+        <nav class="mt-2.5 flex gap-1.5 overflow-x-auto pb-0.5">
           <button
             v-for="item in visibleNavItems"
             :key="item.key"
             type="button"
-            class="inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition"
+            class="inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[15px] font-semibold transition"
             :class="currentView === item.key
-              ? 'border-transparent bg-[#101b29] text-[#f4d18f] shadow-[0_16px_34px_-24px_rgba(15,23,42,0.9)] dark:bg-[#f4d18f] dark:text-[#111827]'
+              ? 'border-transparent bg-[#101b29] text-[#f4d18f] shadow-[0_14px_28px_-24px_rgba(15,23,42,0.9)] dark:bg-[#f4d18f] dark:text-[#111827]'
               : 'border-black/8 bg-white/72 text-slate-600 hover:bg-white hover:text-slate-900 dark:border-white/10 dark:bg-[#0d1825]/78 dark:text-slate-300 dark:hover:bg-[#132131] dark:hover:text-white'"
             @click="navigateTo(item.key)"
           >
-            <component :is="item.icon" class="h-4 w-4" />
+            <component :is="item.icon" class="h-3.5 w-3.5" />
             {{ item.label }}
           </button>
         </nav>
@@ -342,10 +371,7 @@ function openDatasetBuilder() {
           :active-run="activeExtractionRun"
           :latest-workflow="latestAgentWorkflow"
           :preferred-training-dataset-id="preferredTrainingDatasetId"
-          @continue-review="openLatestReview"
-          @retry-failed-run="retryLatestFailedRun"
-          @open-review-queue="openReviewQueue"
-          @open-dataset-builder="openDatasetBuilder"
+          @action="handleHomeAction"
         />
 
         <PipelinePage
@@ -389,11 +415,14 @@ function openDatasetBuilder() {
           :current-section="currentSection"
           :active-scope-label="activeScopeLabel"
           :selected-file-name="selectedFileName"
+          :selected-file="selectedFile"
+          :files="batchFiles"
           :highlight-count="groundingHighlightData.length"
           :pdf-url="groundingPdfUrl"
           :highlight-data="groundingHighlightData"
           :scope-key="sessionState.activeScopeKey"
           @change-section="handleSectionChange"
+          @select-file="setSelectedFile"
           @open-pipeline="navigateTo('pipeline', 'upload')"
           @open-knowledge="navigateTo('knowledge', 'explorer')"
         />
