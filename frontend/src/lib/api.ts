@@ -9,6 +9,7 @@ import {
 } from './session'
 
 export const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '')
+export type ExtractorType = 'tribology' | 'diffusion'
 
 function normalizeApiPath(path: string) {
     const normalizedPath = path.startsWith('/') ? path : `/${path}`
@@ -107,11 +108,13 @@ export async function extractData(
     force: boolean = false,
     profile: 'high_accuracy' | 'standard' = 'high_accuracy',
     strictCofMode?: boolean,
+    extractorType: ExtractorType = 'tribology',
 ): Promise<ExtractionResponse> {
     const query = new URLSearchParams()
     if (force) query.set('force', 'true')
     query.set('profile', profile)
     if (strictCofMode !== undefined) query.set('strict_cof_mode', strictCofMode ? 'true' : 'false')
+    query.set('extractor_type', extractorType)
     const url = `/api/extract/${fileId}${query.toString() ? `?${query.toString()}` : ''}`
     const response = await api.post(url)
     return response.data
@@ -180,9 +183,41 @@ export interface EvidenceResult {
     has_pdf: boolean
 }
 
+export interface FieldEvidenceSource {
+    source_type?: string | null
+    page?: number | null
+    source_label?: string | null
+    quote?: string | null
+    bbox?: number[] | null
+    sample_id?: string | null
+}
+
+export interface FieldEvidenceEntry {
+    value?: string | null
+    confidence?: number | null
+    evidence?: FieldEvidenceSource | null
+    status?: 'grounded' | 'partial' | 'missing' | string
+    review_state?: 'confirmed' | 'flagged' | string | null
+    review_note?: string | null
+}
+
+export interface RecordFieldEvidenceResponse {
+    record_id: number
+    literature_id: number
+    sample_id?: string | null
+    series_id?: string | null
+    extractor_type?: ExtractorType | string | null
+    review_status?: string | null
+    record_origin?: string | null
+    assembly_notes?: string | null
+    required_fields: string[]
+    fields: Record<string, FieldEvidenceEntry>
+}
+
 export interface ExtractionRunDetail {
     run_id: string
     literature_id: number
+    extractor_type?: ExtractorType
     profile: string
     status: string
     candidate_count: number
@@ -232,13 +267,95 @@ export async function getRecordEvidence(litId: number, recordId: number): Promis
     return response.data
 }
 
+export async function getCandidateEvidence(litId: number, candidateId: number): Promise<EvidenceResult> {
+    const response = await api.get(`/api/pdf/${litId}/candidates/${candidateId}/evidence`)
+    return response.data
+}
+
+export async function getDiffusionCandidateEvidence(litId: number, candidateId: number): Promise<EvidenceResult> {
+    const response = await api.get(`/api/pdf/${litId}/diffusion-candidates/${candidateId}/evidence`)
+    return response.data
+}
+
+export async function getRecordFieldEvidence(recordId: number): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.get(`/api/review/records/${recordId}/field-evidence`)
+    return response.data
+}
+
+export async function getCandidateFieldEvidence(candidateId: number): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.get(`/api/review/candidates/${candidateId}/field-evidence`)
+    return response.data
+}
+
+export async function getDiffusionCandidateFieldEvidence(candidateId: number): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.get(`/api/review/diffusion-candidates/${candidateId}/field-evidence`)
+    return response.data
+}
+
+export async function confirmRecordFieldEvidence(recordId: number, fieldKey: string, note?: string | null): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/records/${recordId}/fields/${fieldKey}/confirm`, {
+        note: note ?? null,
+    })
+    return response.data
+}
+
+export async function confirmCandidateFieldEvidence(candidateId: number, fieldKey: string, note?: string | null): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/candidates/${candidateId}/fields/${fieldKey}/confirm`, {
+        note: note ?? null,
+    })
+    return response.data
+}
+
+export async function confirmDiffusionCandidateFieldEvidence(candidateId: number, fieldKey: string, note?: string | null): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/diffusion-candidates/${candidateId}/fields/${fieldKey}/confirm`, {
+        note: note ?? null,
+    })
+    return response.data
+}
+
+export async function flagRecordFieldEvidence(recordId: number, fieldKey: string, note?: string | null): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/records/${recordId}/fields/${fieldKey}/flag`, {
+        note: note ?? null,
+    })
+    return response.data
+}
+
+export async function flagCandidateFieldEvidence(candidateId: number, fieldKey: string, note?: string | null): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/candidates/${candidateId}/fields/${fieldKey}/flag`, {
+        note: note ?? null,
+    })
+    return response.data
+}
+
+export async function flagDiffusionCandidateFieldEvidence(candidateId: number, fieldKey: string, note?: string | null): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/diffusion-candidates/${candidateId}/fields/${fieldKey}/flag`, {
+        note: note ?? null,
+    })
+    return response.data
+}
+
+export async function approveReviewRecord(recordId: number): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/records/${recordId}/approve`)
+    return response.data
+}
+
+export async function approveReviewCandidate(candidateId: number): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/candidates/${candidateId}/approve`)
+    return response.data
+}
+
+export async function approveDiffusionReviewCandidate(candidateId: number): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/diffusion-candidates/${candidateId}/approve`)
+    return response.data
+}
+
 export async function getExtractionRun(runId: string): Promise<ExtractionRunDetail> {
     const response = await api.get(`/api/extraction-runs/${runId}`)
     return response.data
 }
 
-export async function getLatestExtractionRun(literatureId: number): Promise<ExtractionRunDetail> {
-    const response = await api.get(`/api/extraction-runs/latest/${literatureId}`)
+export async function getLatestExtractionRun(literatureId: number, extractorType: ExtractorType = 'tribology'): Promise<ExtractionRunDetail> {
+    const response = await api.get(`/api/extraction-runs/latest/${literatureId}?extractor_type=${extractorType}`)
     return response.data
 }
 
@@ -421,6 +538,7 @@ export type ValidationStatus = 'unverified' | 'verified' | 'modified' | 'warning
 
 export interface TribologyData {
     id?: string
+    extractor_type?: ExtractorType
     material_name: string
     ionic_liquid: string
     base_oil?: string
@@ -456,9 +574,31 @@ export interface TribologyData {
     alkyl_chain_length?: number
     source?: string
     source_page?: number
+    source_bbox?: number[] | null
     source_figure?: string
     notes?: string
     evidence?: string
+    sample_id?: string
+    series_id?: string
+    field_evidence_json?: Record<string, FieldEvidenceEntry>
+    review_status?: string
+    record_origin?: string
+    assembly_notes?: string
+    system_name?: string
+    confinement_material_class?: string
+    confinement_geometry_class?: string
+    surface_functional_groups?: string
+    confinement_dimensionality?: string
+    D_total?: number | null
+    D_cation?: number | null
+    D_anion?: number | null
+    D_unit?: string
+    temperature_value?: number | null
+    confinement_scale_value?: number | null
+    confinement_scale_unit?: string
+    smiles?: string
+    novel_features_json?: Record<string, any>
+    rdkit_features_json?: Record<string, any>
 
     // Validation fields
     validationStatus?: ValidationStatus
@@ -497,12 +637,14 @@ export interface ExtractionResponse {
     status?: string
     metadata?: LiteratureMetadata
     data: TribologyData[]
+    extractor_type?: ExtractorType
     extraction_summary?: ExtractionSummary
     agent_workflow?: AgentWorkflow
     message?: string
 }
 
 export interface ExtractionSummary {
+    extractor_type?: ExtractorType
     run_id?: string | null
     candidate_count: number
     final_count: number
@@ -685,6 +827,12 @@ export function mapRecordToPayload(record: TribologyData) {
         source: record.source,
         sourcePage: record.source_page,
         sourceFigure: record.source_figure,
+        sampleId: record.sample_id,
+        seriesId: record.series_id,
+        fieldEvidenceJson: record.field_evidence_json,
+        reviewStatus: record.review_status,
+        recordOrigin: record.record_origin,
+        assemblyNotes: record.assembly_notes,
         confidence: 0.9,
     }
 }
@@ -731,12 +879,13 @@ export async function syncBatchData(metadata: LiteratureMetadata, records: Tribo
 }
 
 // Batch processing related types
-export type FileExtractionStatus = 'uploaded' | 'processing' | 'success' | 'error'
+export type FileExtractionStatus = 'uploaded' | 'processing' | 'success' | 'error' | 'no_data'
 
 export interface BatchFile {
     id: string
     name: string
     scopeKey?: string
+    extractor_type?: ExtractorType
     status: FileExtractionStatus
     progress: number // 0-100
     progressMessage?: string
@@ -963,6 +1112,81 @@ export async function getDashboardStats() {
         top_journals: Array<{ name: string, count: number }>
         cof_ranges: Array<{ name: string, min: number, max: number }>
     }
+}
+
+export interface MentorProgressStage {
+    key: string
+    label: string
+    total: number
+    delta_count: number
+    last_updated_at: string | null
+    description: string
+}
+
+export interface MentorProgressDelta {
+    key: string
+    label: string
+    baseline_label: string
+    current_label: string
+    baseline_value: number
+    current_value: number
+    change_value: number
+    unit: string
+    trend: 'up' | 'down' | 'flat' | string
+    description: string
+}
+
+export interface MentorTimelineItem {
+    id: string
+    kind: string
+    title: string
+    detail: string
+    timestamp: string | null
+    resource_type: string
+    resource_id?: number | null
+    literature_id?: number | null
+    dataset_id?: number | null
+}
+
+export interface MentorQuickLink {
+    label: string
+    detail: string
+    view: string
+    literature_id?: number
+    record_id?: number
+    dataset_id?: number
+    kind?: string
+}
+
+export interface MentorLatestReadyDataset {
+    id: number
+    name: string
+    usable_records: number
+    feature_dimensions: number
+    created_at: string | null
+}
+
+export interface MentorProgressResponse {
+    window_days: number
+    progress_overview: {
+        stages: MentorProgressStage[]
+    }
+    progress_deltas: {
+        dashboard: MentorProgressDelta[]
+    }
+    timeline: MentorTimelineItem[]
+    quick_links: {
+        latest_processed_paper: MentorQuickLink | null
+        latest_verified_record: MentorQuickLink | null
+        latest_output: MentorQuickLink | null
+    }
+    latest_ready_dataset: MentorLatestReadyDataset | null
+    cleaning_summary: ModelTrainingCleaningSummary | null
+}
+
+export async function getMentorProgress() {
+    const response = await api.get('/api/mentor/progress')
+    return response.data as MentorProgressResponse
 }
 
 export interface ModelTrainingAlgorithmOption {
@@ -1523,6 +1747,232 @@ export async function getGroupActivitySummary(): Promise<GroupActivitySummary> {
 /** 获取操作类型定义 */
 export async function getActionTypes(): Promise<{ action_types: Array<{ key: string; label: string }> }> {
     const response = await api.get('/api/monitor/action-types')
+    return response.data
+}
+
+export interface LiteratureMonitorSchedule {
+    weekday: number
+    hour: number
+    minute: number
+    timezone: string
+    label?: string
+}
+
+export interface LiteratureMonitorSourceConfig {
+    id: 'crossref' | 'openalex' | 'semantic_scholar' | 'rss' | string
+    label: string
+    kind: 'api' | 'rss' | string
+    enabled: boolean
+    feeds?: string[]
+    last_success_at?: string | null
+    last_error?: string | null
+    last_item_count?: number
+    note?: string | null
+}
+
+export interface LiteratureMonitorPdfConfig {
+    enabled: boolean
+    auto_download_oa: boolean
+    queue_proxy_required: boolean
+    storage_dir?: string
+    proxy_queue_path?: string
+}
+
+export interface LiteratureMonitorCampusProxyConfig {
+    enabled: boolean
+    mode?: string
+    portal_url?: string
+    proxy_url: string
+    username: string
+    has_password?: boolean
+    verify_tls: boolean
+    apply_to_metadata: boolean
+    apply_to_pdf: boolean
+    headless?: boolean
+    webvpn_url_template?: string
+    login_username_selector?: string
+    login_password_selector?: string
+    login_submit_selector?: string
+    post_login_success_selector?: string
+    download_trigger_selector?: string
+}
+
+export interface LiteratureMonitorCampusProxyUpdate extends LiteratureMonitorCampusProxyConfig {
+    password?: string
+    clear_password?: boolean
+}
+
+export interface LiteratureMonitorPdfState {
+    status: 'pending' | 'downloaded' | 'queued_proxy' | 'failed' | 'unavailable' | string
+    access: 'open_access' | 'proxy_required' | 'unavailable' | string
+    is_open_access?: boolean | null
+    source?: string | null
+    best_url?: string | null
+    candidate_urls?: string[]
+    local_path?: string | null
+    filename?: string | null
+    last_error?: string | null
+    last_attempted_at?: string | null
+    downloaded_at?: string | null
+    strategy?: string | null
+    notes?: string[]
+}
+
+export interface LiteratureMonitorItem {
+    id: string
+    title: string
+    abstract: string
+    doi?: string | null
+    link: string
+    journal: string
+    publisher: string
+    authors: string[]
+    published_at: string
+    discovered_at: string
+    source_id: string
+    source_name: string
+    matched_keywords: string[]
+    relevance_score?: number
+    relevance_threshold?: number
+    relevance_reasons?: string[]
+    pdf: LiteratureMonitorPdfState
+}
+
+export interface LiteratureMonitorRun {
+    started_at: string
+    completed_at?: string | null
+    status: string
+    trigger: string
+    new_items: number
+    total_items: number
+    errors: string[]
+}
+
+export interface LiteratureMonitorSummary {
+    total_items: number
+    new_items_last_7_days: number
+    active_keywords: number
+    distinct_publishers: number
+    items_by_source: Array<{ name: string; count: number }>
+    items_by_keyword: Array<{ name: string; count: number }>
+    timeline: Array<{ date: string; count: number }>
+}
+
+export interface LiteratureMonitorSnapshot {
+    config: {
+        keywords: string[]
+        lookback_days: number
+        relevance_threshold: number
+        pdf_download: LiteratureMonitorPdfConfig
+        campus_proxy: LiteratureMonitorCampusProxyConfig
+        schedule: LiteratureMonitorSchedule
+        sources: LiteratureMonitorSourceConfig[]
+        notes: string[]
+    }
+    scheduler: {
+        status: string
+        next_run_at?: string | null
+        last_triggered_slot?: string | null
+        last_error?: string | null
+        running_trigger?: string | null
+    }
+    last_run?: LiteratureMonitorRun | null
+    recent_runs: LiteratureMonitorRun[]
+    summary: LiteratureMonitorSummary
+    pdf_summary: {
+        downloaded_count: number
+        queued_proxy_count: number
+        failed_count: number
+        pending_count: number
+        open_access_count: number
+        storage_dir: string
+        proxy_queue_path: string
+    }
+    items: LiteratureMonitorItem[]
+}
+
+export interface LiteratureMonitorConfigUpdate {
+    keywords?: string[]
+    rss_feeds?: string[]
+    crossref_enabled?: boolean
+    openalex_enabled?: boolean
+    semantic_scholar_enabled?: boolean
+    rss_enabled?: boolean
+    lookback_days?: number
+    relevance_threshold?: number
+    pdf_download?: LiteratureMonitorPdfConfig
+    campus_proxy?: LiteratureMonitorCampusProxyUpdate
+    schedule?: LiteratureMonitorSchedule
+}
+
+export interface LLMRuntimeConfig {
+    provider: 'openai-compatible' | 'openrouter' | string
+    openai_base_url: string
+    openrouter_base_url: string
+    openrouter_site_url: string
+    openrouter_app_name: string
+    text_model: string
+    vision_model: string
+    has_openai_api_key: boolean
+    has_openrouter_api_key: boolean
+    has_vision_api_key: boolean
+    updated_at?: string | null
+}
+
+export interface LLMRuntimeUpdatePayload {
+    provider?: 'openai-compatible' | 'openrouter' | string
+    openai_base_url?: string
+    openai_api_key?: string
+    clear_openai_api_key?: boolean
+    openrouter_base_url?: string
+    openrouter_api_key?: string
+    clear_openrouter_api_key?: boolean
+    openrouter_site_url?: string
+    openrouter_app_name?: string
+    text_model?: string
+    vision_model?: string
+    vision_api_key?: string
+    clear_vision_api_key?: boolean
+}
+
+export interface LLMRuntimeSnapshot {
+    config: LLMRuntimeConfig
+    runtime: {
+        active_provider: string
+        active_base_url: string
+        active_text_model: string
+        active_vision_model: string
+        default_headers: Record<string, string>
+    }
+    notes: string[]
+}
+
+export async function getLiteratureMonitorSnapshot(): Promise<LiteratureMonitorSnapshot> {
+    const response = await api.get('/api/monitor/literature-source')
+    return response.data
+}
+
+export async function runLiteratureMonitor(): Promise<LiteratureMonitorSnapshot> {
+    const response = await api.post('/api/monitor/literature-source/run')
+    return response.data
+}
+
+export async function updateLiteratureMonitorConfig(
+    payload: LiteratureMonitorConfigUpdate,
+): Promise<LiteratureMonitorSnapshot> {
+    const response = await api.put('/api/monitor/literature-source/config', payload)
+    return response.data
+}
+
+export async function getLLMRuntimeSnapshot(): Promise<LLMRuntimeSnapshot> {
+    const response = await api.get('/api/monitor/llm-config')
+    return response.data
+}
+
+export async function updateLLMRuntimeConfig(
+    payload: LLMRuntimeUpdatePayload,
+): Promise<LLMRuntimeSnapshot> {
+    const response = await api.put('/api/monitor/llm-config', payload)
     return response.data
 }
 

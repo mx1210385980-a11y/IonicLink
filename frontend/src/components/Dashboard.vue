@@ -7,10 +7,14 @@ import {
 } from 'chart.js'
 import { Doughnut, Line } from 'vue-chartjs'
 import { FileText, Database, Zap, ShieldCheck, Sparkles, ArrowRight, Filter, X, Download, Share2, Copy } from 'lucide-vue-next'
+import { useRouter } from 'vue-router'
 import Card from '@/components/ui/Card.vue'
 import CardHeader from '@/components/ui/CardHeader.vue'
 import CardTitle from '@/components/ui/CardTitle.vue'
 import CardContent from '@/components/ui/CardContent.vue'
+import MentorDeltaGrid from '@/components/dashboard/MentorDeltaGrid.vue'
+import MentorProgressOverview from '@/components/dashboard/MentorProgressOverview.vue'
+import { useMentorProgress } from '@/composables/useMentorProgress'
 import { getDashboardStats } from '@/lib/api'
 import { useDashboardFilters } from '@/composables/useDashboardFilters'
 
@@ -54,6 +58,8 @@ const materialsRatioChartRef = ref<any>(null)
 const chartExportTarget = ref<'publication' | 'materials'>('publication')
 const shareStatus = ref('')
 const exportStatus = ref('')
+const router = useRouter()
+const { progress: mentorProgress, loading: mentorLoading, error: mentorError, refresh: refreshMentorProgress } = useMentorProgress(false)
 const emit = defineEmits<{
   'open-library': []
   'explore-data': [queryParams: Record<string, string>]
@@ -80,6 +86,12 @@ const {
   isJournalSelected,
   isConfidenceBucketSelected,
 } = useDashboardFilters()
+
+const mentorStages = computed(() => mentorProgress.value?.progress_overview.stages || [])
+const mentorDeltas = computed(() => mentorProgress.value?.progress_deltas.dashboard || [])
+const mentorStageMap = computed(() => Object.fromEntries(mentorStages.value.map((stage) => [stage.key, stage])))
+const verifiedStage = computed(() => mentorStageMap.value.verified_records || null)
+const trainingReadyStage = computed(() => mentorStageMap.value.training_ready_outputs || null)
 
 // --- Colors & Styling Helpers ---
 const CHART_COLORS = [
@@ -142,12 +154,34 @@ const FILTER_COLOR_CLASSES: Record<string, { bg: string; text: string; border: s
 // --- Methods ---
 async function fetchStats() {
   try {
-    stats.value = await getDashboardStats()
+    const [dashboardStats] = await Promise.all([
+      getDashboardStats(),
+      refreshMentorProgress(),
+    ])
+    stats.value = dashboardStats
   } catch (e) {
     console.error('Failed to fetch stats:', e)
   } finally {
     loading.value = false
   }
+}
+
+function formatStageDelta(value?: number | null, singular: string = 'update', plural?: string) {
+  const count = Number(value || 0)
+  const pluralLabel = plural || `${singular}s`
+  if (!count) return `No new ${pluralLabel} in the last 7 days`
+  return `+${count} ${count === 1 ? singular : pluralLabel} in the last 7 days`
+}
+
+function formatRelativeTime(value?: string | null) {
+  if (!value) return 'No recent update'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  const diffMs = Date.now() - date.getTime()
+  const diffHours = Math.max(0, Math.round(diffMs / (1000 * 60 * 60)))
+  if (diffHours < 1) return 'Updated within the hour'
+  if (diffHours < 24) return `Updated ${diffHours}h ago`
+  return `Updated ${Math.round(diffHours / 24)}d ago`
 }
 
 function handleExploreData() {
@@ -171,14 +205,6 @@ function handleCofRangeSelect(surface: string) {
     removeFilter('cofRange')
   }
   toggleMaterial(surface)
-}
-
-function buildUrlSearchParams(paramsRecord: Record<string, string>) {
-  const params = new URLSearchParams()
-  Object.entries(paramsRecord).forEach(([key, value]) => {
-    if (value) params.set(key, value)
-  })
-  return params
 }
 
 function triggerDownload(filename: string, blob: Blob) {
@@ -443,11 +469,14 @@ function exportDashboardData(format: 'csv' | 'json' | 'excel') {
 }
 
 const shareSnapshotUrl = computed(() => {
-  if (typeof window === 'undefined') return ''
-  const params = buildUrlSearchParams(queryParams.value)
-  params.set('view', 'dashboard')
-  const queryString = params.toString()
-  return `${window.location.origin}${window.location.pathname}${queryString ? `?${queryString}` : ''}`
+  const resolved = router.resolve({
+    name: 'knowledge',
+    params: { section: 'explorer' },
+    query: queryParams.value,
+  })
+
+  if (typeof window === 'undefined') return resolved.href
+  return new URL(resolved.href, window.location.origin).toString()
 })
 
 async function copyShareSnapshot() {
@@ -845,6 +874,9 @@ watch(filters, () => {
         </div>
       </section>
 
+      <MentorProgressOverview :stages="mentorStages" :loading="mentorLoading" :error="mentorError" />
+      <MentorDeltaGrid :deltas="mentorDeltas" />
+
       <section class="grid gap-4 xl:grid-cols-3">
         <Card class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <CardContent class="p-6">
@@ -969,9 +1001,10 @@ watch(filters, () => {
         <Card class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <CardContent class="flex h-full items-start justify-between p-6">
             <div>
-              <p class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400 dark:text-slate-500">Avg Extraction Speed</p>
-              <h2 class="mt-3 text-4xl font-semibold text-slate-950 dark:text-white">1.2s</h2>
-              <p class="mt-2 text-sm text-amber-600 dark:text-amber-300">per document via AI</p>
+              <p class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400 dark:text-slate-500">Training-Ready Outputs</p>
+              <h2 class="mt-3 text-4xl font-semibold text-slate-950 dark:text-white">{{ trainingReadyStage?.total || 0 }}</h2>
+              <p class="mt-2 text-sm text-amber-600 dark:text-amber-300">{{ formatStageDelta(trainingReadyStage?.delta_count, 'output') }}</p>
+              <p class="mt-2 text-[11px] text-slate-400 dark:text-slate-500">{{ formatRelativeTime(trainingReadyStage?.last_updated_at) }}</p>
             </div>
             <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-400 text-white">
               <Zap class="h-7 w-7" />
@@ -985,7 +1018,8 @@ watch(filters, () => {
               <div>
                 <p class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400 dark:text-slate-500">Data Confidence Score</p>
                 <h2 class="mt-3 text-4xl font-semibold text-slate-950 dark:text-white">{{ formatConfidencePercent(stats?.confidence_stats?.avg_percent ?? null) }}</h2>
-                <p class="mt-2 text-sm text-emerald-600 dark:text-emerald-300">AI composite confidence across library records</p>
+                <p class="mt-2 text-sm text-emerald-600 dark:text-emerald-300">{{ formatStageDelta(verifiedStage?.delta_count, 'verified record') }}</p>
+                <p class="mt-2 text-[11px] text-slate-400 dark:text-slate-500">{{ formatRelativeTime(verifiedStage?.last_updated_at) }}</p>
               </div>
               <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500 text-white">
                 <ShieldCheck class="h-7 w-7" />

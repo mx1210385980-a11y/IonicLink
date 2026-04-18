@@ -116,6 +116,7 @@ class Literature(Base):
 
     content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     file_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    file_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
 
     group_id: Mapped[Optional[int]] = mapped_column(ForeignKey("research_groups.id"), index=True, nullable=True)
     workspace_id: Mapped[Optional[int]] = mapped_column(ForeignKey("workspaces.id"), index=True, nullable=True)
@@ -136,8 +137,28 @@ class Literature(Base):
         back_populates="literature",
         cascade="all, delete-orphan",
     )
+    record_candidates: Mapped[List["RecordCandidate"]] = relationship(
+        "RecordCandidate",
+        back_populates="literature",
+        cascade="all, delete-orphan",
+    )
     extraction_runs: Mapped[List["ExtractionRun"]] = relationship(
         "ExtractionRun",
+        back_populates="literature",
+        cascade="all, delete-orphan",
+    )
+    diffusion_candidates: Mapped[List["DiffusionCandidate"]] = relationship(
+        "DiffusionCandidate",
+        back_populates="literature",
+        cascade="all, delete-orphan",
+    )
+    diffusion_records: Mapped[List["DiffusionRecord"]] = relationship(
+        "DiffusionRecord",
+        back_populates="literature",
+        cascade="all, delete-orphan",
+    )
+    diffusion_feature_sets: Mapped[List["DiffusionFeatureSet"]] = relationship(
+        "DiffusionFeatureSet",
         back_populates="literature",
         cascade="all, delete-orphan",
     )
@@ -189,6 +210,13 @@ class TribologyData(Base):
     extracted_at: Mapped[datetime] = mapped_column(default=func.now())
     confidence: Mapped[float] = mapped_column(Float, default=0.9)
 
+    sample_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    series_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    field_evidence_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    review_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    record_origin: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    assembly_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     evidence: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     evidence_page: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     evidence_bbox: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
@@ -198,6 +226,77 @@ class TribologyData(Base):
     source_figure: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
 
     literature: Mapped["Literature"] = relationship("Literature", back_populates="tribology_data")
+    source_candidates: Mapped[List["RecordCandidate"]] = relationship(
+        "RecordCandidate",
+        back_populates="promoted_record",
+    )
+
+
+class RecordCandidate(Base):
+    __tablename__ = "record_candidates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    literature_id: Mapped[int] = mapped_column(ForeignKey("literature.id"), nullable=False, index=True)
+    promoted_record_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tribology_data.id"), nullable=True, index=True)
+
+    material_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    lubricant: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    cof_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    cof_operator: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    cof_raw: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    load_value: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    load_raw: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    speed_value: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    temperature: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    potential: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    water_content: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    probe_material: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    probe_geometry: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    probe_radius: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    probe_roughness: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    substrate_material: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    substrate_coating: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    substrate_roughness: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    surface_roughness: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    residual_film_thickness_d: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    layer_spacing_delta: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    film_thickness: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    mol_ratio: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    cation: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    anion: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    cation_smiles: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    anion_smiles: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    il_smiles: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    il_inchikey: Mapped[Optional[str]] = mapped_column(String(27), nullable=True, index=True)
+    alkyl_chain_length: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    extracted_at: Mapped[datetime] = mapped_column(default=func.now())
+    confidence: Mapped[float] = mapped_column(Float, default=0.9)
+
+    sample_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    series_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    field_evidence_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    review_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    record_origin: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    assembly_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    evidence: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    evidence_page: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    evidence_bbox: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
+    source: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    source_page: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    source_figure: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    promoted_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+
+    literature: Mapped["Literature"] = relationship("Literature", back_populates="record_candidates")
+    promoted_record: Mapped[Optional["TribologyData"]] = relationship("TribologyData", back_populates="source_candidates")
 
 
 class ExtractionRun(Base):
@@ -207,6 +306,7 @@ class ExtractionRun(Base):
     run_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     literature_id: Mapped[int] = mapped_column(ForeignKey("literature.id"), nullable=False, index=True)
 
+    extractor_type: Mapped[str] = mapped_column(String(32), default="tribology", index=True)
     profile: Mapped[str] = mapped_column(String(32), default="high_accuracy")
     status: Mapped[str] = mapped_column(String(32), default="running", index=True)
 
@@ -249,6 +349,130 @@ class ExtractionCandidate(Base):
     created_at: Mapped[datetime] = mapped_column(default=func.now())
 
     run: Mapped["ExtractionRun"] = relationship("ExtractionRun", back_populates="candidates")
+
+
+class DiffusionRecord(Base):
+    __tablename__ = "diffusion_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    literature_id: Mapped[int] = mapped_column(ForeignKey("literature.id"), nullable=False, index=True)
+
+    system_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    confinement_material_class: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    confinement_geometry_class: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    surface_functional_groups: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    confinement_dimensionality: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    ionic_liquid: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    d_total: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    d_cation: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    d_anion: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    d_unit: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    temperature_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    confinement_scale_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    confinement_scale_unit: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
+    source: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    source_page: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    source_bbox: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    evidence: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    provider: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    prompt_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    raw_model_output: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    field_evidence_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    review_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    record_origin: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    assembly_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.9)
+
+    novel_features_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    smiles: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    rdkit_features_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    extracted_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    literature: Mapped["Literature"] = relationship("Literature", back_populates="diffusion_records")
+    source_candidates: Mapped[List["DiffusionCandidate"]] = relationship(
+        "DiffusionCandidate",
+        back_populates="promoted_record",
+    )
+    feature_sets: Mapped[List["DiffusionFeatureSet"]] = relationship(
+        "DiffusionFeatureSet",
+        back_populates="record",
+        cascade="all, delete-orphan",
+    )
+
+
+class DiffusionCandidate(Base):
+    __tablename__ = "diffusion_candidates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    literature_id: Mapped[int] = mapped_column(ForeignKey("literature.id"), nullable=False, index=True)
+    promoted_record_id: Mapped[Optional[int]] = mapped_column(ForeignKey("diffusion_records.id"), nullable=True, index=True)
+
+    system_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    confinement_material_class: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    confinement_geometry_class: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    surface_functional_groups: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    confinement_dimensionality: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    ionic_liquid: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    d_total: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    d_cation: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    d_anion: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    d_unit: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    temperature_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    confinement_scale_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    confinement_scale_unit: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
+    source: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    source_page: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    source_bbox: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    evidence: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    provider: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    prompt_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    raw_model_output: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    field_evidence_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    review_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    record_origin: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    assembly_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.9)
+
+    novel_features_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    smiles: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    rdkit_features_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    extracted_at: Mapped[datetime] = mapped_column(default=func.now())
+    promoted_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+
+    literature: Mapped["Literature"] = relationship("Literature", back_populates="diffusion_candidates")
+    promoted_record: Mapped[Optional["DiffusionRecord"]] = relationship("DiffusionRecord", back_populates="source_candidates")
+    feature_sets: Mapped[List["DiffusionFeatureSet"]] = relationship(
+        "DiffusionFeatureSet",
+        back_populates="candidate",
+        cascade="all, delete-orphan",
+    )
+
+
+class DiffusionFeatureSet(Base):
+    __tablename__ = "diffusion_feature_sets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    literature_id: Mapped[int] = mapped_column(ForeignKey("literature.id"), nullable=False, index=True)
+    candidate_id: Mapped[Optional[int]] = mapped_column(ForeignKey("diffusion_candidates.id"), nullable=True, index=True)
+    record_id: Mapped[Optional[int]] = mapped_column(ForeignKey("diffusion_records.id"), nullable=True, index=True)
+
+    ionic_liquid: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    smiles: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    rdkit_features_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    feature_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    literature: Mapped["Literature"] = relationship("Literature", back_populates="diffusion_feature_sets")
+    candidate: Mapped[Optional["DiffusionCandidate"]] = relationship("DiffusionCandidate", back_populates="feature_sets")
+    record: Mapped[Optional["DiffusionRecord"]] = relationship("DiffusionRecord", back_populates="feature_sets")
 
 
 class UserActivityLog(Base):

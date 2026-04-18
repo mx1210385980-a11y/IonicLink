@@ -19,6 +19,7 @@ class MediaAgent(BaseAgent):
                 file_id=task.payload["file_id"],
                 force=task.payload.get("force", False),
                 profile=task.payload.get("profile", "high_accuracy"),
+                extractor_type=task.payload.get("extractor_type", "tribology"),
                 strict_cof_mode=task.payload.get("strict_cof_mode"),
             )
             return AgentExecutionResult(agent=self.name, task_id=task.task_id, data=result)

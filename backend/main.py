@@ -7,8 +7,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_db
 from logging_config import setup_logging
-from routers import agent_system, auth_router, data_explorer, extraction, model_cleaning, model_training, monitor_router, sync_router
+from routers import agent_system, auth_router, data_explorer, extraction, mentor_progress, model_cleaning, model_training, monitor_router, sync_router
 from services.agent_runtime_service import get_agent_runtime
+from services.literature_monitor_service import get_literature_monitor_service
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -20,8 +21,11 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing application resources")
     await init_db()
     get_agent_runtime()
+    literature_monitor = get_literature_monitor_service()
+    await literature_monitor.start()
     logger.info("Application startup complete")
     yield
+    await literature_monitor.stop()
     logger.info("Application shutdown complete")
 
 
@@ -58,6 +62,7 @@ app.add_middleware(
 app.include_router(extraction.router)
 app.include_router(sync_router.router)
 app.include_router(data_explorer.router)
+app.include_router(mentor_progress.router)
 app.include_router(model_cleaning.router)
 app.include_router(model_training.router)
 app.include_router(agent_system.router)

@@ -36,6 +36,7 @@ class QueryAgent(BaseAgent):
             result = query_service.validate_extraction_result(
                 records=task.payload.get("records") or [],
                 extraction_summary=task.payload.get("extraction_summary") or {},
+                extractor_type=task.payload.get("extractor_type") or "tribology",
             )
             return AgentExecutionResult(agent=self.name, task_id=task.task_id, data=result)
 

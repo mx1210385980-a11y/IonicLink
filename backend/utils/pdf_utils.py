@@ -206,6 +206,7 @@ def crop_region_to_base64(
     bbox: list,
     padding: int = 12,
     dpi: int = 150,
+    zoom: Optional[float] = None,
 ) -> Optional[str]:
     """
     Crop a region from a PDF page and return as base64-encoded PNG string.
@@ -216,6 +217,7 @@ def crop_region_to_base64(
         bbox: [x0, y0, x1, y1] in PDF points (top-left origin).
         padding: Extra points to add around the bbox for readability.
         dpi: Rendering DPI (higher = sharper but larger).
+        zoom: Backward-compatible render scale. Overrides dpi when provided.
 
     Returns:
         Base64 PNG string (without data URI prefix), or None on error.

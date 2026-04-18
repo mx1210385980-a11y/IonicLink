@@ -45,6 +45,7 @@ class ModeratorAgent(BaseAgent):
                 payload={
                     "records": media_payload.get("data") or [],
                     "extraction_summary": extraction_summary,
+                    "extractor_type": media_payload.get("extractor_type") or task.payload.get("extractor_type") or "tribology",
                 },
                 task_id=task.task_id,
             )
@@ -56,6 +57,7 @@ class ModeratorAgent(BaseAgent):
                     "metadata": media_payload.get("metadata") or {},
                     "records": media_payload.get("data") or [],
                     "validation": validation_result.data or {},
+                    "extractor_type": media_payload.get("extractor_type") or task.payload.get("extractor_type") or "tribology",
                 },
                 task_id=task.task_id,
             )

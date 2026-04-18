@@ -16,6 +16,8 @@ import Button from '@/components/ui/Button.vue'
 import Card from '@/components/ui/Card.vue'
 import CardContent from '@/components/ui/CardContent.vue'
 import Modal from '@/components/ui/Modal.vue'
+import LiteratureSourceMonitor from '@/components/monitor/LiteratureSourceMonitor.vue'
+import LlmRuntimeMonitor from '@/components/monitor/LlmRuntimeMonitor.vue'
 import UserManagement from '@/components/monitor/UserManagement.vue'
 import {
   getUsageMetrics,
@@ -32,7 +34,7 @@ defineProps<{
 }>()
 
 // Tab state
-const activeTab = ref<'system' | 'users'>('users')
+const activeTab = ref<'literature' | 'llm' | 'system' | 'users'>('literature')
 
 const usageMetrics = ref<UsageMetricsResponse | null>(null)
 const usageLoading = ref(false)
@@ -258,6 +260,30 @@ onMounted(() => {
     <div class="flex-shrink-0 border-b border-slate-200 bg-white px-4">
       <nav class="flex gap-4">
         <button
+          @click="activeTab = 'literature'"
+          :class="[
+            'flex items-center gap-2 border-b-2 px-1 py-3 text-sm font-medium transition-colors',
+            activeTab === 'literature'
+              ? 'border-indigo-500 text-indigo-600'
+              : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700',
+          ]"
+        >
+          <Activity class="h-4 w-4" />
+          Literature Source
+        </button>
+        <button
+          @click="activeTab = 'llm'"
+          :class="[
+            'flex items-center gap-2 border-b-2 px-1 py-3 text-sm font-medium transition-colors',
+            activeTab === 'llm'
+              ? 'border-indigo-500 text-indigo-600'
+              : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700',
+          ]"
+        >
+          <Cpu class="h-4 w-4" />
+          LLM Runtime
+        </button>
+        <button
           @click="activeTab = 'users'"
           :class="[
             'flex items-center gap-2 border-b-2 px-1 py-3 text-sm font-medium transition-colors',
@@ -284,8 +310,16 @@ onMounted(() => {
       </nav>
     </div>
 
+    <div v-if="activeTab === 'literature'" class="flex-1 overflow-hidden">
+      <LiteratureSourceMonitor />
+    </div>
+
+    <div v-else-if="activeTab === 'llm'" class="flex-1 overflow-hidden">
+      <LlmRuntimeMonitor />
+    </div>
+
     <!-- User Management Tab -->
-    <div v-if="activeTab === 'users'" class="flex-1 overflow-hidden">
+    <div v-else-if="activeTab === 'users'" class="flex-1 overflow-hidden">
       <UserManagement />
     </div>
 

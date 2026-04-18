@@ -27,12 +27,14 @@ async def create_extraction_run(
     run_id: str,
     literature_id: int,
     profile: str,
+    extractor_type: str = "tribology",
     page_coverage: Optional[dict[str, Any]] = None,
     summary: Optional[dict[str, Any]] = None,
 ) -> ExtractionRun:
     run = ExtractionRun(
         run_id=run_id,
         literature_id=literature_id,
+        extractor_type=extractor_type,
         profile=profile,
         status="running",
         page_coverage=_json_dumps(page_coverage),
@@ -162,13 +164,12 @@ async def get_extraction_run(db: AsyncSession, run_id: str) -> Optional[Extracti
 async def get_latest_extraction_run_by_literature(
     db: AsyncSession,
     literature_id: int,
+    extractor_type: str | None = None,
 ) -> Optional[ExtractionRun]:
-    stmt = (
-        select(ExtractionRun)
-        .where(ExtractionRun.literature_id == literature_id)
-        .order_by(ExtractionRun.id.desc())
-        .limit(1)
-    )
+    stmt = select(ExtractionRun).where(ExtractionRun.literature_id == literature_id)
+    if extractor_type:
+        stmt = stmt.where(ExtractionRun.extractor_type == extractor_type)
+    stmt = stmt.order_by(ExtractionRun.id.desc()).limit(1)
     row = await db.execute(stmt)
     return row.scalar_one_or_none()
 

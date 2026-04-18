@@ -1,11 +1,27 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from utils.tribopair import derive_legacy_material_name, derive_legacy_surface_roughness
+
+
+class EvidenceSource(BaseModel):
+    source_type: Optional[str] = None
+    page: Optional[int] = None
+    source_label: Optional[str] = None
+    quote: Optional[str] = None
+    bbox: Optional[List[float]] = None
+    sample_id: Optional[str] = None
+
+
+class FieldEvidence(BaseModel):
+    value: Optional[str] = None
+    confidence: Optional[float] = None
+    evidence: Optional[EvidenceSource] = None
 
 
 class TribologyData(BaseModel):
@@ -59,16 +75,45 @@ class TribologyData(BaseModel):
     evidence: Optional[str] = None
     source_page: Optional[int] = None
     source_figure: Optional[str] = None
+    sample_id: Optional[str] = None
+    series_id: Optional[str] = None
+    field_evidence_json: Dict[str, FieldEvidence] = Field(default_factory=dict)
+    review_status: Optional[str] = None
+    record_origin: Optional[str] = None
+    assembly_notes: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod
     def map_cof_from_db_fields(cls, data):
-        if isinstance(data, dict) and not data.get("cof"):
-            if data.get("cof_raw"):
-                data["cof"] = data["cof_raw"]
-            elif data.get("cof_value") is not None:
-                data["cof"] = str(data["cof_value"])
+        if isinstance(data, dict):
+            if not data.get("cof"):
+                if data.get("cof_raw"):
+                    data["cof"] = data["cof_raw"]
+                elif data.get("cof_value") is not None:
+                    data["cof"] = str(data["cof_value"])
+
+            if not data.get("ionic_liquid") and data.get("lubricant"):
+                data["ionic_liquid"] = data["lubricant"]
+            if not data.get("load"):
+                data["load"] = data.get("load_raw") or data.get("load_value")
+            if not data.get("speed"):
+                data["speed"] = data.get("speed_raw") or data.get("speed_value")
         return data
+
+    @field_validator("field_evidence_json", mode="before")
+    @classmethod
+    def parse_field_evidence_json(cls, value: Any) -> Dict[str, Any]:
+        if value in (None, "", {}):
+            return {}
+        if isinstance(value, str):
+            try:
+                loaded = json.loads(value)
+                return loaded if isinstance(loaded, dict) else {}
+            except Exception:
+                return {}
+        if isinstance(value, dict):
+            return value
+        return {}
 
     @field_validator("potential", mode="before")
     @classmethod
@@ -119,10 +164,35 @@ class LiteratureMetadata(BaseModel):
     doi: str = Field("")
     journal: str = Field("")
     issn: Optional[str] = None
-    year: int = Field(2024)
+    year: int = Field(0)
     volume: Optional[str] = None
     issue: Optional[str] = None
     pages: Optional[str] = None
+
+    @field_validator("title", "authors", "doi", "journal", mode="before")
+    @classmethod
+    def normalize_required_text(cls, value: Any) -> str:
+        if value is None:
+            return ""
+        return str(value).strip()
+
+    @field_validator("issn", "volume", "issue", "pages", mode="before")
+    @classmethod
+    def normalize_optional_text(cls, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
+    @field_validator("year", mode="before")
+    @classmethod
+    def normalize_year(cls, value: Any) -> int:
+        if value in (None, ""):
+            return 0
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
 
     class Config:
         populate_by_name = True

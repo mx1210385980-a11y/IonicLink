@@ -118,7 +118,28 @@ def summarize_extraction(
     metadata: dict[str, Any],
     records: list[dict[str, Any]],
     validation: dict[str, Any] | None = None,
+    extractor_type: str = "tribology",
 ) -> dict[str, Any]:
+    if extractor_type == "diffusion":
+        system_counter = Counter()
+        lubricant_counter = Counter()
+
+        for record in records or []:
+            system_name = str(record.get("system_name") or "").strip()
+            ionic_liquid = str(record.get("ionic_liquid") or "").strip()
+            if system_name:
+                system_counter[system_name] += 1
+            if ionic_liquid:
+                lubricant_counter[ionic_liquid] += 1
+
+        return {
+            "title": metadata.get("title") or "Untitled",
+            "record_count": len(records or []),
+            "top_systems": [{"name": name, "count": count} for name, count in system_counter.most_common(3)],
+            "top_ionic_liquids": [{"name": name, "count": count} for name, count in lubricant_counter.most_common(3)],
+            "warnings": list((validation or {}).get("warnings") or []),
+        }
+
     material_counter = Counter()
     lubricant_counter = Counter()
 

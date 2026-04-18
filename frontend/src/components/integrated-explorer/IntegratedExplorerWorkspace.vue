@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, toRef } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import {
   searchRecords,
   type RecordResponse,
@@ -16,11 +16,9 @@ import {
   ChevronRight,
   ChevronUp,
   ChevronDown,
-  BookOpen,
   Save,
   ExternalLink,
   Edit,
-  Download,
   SlidersHorizontal,
   FlaskConical,
   Waves,
@@ -33,7 +31,6 @@ import Modal from '@/components/ui/Modal.vue'
 import InteractiveEvidencePanelHost from '@/components/InteractiveEvidencePanelHost.vue'
 import PdfViewerWithHighlight from '@/components/PdfViewerWithHighlight.vue'
 import MoleculeViewer from '@/components/MoleculeViewer.vue'
-import RelationshipGraphPanel from '@/components/RelationshipGraphPanel.vue'
 import { useEvidencePanel } from '@/composables/useEvidencePanel'
 import { useRecordEditing } from '@/composables/useRecordEditing'
 import { useRecordSearch } from '@/composables/useRecordSearch'
@@ -53,6 +50,7 @@ const props = defineProps<{
   sourceName?: string
   literatureMetadata?: any
   selectedFileId?: string | null
+  externalExportRequest?: { id: number, format: ExportFormat } | null
 }>()
 
 const emit = defineEmits<{
@@ -61,7 +59,6 @@ const emit = defineEmits<{
 }>()
 
 const PAGE_SIZE = 10
-const showExportMenu = ref(false)
 const exporting = ref(false)
 type ExportFormat = 'json' | 'csv' | 'ndjson'
 
@@ -83,12 +80,9 @@ const {
   cofMin,
   cofMax,
   currentPage,
-  resultView,
-  graphRefreshKey,
   totalPages,
   rangeStart,
   rangeEnd,
-  currentFilter,
   isLoadRangeInvalid,
   isCofRangeInvalid,
   hasInvalidManualRange,
@@ -132,7 +126,7 @@ type AdvancedFilterState = {
   cofMax: string
 }
 
-const showAdvancedFilters = ref(true)
+const showAdvancedFilters = ref(false)
 const activeAdvancedFilterTab = ref<AdvancedFilterTab>('tribopair')
 const appliedAdvancedFilterState = ref<AdvancedFilterState>(captureAdvancedFilterState())
 
@@ -611,7 +605,6 @@ function onPreviewWheel(e: WheelEvent) {
 
 function onGlobalKeydown(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
-  if (showExportMenu.value) showExportMenu.value = false
   if (imagePreview.value.open) closeImagePreview()
   if (structurePreview.value.open) closeStructurePreview()
   if (pdfLocate.value.open) closePdfLocate()
@@ -1043,7 +1036,6 @@ async function fetchAllFilteredRecords(): Promise<RecordResponse[]> {
 }
 
 async function exportVerifiedData(format: ExportFormat) {
-  showExportMenu.value = false
   if (exporting.value) return
   exporting.value = true
   try {
@@ -1079,6 +1071,14 @@ async function exportVerifiedData(format: ExportFormat) {
   }
 }
 
+watch(
+  () => props.externalExportRequest?.id,
+  (requestId, previousId) => {
+    if (!requestId || requestId === previousId || !props.externalExportRequest) return
+    void exportVerifiedData(props.externalExportRequest.format)
+  },
+)
+
 onMounted(async () => {
   await loadOptions()
   await fetchData()
@@ -1094,61 +1094,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="flex h-full flex-col overflow-hidden bg-slate-50 dark:bg-[#07111d] dark:text-slate-100">
     <div class="border-b bg-white px-6 py-4 dark:border-slate-800 dark:bg-slate-950/80">
-      <div class="mb-6 flex items-start justify-between">
-        <div>
-          <div class="flex items-center gap-2">
-            <BookOpen class="h-6 w-6 text-blue-600" />
-            <h1 class="text-xl font-bold text-slate-900 dark:text-slate-100">IonicLink Sourcing</h1>
-          </div>
-          <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Automatically locate data sources; dual verification ensures extraction precision.</p>
-        </div>
-        <div class="flex items-center gap-3">
-          <button
-            class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
-            @click="emit('view-literature')"
-          >
-            <BookOpen class="h-4 w-4" /> Literature Mgmt
-          </button>
-          <div class="relative">
-            <button
-              class="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
-              :disabled="exporting"
-              @click="showExportMenu = !showExportMenu"
-            >
-              <Download class="h-4 w-4" />
-              {{ exporting ? 'Exporting...' : 'Export Verified Data' }}
-            </button>
-            <div
-              v-if="showExportMenu"
-              class="absolute right-0 z-20 mt-2 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900"
-            >
-              <button
-                type="button"
-                class="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
-                @click="exportVerifiedData('json')"
-              >
-                Export as JSON
-              </button>
-              <button
-                type="button"
-                class="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
-                @click="exportVerifiedData('csv')"
-              >
-                Export as CSV
-              </button>
-              <button
-                type="button"
-                class="block w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800"
-                @click="exportVerifiedData('ndjson')"
-              >
-                Export as NDJSON
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <section class="mb-6 overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_60px_-40px_rgba(15,23,42,0.4)] dark:border-slate-800 dark:bg-slate-950/85">
+      <section class="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_60px_-40px_rgba(15,23,42,0.4)] dark:border-slate-800 dark:bg-slate-950/85">
         <div class="space-y-4 p-4 md:p-5">
           <div class="flex flex-col gap-3 xl:flex-row xl:items-center">
             <div class="relative min-w-0 flex-1">
@@ -1463,43 +1409,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="flex-1 overflow-auto px-6 py-4">
-      <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div class="inline-flex rounded-full border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-800 dark:bg-slate-950/80">
-          <button
-            type="button"
-            class="rounded-full px-4 py-2 text-sm font-semibold transition"
-            :class="resultView === 'table'
-              ? 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300'
-              : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'"
-            @click="resultView = 'table'"
-          >
-            数据表
-          </button>
-          <button
-            type="button"
-            class="rounded-full px-4 py-2 text-sm font-semibold transition"
-            :class="resultView === 'graph'
-              ? 'bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300'
-              : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'"
-            @click="resultView = 'graph'"
-          >
-            关系图谱
-          </button>
-        </div>
-        <p class="text-xs text-slate-500 dark:text-slate-400">
-          图谱基于当前筛选结果生成，点击节点或边查看参数关系明细。
-        </p>
-      </div>
-
-      <RelationshipGraphPanel
-        v-if="resultView === 'graph'"
-        :filter="currentFilter"
-        :active="resultView === 'graph'"
-        :refresh-key="graphRefreshKey"
-      />
-
       <RecordTable
-        v-else
         :loading="loading"
         :records="result.items"
         :deleting-row-id="deletingRowId"
@@ -1513,7 +1423,7 @@ onBeforeUnmount(() => {
       />
     </div>
 
-    <div v-if="resultView === 'table'" class="flex items-center justify-between border-t bg-white px-6 py-3 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-950/80 dark:text-slate-400">
+    <div class="flex items-center justify-between border-t bg-white px-6 py-3 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-950/80 dark:text-slate-400">
       <div>
         <template v-if="result.total > 0">
           Showing {{ rangeStart }} to {{ rangeEnd }} (Total {{ result.total }})

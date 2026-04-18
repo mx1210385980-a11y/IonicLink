@@ -123,7 +123,6 @@
   }
 }
 
-/* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -143,7 +142,6 @@
   background: hsl(var(--muted-foreground) / 0.5);
 }
 
-/* Smooth transitions */
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.3s ease;
@@ -154,7 +152,6 @@
   opacity: 0;
 }
 
-/* Gradient text */
 .gradient-text {
   background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(197 89% 61%) 100%);
   -webkit-background-clip: text;
@@ -162,14 +159,12 @@
   background-clip: text;
 }
 
-/* Glass effect */
 .glass {
   background: hsl(var(--background) / 0.8);
   backdrop-filter: blur(12px);
   border: 1px solid hsl(var(--border) / 0.5);
 }
 
-/* Source Grounding: Highlight animations */
 .highlight-active {
   animation: highlight-pulse 2s ease-in-out infinite;
 }

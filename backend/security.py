@@ -18,7 +18,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from database import get_db_session
-from models.db_models import CleanedDataset, Literature, ResearchGroup, TribologyData, User, Workspace
+from models.db_models import (
+    CleanedDataset,
+    DiffusionCandidate,
+    DiffusionRecord,
+    Literature,
+    RecordCandidate,
+    ResearchGroup,
+    TribologyData,
+    User,
+    Workspace,
+)
 
 ROLE_PRINCIPAL_INVESTIGATOR = "principal_investigator"
 ROLE_GROUP_ADMIN = "group_admin"
@@ -353,6 +363,66 @@ async def require_record_access(
     if write and not can_manage_literature(principal, record.literature):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to modify this record")
     return record
+
+
+async def require_candidate_access(
+    db: AsyncSession,
+    principal: AuthPrincipal,
+    candidate_id: int,
+    *,
+    write: bool = False,
+) -> RecordCandidate:
+    stmt = (
+        select(RecordCandidate)
+        .options(selectinload(RecordCandidate.literature), selectinload(RecordCandidate.promoted_record))
+        .where(RecordCandidate.id == candidate_id)
+    )
+    candidate = (await db.execute(stmt)).scalar_one_or_none()
+    if not candidate or not can_view_literature(principal, candidate.literature):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Candidate not found")
+    if write and not can_manage_literature(principal, candidate.literature):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to modify this candidate")
+    return candidate
+
+
+async def require_diffusion_record_access(
+    db: AsyncSession,
+    principal: AuthPrincipal,
+    record_id: int,
+    *,
+    write: bool = False,
+) -> DiffusionRecord:
+    stmt = (
+        select(DiffusionRecord)
+        .options(selectinload(DiffusionRecord.literature))
+        .where(DiffusionRecord.id == record_id)
+    )
+    record = (await db.execute(stmt)).scalar_one_or_none()
+    if not record or not can_view_literature(principal, record.literature):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Diffusion record not found")
+    if write and not can_manage_literature(principal, record.literature):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to modify this diffusion record")
+    return record
+
+
+async def require_diffusion_candidate_access(
+    db: AsyncSession,
+    principal: AuthPrincipal,
+    candidate_id: int,
+    *,
+    write: bool = False,
+) -> DiffusionCandidate:
+    stmt = (
+        select(DiffusionCandidate)
+        .options(selectinload(DiffusionCandidate.literature), selectinload(DiffusionCandidate.promoted_record))
+        .where(DiffusionCandidate.id == candidate_id)
+    )
+    candidate = (await db.execute(stmt)).scalar_one_or_none()
+    if not candidate or not can_view_literature(principal, candidate.literature):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Diffusion candidate not found")
+    if write and not can_manage_literature(principal, candidate.literature):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to modify this diffusion candidate")
+    return candidate
 
 
 async def require_cleaned_dataset_access(

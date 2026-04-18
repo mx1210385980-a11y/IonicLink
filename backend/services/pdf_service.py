@@ -24,7 +24,9 @@ def resolve_existing_path(raw_path: str | None) -> str | None:
     candidates = [raw_path]
     if not os.path.isabs(raw_path):
         backend_root = Path(__file__).resolve().parents[1]
+        workspace_root = backend_root.parent
         candidates.append(str((backend_root / raw_path).resolve()))
+        candidates.append(str((workspace_root / raw_path).resolve()))
 
     for candidate in candidates:
         if candidate and os.path.exists(candidate):
