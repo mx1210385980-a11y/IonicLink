@@ -1,18 +1,36 @@
 import logging
 import os
 from contextlib import asynccontextmanager
+from importlib import import_module
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_db
 from logging_config import setup_logging
-from routers import agent_system, auth_router, data_explorer, extraction, mentor_progress, model_cleaning, model_training, monitor_router, sync_router
 from services.agent_runtime_service import get_agent_runtime
 from services.literature_monitor_service import get_literature_monitor_service
 
 setup_logging()
 logger = logging.getLogger(__name__)
+
+
+def _include_router_module(
+    app: FastAPI,
+    module_name: str,
+    *,
+    optional: bool = False,
+    attr_name: str = "router",
+) -> None:
+    try:
+        module = import_module(module_name)
+    except Exception:
+        if optional:
+            logger.exception("Skipping optional router %s because import failed", module_name)
+            return
+        raise
+
+    app.include_router(getattr(module, attr_name))
 
 
 @asynccontextmanager
@@ -59,15 +77,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(extraction.router)
-app.include_router(sync_router.router)
-app.include_router(data_explorer.router)
-app.include_router(mentor_progress.router)
-app.include_router(model_cleaning.router)
-app.include_router(model_training.router)
-app.include_router(agent_system.router)
-app.include_router(auth_router.router)
-app.include_router(monitor_router.router)
+_include_router_module(app, "routers.extraction")
+_include_router_module(app, "routers.sync_router")
+_include_router_module(app, "routers.data_explorer")
+_include_router_module(app, "routers.mentor_progress")
+_include_router_module(app, "routers.model_cleaning", optional=True)
+_include_router_module(app, "routers.model_training", optional=True)
+_include_router_module(app, "routers.agent_system")
+_include_router_module(app, "routers.auth_router")
+_include_router_module(app, "routers.monitor_router")
 
 
 @app.get("/")

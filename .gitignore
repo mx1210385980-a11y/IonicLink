@@ -11,6 +11,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 .venv/
+.venv*/
 env/
 venv/
 ENV/
@@ -34,6 +35,23 @@ yarn-error.log*
 backend/data/literature_monitor_state.json
 backend/data/literature_monitor_proxy_queue.json
 backend/data/literature_monitor_pdfs/
+
+# Backend runtime data
+backend/data/.idea/
+backend/data/*.db
+backend/data/*.db-*
+backend/data/*.sqlite
+backend/data/*.sqlite3
+backend/temp_uploads/
+
+# Frontend local outputs
+frontend/pnpm-lock.yaml
+frontend/coverage/
+frontend/err.txt
+frontend/errors.txt
+frontend/tmp.pdf
+frontend/tsc-errors.txt
+frontend/tsc-errors-utf8.txt
 
 # OS files
 .DS_Store
