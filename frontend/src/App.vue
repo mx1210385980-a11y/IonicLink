@@ -54,6 +54,7 @@ const statusLabelKeys = {
   error: 'status.error',
   failed: 'status.failed',
   idle: 'status.idle',
+  no_data: 'status.completed',
   processing: 'status.processing',
   running: 'status.running',
 } as const
@@ -70,6 +71,7 @@ const {
   batchFiles,
   currentSection,
   currentView,
+  defaultExtractorType,
   explorerDoi,
   groundingHighlightData,
   groundingPdfUrl,
@@ -94,6 +96,8 @@ const {
   selectedScopeKey,
   sessionState,
   sidebarTab,
+  setDefaultExtractorType,
+  setFileExtractorType,
   toggleDarkMode,
 } = useAppShell(fileUploadRef, chatPanelRef)
 
@@ -124,7 +128,12 @@ const activeScopeLabel = computed(() => {
 })
 const selectedFile = computed(() => batchFiles.value.find((file) => file.id === selectedFileId.value) || null)
 const selectedFileName = computed(() => selectedFile.value?.name || t('common.no_file_selected'))
-const runStateLabel = computed(() => formatMappedLabel(String(activeExtractionRun.value?.status || 'idle'), statusLabelKeys))
+const runStateLabel = computed(() => {
+  if (String(activeExtractionRun.value?.status || '').toLowerCase() === 'no_data') {
+    return 'NO DATA / No extractable records found'
+  }
+  return formatMappedLabel(String(activeExtractionRun.value?.status || 'idle'), statusLabelKeys)
+})
 const latestFailedFile = computed(() => [...batchFiles.value].reverse().find((file) => file.status === 'error') || null)
 const latestReviewFile = computed(() => {
   return [...batchFiles.value].reverse().find((file) => file.status === 'success' && file.hasWarnings)
@@ -395,6 +404,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
           :latest-agent-workflow="latestAgentWorkflow"
           :active-run="activeExtractionRun"
           :active-file-name="activeExtractionFileName"
+          :default-extractor-type="defaultExtractorType"
           @change-section="handleSectionChange"
           @select-file="setSelectedFile"
           @remove-file="handleRemoveFile"
@@ -408,6 +418,8 @@ function handleHomeAction(action: HomeSuggestedAction) {
           @open-review="navigateTo('review', 'inbox')"
           @open-knowledge="navigateTo('knowledge', 'explorer')"
           @clear-doi="clearExplorerDoi"
+          @set-default-extractor-type="setDefaultExtractorType"
+          @set-file-extractor-type="setFileExtractorType"
         />
 
         <ReviewPage

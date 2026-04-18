@@ -1,0 +1,61 @@
+\documentclass[UTF8,a4paper,12pt]{ctexart}
+\usepackage[margin=2.54cm]{geometry}
+\usepackage{graphicx}
+\usepackage{longtable,booktabs,array,calc}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{indentfirst}
+
+\hypersetup{hidelinks}
+\linespread{1.25}\selectfont
+\setlength{\parindent}{2em}
+\setlength{\LTleft}{0pt}
+\setlength{\LTright}{0pt}
+\setcounter{secnumdepth}{0}
+\setcounter{tocdepth}{3}
+\renewcommand{\contentsname}{目\quad 录}
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+
+\makeatletter
+\renewcommand{\@cite}[2]{\textsuperscript{\normalfont\fontsize{8.5}{8.5}\selectfont[#1\if@tempswa , #2\fi]}}
+\renewenvironment{thebibliography}[1]
+  {%
+    \clearpage
+    \phantomsection
+    \addcontentsline{toc}{section}{参考文献}
+    \thispagestyle{plain}%
+    \noindent 参考文献\hfill 学士学位论文\par
+    \vspace{0.2\baselineskip}
+    \hrule
+    \vspace{2.0\baselineskip}
+    \begin{center}
+      \zihao{2}\bfseries 参考文献
+    \end{center}
+    \vspace{1.0\baselineskip}
+    \zihao{-4}
+    \list{\@biblabel{\@arabic\c@enumiv}}%
+      {\settowidth\labelwidth{\@biblabel{#1}}%
+       \leftmargin\labelwidth
+       \advance\leftmargin\labelsep
+       \setlength{\itemsep}{0.6\baselineskip}%
+       \setlength{\parsep}{0pt}%
+       \setlength{\topsep}{0pt}%
+       \setlength{\partopsep}{0pt}%
+       \usecounter{enumiv}%
+       \let\p@enumiv\@empty
+       \renewcommand\theenumiv{\@arabic\c@enumiv}}%
+    \sloppy
+    \clubpenalty4000
+    \widowpenalty4000
+    \sfcode`\.\@m
+  }
+  {%
+    \def\@noitemerr{\@latex@warning{Empty `thebibliography' environment}}%
+    \endlist
+  }
+\makeatother
+
+\begin{document}
+\input{body.tex}
+\end{document}

@@ -9,6 +9,7 @@ Implements scoped batch sync logic:
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import traceback
@@ -186,6 +187,7 @@ async def get_or_create_literature(
         issue=getattr(metadata, "issue", None),
         pages=getattr(metadata, "pages", None),
         file_path=getattr(metadata, "file_path", None),
+        file_hash=getattr(metadata, "file_hash", None),
         group_id=principal.group.id,
         workspace_id=scope.workspace.id if scope.workspace else None,
         created_by_user_id=principal.user.id,
@@ -300,6 +302,12 @@ async def sync_batch_data(
                     source=getattr(record, "source", None),
                     source_page=getattr(record, "source_page", None),
                     source_figure=getattr(record, "source_figure", None),
+                    sample_id=getattr(record, "sample_id", None),
+                    series_id=getattr(record, "series_id", None),
+                    field_evidence_json=json.dumps(getattr(record, "field_evidence_json", {}) or {}, ensure_ascii=False),
+                    review_status=getattr(record, "review_status", None),
+                    record_origin=getattr(record, "record_origin", None),
+                    assembly_notes=getattr(record, "assembly_notes", None),
                     confidence=record.confidence,
                 )
             )

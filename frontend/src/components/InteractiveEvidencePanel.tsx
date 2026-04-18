@@ -8,7 +8,9 @@ import {
   FileStack,
   ImageIcon,
   Info,
+  X,
   ScanSearch,
+  ZoomIn,
 } from 'lucide-react'
 import {
   useEffect,
@@ -360,6 +362,12 @@ export interface InteractiveEvidencePanelProps {
   ) => void
 }
 
+type ExpandedImageState = {
+  src: string
+  alt: string
+  section: string
+}
+
 export function InteractiveEvidencePanel({
   row,
   className,
@@ -371,6 +379,7 @@ export function InteractiveEvidencePanel({
   const [activeTag, setActiveTag] = useState<EvidenceTagType>('cof')
   const [isTransitioning, setIsTransitioning] = useState(false)
   const [showRationale, setShowRationale] = useState(false)
+  const [expandedImage, setExpandedImage] = useState<ExpandedImageState | null>(null)
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const cofSnippet = row.evidenceMap.cof
@@ -407,6 +416,25 @@ export function InteractiveEvidencePanel({
       }
     }
   }, [])
+
+  useEffect(() => {
+    if (!expandedImage) return undefined
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setExpandedImage(null)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    const originalOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      document.body.style.overflow = originalOverflow
+    }
+  }, [expandedImage])
 
   useEffect(() => {
     const entry = tagState.find((state) => state.tag === activeTag)
@@ -461,25 +489,36 @@ export function InteractiveEvidencePanel({
     }
   }
 
+  function handleExpandImage() {
+    if (!activeSnippet.imageUrl) return
+
+    setExpandedImage({
+      src: activeSnippet.imageUrl,
+      alt: activeSnippet.previewLabel || activeSnippet.target || activeSnippet.section,
+      section: activeSnippet.section,
+    })
+  }
+
   return (
-    <section
-      className={cn(
-        'overflow-hidden rounded-[28px] border border-slate-800/90 bg-gradient-to-br p-6 text-slate-100 shadow-[0_24px_60px_rgba(2,6,23,0.28)]',
-        getPanelGradient(activeTag),
-        className,
-      )}
-      onMouseLeave={scheduleReset}
-    >
-      <div className="mb-5 flex items-center gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-slate-700/80 bg-slate-900/80">
-          <ScanSearch className={cn('h-4.5 w-4.5', activeColors.text)} />
+    <>
+      <section
+        className={cn(
+          'overflow-hidden rounded-[28px] border border-slate-800/90 bg-gradient-to-br p-6 text-slate-100 shadow-[0_24px_60px_rgba(2,6,23,0.28)]',
+          getPanelGradient(activeTag),
+          className,
+        )}
+        onMouseLeave={scheduleReset}
+      >
+        <div className="mb-5 flex items-center gap-3">
+          <div className="flex h-9 w-9 items-center justify-center rounded-2xl border border-slate-700/80 bg-slate-900/80">
+            <ScanSearch className={cn('h-4.5 w-4.5', activeColors.text)} />
+          </div>
+          <div>
+            <h2 className="text-[1.95rem] font-semibold tracking-tight text-slate-50">
+              {title}
+            </h2>
+          </div>
         </div>
-        <div>
-          <h2 className="text-[1.95rem] font-semibold tracking-tight text-slate-50">
-            {title}
-          </h2>
-        </div>
-      </div>
 
       <div className="mb-5 rounded-[22px] border border-slate-700/80 bg-slate-900/35 p-4">
         <div className="flex flex-wrap gap-2.5">
@@ -587,7 +626,12 @@ export function InteractiveEvidencePanel({
                   <ImageIcon className={cn('h-4 w-4', activeColors.text)} />
                   <span>{activeSnippet.section}</span>
                 </div>
-                <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-slate-100">
+                <button
+                  type="button"
+                  onClick={handleExpandImage}
+                  className="group relative block w-full overflow-hidden rounded-3xl border border-slate-200 bg-slate-100 text-left transition hover:border-slate-300 hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+                  title="Click to enlarge"
+                >
                   <img
                     src={activeSnippet.imageUrl}
                     alt={activeSnippet.previewLabel || activeSnippet.target || activeSnippet.section}
@@ -602,7 +646,13 @@ export function InteractiveEvidencePanel({
                       style={snippetStyle}
                     />
                   ) : null}
-                </div>
+                  <div className="pointer-events-none absolute inset-x-4 bottom-4 flex items-center justify-end">
+                    <span className="inline-flex items-center gap-2 rounded-full bg-slate-950/72 px-3 py-1.5 text-xs font-semibold text-white opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
+                      <ZoomIn className="h-3.5 w-3.5" />
+                      Click to enlarge
+                    </span>
+                  </div>
+                </button>
               </div>
             ) : (
               <div
@@ -657,8 +707,44 @@ export function InteractiveEvidencePanel({
             </p>
           </div>
         </div>
-      </div>
-    </section>
+        </div>
+      </section>
+      {expandedImage ? (
+        <div
+          className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/82 p-5 backdrop-blur-sm"
+          onClick={() => setExpandedImage(null)}
+        >
+          <div
+            className="relative w-full max-w-7xl rounded-[28px] border border-white/12 bg-slate-950/92 p-4 shadow-[0_32px_120px_rgba(15,23,42,0.55)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center justify-between gap-4 px-2">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                  PDF Crop Preview
+                </p>
+                <p className="truncate text-sm text-slate-200">{expandedImage.section}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setExpandedImage(null)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10 hover:text-white"
+                title="Close enlarged preview"
+              >
+                <X className="h-4.5 w-4.5" />
+              </button>
+            </div>
+            <div className="flex max-h-[calc(100vh-8rem)] items-center justify-center overflow-auto rounded-[22px] bg-slate-900/70 p-3">
+              <img
+                src={expandedImage.src}
+                alt={expandedImage.alt}
+                className="h-auto max-h-[calc(100vh-12rem)] w-auto max-w-full rounded-2xl object-contain"
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   )
 }
 

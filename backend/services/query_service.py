@@ -412,13 +412,70 @@ async def get_filter_options(
     }
 
 
-def validate_extraction_result(records: list[dict[str, Any]], extraction_summary: dict[str, Any] | None) -> dict[str, Any]:
+def validate_extraction_result(
+    records: list[dict[str, Any]],
+    extraction_summary: dict[str, Any] | None,
+    extractor_type: str = "tribology",
+) -> dict[str, Any]:
     normalized_records = records or []
+    duplicate_keys: set[tuple[Any, ...]] = set()
+    duplicate_count = 0
+    warnings = []
+
+    if extractor_type == "diffusion":
+        missing_system = 0
+        missing_lubricant = 0
+        missing_diffusion = 0
+
+        for record in normalized_records:
+            system_name = str(record.get("system_name") or "").strip()
+            ionic_liquid = str(record.get("ionic_liquid") or "").strip()
+            d_value = record.get("D_total") or record.get("D_cation") or record.get("D_anion")
+
+            if not system_name or system_name.lower().startswith("unknown"):
+                missing_system += 1
+            if not ionic_liquid or ionic_liquid.lower().startswith("unknown"):
+                missing_lubricant += 1
+            if d_value in (None, ""):
+                missing_diffusion += 1
+
+            dedupe_key = (
+                system_name.lower(),
+                ionic_liquid.lower(),
+                str(record.get("D_total") or "").strip().lower(),
+                str(record.get("D_cation") or "").strip().lower(),
+                str(record.get("D_anion") or "").strip().lower(),
+                str(record.get("source_page") or "").strip(),
+                str(record.get("source") or "").strip().lower(),
+            )
+            if dedupe_key in duplicate_keys:
+                duplicate_count += 1
+            else:
+                duplicate_keys.add(dedupe_key)
+
+        if missing_system:
+            warnings.append(f"{missing_system} records are missing system names.")
+        if missing_lubricant:
+            warnings.append(f"{missing_lubricant} records are missing ionic-liquid labels.")
+        if missing_diffusion:
+            warnings.append(f"{missing_diffusion} records are missing diffusion coefficients.")
+        if duplicate_count:
+            warnings.append(f"{duplicate_count} duplicate diffusion candidate groups were detected after extraction.")
+
+        return {
+            "record_count": len(normalized_records),
+            "summary_final_count": int((extraction_summary or {}).get("final_count") or len(normalized_records)),
+            "missing_system_count": missing_system,
+            "missing_lubricant_count": missing_lubricant,
+            "missing_diffusion_count": missing_diffusion,
+            "duplicate_count": duplicate_count,
+            "quality_gate_passed": missing_diffusion == 0,
+            "warnings": warnings,
+        }
+
     missing_material = 0
     missing_lubricant = 0
     missing_cof = 0
-    duplicate_keys: set[tuple[Any, ...]] = set()
-    duplicate_count = 0
 
     for record in normalized_records:
         material = str(record.get("material_name") or "").strip()
@@ -444,7 +501,6 @@ def validate_extraction_result(records: list[dict[str, Any]], extraction_summary
         else:
             duplicate_keys.add(dedupe_key)
 
-    warnings = []
     if missing_material:
         warnings.append(f"{missing_material} records are missing material labels.")
     if missing_lubricant:

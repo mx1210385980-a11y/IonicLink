@@ -50,6 +50,8 @@ def _condition_signature(record: TribologyData) -> Tuple[str, ...]:
 
 
 def _entity_key(record: TribologyData) -> Tuple[str, ...]:
+    sample_id = _norm_text(getattr(record, "sample_id", None))
+    series_id = _norm_text(getattr(record, "series_id", None))
     source_figure = _norm_text(getattr(record, "source_figure", None))
     source_page = str(getattr(record, "source_page", None) or "")
     source = _norm_text(getattr(record, "source", None))
@@ -62,6 +64,8 @@ def _entity_key(record: TribologyData) -> Tuple[str, ...]:
     return (
         _norm_text(record.material_name),
         _norm_text(record.ionic_liquid),
+        sample_id,
+        series_id,
         outcome,
         source,
         source_page,
@@ -149,11 +153,25 @@ def _merge_missing(target: TribologyData, source: TribologyData) -> TribologyDat
         "friction_force",
         "value_origin",
         "evidence",
+        "sample_id",
+        "series_id",
+        "review_status",
+        "record_origin",
+        "assembly_notes",
     ):
         current = getattr(target, field, None)
         incoming = getattr(source, field, None)
         if (current is None or str(current).strip() == "") and incoming not in (None, ""):
             setattr(target, field, incoming)
+
+    target_field_evidence = getattr(target, "field_evidence_json", None) or {}
+    source_field_evidence = getattr(source, "field_evidence_json", None) or {}
+    if not target_field_evidence and source_field_evidence:
+        setattr(target, "field_evidence_json", source_field_evidence)
+    elif isinstance(target_field_evidence, dict) and isinstance(source_field_evidence, dict) and source_field_evidence:
+        merged_field_evidence = dict(target_field_evidence)
+        merged_field_evidence.update({k: v for k, v in source_field_evidence.items() if k not in merged_field_evidence})
+        setattr(target, "field_evidence_json", merged_field_evidence)
 
     target_conf = getattr(target, "confidence", None)
     source_conf = getattr(source, "confidence", None)

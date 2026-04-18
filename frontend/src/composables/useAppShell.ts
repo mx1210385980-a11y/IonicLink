@@ -12,6 +12,7 @@ import {
   uploadFile,
   type AgentWorkflow,
   type BatchFile,
+  type ExtractorType,
   type ExtractionResponse,
   type ExtractionRunDetail,
   type TribologyData,
@@ -44,7 +45,7 @@ type ChatPanelBridge = {
   addMessage: (role: 'user' | 'assistant', message: string) => void
 }
 
-const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'error', 'cancelled'])
+const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'error', 'cancelled', 'no_data'])
 const DARK_MODE_STORAGE_KEY = 'ioniclink-theme'
 const BATCH_EXTRACTION_CONCURRENCY = 3
 const SESSION_RESTORE_TIMEOUT_MS = 9000
@@ -72,6 +73,7 @@ export function useAppShell(
   const isAuthenticating = ref(false)
   const authError = ref('')
   const groundingHighlightData = ref<HighlightRect[]>([])
+  const defaultExtractorType = ref<ExtractorType>('tribology')
 
   const activeScope = computed(() => getActiveScope())
   const availableScopes = computed(() => sessionState.user?.availableScopes || [])
@@ -152,7 +154,20 @@ export function useAppShell(
     }
   })
 
-  function hasWarnings(records: TribologyData[]): boolean {
+  function deriveValidationStatus(reviewStatus?: string | null): TribologyData['validationStatus'] {
+    const normalized = String(reviewStatus || '').trim().toLowerCase()
+    if (normalized === 'approved') return 'verified'
+    if (normalized === 'flagged' || normalized === 'needs_evidence') return 'warning'
+    return 'unverified'
+  }
+
+  function hasWarnings(records: TribologyData[], extractorType: ExtractorType = 'tribology'): boolean {
+    if (extractorType === 'diffusion') {
+      return records.some((record) => {
+        const hasCoefficient = [record.D_total, record.D_cation, record.D_anion].some((value) => value !== null && value !== undefined)
+        return !record.system_name || !record.ionic_liquid || !hasCoefficient
+      })
+    }
     return records.some((record) => !record.cof || record.cof === '-' || record.cof === 'null')
   }
 
@@ -256,6 +271,7 @@ export function useAppShell(
 
   function mapStageToProgress(stage?: string | null, status?: string | null): number {
     if (String(status || '').toLowerCase() === 'completed') return 100
+    if (String(status || '').toLowerCase() === 'no_data') return 100
 
     const normalized = String(stage || '').trim().toLowerCase()
     if (!normalized) return 8
@@ -316,26 +332,51 @@ export function useAppShell(
     batchFile.errorMessage = undefined
   }
 
+  function setFileNoData(batchFile: BatchFile | undefined, message: string) {
+    if (!batchFile) return
+    batchFile.status = 'no_data'
+    batchFile.progress = 100
+    batchFile.progressMessage = message
+    batchFile.errorMessage = message
+  }
+
   function normalizeExtractionPayload(fileId: string, response: ExtractionResponse) {
     const metadata = (response.metadata || undefined) as BatchFile['metadata']
+    const extractorType = (response.extractor_type || response.extraction_summary?.extractor_type || 'tribology') as ExtractorType
     const rawRecords = Array.isArray(response.data) ? response.data : []
     const records = rawRecords.map((record: any, index: number) => ({
       ...record,
       id: record.id || `${fileId}-${index}-${Date.now()}`,
       fileId,
+      extractor_type: record.extractor_type || extractorType,
+      validationStatus: record.validationStatus || deriveValidationStatus(record.review_status),
     }))
 
     return {
       metadata,
       records,
+      extractorType,
     }
+  }
+
+  function isNoDataResponse(response: ExtractionResponse, recordCount: number) {
+    const status = String(response.status || '').toLowerCase()
+    return status === 'no_data'
+      || (status !== 'processing' && !!response.success && recordCount === 0)
+  }
+
+  function isNoDataRun(run: ExtractionRunDetail) {
+    const status = String(run.status || '').toLowerCase()
+    if (status === 'no_data') return true
+    if (!['completed', 'success', 'failed', 'error', 'cancelled'].includes(status)) return false
+    return Number(run.final_count || 0) === 0
   }
 
   function syncActiveRunFromResponse(
     fileId: string,
     response: ExtractionResponse,
     finalRecordCount: number,
-    forcedStatus?: 'running' | 'completed' | 'failed',
+    forcedStatus?: 'running' | 'completed' | 'failed' | 'no_data',
   ) {
     const summary: any = response.extraction_summary || {}
     const existing = activeExtractionRun.value
@@ -343,15 +384,19 @@ export function useAppShell(
       forcedStatus ||
       (response.status === 'processing'
         ? 'running'
+        : isNoDataResponse(response, finalRecordCount)
+          ? 'no_data'
         : response.success
           ? 'completed'
           : 'failed')
 
     const progressLog = [...((summary.progress_log as ExtractionRunDetail['progress_log']) || existing?.progress_log || [])]
-    if (inferredStatus === 'completed') {
-      const finalMessage = finalRecordCount
-        ? t('progress.saved_records', { count: finalRecordCount })
-        : t('progress.finished_without_records')
+    if (inferredStatus === 'completed' || inferredStatus === 'no_data') {
+      const finalMessage = inferredStatus === 'no_data'
+        ? 'No extractable records found.'
+        : finalRecordCount
+          ? t('progress.saved_records', { count: finalRecordCount })
+          : t('progress.finished_without_records')
       const lastEntry = progressLog[progressLog.length - 1]
       if (!lastEntry || lastEntry.stage !== 'stage_e.finalize' || lastEntry.message !== finalMessage) {
         progressLog.push({ stage: 'stage_e.finalize', message: finalMessage })
@@ -373,15 +418,19 @@ export function useAppShell(
         ...(existing?.summary || {}),
         ...(summary || {}),
         current_stage:
-          inferredStatus === 'completed'
+          inferredStatus === 'completed' || inferredStatus === 'no_data'
             ? 'stage_e.finalize'
             : summary.current_stage || existing?.summary?.current_stage,
         current_message:
-          inferredStatus === 'completed'
-            ? (finalRecordCount ? t('progress.saved_records', { count: finalRecordCount }) : t('progress.finished_without_records'))
+          inferredStatus === 'completed' || inferredStatus === 'no_data'
+            ? (inferredStatus === 'no_data'
+              ? 'No extractable records found.'
+              : (finalRecordCount ? t('progress.saved_records', { count: finalRecordCount }) : t('progress.finished_without_records')))
             : summary.current_message || existing?.summary?.current_message,
       },
-      error_message: inferredStatus === 'failed' ? response.message || existing?.error_message || null : null,
+      error_message: inferredStatus === 'failed' || inferredStatus === 'no_data'
+        ? response.message || existing?.error_message || null
+        : null,
       created_at: existing?.created_at,
       updated_at: new Date().toISOString(),
     }
@@ -390,9 +439,10 @@ export function useAppShell(
   async function fetchLatestRun(fileId: string, silentNotFound: boolean = true) {
     const literatureId = Number(fileId)
     if (!Number.isFinite(literatureId)) return null
+    const extractorType = findBatchFile(fileId)?.extractor_type || 'tribology'
 
     try {
-      return await getLatestExtractionRun(literatureId)
+      return await getLatestExtractionRun(literatureId, extractorType)
     } catch (error: any) {
       if (silentNotFound && error?.response?.status === 404) {
         return null
@@ -407,10 +457,12 @@ export function useAppShell(
 
     if (run.status === 'running' || run.status === 'processing') {
       setFileProcessing(batchFile, snapshot.progress, snapshot.message)
+    } else if (isNoDataRun(run)) {
+      setFileNoData(batchFile, snapshot.message || 'No extractable records found.')
     }
 
     if (activeExtractionFileId.value === fileId) {
-      activeExtractionRun.value = run
+      activeExtractionRun.value = isNoDataRun(run) ? { ...run, status: 'no_data' } : run
       if (isTerminalRunStatus(run.status)) {
         clearExtractionPolling()
       }
@@ -580,6 +632,7 @@ export function useAppShell(
         })
 
     try {
+      const extractorType = batchFile.extractor_type || 'tribology'
       latestAgentWorkflow.value = null
       if (trackActiveRun) {
         startExtractionTracking(fileId)
@@ -590,7 +643,7 @@ export function useAppShell(
         force ? t('progress.reanalyzing_document') : t('progress.dispatching_workflow'),
       )
 
-      let response = await extractData(fileId, force)
+      let response = await extractData(fileId, force, 'high_accuracy', undefined, extractorType)
       latestAgentWorkflow.value = response.agent_workflow || null
       if (trackActiveRun) {
         syncActiveRunFromResponse(fileId, response, 0, response.status === 'processing' ? 'running' : undefined)
@@ -606,11 +659,11 @@ export function useAppShell(
         if (!terminalRun) {
           throw new Error(t('progress.extraction_still_running'))
         }
-        if (terminalRun.status !== 'completed') {
+        if (!['completed', 'no_data'].includes(String(terminalRun.status || '').toLowerCase())) {
           throw new Error(terminalRun.error_message || t('progress.background_failed'))
         }
 
-        response = await extractData(fileId, false)
+        response = await extractData(fileId, false, 'high_accuracy', undefined, extractorType)
         latestAgentWorkflow.value = response.agent_workflow || latestAgentWorkflow.value
         if (trackActiveRun) {
           syncActiveRunFromResponse(fileId, response, 0)
@@ -621,13 +674,27 @@ export function useAppShell(
         await refreshLatestRun(fileId, true)
       }
 
-      const { metadata, records } = normalizeExtractionPayload(fileId, response)
+      const { metadata, records, extractorType: resolvedExtractorType } = normalizeExtractionPayload(fileId, response)
       if (trackActiveRun) {
         syncActiveRunFromResponse(fileId, response, records.length)
       }
       batchFile.metadata = metadata
+      batchFile.extractor_type = resolvedExtractorType
       batchFile.records = records
-      batchFile.hasWarnings = hasWarnings(records)
+      batchFile.hasWarnings = hasWarnings(records, resolvedExtractorType)
+
+      if (isNoDataResponse(response, records.length)) {
+        const message = response.message || 'No extractable records found.'
+        if (trackActiveRun) {
+          syncActiveRunFromResponse(fileId, { ...response, success: true, message }, records.length, 'no_data')
+        }
+        setFileNoData(batchFile, message)
+        return {
+          success: true,
+          message,
+          recordCount: 0,
+        }
+      }
 
       if (!response.success || records.length === 0) {
         const message = response.message || t('progress.no_tribology_data')
@@ -642,7 +709,9 @@ export function useAppShell(
         }
       }
 
-      await syncExtractedRecords(batchFile, fileId, metadata, records, force ? 'Sync Reprocess' : 'Sync')
+      if (resolvedExtractorType !== 'diffusion') {
+        await syncExtractedRecords(batchFile, fileId, metadata, records, force ? 'Sync Reprocess' : 'Sync')
+      }
       setFileSuccess(batchFile, t('progress.extracted_records', { count: records.length }))
 
       return {
@@ -656,30 +725,39 @@ export function useAppShell(
   }
 
   function buildInitialFileState(response: { file_id: string; filename: string; status?: string | null }): BatchFile {
-    const alreadyExtracted = String(response.status || '').toLowerCase() === 'completed'
+    const normalizedStatus = String(response.status || '').toLowerCase()
+    const alreadyExtracted = ['completed', 'no_data'].includes(normalizedStatus)
     return {
       id: response.file_id,
       name: response.filename,
       scopeKey: activeScope.value?.key,
-      status: alreadyExtracted ? 'success' : 'uploaded',
+      extractor_type: defaultExtractorType.value,
+      status: normalizedStatus === 'no_data' ? 'no_data' : (alreadyExtracted ? 'success' : 'uploaded'),
       progress: alreadyExtracted ? 100 : 0,
-      progressMessage: alreadyExtracted ? t('progress.already_extracted_ready') : t('progress.ready_to_extract'),
+      progressMessage: normalizedStatus === 'no_data'
+        ? 'No extractable records found.'
+        : (alreadyExtracted ? t('progress.already_extracted_ready') : t('progress.ready_to_extract')),
       records: [],
       hasWarnings: false,
     }
   }
 
   async function hydrateCompletedUpload(batchFile: BatchFile) {
-    batchFile.status = 'success'
+    batchFile.status = batchFile.status === 'no_data' ? 'no_data' : 'success'
     batchFile.progress = 100
     batchFile.progressMessage = t('progress.loading_cached_results')
     batchFile.errorMessage = undefined
     resetExtractionState(batchFile.id)
-    const response = await extractData(batchFile.id, false)
-    const { metadata, records } = normalizeExtractionPayload(batchFile.id, response)
+    const response = await extractData(batchFile.id, false, 'high_accuracy', undefined, batchFile.extractor_type || 'tribology')
+    const { metadata, records, extractorType } = normalizeExtractionPayload(batchFile.id, response)
     batchFile.metadata = metadata
+    batchFile.extractor_type = extractorType
     batchFile.records = records
-    batchFile.hasWarnings = hasWarnings(records)
+    batchFile.hasWarnings = hasWarnings(records, extractorType)
+    if (isNoDataResponse(response, records.length)) {
+      setFileNoData(batchFile, response.message || 'No extractable records found.')
+      return
+    }
     setFileSuccess(
       batchFile,
       records.length ? t('progress.loaded_cached_records', { count: records.length }) : t('progress.cached_extraction_loaded'),
@@ -719,14 +797,16 @@ export function useAppShell(
           selectedFileId.value = response.file_id
         }
 
-        if (String(response.status || '').toLowerCase() === 'completed') {
+        if (['completed', 'no_data'].includes(String(response.status || '').toLowerCase())) {
           await hydrateCompletedUpload(batchFile)
         }
 
         chatPanelRef.value?.addMessage(
           'assistant',
-          String(response.status || '').toLowerCase() === 'completed'
-            ? t('progress.file_already_indexed', { name: response.filename })
+          String(response.status || '').toLowerCase() === 'no_data'
+            ? `${response.filename}: No extractable records found.`
+            : ['completed', 'no_data'].includes(String(response.status || '').toLowerCase())
+              ? t('progress.file_already_indexed', { name: response.filename })
             : t('progress.file_uploaded', { name: response.filename }),
         )
       }
@@ -751,7 +831,7 @@ export function useAppShell(
           const batchFile = buildInitialFileState(response)
           batchFiles.value.push(batchFile)
 
-          if (String(response.status || '').toLowerCase() === 'completed') {
+          if (['completed', 'no_data'].includes(String(response.status || '').toLowerCase())) {
             await hydrateCompletedUpload(batchFile)
           }
 
@@ -780,10 +860,15 @@ export function useAppShell(
 
       const result = await executeExtraction(fileId, force)
 
-      if (result.success) {
+      if (result.success && result.recordCount > 0) {
         chatPanelRef.value?.addMessage(
           'assistant',
           t('chat.extraction_results_panel', { message: result.message }),
+        )
+      } else if (result.success) {
+        chatPanelRef.value?.addMessage(
+          'assistant',
+          result.message || 'No extractable records found.',
         )
       } else {
         chatPanelRef.value?.addMessage(
@@ -892,6 +977,23 @@ export function useAppShell(
     navigateTo('review', 'inbox')
   }
 
+  function setDefaultExtractorType(extractorType: ExtractorType) {
+    defaultExtractorType.value = extractorType
+    const selected = selectedFileId.value ? findBatchFile(selectedFileId.value) : null
+    if (selected && ['uploaded', 'error', 'no_data', 'success'].includes(String(selected.status || '').toLowerCase())) {
+      selected.extractor_type = extractorType
+    }
+  }
+
+  function setFileExtractorType(fileId: string, extractorType: ExtractorType) {
+    const file = findBatchFile(fileId)
+    if (!file) return
+    file.extractor_type = extractorType
+    if (selectedFileId.value === fileId) {
+      defaultExtractorType.value = extractorType
+    }
+  }
+
   onMounted(() => {
     syncStateFromRoute()
     const storedTheme = window.localStorage.getItem(DARK_MODE_STORAGE_KEY)
@@ -945,6 +1047,7 @@ export function useAppShell(
     batchFiles,
     currentSection,
     currentView,
+    defaultExtractorType,
     explorerDoi,
     groundingHighlightData,
     groundingPdfUrl,
@@ -972,6 +1075,8 @@ export function useAppShell(
     sidebarTab,
     activeExtractionFileName,
     activeExtractionRun,
+    setDefaultExtractorType,
+    setFileExtractorType,
     toggleDarkMode,
   }
 }

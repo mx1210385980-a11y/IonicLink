@@ -46,6 +46,8 @@ Return JSON with top-level key `data`:
       "mol_ratio": "1:70",
       "cation": "EMIM",
       "anion": "TFSI",
+      "sample_id": "BB5-1-M",
+      "series_id": "BB5-1",
       "source": "Fig. 3a",
       "source_page": 5,
       "source_figure": "Fig. 3a",
@@ -70,9 +72,12 @@ Rules:
 - If a friction coefficient is reported as the slope of friction vs load over a sweep,
   store the investigated load interval in `load`/`normal_load` (for example `15-75 nN`).
 - If a figure only implies COF through a fitted line or slope and does not print the numeric value, set `cof` to null. Do not estimate slope values visually.
+- If the text only gives a trend/range summary such as `remains around`, `varies between`, `stays nearly constant`, `tends to decrease`, or `shows a trend`,
+  do not emit it as a final quantitative record.
 - `film_thickness`, `residual_film_thickness_d`, and `layer_spacing_delta` must be numeric thickness values with units only.
 - Never place sample abbreviations, ionic-liquid names, or condition labels into thickness fields.
 - Keep sample abbreviations in `evidence`, `notes`, or abbreviation mappings instead.
+- When a sample code is explicit, capture it in `sample_id` and derive `series_id` only if the series is also explicit or trivially recoverable from the sample code.
 - `source`, `source_page`, `source_figure`, `evidence` are mandatory provenance fields.
 - `evidence` must include distinguishing condition/sample identifiers, not generic statements.
 - If a value is unclear, set it to null.
@@ -106,6 +111,8 @@ Text-specific rules:
 - When the text explicitly says a probe/slider/sphere/colloid and substrate/surface,
   fill the tribopair fields instead of only `material_name`.
 - When a caption or paragraph states a load sweep/range, preserve it as a range string in `load`/`normal_load`.
+- Do not convert trend-only prose such as `remains around` or `stays nearly constant` into structured quantitative records.
+- Capture explicit sample codes into `sample_id` and `series_id` when present.
 """
 
 
@@ -140,6 +147,8 @@ Figure/table-specific rules:
   store `load` and `normal_load` as `15-75 nN` for the derived record.
 - Do not invent a shared COF for legend-only condition maps. If a legend lists symbols/conditions but no per-condition numeric coefficient is shown, return no COF row for that legend entry.
 - If a COF would need to be estimated from the slope of a plotted fit line, leave `cof` null unless the figure/text explicitly prints the numeric value.
+- Keep trend-only caption summaries out of structured records.
+- Capture explicit sample codes into `sample_id` and `series_id` when present.
 """
 
 

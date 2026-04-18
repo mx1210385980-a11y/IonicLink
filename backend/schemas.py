@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from utils.tribopair import compose_tribopair_label, derive_legacy_material_name, derive_legacy_surface_roughness
 
@@ -21,6 +22,7 @@ class LiteratureBase(BaseModel):
     issue: Optional[str] = None
     pages: Optional[str] = None
     file_path: Optional[str] = Field("", alias="filePath")
+    file_hash: Optional[str] = Field(None, alias="fileHash")
 
     class Config:
         populate_by_name = True
@@ -87,8 +89,27 @@ class TribologyDataBase(BaseModel):
     source: Optional[str] = None
     source_page: Optional[int] = Field(None, alias="sourcePage")
     source_figure: Optional[str] = Field(None, alias="sourceFigure")
+    sample_id: Optional[str] = Field(None, alias="sampleId")
+    series_id: Optional[str] = Field(None, alias="seriesId")
+    field_evidence_json: dict[str, Any] = Field(default_factory=dict, alias="fieldEvidenceJson")
+    review_status: Optional[str] = Field(None, alias="reviewStatus")
+    record_origin: Optional[str] = Field(None, alias="recordOrigin")
+    assembly_notes: Optional[str] = Field(None, alias="assemblyNotes")
 
     confidence: float = Field(0.9, ge=0.0, le=1.0)
+
+    @field_validator("field_evidence_json", mode="before")
+    @classmethod
+    def parse_field_evidence_json(cls, value: Any) -> dict[str, Any]:
+        if isinstance(value, str):
+            try:
+                loaded = json.loads(value)
+                return loaded if isinstance(loaded, dict) else {}
+            except Exception:
+                return {}
+        if isinstance(value, dict):
+            return value
+        return {}
 
     @model_validator(mode="after")
     def validate_tribopair(self) -> "TribologyDataBase":

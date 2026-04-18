@@ -4,9 +4,10 @@ from typing import Any
 
 from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.schema import CreateColumn, CreateIndex
 from sqlalchemy.sql.schema import MetaData
 
-CURRENT_SCHEMA_REVISION = "20260331_0001"
+CURRENT_SCHEMA_REVISION = "20260414_0005"
 
 
 def _inspect_schema(sync_conn, metadata: MetaData) -> dict[str, Any]:
@@ -48,6 +49,48 @@ async def stamp_schema_revision(conn: AsyncConnection, revision: str = CURRENT_S
         await conn.execute(text("UPDATE alembic_version SET version_num = :revision"), {"revision": revision})
     else:
         await conn.execute(text("INSERT INTO alembic_version(version_num) VALUES (:revision)"), {"revision": revision})
+
+
+def _literal_sql(sync_conn, column, value: Any) -> str:
+    compiler = sync_conn.dialect.statement_compiler(sync_conn.dialect, None)
+    return compiler.render_literal_value(value, column.type)
+
+
+def _repair_schema(sync_conn, metadata: MetaData, state: dict[str, Any]) -> None:
+    missing_tables = state.get("missing_tables") or []
+    missing_columns = state.get("missing_columns") or {}
+
+    if missing_tables:
+        metadata.create_all(sync_conn, tables=[metadata.tables[name] for name in missing_tables], checkfirst=True)
+
+    if missing_columns:
+        for table_name, column_names in missing_columns.items():
+            table = metadata.tables[table_name]
+            for column_name in column_names:
+                column = table.columns[column_name]
+                column_sql = str(CreateColumn(column).compile(dialect=sync_conn.dialect)).strip()
+                if "DEFAULT" not in column_sql.upper() and column.default is not None and not callable(column.default.arg):
+                    column_sql = f"{column_sql} DEFAULT {_literal_sql(sync_conn, column, column.default.arg)}"
+                sync_conn.execute(text(f'ALTER TABLE "{table_name}" ADD COLUMN {column_sql}'))
+
+    inspector = inspect(sync_conn)
+    existing_indexes = {
+        table_name: {index["name"] for index in inspector.get_indexes(table_name)}
+        for table_name in metadata.tables.keys()
+        if table_name in inspector.get_table_names()
+    }
+    for table_name, table in metadata.tables.items():
+        table_indexes = existing_indexes.get(table_name)
+        if table_indexes is None:
+            continue
+        for index in table.indexes:
+            if index.name in table_indexes:
+                continue
+            sync_conn.execute(CreateIndex(index))
+
+
+async def repair_schema(conn: AsyncConnection, metadata: MetaData, state: dict[str, Any]) -> None:
+    await conn.run_sync(lambda sync_conn: _repair_schema(sync_conn, metadata, state))
 
 
 def format_schema_error(state: dict[str, Any]) -> str:

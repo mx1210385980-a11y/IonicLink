@@ -38,13 +38,15 @@ class AgentRuntimeService:
         file_id: int,
         force: bool = False,
         profile: str = "high_accuracy",
+        extractor_type: str = "tribology",
         strict_cof_mode: bool | None = None,
     ) -> dict[str, Any]:
         logger.info(
-            "Starting extraction workflow for literature_id=%s force=%s profile=%s",
+            "Starting extraction workflow for literature_id=%s force=%s profile=%s extractor_type=%s",
             file_id,
             force,
             profile,
+            extractor_type,
         )
         self._usage_metrics.record_api_call(endpoint="/api/extract/{file_id}")
         self._usage_metrics.record_agent_call(
@@ -60,6 +62,7 @@ class AgentRuntimeService:
                     "file_id": file_id,
                     "force": force,
                     "profile": profile,
+                    "extractor_type": extractor_type,
                     "strict_cof_mode": strict_cof_mode,
                 },
             )

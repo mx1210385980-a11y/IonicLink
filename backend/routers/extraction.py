@@ -2,15 +2,23 @@ import os
 import json
 import logging
 import re
-from typing import List
+from datetime import datetime
+from typing import Any, List
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks, Query, Request
 import base64
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.tribology import TribologyData, ChatRequest, LiteratureMetadata
-from models.db_models import TribologyData as TribologyDataDB
+from models.db_models import (
+    DiffusionCandidate,
+    DiffusionRecord,
+    Literature,
+    RecordCandidate,
+    TribologyData as TribologyDataDB,
+)
 from services.llm_service import llm_service
 from services.data_sync_service import get_records_by_literature, get_all_literature
 from database import get_db
@@ -21,11 +29,19 @@ from security import (
     get_current_principal,
     get_request_scope,
     literature_scope_conditions,
+    require_candidate_access,
+    require_diffusion_candidate_access,
+    require_diffusion_record_access,
     require_literature_access,
     require_record_access,
     scope_filters,
 )
-from services.file_service import save_upload_entry, process_file_background
+from services.file_service import (
+    _count_cached_record_artifacts,
+    _normalize_legacy_no_data_state,
+    process_file_background,
+    save_upload_entry,
+)
 from services.extraction_trace_service import get_extraction_run, list_extraction_candidates
 from services.extraction_trace_service import get_latest_extraction_run_by_literature
 from services.agent_runtime_service import get_agent_runtime
@@ -47,6 +63,438 @@ from services.pdf_service import (
 
 router = APIRouter(prefix="/api", tags=["extraction"])
 logger = logging.getLogger(__name__)
+
+_FIELD_KEY_ALIASES = {
+    "ionic-liquid": "ionic_liquid",
+    "source-page": "source_page",
+}
+
+
+def _normalize_field_key(field_key: str) -> str:
+    key = str(field_key or "").strip().lower().replace(" ", "_")
+    return _FIELD_KEY_ALIASES.get(key, key)
+
+
+def _parse_field_evidence_map(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            loaded = json.loads(raw)
+            return loaded if isinstance(loaded, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _field_value_from_record(record: Any, field_key: str) -> Any:
+    if field_key == "material":
+        return record.material_name
+    if field_key == "ionic_liquid":
+        return record.lubricant
+    if field_key == "cof":
+        return record.cof_raw or record.cof_value
+    if field_key == "load":
+        return record.load_raw or record.load_value
+    if field_key == "speed":
+        return record.speed_value
+    if field_key == "temperature":
+        return record.temperature
+    if field_key == "source_page":
+        return f"Page {record.source_page}" if record.source_page else None
+    return None
+
+
+def _field_grounding_status(entry: dict[str, Any]) -> str:
+    evidence = (entry or {}).get("evidence") or {}
+    if any(evidence.get(key) not in (None, "", []) for key in ("page", "source_label", "quote", "bbox")):
+        return "grounded"
+    if any(evidence.get(key) not in (None, "", []) for key in ("sample_id", "source_type")):
+        return "partial"
+    return "missing"
+
+
+def _build_conditions_entry(field_map: dict[str, Any], record: Any) -> dict[str, Any]:
+    condition_values = [value for value in (record.load_raw or record.load_value, record.speed_value, record.temperature) if value]
+    primary_entry = next(
+        (
+            field_map.get(key)
+            for key in ("load", "speed", "temperature")
+            if isinstance(field_map.get(key), dict) and field_map.get(key)
+        ),
+        {},
+    )
+    return {
+        "value": " | ".join(str(value) for value in condition_values) if condition_values else None,
+        "confidence": primary_entry.get("confidence"),
+        "evidence": primary_entry.get("evidence"),
+        "status": _field_grounding_status(primary_entry),
+        "review_state": primary_entry.get("review_state"),
+        "review_note": primary_entry.get("review_note"),
+    }
+
+
+def _build_record_field_evidence_payload(record: Any) -> dict[str, Any]:
+    field_map = _parse_field_evidence_map(record.field_evidence_json)
+    normalized_fields: dict[str, Any] = {}
+    for key in ("material", "ionic_liquid", "cof", "load", "speed", "temperature", "source_page"):
+        raw_entry = field_map.get(key) if isinstance(field_map.get(key), dict) else {}
+        normalized_fields[key] = {
+            "value": raw_entry.get("value", _field_value_from_record(record, key)),
+            "confidence": raw_entry.get("confidence", record.confidence),
+            "evidence": raw_entry.get("evidence"),
+            "status": _field_grounding_status(raw_entry),
+            "review_state": raw_entry.get("review_state"),
+            "review_note": raw_entry.get("review_note"),
+        }
+
+    normalized_fields["conditions"] = _build_conditions_entry(normalized_fields, record)
+
+    return {
+        "record_id": record.id,
+        "literature_id": record.literature_id,
+        "sample_id": record.sample_id,
+        "series_id": record.series_id,
+        "review_status": record.review_status,
+        "record_origin": record.record_origin,
+        "assembly_notes": record.assembly_notes,
+        "required_fields": ["material", "ionic_liquid", "cof"],
+        "fields": normalized_fields,
+    }
+
+
+class ReviewFieldActionPayload(BaseModel):
+    note: str | None = None
+
+
+def _required_field_missing(field_map: dict[str, Any]) -> list[str]:
+    return [key for key in ("material", "ionic_liquid", "cof") if _field_grounding_status(field_map.get(key) or {}) == "missing"]
+
+
+def _persist_field_map(record: Any, field_map: dict[str, Any]) -> None:
+    record.field_evidence_json = json.dumps(field_map, ensure_ascii=False)
+
+
+def _target_field_keys_for_action(field_key: str, field_map: dict[str, Any]) -> list[str]:
+    if field_key == "conditions":
+        keys = [
+            key
+            for key in (
+                "load",
+                "speed",
+                "temperature",
+                "temperature_value",
+                "confinement_scale_value",
+                "confinement_scale_unit",
+            )
+            if isinstance(field_map.get(key), dict) and field_map.get(key)
+        ]
+        return keys or ["load", "speed", "temperature"]
+    return [field_key]
+
+
+def _recompute_review_status(record: Any, field_map: dict[str, Any], *, approved: bool = False) -> None:
+    missing_required = _required_field_missing(field_map)
+    flagged_required = [
+        key for key in ("material", "ionic_liquid", "cof")
+        if str((field_map.get(key) or {}).get("review_state") or "").strip().lower() == "flagged"
+    ]
+    if approved:
+        record.review_status = "approved"
+        record.assembly_notes = None
+        return
+    if flagged_required:
+        record.review_status = "flagged"
+        record.assembly_notes = f"Flagged fields: {', '.join(flagged_required)}"
+        return
+    if missing_required:
+        record.review_status = "needs_evidence"
+        record.assembly_notes = f"Missing field evidence for: {', '.join(missing_required)}"
+        return
+    record.review_status = "pending_review"
+    record.assembly_notes = None
+
+
+def _copy_candidate_to_final_record(candidate: RecordCandidate, record: TribologyDataDB | None = None) -> TribologyDataDB:
+    target = record or TribologyDataDB(literature_id=candidate.literature_id)
+    target.literature_id = candidate.literature_id
+    target.material_name = candidate.material_name
+    target.lubricant = candidate.lubricant
+    target.cof_value = candidate.cof_value
+    target.cof_operator = candidate.cof_operator
+    target.cof_raw = candidate.cof_raw
+    target.load_value = candidate.load_value
+    target.load_raw = candidate.load_raw
+    target.speed_value = candidate.speed_value
+    target.temperature = candidate.temperature
+    target.potential = candidate.potential
+    target.water_content = candidate.water_content
+    target.probe_material = candidate.probe_material
+    target.probe_geometry = candidate.probe_geometry
+    target.probe_radius = candidate.probe_radius
+    target.probe_roughness = candidate.probe_roughness
+    target.substrate_material = candidate.substrate_material
+    target.substrate_coating = candidate.substrate_coating
+    target.substrate_roughness = candidate.substrate_roughness
+    target.surface_roughness = candidate.surface_roughness
+    target.residual_film_thickness_d = candidate.residual_film_thickness_d
+    target.layer_spacing_delta = candidate.layer_spacing_delta
+    target.film_thickness = candidate.film_thickness
+    target.mol_ratio = candidate.mol_ratio
+    target.cation = candidate.cation
+    target.anion = candidate.anion
+    target.cation_smiles = candidate.cation_smiles
+    target.anion_smiles = candidate.anion_smiles
+    target.il_smiles = candidate.il_smiles
+    target.il_inchikey = candidate.il_inchikey
+    target.alkyl_chain_length = candidate.alkyl_chain_length
+    target.confidence = candidate.confidence
+    target.sample_id = candidate.sample_id
+    target.series_id = candidate.series_id
+    target.field_evidence_json = candidate.field_evidence_json
+    target.review_status = candidate.review_status
+    target.record_origin = "review_promoted_candidate"
+    target.assembly_notes = candidate.assembly_notes
+    target.evidence = candidate.evidence
+    target.evidence_page = candidate.evidence_page
+    target.evidence_bbox = candidate.evidence_bbox
+    target.source = candidate.source
+    target.source_page = candidate.source_page
+    target.source_figure = candidate.source_figure
+    return target
+
+
+_DIFFUSION_REQUIRED_FIELD_KEYS = ("system_name", "ionic_liquid")
+_DIFFUSION_COEFFICIENT_FIELD_KEYS = ("d_total", "d_cation", "d_anion")
+
+
+def _format_diffusion_numeric(value: Any) -> Any:
+    if isinstance(value, float):
+        return float(f"{value:.6g}")
+    return value
+
+
+def _diffusion_field_value_from_record(record: Any, field_key: str) -> Any:
+    if field_key == "system_name":
+        return record.system_name
+    if field_key == "confinement_material_class":
+        return record.confinement_material_class
+    if field_key == "confinement_geometry_class":
+        return record.confinement_geometry_class
+    if field_key == "surface_functional_groups":
+        return record.surface_functional_groups
+    if field_key == "confinement_dimensionality":
+        return record.confinement_dimensionality
+    if field_key == "ionic_liquid":
+        return record.ionic_liquid
+    if field_key == "d_total":
+        return _format_diffusion_numeric(record.d_total)
+    if field_key == "d_cation":
+        return _format_diffusion_numeric(record.d_cation)
+    if field_key == "d_anion":
+        return _format_diffusion_numeric(record.d_anion)
+    if field_key == "d_unit":
+        return record.d_unit
+    if field_key == "temperature_value":
+        return _format_diffusion_numeric(record.temperature_value)
+    if field_key == "confinement_scale_value":
+        return _format_diffusion_numeric(record.confinement_scale_value)
+    if field_key == "confinement_scale_unit":
+        return record.confinement_scale_unit
+    if field_key == "source_page":
+        return f"Page {record.source_page}" if getattr(record, "source_page", None) else None
+    return None
+
+
+def _build_diffusion_conditions_entry(field_map: dict[str, Any], record: Any) -> dict[str, Any]:
+    temperature_value = _diffusion_field_value_from_record(record, "temperature_value")
+    confinement_scale_value = _diffusion_field_value_from_record(record, "confinement_scale_value")
+    confinement_scale_unit = _diffusion_field_value_from_record(record, "confinement_scale_unit")
+
+    parts = []
+    if temperature_value not in (None, "", []):
+        parts.append(f"T={temperature_value}")
+    if confinement_scale_value not in (None, "", []):
+        scale_part = f"Scale={confinement_scale_value}"
+        if confinement_scale_unit not in (None, "", []):
+            scale_part = f"{scale_part} {confinement_scale_unit}"
+        parts.append(scale_part)
+
+    primary_entry = next(
+        (
+            field_map.get(key)
+            for key in ("temperature_value", "confinement_scale_value", "confinement_scale_unit")
+            if isinstance(field_map.get(key), dict) and field_map.get(key)
+        ),
+        {},
+    )
+    return {
+        "value": " | ".join(str(value) for value in parts) if parts else None,
+        "confidence": primary_entry.get("confidence"),
+        "evidence": primary_entry.get("evidence"),
+        "status": _field_grounding_status(primary_entry),
+        "review_state": primary_entry.get("review_state"),
+        "review_note": primary_entry.get("review_note"),
+    }
+
+
+def _build_diffusion_field_evidence_payload(record: Any) -> dict[str, Any]:
+    field_map = _parse_field_evidence_map(getattr(record, "field_evidence_json", None))
+    normalized_fields: dict[str, Any] = {}
+    ordered_keys = (
+        "system_name",
+        "confinement_material_class",
+        "confinement_geometry_class",
+        "surface_functional_groups",
+        "confinement_dimensionality",
+        "ionic_liquid",
+        "d_total",
+        "d_cation",
+        "d_anion",
+        "d_unit",
+        "temperature_value",
+        "confinement_scale_value",
+        "confinement_scale_unit",
+        "source_page",
+    )
+    for key in ordered_keys:
+        raw_entry = field_map.get(key) if isinstance(field_map.get(key), dict) else {}
+        normalized_fields[key] = {
+            "value": raw_entry.get("value", _diffusion_field_value_from_record(record, key)),
+            "confidence": raw_entry.get("confidence", record.confidence),
+            "evidence": raw_entry.get("evidence"),
+            "status": _field_grounding_status(raw_entry),
+            "review_state": raw_entry.get("review_state"),
+            "review_note": raw_entry.get("review_note"),
+        }
+
+    normalized_fields["conditions"] = _build_diffusion_conditions_entry(field_map, record)
+
+    return {
+        "record_id": record.id,
+        "literature_id": record.literature_id,
+        "sample_id": None,
+        "series_id": None,
+        "extractor_type": "diffusion",
+        "review_status": record.review_status,
+        "record_origin": record.record_origin,
+        "assembly_notes": getattr(record, "assembly_notes", None),
+        "required_fields": ["system_name", "ionic_liquid", "diffusion_coefficient"],
+        "fields": normalized_fields,
+    }
+
+
+def _diffusion_missing_required_fields(field_map: dict[str, Any]) -> list[str]:
+    missing = [
+        key
+        for key in _DIFFUSION_REQUIRED_FIELD_KEYS
+        if _field_grounding_status(field_map.get(key) or {}) == "missing"
+    ]
+    if not any(_field_grounding_status(field_map.get(key) or {}) != "missing" for key in _DIFFUSION_COEFFICIENT_FIELD_KEYS):
+        missing.append("diffusion_coefficient")
+    return missing
+
+
+def _diffusion_has_blocking_flag(field_map: dict[str, Any]) -> bool:
+    if any(
+        str((field_map.get(key) or {}).get("review_state") or "").strip().lower() == "flagged"
+        for key in _DIFFUSION_REQUIRED_FIELD_KEYS
+    ):
+        return True
+    coefficient_entries = [field_map.get(key) or {} for key in _DIFFUSION_COEFFICIENT_FIELD_KEYS]
+    coefficient_candidates = [
+        entry
+        for entry in coefficient_entries
+        if _field_grounding_status(entry) != "missing"
+    ]
+    if not coefficient_candidates:
+        return False
+    return all(str((entry or {}).get("review_state") or "").strip().lower() == "flagged" for entry in coefficient_candidates)
+
+
+def _recompute_diffusion_review_status(record: Any, field_map: dict[str, Any], *, approved: bool = False) -> None:
+    missing_required = _diffusion_missing_required_fields(field_map)
+    if approved:
+        record.review_status = "approved"
+        record.assembly_notes = None
+        return
+    if _diffusion_has_blocking_flag(field_map):
+        record.review_status = "flagged"
+        record.assembly_notes = "Flagged fields require reviewer attention"
+        return
+    if missing_required:
+        record.review_status = "needs_evidence"
+        record.assembly_notes = f"Missing field evidence for: {', '.join(missing_required)}"
+        return
+    record.review_status = "pending_review"
+    record.assembly_notes = None
+
+
+def _copy_diffusion_candidate_to_final_record(
+    candidate: DiffusionCandidate,
+    record: DiffusionRecord | None = None,
+) -> DiffusionRecord:
+    target = record or DiffusionRecord(literature_id=candidate.literature_id)
+    target.literature_id = candidate.literature_id
+    target.system_name = candidate.system_name
+    target.confinement_material_class = candidate.confinement_material_class
+    target.confinement_geometry_class = candidate.confinement_geometry_class
+    target.surface_functional_groups = candidate.surface_functional_groups
+    target.confinement_dimensionality = candidate.confinement_dimensionality
+    target.ionic_liquid = candidate.ionic_liquid
+    target.d_total = candidate.d_total
+    target.d_cation = candidate.d_cation
+    target.d_anion = candidate.d_anion
+    target.d_unit = candidate.d_unit
+    target.temperature_value = candidate.temperature_value
+    target.confinement_scale_value = candidate.confinement_scale_value
+    target.confinement_scale_unit = candidate.confinement_scale_unit
+    target.source = candidate.source
+    target.source_page = candidate.source_page
+    target.source_bbox = candidate.source_bbox
+    target.evidence = candidate.evidence
+    target.provider = candidate.provider
+    target.prompt_version = candidate.prompt_version
+    target.raw_model_output = candidate.raw_model_output
+    target.field_evidence_json = candidate.field_evidence_json
+    target.review_status = candidate.review_status
+    target.record_origin = "review_promoted_candidate"
+    target.assembly_notes = candidate.assembly_notes
+    target.confidence = candidate.confidence
+    target.novel_features_json = candidate.novel_features_json
+    target.smiles = candidate.smiles
+    target.rdkit_features_json = candidate.rdkit_features_json
+    return target
+
+
+def _build_diffusion_highlight_queries(record: Any) -> list[str]:
+    queries: list[str] = []
+    evidence = str(getattr(record, "evidence", None) or "").strip()
+    if len(evidence) >= 5:
+        queries.append(evidence[:80] if len(evidence) > 80 else evidence)
+    for field_value in (
+        getattr(record, "system_name", None),
+        getattr(record, "ionic_liquid", None),
+        getattr(record, "confinement_material_class", None),
+        getattr(record, "confinement_geometry_class", None),
+        getattr(record, "surface_functional_groups", None),
+    ):
+        value = str(field_value or "").strip()
+        if len(value) >= 2:
+            queries.append(value)
+    for numeric_value in (getattr(record, "d_total", None), getattr(record, "d_cation", None), getattr(record, "d_anion", None)):
+        formatted = _format_diffusion_numeric(numeric_value)
+        if formatted not in (None, "", []):
+            queries.append(str(formatted))
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in queries:
+        key = str(item or "").strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append(str(item).strip())
+    return deduped
 
 
 def _raise_internal_error(action: str, exc: Exception) -> None:
@@ -129,28 +577,411 @@ async def get_pdf_highlights(
     if not pdf_path:
         raise HTTPException(status_code=404, detail="PDF file not available on disk")
 
-    # Get associated TribologyData records
+    # Get associated TribologyData records first
     from sqlalchemy import select as sa_select
     stmt = sa_select(TribologyDataDB).where(TribologyDataDB.literature_id == literature_id)
     result = await db.execute(stmt)
     records = result.scalars().all()
 
-    if not records:
-        return []
-
-    # Build search terms from each record
     search_terms = []
-    for rec in records:
-        queries = build_search_queries_for_record(rec)
-        search_terms.append({
-            "id": f"{rec.id}",
-            "queries": queries,
-        })
+    if records:
+        for rec in records:
+            queries = build_search_queries_for_record(rec)
+            search_terms.append({
+                "id": f"{rec.id}",
+                "queries": queries,
+            })
+    else:
+        diffusion_stmt = sa_select(DiffusionCandidate).where(DiffusionCandidate.literature_id == literature_id)
+        diffusion_result = await db.execute(diffusion_stmt)
+        diffusion_records = diffusion_result.scalars().all()
+        if not diffusion_records:
+            return []
+        for rec in diffusion_records:
+            queries = _build_diffusion_highlight_queries(rec)
+            if not queries:
+                continue
+            search_terms.append({
+                "id": f"diffusion-{rec.id}",
+                "queries": queries,
+            })
+
+    if not search_terms:
+        return []
 
     # Run text search
     highlights = find_text_coordinates(pdf_path, search_terms)
 
     return highlights
+
+
+def _build_candidate_pdf_evidence_payload(literature: Any, candidate: RecordCandidate, *, candidate_id: int) -> dict[str, Any]:
+    import json as json_mod
+    from utils.pdf_coords import (
+        find_evidence_coordinates,
+        find_figure_bbox,
+        normalize_source_label,
+        build_search_queries_for_record,
+        find_text_coordinates,
+    )
+    from utils.pdf_utils import (
+        crop_region_to_base64,
+        render_page_preview_with_bbox_to_base64,
+        render_region_preview_with_highlight_to_base64,
+    )
+
+    evidence_text = getattr(candidate, "evidence", None)
+    evidence_page = getattr(candidate, "evidence_page", None)
+    source_page = getattr(candidate, "source_page", None)
+    evidence_bbox_raw = getattr(candidate, "evidence_bbox", None)
+    source_label = _pick_visual_source_label(
+        getattr(candidate, "source", None),
+        getattr(candidate, "source_figure", None),
+    )
+    source_label_norm = normalize_source_label(source_label) or source_label
+    source_key = str(source_label_norm or "").strip().lower()
+    if source_key in ("", "text", "unknown"):
+        source_type = "text"
+    elif (
+        source_key.startswith("fig")
+        or source_key.startswith("table")
+        or source_key.startswith("image")
+        or source_key.startswith("plot")
+        or bool(re.fullmatch(r"\d+[a-z]?", source_key))
+    ):
+        source_type = "visual"
+    else:
+        source_type = "unknown"
+    is_table_source = bool(source_key.startswith("table"))
+
+    pdf_path = _resolve_existing_path(literature.file_path)
+    has_pdf = bool(pdf_path)
+    image_b64 = None
+    page_preview_b64 = None
+    page = evidence_page or source_page
+    bbox = None
+
+    if evidence_bbox_raw:
+        try:
+            bbox = json_mod.loads(evidence_bbox_raw)
+        except Exception:
+            bbox = None
+
+    if has_pdf:
+        if source_type == "visual":
+            bbox = None
+            if source_label_norm and source_label_norm not in ("Text", "Unknown"):
+                fig_page, fig_bbox = find_figure_bbox(
+                    pdf_path,
+                    source_label_norm,
+                    page_hint=int(source_page) if source_page else (int(page) if page else None),
+                    restrict_to_page_hint=bool(source_page) and not is_table_source,
+                )
+                if fig_page and fig_bbox:
+                    page = fig_page
+                    bbox = fig_bbox
+                    panel_letter = _extract_panel_letter(source_label_norm)
+                    bbox = _tighten_visual_bbox_by_panel(pdf_path, int(page), bbox, panel_letter)
+
+            if page and bbox:
+                if is_table_source:
+                    bbox = _tighten_table_bbox_by_row(pdf_path, int(page), bbox, candidate)
+                else:
+                    focus_queries = _build_visual_focus_queries(candidate)
+                    if focus_queries:
+                        focus_hits = find_text_coordinates(
+                            pdf_path,
+                            [
+                                {
+                                    "id": "visual_focus",
+                                    "queries": focus_queries,
+                                    "page_hint": int(page),
+                                    "restrict_to_page_hint": True,
+                                    "anchor_bbox": bbox,
+                                    "restrict_to_anchor_bbox": True,
+                                }
+                            ],
+                        )
+                        focus_hit = next(
+                            (h for h in focus_hits if (h.get("w") or 0) > 0 and (h.get("h") or 0) > 0),
+                            None,
+                        )
+                        if focus_hit:
+                            fx0 = float(focus_hit["x"])
+                            fy0 = float(focus_hit["y"])
+                            fw = float(focus_hit["w"])
+                            fh = float(focus_hit["h"])
+                            bbox = [
+                                max(0.0, fx0 - 22.0),
+                                max(0.0, fy0 - 12.0),
+                                fx0 + fw + 22.0,
+                                fy0 + fh + 12.0,
+                            ]
+
+            if bbox and page:
+                image_b64 = crop_region_to_base64(pdf_path, page, bbox)
+
+            if not image_b64 and evidence_text and not is_table_source:
+                ev_page, ev_bbox = find_evidence_coordinates(pdf_path, evidence_text, page_hint=page)
+                if ev_page and ev_bbox:
+                    page = ev_page
+                    bbox = ev_bbox
+                    image_b64 = crop_region_to_base64(pdf_path, page, bbox)
+        else:
+            if bbox and page:
+                image_b64 = crop_region_to_base64(pdf_path, page, bbox)
+
+            if not image_b64 and source_label_norm and source_label_norm not in ("Text", "Unknown"):
+                fig_page, fig_bbox = find_figure_bbox(pdf_path, source_label_norm)
+                if fig_page and fig_bbox:
+                    page = fig_page
+                    bbox = fig_bbox
+                    image_b64 = crop_region_to_base64(pdf_path, page, bbox)
+
+            if not image_b64 and evidence_text:
+                ev_page, ev_bbox = find_evidence_coordinates(pdf_path, evidence_text, page_hint=page)
+                if ev_page and ev_bbox:
+                    page = ev_page
+                    bbox = ev_bbox
+                    image_b64 = crop_region_to_base64(pdf_path, page, bbox)
+
+            if not image_b64:
+                queries = build_search_queries_for_record(candidate)
+                if queries:
+                    hits = find_text_coordinates(
+                        pdf_path,
+                        [
+                            {
+                                "id": str(candidate_id),
+                                "queries": queries,
+                                "page_hint": int(page) if page else None,
+                                "restrict_to_page_hint": bool(page),
+                                "anchor_bbox": bbox if bbox and len(bbox) == 4 else None,
+                            }
+                        ],
+                    )
+                    first_hit = next(
+                        (h for h in hits if (h.get("w") or 0) > 0 and (h.get("h") or 0) > 0),
+                        None,
+                    )
+                    if first_hit:
+                        page = first_hit["page"]
+                        x0 = float(first_hit["x"])
+                        y0 = float(first_hit["y"])
+                        w = float(first_hit["w"])
+                        h = float(first_hit["h"])
+                        bbox = [x0, y0, x0 + w, y0 + h]
+                        image_b64 = crop_region_to_base64(pdf_path, page, bbox)
+                        if not evidence_text:
+                            evidence_text = first_hit.get("matched_text")
+                        if not source_label_norm:
+                            source_label_norm = "Text"
+
+    highlight_term_specs = []
+    for term, semantic_type in [
+        (getattr(candidate, "cof_raw", None), "cof"),
+        (str(getattr(candidate, "cof_value", "")) if getattr(candidate, "cof_value", None) is not None else None, "cof"),
+        (getattr(candidate, "lubricant", None), "lubricant"),
+        (getattr(candidate, "material_name", None), "material"),
+        (getattr(candidate, "temperature", None), "temperature"),
+        (getattr(candidate, "potential", None), "potential"),
+        (getattr(candidate, "water_content", None), "water_content"),
+        (getattr(candidate, "speed_value", None), "speed"),
+        (getattr(candidate, "load_value", None), "load"),
+        (getattr(candidate, "surface_roughness", None), "surface_roughness"),
+        (getattr(candidate, "film_thickness", None), "film_thickness"),
+    ]:
+        if term and str(term).strip():
+            highlight_term_specs.append((str(term).strip(), semantic_type))
+    seen_highlight_terms = set()
+    deduped_specs = []
+    for term, semantic_type in highlight_term_specs:
+        if term in seen_highlight_terms:
+            continue
+        seen_highlight_terms.add(term)
+        deduped_specs.append((term, semantic_type))
+    highlight_term_specs = deduped_specs
+    highlight_terms = [term for term, _ in highlight_term_specs]
+
+    term_hits = []
+    if has_pdf and highlight_terms:
+        query_items = [
+            {
+                "id": f"term_{idx}",
+                "queries": _build_term_query_variants(term),
+                "semantic_type": semantic_type,
+                "page_hint": int(page) if page else None,
+                "restrict_to_page_hint": bool(page) and (
+                    source_type != "visual" or (is_table_source and semantic_type in {"cof", "lubricant"})
+                ),
+                "max_page_distance": (
+                    0
+                    if (page and is_table_source and semantic_type in {"cof", "lubricant"})
+                    else (3 if (page and source_type == "visual") else None)
+                ),
+                "anchor_bbox": (
+                    bbox
+                    if (
+                        bbox
+                        and len(bbox) == 4
+                        and (
+                            source_type != "visual"
+                            or (is_table_source and semantic_type in {"cof", "lubricant"})
+                        )
+                    )
+                    else None
+                ),
+                "restrict_to_anchor_bbox": bool(
+                    bbox and len(bbox) == 4 and is_table_source and semantic_type in {"cof", "lubricant"}
+                ),
+            }
+            for idx, (term, semantic_type) in enumerate(highlight_term_specs)
+            if term and len(term.strip()) >= 2
+        ]
+        if query_items:
+            hits = find_text_coordinates(pdf_path, query_items)
+            id_to_spec = {
+                f"term_{idx}": {
+                    "term": term,
+                    "semantic_type": semantic_type,
+                }
+                for idx, (term, semantic_type) in enumerate(highlight_term_specs)
+                if term and len(term.strip()) >= 2
+            }
+            seen_terms = set()
+            for hit in hits:
+                spec = id_to_spec.get(hit.get("id", ""))
+                term = str((spec or {}).get("term") or "").strip()
+                semantic_type = str((spec or {}).get("semantic_type") or "").strip() or None
+                if not term or term in seen_terms:
+                    continue
+                w = float(hit.get("w") or 0)
+                h = float(hit.get("h") or 0)
+                if w <= 0 or h <= 0:
+                    continue
+                x0 = float(hit.get("x") or 0)
+                y0 = float(hit.get("y") or 0)
+                matched_text = str(hit.get("matched_text") or "").strip()
+                is_numeric_term = bool(re.search(r"\d", str(term)))
+                if is_numeric_term and not _numeric_term_matches(str(term), matched_text):
+                    continue
+                term_key = _normalize_term_key(term)
+                match_key = _normalize_term_key(matched_text)
+                inferred = False if is_numeric_term else bool(match_key and term_key and match_key != term_key)
+                term_hits.append(
+                    {
+                        "term": term,
+                        "page": int(hit.get("page") or 1),
+                        "bbox": [x0, y0, x0 + w, y0 + h],
+                        "matched_text": matched_text or None,
+                        "semantic_type": semantic_type,
+                        "inferred": inferred,
+                        "snippet_text": None,
+                        "image_b64": None,
+                    }
+                )
+                seen_terms.add(term)
+
+        for term_hit in term_hits:
+            bbox_hit = term_hit.get("bbox")
+            page_hit = int(term_hit.get("page") or 0)
+            if page_hit < 1 or not isinstance(bbox_hit, list) or len(bbox_hit) != 4:
+                continue
+
+            is_visual_hit = (
+                source_type == "visual"
+                and page is not None
+                and int(page_hit) == int(page)
+                and bbox is not None
+                and len(bbox) == 4
+            )
+            if source_type == "visual":
+                image_b64_hit = None
+                if is_visual_hit and _visual_hit_prefers_figure_preview(
+                    pdf_path=pdf_path,
+                    page_num=page_hit,
+                    figure_bbox=bbox,
+                    hit_bbox=bbox_hit,
+                ):
+                    image_b64_hit = render_region_preview_with_highlight_to_base64(
+                        pdf_path=pdf_path,
+                        page_num=page_hit,
+                        region_bbox=bbox,
+                        highlight_bbox=bbox_hit,
+                        padding=10,
+                        dpi=160,
+                        max_width=1100,
+                    )
+                else:
+                    image_b64_hit = render_page_preview_with_bbox_to_base64(
+                        pdf_path=pdf_path,
+                        page_num=page_hit,
+                        bbox=bbox_hit,
+                        dpi=160,
+                        max_width=1400,
+                    )
+                if image_b64_hit:
+                    term_hit["image_b64"] = image_b64_hit
+
+            snippet_text = _extract_text_snippet(
+                pdf_path=pdf_path,
+                page_num=page_hit,
+                bbox=bbox_hit,
+                fallback_term=str(term_hit.get("matched_text") or term_hit.get("term") or "").strip() or None,
+                prefer_term_context=False,
+            )
+            if snippet_text:
+                term_hit["snippet_text"] = snippet_text
+
+    text_snippet = None
+    if has_pdf and page and source_type != "visual":
+        is_text_source = str(source_label_norm or "").strip().lower() in ("", "text")
+        fallback_term = (
+            getattr(candidate, "cof_raw", None)
+            or evidence_text
+            or (highlight_terms[0] if highlight_terms else None)
+        )
+        text_snippet = _extract_text_snippet(
+            pdf_path=pdf_path,
+            page_num=int(page),
+            bbox=bbox,
+            fallback_term=fallback_term,
+            prefer_term_context=is_text_source,
+        )
+        if (not evidence_text or len(str(evidence_text).strip()) < 8) and text_snippet:
+            evidence_text = text_snippet
+
+        page_preview_b64 = render_page_preview_with_bbox_to_base64(
+            pdf_path=pdf_path,
+            page_num=int(page),
+            bbox=bbox,
+            dpi=120,
+            max_width=900,
+        )
+    elif has_pdf and page:
+        page_preview_b64 = render_page_preview_with_bbox_to_base64(
+            pdf_path=pdf_path,
+            page_num=int(page),
+            bbox=bbox,
+            dpi=160,
+            max_width=1300,
+        )
+
+    return {
+        "record_id": candidate_id,
+        "evidence_text": evidence_text,
+        "text_snippet": text_snippet,
+        "highlight_terms": highlight_terms,
+        "term_hits": term_hits,
+        "source": source_label_norm,
+        "source_type": source_type,
+        "page": page,
+        "bbox": bbox,
+        "image_b64": image_b64,
+        "page_preview_b64": page_preview_b64,
+        "has_image": bool(image_b64),
+        "has_pdf": has_pdf,
+    }
 
 
 @router.get("/pdf/{literature_id}/evidence/{record_id}")
@@ -566,12 +1397,900 @@ async def get_record_evidence(
     }
 
 
+def _build_diffusion_candidate_pdf_evidence_payload(
+    literature: Any,
+    candidate: DiffusionCandidate | DiffusionRecord,
+    *,
+    candidate_id: int,
+) -> dict[str, Any]:
+    import json as json_mod
+    from utils.pdf_coords import find_evidence_coordinates, find_figure_bbox, normalize_source_label
+    from utils.pdf_utils import (
+        crop_region_to_base64,
+        render_page_preview_with_bbox_to_base64,
+        render_region_preview_with_highlight_to_base64,
+    )
+
+    evidence_text = getattr(candidate, "evidence", None)
+    page = getattr(candidate, "source_page", None)
+    bbox = None
+    raw_bbox = getattr(candidate, "source_bbox", None)
+    if raw_bbox:
+        try:
+            bbox = json_mod.loads(raw_bbox)
+        except Exception:
+            bbox = None
+
+    source_label = normalize_source_label(getattr(candidate, "source", None)) or getattr(candidate, "source", None)
+    source_key = str(source_label or "").strip().lower()
+    if source_key.startswith("table"):
+        source_type = "table"
+    elif source_key.startswith(("fig", "image", "plot")):
+        source_type = "figure"
+    elif source_key:
+        source_type = "text"
+    else:
+        source_type = "text"
+
+    pdf_path = _resolve_existing_path(literature.file_path)
+    has_pdf = bool(pdf_path)
+    image_b64 = None
+    page_preview_b64 = None
+    text_snippet = None
+
+    if has_pdf and source_type in ("figure", "table") and (not bbox or not page) and source_label:
+        fig_page, fig_bbox = find_figure_bbox(
+            pdf_path,
+            source_label,
+            page_hint=int(page) if page else None,
+            restrict_to_page_hint=bool(page) and source_type == "figure",
+        )
+        if fig_page and fig_bbox:
+            page = fig_page
+            bbox = fig_bbox
+
+    if has_pdf and evidence_text and (not bbox or not page):
+        evidence_page, evidence_bbox = find_evidence_coordinates(
+            pdf_path,
+            str(evidence_text),
+            page_hint=int(page) if page else None,
+            restrict_to_page_hint=bool(page),
+        )
+        if evidence_page and not page:
+            page = evidence_page
+        if evidence_bbox and not bbox:
+            bbox = evidence_bbox
+
+    highlight_terms = [
+        value
+        for value in (
+            getattr(candidate, "system_name", None),
+            getattr(candidate, "ionic_liquid", None),
+            _format_diffusion_numeric(getattr(candidate, "d_total", None)),
+            _format_diffusion_numeric(getattr(candidate, "d_cation", None)),
+            _format_diffusion_numeric(getattr(candidate, "d_anion", None)),
+        )
+        if value not in (None, "", [])
+    ]
+
+    if has_pdf and page and bbox:
+        if source_type in ("figure", "table"):
+            image_b64 = crop_region_to_base64(
+                pdf_path=pdf_path,
+                page_num=int(page),
+                bbox=bbox,
+                zoom=2.2,
+            )
+            page_preview_b64 = render_page_preview_with_bbox_to_base64(
+                pdf_path=pdf_path,
+                page_num=int(page),
+                bbox=bbox,
+                dpi=160,
+                max_width=1200,
+            )
+        else:
+            image_b64 = render_region_preview_with_highlight_to_base64(
+                pdf_path=pdf_path,
+                page_num=int(page),
+                bbox=bbox,
+                highlight=bbox,
+                dpi=170,
+                max_width=1200,
+            )
+            text_snippet = _extract_text_snippet(
+                pdf_path=pdf_path,
+                page_num=int(page),
+                bbox=bbox,
+                fallback_term=str(evidence_text or (highlight_terms[0] if highlight_terms else "")).strip() or None,
+                prefer_term_context=True,
+            )
+            page_preview_b64 = render_page_preview_with_bbox_to_base64(
+                pdf_path=pdf_path,
+                page_num=int(page),
+                bbox=bbox,
+                dpi=120,
+                max_width=900,
+            )
+    elif has_pdf and page:
+        page_preview_b64 = render_page_preview_with_bbox_to_base64(
+            pdf_path=pdf_path,
+            page_num=int(page),
+            bbox=bbox,
+            dpi=120,
+            max_width=900,
+        )
+        if source_type == "text":
+            text_snippet = _extract_text_snippet(
+                pdf_path=pdf_path,
+                page_num=int(page),
+                bbox=bbox,
+                fallback_term=str(evidence_text or (highlight_terms[0] if highlight_terms else "")).strip() or None,
+                prefer_term_context=True,
+            )
+
+    if (not evidence_text or len(str(evidence_text).strip()) < 8) and text_snippet:
+        evidence_text = text_snippet
+
+    return {
+        "record_id": candidate_id,
+        "evidence_text": evidence_text,
+        "text_snippet": text_snippet,
+        "highlight_terms": [str(item) for item in highlight_terms],
+        "term_hits": [],
+        "source": source_label,
+        "source_type": "visual" if source_type in ("figure", "table") else source_type,
+        "page": page,
+        "bbox": bbox,
+        "image_b64": image_b64,
+        "page_preview_b64": page_preview_b64,
+        "has_image": bool(image_b64),
+        "has_pdf": has_pdf,
+    }
+
+
+@router.get("/pdf/{literature_id}/candidates/{candidate_id}/evidence")
+async def get_candidate_evidence(
+    literature_id: int,
+    candidate_id: int,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    literature = await require_literature_access(db, principal, literature_id)
+    candidate = await require_candidate_access(db, principal, candidate_id)
+    if candidate.literature_id != literature_id:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    return _build_candidate_pdf_evidence_payload(literature, candidate, candidate_id=candidate_id)
+
+
+@router.get("/pdf/{literature_id}/diffusion-candidates/{candidate_id}/evidence")
+async def get_diffusion_candidate_evidence(
+    literature_id: int,
+    candidate_id: int,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    literature = await require_literature_access(db, principal, literature_id)
+    candidate = await require_diffusion_candidate_access(db, principal, candidate_id)
+    if candidate.literature_id != literature_id:
+        raise HTTPException(status_code=404, detail="Diffusion candidate not found")
+    return _build_diffusion_candidate_pdf_evidence_payload(literature, candidate, candidate_id=candidate_id)
+
+
+@router.get("/review/records/{record_id}/field-evidence")
+async def get_record_field_evidence(
+    record_id: int,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    record = await require_record_access(db, principal, record_id)
+    return _build_record_field_evidence_payload(record)
+
+
+@router.get("/review/records/{record_id}/field-evidence/{field_key}")
+async def get_record_field_evidence_for_field(
+    record_id: int,
+    field_key: str,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    record = await require_record_access(db, principal, record_id)
+    payload = _build_record_field_evidence_payload(record)
+    normalized_key = _normalize_field_key(field_key)
+    field_payload = payload["fields"].get(normalized_key)
+    if field_payload is None:
+        raise HTTPException(status_code=404, detail=f"Field evidence '{field_key}' not found")
+    return {
+        "record_id": record.id,
+        "literature_id": record.literature_id,
+        "field_key": normalized_key,
+        "field": field_payload,
+        "sample_id": record.sample_id,
+        "series_id": record.series_id,
+        "review_status": record.review_status,
+    }
+
+
+@router.post("/review/records/{record_id}/fields/{field_key}/confirm")
+async def confirm_record_field_evidence(
+    record_id: int,
+    field_key: str,
+    payload: ReviewFieldActionPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    record = await require_record_access(db, principal, record_id, write=True)
+    normalized_key = _normalize_field_key(field_key)
+    field_map = _parse_field_evidence_map(record.field_evidence_json)
+    target_keys = _target_field_keys_for_action(normalized_key, field_map)
+    if not target_keys:
+        raise HTTPException(status_code=404, detail=f"Field evidence '{field_key}' not found")
+    if any(_field_grounding_status(field_map.get(key) or {}) == "missing" for key in target_keys):
+        raise HTTPException(status_code=422, detail=f"Field '{field_key}' cannot be confirmed without evidence")
+
+    for key in target_keys:
+        entry = field_map.get(key)
+        if not isinstance(entry, dict):
+            continue
+        entry["review_state"] = "confirmed"
+        if payload.note is not None:
+            entry["review_note"] = payload.note
+        field_map[key] = entry
+    _persist_field_map(record, field_map)
+    _recompute_review_status(record, field_map)
+    await db.commit()
+    await db.refresh(record)
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="edit_record",
+        action_detail={
+            "record_id": record.id,
+            "literature_id": record.literature_id,
+            "review_action": "confirm_field",
+            "field_key": normalized_key,
+        },
+        resource_type="record",
+        resource_id=record.id,
+        request=request,
+    )
+    return _build_record_field_evidence_payload(record)
+
+
+@router.post("/review/records/{record_id}/fields/{field_key}/flag")
+async def flag_record_field_evidence(
+    record_id: int,
+    field_key: str,
+    payload: ReviewFieldActionPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    record = await require_record_access(db, principal, record_id, write=True)
+    normalized_key = _normalize_field_key(field_key)
+    field_map = _parse_field_evidence_map(record.field_evidence_json)
+    target_keys = _target_field_keys_for_action(normalized_key, field_map)
+    for key in target_keys:
+        entry = field_map.get(key)
+        if not isinstance(entry, dict):
+            entry = {
+                "value": _field_value_from_record(record, key),
+                "confidence": record.confidence,
+                "evidence": None,
+            }
+        entry["review_state"] = "flagged"
+        entry["review_note"] = payload.note or "Flagged during review"
+        field_map[key] = entry
+    _persist_field_map(record, field_map)
+    _recompute_review_status(record, field_map)
+    await db.commit()
+    await db.refresh(record)
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="edit_record",
+        action_detail={
+            "record_id": record.id,
+            "literature_id": record.literature_id,
+            "review_action": "flag_field",
+            "field_key": normalized_key,
+        },
+        resource_type="record",
+        resource_id=record.id,
+        request=request,
+    )
+    return _build_record_field_evidence_payload(record)
+
+
+@router.post("/review/records/{record_id}/approve")
+async def approve_record_review(
+    record_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    record = await require_record_access(db, principal, record_id, write=True)
+    field_map = _parse_field_evidence_map(record.field_evidence_json)
+    missing_required = _required_field_missing(field_map)
+    if missing_required:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Record cannot be approved. Missing field evidence for: {', '.join(missing_required)}",
+        )
+
+    flagged_required = [
+        key for key in ("material", "ionic_liquid", "cof")
+        if str((field_map.get(key) or {}).get("review_state") or "").strip().lower() == "flagged"
+    ]
+    if flagged_required:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Record cannot be approved while flagged fields remain: {', '.join(flagged_required)}",
+        )
+
+    _recompute_review_status(record, field_map, approved=True)
+    await db.commit()
+    await db.refresh(record)
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="edit_record",
+        action_detail={
+            "record_id": record.id,
+            "literature_id": record.literature_id,
+            "review_action": "approve_record",
+        },
+        resource_type="record",
+        resource_id=record.id,
+        request=request,
+    )
+    return _build_record_field_evidence_payload(record)
+
+
+@router.get("/review/candidates/{candidate_id}/field-evidence")
+async def get_candidate_field_evidence(
+    candidate_id: int,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    candidate = await require_candidate_access(db, principal, candidate_id)
+    return _build_record_field_evidence_payload(candidate)
+
+
+@router.get("/review/candidates/{candidate_id}/field-evidence/{field_key}")
+async def get_candidate_field_evidence_for_field(
+    candidate_id: int,
+    field_key: str,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    candidate = await require_candidate_access(db, principal, candidate_id)
+    payload = _build_record_field_evidence_payload(candidate)
+    normalized_key = _normalize_field_key(field_key)
+    field_payload = payload["fields"].get(normalized_key)
+    if field_payload is None:
+        raise HTTPException(status_code=404, detail=f"Field evidence '{field_key}' not found")
+    return {
+        "record_id": candidate.id,
+        "literature_id": candidate.literature_id,
+        "field_key": normalized_key,
+        "field": field_payload,
+        "sample_id": candidate.sample_id,
+        "series_id": candidate.series_id,
+        "review_status": candidate.review_status,
+    }
+
+
+@router.post("/review/candidates/{candidate_id}/fields/{field_key}/confirm")
+async def confirm_candidate_field_evidence(
+    candidate_id: int,
+    field_key: str,
+    payload: ReviewFieldActionPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    candidate = await require_candidate_access(db, principal, candidate_id, write=True)
+    normalized_key = _normalize_field_key(field_key)
+    field_map = _parse_field_evidence_map(candidate.field_evidence_json)
+    target_keys = _target_field_keys_for_action(normalized_key, field_map)
+    if not target_keys:
+        raise HTTPException(status_code=404, detail=f"Field evidence '{field_key}' not found")
+    if any(_field_grounding_status(field_map.get(key) or {}) == "missing" for key in target_keys):
+        raise HTTPException(status_code=422, detail=f"Field '{field_key}' cannot be confirmed without evidence")
+
+    for key in target_keys:
+        entry = field_map.get(key)
+        if not isinstance(entry, dict):
+            continue
+        entry["review_state"] = "confirmed"
+        if payload.note is not None:
+            entry["review_note"] = payload.note
+        field_map[key] = entry
+    _persist_field_map(candidate, field_map)
+    _recompute_review_status(candidate, field_map)
+    await db.commit()
+    await db.refresh(candidate)
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="edit_record",
+        action_detail={
+            "candidate_id": candidate.id,
+            "literature_id": candidate.literature_id,
+            "review_action": "confirm_candidate_field",
+            "field_key": normalized_key,
+        },
+        resource_type="candidate",
+        resource_id=candidate.id,
+        request=request,
+    )
+    return _build_record_field_evidence_payload(candidate)
+
+
+@router.post("/review/candidates/{candidate_id}/fields/{field_key}/flag")
+async def flag_candidate_field_evidence(
+    candidate_id: int,
+    field_key: str,
+    payload: ReviewFieldActionPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    candidate = await require_candidate_access(db, principal, candidate_id, write=True)
+    normalized_key = _normalize_field_key(field_key)
+    field_map = _parse_field_evidence_map(candidate.field_evidence_json)
+    target_keys = _target_field_keys_for_action(normalized_key, field_map)
+    for key in target_keys:
+        entry = field_map.get(key)
+        if not isinstance(entry, dict):
+            entry = {
+                "value": _field_value_from_record(candidate, key),
+                "confidence": candidate.confidence,
+                "evidence": None,
+            }
+        entry["review_state"] = "flagged"
+        entry["review_note"] = payload.note or "Flagged during review"
+        field_map[key] = entry
+    _persist_field_map(candidate, field_map)
+    _recompute_review_status(candidate, field_map)
+    await db.commit()
+    await db.refresh(candidate)
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="edit_record",
+        action_detail={
+            "candidate_id": candidate.id,
+            "literature_id": candidate.literature_id,
+            "review_action": "flag_candidate_field",
+            "field_key": normalized_key,
+        },
+        resource_type="candidate",
+        resource_id=candidate.id,
+        request=request,
+    )
+    return _build_record_field_evidence_payload(candidate)
+
+
+@router.post("/review/candidates/{candidate_id}/approve")
+async def approve_candidate_review(
+    candidate_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    candidate = await require_candidate_access(db, principal, candidate_id, write=True)
+    field_map = _parse_field_evidence_map(candidate.field_evidence_json)
+    missing_required = _required_field_missing(field_map)
+    if missing_required:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Candidate cannot be approved. Missing field evidence for: {', '.join(missing_required)}",
+        )
+
+    flagged_required = [
+        key for key in ("material", "ionic_liquid", "cof")
+        if str((field_map.get(key) or {}).get("review_state") or "").strip().lower() == "flagged"
+    ]
+    if flagged_required:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Candidate cannot be approved while flagged fields remain: {', '.join(flagged_required)}",
+        )
+
+    _recompute_review_status(candidate, field_map, approved=True)
+    promoted_record = candidate.promoted_record
+    if promoted_record is None:
+        promoted_record = _copy_candidate_to_final_record(candidate)
+        db.add(promoted_record)
+        await db.flush()
+        candidate.promoted_record_id = promoted_record.id
+    else:
+        _copy_candidate_to_final_record(candidate, promoted_record)
+
+    candidate.promoted_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(candidate)
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="edit_record",
+        action_detail={
+            "candidate_id": candidate.id,
+            "promoted_record_id": candidate.promoted_record_id,
+            "literature_id": candidate.literature_id,
+            "review_action": "approve_candidate",
+        },
+        resource_type="candidate",
+        resource_id=candidate.id,
+        request=request,
+    )
+    return _build_record_field_evidence_payload(candidate)
+
+
+@router.get("/review/diffusion-records/{record_id}/field-evidence")
+async def get_diffusion_record_field_evidence(
+    record_id: int,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    record = await require_diffusion_record_access(db, principal, record_id)
+    return _build_diffusion_field_evidence_payload(record)
+
+
+@router.get("/review/diffusion-records/{record_id}/field-evidence/{field_key}")
+async def get_diffusion_record_field_evidence_for_field(
+    record_id: int,
+    field_key: str,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    record = await require_diffusion_record_access(db, principal, record_id)
+    payload = _build_diffusion_field_evidence_payload(record)
+    normalized_key = _normalize_field_key(field_key)
+    field_payload = payload["fields"].get(normalized_key)
+    if field_payload is None:
+        raise HTTPException(status_code=404, detail=f"Field evidence '{field_key}' not found")
+    return {
+        "record_id": record.id,
+        "literature_id": record.literature_id,
+        "field_key": normalized_key,
+        "field": field_payload,
+        "sample_id": None,
+        "series_id": None,
+        "review_status": record.review_status,
+    }
+
+
+@router.post("/review/diffusion-records/{record_id}/fields/{field_key}/confirm")
+async def confirm_diffusion_record_field_evidence(
+    record_id: int,
+    field_key: str,
+    payload: ReviewFieldActionPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    record = await require_diffusion_record_access(db, principal, record_id, write=True)
+    normalized_key = _normalize_field_key(field_key)
+    field_map = _parse_field_evidence_map(record.field_evidence_json)
+    target_keys = _target_field_keys_for_action(normalized_key, field_map)
+    if not target_keys:
+        raise HTTPException(status_code=404, detail=f"Field evidence '{field_key}' not found")
+    if any(_field_grounding_status(field_map.get(key) or {}) == "missing" for key in target_keys):
+        raise HTTPException(status_code=422, detail=f"Field '{field_key}' cannot be confirmed without evidence")
+
+    for key in target_keys:
+        entry = field_map.get(key)
+        if not isinstance(entry, dict):
+            continue
+        entry["review_state"] = "confirmed"
+        if payload.note is not None:
+            entry["review_note"] = payload.note
+        field_map[key] = entry
+    _persist_field_map(record, field_map)
+    _recompute_diffusion_review_status(record, field_map)
+    await db.commit()
+    await db.refresh(record)
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="edit_record",
+        action_detail={
+            "record_id": record.id,
+            "literature_id": record.literature_id,
+            "review_action": "confirm_diffusion_field",
+            "field_key": normalized_key,
+        },
+        resource_type="diffusion_record",
+        resource_id=record.id,
+        request=request,
+    )
+    return _build_diffusion_field_evidence_payload(record)
+
+
+@router.post("/review/diffusion-records/{record_id}/fields/{field_key}/flag")
+async def flag_diffusion_record_field_evidence(
+    record_id: int,
+    field_key: str,
+    payload: ReviewFieldActionPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    record = await require_diffusion_record_access(db, principal, record_id, write=True)
+    normalized_key = _normalize_field_key(field_key)
+    field_map = _parse_field_evidence_map(record.field_evidence_json)
+    target_keys = _target_field_keys_for_action(normalized_key, field_map)
+    for key in target_keys:
+        entry = field_map.get(key)
+        if not isinstance(entry, dict):
+            entry = {
+                "value": _diffusion_field_value_from_record(record, key),
+                "confidence": record.confidence,
+                "evidence": None,
+            }
+        entry["review_state"] = "flagged"
+        entry["review_note"] = payload.note or "Flagged during review"
+        field_map[key] = entry
+    _persist_field_map(record, field_map)
+    _recompute_diffusion_review_status(record, field_map)
+    await db.commit()
+    await db.refresh(record)
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="edit_record",
+        action_detail={
+            "record_id": record.id,
+            "literature_id": record.literature_id,
+            "review_action": "flag_diffusion_field",
+            "field_key": normalized_key,
+        },
+        resource_type="diffusion_record",
+        resource_id=record.id,
+        request=request,
+    )
+    return _build_diffusion_field_evidence_payload(record)
+
+
+@router.post("/review/diffusion-records/{record_id}/approve")
+async def approve_diffusion_record_review(
+    record_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    record = await require_diffusion_record_access(db, principal, record_id, write=True)
+    field_map = _parse_field_evidence_map(record.field_evidence_json)
+    missing_required = _diffusion_missing_required_fields(field_map)
+    if missing_required:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Record cannot be approved. Missing field evidence for: {', '.join(missing_required)}",
+        )
+    if _diffusion_has_blocking_flag(field_map):
+        raise HTTPException(
+            status_code=422,
+            detail="Record cannot be approved while flagged diffusion fields remain",
+        )
+
+    _recompute_diffusion_review_status(record, field_map, approved=True)
+    await db.commit()
+    await db.refresh(record)
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="edit_record",
+        action_detail={
+            "record_id": record.id,
+            "literature_id": record.literature_id,
+            "review_action": "approve_diffusion_record",
+        },
+        resource_type="diffusion_record",
+        resource_id=record.id,
+        request=request,
+    )
+    return _build_diffusion_field_evidence_payload(record)
+
+
+@router.get("/review/diffusion-candidates/{candidate_id}/field-evidence")
+async def get_diffusion_candidate_field_evidence(
+    candidate_id: int,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    candidate = await require_diffusion_candidate_access(db, principal, candidate_id)
+    return _build_diffusion_field_evidence_payload(candidate)
+
+
+@router.get("/review/diffusion-candidates/{candidate_id}/field-evidence/{field_key}")
+async def get_diffusion_candidate_field_evidence_for_field(
+    candidate_id: int,
+    field_key: str,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    candidate = await require_diffusion_candidate_access(db, principal, candidate_id)
+    payload = _build_diffusion_field_evidence_payload(candidate)
+    normalized_key = _normalize_field_key(field_key)
+    field_payload = payload["fields"].get(normalized_key)
+    if field_payload is None:
+        raise HTTPException(status_code=404, detail=f"Field evidence '{field_key}' not found")
+    return {
+        "record_id": candidate.id,
+        "literature_id": candidate.literature_id,
+        "field_key": normalized_key,
+        "field": field_payload,
+        "sample_id": None,
+        "series_id": None,
+        "review_status": candidate.review_status,
+    }
+
+
+@router.post("/review/diffusion-candidates/{candidate_id}/fields/{field_key}/confirm")
+async def confirm_diffusion_candidate_field_evidence(
+    candidate_id: int,
+    field_key: str,
+    payload: ReviewFieldActionPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    candidate = await require_diffusion_candidate_access(db, principal, candidate_id, write=True)
+    normalized_key = _normalize_field_key(field_key)
+    field_map = _parse_field_evidence_map(candidate.field_evidence_json)
+    target_keys = _target_field_keys_for_action(normalized_key, field_map)
+    if not target_keys:
+        raise HTTPException(status_code=404, detail=f"Field evidence '{field_key}' not found")
+    if any(_field_grounding_status(field_map.get(key) or {}) == "missing" for key in target_keys):
+        raise HTTPException(status_code=422, detail=f"Field '{field_key}' cannot be confirmed without evidence")
+
+    for key in target_keys:
+        entry = field_map.get(key)
+        if not isinstance(entry, dict):
+            continue
+        entry["review_state"] = "confirmed"
+        if payload.note is not None:
+            entry["review_note"] = payload.note
+        field_map[key] = entry
+    _persist_field_map(candidate, field_map)
+    _recompute_diffusion_review_status(candidate, field_map)
+    await db.commit()
+    await db.refresh(candidate)
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="edit_record",
+        action_detail={
+            "candidate_id": candidate.id,
+            "literature_id": candidate.literature_id,
+            "review_action": "confirm_diffusion_candidate_field",
+            "field_key": normalized_key,
+        },
+        resource_type="diffusion_candidate",
+        resource_id=candidate.id,
+        request=request,
+    )
+    return _build_diffusion_field_evidence_payload(candidate)
+
+
+@router.post("/review/diffusion-candidates/{candidate_id}/fields/{field_key}/flag")
+async def flag_diffusion_candidate_field_evidence(
+    candidate_id: int,
+    field_key: str,
+    payload: ReviewFieldActionPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    candidate = await require_diffusion_candidate_access(db, principal, candidate_id, write=True)
+    normalized_key = _normalize_field_key(field_key)
+    field_map = _parse_field_evidence_map(candidate.field_evidence_json)
+    target_keys = _target_field_keys_for_action(normalized_key, field_map)
+    for key in target_keys:
+        entry = field_map.get(key)
+        if not isinstance(entry, dict):
+            entry = {
+                "value": _diffusion_field_value_from_record(candidate, key),
+                "confidence": candidate.confidence,
+                "evidence": None,
+            }
+        entry["review_state"] = "flagged"
+        entry["review_note"] = payload.note or "Flagged during review"
+        field_map[key] = entry
+    _persist_field_map(candidate, field_map)
+    _recompute_diffusion_review_status(candidate, field_map)
+    await db.commit()
+    await db.refresh(candidate)
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="edit_record",
+        action_detail={
+            "candidate_id": candidate.id,
+            "literature_id": candidate.literature_id,
+            "review_action": "flag_diffusion_candidate_field",
+            "field_key": normalized_key,
+        },
+        resource_type="diffusion_candidate",
+        resource_id=candidate.id,
+        request=request,
+    )
+    return _build_diffusion_field_evidence_payload(candidate)
+
+
+@router.post("/review/diffusion-candidates/{candidate_id}/approve")
+async def approve_diffusion_candidate_review(
+    candidate_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    candidate = await require_diffusion_candidate_access(db, principal, candidate_id, write=True)
+    field_map = _parse_field_evidence_map(candidate.field_evidence_json)
+    missing_required = _diffusion_missing_required_fields(field_map)
+    if missing_required:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Candidate cannot be approved. Missing field evidence for: {', '.join(missing_required)}",
+        )
+    if _diffusion_has_blocking_flag(field_map):
+        raise HTTPException(
+            status_code=422,
+            detail="Candidate cannot be approved while flagged diffusion fields remain",
+        )
+
+    _recompute_diffusion_review_status(candidate, field_map, approved=True)
+    promoted_record = candidate.promoted_record
+    if promoted_record is None:
+        promoted_record = _copy_diffusion_candidate_to_final_record(candidate)
+        db.add(promoted_record)
+        await db.flush()
+        candidate.promoted_record_id = promoted_record.id
+    else:
+        _copy_diffusion_candidate_to_final_record(candidate, promoted_record)
+
+    candidate.promoted_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(candidate)
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="edit_record",
+        action_detail={
+            "candidate_id": candidate.id,
+            "promoted_record_id": candidate.promoted_record_id,
+            "literature_id": candidate.literature_id,
+            "review_action": "approve_diffusion_candidate",
+        },
+        resource_type="diffusion_candidate",
+        resource_id=candidate.id,
+        request=request,
+    )
+    return _build_diffusion_field_evidence_payload(candidate)
+
+
 @router.post("/upload")
 async def upload_file(
     request: Request,
     file: UploadFile = File(...),
     background_tasks: BackgroundTasks = BackgroundTasks(),
     auto_extract: bool = Query(False),
+    extractor_type: str = Query("tribology", pattern="^(tribology|diffusion)$"),
     db: AsyncSession = Depends(get_db),
     principal: AuthPrincipal = Depends(get_current_principal),
     scope: RequestScope = Depends(get_request_scope),
@@ -596,7 +2315,11 @@ async def upload_file(
             user_id=principal.user.id,
             group_id=principal.group.id,
             action_type="upload_pdf",
-            action_detail={"filename": file.filename, "literature_id": literature.id},
+            action_detail={
+                "filename": file.filename,
+                "literature_id": literature.id,
+                "extractor_type": extractor_type,
+            },
             resource_type="literature",
             resource_id=literature.id,
             request=request,
@@ -604,7 +2327,7 @@ async def upload_file(
 
         if auto_extract and literature.status == "pending":
             logger.info("Queueing background extraction for literature_id=%s", literature.id)
-            background_tasks.add_task(process_file_background, literature.id)
+            background_tasks.add_task(process_file_background, literature.id, extractor_type)
         elif auto_extract:
             logger.info("Skipping background extraction for literature_id=%s status=%s", literature.id, literature.status)
 
@@ -614,6 +2337,7 @@ async def upload_file(
             "file_id": str(literature.id),
             "filename": literature.title,
             "status": literature.status,
+            "extractor_type": extractor_type,
         }
     except HTTPException:
         raise
@@ -628,6 +2352,7 @@ async def extract_data(
     request: Request,
     force: bool = False,
     profile: str = Query("high_accuracy", pattern="^(high_accuracy|standard)$"),
+    extractor_type: str = Query("tribology", pattern="^(tribology|diffusion)$"),
     strict_cof_mode: bool | None = Query(None),
     db: AsyncSession = Depends(get_db),
     principal: AuthPrincipal = Depends(get_current_principal),
@@ -652,7 +2377,12 @@ async def extract_data(
             user_id=principal.user.id,
             group_id=principal.group.id,
             action_type="extract_data",
-            action_detail={"literature_id": lit_id, "profile": profile, "force": force},
+            action_detail={
+                "literature_id": lit_id,
+                "profile": profile,
+                "force": force,
+                "extractor_type": extractor_type,
+            },
             resource_type="literature",
             resource_id=lit_id,
             request=request,
@@ -660,10 +2390,11 @@ async def extract_data(
 
         # 2. Process Safely (Synchronous Wait)
         logger.info(
-            "Starting extraction literature_id=%s force=%s profile=%s strict_cof_mode=%s",
+            "Starting extraction literature_id=%s force=%s profile=%s extractor_type=%s strict_cof_mode=%s",
             lit_id,
             force,
             profile,
+            extractor_type,
             strict_cof_mode,
         )
 
@@ -671,6 +2402,7 @@ async def extract_data(
             file_id=lit_id,
             force=force,
             profile=profile,
+            extractor_type=extractor_type,
             strict_cof_mode=strict_cof_mode,
         )
         metadata = workflow_result.get("metadata") or {}
@@ -686,6 +2418,7 @@ async def extract_data(
                 "data": [],
                 "extraction_summary": extraction_summary,
                 "agent_workflow": agent_workflow,
+                "extractor_type": extractor_type,
                 "message": "Extraction is still running in the background. Please retry shortly."
             }
 
@@ -706,20 +2439,24 @@ async def extract_data(
 
             return {
                 "success": True,
+                "status": "no_data" if not data_list else "completed",
                 "metadata": meta_obj,
                 "data": data_list,
                 "extraction_summary": extraction_summary,
                 "agent_workflow": agent_workflow,
-                "message": f"Successfully extracted {len(data_list)} records."
+                "extractor_type": extractor_type,
+                "message": "No extractable records found." if not data_list else f"Successfully extracted {len(data_list)} records."
             }
         else:
             return {
-                "success": False,
+                "success": True,
+                "status": "no_data",
                 "metadata": {},
                 "data": [],
                 "extraction_summary": extraction_summary,
                 "agent_workflow": agent_workflow,
-                "message": "No data extracted or processing failed."
+                "extractor_type": extractor_type,
+                "message": "No extractable records found."
             }
 
     except HTTPException:
@@ -736,8 +2473,15 @@ async def get_extracted_data(
 ):
     """鑾峰彇宸叉彁鍙栫殑鏁版嵁"""
     try:
+        from sqlalchemy import select as sa_select
+
         lit_id = int(file_id)
         literature = await require_literature_access(db, principal, lit_id)
+        candidate_stmt = sa_select(RecordCandidate).where(RecordCandidate.literature_id == lit_id)
+        candidate_result = await db.execute(candidate_stmt)
+        candidate_records = list(candidate_result.scalars().all())
+        if candidate_records:
+            return candidate_records
         records = await get_records_by_literature(
             db,
             lit_id,
@@ -799,6 +2543,7 @@ async def get_extraction_run_detail(
     return {
         "run_id": run.run_id,
         "literature_id": run.literature_id,
+        "extractor_type": run.extractor_type,
         "profile": run.profile,
         "status": run.status,
         "candidate_count": run.candidate_count,
@@ -817,13 +2562,33 @@ async def get_extraction_run_detail(
 @router.get("/extraction-runs/latest/{literature_id}")
 async def get_latest_extraction_run_detail(
     literature_id: int,
+    extractor_type: str = Query("tribology", pattern="^(tribology|diffusion)$"),
     db: AsyncSession = Depends(get_db),
     principal: AuthPrincipal = Depends(get_current_principal),
 ):
+    from sqlalchemy import func, select as sa_select
+
     await require_literature_access(db, principal, literature_id)
-    run = await get_latest_extraction_run_by_literature(db, literature_id)
+    literature = await db.get(Literature, literature_id)
+    if literature and extractor_type != "diffusion" and await _normalize_legacy_no_data_state(db, literature):
+        await db.commit()
+    run = await get_latest_extraction_run_by_literature(db, literature_id, extractor_type=extractor_type)
     if not run:
-        raise HTTPException(status_code=404, detail=f"No extraction runs for literature '{literature_id}'")
+        return {
+            "run_id": None,
+            "extractor_type": extractor_type,
+            "status": "not_started",
+            "candidate_count": 0,
+            "final_count": 0,
+            "dropped_by_reason": {},
+            "page_coverage": {},
+            "page_candidate_counts": {},
+            "progress_log": [],
+            "summary": {},
+            "error_message": None,
+            "created_at": None,
+            "updated_at": None,
+        }
 
     def _parse_json(value):
         if not value:
@@ -834,11 +2599,44 @@ async def get_latest_extraction_run_detail(
             return {}
 
     summary = _parse_json(run.summary_json)
+    if extractor_type == "diffusion":
+        candidate_count = (
+            await db.execute(
+                sa_select(func.count(DiffusionCandidate.id)).where(DiffusionCandidate.literature_id == literature_id)
+            )
+        ).scalar() or 0
+        final_count = (
+            await db.execute(
+                sa_select(func.count(DiffusionRecord.id)).where(DiffusionRecord.literature_id == literature_id)
+            )
+        ).scalar() or 0
+    else:
+        candidate_count, final_count = await _count_cached_record_artifacts(db, literature_id)
+    response_status = run.status
+    response_error = run.error_message
+    if literature and str(literature.status or "").strip().lower() == "no_data" and not (candidate_count or final_count):
+        response_status = "no_data"
+        response_error = "No extractable records found"
+        progress_log = summary.get("progress_log")
+        if not isinstance(progress_log, list):
+            progress_log = []
+        if not any(
+            isinstance(item, dict)
+            and str(item.get("stage") or "").strip() == "stage_e.finalize"
+            and str(item.get("message") or "").strip() == "No extractable records found"
+            for item in progress_log
+        ):
+            progress_log = [*progress_log, {"stage": "stage_e.finalize", "message": "No extractable records found"}]
+        summary["current_stage"] = "stage_e.finalize"
+        summary["current_message"] = "No extractable records found"
+        summary["progress_log"] = progress_log
+
     return {
         "run_id": run.run_id,
         "literature_id": run.literature_id,
+        "extractor_type": run.extractor_type,
         "profile": run.profile,
-        "status": run.status,
+        "status": response_status,
         "candidate_count": run.candidate_count,
         "final_count": run.final_count,
         "dropped_by_reason": _parse_json(run.dropped_by_reason),
@@ -846,7 +2644,7 @@ async def get_latest_extraction_run_detail(
         "page_candidate_counts": summary.get("page_candidate_counts") or {},
         "progress_log": summary.get("progress_log") or [],
         "summary": summary,
-        "error_message": run.error_message,
+        "error_message": response_error,
         "created_at": run.created_at,
         "updated_at": run.updated_at,
     }
@@ -924,4 +2722,3 @@ async def chat(
         "success": True,
         "response": response
     }
-

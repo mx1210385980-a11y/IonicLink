@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { nextTick } from 'vue'
 
-import Dashboard from '@/components/Dashboard.vue'
 import DataCleaningWorkbench from '@/components/DataCleaningWorkbench.vue'
 import IntegratedExplorer from '@/components/IntegratedExplorer.vue'
+import DiffusionExplorerWorkspace from '@/components/knowledge/DiffusionExplorerWorkspace.vue'
+import KnowledgeContextPanel from '@/components/knowledge/KnowledgeContextPanel.vue'
+import KnowledgeSidebar from '@/components/knowledge/KnowledgeSidebar.vue'
 import RelationshipGraphPanel from '@/components/RelationshipGraphPanel.vue'
-import PlatformSectionHeader from '@/components/shell/PlatformSectionHeader.vue'
-import { useI18n } from '@/composables/useI18n'
 import type { SearchFilter } from '@/lib/api'
 
 const props = defineProps<{
@@ -28,102 +27,154 @@ const emit = defineEmits<{
   'clear-doi': []
 }>()
 
-const { isChinese } = useI18n()
 const emptyFilter: SearchFilter = {}
-const recordExplorerRef = ref<HTMLElement | null>(null)
+const exportRequestId = ref(0)
+const externalExportRequest = ref<{ id: number, format: 'json' | 'csv' | 'ndjson' } | null>(null)
 
-const tabs = computed(() => [
-  { key: 'explorer', label: isChinese.value ? '知识浏览' : 'Explorer' },
-  { key: 'graph', label: isChinese.value ? '关系图谱' : 'Relationship Graph' },
-  { key: 'cleaning', label: isChinese.value ? '清洗工作台' : 'Cleaning Studio' },
-  { key: 'datasets', label: isChinese.value ? '数据集构建' : 'Dataset Builder' },
+const isDiffusionScope = computed(() => {
+  const extractorType = props.selectedFile?.extractor_type
+  if (extractorType === 'diffusion') return true
+  const records = props.selectedFile?.records || []
+  return records.some((record: any) => {
+    return Boolean(String(record?.system_name || '').trim())
+      || record?.D_total != null
+      || record?.D_cation != null
+      || record?.D_anion != null
+  })
+})
+
+const selectedRecordCount = computed(() => props.selectedFile?.records?.length || 0)
+const qualityIssueCount = computed(() => {
+  const records = props.selectedFile?.records || []
+  if (isDiffusionScope.value) {
+    return records.filter((record: any) => {
+      const validationWarning = record.validationStatus === 'warning'
+      const missingCore = !String(record.system_name || '').trim()
+        || !String(record.ionic_liquid || '').trim()
+        || ![record.D_total, record.D_cation, record.D_anion].some((value: unknown) => value !== null && value !== undefined)
+      const missingEvidence = !record.source_page && !String(record.source || record.evidence || '').trim()
+      return validationWarning || missingCore || missingEvidence
+    }).length
+  }
+  return records.filter((record: any) => {
+    const validationWarning = record.validationStatus === 'warning'
+    const missingCore = !String(record.material_name || '').trim()
+      || !String(record.ionic_liquid || '').trim()
+      || !String(record.cof || '').trim()
+    const missingEvidence = !record.source_page && !String(record.source_figure || '').trim() && !String(record.evidence || record.notes || record.source || '').trim()
+    return validationWarning || missingCore || missingEvidence
+  }).length
+})
+
+const sidebarModes = computed(() => [
+  { key: 'explorer', label: 'Data Grid', count: selectedRecordCount.value || undefined },
+  { key: 'graph', label: 'Graph View' },
+  { key: 'cleaning', label: 'Data Quality', count: qualityIssueCount.value || undefined },
+  { key: 'datasets', label: 'Dataset Builder' },
 ])
 
-const signals = computed(() => [
-  { key: 'scope', label: isChinese.value ? '当前范围' : 'Active Scope', value: props.activeScopeLabel },
-  { key: 'source', label: isChinese.value ? '当前来源' : 'Source', value: props.selectedFileName },
-  { key: 'operator', label: isChinese.value ? '当前操作员' : 'Operator', value: props.operatorName },
-])
+const sourceLabel = computed(() => props.selectedFileName || 'Scope Library')
+const modeMeta = computed<{ label: string }>(() => {
+  const modes: Record<string, { label: string }> = {
+    explorer: { label: 'Data Grid' },
+    graph: { label: isDiffusionScope.value ? 'Evidence View' : 'Graph View' },
+    cleaning: { label: 'Data Quality' },
+    datasets: { label: isDiffusionScope.value ? 'Feature Builder' : 'Dataset Builder' },
+  }
+  return modes[props.currentSection] ?? modes.explorer!
+})
 
-async function focusRecordExplorer() {
-  await nextTick()
-  recordExplorerRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+function requestExport(format: 'json' | 'csv' | 'ndjson') {
+  exportRequestId.value += 1
+  externalExportRequest.value = {
+    id: exportRequestId.value,
+    format,
+  }
 }
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col gap-3 sm:gap-4">
-    <PlatformSectionHeader
-      :eyebrow="isChinese ? 'Knowledge' : 'Knowledge'"
-      :title="isChinese ? '把抽取结果沉淀成可复用的研究知识资产。' : 'Turn extracted output into reusable research knowledge assets.'"
-      :description="isChinese
-        ? '这一层不只是查数据，还要承接关系图、数据质量、清洗和数据集构建，把平台主线推进到建模前。'
-        : 'This layer is more than search. It should carry relationship views, data quality work, cleaning, and dataset building before modeling begins.'"
-      :tabs="tabs"
-      :active-tab="currentSection"
-      :signals="signals"
-      :primary-action-label="isChinese ? '进入建模层' : 'Open Modeling'"
-      :secondary-action-label="isChinese ? '返回审阅层' : 'Back To Review'"
-      @select-tab="emit('change-section', $event)"
-      @primary-action="emit('open-training', null)"
-      @secondary-action="emit('open-review')"
-    />
+  <div class="flex h-full min-h-0 flex-col bg-[#f3f7fb] p-3">
+    <div class="grid min-h-0 flex-1 gap-3 xl:grid-cols-[18.5rem_minmax(0,1fr)_20rem]">
+      <KnowledgeSidebar
+        :current-section="currentSection"
+        :modes="sidebarModes"
+        :active-scope-label="activeScopeLabel"
+        :selected-source-name="sourceLabel"
+        :selected-record-count="selectedRecordCount"
+        @select="emit('change-section', $event)"
+        @open-review="emit('open-review')"
+      />
 
-    <div v-if="currentSection === 'graph'" class="shell-surface min-h-0 flex-1 overflow-hidden">
-      <RelationshipGraphPanel :filter="emptyFilter" :active="true" :refresh-key="0" />
-    </div>
-
-    <div v-else-if="currentSection === 'cleaning' || currentSection === 'datasets'" class="shell-surface min-h-0 flex-1 overflow-hidden">
-      <DataCleaningWorkbench :key="scopeKey || 'knowledge-cleaning'" @open-training="emit('open-training', $event)" />
-    </div>
-
-    <div v-else class="min-h-0 flex-1 overflow-auto">
-      <div class="flex min-h-full flex-col gap-4">
-        <section class="shell-surface px-5 py-5 sm:px-6">
-          <div class="max-w-3xl">
-            <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400 dark:text-slate-500">
-              {{ isChinese ? 'Knowledge / Explorer' : 'Knowledge / Explorer' }}
-            </p>
-            <h3 class="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">
-              {{ isChinese ? '把探索、过滤、导出都收回到 Knowledge。' : 'Pull exploration, filters, and exports back into Knowledge.' }}
-            </h3>
-            <p class="mt-3 text-sm leading-7 text-slate-600 dark:text-slate-300">
-              {{ isChinese
-                ? '这里才是图表联动、Filter Chips、快照导出和知识探索该发生的地方。Home 只负责判断平台状态和给出下一步动作。'
-                : 'This is where linked charts, filter chips, snapshot exports, and data exploration belong. Home should only summarize state and suggest the next step.' }}
-            </p>
+      <main class="flex min-h-0 flex-col gap-3 overflow-hidden">
+        <section class="min-h-0 flex-1 overflow-hidden rounded-[1.8rem] border border-[#dbe5f0] bg-white shadow-[0_28px_64px_-46px_rgba(15,23,42,0.34)]">
+          <div
+            v-if="isDiffusionScope && currentSection !== 'graph'"
+            class="h-full min-h-0 overflow-hidden"
+          >
+            <DiffusionExplorerWorkspace
+              :current-section="currentSection"
+              :selected-file="selectedFile"
+              :selected-file-name="selectedFileName"
+              :external-export-request="externalExportRequest"
+              @open-review="emit('open-review')"
+            />
           </div>
-        </section>
 
-        <Dashboard @open-library="emit('open-review')" @explore-data="focusRecordExplorer" />
-
-        <section ref="recordExplorerRef" class="shell-surface min-h-[38rem] overflow-hidden">
-          <div class="border-b border-black/8 px-5 py-4 dark:border-white/10 sm:px-6">
-            <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400 dark:text-slate-500">
-              {{ isChinese ? 'Record Explorer' : 'Record Explorer' }}
-            </p>
-            <h3 class="mt-2 text-xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">
-              {{ isChinese ? '把图表选择继续落到具体记录。' : 'Carry chart selections into concrete records.' }}
-            </h3>
-            <p class="mt-2 max-w-3xl text-sm leading-7 text-slate-600 dark:text-slate-300">
-              {{ isChinese
-                ? '图表探索确定方向后，再往下进入记录级浏览与修订，不再让首页承担这类探索入口。'
-                : 'After the charts set direction, continue into record-level browsing and correction here instead of using Home as the entry for exploration.' }}
-            </p>
+          <div
+            v-else-if="currentSection === 'graph'"
+            class="h-full min-h-0 overflow-hidden"
+          >
+            <div
+              v-if="isDiffusionScope"
+              class="flex h-full min-h-[18rem] items-center justify-center bg-[#fbfdff] px-6 text-center"
+            >
+              <div class="max-w-xl">
+                <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#8ca0ba]">Diffusion Evidence</p>
+                <h3 class="mt-3 text-[1.55rem] font-semibold tracking-[-0.05em] text-slate-950">Graph view is still tribology-only.</h3>
+                <p class="mt-3 text-sm leading-7 text-slate-500">
+                  Use the diffusion grid, quality, and feature builder views to filter records, inspect evidence, and export model-ready feature sets.
+                </p>
+              </div>
+            </div>
+            <RelationshipGraphPanel v-else :filter="emptyFilter" :active="true" :refresh-key="0" />
           </div>
-          <div class="min-h-0 overflow-hidden">
+
+          <div
+            v-else-if="currentSection === 'cleaning' || currentSection === 'datasets'"
+            class="h-full min-h-0 overflow-hidden"
+          >
+            <DataCleaningWorkbench :key="scopeKey || 'knowledge-cleaning'" @open-training="emit('open-training', $event)" />
+          </div>
+
+          <div v-else class="h-full min-h-0 overflow-hidden">
             <IntegratedExplorer
               :key="scopeKey || 'knowledge-explorer'"
               :initial-doi="explorerDoi"
               :selected-file-id="selectedFileId"
               :source-name="selectedFile?.name"
               :literature-metadata="selectedFile?.metadata"
+              :external-export-request="externalExportRequest"
               @view-literature="emit('open-review')"
               @clear-doi="emit('clear-doi')"
             />
           </div>
         </section>
-      </div>
+      </main>
+
+      <KnowledgeContextPanel
+        :current-section="currentSection"
+        :mode-label="modeMeta.label"
+        :selected-source-name="sourceLabel"
+        :active-scope-label="activeScopeLabel"
+        :selected-record-count="selectedRecordCount"
+        :explorer-doi="explorerDoi"
+        :extractor-type="isDiffusionScope ? 'diffusion' : 'tribology'"
+        @open-training="emit('open-training', null)"
+        @open-review="emit('open-review')"
+        @change-section="emit('change-section', $event)"
+        @export-data="requestExport"
+      />
     </div>
   </div>
 </template>

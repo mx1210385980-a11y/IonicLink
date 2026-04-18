@@ -8,7 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
-from services.migration_service import CURRENT_SCHEMA_REVISION, format_schema_error, inspect_schema, stamp_schema_revision
+from services.migration_service import CURRENT_SCHEMA_REVISION, format_schema_error, inspect_schema, repair_schema, stamp_schema_revision
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -114,6 +114,9 @@ async def init_db():
     """Initialize database connection and verify schema state."""
     async with engine.begin() as conn:
         from models.db_models import (
+            DiffusionCandidate,
+            DiffusionFeatureSet,
+            DiffusionRecord,
             ExtractionCandidate,
             ExtractionRun,
             Literature,
@@ -130,7 +133,10 @@ async def init_db():
             await stamp_schema_revision(conn, CURRENT_SCHEMA_REVISION)
         else:
             if schema_state["missing_tables"] or schema_state["missing_columns"]:
-                raise RuntimeError(format_schema_error(schema_state))
+                await repair_schema(conn, Base.metadata, schema_state)
+                schema_state = await inspect_schema(conn, Base.metadata)
+                if schema_state["missing_tables"] or schema_state["missing_columns"]:
+                    raise RuntimeError(format_schema_error(schema_state))
             if schema_state.get("revision") != CURRENT_SCHEMA_REVISION:
                 await stamp_schema_revision(conn, CURRENT_SCHEMA_REVISION)
 

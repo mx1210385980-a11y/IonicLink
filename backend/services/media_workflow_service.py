@@ -4,6 +4,7 @@ from typing import Any, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from services.diffusion.diffusion_extractor_service import process_diffusion_file_safe
 from services.file_service import process_file_safe, reprocess_literature
 
 
@@ -14,18 +15,27 @@ class MediaWorkflowService:
         file_id: int,
         force: bool = False,
         profile: str = "high_accuracy",
+        extractor_type: str = "tribology",
         strict_cof_mode: Optional[bool] = None,
     ) -> dict[str, Any]:
-        metadata, data, extraction_summary = await process_file_safe(
-            file_id=file_id,
-            force=force,
-            profile=profile,
-            strict_cof_mode=strict_cof_mode,
-        )
+        if extractor_type == "diffusion":
+            metadata, data, extraction_summary = await process_diffusion_file_safe(
+                file_id=file_id,
+                force=force,
+                profile=profile,
+            )
+        else:
+            metadata, data, extraction_summary = await process_file_safe(
+                file_id=file_id,
+                force=force,
+                profile=profile,
+                strict_cof_mode=strict_cof_mode,
+            )
         return {
             "metadata": metadata or {},
             "data": data or [],
             "extraction_summary": extraction_summary or {},
+            "extractor_type": extractor_type,
         }
 
     async def reprocess_document(

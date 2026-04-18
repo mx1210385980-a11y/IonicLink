@@ -12,7 +12,25 @@ import {
   Search,
 } from 'lucide-vue-next'
 
-import { getRecordEvidence, type BatchFile, type EvidenceResult, type TribologyData, type ValidationStatus } from '@/lib/api'
+import {
+  approveDiffusionReviewCandidate,
+  approveReviewCandidate,
+  confirmDiffusionCandidateFieldEvidence,
+  confirmCandidateFieldEvidence,
+  flagDiffusionCandidateFieldEvidence,
+  flagCandidateFieldEvidence,
+  getDiffusionCandidateEvidence,
+  getDiffusionCandidateFieldEvidence,
+  getCandidateEvidence,
+  getCandidateFieldEvidence,
+  type BatchFile,
+  type EvidenceResult,
+  type ExtractorType,
+  type FieldEvidenceEntry,
+  type RecordFieldEvidenceResponse,
+  type TribologyData,
+  type ValidationStatus,
+} from '@/lib/api'
 import { getIonicLiquidEvidenceParts, getIonicLiquidEvidenceTerms } from '@/lib/ionicLiquidAliasKnowledge'
 import type { HighlightRect } from '@/types/pdf-highlight'
 
@@ -52,7 +70,8 @@ type RecordItem = {
   label: string
   title: string
   subtitle: string
-  cof: string
+  metricLabel: string
+  metricValue: string
   status: 'review' | 'confirmed' | 'warning'
   lowConfidence: boolean
   missingEvidence: boolean
@@ -69,6 +88,7 @@ type ReviewField = {
   evidenceStatus: 'Grounded' | 'Partial' | 'Missing'
   sourceType: 'text' | 'figure' | 'table' | 'inferred'
   location: string
+  canConfirm: boolean
   issue?: string
 }
 
@@ -103,6 +123,10 @@ const activeFieldId = ref('material')
 const activeRecordId = ref('')
 const activeRecordEvidence = ref<EvidenceResult | null>(null)
 const evidenceCache = ref<Record<string, EvidenceResult | null>>({})
+const activeRecordFieldEvidence = ref<RecordFieldEvidenceResponse | null>(null)
+const fieldEvidenceCache = ref<Record<string, RecordFieldEvidenceResponse | null>>({})
+const reviewActionPending = ref<string | null>(null)
+const reviewActionError = ref('')
 
 const reviewTabs = computed(() => [
   { key: 'inbox', label: 'Inbox' },
@@ -164,10 +188,15 @@ const queueItems = computed<QueueItem[]>(() => {
 
 const recordItems = computed<RecordItem[]>(() => {
   return allRecords.value.map((record, index) => {
+    const extractorType = recordExtractorType(record)
+    const metric = extractorType === 'diffusion'
+      ? diffusionMetric(record)
+      : { label: 'COF', value: present(record.cof) }
     const id = String(record.id || `record-${index + 1}`)
     const lowConfidence = recordLowConfidence(record)
     const missingEvidence = recordNeedsEvidence(record)
-    const status: RecordItem['status'] = record.validationStatus === 'verified' && !lowConfidence && !missingEvidence
+    const isApproved = String(record.review_status || '').trim().toLowerCase() === 'approved' || record.validationStatus === 'verified'
+    const status: RecordItem['status'] = isApproved && !lowConfidence && !missingEvidence
       ? 'confirmed'
       : lowConfidence || missingEvidence
           ? 'warning'
@@ -176,9 +205,10 @@ const recordItems = computed<RecordItem[]>(() => {
     return {
       id,
       label: `Record ${index + 1}`,
-      title: present(record.material_name),
+      title: extractorType === 'diffusion' ? present(record.system_name) : present(record.material_name),
       subtitle: present(record.ionic_liquid),
-      cof: present(record.cof),
+      metricLabel: metric.label,
+      metricValue: metric.value,
       status,
       lowConfidence,
       missingEvidence,
@@ -241,46 +271,81 @@ const activeLiteratureId = computed<number | null>(() => {
   return Number.isFinite(parsed) ? parsed : null
 })
 
-const reviewFields = computed<ReviewField[]>(() => buildReviewFields(activeRecord.value))
+const activeExtractorType = computed<ExtractorType>(() => {
+  const fromFile = selectedReviewFile.value?.extractor_type
+  if (fromFile === 'diffusion') return 'diffusion'
+  const fromFieldPayload = activeRecordFieldEvidence.value?.extractor_type
+  if (fromFieldPayload === 'diffusion') return 'diffusion'
+  const record = activeRecord.value
+  if (record?.extractor_type === 'diffusion') return 'diffusion'
+  if (record?.system_name || record?.D_total != null || record?.D_cation != null || record?.D_anion != null) {
+    return 'diffusion'
+  }
+  return 'tribology'
+})
+
+const reviewFields = computed<ReviewField[]>(() => buildReviewFields(activeRecord.value, activeRecordFieldEvidence.value?.fields))
 
 watch(
   reviewFields,
   (fields) => {
     if (!fields.find((field) => field.id === activeFieldId.value)) {
-      activeFieldId.value = fields[0]?.id || 'material'
+      activeFieldId.value = fields[0]?.id || (activeExtractorType.value === 'diffusion' ? 'system_name' : 'material')
     }
   },
   { immediate: true },
 )
 
 watch(
-  [activeRecord, activeLiteratureId],
-  async ([record, literatureId]) => {
+  [activeRecord, activeLiteratureId, activeExtractorType],
+  async ([record, literatureId, extractorType]) => {
     const recordId = Number(record?.id || '')
     if (!record || !literatureId || !Number.isFinite(recordId)) {
       activeRecordEvidence.value = null
+      activeRecordFieldEvidence.value = null
       return
     }
 
     const cacheKey = `${literatureId}:${recordId}`
     if (cacheKey in evidenceCache.value) {
       activeRecordEvidence.value = evidenceCache.value[cacheKey] ?? null
-      return
+    } else {
+      try {
+        const evidence = extractorType === 'diffusion'
+          ? await getDiffusionCandidateEvidence(literatureId, recordId)
+          : await getCandidateEvidence(literatureId, recordId)
+        evidenceCache.value[cacheKey] = evidence
+        activeRecordEvidence.value = evidence
+      } catch {
+        evidenceCache.value[cacheKey] = null
+        activeRecordEvidence.value = null
+      }
     }
 
-    try {
-      const evidence = await getRecordEvidence(literatureId, recordId)
-      evidenceCache.value[cacheKey] = evidence
-      activeRecordEvidence.value = evidence
-    } catch {
-      evidenceCache.value[cacheKey] = null
-      activeRecordEvidence.value = null
+    if (cacheKey in fieldEvidenceCache.value) {
+      activeRecordFieldEvidence.value = fieldEvidenceCache.value[cacheKey] ?? null
+    } else {
+      try {
+        const fieldEvidence = extractorType === 'diffusion'
+          ? await getDiffusionCandidateFieldEvidence(recordId)
+          : await getCandidateFieldEvidence(recordId)
+        fieldEvidenceCache.value[cacheKey] = fieldEvidence
+        activeRecordFieldEvidence.value = fieldEvidence
+      } catch {
+        fieldEvidenceCache.value[cacheKey] = null
+        activeRecordFieldEvidence.value = null
+      }
     }
   },
   { immediate: true },
 )
 
 const activeField = computed(() => reviewFields.value.find((field) => field.id === activeFieldId.value) || reviewFields.value[0] || null)
+const activeFieldEvidenceEntry = computed(() => {
+  const fieldMap = resolveRecordFieldEvidenceMap(activeRecord.value, activeRecordFieldEvidence.value?.fields)
+  return fieldMap[activeField.value?.id || ''] || null
+})
+const canApproveAllVisible = computed(() => visibleRecordItems.value.length > 0 && visibleRecordItems.value.every((item) => recordCanApprove(item.record)))
 
 const queueIssues = computed<QueueIssue[]>(() => {
   return visibleRecordItems.value.flatMap((item) => {
@@ -298,11 +363,26 @@ const queueIssues = computed<QueueIssue[]>(() => {
   })
 })
 
-const fieldEvidenceContext = computed(() => buildFieldEvidence(activeRecord.value, activeField.value, activeRecordEvidence.value))
+const fieldEvidenceContext = computed(() => buildFieldEvidence(activeRecord.value, activeField.value, activeRecordEvidence.value, activeFieldEvidenceEntry.value))
 const evidenceExcerpt = computed(() => fieldEvidenceContext.value.excerpt)
+const activeEvidenceHit = computed(() => bestEvidenceHitForField(
+  activeRecordEvidence.value,
+  activeField.value,
+  fieldEvidenceContext.value.specs,
+))
 
 const highlightedExcerpt = computed(() => {
   return highlightTerms(evidenceExcerpt.value, fieldEvidenceContext.value.specs)
+})
+
+const evidenceImageUrl = computed(() => {
+  const imageB64 = activeRecordEvidence.value?.image_b64 || activeEvidenceHit.value?.image_b64
+  return imageB64 ? `data:image/png;base64,${imageB64}` : null
+})
+
+const evidencePagePreviewUrl = computed(() => {
+  const imageB64 = activeRecordEvidence.value?.page_preview_b64
+  return imageB64 ? `data:image/png;base64,${imageB64}` : null
 })
 
 const evidenceHits = computed<EvidenceHit[]>(() => {
@@ -326,7 +406,17 @@ const evidenceHits = computed<EvidenceHit[]>(() => {
 })
 
 const reviewTitle = computed(() => activeDocumentName.value)
-const activeFieldDisplayLabel = computed(() => activeField.value?.label.toUpperCase() || 'NO FIELD SELECTED')
+const activeFieldDisplayLabel = computed(() => {
+  const label = activeField.value?.label
+  return label ? label.toUpperCase().replace(/_/g, ' ') : 'NO FIELD SELECTED'
+})
+const evidenceSecondaryLabel = computed(() => activeExtractorType.value === 'diffusion' ? 'System Link' : 'Sample Alignment')
+const evidenceSecondaryValue = computed(() => {
+  if (activeExtractorType.value === 'diffusion') {
+    return activeRecord?.value?.system_name || 'Not linked yet'
+  }
+  return activeFieldEvidenceEntry.value?.evidence?.sample_id || activeRecord?.value?.sample_id || 'Not linked yet'
+})
 const reviewKicker = computed(() => {
   if (props.currentSection === 'queue') return 'RESOLVE THE ITEMS BLOCKING FINAL CONFIRMATION.'
   if (props.currentSection === 'grounding') return 'VERIFY FIELD EVIDENCE BEFORE CONFIRMING THIS RECORD.'
@@ -360,42 +450,296 @@ function present(value: unknown) {
   return trim(value) || 'Not captured yet'
 }
 
+function normalizeFieldKey(key: string) {
+  return String(key || '')
+    .trim()
+    .toLowerCase()
+    .replace(/-/g, '_')
+}
+
+function deriveValidationStatusFromReviewStatus(reviewStatus: string | null | undefined): ValidationStatus {
+  const normalized = String(reviewStatus || '').trim().toLowerCase()
+  if (normalized === 'approved') return 'verified'
+  if (normalized === 'flagged' || normalized === 'needs_evidence') return 'warning'
+  return 'unverified'
+}
+
+function normalizeStoredFieldEvidenceMap(fieldEvidence: TribologyData['field_evidence_json'] | Record<string, FieldEvidenceEntry> | undefined) {
+  return Object.entries(fieldEvidence || {}).reduce<Record<string, FieldEvidenceEntry>>((acc, [key, value]) => {
+    acc[normalizeFieldKey(key)] = value || {}
+    return acc
+  }, {})
+}
+
+function recordExtractorType(record: TribologyData | null | undefined): ExtractorType {
+  if (record?.extractor_type === 'diffusion') return 'diffusion'
+  if (record?.system_name || record?.D_total != null || record?.D_cation != null || record?.D_anion != null) {
+    return 'diffusion'
+  }
+  return 'tribology'
+}
+
+function formatDiffusionNumber(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return 'Not captured yet'
+  return `${Number(value).toPrecision(4)}`.replace(/\.?0+e/, 'e').replace(/\.?0+$/, '')
+}
+
+const superscriptDigits: Record<string, string> = {
+  '0': '⁰',
+  '1': '¹',
+  '2': '²',
+  '3': '³',
+  '4': '⁴',
+  '5': '⁵',
+  '6': '⁶',
+  '7': '⁷',
+  '8': '⁸',
+  '9': '⁹',
+  '-': '⁻',
+  '+': '⁺',
+}
+
+function toSuperscript(value: string) {
+  return Array.from(value).map((char) => superscriptDigits[char] || char).join('')
+}
+
+function formatScientificUnit(value: string | null | undefined) {
+  const text = trim(value)
+  if (!text) return 'Not captured yet'
+
+  return text
+    .replace(/10\s*\^?\s*([+-]?\d+)/g, (_match, exponent: string) => `10${toSuperscript(exponent)}`)
+    .replace(/([A-Za-zÅμµ])2(?=\/)/g, '$1²')
+    .replace(/([A-Za-zÅμµ])\^2(?=\/)/g, '$1²')
+    .replace(/ps-1/g, 'ps⁻¹')
+    .replace(/s-1/g, 's⁻¹')
+}
+
+function hasAnyDiffusionCoefficient(record: TribologyData | null | undefined) {
+  if (!record) return false
+  return [record.D_total, record.D_cation, record.D_anion].some((value) => value !== null && value !== undefined)
+}
+
+function diffusionMetric(record: TribologyData | null | undefined) {
+  if (!record) return { label: 'Diffusion', value: 'Not captured yet' }
+  if (record.D_total != null) return { label: 'D_total', value: formatDiffusionNumber(record.D_total) }
+  if (record.D_cation != null) return { label: 'D_cation', value: formatDiffusionNumber(record.D_cation) }
+  if (record.D_anion != null) return { label: 'D_anion', value: formatDiffusionNumber(record.D_anion) }
+  return { label: 'Diffusion', value: 'Not captured yet' }
+}
+
+function resolveRecordFieldEvidenceMap(
+  record: TribologyData | null | undefined,
+  remoteFields?: Record<string, FieldEvidenceEntry> | null,
+) {
+  const extractorType = recordExtractorType(record)
+  const localFields = normalizeStoredFieldEvidenceMap(record?.field_evidence_json)
+  const merged = {
+    ...localFields,
+    ...normalizeStoredFieldEvidenceMap(remoteFields || undefined),
+  }
+
+  if (!merged.conditions) {
+    const conditionSource = extractorType === 'diffusion'
+      ? (merged.temperature_value || merged.confinement_scale_value || merged.confinement_scale_unit || null)
+      : (merged.load || merged.speed || merged.temperature || null)
+    const conditionValue = summarizeConditions(record || null, extractorType)
+    if (conditionValue !== 'Not captured yet') {
+      merged.conditions = {
+        value: conditionValue,
+        confidence: conditionSource?.confidence ?? undefined,
+        evidence: conditionSource?.evidence ?? undefined,
+        status: conditionSource?.status ?? undefined,
+      }
+    }
+  }
+
+  if (!merged.source_page && record?.source_page) {
+    merged.source_page = {
+      value: `Page ${record.source_page}`,
+      evidence: {
+        source_type: inferSourceType(record),
+        page: record.source_page,
+        source_label: record.source_figure || record.source || null,
+        quote: record.evidence || null,
+        bbox: record.source_bbox || null,
+        sample_id: extractorType === 'tribology' ? (record.sample_id || null) : null,
+      },
+    }
+  }
+
+  return merged
+}
+
+function fieldEntryHasEvidence(entry: FieldEvidenceEntry | null | undefined) {
+  const evidence = entry?.evidence
+  return Boolean(
+    evidence && (
+      evidence.page
+      || trim(evidence.source_label)
+      || trim(evidence.quote)
+      || (Array.isArray(evidence.bbox) && evidence.bbox.length === 4)
+      || trim(evidence.sample_id)
+      || trim(evidence.source_type)
+    ),
+  )
+}
+
+function resolveFieldEvidenceStatus(entry: FieldEvidenceEntry | null | undefined, value: string): ReviewField['evidenceStatus'] {
+  if (!trim(value) || value === 'Not captured yet') return 'Missing'
+  if (!entry) return 'Missing'
+  if (entry.status === 'grounded') return 'Grounded'
+  if (entry.status === 'partial') return 'Partial'
+  if (fieldEntryHasEvidence(entry)) {
+    const evidence = entry.evidence
+    if (evidence?.page || trim(evidence?.source_label) || trim(evidence?.quote) || (Array.isArray(evidence?.bbox) && evidence?.bbox.length === 4)) {
+      return 'Grounded'
+    }
+    return 'Partial'
+  }
+  return 'Missing'
+}
+
+function syncRecordReviewState(recordId: string, payload: RecordFieldEvidenceResponse) {
+  for (const file of props.files) {
+    const record = file.records.find((item) => String(item.id || '') === recordId)
+    if (!record) continue
+    if (payload.extractor_type === 'diffusion') {
+      record.extractor_type = 'diffusion'
+      file.extractor_type = 'diffusion'
+    }
+    record.field_evidence_json = payload.fields
+    record.review_status = payload.review_status || undefined
+    record.record_origin = payload.record_origin || record.record_origin
+    record.assembly_notes = payload.assembly_notes || undefined
+    record.sample_id = payload.sample_id || record.sample_id
+    record.series_id = payload.series_id || record.series_id
+    record.validationStatus = deriveValidationStatusFromReviewStatus(payload.review_status)
+    record.validationMessage = payload.assembly_notes || undefined
+  }
+}
+
+function applyReviewResponse(payload: RecordFieldEvidenceResponse) {
+  const recordId = String(payload.record_id)
+  const literatureId = Number(payload.literature_id || activeLiteratureId.value || 0)
+  if (literatureId && Number.isFinite(payload.record_id)) {
+    fieldEvidenceCache.value[`${literatureId}:${payload.record_id}`] = payload
+  }
+  if (activeRecord.value && String(activeRecord.value.id || '') === recordId) {
+    activeRecordFieldEvidence.value = payload
+  }
+  syncRecordReviewState(recordId, payload)
+}
+
+function resolveFieldSourceType(entry: FieldEvidenceEntry | null | undefined, record: TribologyData | null | undefined): ReviewField['sourceType'] {
+  const sourceType = trim(entry?.evidence?.source_type).toLowerCase()
+  if (sourceType.includes('table')) return 'table'
+  if (sourceType.includes('figure') || sourceType.includes('caption') || trim(entry?.evidence?.source_label).toLowerCase().startsWith('fig')) return 'figure'
+  if (sourceType) return 'text'
+  return inferSourceType(record)
+}
+
+function resolveFieldLocation(entry: FieldEvidenceEntry | null | undefined, record: TribologyData | null | undefined) {
+  const page = entry?.evidence?.page
+  const label = trim(entry?.evidence?.source_label)
+  if (page && label) return `Page ${page} | ${label}`
+  if (page) return `Page ${page}`
+  if (label) return label
+  return evidenceLocation(record)
+}
+
 function hasTextEvidence(record: TribologyData | null | undefined) {
   if (!record) return false
   return Boolean(trim(record.evidence) || trim(record.notes) || trim(record.source))
 }
 
 function recordNeedsEvidence(record: TribologyData) {
-  return !record.source_page && !trim(record.source_figure) && !hasTextEvidence(record)
+  const extractorType = recordExtractorType(record)
+  const fieldMap = resolveRecordFieldEvidenceMap(record)
+  if (extractorType === 'diffusion') {
+    const missingBase = ['system_name', 'ionic_liquid']
+      .some((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) === 'Missing')
+    const coefficientMissing = ['d_total', 'd_cation', 'd_anion']
+      .every((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) === 'Missing')
+    return missingBase || coefficientMissing
+  }
+  return ['material', 'ionic_liquid', 'cof']
+    .some((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) === 'Missing')
 }
 
 function recordNeedsReview(record: TribologyData) {
-  return record.validationStatus !== 'verified'
+  return String(record.review_status || '').trim().toLowerCase() !== 'approved' && record.validationStatus !== 'verified'
 }
 
 function recordLowConfidence(record: TribologyData) {
-  const missingCore = !trim(record.material_name) || !trim(record.ionic_liquid) || !trim(record.cof)
-  return record.validationStatus === 'warning' || missingCore
+  const extractorType = recordExtractorType(record)
+  const missingCore = extractorType === 'diffusion'
+    ? (!trim(record.system_name) || !trim(record.ionic_liquid) || !hasAnyDiffusionCoefficient(record))
+    : (!trim(record.material_name) || !trim(record.ionic_liquid) || !trim(record.cof))
+  const reviewStatus = String(record.review_status || '').trim().toLowerCase()
+  return record.validationStatus === 'warning' || reviewStatus === 'flagged' || reviewStatus === 'needs_evidence' || missingCore
 }
 
-function summarizeConditions(record: TribologyData) {
+function summarizeConditions(record: TribologyData | null | undefined, extractorType: ExtractorType = recordExtractorType(record)) {
+  if (!record) return 'Not captured yet'
+  if (extractorType === 'diffusion') {
+    const parts = [
+      record.temperature_value != null ? `T ${formatDiffusionNumber(record.temperature_value)}` : '',
+      record.confinement_scale_value != null
+        ? `Scale ${formatDiffusionNumber(record.confinement_scale_value)}${trim(record.confinement_scale_unit) ? ` ${formatScientificUnit(record.confinement_scale_unit)}` : ''}`
+        : '',
+    ].map((item) => trim(item)).filter(Boolean)
+    return parts.length ? parts.join(' | ') : 'Not captured yet'
+  }
   const parts = [record.load, record.speed, record.temperature].map((item) => trim(item)).filter(Boolean)
   return parts.length ? parts.join(' | ') : 'Not captured yet'
 }
 
-function inferSourceType(record: TribologyData): ReviewField['sourceType'] {
+function inferSourceType(record: TribologyData | null | undefined): ReviewField['sourceType'] {
+  if (!record) return 'inferred'
+  const sourceLabel = trim(record.source || record.source_figure).toLowerCase()
   const sourceText = [record.source, record.evidence, record.notes].map((item) => trim(item).toLowerCase()).join(' ')
   if (trim(record.source_figure)) return 'figure'
+  if (sourceLabel.startsWith('fig') || sourceLabel.startsWith('image') || sourceLabel.startsWith('plot')) return 'figure'
   if (sourceText.includes('table')) return 'table'
+  if (sourceLabel.startsWith('table')) return 'table'
   if (hasTextEvidence(record)) return 'text'
   return 'inferred'
 }
 
-function evidenceLocation(record: TribologyData) {
+function evidenceLocation(record: TribologyData | null | undefined) {
+  if (!record) return `Scope ${props.activeScopeLabel}`
   if (record.source_page && trim(record.source_figure)) return `Page ${record.source_page} | ${record.source_figure}`
   if (record.source_page) return `Page ${record.source_page}`
   if (trim(record.source_figure)) return `Figure ${trim(record.source_figure)}`
   return `Scope ${props.activeScopeLabel}`
+}
+
+function fieldValueForKey(record: TribologyData, key: string, extractorType: ExtractorType = recordExtractorType(record)) {
+  if (extractorType === 'diffusion') {
+    if (key === 'system_name') return present(record.system_name)
+    if (key === 'confinement_material_class') return present(record.confinement_material_class)
+    if (key === 'confinement_geometry_class') return present(record.confinement_geometry_class)
+    if (key === 'surface_functional_groups') return present(record.surface_functional_groups)
+    if (key === 'confinement_dimensionality') return present(record.confinement_dimensionality)
+    if (key === 'ionic_liquid') return present(record.ionic_liquid)
+    if (key === 'd_total') return formatDiffusionNumber(record.D_total)
+    if (key === 'd_cation') return formatDiffusionNumber(record.D_cation)
+    if (key === 'd_anion') return formatDiffusionNumber(record.D_anion)
+    if (key === 'd_unit') return formatScientificUnit(record.D_unit)
+    if (key === 'temperature_value') return formatDiffusionNumber(record.temperature_value)
+    if (key === 'confinement_scale_value') return formatDiffusionNumber(record.confinement_scale_value)
+    if (key === 'confinement_scale_unit') return formatScientificUnit(record.confinement_scale_unit)
+    if (key === 'conditions') return summarizeConditions(record, extractorType)
+    if (key === 'source_page') return record.source_page ? `Page ${record.source_page}` : 'Not captured yet'
+    return 'Not captured yet'
+  }
+  if (key === 'material') return present(record.material_name)
+  if (key === 'ionic_liquid') return present(record.ionic_liquid)
+  if (key === 'cof') return present(record.cof)
+  if (key === 'conditions') return summarizeConditions(record, extractorType)
+  if (key === 'source_page') return record.source_page ? `Page ${record.source_page}` : 'Not captured yet'
+  return 'Not captured yet'
 }
 
 function getRecordEvidenceText(record: TribologyData | null) {
@@ -425,15 +769,18 @@ function classifyIonicLiquidMode(term: string): EvidenceSearchMode {
 function fieldEvidenceSpecs(field: ReviewField | null, record: TribologyData | null) {
   if (!field || !record) return []
 
+  const extractorType = recordExtractorType(record)
   const specs = new Map<string, EvidenceSearchSpec>()
   const cleanValue = trim(field.value)
 
   if (cleanValue && cleanValue !== 'Not captured yet') {
-    addEvidenceSpec(specs, cleanValue, field.id === 'cof' ? 'numeric' : 'loose')
+    addEvidenceSpec(specs, cleanValue, ['cof', 'd_total', 'd_cation', 'd_anion'].includes(field.id) ? 'numeric' : 'loose')
   }
 
   if (field.id === 'conditions') {
-    ;[record.load, record.speed, record.temperature]
+    ;(extractorType === 'diffusion'
+      ? [record.temperature_value != null ? formatDiffusionNumber(record.temperature_value) : '', record.confinement_scale_value != null ? formatDiffusionNumber(record.confinement_scale_value) : '', record.confinement_scale_unit]
+      : [record.load, record.speed, record.temperature])
       .map((item) => trim(item))
       .filter(Boolean)
       .forEach((item) => addEvidenceSpec(specs, item, 'loose'))
@@ -444,7 +791,17 @@ function fieldEvidenceSpecs(field: ReviewField | null, record: TribologyData | n
     if (material) addEvidenceSpec(specs, material, 'loose')
   }
 
-  if (field.id === 'ionic-liquid') {
+  if (field.id === 'system_name') {
+    const systemName = trim(record.system_name)
+    if (systemName) addEvidenceSpec(specs, systemName, 'loose')
+  }
+
+  if (['confinement_material_class', 'confinement_geometry_class', 'surface_functional_groups', 'confinement_dimensionality'].includes(field.id)) {
+    const raw = fieldValueForKey(record, field.id, extractorType)
+    if (trim(raw)) addEvidenceSpec(specs, raw, 'loose')
+  }
+
+  if (field.id === 'ionic_liquid') {
     const ionicLiquid = trim(record.ionic_liquid)
     const ionicParts = getIonicLiquidEvidenceParts(ionicLiquid)
 
@@ -480,9 +837,19 @@ function fieldEvidenceSpecs(field: ReviewField | null, record: TribologyData | n
     }
   }
 
-  if (field.id === 'source-page') {
+  if (['d_total', 'd_cation', 'd_anion'].includes(field.id)) {
+    const numeric = cleanValue.match(/[0-9]+(?:\.[0-9]+)?(?:e[-+]?\d+)?/i)?.[0]
+    if (numeric) {
+      addEvidenceSpec(specs, numeric, 'numeric')
+      addEvidenceSpec(specs, `diffusion ${numeric}`, 'loose')
+      addEvidenceSpec(specs, `diffusion coefficient ${numeric}`, 'loose')
+    }
+  }
+
+  if (field.id === 'source_page') {
     if (record.source_page) addEvidenceSpec(specs, `Page ${record.source_page}`, 'loose')
     if (trim(record.source_figure)) addEvidenceSpec(specs, trim(record.source_figure), 'loose')
+    if (trim(record.source)) addEvidenceSpec(specs, trim(record.source), 'loose')
   }
 
   return [...specs.values()]
@@ -522,10 +889,18 @@ function extractEvidenceExcerpt(text: string, specs: EvidenceSearchSpec[]) {
 function semanticTypesForField(field: ReviewField | null) {
   if (!field) return []
   if (field.id === 'material') return ['material', 'substrate_material', 'probe_material', 'tribopair']
-  if (field.id === 'ionic-liquid') return ['ionic_liquid', 'lubricant', 'cation', 'anion']
+  if (field.id === 'system_name') return ['system', 'system_name', 'sample']
+  if (field.id === 'confinement_material_class') return ['material', 'confinement_material']
+  if (field.id === 'confinement_geometry_class') return ['geometry', 'confinement_geometry']
+  if (field.id === 'surface_functional_groups') return ['surface_functional_groups', 'surface_group']
+  if (field.id === 'confinement_dimensionality') return ['dimensionality', 'confinement_dimensionality']
+  if (field.id === 'ionic_liquid') return ['ionic_liquid', 'lubricant', 'cation', 'anion']
   if (field.id === 'cof') return ['cof', 'friction_coefficient']
+  if (field.id === 'd_total') return ['diffusion', 'd_total']
+  if (field.id === 'd_cation') return ['diffusion', 'd_cation']
+  if (field.id === 'd_anion') return ['diffusion', 'd_anion']
   if (field.id === 'conditions') return ['load', 'speed', 'temperature', 'condition']
-  if (field.id === 'source-page') return ['source_page', 'figure', 'table']
+  if (field.id === 'source_page') return ['source_page', 'figure', 'table']
   return []
 }
 
@@ -564,7 +939,12 @@ function bestEvidenceHitForField(evidence: EvidenceResult | null, field: ReviewF
   return null
 }
 
-function buildFieldEvidence(record: TribologyData | null, field: ReviewField | null, evidence: EvidenceResult | null) {
+function buildFieldEvidence(
+  record: TribologyData | null,
+  field: ReviewField | null,
+  evidence: EvidenceResult | null,
+  fieldEntry: FieldEvidenceEntry | null | undefined,
+) {
   if (!field) {
     return {
       excerpt: 'Select a field on the left to inspect its grounding evidence.',
@@ -580,6 +960,14 @@ function buildFieldEvidence(record: TribologyData | null, field: ReviewField | n
   }
 
   const specs = fieldEvidenceSpecs(field, record)
+  const directQuote = trim(fieldEntry?.evidence?.quote)
+  if (directQuote) {
+    return {
+      excerpt: directQuote,
+      specs,
+    }
+  }
+
   const bestHit = bestEvidenceHitForField(evidence, field, specs)
   if (bestHit) {
     const matchedText = trim(bestHit.matched_text) || trim(bestHit.term)
@@ -715,23 +1103,28 @@ function confidenceLabel(status: ValidationStatus | undefined, value: string): R
   return 'Medium'
 }
 
-function evidenceStatus(record: TribologyData, value: string): ReviewField['evidenceStatus'] {
-  if (!trim(value)) return 'Missing'
-  if (record.source_page || trim(record.source_figure)) return 'Grounded'
-  if (hasTextEvidence(record)) return 'Partial'
-  return 'Missing'
-}
-
-function fieldStatus(record: TribologyData, value: string): ReviewField['status'] {
+function fieldStatusFromEntry(record: TribologyData, value: string, evidence: ReviewField['evidenceStatus'], entry: FieldEvidenceEntry | null | undefined): ReviewField['status'] {
+  const reviewState = String(entry?.review_state || '').trim().toLowerCase()
   if (!trim(value)) return 'low_conf'
-  if (record.validationStatus === 'verified' && evidenceStatus(record, value) === 'Grounded') return 'confirmed'
-  if (record.validationStatus === 'warning' || evidenceStatus(record, value) === 'Missing') return 'low_conf'
+  if (reviewState === 'flagged') return 'low_conf'
+  if (reviewState === 'confirmed' && evidence !== 'Missing') return 'confirmed'
+  if (record.validationStatus === 'verified' && evidence === 'Grounded') return 'confirmed'
+  if (record.validationStatus === 'warning' || evidence === 'Missing') return 'low_conf'
   return 'review'
 }
 
-function buildField(label: string, id: string, rawValue: string, record: TribologyData, issueMessage?: string): ReviewField {
+function buildField(
+  label: string,
+  id: string,
+  rawValue: string,
+  record: TribologyData,
+  entry: FieldEvidenceEntry | null | undefined,
+  issueMessage?: string,
+): ReviewField {
   const value = rawValue
-  const status = fieldStatus(record, value)
+  const evidence = resolveFieldEvidenceStatus(entry, value)
+  const status = fieldStatusFromEntry(record, value, evidence, entry)
+  const canConfirm = trim(value) !== '' && value !== 'Not captured yet' && evidence !== 'Missing'
 
   return {
     id,
@@ -739,14 +1132,17 @@ function buildField(label: string, id: string, rawValue: string, record: Tribolo
     value,
     status,
     confidence: confidenceLabel(record.validationStatus, value),
-    evidenceStatus: evidenceStatus(record, value),
-    sourceType: inferSourceType(record),
-    location: evidenceLocation(record),
-    issue: status === 'low_conf' ? issueMessage : undefined,
+    evidenceStatus: evidence,
+    sourceType: resolveFieldSourceType(entry, record),
+    location: resolveFieldLocation(entry, record),
+    canConfirm,
+    issue: entry?.review_state === 'flagged'
+      ? (trim(entry.review_note) || issueMessage)
+      : (!canConfirm ? issueMessage : undefined),
   }
 }
 
-function buildReviewFields(record: TribologyData | null): ReviewField[] {
+function buildReviewFields(record: TribologyData | null, remoteFields?: Record<string, FieldEvidenceEntry> | null): ReviewField[] {
   if (!record) {
     return [
       {
@@ -758,18 +1154,138 @@ function buildReviewFields(record: TribologyData | null): ReviewField[] {
         evidenceStatus: 'Missing',
         sourceType: 'inferred',
         location: `Scope ${props.activeScopeLabel}`,
+        canConfirm: false,
         issue: 'No extracted record is attached to this literature file yet.',
       },
     ]
   }
 
+  const extractorType = recordExtractorType(record)
+  const fieldMap = resolveRecordFieldEvidenceMap(record, remoteFields)
+  if (extractorType === 'diffusion') {
+    return [
+      buildField('System', 'system_name', present(record.system_name), record, fieldMap.system_name, 'System name still needs grounding confirmation.'),
+      buildField('Ionic Liquid', 'ionic_liquid', present(record.ionic_liquid), record, fieldMap.ionic_liquid, 'Ionic liquid still needs grounding confirmation.'),
+      buildField('D_total', 'd_total', formatDiffusionNumber(record.D_total), record, fieldMap.d_total, 'Total diffusion coefficient still needs grounding confirmation.'),
+      buildField('D_cation', 'd_cation', formatDiffusionNumber(record.D_cation), record, fieldMap.d_cation, 'Cation diffusion coefficient still needs grounding confirmation.'),
+      buildField('D_anion', 'd_anion', formatDiffusionNumber(record.D_anion), record, fieldMap.d_anion, 'Anion diffusion coefficient still needs grounding confirmation.'),
+      buildField('D Unit', 'd_unit', formatScientificUnit(record.D_unit), record, fieldMap.d_unit, 'Diffusion unit still needs grounding confirmation.'),
+      buildField('Confinement Material', 'confinement_material_class', present(record.confinement_material_class), record, fieldMap.confinement_material_class, 'Confinement material still needs confirmation.'),
+      buildField('Geometry', 'confinement_geometry_class', present(record.confinement_geometry_class), record, fieldMap.confinement_geometry_class, 'Confinement geometry still needs confirmation.'),
+      buildField('Surface Groups', 'surface_functional_groups', present(record.surface_functional_groups), record, fieldMap.surface_functional_groups, 'Surface functional groups still need confirmation.'),
+      buildField('Dimensionality', 'confinement_dimensionality', present(record.confinement_dimensionality), record, fieldMap.confinement_dimensionality, 'Confinement dimensionality still needs confirmation.'),
+      buildField('Diffusion Conditions', 'conditions', summarizeConditions(record, extractorType), record, fieldMap.conditions, 'Temperature or confinement scale still need confirmation.'),
+      buildField('Source Page', 'source_page', record.source_page ? `Page ${record.source_page}` : 'Not captured yet', record, fieldMap.source_page, 'No grounded page was attached to this record.'),
+    ]
+  }
   return [
-    buildField('Material', 'material', present(record.material_name), record, 'Material still needs grounding confirmation.'),
-    buildField('Ionic Liquid', 'ionic-liquid', present(record.ionic_liquid), record, 'Ionic liquid still needs grounding confirmation.'),
-    buildField('COF', 'cof', present(record.cof), record, 'COF still needs grounding confirmation.'),
-    buildField('Test Conditions', 'conditions', summarizeConditions(record), record, 'Load, speed, or temperature still need confirmation.'),
-    buildField('Source Page', 'source-page', record.source_page ? `Page ${record.source_page}` : 'Not captured yet', record, 'No grounded page was attached to this record.'),
+    buildField('Material', 'material', present(record.material_name), record, fieldMap.material, 'Material still needs grounding confirmation.'),
+    buildField('Ionic Liquid', 'ionic_liquid', present(record.ionic_liquid), record, fieldMap.ionic_liquid, 'Ionic liquid still needs grounding confirmation.'),
+    buildField('COF', 'cof', present(record.cof), record, fieldMap.cof, 'COF still needs grounding confirmation.'),
+    buildField('Test Conditions', 'conditions', summarizeConditions(record), record, fieldMap.conditions, 'Load, speed, or temperature still need confirmation.'),
+    buildField('Source Page', 'source_page', record.source_page ? `Page ${record.source_page}` : 'Not captured yet', record, fieldMap.source_page, 'No grounded page was attached to this record.'),
   ]
+}
+
+function recordCanApprove(record: TribologyData | null | undefined, remoteFields?: Record<string, FieldEvidenceEntry> | null) {
+  if (!record) return false
+  const extractorType = recordExtractorType(record)
+  const fieldMap = resolveRecordFieldEvidenceMap(record, remoteFields)
+  if (extractorType === 'diffusion') {
+    const baseReady = ['system_name', 'ionic_liquid']
+      .every((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) !== 'Missing')
+    const coefficientReady = ['d_total', 'd_cation', 'd_anion']
+      .some((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) !== 'Missing')
+    return baseReady && coefficientReady
+  }
+  return ['material', 'ionic_liquid', 'cof']
+    .every((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) !== 'Missing')
+}
+
+async function handleConfirmField(field: ReviewField) {
+  const recordId = Number(activeRecord.value?.id || '')
+  if (!field.canConfirm || !Number.isFinite(recordId)) return
+
+  reviewActionPending.value = `confirm:${recordId}:${field.id}`
+  reviewActionError.value = ''
+  try {
+    const payload = activeExtractorType.value === 'diffusion'
+      ? await confirmDiffusionCandidateFieldEvidence(recordId, field.id)
+      : await confirmCandidateFieldEvidence(recordId, field.id)
+    applyReviewResponse(payload)
+  } catch (error: any) {
+    reviewActionError.value = String(error?.response?.data?.detail || error?.message || 'Failed to confirm field')
+  } finally {
+    reviewActionPending.value = null
+  }
+}
+
+async function handleFlagActiveField(fieldId?: string) {
+  const recordId = Number(activeRecord.value?.id || '')
+  const targetFieldId = fieldId || activeField.value?.id
+  if (!targetFieldId || !Number.isFinite(recordId)) return
+
+  reviewActionPending.value = `flag:${recordId}:${targetFieldId}`
+  reviewActionError.value = ''
+  try {
+    const payload = activeExtractorType.value === 'diffusion'
+      ? await flagDiffusionCandidateFieldEvidence(recordId, targetFieldId, 'Flagged from review UI')
+      : await flagCandidateFieldEvidence(recordId, targetFieldId, 'Flagged from review UI')
+    applyReviewResponse(payload)
+  } catch (error: any) {
+    reviewActionError.value = String(error?.response?.data?.detail || error?.message || 'Failed to flag field')
+  } finally {
+    reviewActionPending.value = null
+  }
+}
+
+async function handleApproveRecord(record?: TribologyData | null) {
+  const target = record || activeRecord.value
+  const recordId = Number(target?.id || '')
+  const remoteFields = target && activeRecord.value && String(target.id || '') === String(activeRecord.value.id || '')
+    ? activeRecordFieldEvidence.value?.fields
+    : undefined
+  if (!target || !Number.isFinite(recordId) || !recordCanApprove(target, remoteFields)) return
+
+  reviewActionPending.value = `approve:${recordId}`
+  reviewActionError.value = ''
+  try {
+    const payload = activeExtractorType.value === 'diffusion'
+      ? await approveDiffusionReviewCandidate(recordId)
+      : await approveReviewCandidate(recordId)
+    applyReviewResponse(payload)
+  } catch (error: any) {
+    reviewActionError.value = String(error?.response?.data?.detail || error?.message || 'Failed to approve record')
+  } finally {
+    reviewActionPending.value = null
+  }
+}
+
+async function handleApproveAll() {
+  if (!canApproveAllVisible.value) return
+
+  if (visibleRecordItems.value.length === 1) {
+    await handleApproveRecord(visibleRecordItems.value[0]?.record || null)
+    return
+  }
+
+  reviewActionPending.value = 'approve-all'
+  reviewActionError.value = ''
+  try {
+    for (const item of visibleRecordItems.value) {
+      if (!recordCanApprove(item.record)) {
+        throw new Error(`Record ${item.label} is missing required evidence`)
+      }
+      const payload = activeExtractorType.value === 'diffusion'
+        ? await approveDiffusionReviewCandidate(Number(item.record.id))
+        : await approveReviewCandidate(Number(item.record.id))
+      applyReviewResponse(payload)
+    }
+  } catch (error: any) {
+    reviewActionError.value = String(error?.response?.data?.detail || error?.message || 'Failed to approve all visible records')
+  } finally {
+    reviewActionPending.value = null
+  }
 }
 
 function queueTone(status: QueueItem['status']) {
@@ -931,16 +1447,35 @@ function issueTone(severity: QueueIssue['severity']) {
             </div>
 
             <div class="flex shrink-0 items-center gap-2">
-              <button type="button" class="inline-flex items-center gap-2 rounded-[0.85rem] border border-[#d9e2ef] bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-[#f8fbff]">
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-[0.85rem] border border-[#d9e2ef] bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-[#f8fbff]"
+                :disabled="!activeField"
+                @click="() => handleFlagActiveField()"
+              >
                 <Flag class="h-4 w-4" />
                 Escalate
               </button>
-              <button type="button" class="inline-flex items-center gap-2 rounded-[0.85rem] bg-[#5b56ea] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_18px_36px_-24px_rgba(91,86,234,0.85)] transition hover:bg-[#4c47d9]">
+              <button
+                type="button"
+                class="inline-flex items-center gap-2 rounded-[0.85rem] px-5 py-2.5 text-sm font-semibold transition"
+                :class="canApproveAllVisible
+                  ? 'bg-[#5b56ea] text-white shadow-[0_18px_36px_-24px_rgba(91,86,234,0.85)] hover:bg-[#4c47d9]'
+                  : 'cursor-not-allowed bg-[#d7ddf7] text-white/80'"
+                :disabled="!canApproveAllVisible || reviewActionPending === 'approve-all'"
+                @click="handleApproveAll"
+              >
                 <CheckCheck class="h-4 w-4" />
-                Approve All
+                {{ visibleRecordItems.length === 1 ? 'Approve Record' : 'Approve All' }}
               </button>
             </div>
           </div>
+          <p
+            v-if="reviewActionError"
+            class="mt-3 rounded-[0.8rem] border border-[#ffd4da] bg-[#fff5f6] px-3 py-2 text-sm text-[#cf334f]"
+          >
+            {{ reviewActionError }}
+          </p>
         </div>
 
         <div class="space-y-5 bg-white px-6 py-4">
@@ -996,7 +1531,7 @@ function issueTone(severity: QueueIssue['severity']) {
                 </div>
 
                 <div class="mt-4 text-sm text-slate-700">
-                  <span class="font-medium">COF</span> {{ item.cof }}
+                  <span class="font-medium">{{ item.metricLabel }}</span> {{ item.metricValue }}
                 </div>
 
                 <div class="mt-4 flex flex-wrap gap-2">
@@ -1109,13 +1644,21 @@ function issueTone(severity: QueueIssue['severity']) {
                   <button type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-[0.6rem] transition hover:bg-slate-100 hover:text-slate-700">
                     <Pencil class="h-4 w-4" />
                   </button>
-                  <button type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-[0.6rem] transition hover:bg-slate-100 hover:text-slate-700">
+                  <button
+                    type="button"
+                    class="inline-flex h-8 w-8 items-center justify-center rounded-[0.6rem] transition hover:bg-slate-100 hover:text-slate-700"
+                    @click.stop="activeFieldId = field.id; handleFlagActiveField(field.id)"
+                  >
                     <Flag class="h-4 w-4" />
                   </button>
                   <button
                     type="button"
                     class="ml-1 inline-flex items-center rounded-[0.75rem] border px-3.5 py-2 text-sm font-bold uppercase tracking-[0.12em] transition"
-                    :class="field.id === activeFieldId ? 'border-[#5b56ea] bg-[#5b56ea] text-white hover:bg-[#4c47d9]' : 'border-[#dbe2eb] bg-white text-slate-500 hover:border-[#cdd5e2] hover:text-slate-700'"
+                    :class="field.canConfirm
+                      ? (field.id === activeFieldId ? 'border-[#5b56ea] bg-[#5b56ea] text-white hover:bg-[#4c47d9]' : 'border-[#dbe2eb] bg-white text-slate-500 hover:border-[#cdd5e2] hover:text-slate-700')
+                      : 'cursor-not-allowed border-[#e5e7eb] bg-[#f8fafc] text-slate-300'"
+                    :disabled="!field.canConfirm || reviewActionPending === `confirm:${Number(activeRecord?.id || '')}:${field.id}`"
+                    @click.stop="handleConfirmField(field)"
                   >
                     Confirm
                   </button>
@@ -1177,6 +1720,14 @@ function issueTone(severity: QueueIssue['severity']) {
                 <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#9aa8bc]">Location</dt>
                 <dd class="mt-1 font-medium text-slate-700">{{ activeField?.location || `Scope ${activeScopeLabel}` }}</dd>
               </div>
+              <div>
+                <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#9aa8bc]">Source Label</dt>
+                <dd class="mt-1 font-medium text-slate-700">{{ activeFieldEvidenceEntry?.evidence?.source_label || 'Not linked yet' }}</dd>
+              </div>
+              <div>
+                <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#9aa8bc]">{{ evidenceSecondaryLabel }}</dt>
+                <dd class="mt-1 font-medium text-slate-700">{{ evidenceSecondaryValue }}</dd>
+              </div>
             </dl>
           </div>
 
@@ -1188,6 +1739,24 @@ function issueTone(severity: QueueIssue['severity']) {
             <div class="relative mt-3 rounded-[1.15rem] border border-[#f2e5bf] bg-[#fff8e8] p-5">
               <p class="font-serif text-[1.03rem] leading-10 text-[#39455c]" v-html="highlightedExcerpt" />
               <Quote class="pointer-events-none absolute bottom-2 right-2 h-10 w-10 rotate-180 text-[#7b5d18]/10" />
+            </div>
+          </div>
+
+          <div v-if="evidenceImageUrl || evidencePagePreviewUrl">
+            <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8ea2c0]">PDF Crop Preview</p>
+            <div class="mt-3 space-y-3">
+              <div
+                v-if="evidenceImageUrl"
+                class="overflow-hidden rounded-[1rem] border border-[#e4e9f2] bg-[#f8fafc]"
+              >
+                <img :src="evidenceImageUrl" alt="Evidence crop preview" class="max-h-[18rem] w-full object-contain bg-white" />
+              </div>
+              <div
+                v-if="evidencePagePreviewUrl"
+                class="overflow-hidden rounded-[1rem] border border-[#e4e9f2] bg-[#f8fafc]"
+              >
+                <img :src="evidencePagePreviewUrl" alt="Evidence page preview" class="max-h-[18rem] w-full object-contain bg-white" />
+              </div>
             </div>
           </div>
 

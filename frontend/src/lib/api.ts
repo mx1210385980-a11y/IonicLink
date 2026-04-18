@@ -9,6 +9,7 @@ import {
 } from './session'
 
 export const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '')
+export type ExtractorType = 'tribology' | 'diffusion'
 
 function normalizeApiPath(path: string) {
     const normalizedPath = path.startsWith('/') ? path : `/${path}`
@@ -107,11 +108,13 @@ export async function extractData(
     force: boolean = false,
     profile: 'high_accuracy' | 'standard' = 'high_accuracy',
     strictCofMode?: boolean,
+    extractorType: ExtractorType = 'tribology',
 ): Promise<ExtractionResponse> {
     const query = new URLSearchParams()
     if (force) query.set('force', 'true')
     query.set('profile', profile)
     if (strictCofMode !== undefined) query.set('strict_cof_mode', strictCofMode ? 'true' : 'false')
+    query.set('extractor_type', extractorType)
     const url = `/api/extract/${fileId}${query.toString() ? `?${query.toString()}` : ''}`
     const response = await api.post(url)
     return response.data
@@ -180,9 +183,41 @@ export interface EvidenceResult {
     has_pdf: boolean
 }
 
+export interface FieldEvidenceSource {
+    source_type?: string | null
+    page?: number | null
+    source_label?: string | null
+    quote?: string | null
+    bbox?: number[] | null
+    sample_id?: string | null
+}
+
+export interface FieldEvidenceEntry {
+    value?: string | null
+    confidence?: number | null
+    evidence?: FieldEvidenceSource | null
+    status?: 'grounded' | 'partial' | 'missing' | string
+    review_state?: 'confirmed' | 'flagged' | string | null
+    review_note?: string | null
+}
+
+export interface RecordFieldEvidenceResponse {
+    record_id: number
+    literature_id: number
+    sample_id?: string | null
+    series_id?: string | null
+    extractor_type?: ExtractorType | string | null
+    review_status?: string | null
+    record_origin?: string | null
+    assembly_notes?: string | null
+    required_fields: string[]
+    fields: Record<string, FieldEvidenceEntry>
+}
+
 export interface ExtractionRunDetail {
     run_id: string
     literature_id: number
+    extractor_type?: ExtractorType
     profile: string
     status: string
     candidate_count: number
@@ -232,13 +267,95 @@ export async function getRecordEvidence(litId: number, recordId: number): Promis
     return response.data
 }
 
+export async function getCandidateEvidence(litId: number, candidateId: number): Promise<EvidenceResult> {
+    const response = await api.get(`/api/pdf/${litId}/candidates/${candidateId}/evidence`)
+    return response.data
+}
+
+export async function getDiffusionCandidateEvidence(litId: number, candidateId: number): Promise<EvidenceResult> {
+    const response = await api.get(`/api/pdf/${litId}/diffusion-candidates/${candidateId}/evidence`)
+    return response.data
+}
+
+export async function getRecordFieldEvidence(recordId: number): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.get(`/api/review/records/${recordId}/field-evidence`)
+    return response.data
+}
+
+export async function getCandidateFieldEvidence(candidateId: number): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.get(`/api/review/candidates/${candidateId}/field-evidence`)
+    return response.data
+}
+
+export async function getDiffusionCandidateFieldEvidence(candidateId: number): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.get(`/api/review/diffusion-candidates/${candidateId}/field-evidence`)
+    return response.data
+}
+
+export async function confirmRecordFieldEvidence(recordId: number, fieldKey: string, note?: string | null): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/records/${recordId}/fields/${fieldKey}/confirm`, {
+        note: note ?? null,
+    })
+    return response.data
+}
+
+export async function confirmCandidateFieldEvidence(candidateId: number, fieldKey: string, note?: string | null): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/candidates/${candidateId}/fields/${fieldKey}/confirm`, {
+        note: note ?? null,
+    })
+    return response.data
+}
+
+export async function confirmDiffusionCandidateFieldEvidence(candidateId: number, fieldKey: string, note?: string | null): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/diffusion-candidates/${candidateId}/fields/${fieldKey}/confirm`, {
+        note: note ?? null,
+    })
+    return response.data
+}
+
+export async function flagRecordFieldEvidence(recordId: number, fieldKey: string, note?: string | null): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/records/${recordId}/fields/${fieldKey}/flag`, {
+        note: note ?? null,
+    })
+    return response.data
+}
+
+export async function flagCandidateFieldEvidence(candidateId: number, fieldKey: string, note?: string | null): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/candidates/${candidateId}/fields/${fieldKey}/flag`, {
+        note: note ?? null,
+    })
+    return response.data
+}
+
+export async function flagDiffusionCandidateFieldEvidence(candidateId: number, fieldKey: string, note?: string | null): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/diffusion-candidates/${candidateId}/fields/${fieldKey}/flag`, {
+        note: note ?? null,
+    })
+    return response.data
+}
+
+export async function approveReviewRecord(recordId: number): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/records/${recordId}/approve`)
+    return response.data
+}
+
+export async function approveReviewCandidate(candidateId: number): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/candidates/${candidateId}/approve`)
+    return response.data
+}
+
+export async function approveDiffusionReviewCandidate(candidateId: number): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/diffusion-candidates/${candidateId}/approve`)
+    return response.data
+}
+
 export async function getExtractionRun(runId: string): Promise<ExtractionRunDetail> {
     const response = await api.get(`/api/extraction-runs/${runId}`)
     return response.data
 }
 
-export async function getLatestExtractionRun(literatureId: number): Promise<ExtractionRunDetail> {
-    const response = await api.get(`/api/extraction-runs/latest/${literatureId}`)
+export async function getLatestExtractionRun(literatureId: number, extractorType: ExtractorType = 'tribology'): Promise<ExtractionRunDetail> {
+    const response = await api.get(`/api/extraction-runs/latest/${literatureId}?extractor_type=${extractorType}`)
     return response.data
 }
 
@@ -421,6 +538,7 @@ export type ValidationStatus = 'unverified' | 'verified' | 'modified' | 'warning
 
 export interface TribologyData {
     id?: string
+    extractor_type?: ExtractorType
     material_name: string
     ionic_liquid: string
     base_oil?: string
@@ -456,9 +574,31 @@ export interface TribologyData {
     alkyl_chain_length?: number
     source?: string
     source_page?: number
+    source_bbox?: number[] | null
     source_figure?: string
     notes?: string
     evidence?: string
+    sample_id?: string
+    series_id?: string
+    field_evidence_json?: Record<string, FieldEvidenceEntry>
+    review_status?: string
+    record_origin?: string
+    assembly_notes?: string
+    system_name?: string
+    confinement_material_class?: string
+    confinement_geometry_class?: string
+    surface_functional_groups?: string
+    confinement_dimensionality?: string
+    D_total?: number | null
+    D_cation?: number | null
+    D_anion?: number | null
+    D_unit?: string
+    temperature_value?: number | null
+    confinement_scale_value?: number | null
+    confinement_scale_unit?: string
+    smiles?: string
+    novel_features_json?: Record<string, any>
+    rdkit_features_json?: Record<string, any>
 
     // Validation fields
     validationStatus?: ValidationStatus
@@ -497,12 +637,14 @@ export interface ExtractionResponse {
     status?: string
     metadata?: LiteratureMetadata
     data: TribologyData[]
+    extractor_type?: ExtractorType
     extraction_summary?: ExtractionSummary
     agent_workflow?: AgentWorkflow
     message?: string
 }
 
 export interface ExtractionSummary {
+    extractor_type?: ExtractorType
     run_id?: string | null
     candidate_count: number
     final_count: number
@@ -685,6 +827,12 @@ export function mapRecordToPayload(record: TribologyData) {
         source: record.source,
         sourcePage: record.source_page,
         sourceFigure: record.source_figure,
+        sampleId: record.sample_id,
+        seriesId: record.series_id,
+        fieldEvidenceJson: record.field_evidence_json,
+        reviewStatus: record.review_status,
+        recordOrigin: record.record_origin,
+        assemblyNotes: record.assembly_notes,
         confidence: 0.9,
     }
 }
@@ -731,12 +879,13 @@ export async function syncBatchData(metadata: LiteratureMetadata, records: Tribo
 }
 
 // Batch processing related types
-export type FileExtractionStatus = 'uploaded' | 'processing' | 'success' | 'error'
+export type FileExtractionStatus = 'uploaded' | 'processing' | 'success' | 'error' | 'no_data'
 
 export interface BatchFile {
     id: string
     name: string
     scopeKey?: string
+    extractor_type?: ExtractorType
     status: FileExtractionStatus
     progress: number // 0-100
     progressMessage?: string

@@ -26,6 +26,7 @@ class InsightAgent(BaseAgent):
                 metadata=task.payload.get("metadata") or {},
                 records=task.payload.get("records") or [],
                 validation=task.payload.get("validation") or {},
+                extractor_type=task.payload.get("extractor_type") or "tribology",
             )
             return AgentExecutionResult(agent=self.name, task_id=task.task_id, data=result)
 
