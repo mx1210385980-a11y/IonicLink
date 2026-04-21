@@ -536,7 +536,15 @@ _TREND_PATTERNS = [
     re.compile(r"\bshows?\s+(?:a\s+)?trend\b", re.IGNORECASE),
 ]
 _SAMPLE_ID_PATTERN = re.compile(r"\b[A-Z]{1,5}\d+(?:-\d+)+(?:-[A-Z0-9]+)*\b")
-_FIELD_EVIDENCE_REQUIRED_KEYS = ("material", "ionic_liquid", "cof")
+_TRIBOLOGY_PERSISTABLE_METRIC_KEYS = (
+    "cof",
+    "friction_force",
+    "wear_rate",
+    "film_thickness",
+    "residual_film_thickness_d",
+    "layer_spacing_delta",
+    "surface_roughness",
+)
 
 
 def _safe_json_dumps(value: Any) -> Optional[str]:
@@ -641,9 +649,26 @@ def _get_drop_reason_for_final_record(item: dict) -> Optional[str]:
     ionic_liquid = item.get("ionic_liquid", item.get("lubricant"))
     if _is_unknown_il(ionic_liquid):
         return "missing_ionic_liquid"
+    if not _resolve_primary_metric_key(item):
+        return "missing_primary_metric"
     if _looks_like_trend_record(item):
         return "trend_statement"
     return None
+
+
+def _resolve_primary_metric_key(item: dict[str, Any] | dict[str, object]) -> Optional[str]:
+    for key in _TRIBOLOGY_PERSISTABLE_METRIC_KEYS:
+        if _filled_text((item or {}).get(key)):
+            return key
+    return None
+
+
+def _resolve_required_field_keys(field_evidence_map: dict[str, Any]) -> list[str]:
+    required = ["material", "ionic_liquid"]
+    metric_key = _resolve_primary_metric_key(field_evidence_map)
+    if metric_key:
+        required.append(metric_key)
+    return required
 
 
 def _build_field_evidence_entry(
@@ -712,6 +737,66 @@ def _build_field_evidence_map(item: dict, db_record: TribologyData, *, confidenc
             bbox=bbox,
             sample_id=sample_id,
         ),
+        "friction_force": _build_field_evidence_entry(
+            value=item.get("friction_force"),
+            confidence=confidence,
+            source_type=source_type,
+            page=page,
+            source_label=source_label,
+            quote=quote,
+            bbox=bbox,
+            sample_id=sample_id,
+        ),
+        "wear_rate": _build_field_evidence_entry(
+            value=item.get("wear_rate"),
+            confidence=confidence,
+            source_type=source_type,
+            page=page,
+            source_label=source_label,
+            quote=quote,
+            bbox=bbox,
+            sample_id=sample_id,
+        ),
+        "film_thickness": _build_field_evidence_entry(
+            value=item.get("film_thickness"),
+            confidence=confidence,
+            source_type=source_type,
+            page=page,
+            source_label=source_label,
+            quote=quote,
+            bbox=bbox,
+            sample_id=sample_id,
+        ),
+        "residual_film_thickness_d": _build_field_evidence_entry(
+            value=item.get("residual_film_thickness_d"),
+            confidence=confidence,
+            source_type=source_type,
+            page=page,
+            source_label=source_label,
+            quote=quote,
+            bbox=bbox,
+            sample_id=sample_id,
+        ),
+        "layer_spacing_delta": _build_field_evidence_entry(
+            value=item.get("layer_spacing_delta"),
+            confidence=confidence,
+            source_type=source_type,
+            page=page,
+            source_label=source_label,
+            quote=quote,
+            bbox=bbox,
+            sample_id=sample_id,
+        ),
+        "surface_roughness": _build_field_evidence_entry(
+            value=item.get("surface_roughness"),
+            confidence=confidence,
+            source_type=source_type,
+            page=page,
+            source_label=source_label,
+            quote=quote,
+            bbox=bbox,
+            sample_id=sample_id,
+        ),
         "load": _build_field_evidence_entry(
             value=item.get("load") or item.get("normal_load"),
             confidence=confidence,
@@ -765,7 +850,11 @@ def _field_entry_has_evidence(entry: Optional[dict[str, Any]]) -> bool:
 
 
 def _resolve_review_status(field_evidence_map: dict[str, Any]) -> tuple[str, Optional[str]]:
-    missing = [key for key in _FIELD_EVIDENCE_REQUIRED_KEYS if not _field_entry_has_evidence(field_evidence_map.get(key))]
+    missing = [
+        key
+        for key in _resolve_required_field_keys(field_evidence_map)
+        if not _field_entry_has_evidence(field_evidence_map.get(key))
+    ]
     if missing:
         return "needs_evidence", f"Missing field evidence for: {', '.join(missing)}"
     return "pending_review", None
@@ -1906,14 +1995,12 @@ async def process_file_safe(
 
                 new_records_db: list[RecordCandidate] = []
                 response_rows: list[tuple[RecordCandidate, dict[str, Any]]] = []
-                no_cof_dropped = 0
+                metric_dropped = 0
                 blocked_by_reason: dict[str, int] = {}
                 
                 for i, item in enumerate(records):
-                    cof_raw = item.get("cof")
-                    cof_value = _parse_cof_value(cof_raw)
-                    if cof_value is None:
-                        no_cof_dropped += 1
+                    if not _resolve_primary_metric_key(item):
+                        metric_dropped += 1
                         stage_e_candidates.append(
                             {
                                 "stage": "stage_e",
@@ -1922,7 +2009,7 @@ async def process_file_safe(
                                 "source_figure": item.get("source_figure"),
                                 "raw": item,
                                 "normalized": item,
-                                "drop_reason": "no_cof_value",
+                                "drop_reason": "missing_primary_metric",
                                 "merged_into": None,
                             }
                         )
@@ -1991,8 +2078,10 @@ async def process_file_safe(
                     **(merge_report.get("dropped_by_reason") or {}),
                     **blocked_by_reason,
                 }
-                if no_cof_dropped:
-                    dropped_by_reason["no_cof_value"] = int(dropped_by_reason.get("no_cof_value") or 0) + no_cof_dropped
+                if metric_dropped:
+                    dropped_by_reason["missing_primary_metric"] = (
+                        int(dropped_by_reason.get("missing_primary_metric") or 0) + metric_dropped
+                    )
                 extraction_summary = {
                     "run_id": run_id,
                     "candidate_count": max(
@@ -2295,12 +2384,10 @@ async def reprocess_literature(
         
         # Step 5: Atomic Replace
         new_records: list[RecordCandidate] = []
-        no_cof_dropped = 0
+        metric_dropped = 0
         for record_data in data_list:
-            cof_raw = record_data.get("cof")
-            cof_value = _parse_cof_value(cof_raw)
-            if cof_value is None:
-                no_cof_dropped += 1
+            if not _resolve_primary_metric_key(record_data):
+                metric_dropped += 1
                 continue
 
             drop_reason = _get_drop_reason_for_final_record(record_data)
@@ -2321,8 +2408,12 @@ async def reprocess_literature(
             await db.execute(delete(TribologyData).where(TribologyData.literature_id == literature_id))
             db.add_all(new_records)
             logger.info("Replaced literature_id=%s with %s reprocessed records", literature_id, len(new_records))
-        if no_cof_dropped:
-            logger.info("Dropped %s records without COF during reprocess literature_id=%s", no_cof_dropped, literature_id)
+        if metric_dropped:
+            logger.info(
+                "Dropped %s records without a persistable quantitative metric during reprocess literature_id=%s",
+                metric_dropped,
+                literature_id,
+            )
         
         # Step 5: Update Metadata
         if _should_update_metadata(literature, metadata_dict):
@@ -2338,7 +2429,10 @@ async def reprocess_literature(
             "success": True,
             "literature_id": literature_id,
             "reprocessed_count": len(new_records),
-            "message": f"Successfully reprocessed {len(new_records)} records",
+            "message": (
+                f"Successfully reprocessed {len(new_records)} records"
+                + (f"; skipped {metric_dropped} records without a persistable quantitative metric" if metric_dropped else "")
+            ),
             "metadata": metadata_dict,
         }
         
@@ -2478,5 +2572,3 @@ def _try_resolve_evidence_coords(db_record, item: dict, file_path: Optional[str]
         print(f"[EvidenceCoords] Resolved: page={page}, bbox={bbox}")
     else:
         print(f"[EvidenceCoords] No match for record material={item.get('material_name', '?')}")
-
-

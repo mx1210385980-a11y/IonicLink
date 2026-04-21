@@ -77,6 +77,15 @@ class DOIService:
                             await asyncio.sleep(2 ** attempt)  # 指数退避
                             continue
                         raise Exception(f"网络请求失败: {str(e)}")
+                    except httpx.HTTPStatusError as e:
+                        status_code = e.response.status_code
+                        if status_code == 404:
+                            logger.info(f"Crossref 未找到 DOI: {doi}")
+                            return None
+                        if status_code >= 500 and attempt < self.max_retries - 1:
+                            await asyncio.sleep(2 ** attempt)
+                            continue
+                        raise Exception(f"Crossref 返回状态码 {status_code}: {str(e)}")
                     except Exception as e:
                         logger.error(f"解析DOI失败: {str(e)}")
                         raise

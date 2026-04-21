@@ -653,6 +653,53 @@ function hasTextEvidence(record: TribologyData | null | undefined) {
   return Boolean(trim(record.evidence) || trim(record.notes) || trim(record.source))
 }
 
+const tribologyPrimaryMetricKeys = [
+  'cof',
+  'friction_force',
+  'wear_rate',
+  'film_thickness',
+  'residual_film_thickness_d',
+  'layer_spacing_delta',
+  'surface_roughness',
+] as const
+
+function resolvePrimaryTribologyMetricKey(record: TribologyData | null | undefined) {
+  if (!record) return null
+  for (const key of tribologyPrimaryMetricKeys) {
+    if (trim(String(record[key] ?? ''))) return key
+  }
+  return null
+}
+
+function requiredTribologyFieldKeys(record: TribologyData | null | undefined) {
+  const keys = ['material', 'ionic_liquid']
+  const metricKey = resolvePrimaryTribologyMetricKey(record)
+  if (metricKey) keys.push(metricKey)
+  return keys
+}
+
+function tribologyFieldLabel(key: string) {
+  if (key === 'cof') return 'COF'
+  if (key === 'friction_force') return 'Friction Force'
+  if (key === 'wear_rate') return 'Wear Rate'
+  if (key === 'film_thickness') return 'Film Thickness'
+  if (key === 'residual_film_thickness_d') return 'Residual Film Thickness'
+  if (key === 'layer_spacing_delta') return 'Layer Spacing'
+  if (key === 'surface_roughness') return 'Surface Roughness'
+  return key
+}
+
+function tribologyFieldIssue(key: string) {
+  if (key === 'cof') return 'COF still needs grounding confirmation.'
+  if (key === 'friction_force') return 'Friction force still needs grounding confirmation.'
+  if (key === 'wear_rate') return 'Wear rate still needs grounding confirmation.'
+  if (key === 'film_thickness') return 'Film thickness still needs grounding confirmation.'
+  if (key === 'residual_film_thickness_d') return 'Residual film thickness still needs grounding confirmation.'
+  if (key === 'layer_spacing_delta') return 'Layer spacing still needs grounding confirmation.'
+  if (key === 'surface_roughness') return 'Surface roughness still needs grounding confirmation.'
+  return 'Field still needs grounding confirmation.'
+}
+
 function recordNeedsEvidence(record: TribologyData) {
   const extractorType = recordExtractorType(record)
   const fieldMap = resolveRecordFieldEvidenceMap(record)
@@ -663,7 +710,7 @@ function recordNeedsEvidence(record: TribologyData) {
       .every((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) === 'Missing')
     return missingBase || coefficientMissing
   }
-  return ['material', 'ionic_liquid', 'cof']
+  return requiredTribologyFieldKeys(record)
     .some((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) === 'Missing')
 }
 
@@ -675,7 +722,8 @@ function recordLowConfidence(record: TribologyData) {
   const extractorType = recordExtractorType(record)
   const missingCore = extractorType === 'diffusion'
     ? (!trim(record.system_name) || !trim(record.ionic_liquid) || !hasAnyDiffusionCoefficient(record))
-    : (!trim(record.material_name) || !trim(record.ionic_liquid) || !trim(record.cof))
+    : requiredTribologyFieldKeys(record)
+      .some((key) => !trim(fieldValueForKey(record, key, extractorType)))
   const reviewStatus = String(record.review_status || '').trim().toLowerCase()
   return record.validationStatus === 'warning' || reviewStatus === 'flagged' || reviewStatus === 'needs_evidence' || missingCore
 }
@@ -737,6 +785,12 @@ function fieldValueForKey(record: TribologyData, key: string, extractorType: Ext
   if (key === 'material') return present(record.material_name)
   if (key === 'ionic_liquid') return present(record.ionic_liquid)
   if (key === 'cof') return present(record.cof)
+  if (key === 'friction_force') return present(record.friction_force)
+  if (key === 'wear_rate') return present(record.wear_rate)
+  if (key === 'film_thickness') return present(record.film_thickness)
+  if (key === 'residual_film_thickness_d') return present(record.residual_film_thickness_d)
+  if (key === 'layer_spacing_delta') return present(record.layer_spacing_delta)
+  if (key === 'surface_roughness') return present(record.surface_roughness)
   if (key === 'conditions') return summarizeConditions(record, extractorType)
   if (key === 'source_page') return record.source_page ? `Page ${record.source_page}` : 'Not captured yet'
   return 'Not captured yet'
@@ -774,7 +828,13 @@ function fieldEvidenceSpecs(field: ReviewField | null, record: TribologyData | n
   const cleanValue = trim(field.value)
 
   if (cleanValue && cleanValue !== 'Not captured yet') {
-    addEvidenceSpec(specs, cleanValue, ['cof', 'd_total', 'd_cation', 'd_anion'].includes(field.id) ? 'numeric' : 'loose')
+    addEvidenceSpec(
+      specs,
+      cleanValue,
+      ['cof', 'friction_force', 'wear_rate', 'film_thickness', 'residual_film_thickness_d', 'layer_spacing_delta', 'surface_roughness', 'd_total', 'd_cation', 'd_anion'].includes(field.id)
+        ? 'numeric'
+        : 'loose',
+    )
   }
 
   if (field.id === 'conditions') {
@@ -837,6 +897,14 @@ function fieldEvidenceSpecs(field: ReviewField | null, record: TribologyData | n
     }
   }
 
+  if (['friction_force', 'wear_rate', 'film_thickness', 'residual_film_thickness_d', 'layer_spacing_delta', 'surface_roughness'].includes(field.id)) {
+    const numeric = cleanValue.match(/[0-9]+(?:\.[0-9]+)?(?:e[-+]?\d+)?/i)?.[0]
+    if (numeric) {
+      addEvidenceSpec(specs, numeric, 'numeric')
+      addEvidenceSpec(specs, `${tribologyFieldLabel(field.id)} ${numeric}`, 'loose')
+    }
+  }
+
   if (['d_total', 'd_cation', 'd_anion'].includes(field.id)) {
     const numeric = cleanValue.match(/[0-9]+(?:\.[0-9]+)?(?:e[-+]?\d+)?/i)?.[0]
     if (numeric) {
@@ -896,6 +964,12 @@ function semanticTypesForField(field: ReviewField | null) {
   if (field.id === 'confinement_dimensionality') return ['dimensionality', 'confinement_dimensionality']
   if (field.id === 'ionic_liquid') return ['ionic_liquid', 'lubricant', 'cation', 'anion']
   if (field.id === 'cof') return ['cof', 'friction_coefficient']
+  if (field.id === 'friction_force') return ['friction_force', 'force']
+  if (field.id === 'wear_rate') return ['wear_rate']
+  if (field.id === 'film_thickness') return ['film_thickness', 'thickness']
+  if (field.id === 'residual_film_thickness_d') return ['residual_film_thickness_d', 'thickness']
+  if (field.id === 'layer_spacing_delta') return ['layer_spacing_delta', 'spacing']
+  if (field.id === 'surface_roughness') return ['surface_roughness', 'roughness']
   if (field.id === 'd_total') return ['diffusion', 'd_total']
   if (field.id === 'd_cation') return ['diffusion', 'd_cation']
   if (field.id === 'd_anion') return ['diffusion', 'd_anion']
@@ -1178,10 +1252,22 @@ function buildReviewFields(record: TribologyData | null, remoteFields?: Record<s
       buildField('Source Page', 'source_page', record.source_page ? `Page ${record.source_page}` : 'Not captured yet', record, fieldMap.source_page, 'No grounded page was attached to this record.'),
     ]
   }
+  const primaryMetricKey = resolvePrimaryTribologyMetricKey(record)
   return [
     buildField('Material', 'material', present(record.material_name), record, fieldMap.material, 'Material still needs grounding confirmation.'),
     buildField('Ionic Liquid', 'ionic_liquid', present(record.ionic_liquid), record, fieldMap.ionic_liquid, 'Ionic liquid still needs grounding confirmation.'),
-    buildField('COF', 'cof', present(record.cof), record, fieldMap.cof, 'COF still needs grounding confirmation.'),
+    ...(primaryMetricKey
+      ? [
+          buildField(
+            tribologyFieldLabel(primaryMetricKey),
+            primaryMetricKey,
+            fieldValueForKey(record, primaryMetricKey, extractorType),
+            record,
+            fieldMap[primaryMetricKey],
+            tribologyFieldIssue(primaryMetricKey),
+          ),
+        ]
+      : []),
     buildField('Test Conditions', 'conditions', summarizeConditions(record), record, fieldMap.conditions, 'Load, speed, or temperature still need confirmation.'),
     buildField('Source Page', 'source_page', record.source_page ? `Page ${record.source_page}` : 'Not captured yet', record, fieldMap.source_page, 'No grounded page was attached to this record.'),
   ]
@@ -1198,7 +1284,7 @@ function recordCanApprove(record: TribologyData | null | undefined, remoteFields
       .some((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) !== 'Missing')
     return baseReady && coefficientReady
   }
-  return ['material', 'ionic_liquid', 'cof']
+  return requiredTribologyFieldKeys(record)
     .every((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) !== 'Missing')
 }
 

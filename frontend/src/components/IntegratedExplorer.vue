@@ -12,6 +12,7 @@ defineProps<{
 defineEmits<{
   'view-literature': []
   'clear-doi': []
+  'clear-source': []
 }>()
 </script>
 
@@ -24,5 +25,6 @@ defineEmits<{
     :external-export-request="externalExportRequest"
     @view-literature="$emit('view-literature')"
     @clear-doi="$emit('clear-doi')"
+    @clear-source="$emit('clear-source')"
   />
 </template>

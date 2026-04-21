@@ -56,6 +56,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'view-literature': []
   'clear-doi': []
+  'clear-source': []
 }>()
 
 const PAGE_SIZE = 10
@@ -1118,7 +1119,15 @@ onBeforeUnmount(() => {
 
             <div class="flex flex-wrap items-center gap-2">
               <span v-if="props.selectedFileId && props.sourceName" class="rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300">
-                Source: {{ props.sourceName }}
+                <span>Source: {{ props.sourceName }}</span>
+                <button
+                  type="button"
+                  class="ml-2 inline-flex h-4 w-4 items-center justify-center rounded-full text-blue-500 transition hover:bg-blue-100 hover:text-blue-700 dark:hover:bg-blue-500/20 dark:hover:text-blue-100"
+                  title="Clear source filter"
+                  @click="emit('clear-source')"
+                >
+                  <X class="h-3 w-3" />
+                </button>
               </span>
               <span v-else class="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
                 Showing all data
@@ -1914,5 +1923,4 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
-
 

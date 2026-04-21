@@ -25,6 +25,7 @@ const emit = defineEmits<{
   'open-training': [datasetId: number | null]
   'open-review': []
   'clear-doi': []
+  'clear-source': []
 }>()
 
 const emptyFilter: SearchFilter = {}
@@ -157,6 +158,7 @@ function requestExport(format: 'json' | 'csv' | 'ndjson') {
               :external-export-request="externalExportRequest"
               @view-literature="emit('open-review')"
               @clear-doi="emit('clear-doi')"
+              @clear-source="emit('clear-source')"
             />
           </div>
         </section>

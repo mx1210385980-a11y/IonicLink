@@ -68,6 +68,15 @@ _FIELD_KEY_ALIASES = {
     "ionic-liquid": "ionic_liquid",
     "source-page": "source_page",
 }
+_TRIBOLOGY_PRIMARY_METRIC_KEYS = (
+    "cof",
+    "friction_force",
+    "wear_rate",
+    "film_thickness",
+    "residual_film_thickness_d",
+    "layer_spacing_delta",
+    "surface_roughness",
+)
 
 
 def _normalize_field_key(field_key: str) -> str:
@@ -94,6 +103,18 @@ def _field_value_from_record(record: Any, field_key: str) -> Any:
         return record.lubricant
     if field_key == "cof":
         return record.cof_raw or record.cof_value
+    if field_key == "friction_force":
+        return getattr(record, "friction_force", None)
+    if field_key == "wear_rate":
+        return getattr(record, "wear_rate", None)
+    if field_key == "film_thickness":
+        return getattr(record, "film_thickness", None)
+    if field_key == "residual_film_thickness_d":
+        return getattr(record, "residual_film_thickness_d", None)
+    if field_key == "layer_spacing_delta":
+        return getattr(record, "layer_spacing_delta", None)
+    if field_key == "surface_roughness":
+        return getattr(record, "surface_roughness", None)
     if field_key == "load":
         return record.load_raw or record.load_value
     if field_key == "speed":
@@ -137,7 +158,21 @@ def _build_conditions_entry(field_map: dict[str, Any], record: Any) -> dict[str,
 def _build_record_field_evidence_payload(record: Any) -> dict[str, Any]:
     field_map = _parse_field_evidence_map(record.field_evidence_json)
     normalized_fields: dict[str, Any] = {}
-    for key in ("material", "ionic_liquid", "cof", "load", "speed", "temperature", "source_page"):
+    for key in (
+        "material",
+        "ionic_liquid",
+        "cof",
+        "friction_force",
+        "wear_rate",
+        "film_thickness",
+        "residual_film_thickness_d",
+        "layer_spacing_delta",
+        "surface_roughness",
+        "load",
+        "speed",
+        "temperature",
+        "source_page",
+    ):
         raw_entry = field_map.get(key) if isinstance(field_map.get(key), dict) else {}
         normalized_fields[key] = {
             "value": raw_entry.get("value", _field_value_from_record(record, key)),
@@ -158,7 +193,7 @@ def _build_record_field_evidence_payload(record: Any) -> dict[str, Any]:
         "review_status": record.review_status,
         "record_origin": record.record_origin,
         "assembly_notes": record.assembly_notes,
-        "required_fields": ["material", "ionic_liquid", "cof"],
+        "required_fields": _required_field_keys(field_map),
         "fields": normalized_fields,
     }
 
@@ -167,8 +202,18 @@ class ReviewFieldActionPayload(BaseModel):
     note: str | None = None
 
 
+def _required_field_keys(field_map: dict[str, Any]) -> list[str]:
+    required = ["material", "ionic_liquid"]
+    for key in _TRIBOLOGY_PRIMARY_METRIC_KEYS:
+        entry = field_map.get(key) or {}
+        if (entry or {}).get("value") not in (None, ""):
+            required.append(key)
+            break
+    return required
+
+
 def _required_field_missing(field_map: dict[str, Any]) -> list[str]:
-    return [key for key in ("material", "ionic_liquid", "cof") if _field_grounding_status(field_map.get(key) or {}) == "missing"]
+    return [key for key in _required_field_keys(field_map) if _field_grounding_status(field_map.get(key) or {}) == "missing"]
 
 
 def _persist_field_map(record: Any, field_map: dict[str, Any]) -> None:
@@ -196,7 +241,7 @@ def _target_field_keys_for_action(field_key: str, field_map: dict[str, Any]) -> 
 def _recompute_review_status(record: Any, field_map: dict[str, Any], *, approved: bool = False) -> None:
     missing_required = _required_field_missing(field_map)
     flagged_required = [
-        key for key in ("material", "ionic_liquid", "cof")
+        key for key in _required_field_keys(field_map)
         if str((field_map.get(key) or {}).get("review_state") or "").strip().lower() == "flagged"
     ]
     if approved:
@@ -1721,7 +1766,7 @@ async def approve_record_review(
         )
 
     flagged_required = [
-        key for key in ("material", "ionic_liquid", "cof")
+        key for key in _required_field_keys(field_map)
         if str((field_map.get(key) or {}).get("review_state") or "").strip().lower() == "flagged"
     ]
     if flagged_required:
@@ -1895,7 +1940,7 @@ async def approve_candidate_review(
         )
 
     flagged_required = [
-        key for key in ("material", "ionic_liquid", "cof")
+        key for key in _required_field_keys(field_map)
         if str((field_map.get(key) or {}).get("review_state") or "").strip().lower() == "flagged"
     ]
     if flagged_required:

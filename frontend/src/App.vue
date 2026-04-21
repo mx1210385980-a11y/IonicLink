@@ -1,28 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, type Component } from 'vue'
-import {
-  ArrowUpRight,
-  Beaker,
-  BookOpen,
-  Database,
-  FlaskConical,
-  Github,
-  Library,
-  LogOut,
-  Moon,
-  PieChart,
-  Search,
-  Server,
-  Sun,
-  UserCircle2,
-} from 'lucide-vue-next'
+import { computed, ref } from 'vue'
+import { Github } from 'lucide-vue-next'
 
+import AppSidebar from '@/components/AppSidebar.vue'
 import BlogView from '@/components/BlogView.vue'
 import FileUpload from '@/components/FileUpload.vue'
 import ChatPanel from '@/components/ChatPanel.vue'
-import LanguageToggle from '@/components/LanguageToggle.vue'
 import LoginScreen from '@/components/LoginScreen.vue'
-import Button from '@/components/ui/Button.vue'
 import type { HomeSuggestedAction } from '@/composables/useHomeSummary'
 import { useAppShell } from '@/composables/useAppShell'
 import { useI18n } from '@/composables/useI18n'
@@ -58,6 +42,7 @@ const statusLabelKeys = {
   processing: 'status.processing',
   running: 'status.running',
 } as const
+
 
 const fileUploadRef = ref<FileUploadBridge>()
 const chatPanelRef = ref<ChatPanelBridge>()
@@ -103,18 +88,6 @@ const {
 
 const canAccessAdmin = computed(() => ADMIN_ROLES.has(String(sessionState.user?.role || '')))
 const isBlogView = computed(() => currentView.value === 'blog')
-
-const navItems = computed<Array<{ key: AppView; label: string; icon: Component; adminOnly?: boolean }>>(() => [
-  { key: 'home', label: isChinese.value ? '首页' : 'Home', icon: PieChart },
-  { key: 'pipeline', label: isChinese.value ? 'Pipeline' : 'Pipeline', icon: Search },
-  { key: 'review', label: isChinese.value ? 'Review' : 'Review', icon: Library },
-  { key: 'knowledge', label: isChinese.value ? 'Knowledge' : 'Knowledge', icon: Database },
-  { key: 'modeling', label: isChinese.value ? 'Modeling' : 'Modeling', icon: FlaskConical },
-  { key: 'admin', label: isChinese.value ? 'Admin' : 'Admin', icon: Server, adminOnly: true },
-  { key: 'help', label: isChinese.value ? '帮助' : 'Help', icon: BookOpen },
-])
-
-const visibleNavItems = computed(() => navItems.value.filter((item) => !item.adminOnly || canAccessAdmin.value))
 
 const queueSizeLabel = computed(() => {
   const count = batchFiles.value.length
@@ -162,7 +135,7 @@ function setSidebarTab(tab: 'chat' | 'agents') {
   sidebarTab.value = tab
 }
 
-function setSelectedFile(fileId: string) {
+function setSelectedFile(fileId: string | null) {
   selectedFileId.value = fileId
 }
 
@@ -258,239 +231,176 @@ function handleHomeAction(action: HomeSuggestedAction) {
     @exit="navigateTo('help', 'content')"
   />
 
-  <div v-else class="app-shell relative flex min-h-screen flex-col bg-background text-foreground">
-    <div class="pointer-events-none absolute inset-0 overflow-hidden">
-      <div class="absolute left-[-10rem] top-[-12rem] h-[30rem] w-[30rem] rounded-full bg-[#e4bf78]/18 blur-3xl dark:bg-[#e4bf78]/8" />
-      <div class="absolute right-[-12rem] top-[8rem] h-[26rem] w-[26rem] rounded-full bg-sky-300/16 blur-3xl dark:bg-sky-400/10" />
-      <div class="absolute bottom-[-14rem] left-[20%] h-[28rem] w-[28rem] rounded-full bg-emerald-200/18 blur-3xl dark:bg-emerald-300/8" />
+  <div v-else class="app-shell relative flex h-screen overflow-hidden bg-background text-foreground">
+    <!-- Ambient gradient orbs -->
+    <div class="pointer-events-none absolute inset-0 overflow-hidden z-0">
+      <div class="absolute left-[220px] top-[-12rem] h-[30rem] w-[30rem] rounded-full bg-[#e4bf78]/14 blur-3xl dark:bg-[#e4bf78]/6" />
+      <div class="absolute right-[-12rem] top-[8rem] h-[26rem] w-[26rem] rounded-full bg-sky-300/12 blur-3xl dark:bg-sky-400/8" />
+      <div class="absolute bottom-[-14rem] left-[30%] h-[28rem] w-[28rem] rounded-full bg-emerald-200/14 blur-3xl dark:bg-emerald-300/6" />
     </div>
 
-    <header class="relative z-40 border-b border-black/8 bg-[rgba(251,248,242,0.72)] backdrop-blur-2xl dark:border-white/10 dark:bg-[rgba(8,16,26,0.78)]">
-      <div class="px-4 py-3 sm:px-5">
-        <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-          <div class="min-w-0 flex items-start gap-3">
-            <button
-              type="button"
-              :title="isChinese ? '打开内容中心' : 'Open Content Center'"
-              class="group flex h-11 w-11 shrink-0 items-center justify-center rounded-[1rem] border border-black/8 bg-[#0d1724] text-[#f4d18f] shadow-[0_14px_30px_-22px_rgba(15,23,42,0.95)] transition hover:-translate-y-0.5 hover:bg-[#162234] dark:border-white/10 dark:bg-[#101b29] dark:hover:bg-[#16263b]"
-              @click="navigateTo('blog', 'articles')"
-            >
-              <Beaker class="h-5 w-5" />
-            </button>
-            <div class="min-w-0">
-              <p class="text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-500 dark:text-slate-400">{{ t('header.platform_eyebrow') }}</p>
-              <div class="mt-0.5 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                <h1 class="brand-serif text-[1.85rem] leading-none text-slate-950 dark:text-white">IonicLink</h1>
-                <p class="max-w-3xl text-[15px] leading-6 text-slate-600 dark:text-slate-300">
-                  {{ t('header.platform_description') }}
-                </p>
-              </div>
-              <button
-                type="button"
-                class="mt-1.5 inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-[#a46a18] transition hover:text-[#7c4c0d] dark:text-[#f0c67a] dark:hover:text-[#f6d79d]"
-                @click="navigateTo('blog', 'articles')"
-              >
-                {{ isChinese ? '内容中心' : 'Content Center' }}
-                <ArrowUpRight class="h-3 w-3" />
-              </button>
-            </div>
-          </div>
+    <!-- Left sidebar -->
+    <AppSidebar
+      :current-view="currentView"
+      :batch-files="batchFiles"
+      :selected-file-id="selectedFileId"
+      :can-access-admin="canAccessAdmin"
+      :operator-name="operatorName"
+      :operator-role="operatorRole"
+      :selected-scope-key="selectedScopeKey"
+      :available-scopes="availableScopes"
+      :is-dark="isDark"
+      :is-chinese="isChinese"
+      @navigate="navigateTo"
+      @select-file="setSelectedFile"
+      @toggle-dark="toggleDarkMode"
+      @logout="handleLogout"
+      @update:selected-scope-key="(key) => { selectedScopeKey = key }"
+    />
 
-          <div class="flex flex-wrap items-center gap-1.5 xl:justify-end">
-            <div class="inline-flex min-w-[13rem] items-center gap-2.5 rounded-full border border-black/8 bg-white/75 px-3.5 py-2 text-sm shadow-[0_10px_24px_-24px_rgba(15,23,42,0.45)] dark:border-white/10 dark:bg-[#0d1825]/85">
-              <Library class="h-3.5 w-3.5 text-[#c79237]" />
-              <label class="min-w-0 flex-1">
-                <span class="block text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400 dark:text-slate-500">{{ t('common.active_scope') }}</span>
-                <select
-                  v-model="selectedScopeKey"
-                  class="mt-0.5 w-full appearance-none bg-transparent text-[15px] font-semibold text-slate-800 outline-none dark:text-slate-100"
-                >
-                  <option v-for="scope in availableScopes" :key="scope.key" :value="scope.key">
-                    {{ scope.label }}
-                  </option>
-                </select>
-              </label>
-            </div>
-
-            <div class="hidden min-w-[13rem] items-center gap-2.5 rounded-full border border-black/8 bg-white/75 px-3.5 py-2 text-sm shadow-[0_10px_24px_-24px_rgba(15,23,42,0.45)] dark:border-white/10 dark:bg-[#0d1825]/85 md:inline-flex">
-              <UserCircle2 class="h-4.5 w-4.5 text-slate-400" />
-              <div class="min-w-0">
-                <p class="truncate text-[15px] font-semibold text-slate-800 dark:text-slate-100">{{ operatorName }}</p>
-                <p class="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400 dark:text-slate-500">{{ operatorRole }}</p>
-              </div>
-            </div>
-
-            <LanguageToggle />
-
-            <Button
-              variant="ghost"
-              size="icon"
-              class="h-9 w-9 rounded-full border border-black/8 bg-white/75 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-[#0d1825]/85 dark:text-slate-200 dark:hover:bg-[#132131]"
-              @click="toggleDarkMode"
-            >
-              <Sun v-if="isDark" class="h-4.5 w-4.5" />
-              <Moon v-else class="h-4.5 w-4.5" />
-            </Button>
-
-            <a
-              href="https://github.com/mx1210385980-a11y/IonicLink/tree/main"
-              target="_blank"
-              rel="noreferrer"
-              class="inline-flex h-9 w-9 items-center justify-center rounded-full border border-black/8 bg-white/75 text-slate-700 transition hover:bg-white dark:border-white/10 dark:bg-[#0d1825]/85 dark:text-slate-200 dark:hover:bg-[#132131]"
-            >
-              <Github class="h-4.5 w-4.5" />
-            </a>
-
-            <Button
-              variant="ghost"
-              size="icon"
-              class="h-9 w-9 rounded-full border border-black/8 bg-white/75 text-slate-700 hover:bg-white dark:border-white/10 dark:bg-[#0d1825]/85 dark:text-slate-200 dark:hover:bg-[#132131]"
-              @click="handleLogout"
-            >
-              <LogOut class="h-4.5 w-4.5" />
-            </Button>
-          </div>
-        </div>
-
-        <nav class="mt-2.5 flex gap-1.5 overflow-x-auto pb-0.5">
-          <button
-            v-for="item in visibleNavItems"
-            :key="item.key"
-            type="button"
-            class="inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[15px] font-semibold transition"
-            :class="currentView === item.key
-              ? 'border-transparent bg-[#101b29] text-[#f4d18f] shadow-[0_14px_28px_-24px_rgba(15,23,42,0.9)] dark:bg-[#f4d18f] dark:text-[#111827]'
-              : 'border-black/8 bg-white/72 text-slate-600 hover:bg-white hover:text-slate-900 dark:border-white/10 dark:bg-[#0d1825]/78 dark:text-slate-300 dark:hover:bg-[#132131] dark:hover:text-white'"
-            @click="navigateTo(item.key)"
+    <!-- Right content column -->
+    <div class="relative z-10 flex flex-1 flex-col min-w-0 min-h-0">
+      <!-- Minimal top bar -->
+      <header class="flex h-11 shrink-0 items-center gap-3 border-b border-black/8 bg-[rgba(251,248,242,0.72)] px-4 backdrop-blur-xl dark:border-white/8 dark:bg-[rgba(8,16,26,0.72)]">
+        <h2 class="text-[13px] font-semibold capitalize text-slate-700 dark:text-slate-200">
+          {{ currentView }}
+        </h2>
+        <div class="ml-auto flex items-center gap-1.5">
+          <a
+            href="https://github.com/mx1210385980-a11y/IonicLink/tree/main"
+            target="_blank"
+            rel="noreferrer"
+            class="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-black/5 transition dark:text-slate-500 dark:hover:text-slate-200 dark:hover:bg-white/6"
           >
-            <component :is="item.icon" class="h-3.5 w-3.5" />
-            {{ item.label }}
-          </button>
-        </nav>
-      </div>
-    </header>
+            <Github class="h-3.5 w-3.5" />
+          </a>
+        </div>
+      </header>
 
-    <main class="relative z-10 flex-1 min-h-0 overflow-hidden">
-      <div class="flex h-full min-h-0 flex-col gap-3 px-3 pb-3 pt-3 sm:gap-4 sm:px-4 sm:pb-4">
-        <HomePage
-          v-if="currentView === 'home'"
-          :active-scope-label="activeScopeLabel"
-          :operator-name="operatorName"
-          :files="batchFiles"
-          :active-run="activeExtractionRun"
-          :latest-workflow="latestAgentWorkflow"
-          :preferred-training-dataset-id="preferredTrainingDatasetId"
-          @action="handleHomeAction"
-        />
+      <!-- Page workspace -->
+      <main class="flex-1 min-h-0 overflow-hidden">
+        <div class="flex h-full min-h-0 flex-col gap-3 px-3 pb-3 pt-3 sm:gap-4 sm:px-4 sm:pb-4">
+          <HomePage
+            v-if="currentView === 'home'"
+            :active-scope-label="activeScopeLabel"
+            :operator-name="operatorName"
+            :files="batchFiles"
+            :active-run="activeExtractionRun"
+            :latest-workflow="latestAgentWorkflow"
+            :preferred-training-dataset-id="preferredTrainingDatasetId"
+            @action="handleHomeAction"
+          />
 
-        <PipelinePage
-          v-else-if="currentView === 'pipeline'"
-          :current-section="currentSection"
-          :active-scope-label="activeScopeLabel"
-          :queue-size-label="queueSizeLabel"
-          :operator-name="operatorName"
-          :run-state-label="runStateLabel"
-          :selected-file-name="selectedFileName"
-          :selected-file="selectedFile"
-          :selected-file-id="selectedFileId"
-          :explorer-doi="explorerDoi"
-          :session-scope-key="sessionState.activeScopeKey"
-          :files="batchFiles"
-          :active-id="selectedFileId"
-          :bind-file-upload-ref="bindFileUploadRef"
-          :bind-chat-panel-ref="bindChatPanelRef"
-          :sidebar-tab="sidebarTab"
-          :is-chatting="isChatting"
-          :latest-agent-workflow="latestAgentWorkflow"
-          :active-run="activeExtractionRun"
-          :active-file-name="activeExtractionFileName"
-          :default-extractor-type="defaultExtractorType"
-          @change-section="handleSectionChange"
-          @select-file="setSelectedFile"
-          @remove-file="handleRemoveFile"
-          @clear-files="handleClearFiles"
-          @upload="handleUpload"
-          @batch-upload="handleBatchUpload"
-          @extract="handleExtract"
-          @batch-extract="handleBatchExtract"
-          @send-chat="handleChat"
-          @update-sidebar-tab="setSidebarTab"
-          @open-review="navigateTo('review', 'inbox')"
-          @open-knowledge="navigateTo('knowledge', 'explorer')"
-          @clear-doi="clearExplorerDoi"
-          @set-default-extractor-type="setDefaultExtractorType"
-          @set-file-extractor-type="setFileExtractorType"
-        />
+          <PipelinePage
+            v-else-if="currentView === 'pipeline'"
+            :current-section="currentSection"
+            :active-scope-label="activeScopeLabel"
+            :queue-size-label="queueSizeLabel"
+            :operator-name="operatorName"
+            :run-state-label="runStateLabel"
+            :selected-file-name="selectedFileName"
+            :selected-file="selectedFile"
+            :selected-file-id="selectedFileId"
+            :explorer-doi="explorerDoi"
+            :session-scope-key="sessionState.activeScopeKey"
+            :files="batchFiles"
+            :active-id="selectedFileId"
+            :bind-file-upload-ref="bindFileUploadRef"
+            :bind-chat-panel-ref="bindChatPanelRef"
+            :sidebar-tab="sidebarTab"
+            :is-chatting="isChatting"
+            :latest-agent-workflow="latestAgentWorkflow"
+            :active-run="activeExtractionRun"
+            :active-file-name="activeExtractionFileName"
+            :default-extractor-type="defaultExtractorType"
+            @change-section="handleSectionChange"
+            @select-file="setSelectedFile"
+            @remove-file="handleRemoveFile"
+            @clear-files="handleClearFiles"
+            @upload="handleUpload"
+            @batch-upload="handleBatchUpload"
+            @extract="handleExtract"
+            @batch-extract="handleBatchExtract"
+            @send-chat="handleChat"
+            @update-sidebar-tab="setSidebarTab"
+            @open-review="navigateTo('review', 'inbox')"
+            @open-knowledge="navigateTo('knowledge', 'explorer')"
+            @clear-doi="clearExplorerDoi"
+            @set-default-extractor-type="setDefaultExtractorType"
+            @set-file-extractor-type="setFileExtractorType"
+          />
 
-        <ReviewPage
-          v-else-if="currentView === 'review'"
-          :current-section="currentSection"
-          :active-scope-label="activeScopeLabel"
-          :selected-file-name="selectedFileName"
-          :selected-file="selectedFile"
-          :files="batchFiles"
-          :highlight-count="groundingHighlightData.length"
-          :pdf-url="groundingPdfUrl"
-          :highlight-data="groundingHighlightData"
-          :scope-key="sessionState.activeScopeKey"
-          @change-section="handleSectionChange"
-          @select-file="setSelectedFile"
-          @open-pipeline="navigateTo('pipeline', 'upload')"
-          @open-knowledge="navigateTo('knowledge', 'explorer')"
-        />
+          <ReviewPage
+            v-else-if="currentView === 'review'"
+            :current-section="currentSection"
+            :active-scope-label="activeScopeLabel"
+            :selected-file-name="selectedFileName"
+            :selected-file="selectedFile"
+            :files="batchFiles"
+            :highlight-count="groundingHighlightData.length"
+            :pdf-url="groundingPdfUrl"
+            :highlight-data="groundingHighlightData"
+            :scope-key="sessionState.activeScopeKey"
+            @change-section="handleSectionChange"
+            @select-file="setSelectedFile"
+            @open-pipeline="navigateTo('pipeline', 'upload')"
+            @open-knowledge="navigateTo('knowledge', 'explorer')"
+          />
 
-        <KnowledgePage
-          v-else-if="currentView === 'knowledge'"
-          :current-section="currentSection"
-          :active-scope-label="activeScopeLabel"
-          :operator-name="operatorName"
-          :selected-file-name="selectedFileName"
-          :explorer-doi="explorerDoi"
-          :selected-file="selectedFile"
-          :selected-file-id="selectedFileId"
-          :scope-key="sessionState.activeScopeKey"
-          @change-section="handleSectionChange"
-          @open-training="openTrainingWorkbench"
-          @open-review="handleLiteratureView"
-          @clear-doi="clearExplorerDoi"
-        />
+          <KnowledgePage
+            v-else-if="currentView === 'knowledge'"
+            :current-section="currentSection"
+            :active-scope-label="activeScopeLabel"
+            :operator-name="operatorName"
+            :selected-file-name="selectedFileName"
+            :explorer-doi="explorerDoi"
+            :selected-file="selectedFile"
+            :selected-file-id="selectedFileId"
+            :scope-key="sessionState.activeScopeKey"
+            @change-section="handleSectionChange"
+            @open-training="openTrainingWorkbench"
+            @open-review="handleLiteratureView"
+            @clear-doi="clearExplorerDoi"
+            @clear-source="setSelectedFile(null)"
+          />
 
-        <ModelingPage
-          v-else-if="currentView === 'modeling'"
-          :current-section="currentSection"
-          :active-scope-label="activeScopeLabel"
-          :operator-name="operatorName"
-          :preferred-training-dataset-id="preferredTrainingDatasetId"
-          :scope-key="sessionState.activeScopeKey"
-          @change-section="handleSectionChange"
-          @open-knowledge="navigateTo('knowledge', 'cleaning')"
-        />
+          <ModelingPage
+            v-else-if="currentView === 'modeling'"
+            :current-section="currentSection"
+            :active-scope-label="activeScopeLabel"
+            :operator-name="operatorName"
+            :preferred-training-dataset-id="preferredTrainingDatasetId"
+            :scope-key="sessionState.activeScopeKey"
+            @change-section="handleSectionChange"
+            @open-knowledge="navigateTo('knowledge', 'cleaning')"
+          />
 
-        <AdminPage
-          v-else-if="currentView === 'admin'"
-          :current-section="currentSection"
-          :active-scope-label="activeScopeLabel"
-          :operator-name="operatorName"
-          :run-state-label="runStateLabel"
-          :can-access-monitor="canAccessAdmin"
-          :latest-agent-workflow="latestAgentWorkflow"
-          :active-run="activeExtractionRun"
-          :active-file-name="activeExtractionFileName"
-          @change-section="handleSectionChange"
-          @open-help="navigateTo('help', 'quick-start')"
-          @open-home="navigateTo('home', 'today')"
-        />
+          <AdminPage
+            v-else-if="currentView === 'admin'"
+            :current-section="currentSection"
+            :active-scope-label="activeScopeLabel"
+            :operator-name="operatorName"
+            :run-state-label="runStateLabel"
+            :can-access-monitor="canAccessAdmin"
+            :latest-agent-workflow="latestAgentWorkflow"
+            :active-run="activeExtractionRun"
+            :active-file-name="activeExtractionFileName"
+            @change-section="handleSectionChange"
+            @open-help="navigateTo('help', 'quick-start')"
+            @open-home="navigateTo('home', 'today')"
+          />
 
-        <HelpPage
-          v-else
-          :current-section="currentSection"
-          :active-scope-label="activeScopeLabel"
-          :operator-name="operatorName"
-          @change-section="handleSectionChange"
-          @open-pipeline="navigateTo('pipeline', 'upload')"
-          @open-blog="navigateTo('blog', 'articles')"
-        />
-      </div>
-    </main>
+          <HelpPage
+            v-else
+            :current-section="currentSection"
+            :active-scope-label="activeScopeLabel"
+            :operator-name="operatorName"
+            @change-section="handleSectionChange"
+            @open-pipeline="navigateTo('pipeline', 'upload')"
+            @open-blog="navigateTo('blog', 'articles')"
+          />
+        </div>
+      </main>
+    </div>
   </div>
 </template>
