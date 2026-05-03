@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from routers.extraction import _sanitize_field_evidence_locations
 from services.file_service import _build_field_evidence_map
 from services.il_resolver_service import filter_to_supported_ionic_liquid_records, is_likely_ionic_liquid_name
 from services.normalization.row_normalizer import normalize_extraction_row
@@ -107,3 +108,25 @@ def test_review_figure_estimate_filter_keeps_known_aliases_in_strict_mode_and_co
     assert [row["ionic_liquid"] for row in permissive_kept] == ["L-F206", "BHPT"]
     assert [row["ionic_liquid"] for row in permissive_dropped] == ["Z-TETRAOL"]
     assert is_likely_ionic_liquid_name("BHPET")
+
+
+def test_review_sanitizer_keeps_ionic_liquid_alias_bbox_for_standardized_value():
+    fields = {
+        "ionic_liquid": {
+            "value": "[EHIM][TFSI]",
+            "literature_alias": "L-F206",
+            "original_value": "L-F206",
+            "evidence": {
+                "source_type": "text",
+                "page": 6,
+                "bbox": [345.66, 693.84, 375.54, 703.8],
+                "matched_text": "L-F206",
+            },
+        }
+    }
+
+    sanitized = _sanitize_field_evidence_locations(fields, pdf_path=None)
+
+    evidence = sanitized["ionic_liquid"]["evidence"]
+    assert evidence["bbox"] == [345.66, 693.84, 375.54, 703.8]
+    assert evidence["matched_text"] == "L-F206"

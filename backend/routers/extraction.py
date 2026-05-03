@@ -328,6 +328,31 @@ def _clear_unverified_location(entry: dict[str, Any], note: str) -> dict[str, An
     return cleaned
 
 
+def _text_matches_field_or_alias(field_key: str, value: Any, entry: dict[str, Any], text: str) -> bool:
+    if _text_explicitly_matches_field_value(field_key, value, text):
+        return True
+    if field_key != "ionic_liquid":
+        return False
+
+    normalized_text = str(text or "").strip().lower()
+    if not normalized_text:
+        return False
+    alias_candidates = [
+        entry.get("literature_alias"),
+        entry.get("lubricant_alias"),
+        entry.get("original_value"),
+        (entry.get("evidence") or {}).get("matched_text") if isinstance(entry.get("evidence"), dict) else None,
+    ]
+    for candidate in alias_candidates:
+        alias = str(candidate or "").strip()
+        if not alias:
+            continue
+        pattern = rf"(?<![A-Za-z0-9]){re.escape(alias.lower())}(?![A-Za-z0-9])"
+        if re.search(pattern, normalized_text):
+            return True
+    return False
+
+
 def _sanitize_field_evidence_locations(
     field_map: dict[str, Any],
     *,
@@ -358,7 +383,7 @@ def _sanitize_field_evidence_locations(
         verification_text = bbox_text or matched_text
 
         if source_type == "table" and not matched_text:
-            if bbox_text and _text_explicitly_matches_field_value(key, value, bbox_text):
+            if bbox_text and _text_matches_field_or_alias(key, value, entry, bbox_text):
                 cleaned = dict(entry or {})
                 cleaned_evidence = dict(evidence or {})
                 cleaned_evidence["matched_text"] = bbox_text
@@ -377,7 +402,7 @@ def _sanitize_field_evidence_locations(
             )
             continue
 
-        if source_type in {"text", "table"} and not _text_explicitly_matches_field_value(key, value, verification_text):
+        if source_type in {"text", "table"} and not _text_matches_field_or_alias(key, value, entry, verification_text):
             sanitized[key] = _clear_unverified_location(
                 entry,
                 "Stored bbox text does not match this field value; location needs re-extraction.",
@@ -412,6 +437,7 @@ def _build_record_field_evidence_payload(record: Any) -> dict[str, Any]:
     ):
         raw_entry = field_map.get(key) if isinstance(field_map.get(key), dict) else {}
         normalized_fields[key] = {
+            **raw_entry,
             "value": raw_entry.get("value", _field_value_from_record(record, key)),
             "confidence": raw_entry.get("confidence", record.confidence),
             "evidence": raw_entry.get("evidence"),
@@ -783,6 +809,7 @@ def _build_diffusion_field_evidence_payload(record: Any) -> dict[str, Any]:
     for key in ordered_keys:
         raw_entry = field_map.get(key) if isinstance(field_map.get(key), dict) else {}
         normalized_fields[key] = {
+            **raw_entry,
             "value": raw_entry.get("value", _diffusion_field_value_from_record(record, key)),
             "confidence": raw_entry.get("confidence", record.confidence),
             "evidence": raw_entry.get("evidence"),
