@@ -29,6 +29,7 @@ from services.model_training_service import (
     _safe_float,
     target_column_name,
 )
+from utils.experiment_profile import build_experiment_profile, normalize_training_view, record_matches_training_view
 from utils.tribopair import composite_roughness_nm, parse_roughness_nm
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,7 @@ except Exception:
 
 DEFAULT_CLEANING_WORKBENCH_OPTIONS = {
     **DEFAULT_CLEANING_OPTIONS,
+    "training_view": "all",
     "missing_value_strategy": "median",
     "remove_target_outliers": False,
     "iqr_multiplier": 1.5,
@@ -558,6 +560,7 @@ class ModelCleaningService:
         feature_config["use_pca"] = bool(feature_config.get("use_pca", False))
         feature_config["n_components"] = max(2, min(30, int(feature_config.get("n_components", DEFAULT_FEATURE_CONFIG["n_components"]) or DEFAULT_FEATURE_CONFIG["n_components"])))
         merged["source_mode"] = source_mode
+        merged["training_view"] = normalize_training_view(merged.get("training_view"))
         merged["missing_value_strategy"] = strategy
         merged["drop_missing_target"] = bool(merged.get("drop_missing_target", True))
         merged["require_dual_smiles"] = bool(merged.get("require_dual_smiles", True))
@@ -869,6 +872,8 @@ class ModelCleaningService:
             "potential": record.potential,
             "water_content": record.water_content,
             "film_thickness": record.film_thickness,
+            "regime": getattr(record, "regime", None),
+            "tribological_system": getattr(record, "tribological_system_json", None),
             "probe_roughness": record.probe_roughness,
             "substrate_roughness": record.substrate_roughness,
             "surface_roughness": record.surface_roughness,
@@ -925,17 +930,30 @@ class ModelCleaningService:
             "repaired_fields": [],
             "is_target_outlier": False,
         }
+        experiment_profile = build_experiment_profile(row)
+        row.update(
+            {
+                "experiment_profile": experiment_profile,
+                "experiment_scale": experiment_profile["scale"],
+                "experiment_method": experiment_profile["method"],
+                "measurement_type": experiment_profile["measurement_type"],
+                "training_view": experiment_profile["training_view"],
+            }
+        )
         return row
 
     def _clean_rows(self, rows: list[dict[str, Any]], *, target_key: str, options: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         target_def = TARGET_DEFINITIONS[target_key]
         raw_count = len(rows)
-        target_ready_rows = [row for row in rows if _safe_float(row.get(target_def["field"])) is not None]
+        training_view = normalize_training_view(options.get("training_view"))
+        view_ready_rows = [row for row in rows if record_matches_training_view(row, training_view)]
+        scoped_rows = view_ready_rows if training_view != "all" else rows
+        target_ready_rows = [row for row in scoped_rows if _safe_float(row.get(target_def["field"])) is not None]
         smiles_ready_rows = [
-            row for row in rows if str(row.get("cation_smiles") or "").strip() and str(row.get("anion_smiles") or "").strip()
+            row for row in scoped_rows if str(row.get("cation_smiles") or "").strip() and str(row.get("anion_smiles") or "").strip()
         ]
 
-        working_rows = [dict(row) for row in rows]
+        working_rows = [dict(row) for row in scoped_rows]
         if options["drop_missing_target"]:
             working_rows = [row for row in working_rows if _safe_float(row.get(target_def["field"])) is not None]
         if options["require_dual_smiles"]:
@@ -955,6 +973,7 @@ class ModelCleaningService:
 
         summary = {
             "raw_records": raw_count,
+            "view_ready_records": len(view_ready_rows),
             "target_ready_records": len(target_ready_rows),
             "chemistry_ready_records": len(smiles_ready_rows),
             "training_ready_records": len(working_rows),
@@ -962,11 +981,13 @@ class ModelCleaningService:
             "outliers_detected": outlier_count,
             "outliers_removed": outlier_count if options["remove_target_outliers"] else 0,
             "dropped_by_reason": {
-                "missing_target": sum(1 for row in rows if _safe_float(row.get(target_def["field"])) is None),
-                "missing_cation_smiles": sum(1 for row in rows if not str(row.get("cation_smiles") or "").strip()),
-                "missing_anion_smiles": sum(1 for row in rows if not str(row.get("anion_smiles") or "").strip()),
+                "missing_target": sum(1 for row in scoped_rows if _safe_float(row.get(target_def["field"])) is None),
+                "missing_cation_smiles": sum(1 for row in scoped_rows if not str(row.get("cation_smiles") or "").strip()),
+                "missing_anion_smiles": sum(1 for row in scoped_rows if not str(row.get("anion_smiles") or "").strip()),
+                "outside_training_view": 0 if training_view == "all" else max(0, raw_count - len(view_ready_rows)),
             },
             "rules": {
+                "training_view": training_view,
                 "drop_missing_target": options["drop_missing_target"],
                 "require_dual_smiles": options["require_dual_smiles"],
                 "missing_value_strategy": options["missing_value_strategy"],
@@ -1504,6 +1525,10 @@ class ModelCleaningService:
             "__record_id": row.get("record_id"),
             "__literature_id": row.get("literature_id"),
             "__confidence": self._jsonable_number(row.get("confidence")),
+            "__experiment_scale": row.get("experiment_scale"),
+            "__experiment_method": row.get("experiment_method"),
+            "__measurement_type": row.get("measurement_type"),
+            "__training_view": row.get("training_view"),
         }
         for key, column_name in zip(keep_features, process_columns):
             matrix_row[column_name] = self._jsonable_number(row.get(PROCESS_FEATURE_LOOKUP[key]["normalized_field"]))

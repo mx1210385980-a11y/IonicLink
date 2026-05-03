@@ -5,6 +5,8 @@ import math
 import re
 from typing import Any
 
+from utils.experiment_profile import build_experiment_profile, canonical_scale
+
 
 LOAD_VALUE_TYPES = {"single", "range", "composite", "unstated"}
 FRICTION_REGIMES = {"static", "kinetic", "boundary", "mixed", "hydrodynamic", "elastohydrodynamic", "unstated"}
@@ -183,14 +185,21 @@ def normalize_tribological_system(value: Any) -> dict[str, Any]:
     if friction_regime not in FRICTION_REGIMES:
         friction_regime = "unstated"
     contact_geometry = _clean_text(value.get("contact_geometry") or value.get("contactGeometry")) or None
-    scale = _clean_text(value.get("scale")) or None
+    scale = canonical_scale(value.get("scale")) or (_clean_text(value.get("scale")) or None)
     note = _clean_text(value.get("note")) or None
+    profile = build_experiment_profile({"tribological_system": value})
 
     normalized: dict[str, Any] = {
         "raw_text": raw_text,
         "friction_regime": friction_regime,
         "contact_geometry": contact_geometry,
         "scale": scale,
+        "method": profile["method"],
+        "instrument": profile["instrument"],
+        "measurement_type": profile["measurement_type"],
+        "profile": profile["profile"],
+        "training_view": profile["training_view"],
+        "training_views": profile["training_views"],
     }
     if note:
         normalized["note"] = note
@@ -246,9 +255,17 @@ def derive_tribological_system(raw_text: Any) -> dict[str, Any]:
     elif "macro" in lower:
         scale = "macro"
 
+    profile = build_experiment_profile({"raw_text": text})
+
     return normalize_tribological_system({
         "raw_text": text,
         "friction_regime": friction_regime,
-        "contact_geometry": contact_geometry,
-        "scale": scale,
+        "contact_geometry": contact_geometry or profile["contact_geometry"],
+        "scale": scale or profile["scale"],
+        "method": profile["method"],
+        "instrument": profile["instrument"],
+        "measurement_type": profile["measurement_type"],
+        "profile": profile["profile"],
+        "training_view": profile["training_view"],
+        "training_views": profile["training_views"],
     })

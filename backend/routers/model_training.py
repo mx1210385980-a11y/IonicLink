@@ -51,6 +51,7 @@ class DataOptionPayload(BaseModel):
 
 class CleaningOptionPayload(BaseModel):
     source_mode: str = DEFAULT_CLEANING_OPTIONS["source_mode"]
+    training_view: str = DEFAULT_CLEANING_OPTIONS["training_view"]
     drop_missing_target: bool = DEFAULT_CLEANING_OPTIONS["drop_missing_target"]
     require_dual_smiles: bool = DEFAULT_CLEANING_OPTIONS["require_dual_smiles"]
 

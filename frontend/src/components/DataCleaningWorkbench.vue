@@ -39,6 +39,13 @@ const SOURCE_MODE_OPTIONS = [
   { value: 'group_library', label: '只使用组级共享库', detail: '适合构建跨工作区的统一数据池。' },
 ] as const
 
+const TRAINING_VIEW_OPTIONS = [
+  { value: 'all', label: '统一知识库全部样本', detail: '保留 macro 与 AFM 数据，适合先看总体覆盖。' },
+  { value: 'macro_performance', label: '宏观性能预测', detail: '优先使用 ball-on-disk / ball-on-flat / pin-on-disk 等宏观 COF 与磨损数据。' },
+  { value: 'afm_surface_response', label: 'AFM 表面响应', detail: '优先使用 AFM / FFM 的纳米摩擦、侧向力、粘附和表面响应数据。' },
+  { value: 'cross_scale', label: '跨尺度数据池', detail: '保留已识别为宏观或 AFM 的记录，为后续跨尺度建模做准备。' },
+] as const
+
 const STARTER_PRESETS = [
   { key: 'balanced', label: '平衡模式', badge: '推荐', summary: '兼顾样本量与完整性。' },
   { key: 'strict', label: '严格模式', badge: '严格', summary: '更适合复现实验和小样本验证。' },
@@ -70,6 +77,7 @@ const emit = defineEmits<{
 
 const form = reactive<ModelCleaningOptions>({
   source_mode: 'group_library_fallback',
+  training_view: 'all',
   drop_missing_target: true,
   require_dual_smiles: true,
   missing_value_strategy: 'median',
@@ -176,6 +184,10 @@ const selectedSourceMode = computed(() => {
   return SOURCE_MODE_OPTIONS.find((option) => option.value === form.source_mode)?.label || SOURCE_MODE_OPTIONS[0].label
 })
 
+const selectedTrainingView = computed(() => {
+  return TRAINING_VIEW_OPTIONS.find((option) => option.value === form.training_view) || TRAINING_VIEW_OPTIONS[0]
+})
+
 const rdkitStatusLabel = computed(() => {
   if (!descriptorSummary.value) return '--'
   return descriptorSummary.value.rdkit_enabled ? '已启用' : '未启用'
@@ -214,6 +226,7 @@ const cleaningSummary = computed(() => preview.value?.summary || null)
 const missingTargetCount = computed(() => cleaningSummary.value?.dropped_by_reason.missing_target || 0)
 const missingCationCount = computed(() => cleaningSummary.value?.dropped_by_reason.missing_cation_smiles || 0)
 const missingAnionCount = computed(() => cleaningSummary.value?.dropped_by_reason.missing_anion_smiles || 0)
+const outsideTrainingViewCount = computed(() => cleaningSummary.value?.dropped_by_reason.outside_training_view || 0)
 const missingChemistryFieldCount = computed(() => missingCationCount.value + missingAnionCount.value)
 const repairCount = computed(() => {
   const repairs = cleaningSummary.value?.missing_value_repairs || {}
@@ -247,6 +260,17 @@ const qualityIssueCards = computed(() => {
       explanation: '模型必须知道每条样本的摩擦系数，缺少目标值的记录不能直接进入训练。',
       studentAction: '保留“有 μ/COF 的样本”开关，必要时回到审核页补充原文证据。',
       icon: FileWarning,
+    },
+    {
+      key: 'profile',
+      title: '实验视图匹配',
+      value: outsideTrainingViewCount.value,
+      unit: '条不在当前视图',
+      severity: outsideTrainingViewCount.value > 0 ? 'watch' : 'ok',
+      status: selectedTrainingView.value.label,
+      explanation: '训练视图按实验尺度和方法筛选 macro / AFM 数据，避免把不同物理尺度当成同分布样本。',
+      studentAction: '预测宏观 COF/磨损时选“宏观性能预测”；研究 AFM 信号时选“AFM 表面响应”；做跨尺度假设时选“跨尺度数据池”。',
+      icon: Workflow,
     },
     {
       key: 'chemistry',
@@ -856,6 +880,16 @@ onBeforeUnmount(() => {
                       </option>
                     </select>
                     <p class="mt-2 text-xs leading-5 text-slate-500">{{ SOURCE_MODE_OPTIONS.find((option) => option.value === form.source_mode)?.detail }}</p>
+                  </div>
+
+                  <div class="mt-4">
+                    <label class="mb-2 block text-xs font-semibold text-slate-400">训练视图</label>
+                    <select v-model="form.training_view" class="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100">
+                      <option v-for="option in TRAINING_VIEW_OPTIONS" :key="option.value" :value="option.value">
+                        {{ option.label }}
+                      </option>
+                    </select>
+                    <p class="mt-2 text-xs leading-5 text-slate-500">{{ selectedTrainingView.detail }}</p>
                   </div>
                 </div>
 

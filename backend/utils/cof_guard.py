@@ -5,7 +5,7 @@ from typing import Any, Mapping, Optional
 
 
 _STRONG_COF_CUE_RE = re.compile(
-    r"(?:friction coefficient|\bcof\b|\bmu\b|[μµ]|lateral force|normal load|friction-load)",
+    r"(?:friction coefficient|coefficient of friction|\bcof\b|\bmu\b|[μµ]|lateral force|normal load|friction-load)",
     re.IGNORECASE,
 )
 _POTENTIAL_RE = re.compile(r"[+-]?\d+(?:\.\d+)?\s*V|\bOCP\b", re.IGNORECASE)

@@ -188,6 +188,7 @@ class FeatureConfigPayload(BaseModel):
 
 class CleaningOptionPayload(BaseModel):
     source_mode: str = DEFAULT_CLEANING_WORKBENCH_OPTIONS["source_mode"]
+    training_view: str = DEFAULT_CLEANING_WORKBENCH_OPTIONS["training_view"]
     drop_missing_target: bool = DEFAULT_CLEANING_WORKBENCH_OPTIONS["drop_missing_target"]
     require_dual_smiles: bool = DEFAULT_CLEANING_WORKBENCH_OPTIONS["require_dual_smiles"]
     missing_value_strategy: str = DEFAULT_CLEANING_WORKBENCH_OPTIONS["missing_value_strategy"]

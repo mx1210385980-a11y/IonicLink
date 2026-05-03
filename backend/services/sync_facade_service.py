@@ -30,6 +30,7 @@ from services.il_resolver_service import resolve_il
 from services.llm_service import llm_service
 from utils.tribopair import compose_tribopair_label, composite_roughness_label
 from utils.cof_extraction import derive_cof_extracted, normalize_cof_extracted
+from utils.experiment_profile import build_experiment_profile
 from utils.lubricant_mixture import (
     compact_lubricant_label,
     components_for_record,
@@ -155,6 +156,23 @@ def _record_to_payload(record) -> dict[str, Any]:
     load_conditions = normalize_load_conditions(getattr(record, "load_conditions_json", None)) or derive_load_conditions(record.load_raw or record.load_value)
     speed_conditions = normalize_speed_conditions(getattr(record, "speed_conditions_json", None)) or derive_speed_conditions(record.speed_value)
     tribological_system = normalize_tribological_system(getattr(record, "tribological_system_json", None)) or derive_tribological_system(getattr(record, "regime", None))
+    experiment_profile = build_experiment_profile(
+        {
+            "tribological_system": tribological_system,
+            "cof": record.cof_raw,
+            "cof_value": record.cof_value,
+            "load": record.load_raw or record.load_value,
+            "speed": record.speed_value,
+            "probe_geometry": record.probe_geometry,
+            "probe_radius": record.probe_radius,
+            "regime": getattr(record, "regime", None),
+            "source": getattr(record, "source", None),
+            "source_figure": getattr(record, "source_figure", None),
+            "evidence": getattr(record, "evidence", None),
+        }
+    )
+    if tribological_system:
+        tribological_system = {**tribological_system, **experiment_profile}
     return {
         "id": record.id,
         "literatureId": record.literature_id,
@@ -200,6 +218,11 @@ def _record_to_payload(record) -> dict[str, Any]:
         "filmThickness": record.film_thickness,
         "regime": getattr(record, "regime", None),
         "tribologicalSystem": tribological_system,
+        "experimentProfile": experiment_profile,
+        "experimentScale": experiment_profile["scale"],
+        "experimentMethod": experiment_profile["method"],
+        "measurementType": experiment_profile["measurement_type"],
+        "trainingView": experiment_profile["training_view"],
         "molRatio": record.mol_ratio,
         "cation": record.cation,
         "anion": record.anion,

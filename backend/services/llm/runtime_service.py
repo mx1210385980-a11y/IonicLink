@@ -511,7 +511,7 @@ class LLMService:
             # For figure-derived COF records, evidence should carry direct coefficient signal.
             support_text = " ".join(part for part in (evidence, notes) if part).strip()
             if cof and support_text and not re.search(
-                r"(?:\bcof\b|friction coefficient|[μµu]\s*=|\bmu\s*=|\d|linear fit|slope)",
+                r"(?:\bcof\b|friction coefficient|coefficient of friction|[μµu]\s*=|\bmu\s*=|\d|linear fit|slope)",
                 support_text,
                 re.IGNORECASE,
             ):
@@ -1245,6 +1245,12 @@ class LLMService:
                 "residual_film_thickness_d": r.residual_film_thickness_d,
                 "layer_spacing_delta": r.layer_spacing_delta,
                 "film_thickness": r.film_thickness,
+                "regime": r.regime,
+                "tribological_system": r.tribological_system,
+                "experiment_scale": r.experiment_scale,
+                "experiment_method": r.experiment_method,
+                "measurement_type": r.measurement_type,
+                "training_view": r.training_view,
                 "mol_ratio": r.mol_ratio,
                 "cation": r.cation,
                 "anion": r.anion,

@@ -7,7 +7,9 @@ from knowledge_base import normalize_ionic_liquid
 from services.cleaning_service import normalize_temperature
 from services.normalization.potential import normalize_potential_text
 from utils.document_context import normalize_surface_roughness_value
+from utils.experiment_profile import build_experiment_profile
 from utils.speed_conditions import derive_speed_conditions, normalize_speed_conditions, speed_value_from_conditions
+from utils.structured_conditions import derive_tribological_system, normalize_tribological_system
 
 
 def _format_thickness_nm(value: float) -> str:
@@ -161,12 +163,24 @@ def _collect_il_candidates(text: str) -> List[str]:
     for pattern in patterns:
         for hit in re.findall(pattern, text, flags=re.IGNORECASE):
             il = re.sub(r"\s+", "", str(hit))
+            if _looks_like_reference_token(il):
+                continue
             mixed_left = re.fullmatch(r"(\[[^\[\]]+?\])([A-Za-z][A-Za-z0-9,+\-()]{1,24})", il)
             if mixed_left:
                 il = f"{mixed_left.group(1)}[{mixed_left.group(2)}]"
             if il and il not in candidates:
                 candidates.append(il)
     return candidates
+
+
+def _looks_like_reference_token(text: Any) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    return bool(
+        re.fullmatch(r"\[\d{1,4}\]\[[A-Za-z]{2,24}\]", value)
+        or re.fullmatch(r"\[\d{1,4}\]", value)
+    )
 
 
 def _looks_like_source_label(text: Any) -> bool:
@@ -192,6 +206,8 @@ def _is_invalid_ionic_liquid_value(value: Any, source: Any, source_figure: Any) 
         return True
     if _looks_like_source_label(text):
         return True
+    if _looks_like_reference_token(text):
+        return True
 
     source_candidates = {
         str(source or "").strip().lower(),
@@ -207,6 +223,8 @@ def _is_invalid_ionic_liquid_value(value: Any, source: Any, source_figure: Any) 
 def _canonicalize_il(value: Any) -> str:
     text = str(value or "").strip()
     if not text:
+        return ""
+    if _looks_like_reference_token(text):
         return ""
     text_l = text.lower()
     if "ethylammonium nitrate" in text_l or re.search(r"\bean\b", text_l):
@@ -309,6 +327,20 @@ def normalize_extraction_row(
         source_tag = source_val
 
     panel_ctx = _extract_panel_context(page_ctx, source_tag)
+    if not item.get("ionic_liquid"):
+        for direct_source in (
+            item.get("sample_id"),
+            item.get("sample"),
+            item.get("lubricant"),
+            item.get("condition"),
+            tribopair.get("coating"),
+        ):
+            inferred = _canonicalize_il(normalize_ionic_liquid(direct_source))
+            inferred_l = str(inferred or "").strip().lower()
+            if inferred and inferred_l not in {"unknown", "unknown il", "n/a", "-", "--"}:
+                item["ionic_liquid"] = inferred
+                break
+
     if not item.get("ionic_liquid"):
         local_space = " ".join(
             [
@@ -522,4 +554,26 @@ def normalize_extraction_row(
         if len(text) > 560:
             text = re.sub(r"\s+\S*$", "", text[:560]).strip()
         item["evidence"] = text
+    tribological_system = normalize_tribological_system(item.get("tribological_system") or item.get("tribologicalSystem"))
+    if not tribological_system:
+        tribological_system = derive_tribological_system(
+            " ".join(
+                str(part or "")
+                for part in (
+                    item.get("regime"),
+                    item.get("contact_type"),
+                    item.get("probe_geometry"),
+                    item.get("source"),
+                    item.get("source_figure"),
+                    item.get("evidence"),
+                    page_ctx[:1200],
+                )
+            )
+        )
+    experiment_profile = build_experiment_profile({**item, "tribological_system": tribological_system})
+    item["tribological_system"] = {**tribological_system, **experiment_profile} if tribological_system else experiment_profile
+    item["experiment_scale"] = experiment_profile["scale"]
+    item["experiment_method"] = experiment_profile["method"]
+    item["measurement_type"] = experiment_profile["measurement_type"]
+    item["training_view"] = experiment_profile["training_view"]
     return item

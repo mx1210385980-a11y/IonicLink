@@ -41,6 +41,7 @@ from services.extraction_trace_service import (
     update_extraction_run_progress,
 )
 from utils.cof_extraction import derive_cof_extracted, normalize_cof_extracted, serialize_cof_extracted
+from utils.experiment_profile import build_experiment_profile
 from utils.lubricant_mixture import (
     compact_lubricant_label,
     components_for_record,
@@ -2041,6 +2042,25 @@ def _record_to_response_item(record: Any) -> dict[str, Any]:
     tribological_system = normalize_tribological_system(getattr(record, "tribological_system_json", None)) or derive_tribological_system(
         getattr(record, "regime", None),
     )
+    experiment_profile = build_experiment_profile(
+        {
+            "tribological_system": tribological_system,
+            "cof": cof_str,
+            "load": getattr(record, "load_raw", None) or getattr(record, "load_value", None),
+            "speed": getattr(record, "speed_value", None),
+            "friction_force": getattr(record, "friction_force", None),
+            "wear_rate": getattr(record, "wear_rate", None),
+            "probe_geometry": getattr(record, "probe_geometry", None),
+            "probe_radius": getattr(record, "probe_radius", None),
+            "contact_type": getattr(record, "contact_type", None),
+            "regime": getattr(record, "regime", None),
+            "source": getattr(record, "source", None),
+            "source_figure": getattr(record, "source_figure", None),
+            "evidence": getattr(record, "evidence", None),
+        }
+    )
+    if tribological_system:
+        tribological_system = {**tribological_system, **experiment_profile}
     return {
         "id": str(record.id),
         "material_name": record.material_name,
@@ -2078,6 +2098,11 @@ def _record_to_response_item(record: Any) -> dict[str, Any]:
         "layer_spacing_delta": record.layer_spacing_delta,
         "regime": getattr(record, "regime", None),
         "tribological_system": tribological_system,
+        "experiment_profile": experiment_profile,
+        "experiment_scale": experiment_profile["scale"],
+        "experiment_method": experiment_profile["method"],
+        "measurement_type": experiment_profile["measurement_type"],
+        "training_view": experiment_profile["training_view"],
         "mol_ratio": record.mol_ratio,
         "cation": record.cation,
         "anion": record.anion,
@@ -2260,6 +2285,8 @@ def _build_db_record_from_item(
     if speed_conditions.get("scan_rate_hz") is not None and speed_conditions.get("sliding_velocity_um_s") is None:
         speed_value = None
     tribological_system = normalize_tribological_system(item.get("tribological_system") or item.get("tribologicalSystem")) or derive_tribological_system(item.get("regime"))
+    experiment_profile = build_experiment_profile({**item, "tribological_system": tribological_system})
+    tribological_system = {**tribological_system, **experiment_profile} if tribological_system else experiment_profile
     db_record = model_cls(
         literature_id=literature_id,
         material_name=item.get("material_name", "Unknown"),
@@ -2328,6 +2355,11 @@ def _build_db_record_from_item(
             "cof_extracted": cof_extracted,
             "load_conditions": load_conditions,
             "tribological_system": tribological_system,
+            "experiment_profile": experiment_profile,
+            "experiment_scale": experiment_profile["scale"],
+            "experiment_method": experiment_profile["method"],
+            "measurement_type": experiment_profile["measurement_type"],
+            "training_view": experiment_profile["training_view"],
             "field_evidence_json": field_evidence_map,
             "review_status": review_status,
             "record_origin": record_origin,

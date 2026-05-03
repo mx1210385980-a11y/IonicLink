@@ -78,8 +78,16 @@ Return JSON with top-level key `data`:
         "raw_text": "n = 3 layers",
         "friction_regime": "unstated",
         "contact_geometry": null,
-        "scale": null
+        "scale": null,
+        "method": null,
+        "instrument": null,
+        "measurement_type": null,
+        "profile": null,
+        "training_view": null
       },
+      "experiment_scale": "nanoscale",
+      "experiment_method": "afm_colloidal_probe",
+      "measurement_type": "cof",
       "mol_ratio": "1:70",
       "cation": "EMIM",
       "anion": "TFSI",
@@ -123,9 +131,18 @@ Rules:
   `hydrodynamic`, `elastohydrodynamic`, `unstated`.
   Put contact geometry in `contact_geometry` as a compact enum-style label such as
   `ball_on_disk`, `ball_on_3_pins`, `pin_on_disk`, `four_ball`, or `afm_colloidal_probe`.
-  Use `scale` only when stated or obvious from the phrase (`macro`, `micro`, `nano`).
+  Use `scale` only when stated or obvious from the phrase (`macroscale`, `microscale`, `nanoscale`).
+  Also fill `method`, `instrument`, `measurement_type`, `profile`, and `training_view`
+  when supported by evidence. `profile` should be `macro` for ball/pin/four-ball
+  tribometer data, `afm` for AFM/FFM colloidal-probe or sharp-tip data, or `unknown`.
+  `training_view` should be `macro_performance` for macroscopic COF/wear records and
+  `afm_surface_response` for AFM lateral force, adhesion, roughness, film-thickness,
+  or nanoscale friction records.
   Example: `static friction, macroscopic ball-on-3-pins` ->
-  `{"raw_text":"static friction, macroscopic ball-on-3-pins","friction_regime":"static","contact_geometry":"ball_on_3_pins","scale":"macro"}`.
+  `{"raw_text":"static friction, macroscopic ball-on-3-pins","friction_regime":"static","contact_geometry":"ball_on_3_pins","scale":"macroscale","method":"ball_on_3_pins","instrument":"tribometer","measurement_type":"cof","profile":"macro","training_view":"macro_performance"}`.
+- Fill top-level `experiment_scale`, `experiment_method`, and `measurement_type` with
+  the same canonical values where possible. These labels are used later to build
+  `macro_performance`, `afm_surface_response`, and `cross_scale` training views.
 - Keep sliding/slip velocity and shear rate separate. Use `speed` only for linear sliding
   velocity with length/time units (for example `1 μm/s`); use `shear_rate` for velocity
   gradients with reciprocal-time units (for example `195-1300 s^-1`).

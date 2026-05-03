@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from utils.cof_extraction import normalize_cof_extracted
+from utils.experiment_profile import build_experiment_profile
 from utils.lubricant_mixture import normalize_lubricant_components
 from utils.structured_conditions import normalize_load_conditions, normalize_tribological_system
 from services.normalization.potential import normalize_potential_text
@@ -79,6 +80,10 @@ class TribologyData(BaseModel):
     film_thickness: Optional[str] = None
     regime: Optional[str] = None
     tribological_system: Dict[str, Any] = Field(default_factory=dict)
+    experiment_scale: Optional[str] = None
+    experiment_method: Optional[str] = None
+    measurement_type: Optional[str] = None
+    training_view: Optional[str] = None
 
     mol_ratio: Optional[str] = None
     cation: Optional[str] = None
@@ -188,6 +193,31 @@ class TribologyData(BaseModel):
             substrate_roughness=self.substrate_roughness,
             legacy_surface_roughness=self.surface_roughness,
         )
+        experiment_profile = build_experiment_profile(
+            {
+                "tribological_system": self.tribological_system,
+                "experiment_scale": self.experiment_scale,
+                "experiment_method": self.experiment_method,
+                "measurement_type": self.measurement_type,
+                "cof": self.cof,
+                "load": self.load or self.normal_load,
+                "speed": self.speed,
+                "friction_force": self.friction_force,
+                "wear_rate": self.wear_rate,
+                "probe_geometry": self.probe_geometry,
+                "probe_radius": self.probe_radius,
+                "contact_type": self.contact_type,
+                "regime": self.regime,
+                "source": self.source,
+                "source_figure": self.source_figure,
+                "evidence": self.evidence,
+            }
+        )
+        self.tribological_system = {**(self.tribological_system or {}), **experiment_profile}
+        self.experiment_scale = experiment_profile["scale"]
+        self.experiment_method = experiment_profile["method"]
+        self.measurement_type = experiment_profile["measurement_type"]
+        self.training_view = experiment_profile["training_view"]
         return self
 
 

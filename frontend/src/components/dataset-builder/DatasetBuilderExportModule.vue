@@ -23,6 +23,11 @@ const emit = defineEmits<{
 function subsetPreviewColumns(columns: string[]) {
   return columns.slice(0, Math.min(8, columns.length))
 }
+
+function formatMatrixCell(value: number | string | null | undefined) {
+  if (typeof value === 'number') return formatMetric(value, 4)
+  return value == null || value === '' ? '--' : String(value)
+}
 </script>
 
 <template>
@@ -116,7 +121,7 @@ function subsetPreviewColumns(columns: string[]) {
             <tbody>
               <tr v-for="(row, rowIndex) in card.summary?.preview_rows || []" :key="`${card.key}-${rowIndex}`" class="border-b border-slate-200/70">
                 <td v-for="column in subsetPreviewColumns(card.summary?.columns || [])" :key="`${card.key}-${rowIndex}-${column}`" class="px-3 py-3 text-slate-700">
-                  {{ formatMetric(row[column], 4) }}
+                  {{ formatMatrixCell(row[column]) }}
                 </td>
               </tr>
             </tbody>

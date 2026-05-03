@@ -27,6 +27,7 @@ from database import async_session_maker
 from models.db_models import CleanedDataset, ModelTrainingRun, RegisteredModel, TribologyData
 from security import literature_scope_conditions
 from services.unit_converter import parse_force_range_to_newtons, parse_force_to_newtons, parse_speed_to_mps
+from utils.experiment_profile import build_experiment_profile, normalize_training_view, record_matches_training_view
 from utils.speed_conditions import normalize_speed_conditions
 
 logger = logging.getLogger(__name__)
@@ -277,6 +278,7 @@ DEFAULT_DATA_OPTIONS = {
 
 DEFAULT_CLEANING_OPTIONS = {
     "source_mode": "group_library_fallback",
+    "training_view": "all",
     "drop_missing_target": True,
     "require_dual_smiles": True,
 }
@@ -677,7 +679,7 @@ def _metric_point(round_index: int, total_rounds: int, y_train: np.ndarray, trai
 
 
 def _serialize_record(record: TribologyData) -> dict[str, Any]:
-    return {
+    row = {
         "id": record.id,
         "literature_id": record.literature_id,
         "cof_value": record.cof_value,
@@ -697,6 +699,17 @@ def _serialize_record(record: TribologyData) -> dict[str, Any]:
         "tribological_system": getattr(record, "tribological_system_json", None),
         "alkyl_chain_length": record.alkyl_chain_length,
     }
+    experiment_profile = build_experiment_profile(row)
+    row.update(
+        {
+            "experiment_profile": experiment_profile,
+            "experiment_scale": experiment_profile["scale"],
+            "experiment_method": experiment_profile["method"],
+            "measurement_type": experiment_profile["measurement_type"],
+            "training_view": experiment_profile["training_view"],
+        }
+    )
+    return row
 
 
 @dataclass
@@ -1488,6 +1501,7 @@ class ModelTrainingService:
         if source_mode not in {"current_scope", "group_library", "group_library_fallback"}:
             source_mode = DEFAULT_CLEANING_OPTIONS["source_mode"]
         options["source_mode"] = source_mode
+        options["training_view"] = normalize_training_view(options.get("training_view"))
         options["drop_missing_target"] = bool(options.get("drop_missing_target", True))
         options["require_dual_smiles"] = bool(options.get("require_dual_smiles", True))
         return options
@@ -1549,14 +1563,17 @@ class ModelTrainingService:
             raise ValueError(f"Unsupported target '{target_key}'.")
 
         options = self._normalize_cleaning_options(cleaning_options)
-        target_ready = [record for record in records if _safe_float(record.get(target_def["field"])) is not None]
+        training_view = normalize_training_view(options.get("training_view"))
+        view_ready = [record for record in records if record_matches_training_view(record, training_view)]
+        scoped_records = view_ready if training_view != "all" else records
+        target_ready = [record for record in scoped_records if _safe_float(record.get(target_def["field"])) is not None]
         chemistry_ready = [
             record
-            for record in records
+            for record in scoped_records
             if str(record.get("cation_smiles") or "").strip() and str(record.get("anion_smiles") or "").strip()
         ]
 
-        cleaned_records = target_ready if options["drop_missing_target"] else list(records)
+        cleaned_records = target_ready if options["drop_missing_target"] else list(scoped_records)
         if options["require_dual_smiles"]:
             cleaned_records = [
                 record
@@ -1568,16 +1585,20 @@ class ModelTrainingService:
             "summary_records": cleaned_records,
             "summary": {
                 "source_mode": options["source_mode"],
+                "training_view": training_view,
                 "raw_records": len(records),
+                "view_ready_records": len(view_ready),
                 "target_ready_records": len(target_ready),
                 "chemistry_ready_records": len(chemistry_ready),
                 "training_ready_records": len(cleaned_records),
                 "dropped_by_reason": {
-                    "missing_target": sum(1 for record in records if _safe_float(record.get(target_def["field"])) is None),
-                    "missing_cation_smiles": sum(1 for record in records if not str(record.get("cation_smiles") or "").strip()),
-                    "missing_anion_smiles": sum(1 for record in records if not str(record.get("anion_smiles") or "").strip()),
+                    "missing_target": sum(1 for record in scoped_records if _safe_float(record.get(target_def["field"])) is None),
+                    "missing_cation_smiles": sum(1 for record in scoped_records if not str(record.get("cation_smiles") or "").strip()),
+                    "missing_anion_smiles": sum(1 for record in scoped_records if not str(record.get("anion_smiles") or "").strip()),
+                    "outside_training_view": 0 if training_view == "all" else max(0, len(records) - len(view_ready)),
                 },
                 "rules": {
+                    "training_view": training_view,
                     "drop_missing_target": options["drop_missing_target"],
                     "require_dual_smiles": options["require_dual_smiles"],
                 },
@@ -1733,6 +1754,8 @@ class ModelTrainingService:
 
         target_label = metadata.get("target", {}).get("label") or TARGET_DEFINITIONS["cof"]["label"]
         split_label = SPLIT_STRATEGY_DEFINITIONS[split_strategy]["label"]
+        cleaning_rules = (metadata.get("summary") or {}).get("rules") or {}
+        training_view = normalize_training_view(cleaning_rules.get("training_view"))
 
         return {
             "matrix_raw": matrix,
@@ -1747,6 +1770,10 @@ class ModelTrainingService:
                     "record_id": row.get("_record_id"),
                     "literature_id": row.get("_literature_id"),
                     "confidence": row.get("_confidence"),
+                    "experiment_scale": row.get("__experiment_scale"),
+                    "experiment_method": row.get("__experiment_method"),
+                    "measurement_type": row.get("__measurement_type"),
+                    "training_view": row.get("__training_view"),
                     "actual": float(row["_target_value"]),
                 }
                 for row in eligible_rows
@@ -1781,6 +1808,7 @@ class ModelTrainingService:
                     "validation_split": validation_split,
                     "split_strategy": split_strategy,
                     "cv_folds": effective_cv_folds,
+                    "training_view": training_view,
                 },
                 "split": {
                     "strategy": split_strategy,
@@ -1895,6 +1923,10 @@ class ModelTrainingService:
                     "record_id": meta.get("record_id"),
                     "literature_id": meta.get("literature_id"),
                     "confidence": meta.get("confidence"),
+                    "experiment_scale": meta.get("experiment_scale"),
+                    "experiment_method": meta.get("experiment_method"),
+                    "measurement_type": meta.get("measurement_type"),
+                    "training_view": meta.get("training_view"),
                     "actual": actual,
                     "predicted": predicted,
                     "residual": residual,

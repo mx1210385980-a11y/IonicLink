@@ -175,7 +175,7 @@ def drop_reason_for_candidate(item: dict[str, Any], modality: str) -> Optional[s
 
         support_text = " ".join(part for part in (evidence, notes) if part).strip()
         if cof and support_text and not re.search(
-            r"(?:\bcof\b|friction coefficient|[μµu]\s*=|\bmu\s*=|\d|linear fit|slope)",
+            r"(?:\bcof\b|friction coefficient|coefficient of friction|[μµu]\s*=|\bmu\s*=|\d|linear fit|slope)",
             support_text,
             re.IGNORECASE,
         ):

@@ -666,7 +666,31 @@ export interface TribologicalSystem {
     contact_geometry?: string | null
     contactGeometry?: string | null
     scale?: string | null
+    method?: string | null
+    instrument?: string | null
+    measurement_type?: string | null
+    measurementType?: string | null
+    profile?: string | null
+    training_view?: string | null
+    trainingView?: string | null
+    training_views?: string[] | null
+    trainingViews?: string[] | null
     note?: string | null
+}
+
+export interface ExperimentProfile {
+    scale: 'macroscale' | 'microscale' | 'nanoscale' | 'unknown' | string
+    method: string
+    instrument: string
+    contact_geometry?: string | null
+    contactGeometry?: string | null
+    measurement_type: string
+    measurementType?: string
+    profile: string
+    training_view: string
+    trainingView?: string
+    training_views?: string[]
+    trainingViews?: string[]
 }
 
 export interface TribologyData {
@@ -707,6 +731,11 @@ export interface TribologyData {
     film_thickness?: string // Film thickness
     regime?: string
     tribological_system?: TribologicalSystem | null
+    experiment_profile?: ExperimentProfile | null
+    experiment_scale?: string
+    experiment_method?: string
+    measurement_type?: string
+    training_view?: string
     mol_ratio?: string // Mol ratio
     cation?: string // Cation
     anion?: string // Anion
@@ -936,6 +965,9 @@ function mapRecordForLegacySync(record: TribologyData) {
         substrateRoughness: record.substrate_roughness,
         regime: record.regime,
         tribologicalSystem: record.tribological_system,
+        experimentScale: record.experiment_scale,
+        experimentMethod: record.experiment_method,
+        measurementType: record.measurement_type,
         validationStatus: record.validationStatus,
         adminComment: record.notes,
     }
@@ -975,6 +1007,9 @@ export function mapRecordToPayload(record: TribologyData) {
         filmThickness: record.film_thickness,
         regime: record.regime,
         tribologicalSystem: record.tribological_system,
+        experimentScale: record.experiment_scale,
+        experimentMethod: record.experiment_method,
+        measurementType: record.measurement_type,
         molRatio: record.mol_ratio,
         cation: record.cation,
         anion: record.anion,
@@ -1072,6 +1107,10 @@ export type SearchFilter = {
     load_max?: number
     cof_min?: number
     cof_max?: number
+    experiment_scales?: string[]
+    experiment_methods?: string[]
+    measurement_types?: string[]
+    training_views?: string[]
     doi?: string
     fileId?: string
 }
@@ -1138,6 +1177,11 @@ export interface RecordResponse {
     filmThickness: string | null
     regime?: string | null
     tribologicalSystem?: TribologicalSystem | null
+    experimentProfile?: ExperimentProfile | null
+    experimentScale?: string | null
+    experimentMethod?: string | null
+    measurementType?: string | null
+    trainingView?: string | null
     molRatio?: string | null
     cation?: string | null
     anion?: string | null
@@ -1201,6 +1245,9 @@ export interface RecordUpdatePayload {
     lubricantComponents?: LubricantComponent[]
     lubricantAlias?: string | null
     cofExtracted?: CofExtracted | null
+    experimentScale?: string | null
+    experimentMethod?: string | null
+    measurementType?: string | null
 }
 
 export type ComparisonOperator = 'EQ' | 'LT' | 'GT' | 'LE' | 'GE'
@@ -1461,7 +1508,9 @@ export interface ModelCleaningPcaInfo {
 
 export interface ModelTrainingCleaningSummary {
     source_mode: string
+    training_view?: string
     raw_records: number
+    view_ready_records?: number
     target_ready_records: number
     chemistry_ready_records: number
     training_ready_records: number
@@ -1474,8 +1523,10 @@ export interface ModelTrainingCleaningSummary {
         missing_target: number
         missing_cation_smiles: number
         missing_anion_smiles: number
+        outside_training_view?: number
     }
     rules: {
+        training_view?: string
         drop_missing_target: boolean
         require_dual_smiles: boolean
         missing_value_strategy?: string
@@ -1537,6 +1588,7 @@ export interface ModelTrainingTaskSnapshot {
             min_confidence: number
             max_records: number | null
             validation_split: number
+            training_view?: string
         }
         cleaning?: ModelTrainingCleaningSummary
         source_scope?: ModelTrainingSourceScope
@@ -1605,6 +1657,7 @@ export interface ModelTrainingSplitStrategyOption {
 
 export interface ModelTrainingCleaningOptions {
     source_mode: 'current_scope' | 'group_library' | 'group_library_fallback'
+    training_view?: 'all' | 'macro_performance' | 'afm_surface_response' | 'cross_scale'
     drop_missing_target: boolean
     require_dual_smiles: boolean
 }
@@ -1643,6 +1696,7 @@ export async function getModelTrainingCleaningSummary(payload: ModelTrainingClea
 
 export interface ModelCleaningOptions {
     source_mode: 'current_scope' | 'group_library' | 'group_library_fallback'
+    training_view: 'all' | 'macro_performance' | 'afm_surface_response' | 'cross_scale'
     drop_missing_target: boolean
     require_dual_smiles: boolean
     missing_value_strategy: 'keep' | 'median' | 'zero'
@@ -1651,7 +1705,7 @@ export interface ModelCleaningOptions {
     feature_config: ModelCleaningFeatureConfig
 }
 
-export type ModelCleaningMatrixRow = Record<string, number | null>
+export type ModelCleaningMatrixRow = Record<string, number | string | null>
 
 export interface ModelCleaningPreview {
     target: {

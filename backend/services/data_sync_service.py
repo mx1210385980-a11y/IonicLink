@@ -31,6 +31,7 @@ from security import (
 from services.doi_service import DOIService
 from services.il_resolver_service import is_supported_ionic_liquid_name, resolve_il
 from utils.cof_extraction import derive_cof_extracted, normalize_cof_extracted, serialize_cof_extracted
+from utils.experiment_profile import build_experiment_profile
 from utils.lubricant_mixture import (
     normalize_lubricant_components,
     parse_lubricant_components,
@@ -306,6 +307,24 @@ async def sync_batch_data(
             tribological_system = normalize_tribological_system(getattr(record, "tribological_system", None)) or derive_tribological_system(
                 getattr(record, "regime", None)
             )
+            experiment_profile = build_experiment_profile(
+                {
+                    "tribological_system": tribological_system,
+                    "experiment_scale": getattr(record, "experiment_scale", None),
+                    "experiment_method": getattr(record, "experiment_method", None),
+                    "measurement_type": getattr(record, "measurement_type", None),
+                    "cof": record.cof_raw or record.cof_value,
+                    "load": record.load_raw or record.load_value,
+                    "speed": speed_value,
+                    "probe_geometry": getattr(record, "probe_geometry", None),
+                    "probe_radius": getattr(record, "probe_radius", None),
+                    "regime": getattr(record, "regime", None),
+                    "source": getattr(record, "source", None),
+                    "source_figure": getattr(record, "source_figure", None),
+                    "evidence": getattr(record, "evidence", None),
+                }
+            )
+            tribological_system = {**tribological_system, **experiment_profile} if tribological_system else experiment_profile
 
             # Resolve IL chemistry to backfill cation/anion/SMILES
             resolved = resolve_il(lubricant)

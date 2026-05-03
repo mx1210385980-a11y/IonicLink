@@ -33,6 +33,7 @@ from services.relationship_graph_service import (
 )
 from knowledge_base import normalize_ionic_liquid
 from utils.cof_extraction import derive_cof_extracted, normalize_cof_extracted, serialize_cof_extracted
+from utils.experiment_profile import build_experiment_profile
 from utils.lubricant_mixture import (
     compact_lubricant_label,
     components_for_record,
@@ -153,6 +154,11 @@ class RecordResponse(BaseModel):
     film_thickness: Optional[str] = Field(None, alias="filmThickness")
     regime: Optional[str] = None
     tribological_system: dict = Field(default_factory=dict, alias="tribologicalSystem")
+    experiment_profile: dict = Field(default_factory=dict, alias="experimentProfile")
+    experiment_scale: Optional[str] = Field(None, alias="experimentScale")
+    experiment_method: Optional[str] = Field(None, alias="experimentMethod")
+    measurement_type: Optional[str] = Field(None, alias="measurementType")
+    training_view: Optional[str] = Field(None, alias="trainingView")
     mol_ratio: Optional[str] = Field(None, alias="molRatio")
     cation: Optional[str] = None
     anion: Optional[str] = None
@@ -332,6 +338,9 @@ class RecordUpdatePayload(BaseModel):
     film_thickness: Optional[str] = Field(None, alias="filmThickness")
     regime: Optional[str] = None
     tribological_system: Optional[dict] = Field(None, alias="tribologicalSystem")
+    experiment_scale: Optional[str] = Field(None, alias="experimentScale")
+    experiment_method: Optional[str] = Field(None, alias="experimentMethod")
+    measurement_type: Optional[str] = Field(None, alias="measurementType")
     material_name: Optional[str] = Field(None, alias="materialName")
     lubricant: Optional[str] = None
     lubricant_components: Optional[List[dict]] = Field(None, alias="lubricantComponents")
@@ -561,6 +570,23 @@ def _record_to_response(r: TribologyData) -> RecordResponse:
     load_conditions = normalize_load_conditions(getattr(r, "load_conditions_json", None)) or derive_load_conditions(r.load_raw or r.load_value)
     speed_conditions = normalize_speed_conditions(getattr(r, "speed_conditions_json", None)) or derive_speed_conditions(r.speed_value)
     tribological_system = normalize_tribological_system(getattr(r, "tribological_system_json", None)) or derive_tribological_system(getattr(r, "regime", None))
+    experiment_profile = build_experiment_profile(
+        {
+            "tribological_system": tribological_system,
+            "cof": r.cof_raw,
+            "cof_value": r.cof_value,
+            "load": r.load_raw or r.load_value,
+            "speed": r.speed_value,
+            "probe_geometry": r.probe_geometry,
+            "probe_radius": r.probe_radius,
+            "regime": getattr(r, "regime", None),
+            "source": getattr(r, "source", None),
+            "source_figure": getattr(r, "source_figure", None),
+            "evidence": getattr(r, "evidence", None),
+        }
+    )
+    if tribological_system:
+        tribological_system = {**tribological_system, **experiment_profile}
 
     payload = {
         "id": r.id,
@@ -606,6 +632,11 @@ def _record_to_response(r: TribologyData) -> RecordResponse:
         "film_thickness": r.film_thickness,
         "regime": getattr(r, "regime", None),
         "tribological_system": tribological_system,
+        "experiment_profile": experiment_profile,
+        "experiment_scale": experiment_profile["scale"],
+        "experiment_method": experiment_profile["method"],
+        "measurement_type": experiment_profile["measurement_type"],
+        "training_view": experiment_profile["training_view"],
         "mol_ratio": r.mol_ratio,
         "cation": r.cation,
         "anion": r.anion,
@@ -794,6 +825,24 @@ async def update_record(
             record.tribological_system_json = serialize_tribological_system(
                 normalize_tribological_system(tribological_system_update)
             )
+        if any(field in update_data for field in ("experiment_scale", "experiment_method", "measurement_type")):
+            current_system = normalize_tribological_system(record.tribological_system_json) or derive_tribological_system(record.regime)
+            explicit_profile = build_experiment_profile(
+                {
+                    "tribological_system": current_system,
+                    "experiment_scale": payload.experiment_scale,
+                    "experiment_method": payload.experiment_method,
+                    "measurement_type": payload.measurement_type,
+                    "cof": record.cof_raw,
+                    "cof_value": record.cof_value,
+                    "load": record.load_raw or record.load_value,
+                    "speed": record.speed_value,
+                    "probe_geometry": record.probe_geometry,
+                    "regime": record.regime,
+                    "evidence": record.evidence,
+                }
+            )
+            record.tribological_system_json = serialize_tribological_system({**current_system, **explicit_profile})
 
         record.material_name = derive_legacy_material_name(
             probe_material=record.probe_material,

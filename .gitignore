@@ -36,6 +36,9 @@ backend/data/literature_monitor_state.json
 backend/data/literature_monitor_proxy_queue.json
 backend/data/literature_monitor_pdfs/
 
+# Local tool worktrees
+.claude/worktrees/
+
 # Backend runtime data
 backend/data/.idea/
 backend/data/*.db

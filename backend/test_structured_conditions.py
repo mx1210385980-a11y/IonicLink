@@ -15,4 +15,6 @@ def test_derive_tribological_system_from_mixed_regime_text():
 
     assert payload["friction_regime"] == "static"
     assert payload["contact_geometry"] == "ball_on_3_pins"
-    assert payload["scale"] == "macro"
+    assert payload["scale"] == "macroscale"
+    assert payload["method"] == "ball_on_3_pins"
+    assert payload["training_view"] == "macro_performance"
