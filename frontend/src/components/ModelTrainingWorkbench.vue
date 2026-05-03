@@ -1,23 +1,31 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
-  Activity,
   AlertTriangle,
-  ArrowUpRight,
+  ChevronDown,
   Database,
-  FlaskConical,
-  Layers3,
-  Orbit,
+  ExternalLink,
+  Layers,
+  Loader2,
   Play,
-  SlidersHorizontal,
+  Search,
   Sparkles,
   Square,
-  Target,
   Trophy,
-  Waves,
 } from 'lucide-vue-next'
-import { Chart as ChartJS, CategoryScale, Filler, Legend, LineElement, LinearScale, PointElement, Title, Tooltip } from 'chart.js'
-import { Line } from 'vue-chartjs'
+import {
+  BarElement,
+  Chart as ChartJS,
+  CategoryScale,
+  Filler,
+  Legend,
+  LineElement,
+  LinearScale,
+  PointElement,
+  Title,
+  Tooltip,
+} from 'chart.js'
+import { Bar, Line } from 'vue-chartjs'
 import {
   buildModelTrainingWebSocketUrl,
   cancelModelTraining,
@@ -31,7 +39,7 @@ import {
   type SavedCleanedDatasetSummary,
 } from '@/lib/api'
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler)
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler)
 
 type LeaderboardRow = {
   taskId: string
@@ -41,6 +49,17 @@ type LeaderboardRow = {
   valR2: number
   valRmse: number
   valMae: number
+}
+
+type ComparisonRow = {
+  algorithm: string
+  taskId: string
+  status: 'completed' | 'failed' | 'cancelled'
+  valR2: number | null
+  valRmse: number | null
+  valMae: number | null
+  finishedAt: string
+  error?: string | null
 }
 
 const props = defineProps<{
@@ -58,12 +77,37 @@ const starting = ref(false)
 const cancelling = ref(false)
 const socketRef = ref<WebSocket | null>(null)
 const completedTaskIds = new Set<string>()
+const showAdvanced = ref(false)
+
+// 全算法对比模式
+const compareMode = ref(false)
+const compareQueue = ref<string[]>([])
+const compareResults = ref<ComparisonRow[]>([])
+const compareTotal = ref(0)
+const compareCurrentAlgorithm = ref<string | null>(null)
+
+// 自动调参模式（仅作用于"开始训练"那一次任务，对比模式各算法走默认参数）
+const tuneRequested = ref(false)
+
+const emit = defineEmits<{
+  'open-knowledge': []
+  'inspect-record': [payload: {
+    literatureId?: number | null
+    recordId?: number | null
+    rowIndex?: number | null
+    source: 'val' | 'test'
+    actual: number
+    predicted: number
+    residual: number
+    absResidual: number
+  }]
+}>()
 
 const form = reactive<ModelTrainingStartPayload>({
   target: 'Target_COF',
   algorithm: 'gradient_boosting',
   hyperparameters: { n_estimators: 120, learning_rate: 0.06, max_depth: 3, l2_leaf_reg: 3, random_strength: 1 },
-  data_options: { validation_split: 0.2, min_confidence: 0, max_records: null, random_seed: 42 },
+  data_options: { validation_split: 0.2, min_confidence: 0, max_records: null, random_seed: 42, split_strategy: 'k_fold', cv_folds: 5 },
   cleaned_dataset_id: null,
 })
 
@@ -78,57 +122,13 @@ const history = computed(() => activeTask.value?.history || [])
 const currentPoint = computed(() => activeTask.value?.current || null)
 const hasSavedDatasets = computed(() => savedDatasets.value.length > 0)
 const selectedDataset = computed(() => savedDatasets.value.find((dataset) => dataset.id === selectedCleanedDatasetId.value) || null)
-const sourceScope = computed(() => activeTask.value?.dataset.source_scope || summary.value?.dataset.source_scope || null)
-const cleaningSummary = computed(() => activeTask.value?.dataset.cleaning || summary.value?.cleaning || null)
-const pcaInfo = computed(() => activeTask.value?.dataset.pca_info || summary.value?.pca_info || null)
-const selectedFeatureColumns = computed(() => {
-  return activeTask.value?.dataset.cleaning?.final_feature_columns
-    || activeTask.value?.dataset.feature_columns
-    || summary.value?.dataset.feature_columns
-    || []
-})
-const visibleFeatureColumns = computed(() => selectedFeatureColumns.value.slice(0, 14))
-const featureBlocks = computed(() => activeTask.value?.feature_blocks || [])
 const runWarnings = computed(() => activeTask.value?.warnings || [])
-const currentAlgorithm = computed(() => summary.value?.algorithms.find((algorithm) => algorithm.key === form.algorithm) || null)
 const isRandomForest = computed(() => form.algorithm === 'random_forest')
-const isCatBoost = computed(() => form.algorithm === 'catboost')
 const usableRecords = computed(() => activeTask.value?.dataset.usable_records || summary.value?.dataset.usable_records || 0)
 const progressPercent = computed(() => Math.round((currentPoint.value?.progress || 0) * 100))
 const validationSplitPercent = computed(() => Math.round((form.data_options.validation_split || 0) * 100))
 const targetLabel = computed(() => summary.value?.dataset.target?.label || formatColumnLabel(summary.value?.dataset.target_column || form.target))
-const datasetTitle = computed(() => selectedDataset.value?.name || summary.value?.dataset.name || 'Training workspace')
-const datasetDescription = computed(() => selectedDataset.value?.description || summary.value?.dataset.description || 'Train against a cleaned matrix with a fully tracked data lineage.')
-const statusTone = computed(() => {
-  if (activeTask.value?.status === 'completed') {
-    return {
-      chip: 'bg-emerald-500/14 text-emerald-200 ring-1 ring-emerald-400/20',
-      accent: 'from-emerald-400 via-cyan-400 to-sky-400',
-    }
-  }
-  if (activeTask.value?.status === 'failed') {
-    return {
-      chip: 'bg-rose-500/14 text-rose-200 ring-1 ring-rose-400/20',
-      accent: 'from-rose-400 via-orange-300 to-amber-300',
-    }
-  }
-  if (activeTask.value?.status === 'cancelled') {
-    return {
-      chip: 'bg-amber-500/14 text-amber-200 ring-1 ring-amber-400/20',
-      accent: 'from-amber-300 via-orange-300 to-rose-300',
-    }
-  }
-  if (activeTask.value?.status === 'running') {
-    return {
-      chip: 'bg-sky-500/14 text-sky-200 ring-1 ring-sky-400/20',
-      accent: 'from-sky-300 via-cyan-300 to-emerald-300',
-    }
-  }
-  return {
-    chip: 'bg-white/10 text-slate-200 ring-1 ring-white/10',
-    accent: 'from-slate-400 via-slate-300 to-slate-200',
-  }
-})
+const datasetTitle = computed(() => selectedDataset.value?.name || summary.value?.dataset.name || '训练工作台')
 
 const chartOptions = computed(() => ({
   responsive: true,
@@ -172,7 +172,7 @@ const r2ChartData = computed(() => ({
   labels: history.value.map((point) => String(point.round)),
   datasets: [
     {
-      label: 'Train R2',
+      label: '训练集 R²',
       data: history.value.map((point) => point.train_r2),
       borderColor: '#b7791f',
       pointRadius: 0,
@@ -180,7 +180,7 @@ const r2ChartData = computed(() => ({
       tension: 0.28,
     },
     {
-      label: 'Validation R2',
+      label: '验证集 R²',
       data: history.value.map((point) => point.val_r2),
       borderColor: '#0f766e',
       backgroundColor: 'rgba(20,184,166,0.12)',
@@ -196,7 +196,7 @@ const errorChartData = computed(() => ({
   labels: history.value.map((point) => String(point.round)),
   datasets: [
     {
-      label: 'Validation RMSE',
+      label: '验证集 RMSE',
       data: history.value.map((point) => point.val_rmse),
       borderColor: '#e11d48',
       pointRadius: 0,
@@ -204,7 +204,7 @@ const errorChartData = computed(() => ({
       tension: 0.28,
     },
     {
-      label: 'Validation MAE',
+      label: '验证集 MAE',
       data: history.value.map((point) => point.val_mae),
       borderColor: '#d97706',
       pointRadius: 0,
@@ -214,16 +214,376 @@ const errorChartData = computed(() => ({
   ],
 }))
 
+// ── Insights：来自后端训练完成时计算的预测样本 + 特征重要性 ──────────────
+const insights = computed(() => activeTask.value?.insights || null)
+const predictionSamples = computed(() => insights.value?.prediction_samples || [])
+const testSamples = computed(() => insights.value?.test_samples || [])
+const featureImportances = computed(() => (insights.value?.feature_importance || []).slice(0, 10))
+const testMetrics = computed(() => activeTask.value?.test_metrics || null)
+
+const allScatterSamples = computed(() => [
+  ...predictionSamples.value,
+  ...testSamples.value,
+])
+
+// 异常样本诊断：把验证 OOF 和测试样本合起来，按残差降序取 Top 10
+type DiagSample = {
+  source: 'val' | 'test'
+  recordId: number | null
+  literatureId: number | null
+  actual: number
+  predicted: number
+  residual: number
+  absResidual: number
+  rowIndex: number | null
+}
+
+function nullableNumber(value: unknown) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const topResiduals = computed<DiagSample[]>(() => {
+  const merged: DiagSample[] = []
+  for (const s of predictionSamples.value) {
+    merged.push({
+      source: 'val',
+      recordId: nullableNumber(s.record_id),
+      literatureId: nullableNumber(s.literature_id),
+      actual: Number(s.actual),
+      predicted: Number(s.predicted),
+      residual: Number(s.residual ?? (Number(s.predicted) - Number(s.actual))),
+      absResidual: Number(s.abs_residual ?? Math.abs(Number(s.predicted) - Number(s.actual))),
+      rowIndex: nullableNumber(s.row_index),
+    })
+  }
+  for (const s of testSamples.value) {
+    merged.push({
+      source: 'test',
+      recordId: nullableNumber(s.record_id),
+      literatureId: nullableNumber(s.literature_id),
+      actual: Number(s.actual),
+      predicted: Number(s.predicted),
+      residual: Number(s.residual ?? (Number(s.predicted) - Number(s.actual))),
+      absResidual: Number(s.abs_residual ?? Math.abs(Number(s.predicted) - Number(s.actual))),
+      rowIndex: nullableNumber(s.row_index),
+    })
+  }
+  return merged
+    .filter((s) => Number.isFinite(s.absResidual))
+    .sort((a, b) => b.absResidual - a.absResidual)
+    .slice(0, 10)
+})
+
+function suspiciousFlag(sample: DiagSample): { kind: 'impossible' | 'extreme' | null; hint: string } {
+  if (sample.actual < 0) return { kind: 'impossible', hint: 'COF 物理上不可为负，几乎肯定是提取错误。' }
+  if (sample.predicted < 0) return { kind: 'impossible', hint: '模型预测出负 COF，建议检查特征是否有异常输入。' }
+  if (sample.actual > 2) return { kind: 'extreme', hint: '极少见的高摩擦区间——请核对原文是否真是 μCOF（可能是 ΔμCOF 或其他物理量）。' }
+  return { kind: null, hint: '' }
+}
+
+function handleInspectRecord(sample: DiagSample) {
+  emit('inspect-record', {
+    literatureId: sample.literatureId,
+    recordId: sample.recordId,
+    rowIndex: sample.rowIndex,
+    source: sample.source,
+    actual: sample.actual,
+    predicted: sample.predicted,
+    residual: sample.residual,
+    absResidual: sample.absResidual,
+  })
+}
+
+const predictionRange = computed(() => {
+  const samples = allScatterSamples.value
+  if (!samples.length) return { min: 0, max: 1 }
+  let min = Number.POSITIVE_INFINITY
+  let max = Number.NEGATIVE_INFINITY
+  for (const sample of samples) {
+    if (sample.actual < min) min = sample.actual
+    if (sample.predicted < min) min = sample.predicted
+    if (sample.actual > max) max = sample.actual
+    if (sample.predicted > max) max = sample.predicted
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return { min: 0, max: 1 }
+  const padding = Math.max(0.05, (max - min) * 0.08)
+  return { min: min - padding, max: max + padding }
+})
+
+const predictionScatterData = computed(() => {
+  const valSamples = predictionSamples.value
+  const testSamplesData = testSamples.value
+  const { min, max } = predictionRange.value
+  return {
+    datasets: [
+      {
+        type: 'line' as const,
+        label: 'Y = X 参考线',
+        data: [
+          { x: min, y: min },
+          { x: max, y: max },
+        ],
+        borderColor: 'rgba(148,163,184,0.7)',
+        borderDash: [6, 4],
+        borderWidth: 1.5,
+        pointRadius: 0,
+        showLine: true,
+        fill: false,
+      },
+      {
+        type: 'line' as const,
+        label: `验证集 (CV) · ${valSamples.length}`,
+        data: valSamples.map((sample) => ({ x: sample.actual, y: sample.predicted })),
+        backgroundColor: 'rgba(91, 86, 234, 0.55)',
+        borderColor: 'rgba(255,255,255,0.7)',
+        borderWidth: 0.8,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        showLine: false,
+      },
+      {
+        type: 'line' as const,
+        label: `测试集（隔离）· ${testSamplesData.length}`,
+        data: testSamplesData.map((sample) => ({ x: sample.actual, y: sample.predicted })),
+        backgroundColor: 'rgba(239, 68, 68, 0.78)',
+        borderColor: 'rgba(255,255,255,0.85)',
+        borderWidth: 1,
+        pointRadius: 5.5,
+        pointHoverRadius: 8,
+        pointStyle: 'rectRot' as const,
+        showLine: false,
+      },
+    ],
+  }
+})
+
+const predictionScatterOptions = computed(() => ({
+  responsive: true,
+  maintainAspectRatio: false,
+  animation: false as const,
+  plugins: {
+    legend: {
+      labels: {
+        usePointStyle: true,
+        boxWidth: 10,
+        color: 'rgba(51,65,85,0.82)',
+        padding: 14,
+        font: { size: 11, weight: 600 },
+      },
+    },
+    tooltip: {
+      backgroundColor: '#ffffff',
+      titleColor: '#0f172a',
+      bodyColor: '#475569',
+      borderColor: 'rgba(148,163,184,0.2)',
+      borderWidth: 1,
+      callbacks: {
+        label: (ctx: any) => {
+          const x = Number(ctx.parsed?.x ?? 0)
+          const y = Number(ctx.parsed?.y ?? 0)
+          if (ctx.dataset.label === 'Y = X') return `Y = X (${x.toFixed(3)}, ${y.toFixed(3)})`
+          return `真实 ${x.toFixed(3)}  /  预测 ${y.toFixed(3)}  /  残差 ${(y - x).toFixed(3)}`
+        },
+      },
+    },
+  },
+  scales: {
+    x: {
+      type: 'linear' as const,
+      title: { display: true, text: '真实值', color: 'rgba(71,85,105,0.78)', font: { size: 11, weight: 600 } },
+      min: predictionRange.value.min,
+      max: predictionRange.value.max,
+      grid: { color: 'rgba(148,163,184,0.12)' },
+      border: { color: 'rgba(148,163,184,0.18)' },
+      ticks: { color: 'rgba(71,85,105,0.72)' },
+    },
+    y: {
+      type: 'linear' as const,
+      title: { display: true, text: '预测值', color: 'rgba(71,85,105,0.78)', font: { size: 11, weight: 600 } },
+      min: predictionRange.value.min,
+      max: predictionRange.value.max,
+      grid: { color: 'rgba(148,163,184,0.12)' },
+      border: { color: 'rgba(148,163,184,0.18)' },
+      ticks: { color: 'rgba(71,85,105,0.72)' },
+    },
+  },
+}))
+
+// 数据切分策略 ─────────────────────────────────────────────────
+const splitOptions = computed(() => summary.value?.split_options || [])
+const activeSplitOption = computed(() =>
+  splitOptions.value.find((opt) => opt.key === form.data_options.split_strategy) || null,
+)
+
+// 自动调参 ─────────────────────────────────────────────────────
+const tuneProgress = computed(() => activeTask.value?.tune_progress || null)
+const tuneActive = computed(() => Boolean(tuneProgress.value?.active))
+const tuneSearched = computed(() => Number(tuneProgress.value?.searched || 0))
+const tuneTotal = computed(() => Number(tuneProgress.value?.total || 0))
+const tuneBestScore = computed(() => {
+  const v = tuneProgress.value?.best_score
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+})
+const tuneBestParamEntries = computed(() => {
+  const params = tuneProgress.value?.best_params
+  if (!params || typeof params !== 'object') return []
+  return Object.entries(params as Record<string, unknown>).map(([k, v]) => ({
+    key: k,
+    value: Array.isArray(v) ? `[${v.join(', ')}]` : String(v),
+  }))
+})
+
+// 算法对比 ─────────────────────────────────────────────────────
+const compareSucceeded = computed(() => compareResults.value.filter((row) => row.status === 'completed' && row.valR2 != null))
+const compareSorted = computed(() => [...compareSucceeded.value].sort((a, b) => Number(b.valR2) - Number(a.valR2)))
+const compareBestAlgorithm = computed(() => compareSorted.value[0] || null)
+const compareProgressLabel = computed(() => {
+  if (!compareMode.value && !compareTotal.value) return ''
+  const done = compareResults.value.length
+  const total = compareTotal.value || done
+  return `${done} / ${total}`
+})
+const compareCurrentLabel = computed(() => algorithmLabelZh(compareCurrentAlgorithm.value))
+
+const compareChartData = computed(() => ({
+  labels: compareSorted.value.map((row) => algorithmLabelZh(row.algorithm)),
+  datasets: [
+    {
+      label: '验证集 R²',
+      data: compareSorted.value.map((row) => Number(row.valR2 || 0)),
+      backgroundColor: compareSorted.value.map((_, idx) => idx === 0 ? 'rgba(91, 86, 234, 0.85)' : 'rgba(148, 163, 184, 0.6)'),
+      borderRadius: 6,
+      borderSkipped: false as const,
+    },
+  ],
+}))
+
+const compareChartOptions = computed(() => ({
+  indexAxis: 'y' as const,
+  responsive: true,
+  maintainAspectRatio: false,
+  animation: false as const,
+  plugins: {
+    legend: { display: false },
+    tooltip: {
+      backgroundColor: '#ffffff',
+      titleColor: '#0f172a',
+      bodyColor: '#475569',
+      borderColor: 'rgba(148,163,184,0.2)',
+      borderWidth: 1,
+      callbacks: {
+        label: (ctx: any) => {
+          const row = compareSorted.value[ctx.dataIndex]
+          if (!row) return `R²：${Number(ctx.parsed.x).toFixed(4)}`
+          return [
+            `R² = ${formatMetric(row.valR2, 3)}`,
+            `RMSE = ${formatMetric(row.valRmse, 3)}`,
+            `MAE = ${formatMetric(row.valMae, 3)}`,
+          ]
+        },
+      },
+    },
+  },
+  scales: {
+    x: {
+      min: 0,
+      max: 1,
+      grid: { color: 'rgba(148,163,184,0.12)' },
+      border: { color: 'rgba(148,163,184,0.18)' },
+      ticks: { color: 'rgba(71,85,105,0.72)', callback: (v: any) => Number(v).toFixed(2) },
+    },
+    y: {
+      grid: { display: false },
+      border: { color: 'rgba(148,163,184,0.18)' },
+      ticks: { color: 'rgba(71,85,105,0.85)', font: { size: 11, weight: 500 } },
+    },
+  },
+}))
+
+const featureImportanceChartData = computed(() => ({
+  labels: featureImportances.value.map((entry) => formatColumnLabel(entry.feature)),
+  datasets: [
+    {
+      label: '重要性',
+      data: featureImportances.value.map((entry) => Number(entry.importance)),
+      backgroundColor: 'rgba(91, 86, 234, 0.78)',
+      borderRadius: 6,
+      borderSkipped: false as const,
+    },
+  ],
+}))
+
+const featureImportanceChartOptions = computed(() => ({
+  indexAxis: 'y' as const,
+  responsive: true,
+  maintainAspectRatio: false,
+  animation: false as const,
+  plugins: {
+    legend: { display: false },
+    tooltip: {
+      backgroundColor: '#ffffff',
+      titleColor: '#0f172a',
+      bodyColor: '#475569',
+      borderColor: 'rgba(148,163,184,0.2)',
+      borderWidth: 1,
+      callbacks: { label: (ctx: any) => `${ctx.label}：${Number(ctx.parsed.x).toFixed(4)}` },
+    },
+  },
+  scales: {
+    x: {
+      grid: { color: 'rgba(148,163,184,0.12)' },
+      border: { color: 'rgba(148,163,184,0.18)' },
+      ticks: { color: 'rgba(71,85,105,0.72)' },
+    },
+    y: {
+      grid: { display: false },
+      border: { color: 'rgba(148,163,184,0.18)' },
+      ticks: { color: 'rgba(71,85,105,0.85)', font: { size: 11, weight: 500 } },
+    },
+  },
+}))
+
+function algorithmLabelZh(key: string | null | undefined) {
+  switch (key) {
+    case 'gradient_boosting': return '梯度提升（Gradient Boosting）'
+    case 'random_forest': return '随机森林（Random Forest）'
+    case 'catboost': return 'CatBoost'
+    case 'xgboost': return '极端梯度提升（XGBoost）'
+    case 'svr': return '支持向量回归（SVR）'
+    case 'mlp': return '多层感知机（MLP）'
+    case 'linear_regression': return '线性回归（Linear Regression）'
+    default: return formatTitleLabel(key || '')
+  }
+}
+
+function statusLabelZh(status: string | null | undefined) {
+  switch (status) {
+    case 'completed': return '已完成'
+    case 'running': return '训练中'
+    case 'failed': return '失败'
+    case 'cancelled': return '已中止'
+    case 'queued': return '排队中'
+    default: return '就绪'
+  }
+}
+
+function statusBadgeClass(status: string | null | undefined) {
+  switch (status) {
+    case 'completed': return 'bg-[#e8fff2] text-[#0b9d63]'
+    case 'running': return 'bg-[#edf2ff] text-[#3d56d2]'
+    case 'failed': return 'bg-[#fff5f6] text-[#cf334f]'
+    case 'cancelled': return 'bg-[#fff4da] text-[#c97a00]'
+    default: return 'bg-[#f1f5f9] text-slate-600'
+  }
+}
+
 function formatMetric(value: number | null | undefined, digits = 4) {
   return value == null || Number.isNaN(Number(value)) ? '--' : Number(value).toFixed(digits)
 }
 
 function formatNumber(value: number | null | undefined) {
   return value == null || Number.isNaN(Number(value)) ? '--' : new Intl.NumberFormat().format(Number(value))
-}
-
-function formatPercent(value: number | null | undefined, digits = 0) {
-  return value == null || Number.isNaN(Number(value)) ? '--' : `${(Number(value) * 100).toFixed(digits)}%`
 }
 
 function formatDateTime(value: string | null | undefined) {
@@ -238,13 +598,6 @@ function formatTitleLabel(value: string | null | undefined) {
   return String(value || '')
     .replace(/_/g, ' ')
     .replace(/\b\w/g, (char) => char.toUpperCase())
-}
-
-function formatScopeMode(value: string | null | undefined) {
-  const normalized = String(value || '').trim()
-  if (!normalized) return 'Unknown scope'
-  if (normalized === 'group_library_fallback') return 'Group Library Fallback'
-  return formatTitleLabel(normalized)
 }
 
 function hydrateDefaults(nextSummary: ModelTrainingSummary) {
@@ -326,7 +679,97 @@ function openSocket(taskId: string) {
     if (payload.type === 'task.completed' || payload.type === 'task.failed' || payload.type === 'task.cancelled') {
       applyTaskSnapshot(payload.task)
       closeSocket()
+      void onTaskTerminal(payload.task)
     }
+  }
+}
+
+function recordCompareResult(snapshot: ModelTrainingTaskSnapshot) {
+  const existing = compareResults.value.find((row) => row.taskId === snapshot.task_id)
+  const row: ComparisonRow = {
+    algorithm: snapshot.config.algorithm,
+    taskId: snapshot.task_id,
+    status: (snapshot.status as ComparisonRow['status']) || 'cancelled',
+    valR2: snapshot.current?.val_r2 ?? null,
+    valRmse: snapshot.current?.val_rmse ?? null,
+    valMae: snapshot.current?.val_mae ?? null,
+    finishedAt: snapshot.finished_at || snapshot.created_at,
+    error: snapshot.error,
+  }
+  if (existing) Object.assign(existing, row)
+  else compareResults.value.push(row)
+}
+
+async function onTaskTerminal(snapshot: ModelTrainingTaskSnapshot) {
+  if (!compareMode.value) return
+  recordCompareResult(snapshot)
+  if (snapshot.status === 'cancelled') {
+    // 用户主动取消整个对比流程
+    compareMode.value = false
+    compareQueue.value = []
+    compareCurrentAlgorithm.value = null
+    return
+  }
+  if (compareQueue.value.length) {
+    await runNextCompareItem()
+  } else {
+    compareMode.value = false
+    compareCurrentAlgorithm.value = null
+  }
+}
+
+async function runNextCompareItem() {
+  const next = compareQueue.value.shift()
+  if (!next) {
+    compareMode.value = false
+    compareCurrentAlgorithm.value = null
+    return
+  }
+  compareCurrentAlgorithm.value = next
+  form.algorithm = next
+  loadError.value = ''
+  await handleStartTraining()
+  // 启动失败时（loadError 被设置），WebSocket 不会触发完成事件，需手动推进队列
+  if (loadError.value) {
+    compareResults.value.push({
+      algorithm: next,
+      taskId: `error-${Date.now()}`,
+      status: 'failed',
+      valR2: null,
+      valRmse: null,
+      valMae: null,
+      finishedAt: new Date().toISOString(),
+      error: loadError.value,
+    })
+    if (compareQueue.value.length) {
+      await runNextCompareItem()
+    } else {
+      compareMode.value = false
+      compareCurrentAlgorithm.value = null
+    }
+  }
+}
+
+async function handleCompareAll() {
+  if (!summary.value || selectedCleanedDatasetId.value == null) return
+  if (compareMode.value || activeTask.value?.status === 'running') return
+  const algorithms = summary.value.algorithms.map((alg) => alg.key)
+  if (!algorithms.length) return
+  compareResults.value = []
+  compareQueue.value = algorithms.slice()
+  compareTotal.value = algorithms.length
+  compareMode.value = true
+  await runNextCompareItem()
+}
+
+async function handleStopCompare() {
+  if (!compareMode.value) return
+  compareQueue.value = []
+  if (activeTask.value && activeTask.value.status === 'running') {
+    await handleCancelTraining()
+  } else {
+    compareMode.value = false
+    compareCurrentAlgorithm.value = null
   }
 }
 
@@ -350,6 +793,7 @@ async function handleStartTraining() {
       hyperparameters: { ...form.hyperparameters },
       data_options: { ...form.data_options },
       cleaned_dataset_id: selectedCleanedDatasetId.value,
+      tune: tuneRequested.value && !compareMode.value,
     }
     const response = await startModelTraining(payload)
     applyTaskSnapshot(response.task)
@@ -358,7 +802,15 @@ async function handleStartTraining() {
     loadError.value = error?.response?.data?.detail || error?.message || 'Failed to start training.'
   } finally {
     starting.value = false
+    tuneRequested.value = false  // 一次性标志，下次"开始训练"恢复默认
   }
+}
+
+async function handleAutoTune() {
+  if (!summary.value || selectedCleanedDatasetId.value == null) return
+  if (compareMode.value || activeTask.value?.status === 'running') return
+  tuneRequested.value = true
+  await handleStartTraining()
 }
 
 async function handleCancelTraining() {
@@ -393,564 +845,755 @@ watch(
 )
 </script>
 
+
 <template>
-  <div class="training-workbench flex h-full min-h-0 flex-col overflow-hidden bg-[linear-gradient(180deg,#f7f3eb_0%,#eef4f7_100%)] text-slate-900 lg:flex-row">
-    <aside class="flex w-full shrink-0 flex-col border-b border-slate-200 bg-[linear-gradient(180deg,rgba(252,249,243,0.98),rgba(246,241,232,0.98))] lg:w-[23rem] lg:border-b-0 lg:border-r">
-      <div class="border-b border-slate-200 px-6 py-6">
-        <div class="flex items-start gap-4">
-          <div class="flex h-12 w-12 items-center justify-center rounded-[1.25rem] border border-amber-200 bg-amber-50 text-amber-700">
-            <FlaskConical class="h-5 w-5" />
-          </div>
-          <div>
-            <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-amber-700">Model Studio</p>
-            <h1 class="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950">Predictive Training</h1>
-            <p class="mt-2 text-sm leading-6 text-slate-600">
-              Configure a cleaned matrix, tune the run, and monitor every metric live.
-            </p>
-          </div>
-        </div>
+  <div class="flex h-full min-h-0 flex-col gap-3 overflow-hidden bg-[#f1f5f9] p-3">
+    <!-- ─── 顶部状态条 ─────────────────────────────────────────────── -->
+    <section class="shell-surface flex flex-wrap items-center gap-3 px-4 py-2.5 sm:px-5">
+      <div class="flex min-w-0 flex-1 items-center gap-2">
+        <Database class="h-4 w-4 shrink-0 text-[#7d8eaa]" />
+        <h1 class="truncate text-[0.95rem] font-semibold text-slate-900">{{ datasetTitle }}</h1>
+        <span
+          v-if="usableRecords"
+          class="shrink-0 rounded-full bg-[#edf2ff] px-2.5 py-0.5 text-xs font-semibold text-[#3d56d2]"
+        >
+          {{ formatNumber(usableRecords) }} 条
+        </span>
+        <span
+          v-if="targetLabel"
+          class="shrink-0 rounded-full bg-[#fff4da] px-2.5 py-0.5 text-xs font-semibold text-[#c97a00]"
+        >
+          预测 {{ targetLabel }}
+        </span>
+        <span
+          class="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold"
+          :class="statusBadgeClass(activeTask?.status)"
+        >
+          {{ statusLabelZh(activeTask?.status) }}
+        </span>
+        <span
+          v-if="activeTask?.status === 'running' && !compareMode"
+          class="shrink-0 text-xs font-medium text-slate-500 tabular-nums"
+        >
+          {{ activeTask?.current_round || 0 }} / {{ activeTask?.total_rounds || form.hyperparameters.n_estimators }} 轮
+        </span>
+        <span
+          v-if="compareMode"
+          class="shrink-0 rounded-full bg-[#5b56ea]/10 px-2.5 py-0.5 text-xs font-semibold text-[#5b56ea]"
+        >
+          对比中 {{ compareProgressLabel }} · {{ compareCurrentLabel }}
+        </span>
+        <span
+          v-if="tuneActive"
+          class="shrink-0 rounded-full bg-[#fff4da] px-2.5 py-0.5 text-xs font-semibold text-[#c97a00]"
+        >
+          调参中 {{ tuneSearched }} / {{ tuneTotal }}<template v-if="tuneBestScore !== null"> · 当前最佳 R²={{ tuneBestScore.toFixed(3) }}</template>
+        </span>
       </div>
 
-      <div v-if="loading" class="px-6 py-6">
-        <div class="rounded-[1.6rem] border border-slate-200 bg-white px-5 py-5 text-sm text-slate-500">
-          Loading training workspace...
-        </div>
+      <div class="flex shrink-0 items-center gap-1.5">
+        <button
+          v-if="!compareMode"
+          type="button"
+          class="inline-flex items-center gap-1.5 rounded-[0.6rem] bg-[#5b56ea] px-3.5 py-1.5 text-xs font-semibold text-white shadow-[0_10px_24px_-18px_rgba(91,86,234,0.85)] transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3] disabled:shadow-none"
+          :disabled="starting || selectedCleanedDatasetId == null || usableRecords < 10 || activeTask?.status === 'running'"
+          @click="handleStartTraining"
+        >
+          <Loader2 v-if="starting" class="h-3.5 w-3.5 animate-spin" />
+          <Play v-else class="h-3.5 w-3.5" />
+          {{ starting ? '启动中' : '开始训练' }}
+        </button>
+        <button
+          v-if="!compareMode"
+          type="button"
+          class="inline-flex items-center gap-1.5 rounded-[0.6rem] border border-[#5b56ea] bg-white px-3 py-1.5 text-xs font-semibold text-[#5b56ea] transition hover:bg-[#f5f7ff] disabled:cursor-not-allowed disabled:border-[#cfd2f3] disabled:text-[#cfd2f3]"
+          :disabled="starting || selectedCleanedDatasetId == null || usableRecords < 10 || activeTask?.status === 'running' || !summary"
+          title="对当前算法做小规模网格搜索，自动找到最佳超参数后再训练"
+          @click="handleAutoTune"
+        >
+          <Sparkles class="h-3.5 w-3.5" />
+          自动调参
+        </button>
+        <button
+          v-if="!compareMode"
+          type="button"
+          class="inline-flex items-center gap-1.5 rounded-[0.6rem] border border-[#5b56ea] bg-white px-3 py-1.5 text-xs font-semibold text-[#5b56ea] transition hover:bg-[#f5f7ff] disabled:cursor-not-allowed disabled:border-[#cfd2f3] disabled:text-[#cfd2f3]"
+          :disabled="starting || selectedCleanedDatasetId == null || usableRecords < 10 || activeTask?.status === 'running' || !summary || !summary.algorithms.length"
+          title="依次跑全部算法，自动选出表现最好的一个"
+          @click="handleCompareAll"
+        >
+          <Layers class="h-3.5 w-3.5" />
+          全部算法对比
+        </button>
+        <button
+          v-if="compareMode"
+          type="button"
+          class="inline-flex items-center gap-1 rounded-[0.6rem] border border-[#ffd4da] bg-white px-2.5 py-1.5 text-xs font-medium text-[#cf334f] transition hover:bg-[#fff5f6]"
+          @click="handleStopCompare"
+        >
+          <Square class="h-3.5 w-3.5" />
+          停止对比
+        </button>
+        <button
+          v-if="!compareMode"
+          type="button"
+          class="inline-flex items-center gap-1 rounded-[0.6rem] border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[#f8fbff] hover:text-slate-900"
+          :disabled="!activeTask || activeTask.status !== 'running' || cancelling"
+          @click="handleCancelTraining"
+        >
+          <Square class="h-3.5 w-3.5" />
+          {{ cancelling ? '中止中' : '中止' }}
+        </button>
+        <span class="mx-1 h-5 w-px bg-[#e2e8f0]" />
+        <button
+          type="button"
+          class="inline-flex items-center gap-1 rounded-[0.6rem] border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-[#f8fbff] hover:text-slate-900"
+          @click="$emit('open-knowledge')"
+        >
+          返回知识库
+        </button>
       </div>
 
-      <div v-else-if="loadError && !summary" class="px-6 py-6">
-        <div class="rounded-[1.6rem] border border-rose-200 bg-rose-50 px-5 py-5 text-sm text-rose-700">
-          <div class="flex items-center gap-2 font-semibold">
-            <AlertTriangle class="h-4 w-4" />
-            Initialization failed
-          </div>
-          <p class="mt-3 leading-6">{{ loadError }}</p>
+      <p
+        v-if="loadError"
+        class="basis-full rounded-[0.6rem] border border-[#ffd4da] bg-[#fff5f6] px-3 py-1.5 text-xs text-[#cf334f]"
+      >
+        {{ loadError }}
+      </p>
+      <div
+        v-if="activeTask?.status === 'running'"
+        class="basis-full"
+      >
+        <div class="h-1.5 overflow-hidden rounded-full bg-[#eef2f6]">
+          <div
+            class="h-full rounded-full bg-gradient-to-r from-[#5b56ea] via-[#7d6cff] to-[#a594ff] transition-all duration-500"
+            :style="{ width: `${progressPercent}%` }"
+          />
         </div>
       </div>
+    </section>
 
-      <template v-else-if="summary">
-        <div class="min-h-0 flex-1 overflow-y-auto">
-          <section class="border-b border-slate-200 px-6 py-6">
-            <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-              <Database class="h-4 w-4 text-amber-700" />
-              Dataset
+    <div class="grid min-h-0 flex-1 gap-3 xl:grid-cols-[22rem_minmax(0,1fr)]">
+      <!-- ── 左：训练设置 ─────────────────────────────── -->
+      <aside class="flex min-h-0 flex-col overflow-hidden rounded-[1.25rem] border border-[#e2e8f0] bg-white">
+        <div class="border-b border-[#eef2f6] px-4 py-3">
+          <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">训练设置</p>
+        </div>
+
+        <div v-if="loading" class="px-4 py-4 text-sm text-slate-500">
+          正在加载训练工作台...
+        </div>
+
+        <div v-else-if="!summary && loadError" class="px-4 py-4">
+          <div class="rounded-[0.7rem] border border-[#ffd4da] bg-[#fff5f6] px-3 py-3 text-sm text-[#cf334f]">
+            <div class="flex items-center gap-1.5 font-semibold">
+              <AlertTriangle class="h-3.5 w-3.5" />
+              初始化失败
             </div>
+            <p class="mt-1.5 leading-5">{{ loadError }}</p>
+          </div>
+        </div>
 
-            <label class="mt-4 block">
-              <span class="mb-2 block text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Saved Matrix</span>
+        <template v-else-if="summary">
+          <div class="min-h-0 flex-1 space-y-5 overflow-y-auto custom-scrollbar p-4">
+            <!-- ① 数据集 -->
+            <section>
+              <p class="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#5b56ea]">
+                <span class="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[#5b56ea] text-[9px] text-white">1</span>
+                数据集
+              </p>
               <select
                 v-model="selectedDatasetValue"
-                class="h-12 w-full rounded-[1.2rem] border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-amber-300 focus:ring-2 focus:ring-amber-100"
+                class="h-10 w-full rounded-[0.6rem] border border-[#e2e8f0] bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-[#aebdfc] focus:ring-2 focus:ring-[#aebdfc]/20"
                 @change="handleDatasetChange"
               >
-                <option value="" :disabled="hasSavedDatasets">Select a cleaned dataset</option>
+                <option value="" :disabled="hasSavedDatasets">选择已清洗的数据集</option>
                 <option v-for="dataset in savedDatasets" :key="dataset.id" :value="String(dataset.id)">
-                  {{ dataset.name }} / {{ dataset.row_count }} rows
+                  {{ dataset.name }} · {{ dataset.row_count }} 条
                 </option>
               </select>
-            </label>
+              <div v-if="!hasSavedDatasets" class="mt-2 rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] px-3 py-2.5 text-xs text-slate-500">
+                尚无已清洗的数据集，请先到"知识库"页保存一份。
+              </div>
+              <div v-else class="mt-2.5 grid grid-cols-3 gap-2 text-xs">
+                <div class="rounded-[0.55rem] bg-[#f8fafc] px-2 py-2">
+                  <p class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8fa0ba]">目标</p>
+                  <p class="mt-0.5 truncate font-semibold text-slate-900">{{ targetLabel }}</p>
+                </div>
+                <div class="rounded-[0.55rem] bg-[#f8fafc] px-2 py-2">
+                  <p
+                    class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8fa0ba]"
+                    title="平台会自动留出 ~15% 作为测试集，绝不参与训练"
+                  >行数</p>
+                  <p class="mt-0.5 font-semibold text-slate-900">{{ formatNumber(usableRecords) }}</p>
+                </div>
+                <div class="rounded-[0.55rem] bg-[#f8fafc] px-2 py-2">
+                  <p class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8fa0ba]">特征</p>
+                  <p class="mt-0.5 font-semibold text-slate-900">{{ formatNumber(activeTask?.dataset.feature_dimensions || summary.dataset.feature_dimensions) }}</p>
+                </div>
+              </div>
+              <div
+                v-if="hasSavedDatasets && (activeTask?.dataset?.test_size || summary.dataset?.test_size)"
+                class="mt-2 flex flex-wrap gap-1 text-[10px] text-slate-500"
+              >
+                <span class="rounded-md bg-[#eef2ff] px-1.5 py-0.5 text-[#3d56d2]">
+                  训练池 {{ formatNumber(activeTask?.dataset?.pool_size || summary.dataset?.pool_size) }}
+                </span>
+                <span class="rounded-md bg-[#fff5f6] px-1.5 py-0.5 text-[#cf334f]">
+                  测试集 {{ formatNumber(activeTask?.dataset?.test_size || summary.dataset?.test_size) }}（隔离）
+                </span>
+              </div>
+            </section>
 
-            <p class="mt-4 text-sm leading-6 text-slate-600">{{ datasetDescription }}</p>
+            <!-- ② 算法 -->
+            <section>
+              <p class="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#5b56ea]">
+                <span class="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[#5b56ea] text-[9px] text-white">2</span>
+                算法
+              </p>
+              <div class="space-y-1.5">
+                <label
+                  v-for="algorithm in summary.algorithms"
+                  :key="algorithm.key"
+                  class="flex cursor-pointer items-start gap-2 rounded-[0.65rem] border px-3 py-2 transition"
+                  :class="form.algorithm === algorithm.key
+                    ? 'border-[#aebdfc] bg-[#f5f7ff] ring-1 ring-[#aebdfc]/40'
+                    : 'border-[#eef2f6] bg-white hover:border-[#d8e0eb]'"
+                >
+                  <input
+                    v-model="form.algorithm"
+                    type="radio"
+                    :value="algorithm.key"
+                    class="mt-1 h-3.5 w-3.5 border-slate-300 text-[#5b56ea] focus:ring-[#5b56ea]"
+                  >
+                  <div class="min-w-0 flex-1">
+                    <p class="text-sm font-semibold text-slate-900">{{ algorithmLabelZh(algorithm.key) }}</p>
+                    <p v-if="algorithm.description" class="mt-0.5 text-[11px] leading-snug text-slate-500">
+                      {{ algorithm.description }}
+                    </p>
+                  </div>
+                </label>
+              </div>
+            </section>
 
-            <div class="mt-5 space-y-3 border-t border-slate-200 pt-5 text-sm">
-              <div class="flex items-center justify-between gap-3">
-                <span class="text-slate-500">Target</span>
-                <span class="font-semibold text-slate-900">{{ targetLabel }}</span>
+            <!-- ③ 高级设置（默认折叠） -->
+            <section>
+              <button
+                type="button"
+                class="flex w-full items-center justify-between rounded-[0.6rem] border border-[#e2e8f0] bg-[#f8fafc] px-3 py-2 text-left text-xs font-semibold text-slate-600 transition hover:bg-white"
+                @click="showAdvanced = !showAdvanced"
+              >
+                <span>高级设置（超参数）</span>
+                <ChevronDown class="h-3.5 w-3.5 transition" :class="showAdvanced ? 'rotate-180 text-[#5b56ea]' : ''" />
+              </button>
+
+              <div v-if="showAdvanced" class="mt-2 space-y-4 rounded-[0.6rem] border border-[#eef2f6] bg-[#fbfcff] px-3 py-3">
+                <label class="block">
+                  <div class="mb-1.5 flex items-center justify-between gap-2 text-xs">
+                    <span
+                      class="font-semibold text-slate-700"
+                      title="决定要训练多少棵树或多少轮迭代。值越大模型越复杂，但训练越慢。"
+                    >训练轮次</span>
+                    <span class="font-semibold text-slate-900 tabular-nums">{{ form.hyperparameters.n_estimators }}</span>
+                  </div>
+                  <input
+                    v-model.number="form.hyperparameters.n_estimators"
+                    type="range"
+                    min="20"
+                    max="300"
+                    step="10"
+                    class="training-range w-full"
+                  >
+                </label>
+
+                <label class="block">
+                  <div class="mb-1.5 flex items-center justify-between gap-2 text-xs">
+                    <span
+                      class="font-semibold text-slate-700"
+                      title="每棵树对最终预测的贡献权重。一般 0.05-0.10 为佳；越小越稳健，但需要更多轮次。"
+                    >学习率</span>
+                    <span
+                      class="font-semibold tabular-nums"
+                      :class="isRandomForest ? 'text-slate-300' : 'text-slate-900'"
+                    >
+                      {{ isRandomForest ? '不适用' : form.hyperparameters.learning_rate.toFixed(2) }}
+                    </span>
+                  </div>
+                  <input
+                    v-model.number="form.hyperparameters.learning_rate"
+                    type="range"
+                    min="0.01"
+                    max="0.30"
+                    step="0.01"
+                    class="training-range w-full"
+                    :disabled="isRandomForest"
+                  >
+                </label>
+
+                <label class="block">
+                  <div class="mb-1.5 flex items-center justify-between gap-2 text-xs">
+                    <span
+                      class="font-semibold text-slate-700"
+                      title="单棵树的最大层数。值越大越能拟合复杂关系，但也更容易过拟合。"
+                    >树深度</span>
+                    <span class="font-semibold text-slate-900 tabular-nums">{{ form.hyperparameters.max_depth }}</span>
+                  </div>
+                  <input
+                    v-model.number="form.hyperparameters.max_depth"
+                    type="range"
+                    min="1"
+                    max="8"
+                    step="1"
+                    class="training-range w-full"
+                  >
+                </label>
+
+                <div v-if="splitOptions.length" class="border-t border-[#eef2f6] pt-3">
+                  <label class="block text-xs">
+                    <span
+                      class="mb-1 block font-semibold text-slate-700"
+                      title="影响顶部 R² / RMSE / MAE 的计算方式：K 折交叉验证更可靠，单次随机切分更快但容易虚高"
+                    >数据切分策略</span>
+                    <select
+                      v-model="form.data_options.split_strategy"
+                      class="h-8 w-full rounded-[0.55rem] border border-[#e2e8f0] bg-white px-2 text-xs text-slate-900 outline-none transition focus:border-[#aebdfc] focus:ring-2 focus:ring-[#aebdfc]/20"
+                    >
+                      <option v-for="opt in splitOptions" :key="opt.key" :value="opt.key">
+                        {{ opt.label }}
+                      </option>
+                    </select>
+                    <p v-if="activeSplitOption?.description" class="mt-1.5 text-[11px] leading-snug text-slate-500">
+                      {{ activeSplitOption.description }}
+                    </p>
+                  </label>
+                </div>
+
+                <p class="text-[11px] leading-5 text-slate-500">
+                  随机种子 {{ form.data_options.random_seed }}<template v-if="form.data_options.split_strategy === 'random_holdout'"> · 验证集占比 {{ validationSplitPercent }}%</template><template v-else> · 折数 {{ form.data_options.cv_folds || 5 }}</template>
+                </p>
               </div>
-              <div class="flex items-center justify-between gap-3">
-                <span class="text-slate-500">Source Scope</span>
-                  <p class="mt-2 font-semibold text-slate-950">{{ formatScopeMode(sourceScope?.resolved_scope_type || sourceScope?.requested_mode) }}</p>
-              </div>
-              <div class="flex items-center justify-between gap-3">
-                <span class="text-slate-500">Rows Ready</span>
-                <span class="font-semibold text-slate-900">{{ formatNumber(cleaningSummary?.training_ready_records || summary.dataset.usable_records) }}</span>
-              </div>
-              <div class="flex items-center justify-between gap-3">
-                <span class="text-slate-500">Feature Dimensions</span>
-                <span class="font-semibold text-slate-900">{{ formatNumber(activeTask?.dataset.feature_dimensions || summary.dataset.feature_dimensions) }}</span>
-              </div>
+            </section>
+
+            <div
+              v-if="!hasSavedDatasets || usableRecords < 10"
+              class="rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] px-3 py-2.5 text-xs leading-5 text-slate-500"
+            >
+              数据集就绪条件：可用样本 ≥ 10 条。
+            </div>
+          </div>
+        </template>
+      </aside>
+
+      <!-- ── 右：训练监控 ─────────────────────────────── -->
+      <main class="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[1.25rem] border border-[#e2e8f0] bg-white">
+        <div class="min-h-0 flex-1 space-y-3 overflow-y-auto custom-scrollbar p-4">
+          <!-- 4 个核心指标：训练 / 验证 / 测试 / 进度 -->
+          <section class="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+            <div class="rounded-[0.85rem] border border-[#eef2f6] bg-white px-4 py-3">
+              <p
+                class="text-[10px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]"
+                title="模型对自己学过的训练集的拟合程度。一般会很高（&gt;0.9）；如果连训练集 R² 都低，说明模型欠拟合，特征或算法不够强。"
+              >
+                训练集 R²
+              </p>
+              <p class="mt-1 text-2xl font-semibold tracking-[-0.04em] text-slate-950">
+                {{ formatMetric(currentPoint?.train_r2, 3) }}
+              </p>
+              <p class="mt-1 text-[10px] text-slate-400">
+                模型学过的数据 · {{ formatNumber(activeTask?.dataset?.train_size) }} 行
+              </p>
+            </div>
+
+            <div class="rounded-[0.85rem] border border-[#eef2f6] bg-white px-4 py-3">
+              <p
+                class="text-[10px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]"
+                title="K 折交叉验证：训练池里轮流藏起 1 折当验证集，5 次平均。用于挑选最佳超参，是泛化能力的可靠估计。"
+              >
+                验证集 R²
+              </p>
+              <p class="mt-1 text-2xl font-semibold tracking-[-0.04em] text-slate-950">
+                {{ formatMetric(currentPoint?.val_r2, 3) }}
+              </p>
+              <p class="mt-1 text-[10px] text-slate-400">
+                K 折 CV 平均 · {{ formatNumber(activeTask?.dataset?.validation_size) }} 行/折
+              </p>
             </div>
 
             <div
-              v-if="!hasSavedDatasets"
-              class="mt-5 rounded-[1.4rem] border border-dashed border-slate-200 bg-white px-4 py-4 text-sm leading-6 text-slate-500"
+              class="rounded-[0.85rem] border bg-white px-4 py-3"
+              :class="testMetrics ? 'border-[#aebdfc] ring-1 ring-[#aebdfc]/40' : 'border-dashed border-[#dbe4f2]'"
             >
-              No cleaned dataset is available yet. Save one from the Cleaning page first.
-            </div>
-          </section>
-
-          <section class="border-b border-slate-200 px-6 py-6">
-            <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-              <SlidersHorizontal class="h-4 w-4 text-teal-700" />
-              Run Configuration
-            </div>
-
-            <div class="mt-4">
-              <label class="mb-2 block text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Algorithm</label>
-              <select
-                v-model="form.algorithm"
-                class="h-12 w-full rounded-[1.2rem] border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-amber-300 focus:ring-2 focus:ring-amber-100"
+              <p
+                class="text-[10px] font-bold uppercase tracking-[0.18em]"
+                :class="testMetrics ? 'text-[#5b56ea]' : 'text-[#8fa0ba]'"
+                title='完全藏起来不参与训练的 15% 数据，最后给模型出一份"考卷"。这个数字才是论文里报告的最终成绩，反映模型对全新样本的真实预测能力。'
               >
-                <option v-for="algorithm in summary.algorithms" :key="algorithm.key" :value="algorithm.key">
-                  {{ algorithm.label }}
-                </option>
-              </select>
-              <p class="mt-3 text-sm leading-6 text-slate-600">
-                {{ currentAlgorithm?.description || 'Choose the estimator used for the next run.' }}
+                测试集 R²
+              </p>
+              <p class="mt-1 text-2xl font-semibold tracking-[-0.04em]" :class="testMetrics ? 'text-[#5b56ea]' : 'text-slate-300'">
+                {{ testMetrics ? formatMetric(testMetrics.test_r2, 3) : '—' }}
+              </p>
+              <p class="mt-1 text-[10px]" :class="testMetrics ? 'text-[#5b56ea]/70' : 'text-slate-400'">
+                <template v-if="testMetrics">
+                  从未见过的数据 · {{ testMetrics.sample_count }} 行
+                </template>
+                <template v-else>
+                  训练完成后给出
+                </template>
               </p>
             </div>
 
-            <div class="mt-6 space-y-5">
-              <label class="block">
-                <div class="mb-2 flex items-center justify-between gap-3 text-sm">
-                  <span class="text-slate-600">Rounds</span>
-                  <span class="font-semibold text-slate-900">{{ form.hyperparameters.n_estimators }}</span>
-                </div>
-                <input
-                  v-model.number="form.hyperparameters.n_estimators"
-                  type="range"
-                  min="20"
-                  max="300"
-                  step="10"
-                  class="training-range w-full"
-                >
-              </label>
-
-              <label class="block">
-                <div class="mb-2 flex items-center justify-between gap-3 text-sm">
-                  <span class="text-slate-600">Learning Rate</span>
-                  <span class="font-semibold text-slate-900">{{ form.hyperparameters.learning_rate.toFixed(2) }}</span>
-                </div>
-                <input
-                  v-model.number="form.hyperparameters.learning_rate"
-                  type="range"
-                  min="0.01"
-                  max="0.30"
-                  step="0.01"
-                  class="training-range w-full"
-                  :disabled="isRandomForest"
-                >
-              </label>
-
-              <label class="block">
-                <div class="mb-2 flex items-center justify-between gap-3 text-sm">
-                  <span class="text-slate-600">Tree Depth</span>
-                  <span class="font-semibold text-slate-900">{{ form.hyperparameters.max_depth }}</span>
-                </div>
-                <input
-                  v-model.number="form.hyperparameters.max_depth"
-                  type="range"
-                  min="1"
-                  max="8"
-                  step="1"
-                  class="training-range w-full"
-                >
-              </label>
-
-              <label v-if="isCatBoost" class="block">
-                <div class="mb-2 flex items-center justify-between gap-3 text-sm">
-                  <span class="text-slate-600">L2 Regularization</span>
-                  <span class="font-semibold text-slate-900">{{ form.hyperparameters.l2_leaf_reg.toFixed(1) }}</span>
-                </div>
-                <input
-                  v-model.number="form.hyperparameters.l2_leaf_reg"
-                  type="range"
-                  min="0"
-                  max="20"
-                  step="0.5"
-                  class="training-range w-full"
-                >
-              </label>
-
-              <label v-if="isCatBoost" class="block">
-                <div class="mb-2 flex items-center justify-between gap-3 text-sm">
-                  <span class="text-slate-600">Random Strength</span>
-                  <span class="font-semibold text-slate-900">{{ form.hyperparameters.random_strength.toFixed(1) }}</span>
-                </div>
-                <input
-                  v-model.number="form.hyperparameters.random_strength"
-                  type="range"
-                  min="0"
-                  max="10"
-                  step="0.5"
-                  class="training-range w-full"
-                >
-              </label>
-            </div>
-
-            <div class="mt-6 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-1">
-              <div class="rounded-[1.2rem] border border-slate-200 bg-white px-4 py-3">
-                <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Validation Split</p>
-                <p class="mt-2 font-semibold text-slate-900">{{ validationSplitPercent }}%</p>
-              </div>
-              <div class="rounded-[1.2rem] border border-slate-200 bg-white px-4 py-3">
-                <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Random Seed</p>
-                <p class="mt-2 font-semibold text-slate-900">{{ form.data_options.random_seed }}</p>
-              </div>
+            <div class="rounded-[0.85rem] border border-[#eef2f6] bg-white px-4 py-3">
+              <p class="text-[10px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">进度</p>
+              <p class="mt-1 text-2xl font-semibold tracking-[-0.04em] text-slate-950 tabular-nums">
+                {{ progressPercent }}%
+              </p>
+              <p v-if="testMetrics" class="mt-1 text-[10px] text-slate-400 tabular-nums">
+                RMSE {{ formatMetric(testMetrics.test_rmse, 3) }} · MAE {{ formatMetric(testMetrics.test_mae, 3) }}
+              </p>
+              <p v-else class="mt-1 text-[10px] text-slate-400 tabular-nums">
+                RMSE {{ formatMetric(currentPoint?.val_rmse, 3) }} · MAE {{ formatMetric(currentPoint?.val_mae, 3) }}
+              </p>
             </div>
           </section>
 
-          <section class="px-6 py-6">
-            <div class="flex flex-col gap-3 sm:flex-row">
-              <button
-                class="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-full bg-slate-900 px-5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-                :disabled="starting || selectedCleanedDatasetId == null || usableRecords < 10"
-                @click="handleStartTraining"
-              >
-                <Play class="h-4 w-4" />
-                {{ starting ? 'Starting Run' : 'Start Training' }}
-              </button>
-              <button
-                class="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                :disabled="!activeTask || cancelling"
-                @click="handleCancelTraining"
-              >
-                <Square class="h-4 w-4" />
-                {{ cancelling ? 'Cancelling' : 'Cancel Run' }}
-              </button>
-            </div>
-
-            <p class="mt-4 text-sm leading-6 text-slate-500">
-              Training is enabled once the cleaned dataset has at least 10 usable rows.
+          <!-- 运行警告 -->
+          <section
+            v-if="runWarnings.length"
+            class="rounded-[0.85rem] border border-[#ffe4b5] bg-[#fffaf0] px-4 py-3"
+          >
+            <p class="flex items-center gap-1.5 text-xs font-semibold text-[#a16207]">
+              <AlertTriangle class="h-3.5 w-3.5" />
+              运行提示
             </p>
+            <ul class="mt-1.5 space-y-1 text-xs leading-5 text-[#854d0e]">
+              <li v-for="warning in runWarnings" :key="warning">· {{ warning }}</li>
+            </ul>
           </section>
-        </div>
-      </template>
-    </aside>
 
-    <main class="min-h-0 min-w-0 flex-1 overflow-y-auto">
-      <div class="mx-auto flex min-h-full max-w-[1400px] flex-col gap-6 px-4 py-4 sm:px-6 sm:py-6 xl:px-8">
-        <section class="relative overflow-hidden rounded-[2rem] border border-slate-200 bg-[linear-gradient(135deg,rgba(255,252,246,0.98),rgba(247,243,233,0.98)_55%,rgba(239,246,248,0.98))] px-6 py-6 shadow-[0_24px_60px_-36px_rgba(15,23,42,0.28)] sm:px-8 sm:py-8">
-          <div class="pointer-events-none absolute -right-24 top-[-5rem] h-[18rem] w-[18rem] rounded-full bg-amber-200/30 blur-3xl" />
-          <div class="pointer-events-none absolute bottom-[-7rem] right-[12%] h-[18rem] w-[18rem] rounded-full bg-cyan-200/25 blur-3xl" />
-
-          <div class="relative grid gap-8 xl:grid-cols-[minmax(0,1.2fr)_minmax(420px,0.8fr)] xl:items-end">
-            <div>
-              <div class="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.28em] text-amber-700">
-                <Sparkles class="h-3.5 w-3.5" />
-                Live Training Monitor
+          <!-- 自动调参进度 / 结果 -->
+          <section
+            v-if="tuneProgress"
+            class="rounded-[0.95rem] border bg-white p-4"
+            :class="tuneActive ? 'border-[#fbbf24] ring-1 ring-[#fbbf24]/40' : 'border-[#eef2f6]'"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="flex items-center gap-1.5">
+                <Sparkles class="h-3.5 w-3.5 text-[#c97a00]" />
+                <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#c97a00]">自动调参</p>
               </div>
-              <h2 class="mt-4 text-3xl font-semibold tracking-[-0.05em] text-slate-950 sm:text-4xl">
-                {{ datasetTitle }}
-              </h2>
-              <p class="mt-3 max-w-3xl text-sm leading-7 text-slate-600 sm:text-[15px]">
-                  {{ activeTask?.status ? activeTask.status : 'ready' }}
+              <span v-if="tuneTotal" class="text-[10px] text-slate-400 tabular-nums">
+                {{ tuneSearched }} / {{ tuneTotal }} 组
+              </span>
+            </div>
+
+            <p
+              v-if="tuneProgress?.skipped"
+              class="mt-2 text-xs text-slate-500"
+            >该算法没有可调超参数。</p>
+            <template v-else>
+              <p class="mt-1.5 text-xs text-slate-500">
+                <span v-if="tuneActive">
+                  正在 5 折交叉验证下搜索最佳超参组合...
+                </span>
+                <span v-else-if="tuneBestScore !== null">
+                  调参完成 · 最佳 5 折 CV R² = <span class="font-semibold text-[#5b56ea]">{{ tuneBestScore.toFixed(3) }}</span>
+                </span>
+                <span v-else>
+                  调参未找到有效结果，已用默认参数继续训练。
+                </span>
               </p>
 
-              <div class="mt-6 flex flex-wrap items-center gap-3">
-                <span class="inline-flex items-center rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em]" :class="statusTone.chip">
-                  {{ activeTask?.status ? activeTask.status : 'ready' }}
+              <div v-if="tuneActive" class="mt-2 h-1.5 overflow-hidden rounded-full bg-[#fef3c7]">
+                <div
+                  class="h-full rounded-full bg-gradient-to-r from-[#fbbf24] to-[#f97316] transition-all"
+                  :style="{ width: `${tuneTotal ? (tuneSearched / tuneTotal) * 100 : 0}%` }"
+                />
+              </div>
+
+              <div
+                v-if="tuneBestParamEntries.length"
+                class="mt-2.5 flex flex-wrap gap-1.5"
+              >
+                <span
+                  v-for="entry in tuneBestParamEntries"
+                  :key="entry.key"
+                  class="inline-flex items-center gap-1 rounded-md bg-[#f5f7ff] px-2 py-1 text-[11px] font-medium text-[#5b56ea]"
+                >
+                  <span class="text-slate-500">{{ entry.key }}</span>
+                  =
+                  <span class="font-semibold tabular-nums">{{ entry.value }}</span>
                 </span>
-                <span class="text-sm text-slate-400">
-                  {{ currentAlgorithm?.label || formatTitleLabel(form.algorithm) }}
-                </span>
-                <span class="text-sm text-slate-500">/</span>
-                <span class="text-sm text-slate-400">
-                  {{ formatNumber(activeTask?.dataset.train_size || Math.round(usableRecords * (1 - form.data_options.validation_split))) }} train /
-                  {{ formatNumber(activeTask?.dataset.validation_size || Math.round(usableRecords * form.data_options.validation_split)) }} validation
-                </span>
               </div>
+            </template>
+          </section>
 
-              <div v-if="loadError && summary" class="mt-6 rounded-[1.5rem] border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-700">
-                {{ loadError }}
-              </div>
-
-              <div v-if="runWarnings.length > 0" class="mt-6 rounded-[1.5rem] border border-amber-200 bg-amber-50 px-4 py-4">
-                <div class="flex items-center gap-2 text-sm font-semibold text-amber-800">
-                  <AlertTriangle class="h-4 w-4" />
-                  Run warnings
-                </div>
-                <ul class="mt-3 space-y-2 text-sm leading-6 text-amber-700">
-                  <li v-for="warning in runWarnings" :key="warning">- {{ warning }}</li>
-                </ul>
-              </div>
-            </div>
-
-            <div class="rounded-[1.7rem] border border-slate-200 bg-white/80 p-4 sm:p-5">
-              <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <div class="border-b border-slate-200 pb-3 sm:border-b-0 sm:border-r sm:pb-0 sm:pr-4">
-                  <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Validation R2</p>
-                  <p class="mt-3 text-3xl font-semibold tracking-[-0.05em] text-slate-950">{{ formatMetric(currentPoint?.val_r2) }}</p>
-                </div>
-                <div class="border-b border-slate-200 pb-3 sm:border-b-0 sm:border-r sm:pb-0 sm:px-4">
-                  <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">RMSE</p>
-                  <p class="mt-3 text-3xl font-semibold tracking-[-0.05em] text-slate-950">{{ formatMetric(currentPoint?.val_rmse) }}</p>
-                </div>
-                <div class="border-b border-slate-200 pb-3 sm:border-b-0 sm:border-r sm:pb-0 sm:px-4">
-                  <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">MAE</p>
-                  <p class="mt-3 text-3xl font-semibold tracking-[-0.05em] text-slate-950">{{ formatMetric(currentPoint?.val_mae) }}</p>
-                </div>
-                <div class="sm:pl-4">
-                  <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Progress</p>
-                  <p class="mt-3 text-3xl font-semibold tracking-[-0.05em] text-slate-950">
-                    {{ activeTask?.current_round || 0 }}/{{ activeTask?.total_rounds || form.hyperparameters.n_estimators }}
-                  </p>
-                </div>
-              </div>
-
-              <div class="mt-5">
-                <div class="mb-2 flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
-                  <span>Training trajectory</span>
-                  <span>{{ progressPercent }}%</span>
-                </div>
-                <div class="h-2.5 overflow-hidden rounded-full bg-slate-200">
-                  <div
-                    class="h-full rounded-full bg-gradient-to-r transition-all duration-500"
-                    :class="statusTone.accent"
-                    :style="{ width: `${progressPercent}%` }"
-                  />
-                </div>
-              </div>
-
-              <div class="mt-5 grid gap-3 text-sm text-slate-700 md:grid-cols-3">
-                <div class="rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Target</p>
-                  <p class="mt-2 font-semibold text-slate-950">{{ targetLabel }}</p>
-                </div>
-                <div class="rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Scope</p>
-                  <p class="mt-2 font-semibold text-slate-950">{{ formatScopeMode(sourceScope?.resolved_scope_type || sourceScope?.requested_mode) }}</p>
-                </div>
-                <div class="rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">PCA</p>
-                  <p class="mt-2 font-semibold text-slate-950">
-                    {{ pcaInfo?.enabled ? `Enabled / ${formatPercent(pcaInfo.explained_variance_ratio)}` : 'Disabled' }}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section class="grid gap-6 xl:grid-cols-2">
-          <div class="rounded-[1.8rem] border border-slate-200 bg-white/85 p-5 sm:p-6">
-            <div class="mb-5 flex items-center justify-between gap-4">
+          <!-- ⭐ 算法对比结果 -->
+          <section
+            v-if="compareMode || compareResults.length"
+            class="rounded-[0.95rem] border bg-white p-4"
+            :class="compareMode ? 'border-[#aebdfc] ring-1 ring-[#aebdfc]/40' : 'border-[#eef2f6]'"
+          >
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div>
-                <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Learning Trace</p>
-                <h3 class="mt-2 text-xl font-semibold tracking-[-0.04em] text-slate-950">R2 trajectory</h3>
-              </div>
-              <div class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600">
-                <Activity class="h-3.5 w-3.5 text-teal-700" />
-                Train vs validation
-              </div>
-            </div>
-
-            <div class="h-[320px]">
-              <div v-if="history.length === 0" class="flex h-full items-center justify-center rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-500">
-                Start a run to populate the R2 trajectory.
-              </div>
-              <Line v-else :data="r2ChartData" :options="chartOptions" />
-            </div>
-          </div>
-
-          <div class="rounded-[1.8rem] border border-slate-200 bg-white/85 p-5 sm:p-6">
-            <div class="mb-5 flex items-center justify-between gap-4">
-              <div>
-                <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Error Trace</p>
-                <h3 class="mt-2 text-xl font-semibold tracking-[-0.04em] text-slate-950">Validation loss profile</h3>
-              </div>
-              <div class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600">
-                <Waves class="h-3.5 w-3.5 text-rose-600" />
-                RMSE and MAE
-              </div>
-            </div>
-
-            <div class="h-[320px]">
-              <div v-if="history.length === 0" class="flex h-full items-center justify-center rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-500">
-                Error metrics appear once training begins.
-              </div>
-              <Line v-else :data="errorChartData" :options="chartOptions" />
-            </div>
-          </div>
-        </section>
-
-        <section class="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-          <div class="rounded-[1.8rem] border border-slate-200 bg-white/85 p-5 sm:p-6">
-            <div class="flex flex-col gap-3 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
-              <div>
-                <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Data Provenance</p>
-                <h3 class="mt-2 text-xl font-semibold tracking-[-0.04em] text-slate-950">Dataset readiness and feature lineage</h3>
-              </div>
-              <div class="text-sm text-slate-400">
-                {{ selectedFeatureColumns.length }} selected features
-              </div>
-            </div>
-
-            <div class="mt-5 grid gap-4 md:grid-cols-2">
-              <div class="rounded-[1.4rem] border border-slate-200 bg-slate-50 p-4">
-                <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                  <Database class="h-4 w-4 text-amber-700" />
-                  Record flow
-                </div>
-                <dl class="mt-4 space-y-3 text-sm">
-                  <div class="flex items-center justify-between gap-3">
-                    <dt class="text-slate-500">Raw records</dt>
-                    <dd class="font-semibold text-slate-950">{{ formatNumber(cleaningSummary?.raw_records || activeTask?.dataset.total_records || summary?.dataset.total_records) }}</dd>
-                  </div>
-                  <div class="flex items-center justify-between gap-3">
-                    <dt class="text-slate-500">Target ready</dt>
-                    <dd class="font-semibold text-slate-950">{{ formatNumber(cleaningSummary?.target_ready_records) }}</dd>
-                  </div>
-                  <div class="flex items-center justify-between gap-3">
-                    <dt class="text-slate-500">Chemistry ready</dt>
-                    <dd class="font-semibold text-slate-950">{{ formatNumber(cleaningSummary?.chemistry_ready_records) }}</dd>
-                  </div>
-                  <div class="flex items-center justify-between gap-3">
-                    <dt class="text-slate-500">Training ready</dt>
-                    <dd class="font-semibold text-slate-950">{{ formatNumber(cleaningSummary?.training_ready_records || activeTask?.dataset.usable_records || summary?.dataset.usable_records) }}</dd>
-                  </div>
-                </dl>
-              </div>
-
-              <div class="rounded-[1.4rem] border border-slate-200 bg-slate-50 p-4">
-                <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                  <Target class="h-4 w-4 text-teal-700" />
-                  Cleaning rules
-                </div>
-                <dl class="mt-4 space-y-3 text-sm">
-                  <div class="flex items-center justify-between gap-3">
-                    <dt class="text-slate-500">Missing target rows</dt>
-                    <dd class="font-semibold text-slate-950">{{ formatNumber(cleaningSummary?.dropped_by_reason.missing_target) }}</dd>
-                  </div>
-                  <div class="flex items-center justify-between gap-3">
-                    <dt class="text-slate-500">Missing cation SMILES</dt>
-                    <dd class="font-semibold text-slate-950">{{ formatNumber(cleaningSummary?.dropped_by_reason.missing_cation_smiles) }}</dd>
-                  </div>
-                  <div class="flex items-center justify-between gap-3">
-                    <dt class="text-slate-500">Missing anion SMILES</dt>
-                    <dd class="font-semibold text-slate-950">{{ formatNumber(cleaningSummary?.dropped_by_reason.missing_anion_smiles) }}</dd>
-                  </div>
-                  <div class="flex items-center justify-between gap-3">
-                    <dt class="text-slate-500">Outliers removed</dt>
-                    <dd class="font-semibold text-slate-950">{{ formatNumber(cleaningSummary?.outliers_removed || 0) }}</dd>
-                  </div>
-                </dl>
-              </div>
-            </div>
-
-            <div class="mt-5 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-              <div class="rounded-[1.4rem] border border-slate-200 bg-slate-50 p-4">
-                <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                  <Orbit class="h-4 w-4 text-amber-600" />
-                  Feature blocks
-                </div>
-                <div v-if="featureBlocks.length === 0" class="mt-4 rounded-[1.2rem] border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-500">
-                  Feature block dimensions become available after a run starts.
-                </div>
-                <div v-else class="mt-4 space-y-3">
-                  <div
-                    v-for="block in featureBlocks"
-                    :key="block.key"
-                    class="rounded-[1.2rem] border border-slate-200 bg-white px-4 py-3"
-                  >
-                    <div class="flex items-center justify-between gap-3">
-                      <p class="font-semibold text-slate-950">{{ block.label }}</p>
-                      <span class="text-sm text-slate-400">{{ block.dimensions }} dims</span>
-                    </div>
-                    <p class="mt-2 text-xs uppercase tracking-[0.18em] text-slate-500">{{ formatTitleLabel(block.key) }}</p>
-                  </div>
-                </div>
-              </div>
-
-              <div class="rounded-[1.4rem] border border-slate-200 bg-slate-50 p-4">
-                <div class="flex items-center justify-between gap-3">
-                  <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                    <Layers3 class="h-4 w-4 text-amber-700" />
-                    Active feature columns
-                  </div>
-                  <span class="text-xs uppercase tracking-[0.18em] text-slate-500">{{ selectedFeatureColumns.length }} total</span>
-                </div>
-
-                <div v-if="selectedFeatureColumns.length === 0" class="mt-4 rounded-[1.2rem] border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-500">
-                  Select a saved cleaned dataset to inspect the matrix columns.
-                </div>
-                <div v-else class="mt-4 flex flex-wrap gap-2">
-                  <span
-                    v-for="column in visibleFeatureColumns"
-                    :key="column"
-                    class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700"
-                  >
-                    {{ formatColumnLabel(column) }}
+                <p class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#5b56ea]">
+                  <Layers class="h-3.5 w-3.5" />
+                  算法对比
+                </p>
+                <p class="mt-0.5 text-xs text-slate-500">
+                  <span v-if="compareMode">
+                    正在依次训练全部 {{ compareTotal }} 种算法（默认超参），完成后自动给出最佳推荐。
                   </span>
+                  <span v-else-if="compareBestAlgorithm">
+                    本轮对比最佳：<span class="font-semibold text-[#5b56ea]">{{ algorithmLabelZh(compareBestAlgorithm.algorithm) }}</span>
+                    · 验证集 R² = {{ formatMetric(compareBestAlgorithm.valR2, 3) }}
+                  </span>
+                  <span v-else>
+                    所有算法都未成功完成，可重新尝试或调整数据集。
+                  </span>
+                </p>
+              </div>
+              <span class="shrink-0 text-[10px] text-slate-400 tabular-nums">
+                完成 {{ compareResults.length }} / {{ compareTotal || compareResults.length }}
+              </span>
+            </div>
+
+            <div v-if="compareSucceeded.length" :style="{ height: `${Math.max(140, compareSucceeded.length * 38)}px` }">
+              <Bar :data="compareChartData" :options="compareChartOptions" />
+            </div>
+
+            <div v-if="compareResults.length" class="mt-3 space-y-1.5">
+              <div
+                v-for="(row, idx) in compareSorted"
+                :key="row.taskId"
+                class="flex items-center gap-3 rounded-[0.6rem] border px-3 py-2 text-xs"
+                :class="idx === 0 && row.status === 'completed'
+                  ? 'border-[#aebdfc] bg-[#f5f7ff]'
+                  : 'border-[#eef2f6] bg-white'"
+              >
+                <span
+                  class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
+                  :class="idx === 0 ? 'bg-[#5b56ea] text-white' : 'bg-slate-100 text-slate-600'"
+                >{{ idx + 1 }}</span>
+                <span class="min-w-0 flex-1 truncate font-medium text-slate-800">
+                  {{ algorithmLabelZh(row.algorithm) }}
+                </span>
+                <span class="shrink-0 font-semibold text-slate-900 tabular-nums">R²={{ formatMetric(row.valR2, 3) }}</span>
+                <span class="shrink-0 text-slate-500 tabular-nums">RMSE={{ formatMetric(row.valRmse, 3) }}</span>
+                <span class="hidden shrink-0 text-slate-400 sm:inline tabular-nums">MAE={{ formatMetric(row.valMae, 3) }}</span>
+              </div>
+              <div
+                v-for="row in compareResults.filter((r) => r.status !== 'completed')"
+                :key="`failed-${row.taskId}`"
+                class="flex items-center gap-3 rounded-[0.6rem] border border-[#ffe4e6] bg-[#fff5f6] px-3 py-2 text-xs text-[#cf334f]"
+              >
+                <AlertTriangle class="h-3.5 w-3.5 shrink-0" />
+                <span class="min-w-0 flex-1 truncate font-medium">
+                  {{ algorithmLabelZh(row.algorithm) }} · {{ row.status === 'failed' ? '失败' : '已中止' }}
+                </span>
+                <span v-if="row.error" class="hidden truncate text-[10px] text-[#cf334f]/80 sm:inline">
+                  {{ row.error }}
+                </span>
+              </div>
+            </div>
+
+            <div v-else class="rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] px-3 py-3 text-center text-xs text-slate-500">
+              <Loader2 v-if="compareMode" class="mx-auto h-4 w-4 animate-spin text-[#5b56ea]" />
+              <p class="mt-1">{{ compareMode ? '正在训练第一个算法...' : '尚无对比结果' }}</p>
+            </div>
+          </section>
+
+          <!-- 学习曲线 + 误差曲线 -->
+          <section class="grid gap-3 xl:grid-cols-2">
+            <div class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
+              <div class="mb-2 flex items-center justify-between gap-2">
+                <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">
+                  学习曲线 · R² 轨迹
+                </p>
+                <span class="text-[10px] text-slate-400">训练 vs 验证</span>
+              </div>
+              <div class="h-[200px]">
+                <div v-if="!history.length" class="flex h-full items-center justify-center rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] text-xs text-slate-500">
+                  开始训练后此处显示 R² 变化趋势
                 </div>
-                <p v-if="selectedFeatureColumns.length > visibleFeatureColumns.length" class="mt-4 text-sm text-slate-500">
-                  Showing the first {{ visibleFeatureColumns.length }} columns from the cleaned matrix.
+                <Line v-else :data="r2ChartData" :options="chartOptions" />
+              </div>
+            </div>
+
+            <div class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
+              <div class="mb-2 flex items-center justify-between gap-2">
+                <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">
+                  误差曲线 · RMSE / MAE
+                </p>
+                <span class="text-[10px] text-slate-400">越小越好</span>
+              </div>
+              <div class="h-[200px]">
+                <div v-if="!history.length" class="flex h-full items-center justify-center rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] text-xs text-slate-500">
+                  开始训练后此处显示误差变化
+                </div>
+                <Line v-else :data="errorChartData" :options="chartOptions" />
+              </div>
+            </div>
+          </section>
+
+          <!-- ⭐ 预测 vs 真实（核心可视化，对应论文图 3.2） -->
+          <section class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
+            <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#5b56ea]">
+                  预测 vs 真实
+                </p>
+                <p class="mt-0.5 text-xs text-slate-500">
+                  散点越靠近虚线（Y = X），表示预测越准确。
+                  <span class="inline-flex items-center gap-1 ml-1">
+                    <span class="inline-block h-2 w-2 rounded-full bg-[#5b56ea]/60" />紫色=验证集（CV）
+                  </span>
+                  <span class="inline-flex items-center gap-1 ml-1">
+                    <span class="inline-block h-2 w-2 rotate-45 bg-[#ef4444]" />红色=测试集（隔离）
+                  </span>
+                </p>
+              </div>
+              <span v-if="allScatterSamples.length" class="text-[10px] text-slate-400 tabular-nums">
+                验证 {{ predictionSamples.length }} · 测试 {{ testSamples.length }}
+              </span>
+            </div>
+            <div class="h-[300px]">
+              <div v-if="!allScatterSamples.length" class="flex h-full flex-col items-center justify-center gap-1 rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] text-center text-xs text-slate-500">
+                <p>训练完成后在此显示散点图</p>
+                <p class="text-slate-400">紫色 = 验证集 K 折预测，红色 = 测试集真实考卷</p>
+              </div>
+              <Line v-else :data="predictionScatterData" :options="predictionScatterOptions" />
+            </div>
+          </section>
+
+          <!-- ⭐ 异常样本诊断（残差 Top10） -->
+          <section
+            v-if="topResiduals.length"
+            class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4"
+          >
+            <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#cf334f]">
+                  <Search class="h-3.5 w-3.5" />
+                  异常样本诊断 · 残差 Top {{ topResiduals.length }}
+                </p>
+                <p class="mt-0.5 text-xs text-slate-500">
+                  这些样本的预测值偏离最大——通常是数据本身有问题（提取错误、单位错乱、极端工况）。点"定位数据"跳到 Knowledge 库中的原始记录。
                 </p>
               </div>
             </div>
-          </div>
+            <div class="space-y-1.5">
+              <div
+                v-for="(sample, idx) in topResiduals"
+                :key="`${sample.source}-${idx}`"
+                class="flex items-center gap-2 rounded-[0.6rem] border px-3 py-2 text-xs"
+                :class="suspiciousFlag(sample).kind === 'impossible'
+                  ? 'border-[#cf334f]/40 bg-[#fff5f6]'
+                  : suspiciousFlag(sample).kind === 'extreme'
+                    ? 'border-[#fbbf24]/50 bg-[#fffbeb]'
+                    : 'border-[#eef2f6] bg-white'"
+              >
+                <span class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-600">
+                  {{ idx + 1 }}
+                </span>
+                <span
+                  class="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
+                  :class="sample.source === 'test' ? 'bg-[#fff5f6] text-[#cf334f]' : 'bg-[#f5f7ff] text-[#5b56ea]'"
+                >
+                  {{ sample.source === 'test' ? '测试' : '验证' }}
+                </span>
+                <span class="shrink-0 text-[10px] text-slate-400">
+                  <template v-if="sample.literatureId != null">文献#{{ sample.literatureId }}</template>
+                  <template v-if="sample.recordId != null"> · 记录#{{ sample.recordId }}</template>
+                </span>
+                <span class="min-w-0 flex-1 truncate font-medium text-slate-700 tabular-nums">
+                  真实 <span class="text-slate-900 font-semibold">{{ sample.actual.toFixed(3) }}</span>
+                  → 预测 <span class="text-slate-900 font-semibold">{{ sample.predicted.toFixed(3) }}</span>
+                </span>
+                <span class="shrink-0 font-bold tabular-nums" :class="sample.residual > 0 ? 'text-[#cf334f]' : 'text-[#3d56d2]'">
+                  残差 {{ sample.residual >= 0 ? '+' : '' }}{{ sample.residual.toFixed(3) }}
+                </span>
+                <span
+                  v-if="suspiciousFlag(sample).kind"
+                  class="shrink-0 text-[10px]"
+                  :class="suspiciousFlag(sample).kind === 'impossible' ? 'text-[#cf334f]' : 'text-[#b97113]'"
+                  :title="suspiciousFlag(sample).hint"
+                >
+                  {{ suspiciousFlag(sample).kind === 'impossible' ? '🚨 不可能值' : '⚠️ 极端值' }}
+                </span>
+                <button
+                  type="button"
+                  class="inline-flex shrink-0 items-center gap-1 rounded-md border border-[#e2e8f0] bg-white px-2 py-1 text-[10px] font-medium text-slate-600 transition disabled:cursor-not-allowed disabled:opacity-40 hover:bg-[#f8fbff] hover:text-[#5b56ea]"
+                  :disabled="sample.recordId == null"
+                  title="跳到 Knowledge 数据库定位这条异常样本"
+                  @click="handleInspectRecord(sample)"
+                >
+                  <ExternalLink class="h-3 w-3" />
+                  定位数据
+                </button>
+              </div>
+            </div>
+            <p class="mt-3 text-[11px] leading-snug text-slate-500">
+              <span class="font-semibold text-[#cf334f]">🚨 红框</span>：物理上不可能的值，几乎肯定是数据错误，建议直接删除。
+              <span class="ml-2 font-semibold text-[#b97113]">⚠️ 黄框</span>：极端值，需核对原文确认。
+              <span class="ml-2 font-semibold text-slate-700">无标记</span>：可能是模型本身能力上限，需要更多数据或更强算法。
+            </p>
+          </section>
 
-          <div class="rounded-[1.8rem] border border-slate-200 bg-white/85 p-5 sm:p-6">
-            <div class="flex flex-col gap-3 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
+          <!-- ⭐ 特征重要性 -->
+          <section class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
+            <div class="mb-2 flex items-center justify-between gap-2">
               <div>
-                <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Run Archive</p>
-                <h3 class="mt-2 text-xl font-semibold tracking-[-0.04em] text-slate-950">Leaderboard</h3>
-              </div>
-              <div class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600">
-                <Trophy class="h-3.5 w-3.5 text-amber-600" />
-                Best completed runs
+                <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#5b56ea]">
+                  特征重要性 Top {{ featureImportances.length || 10 }}
+                </p>
+                <p class="mt-0.5 text-xs text-slate-500">
+                  数值越高，说明该特征对模型预测的贡献越大。
+                </p>
               </div>
             </div>
+            <div :style="{ height: `${Math.max(160, featureImportances.length * 26)}px` }">
+              <div v-if="!featureImportances.length" class="flex h-full items-center justify-center rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] text-xs text-slate-500">
+                训练完成后在此显示特征重要性排名
+              </div>
+              <Bar v-else :data="featureImportanceChartData" :options="featureImportanceChartOptions" />
+            </div>
+          </section>
 
-            <div v-if="leaderboard.length === 0" class="mt-5 flex min-h-[420px] items-center justify-center rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50 px-6 text-center text-sm leading-6 text-slate-500">
-              Completed runs will appear here once the first training session finishes.
-            </div>
-            <div v-else class="mt-5 overflow-x-auto">
-              <table class="min-w-full text-left text-sm">
-                <thead>
-                  <tr class="border-b border-slate-200 text-[11px] uppercase tracking-[0.2em] text-slate-400">
-                    <th class="px-3 py-3 font-semibold">Finished</th>
-                    <th class="px-3 py-3 font-semibold">Algorithm</th>
-                    <th class="px-3 py-3 font-semibold">Rows</th>
-                    <th class="px-3 py-3 font-semibold">Val R2</th>
-                    <th class="px-3 py-3 font-semibold">RMSE</th>
-                    <th class="px-3 py-3 font-semibold">MAE</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="row in leaderboard"
-                    :key="row.taskId"
-                    class="border-b border-slate-100 transition hover:bg-slate-50"
-                  >
-                    <td class="px-3 py-4 font-semibold text-slate-950">{{ formatDateTime(row.finishedAt) }}</td>
-                    <td class="px-3 py-4 text-slate-600">{{ formatTitleLabel(row.algorithm) }}</td>
-                    <td class="px-3 py-4 text-slate-600">{{ formatNumber(row.usableRecords) }}</td>
-                    <td class="px-3 py-4 font-semibold text-teal-700">{{ formatMetric(row.valR2) }}</td>
-                    <td class="px-3 py-4 font-semibold text-rose-600">{{ formatMetric(row.valRmse) }}</td>
-                    <td class="px-3 py-4 font-semibold text-amber-600">{{ formatMetric(row.valMae) }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <div class="mt-5 rounded-[1.4rem] border border-slate-200 bg-slate-50 px-4 py-4">
-              <div class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <ArrowUpRight class="h-4 w-4 text-amber-700" />
-                Current run snapshot
+          <!-- 历史训练 -->
+          <section class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
+            <div class="mb-3 flex items-center justify-between gap-2">
+              <div class="flex items-center gap-1.5">
+                <Trophy class="h-3.5 w-3.5 text-[#5b56ea]" />
+                <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">历史训练</p>
               </div>
-              <div class="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-                <div>
-                  <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Status</p>
-                  {{ activeTask?.status ? activeTask.status : 'ready' }}
-                </div>
-                <div>
-                  <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Started</p>
-                  <p class="mt-2 font-semibold text-slate-950">{{ formatDateTime(activeTask?.started_at || activeTask?.created_at) }}</p>
-                </div>
-                <div>
-                  <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Usable records</p>
-                  <p class="mt-2 font-semibold text-slate-950">{{ formatNumber(activeTask?.dataset.usable_records || summary?.dataset.usable_records) }}</p>
-                </div>
-                <div>
-                  <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">Validation split</p>
-                  <p class="mt-2 font-semibold text-slate-950">{{ formatPercent(activeTask?.dataset.filters.validation_split ?? form.data_options.validation_split, 0) }}</p>
-                </div>
+              <span class="text-[10px] text-slate-400">{{ leaderboard.length }} 条</span>
+            </div>
+            <div v-if="!leaderboard.length" class="rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] px-3 py-3 text-center text-xs text-slate-500">
+              本次会话尚无完成的训练记录。
+            </div>
+            <div v-else class="space-y-1.5">
+              <div
+                v-for="(row, idx) in leaderboard"
+                :key="row.taskId"
+                class="flex items-center gap-3 rounded-[0.6rem] border px-3 py-2 text-xs"
+                :class="idx === 0 ? 'border-[#aebdfc] bg-[#f5f7ff]' : 'border-[#eef2f6] bg-white'"
+              >
+                <span class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-600">
+                  {{ leaderboard.length - idx }}
+                </span>
+                <span class="min-w-0 flex-1 truncate font-medium text-slate-700">
+                  {{ algorithmLabelZh(row.algorithm) }} · {{ formatNumber(row.usableRecords) }} 条
+                </span>
+                <span class="shrink-0 font-semibold text-slate-900 tabular-nums">R²={{ formatMetric(row.valR2, 3) }}</span>
+                <span class="shrink-0 text-slate-500 tabular-nums">RMSE={{ formatMetric(row.valRmse, 3) }}</span>
+                <span class="hidden shrink-0 text-slate-400 sm:inline">{{ formatDateTime(row.finishedAt) }}</span>
               </div>
             </div>
-          </div>
-        </section>
-      </div>
-    </main>
+          </section>
+        </div>
+      </main>
+    </div>
   </div>
 </template>
 

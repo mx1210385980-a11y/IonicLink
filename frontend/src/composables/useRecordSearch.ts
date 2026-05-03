@@ -12,6 +12,7 @@ import { useDashboardFilters } from '@/composables/useDashboardFilters'
 type UseRecordSearchOptions = {
   initialDoi: Ref<string | undefined>
   selectedFileId: Ref<string | null | undefined>
+  targetRecordId?: Ref<string | number | null | undefined>
   pageSize?: number
 }
 
@@ -34,6 +35,7 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
     substrateMaterials: [],
     substrateCoatings: [],
     speedValues: [],
+    shearRateValues: [],
     temperatureValues: [],
     potentialValues: [],
     waterContentValues: [],
@@ -44,6 +46,7 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
   const selectedSubstrateMaterial = ref('')
   const selectedSubstrateCoating = ref('')
   const selectedSpeedValue = ref('')
+  const selectedShearRateValue = ref('')
   const selectedTemperatureValue = ref('')
   const selectedPotentialValue = ref('')
   const selectedWaterContentValue = ref('')
@@ -84,7 +87,10 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
       chips.push({ id: 'manual-coating', label: 'Coating', value: selectedSubstrateCoating.value })
     }
     if (selectedSpeedValue.value) {
-      chips.push({ id: 'manual-speed', label: 'Speed', value: selectedSpeedValue.value })
+      chips.push({ id: 'manual-speed', label: '滑移速度', value: selectedSpeedValue.value })
+    }
+    if (selectedShearRateValue.value) {
+      chips.push({ id: 'manual-shear-rate', label: '剪切率', value: selectedShearRateValue.value })
     }
     if (selectedTemperatureValue.value) {
       chips.push({ id: 'manual-temperature', label: 'Temp', value: selectedTemperatureValue.value })
@@ -131,7 +137,20 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
     return false
   }
 
+  function parseTargetRecordId(value: string | number | null | undefined): number | null {
+    if (value == null) return null
+    const normalized = String(value).trim()
+    if (!normalized) return null
+    const parsed = Number(normalized)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+  }
+
   function buildCurrentFilter(): SearchFilter {
+    const targetRecordId = parseTargetRecordId(options.targetRecordId?.value)
+    if (targetRecordId != null) {
+      return { recordId: targetRecordId }
+    }
+
     const dashboardMaterials = filters.materials.length ? [...filters.materials] : []
     const dashboardLubricants = filters.ionicLiquid ? [filters.ionicLiquid] : []
     const dashboardCofMin = filters.cofRange.min ?? undefined
@@ -144,6 +163,7 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
       substrate_coatings: selectedSubstrateCoating.value ? [selectedSubstrateCoating.value] : undefined,
       lubricants: selectedLubricant.value ? [selectedLubricant.value] : dashboardLubricants,
       speed_values: selectedSpeedValue.value ? [selectedSpeedValue.value] : undefined,
+      shear_rate_values: selectedShearRateValue.value ? [selectedShearRateValue.value] : undefined,
       temperature_values: selectedTemperatureValue.value ? [selectedTemperatureValue.value] : undefined,
       potential_values: selectedPotentialValue.value ? [selectedPotentialValue.value] : undefined,
       water_content_values: selectedWaterContentValue.value ? [selectedWaterContentValue.value] : undefined,
@@ -193,6 +213,7 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
     selectedSubstrateMaterial.value = ''
     selectedSubstrateCoating.value = ''
     selectedSpeedValue.value = ''
+    selectedShearRateValue.value = ''
     selectedTemperatureValue.value = ''
     selectedPotentialValue.value = ''
     selectedWaterContentValue.value = ''
@@ -232,6 +253,17 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
     },
   )
 
+  if (options.targetRecordId) {
+    watch(
+      options.targetRecordId,
+      () => {
+        currentPage.value = 1
+        markGraphDirty()
+        void fetchData()
+      },
+    )
+  }
+
   watch(
     filters,
     () => {
@@ -251,6 +283,7 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
     selectedSubstrateMaterial,
     selectedSubstrateCoating,
     selectedSpeedValue,
+    selectedShearRateValue,
     selectedTemperatureValue,
     selectedPotentialValue,
     selectedWaterContentValue,

@@ -4,6 +4,7 @@ Handles file-based operations including reprocessing of Literature records.
 """
 
 import json
+import math
 import os
 import re
 import uuid
@@ -32,18 +33,44 @@ from services.llm.utils import normalize_record_value
 from knowledge_base import normalize_ionic_liquid
 from services.score_service import calculate_confidence
 from services.fallback_extraction_service import extract_metadata_fallback, extract_table_fallback_records
-from services.il_resolver_service import filter_to_supported_ionic_liquid_records, resolve_il
+from services.il_resolver_service import ANION_DB, CATION_DB, filter_to_supported_ionic_liquid_records, resolve_il
 from services.extraction_trace_service import (
     add_extraction_candidates,
     create_extraction_run,
     finalize_extraction_run,
     update_extraction_run_progress,
 )
+from utils.cof_extraction import derive_cof_extracted, normalize_cof_extracted, serialize_cof_extracted
+from utils.lubricant_mixture import (
+    compact_lubricant_label,
+    components_for_record,
+    format_lubricant_tooltip,
+    normalize_lubricant_components,
+    parse_lubricant_components,
+    serialize_lubricant_components,
+)
+from utils.structured_conditions import (
+    derive_load_conditions,
+    derive_tribological_system,
+    normalize_load_conditions,
+    normalize_tribological_system,
+    serialize_load_conditions,
+    serialize_tribological_system,
+)
+from utils.speed_conditions import (
+    derive_speed_conditions,
+    normalize_speed_conditions,
+    serialize_speed_conditions,
+    speed_value_from_conditions,
+)
 from models.tribology import TribologyData as ExtractTribologyData
 from security import AuthPrincipal, RequestScope, build_scope_key, can_manage_literature
+from utils.tribopair import composite_roughness_label
 
 TEMP_UPLOAD_DIR = "temp_uploads"
+DEFAULT_TEMPERATURE_VALUE = "298.15 K"
 logger = logging.getLogger(__name__)
+_SOURCE_ANCHOR_CACHE: dict[tuple[str, str, int, str], Optional[dict[str, Any]]] = {}
 
 
 def _resolve_confidence(raw: object, record_like: dict) -> float:
@@ -178,12 +205,15 @@ def _resolve_existing_path(raw_path: Optional[str]) -> Optional[str]:
     if not raw_path:
         return None
 
+    normalized_path = str(raw_path).replace("\\", "/")
     candidates = [raw_path]
-    if not os.path.isabs(raw_path):
+    if normalized_path != raw_path:
+        candidates.append(normalized_path)
+    if not os.path.isabs(normalized_path):
         backend_root = os.path.dirname(os.path.dirname(__file__))
         workspace_root = os.path.dirname(backend_root)
-        candidates.append(os.path.abspath(os.path.join(backend_root, raw_path)))
-        candidates.append(os.path.abspath(os.path.join(workspace_root, raw_path)))
+        candidates.append(os.path.abspath(os.path.join(backend_root, normalized_path)))
+        candidates.append(os.path.abspath(os.path.join(workspace_root, normalized_path)))
 
     for p in candidates:
         if p and os.path.exists(p):
@@ -208,6 +238,7 @@ def _build_record_uniqueness_key(item: dict) -> tuple:
         normalize_record_value(item.get("film_thickness")),
         normalize_record_value(item.get("residual_film_thickness_d")),
         normalize_record_value(item.get("layer_spacing_delta")),
+        normalize_record_value(item.get("regime")),
         normalize_record_value(item.get("source")),
     )
 
@@ -335,6 +366,10 @@ def _normalize_il_token(token: str) -> str:
     text = str(token or "").strip()
     text = re.sub(r"\]\s+\[", "][", text)
     text = re.sub(r"\]\s*i\s*\[", "]i[", text, flags=re.IGNORECASE)
+    compact = re.sub(r"\s+", "", text)
+    mixed_left = re.fullmatch(r"(\[[^\[\]]+?\])([A-Za-z][A-Za-z0-9,+\-()]{1,24})", compact)
+    if mixed_left:
+        return f"{mixed_left.group(1)}[{mixed_left.group(2)}]"
     return text
 
 
@@ -354,12 +389,22 @@ def _extract_il_candidates(text: str) -> list[str]:
         m = re.search(r"(\[[^\[\]]+?\]\s*(?:i\s*)?\[[^\[\]]+?\])", token)
         if m:
             return re.sub(r"\s+", "", m.group(1)).replace("]i[", "][")
+        mixed = re.search(r"(\[[^\[\]]+?\]\s*[A-Za-z][A-Za-z0-9,+\-()]{1,24})", token)
+        if mixed:
+            return _normalize_il_token(mixed.group(1))
+        compact_il_like = bool(
+            re.fullmatch(r"[A-Za-z0-9(),+\-\[\]]{2,48}", token)
+            or re.fullmatch(r"[A-Za-z0-9(),+\-\[\]]{2,24}\s+[A-Za-z0-9(),+\-\[\]]{1,24}", token)
+        )
+        if not compact_il_like:
+            return ""
         if len(token) > 80:
             return ""
         return token
     patterns = [
         r"(\[[^\[\]]+?\]\s*\[[^\[\]]+?\])",
         r"(\[[^\[\]]+?\]\s*i\s*\[[^\[\]]+?\])",
+        r"(\[[^\[\]]+?\]\s*[A-Za-z][A-Za-z0-9,+\-()]{1,24})",
     ]
     for pat in patterns:
         for hit in re.findall(pat, text, flags=re.IGNORECASE):
@@ -382,8 +427,13 @@ def _extract_il_candidates(text: str) -> list[str]:
             candidates.append("Ethaline")
     # Last-resort alias normalization for non-bracket notations.
     normalized_text = _canonicalize_il(normalize_ionic_liquid(text))
-    if normalized_text and normalized_text not in candidates and not _is_unknown_il(normalized_text):
-        candidates.append(normalized_text)
+    normalized_token = _normalize_il_token(normalized_text) if normalized_text else ""
+    if (
+        normalized_token
+        and not _is_unknown_il(normalized_token)
+        and all(_normalize_il_token(existing) != normalized_token for existing in candidates)
+    ):
+        candidates.append(normalized_token)
     return candidates
 
 
@@ -663,6 +713,29 @@ def _resolve_primary_metric_key(item: dict[str, Any] | dict[str, object]) -> Opt
     return None
 
 
+def _is_default_temperature_value(value: Any) -> bool:
+    normalized = re.sub(r"\s+", "", _filled_text(value).lower())
+    return normalized in {"298.15k", "298k"}
+
+
+def _temperature_default_evidence_entry(value: Any, confidence: float) -> dict[str, Any]:
+    return {
+        "value": _filled_text(value) or DEFAULT_TEMPERATURE_VALUE,
+        "confidence": confidence,
+        "evidence": {
+            "source_type": "inferred",
+            "page": None,
+            "source_label": "Default condition",
+            "quote": "Defaulted to 298.15 K when no explicit experimental temperature is reported.",
+            "bbox": None,
+            "sample_id": None,
+            "matched_text": None,
+        },
+        "grounding_mode": "inferred",
+        "grounding_note": "No explicit temperature found; stored as the default room-temperature condition.",
+    }
+
+
 def _resolve_required_field_keys(field_evidence_map: dict[str, Any]) -> list[str]:
     required = ["material", "ionic_liquid"]
     metric_key = _resolve_primary_metric_key(field_evidence_map)
@@ -694,11 +767,954 @@ def _build_field_evidence_entry(
             "quote": quote,
             "bbox": bbox,
             "sample_id": sample_id,
+            "matched_text": None,
         },
     }
 
 
-def _build_field_evidence_map(item: dict, db_record: TribologyData, *, confidence: float) -> dict[str, Any]:
+def _field_value_for_evidence(item: dict[str, Any], field_key: str) -> Any:
+    if field_key == "material":
+        return item.get("material_name")
+    if field_key == "ionic_liquid":
+        return item.get("ionic_liquid", item.get("lubricant"))
+    if field_key == "cof":
+        return item.get("cof")
+    if field_key == "friction_force":
+        return item.get("friction_force")
+    if field_key == "wear_rate":
+        return item.get("wear_rate")
+    if field_key == "film_thickness":
+        return item.get("film_thickness")
+    if field_key == "residual_film_thickness_d":
+        return item.get("residual_film_thickness_d")
+    if field_key == "layer_spacing_delta":
+        return item.get("layer_spacing_delta")
+    if field_key == "regime":
+        return item.get("regime")
+    if field_key == "surface_roughness":
+        return item.get("surface_roughness")
+    if field_key == "probe_roughness":
+        return item.get("probe_roughness")
+    if field_key == "substrate_roughness":
+        return item.get("substrate_roughness")
+    if field_key == "load":
+        return item.get("load") or item.get("normal_load")
+    if field_key == "speed":
+        return item.get("speed")
+    if field_key == "shear_rate":
+        return item.get("shear_rate")
+    if field_key == "temperature":
+        return item.get("temperature")
+    if field_key == "water_content":
+        return item.get("water_content")
+    if field_key == "potential":
+        return item.get("potential")
+    return None
+
+
+def _field_semantic_type(field_key: str) -> str:
+    if field_key == "material":
+        return "material"
+    if field_key == "ionic_liquid":
+        return "lubricant"
+    if field_key == "cof":
+        return "cof"
+    if field_key == "friction_force":
+        return "friction_force"
+    if field_key == "wear_rate":
+        return "wear_rate"
+    if field_key == "film_thickness":
+        return "film_thickness"
+    if field_key == "residual_film_thickness_d":
+        return "thickness"
+    if field_key == "layer_spacing_delta":
+        return "spacing"
+    if field_key == "regime":
+        return "regime"
+    if field_key == "surface_roughness":
+        return "roughness"
+    if field_key in {"probe_roughness", "substrate_roughness"}:
+        return "roughness"
+    if field_key == "load":
+        return "load"
+    if field_key == "speed":
+        return "speed"
+    if field_key == "shear_rate":
+        return "shear_rate"
+    if field_key == "temperature":
+        return "temperature"
+    if field_key == "water_content":
+        return "water_content"
+    if field_key == "potential":
+        return "potential"
+    return ""
+
+
+def _ionic_liquid_query_variants(value: Any) -> list[str]:
+    text = _filled_text(value)
+    if not text:
+        return []
+
+    resolved = resolve_il(text)
+    cation = str(resolved.get("cation") or "").strip()
+    anion = str(resolved.get("anion") or "").strip()
+    if not cation or not anion:
+        return []
+
+    cation_variants = [cation]
+    anion_variants = [anion]
+    cation_variants.extend(
+        str(alias).strip()
+        for alias in (CATION_DB.get(cation, {}) or {}).get("aliases", [])
+        if str(alias or "").strip()
+    )
+    anion_variants.extend(
+        str(alias).strip().lstrip("[").rstrip("]").rstrip("-")
+        for alias in (ANION_DB.get(anion, {}) or {}).get("aliases", [])
+        if str(alias or "").strip()
+    )
+
+    variants: list[str] = []
+    for cation_variant in cation_variants[:8]:
+        for anion_variant in anion_variants[:6]:
+            if not cation_variant or not anion_variant:
+                continue
+            variants.extend(
+                [
+                    f"[{cation_variant}][{anion_variant}]",
+                    f"[{cation_variant}]{anion_variant}",
+                    f"{cation_variant} {anion_variant}",
+                ]
+            )
+    return variants
+
+
+def _micro_text_variants(text: str) -> list[str]:
+    variants = [text]
+    if "μ" in text or "µ" in text:
+        variants.extend([
+            text.replace("μ", "µ"),
+            text.replace("µ", "μ"),
+        ])
+    return list(dict.fromkeys(candidate for candidate in variants if candidate))
+
+
+def _field_context_query_variants(field_key: str, value: Any) -> list[str]:
+    text = _filled_text(value)
+    if not text:
+        return []
+
+    queries: list[str] = []
+    if field_key == "material":
+        lowered = text.lower()
+        if not any(token in lowered for token in ("[", "]")):
+            queries.extend([
+                f"freshly cleaved {text} surface",
+                f"{text} surface",
+                f"bare {text}",
+                f"uncoated {text}",
+            ])
+    elif field_key == "surface_roughness":
+        queries.extend([
+            f"RMS roughness was smaller than {text}",
+            f"roughness was smaller than {text}",
+            f"smaller than {text}",
+            f"RMS roughness {text}",
+            f"roughness {text}",
+        ])
+    elif field_key == "speed":
+        for variant in _micro_text_variants(text):
+            queries.extend([
+                f"constant sliding velocity of {variant}",
+                f"sliding velocity of {variant}",
+                f"performed at {variant}",
+                f"at {variant}",
+            ])
+    elif field_key == "shear_rate":
+        queries.extend([
+            f"shear rate {text}",
+            f"shear rates {text}",
+            f"at any shear rate investigated {text}",
+            str(text),
+        ])
+    elif field_key == "regime":
+        queries.extend([
+            text,
+            text.replace("layers", "film").replace("layer", "film"),
+            "structural force regions",
+            "repulsive structural force regions",
+        ])
+    elif field_key == "load":
+        nums = re.findall(r"\d+(?:\.\d+)?", text)
+        unit_match = re.search(r"\b(nN|mN|N)\b", text, flags=re.IGNORECASE)
+        unit = unit_match.group(1) if unit_match else "nN"
+        if len(nums) >= 2:
+            low, high = nums[0], nums[1]
+            queries.extend([
+                f"between {low} and {high} {unit}",
+                f"{low} and {high} {unit}",
+                f"{low} to {high} {unit}",
+                f"{low}-{high} {unit}",
+                f"{low}–{high} {unit}",
+                f"normal loads between {low} and {high} {unit}",
+                f"normal load ranging from {low} to {high} {unit}",
+            ])
+    return queries
+
+
+def _field_query_variants(field_key: str, value: Any) -> list[str]:
+    from services.pdf_service import build_term_query_variants
+
+    text = _filled_text(value)
+    if not text:
+        return []
+
+    queries = _field_context_query_variants(field_key, text)
+    queries.extend(build_term_query_variants(text))
+    if field_key == "ionic_liquid":
+        queries.extend(_ionic_liquid_query_variants(text))
+    if field_key == "cof":
+        numeric_match = re.search(r"-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?", text)
+        if numeric_match:
+            numeric = numeric_match.group(0)
+            queries.extend([
+                numeric,
+                f"μ = {numeric}",
+                f"mu = {numeric}",
+                f"COF {numeric}",
+                f"coefficient of friction {numeric}",
+            ])
+    elif field_key == "potential":
+        queries.extend([f"potential {text}", f"voltage {text}"])
+        magnitude_match = re.search(r"([+-]?\d+(?:[\.:]\d+)?)", text)
+        if magnitude_match:
+            magnitude = magnitude_match.group(1)
+            decimal_magnitude = magnitude.replace(":", ".")
+            colon_magnitude = magnitude.replace(".", ":")
+            for candidate in {magnitude, decimal_magnitude, colon_magnitude}:
+                queries.extend([
+                    f"{candidate} V",
+                    f"{candidate}V",
+                    f"potential {candidate} V",
+                    f"voltage {candidate} V",
+                ])
+                signed_parts = re.match(r"^([+-])(.+)$", candidate)
+                if signed_parts:
+                    sign_variants = ["+", "\uff0b"] if signed_parts.group(1) == "+" else ["-", "\u2212", "\u2013"]
+                    for sign_variant in sign_variants:
+                        signed = f"{sign_variant}{signed_parts.group(2)}"
+                        spaced = f"{sign_variant} {signed_parts.group(2)}"
+                        queries.extend([
+                            f"{signed} V",
+                            f"{signed}V",
+                            f"{spaced} V",
+                            f"{spaced}V",
+                            f"potential {signed} V",
+                            f"potential {spaced} V",
+                            f"voltage {signed} V",
+                            f"voltage {spaced} V",
+                        ])
+        if re.search(r"\bocp\b", text, flags=re.IGNORECASE):
+            queries.extend(["OCP", "open circuit potential", "at OCP", "potential at OCP"])
+    elif field_key == "load":
+        queries.extend([f"load {text}", f"normal load {text}"])
+        if re.search(r"\d+\s*[-–—]\s*\d+\s*n\s*n", text, flags=re.IGNORECASE):
+            queries.extend(["normal load", "normal load (nN)", "load (nN)"])
+    elif field_key == "speed":
+        queries.extend([f"speed {text}", f"scan speed {text}", f"sliding speed {text}"])
+    elif field_key == "shear_rate":
+        queries.extend([f"shear rate {text}", f"shear rates {text}", str(text)])
+    elif field_key == "temperature":
+        queries.extend([f"temperature {text}"])
+    elif field_key == "water_content":
+        queries.extend([f"water content {text}", f"humidity {text}"])
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for query in queries:
+        candidate = re.sub(r"\s+", " ", str(query or "")).strip()
+        if len(candidate) < 2:
+            continue
+        key = candidate.lower().replace("μ", "u").replace("µ", "u")
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(candidate)
+    return deduped
+
+
+def _field_allows_global_context_fallback(field_key: str, value: Any) -> bool:
+    value_text = _filled_text(value)
+    if not value_text:
+        return False
+    if field_key in {"material", "ionic_liquid", "surface_roughness", "regime"}:
+        return True
+    if field_key == "load" and len(re.findall(r"\d+(?:\.\d+)?", value_text)) >= 2:
+        return True
+    return False
+
+
+def _all_numeric_values_match(term: str, matched_text: str) -> bool:
+    from services.pdf_service import extract_numeric_values
+
+    term_values = extract_numeric_values(term)
+    matched_values = extract_numeric_values(matched_text)
+    if not term_values or not matched_values:
+        return False
+    for term_value in term_values:
+        tolerance = max(1e-6, abs(term_value) * 0.01)
+        if not any(abs(term_value - matched_value) <= tolerance for matched_value in matched_values):
+            return False
+    return True
+
+
+def _field_exact_query_variants(field_key: str, value: Any) -> list[str]:
+    from services.pdf_service import build_term_query_variants
+
+    text = _filled_text(value)
+    if not text:
+        return []
+
+    if field_key == "ionic_liquid":
+        return _field_query_variants(field_key, value)
+
+    variants = list(build_term_query_variants(text))
+    has_numeric_value = bool(re.search(r"\d", text))
+    if has_numeric_value:
+        variants = [candidate for candidate in variants if re.search(r"\d", candidate)]
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for variant in variants:
+        candidate = re.sub(r"\s+", " ", str(variant or "")).strip()
+        if len(candidate) < 2:
+            continue
+        key = candidate.lower().replace("μ", "u").replace("µ", "u")
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(candidate)
+    return deduped
+
+
+def _text_explicitly_matches_field_value(field_key: str, value: Any, text: Optional[str]) -> bool:
+    from services.pdf_service import normalize_term_key, numeric_term_matches
+
+    source_text = _filled_text(text)
+    value_text = _filled_text(value)
+    if not source_text or not value_text:
+        return False
+
+    if field_key == "potential":
+        magnitude_match = re.search(r"(\d+(?:\.\d+)?)", value_text)
+        if not magnitude_match:
+            return False
+        magnitude = magnitude_match.group(1)
+        magnitude_pattern = re.escape(magnitude).replace(r"\.", r"[:.]?")
+        if re.search(rf"(?<!\d){magnitude_pattern}\s*[vV](?![A-Za-z])", source_text):
+            return True
+        return False
+
+    normalized_source = normalize_term_key(source_text)
+    for variant in _field_exact_query_variants(field_key, value_text):
+        candidate = _filled_text(variant)
+        if not candidate:
+            continue
+        if normalize_term_key(candidate) and normalize_term_key(candidate) in normalized_source:
+            return True
+        if re.search(r"\d", candidate) and numeric_term_matches(candidate, source_text):
+            if len(re.findall(r"-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?", candidate)) > 1 and not _all_numeric_values_match(candidate, source_text):
+                continue
+            if field_key != "potential" or re.search(r"[vV]|volt|potential", source_text):
+                return True
+    return False
+
+
+def _derive_grounding_metadata(
+    field_key: str,
+    value: Any,
+    evidence: Optional[dict[str, Any]],
+) -> tuple[Optional[str], Optional[str]]:
+    value_text = _filled_text(value)
+    evidence_map = evidence or {}
+    quote = _filled_text(evidence_map.get("quote"))
+    matched_text = _filled_text(evidence_map.get("matched_text"))
+    combined = " ".join(part for part in [matched_text, quote] if part).strip()
+    combined_lower = combined.lower()
+
+    if not _evidence_has_location(evidence_map):
+        return None, None
+
+    if _text_explicitly_matches_field_value(field_key, value_text, matched_text) or _text_explicitly_matches_field_value(field_key, value_text, quote):
+        return "explicit", None
+
+    normalized_value = value_text.strip().lower()
+    source_is_precise = _source_label_has_precise_region(evidence_map.get("source_type"), evidence_map.get("source_label"))
+    if (
+        field_key == "temperature"
+        and source_is_precise
+        and normalized_value in {"298 k", "298k", "293 k", "293k"}
+        and any(token in combined_lower for token in ("room temperature", "room-temperature", "ambient temperature"))
+    ):
+        return "derived", 'Normalized from room-temperature wording.'
+    if (
+        field_key == "potential"
+        and source_is_precise
+        and re.search(r"\bocp\b|open circuit potential", normalized_value, flags=re.IGNORECASE)
+        and any(token in combined_lower for token in ("open circuit potential", "ocp"))
+    ):
+        return "derived", 'Derived from open-circuit-potential wording.'
+    return None, None
+
+
+def _refine_potential_evidence_from_metric_context(entries: dict[str, Any]) -> dict[str, Any]:
+    return _refine_potential_evidence_from_metric_context_with_pdf(entries, None)
+
+
+def _refine_potential_bbox_near_metric_evidence(
+    *,
+    file_path: Optional[str],
+    potential_value: Any,
+    metric_evidence: dict[str, Any],
+) -> Optional[dict[str, Any]]:
+    from utils.pdf_coords import find_text_coordinates
+
+    pdf_path = _resolve_existing_path(file_path)
+    page_num = int(metric_evidence.get("page") or 0)
+    metric_bbox = metric_evidence.get("bbox")
+    if not pdf_path or page_num < 1 or not isinstance(metric_bbox, list) or len(metric_bbox) != 4:
+        return None
+
+    magnitude_match = re.search(r"(\d+(?:\.\d+)?)", _filled_text(potential_value))
+    if not magnitude_match:
+        return None
+    magnitude = magnitude_match.group(1)
+    value_text = _filled_text(potential_value)
+    sign_match = re.search(r"([+-])\s*\d", value_text)
+    sign = sign_match.group(1) if sign_match else ""
+    sign_variants = [""]
+    if sign == "+":
+        sign_variants = ["+", "\uff0b"]
+    elif sign == "-":
+        sign_variants = ["-", "\u2212", "\u2013"]
+
+    query_candidates = []
+    for sign_variant in sign_variants:
+        query_candidates.extend([
+            f"{sign_variant}{magnitude} V",
+            f"{sign_variant}{magnitude}V",
+        ])
+        if sign_variant:
+            query_candidates.extend([
+                f"{sign_variant} {magnitude} V",
+                f"{sign_variant} {magnitude}V",
+            ])
+    if not sign:
+        query_candidates.extend([
+            f"{magnitude} V",
+            f"{magnitude}V",
+        ])
+    if "." in magnitude:
+        colon_magnitude = magnitude.replace(".", ":")
+        for sign_variant in sign_variants:
+            query_candidates.extend([
+                f"{sign_variant}{colon_magnitude} V",
+                f"{sign_variant}{colon_magnitude}V",
+            ])
+            if sign_variant:
+                query_candidates.extend([
+                    f"{sign_variant} {colon_magnitude} V",
+                    f"{sign_variant} {colon_magnitude}V",
+                ])
+        if not sign:
+            query_candidates.extend([
+                f"{colon_magnitude} V",
+                f"{colon_magnitude}V",
+            ])
+
+    try:
+        matches: list[tuple[float, fitz.Rect, str]] = []
+        hits = find_text_coordinates(
+            pdf_path,
+            [{
+                "id": "potential",
+                "queries": query_candidates,
+                "semantic_type": "potential",
+                "page_hint": page_num,
+                "restrict_to_page_hint": True,
+                "anchor_bbox": metric_bbox,
+                "restrict_to_anchor_bbox": False,
+            }],
+        )
+        for hit in hits:
+            w = float(hit.get("w") or 0)
+            h = float(hit.get("h") or 0)
+            if w <= 0 or h <= 0:
+                continue
+            x0 = float(hit.get("x") or 0)
+            y0 = float(hit.get("y") or 0)
+            rect = fitz.Rect(x0, y0, x0 + w, y0 + h)
+            rect_bbox = [float(rect.x0), float(rect.y0), float(rect.x1), float(rect.y1)]
+            score = _bbox_center_distance(metric_bbox, rect_bbox)
+            matches.append((score, rect, _filled_text(hit.get("matched_text")) or _filled_text(potential_value)))
+        if not matches:
+            return None
+        _, best_rect, matched_text = min(matches, key=lambda item: item[0])
+        bbox = [float(best_rect.x0), float(best_rect.y0), float(best_rect.x1), float(best_rect.y1)]
+        return {
+            "page": page_num,
+            "bbox": bbox,
+            "matched_text": _filled_text(matched_text) or _filled_text(potential_value),
+            "quote": _extract_field_quote_from_bbox(pdf_path, page_num, bbox, fallback_term=_filled_text(matched_text) or _filled_text(potential_value)),
+        }
+    except Exception:
+        return None
+
+
+def _refine_potential_evidence_from_metric_context_with_pdf(
+    entries: dict[str, Any],
+    file_path: Optional[str],
+) -> dict[str, Any]:
+    potential_entry = entries.get("potential")
+    if not isinstance(potential_entry, dict) or not _filled_text(potential_entry.get("value")):
+        return entries
+
+    potential_value = potential_entry.get("value")
+    potential_evidence = potential_entry.get("evidence") or {}
+    if (
+        str(potential_entry.get("grounding_mode") or "").strip().lower() == "explicit"
+        and _evidence_has_location(potential_evidence)
+    ):
+        return entries
+
+    primary_metric_keys = (
+        "cof",
+        "friction_force",
+        "wear_rate",
+        "film_thickness",
+        "residual_film_thickness_d",
+        "layer_spacing_delta",
+        "surface_roughness",
+    )
+    for metric_key in primary_metric_keys:
+        metric_entry = entries.get(metric_key)
+        if not isinstance(metric_entry, dict):
+            continue
+        metric_evidence = metric_entry.get("evidence") or {}
+        refined_bbox_evidence = _refine_potential_bbox_near_metric_evidence(
+            file_path=file_path,
+            potential_value=potential_value,
+            metric_evidence=metric_evidence,
+        )
+        if not refined_bbox_evidence:
+            metric_quote = _filled_text(metric_evidence.get("quote"))
+            if not _text_explicitly_matches_field_value("potential", potential_value, metric_quote):
+                continue
+        potential_entry["evidence"] = {
+            **metric_evidence,
+            **(refined_bbox_evidence or {}),
+            "matched_text": _filled_text((refined_bbox_evidence or {}).get("matched_text")) or _filled_text(potential_value),
+        }
+        entries["potential"] = potential_entry
+        return entries
+
+    return entries
+
+
+def _extract_field_quote_from_bbox(
+    pdf_path: Optional[str],
+    page_num: Optional[int],
+    bbox: Optional[list[float]],
+    *,
+    fallback_term: Optional[str] = None,
+) -> Optional[str]:
+    if not pdf_path or not os.path.exists(pdf_path) or not page_num or not bbox or len(bbox) != 4:
+        return _filled_text(fallback_term) or None
+
+    try:
+        doc = fitz.open(pdf_path)
+        page = doc[int(page_num) - 1]
+        x0, y0, x1, y1 = [float(value) for value in bbox]
+        clip = fitz.Rect(
+            max(0, x0 - 140),
+            max(0, y0 - 45),
+            min(page.rect.width, x1 + 220),
+            min(page.rect.height, y1 + 45),
+        )
+        snippet = re.sub(r"\s+", " ", (page.get_text("text", clip=clip) or "")).strip()
+        doc.close()
+        if snippet:
+            return snippet[:420]
+    except Exception:
+        return _filled_text(fallback_term) or None
+
+    return _filled_text(fallback_term) or None
+
+
+def _bbox_intersects(anchor_bbox: Optional[list[float]], candidate_bbox: Optional[list[float]]) -> bool:
+    if not anchor_bbox or not candidate_bbox or len(anchor_bbox) != 4 or len(candidate_bbox) != 4:
+        return False
+    ax0, ay0, ax1, ay1 = [float(value) for value in anchor_bbox]
+    bx0, by0, bx1, by1 = [float(value) for value in candidate_bbox]
+    return max(ax0, bx0) < min(ax1, bx1) and max(ay0, by0) < min(ay1, by1)
+
+
+def _bbox_center_distance(anchor_bbox: Optional[list[float]], candidate_bbox: Optional[list[float]]) -> float:
+    if not anchor_bbox or not candidate_bbox or len(anchor_bbox) != 4 or len(candidate_bbox) != 4:
+        return float("inf")
+    ax0, ay0, ax1, ay1 = [float(value) for value in anchor_bbox]
+    bx0, by0, bx1, by1 = [float(value) for value in candidate_bbox]
+    anchor_cx = (ax0 + ax1) / 2.0
+    anchor_cy = (ay0 + ay1) / 2.0
+    candidate_cx = (bx0 + bx1) / 2.0
+    candidate_cy = (by0 + by1) / 2.0
+    return math.hypot(anchor_cx - candidate_cx, anchor_cy - candidate_cy)
+
+
+def _source_label_has_precise_region(source_type: Optional[str], source_label: Optional[str]) -> bool:
+    normalized_type = str(source_type or "").strip().lower()
+    if normalized_type in {"figure", "table"}:
+        return True
+    source_text = _filled_text(source_label)
+    return bool(re.search(r"\b(?:fig(?:ure)?\.?|table|tab\.?)\s*[a-z]?\d+", source_text, flags=re.IGNORECASE))
+
+
+def _field_location_match_is_reliable(field_key: str, value: Any, evidence: dict[str, Any]) -> bool:
+    matched_text = _filled_text(evidence.get("matched_text"))
+    quote = _filled_text(evidence.get("quote"))
+    if _text_explicitly_matches_field_value(field_key, value, matched_text):
+        return True
+    if _text_explicitly_matches_field_value(field_key, value, quote):
+        return True
+
+    combined = " ".join(part for part in [matched_text, quote] if part).lower()
+    value_text = _filled_text(value).strip().lower()
+    source_is_precise = _source_label_has_precise_region(evidence.get("source_type"), evidence.get("source_label"))
+    if field_key == "temperature" and source_is_precise and value_text in {"298 k", "298k", "293 k", "293k"}:
+        return any(token in combined for token in ("room temperature", "room-temperature", "ambient temperature"))
+    if field_key == "potential" and source_is_precise and re.search(r"\bocp\b|open circuit potential", value_text, flags=re.IGNORECASE):
+        return "ocp" in combined or "open circuit potential" in combined
+    return False
+
+
+def _select_best_field_hit(
+    hits: list[dict[str, Any]],
+    *,
+    page_hint: Optional[int],
+    anchor_bbox: Optional[list[float]],
+) -> Optional[dict[str, Any]]:
+    valid_hits = [
+        hit for hit in hits
+        if float(hit.get("w") or 0) > 0 and float(hit.get("h") or 0) > 0
+    ]
+    if not valid_hits:
+        return None
+
+    def _score(hit: dict[str, Any]) -> tuple[float, float, float, float]:
+        page = int(hit.get("page") or page_hint or 1)
+        x0 = float(hit.get("x") or 0)
+        y0 = float(hit.get("y") or 0)
+        w = float(hit.get("w") or 0)
+        h = float(hit.get("h") or 0)
+        bbox = [x0, y0, x0 + w, y0 + h]
+        page_distance = abs(page - page_hint) if page_hint else 0
+        intersects_anchor = 0 if _bbox_intersects(anchor_bbox, bbox) else 1
+        anchor_distance = _bbox_center_distance(anchor_bbox, bbox)
+        area = max(w, 0.0) * max(h, 0.0)
+        return (page_distance, intersects_anchor, anchor_distance, area)
+
+    return min(valid_hits, key=_score)
+
+
+def _locate_field_evidence_for_value(
+    *,
+    file_path: Optional[str],
+    field_key: str,
+    field_value: Any,
+    source_label: Optional[str],
+    page_hint: Optional[int],
+    anchor_bbox: Optional[list[float]],
+    source_type: Optional[str],
+) -> Optional[dict[str, Any]]:
+    from utils.pdf_coords import find_figure_bbox, find_text_coordinates, normalize_source_label
+
+    pdf_path = _resolve_existing_path(file_path)
+    if not pdf_path:
+        return None
+
+    value_text = _filled_text(field_value)
+    if not value_text:
+        return None
+
+    normalized_source = normalize_source_label(source_label) or _filled_text(source_label) or None
+    resolved_page_hint = int(page_hint) if page_hint else None
+    resolved_anchor_bbox = _parse_json_bbox(anchor_bbox)
+    effective_source_type = str(source_type or _infer_source_type(normalized_source)).strip().lower()
+    if resolved_anchor_bbox and not _source_label_has_precise_region(effective_source_type, normalized_source):
+        resolved_anchor_bbox = None
+
+    if normalized_source and not resolved_anchor_bbox and _source_label_has_precise_region(effective_source_type, normalized_source):
+        try:
+            fig_page, fig_bbox = find_figure_bbox(
+                pdf_path,
+                normalized_source,
+                page_hint=resolved_page_hint,
+                restrict_to_page_hint=False,
+            )
+            if fig_page and fig_bbox:
+                if not resolved_page_hint:
+                    resolved_page_hint = int(fig_page)
+                resolved_anchor_bbox = [float(value) for value in fig_bbox]
+        except Exception:
+            pass
+
+    queries = _field_query_variants(field_key, value_text)
+    if not queries:
+        return None
+
+    def _find_hit(*, use_source_context: bool) -> tuple[Optional[dict[str, Any]], bool]:
+        has_source_context = bool(resolved_page_hint or resolved_anchor_bbox)
+        if use_source_context and not has_source_context:
+            return None, False
+        if not use_source_context and not _field_allows_global_context_fallback(field_key, value_text):
+            return None, False
+
+        search_page_hint = resolved_page_hint if use_source_context else None
+        search_anchor_bbox = resolved_anchor_bbox if use_source_context else None
+        hits = find_text_coordinates(
+            pdf_path,
+            [{
+                "id": field_key,
+                "queries": queries,
+                "semantic_type": _field_semantic_type(field_key),
+                "page_hint": search_page_hint,
+                "restrict_to_page_hint": bool(search_page_hint),
+                "max_page_distance": 0 if search_page_hint else None,
+                "anchor_bbox": search_anchor_bbox,
+                "restrict_to_anchor_bbox": bool(search_anchor_bbox),
+            }],
+        )
+        return _select_best_field_hit(hits, page_hint=search_page_hint, anchor_bbox=search_anchor_bbox), not use_source_context
+
+    hit: Optional[dict[str, Any]] = None
+    used_global_fallback = False
+    if field_key == "load":
+        hit, used_global_fallback = _find_hit(use_source_context=False)
+    if not hit:
+        hit, used_global_fallback = _find_hit(use_source_context=True)
+    if not hit:
+        hit, used_global_fallback = _find_hit(use_source_context=False)
+    if not hit:
+        return None
+
+    page = int(hit.get("page") or resolved_page_hint or 1)
+    x0 = float(hit.get("x") or 0)
+    y0 = float(hit.get("y") or 0)
+    w = float(hit.get("w") or 0)
+    h = float(hit.get("h") or 0)
+    bbox = [x0, y0, x0 + w, y0 + h]
+    matched_text = _filled_text(hit.get("matched_text")) or value_text
+    quote = _extract_field_quote_from_bbox(pdf_path, page, bbox, fallback_term=matched_text)
+    resolved_source_type = effective_source_type or _infer_source_type(normalized_source)
+    resolved_source_label = normalized_source
+    if used_global_fallback:
+        resolved_source_type = "text"
+        resolved_source_label = None
+    if not used_global_fallback and resolved_page_hint and page != resolved_page_hint:
+        return None
+    if not used_global_fallback and resolved_anchor_bbox and not _bbox_intersects(resolved_anchor_bbox, bbox):
+        return None
+
+    located = {
+        "source_type": resolved_source_type,
+        "page": page,
+        "source_label": resolved_source_label,
+        "quote": quote,
+        "bbox": bbox,
+        "matched_text": matched_text,
+    }
+    if not _field_location_match_is_reliable(field_key, value_text, located):
+        return None
+    return located
+
+
+def _evidence_has_location(evidence: Any) -> bool:
+    if not isinstance(evidence, dict):
+        return False
+    bbox = evidence.get("bbox")
+    return bool(evidence.get("page") and isinstance(bbox, list) and len(bbox) >= 4)
+
+
+def _locate_source_anchor_evidence(
+    *,
+    file_path: Optional[str],
+    source_label: Optional[str],
+    page_hint: Optional[int],
+    source_type: Optional[str],
+) -> Optional[dict[str, Any]]:
+    from utils.pdf_coords import find_figure_bbox, find_text_coordinates, normalize_source_label
+
+    pdf_path = _resolve_existing_path(file_path)
+    if not pdf_path:
+        return None
+
+    normalized_source = normalize_source_label(source_label) or _filled_text(source_label)
+    resolved_page_hint = int(page_hint) if page_hint else 0
+    effective_source_type = str(source_type or _infer_source_type(normalized_source)).strip().lower()
+
+    if not normalized_source and not resolved_page_hint:
+        return None
+
+    cache_key = (pdf_path, normalized_source, resolved_page_hint, effective_source_type)
+    if cache_key in _SOURCE_ANCHOR_CACHE:
+        cached = _SOURCE_ANCHOR_CACHE[cache_key]
+        if not cached:
+            return None
+        return {
+            **cached,
+            "bbox": list(cached.get("bbox") or []),
+        }
+
+    def _remember(value: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+        _SOURCE_ANCHOR_CACHE[cache_key] = value
+        if not value:
+            return None
+        return {
+            **value,
+            "bbox": list(value.get("bbox") or []),
+        }
+
+    if normalized_source:
+        try:
+            anchor_page, anchor_bbox = find_figure_bbox(
+                pdf_path,
+                normalized_source,
+                page_hint=resolved_page_hint or None,
+                restrict_to_page_hint=False,
+            )
+            if anchor_page and anchor_bbox:
+                bbox = [float(value) for value in anchor_bbox]
+                quote = _extract_field_quote_from_bbox(
+                    pdf_path,
+                    int(anchor_page),
+                    bbox,
+                    fallback_term=normalized_source,
+                )
+                return _remember({
+                    "source_type": effective_source_type or _infer_source_type(normalized_source),
+                    "page": int(anchor_page),
+                    "source_label": normalized_source,
+                    "quote": quote or normalized_source,
+                    "bbox": bbox,
+                    "matched_text": normalized_source,
+                })
+        except Exception:
+            pass
+
+        source_words = normalized_source.split()
+        source_queries = [
+            normalized_source,
+            " ".join(source_words[:14]),
+            normalized_source[:120],
+        ]
+        source_queries = [
+            query.strip()
+            for query in dict.fromkeys(source_queries)
+            if len(query.strip()) >= 6
+        ]
+        try:
+            hits = find_text_coordinates(
+                pdf_path,
+                [{
+                    "id": "source_anchor",
+                    "queries": source_queries,
+                    "semantic_type": "source",
+                    "page_hint": resolved_page_hint or None,
+                    "max_page_distance": 0 if resolved_page_hint else None,
+                    "restrict_to_page_hint": bool(resolved_page_hint),
+                }],
+            )
+            hit = _select_best_field_hit(hits, page_hint=resolved_page_hint or None, anchor_bbox=None)
+            if hit:
+                page = int(hit.get("page") or resolved_page_hint or 1)
+                x0 = float(hit.get("x") or 0)
+                y0 = float(hit.get("y") or 0)
+                w = float(hit.get("w") or 0)
+                h = float(hit.get("h") or 0)
+                bbox = [x0, y0, x0 + w, y0 + h]
+                matched_text = _filled_text(hit.get("matched_text")) or normalized_source
+                quote = _extract_field_quote_from_bbox(pdf_path, page, bbox, fallback_term=matched_text)
+                return _remember({
+                    "source_type": effective_source_type or "text",
+                    "page": page,
+                    "source_label": normalized_source,
+                    "quote": quote or matched_text,
+                    "bbox": bbox,
+                    "matched_text": matched_text,
+                })
+        except Exception:
+            pass
+
+    return _remember(None)
+
+
+def _field_evidence_map_looks_generic(field_evidence_map: dict[str, Any]) -> bool:
+    signatures: dict[tuple[Any, ...], int] = {}
+    located_entry_count = 0
+    for key, entry in (field_evidence_map or {}).items():
+        if key == "source_page" or not isinstance(entry, dict) or not _filled_text(entry.get("value")):
+            continue
+        evidence = entry.get("evidence") or {}
+        bbox = evidence.get("bbox")
+        if not evidence.get("page") or not (isinstance(bbox, list) and len(bbox) >= 4):
+            continue
+        located_entry_count += 1
+        signature = (
+            evidence.get("page"),
+            _filled_text(evidence.get("source_label")),
+            tuple(round(float(v), 2) for v in bbox[:4]),
+            _filled_text(evidence.get("quote"))[:160],
+        )
+        signatures[signature] = signatures.get(signature, 0) + 1
+    if not signatures or located_entry_count < 3:
+        return False
+    dominant_count = max(signatures.values())
+    return dominant_count >= 3 and (dominant_count / located_entry_count) >= 0.75
+
+
+def _merge_field_review_metadata(
+    field_evidence_map: dict[str, Any],
+    existing_field_evidence_map: Optional[dict[str, Any]],
+) -> dict[str, Any]:
+    if not field_evidence_map or not isinstance(existing_field_evidence_map, dict):
+        return field_evidence_map
+
+    for key, entry in field_evidence_map.items():
+        if not isinstance(entry, dict):
+            continue
+        previous_entry = existing_field_evidence_map.get(key)
+        if not isinstance(previous_entry, dict):
+            continue
+        for metadata_key in ("review_state", "review_note"):
+            metadata_value = previous_entry.get(metadata_key)
+            if metadata_value not in (None, ""):
+                entry[metadata_key] = metadata_value
+    return field_evidence_map
+
+
+def _build_field_evidence_map(item: dict, db_record: TribologyData, *, confidence: float, file_path: Optional[str] = None) -> dict[str, Any]:
+    if not _filled_text(item.get("temperature")):
+        item = {**item, "temperature": DEFAULT_TEMPERATURE_VALUE}
+    provided_field_evidence = _parse_json_object(item.get("field_evidence_json")) or _parse_json_object(item.get("field_evidence"))
+    provided_field_keys = {
+        key
+        for key, entry in provided_field_evidence.items()
+        if isinstance(entry, dict) and (
+            isinstance(entry.get("evidence"), dict)
+            or _filled_text(entry.get("grounding_mode"))
+            or _filled_text(entry.get("review_state"))
+        )
+    }
     source_label = getattr(db_record, "source", None) or getattr(db_record, "source_figure", None) or item.get("source")
     page = getattr(db_record, "evidence_page", None) or getattr(db_record, "source_page", None) or item.get("source_page")
     quote = _filled_text(item.get("evidence")) or _filled_text(item.get("notes")) or None
@@ -787,8 +1803,38 @@ def _build_field_evidence_map(item: dict, db_record: TribologyData, *, confidenc
             bbox=bbox,
             sample_id=sample_id,
         ),
+        "regime": _build_field_evidence_entry(
+            value=item.get("regime"),
+            confidence=confidence,
+            source_type=source_type,
+            page=page,
+            source_label=source_label,
+            quote=quote,
+            bbox=bbox,
+            sample_id=sample_id,
+        ),
         "surface_roughness": _build_field_evidence_entry(
             value=item.get("surface_roughness"),
+            confidence=confidence,
+            source_type=source_type,
+            page=page,
+            source_label=source_label,
+            quote=quote,
+            bbox=bbox,
+            sample_id=sample_id,
+        ),
+        "probe_roughness": _build_field_evidence_entry(
+            value=item.get("probe_roughness"),
+            confidence=confidence,
+            source_type=source_type,
+            page=page,
+            source_label=source_label,
+            quote=quote,
+            bbox=bbox,
+            sample_id=sample_id,
+        ),
+        "substrate_roughness": _build_field_evidence_entry(
+            value=item.get("substrate_roughness"),
             confidence=confidence,
             source_type=source_type,
             page=page,
@@ -817,8 +1863,38 @@ def _build_field_evidence_map(item: dict, db_record: TribologyData, *, confidenc
             bbox=bbox,
             sample_id=sample_id,
         ),
+        "shear_rate": _build_field_evidence_entry(
+            value=item.get("shear_rate"),
+            confidence=confidence,
+            source_type=source_type,
+            page=page,
+            source_label=source_label,
+            quote=quote,
+            bbox=bbox,
+            sample_id=sample_id,
+        ),
         "temperature": _build_field_evidence_entry(
             value=item.get("temperature"),
+            confidence=confidence,
+            source_type=source_type,
+            page=page,
+            source_label=source_label,
+            quote=quote,
+            bbox=bbox,
+            sample_id=sample_id,
+        ),
+        "water_content": _build_field_evidence_entry(
+            value=item.get("water_content"),
+            confidence=confidence,
+            source_type=source_type,
+            page=page,
+            source_label=source_label,
+            quote=quote,
+            bbox=bbox,
+            sample_id=sample_id,
+        ),
+        "potential": _build_field_evidence_entry(
+            value=item.get("potential"),
             confidence=confidence,
             source_type=source_type,
             page=page,
@@ -838,15 +1914,87 @@ def _build_field_evidence_map(item: dict, db_record: TribologyData, *, confidenc
             sample_id=sample_id,
         ),
     }
+
+    for field_key, entry in list(entries.items()):
+        if field_key == "source_page" or not isinstance(entry, dict):
+            continue
+        if field_key in provided_field_keys:
+            continue
+        evidence = entry.get("evidence") or {}
+        evidence["bbox"] = None
+        evidence["matched_text"] = None
+        entry["evidence"] = evidence
+        entries[field_key] = entry
+
+    for field_key in provided_field_keys:
+        override = provided_field_evidence.get(field_key)
+        if not isinstance(override, dict):
+            continue
+        base = entries.get(field_key) if isinstance(entries.get(field_key), dict) else {}
+        merged = {**base, **override}
+        if not _filled_text(merged.get("value")) and _filled_text(base.get("value")):
+            merged["value"] = base.get("value")
+        if "confidence" not in merged and "confidence" in base:
+            merged["confidence"] = base.get("confidence")
+        entries[field_key] = merged
+
+    resolved_file_path = _resolve_existing_path(file_path)
+    if resolved_file_path:
+        for field_key, entry in list(entries.items()):
+            if field_key == "source_page" or not entry:
+                continue
+            if field_key in provided_field_keys:
+                continue
+            field_value = _field_value_for_evidence(item, field_key)
+            located = _locate_field_evidence_for_value(
+                file_path=resolved_file_path,
+                field_key=field_key,
+                field_value=field_value,
+                source_label=source_label,
+                page_hint=int(page) if page else None,
+                anchor_bbox=bbox,
+                source_type=source_type,
+            )
+            if located:
+                entry["evidence"] = {
+                    **(entry.get("evidence") or {}),
+                    **located,
+                    "sample_id": sample_id,
+                }
+            entries[field_key] = entry
+
+    if "potential" not in provided_field_keys:
+        entries = _refine_potential_evidence_from_metric_context_with_pdf(entries, resolved_file_path)
+
+    for field_key, entry in list(entries.items()):
+        if field_key == "source_page" or not isinstance(entry, dict) or not _filled_text(entry.get("value")):
+            continue
+        if field_key == "temperature" and _is_default_temperature_value(entry.get("value")):
+            evidence = entry.get("evidence") or {}
+            if not _evidence_has_location(evidence):
+                entries[field_key] = _temperature_default_evidence_entry(entry.get("value"), confidence)
+                continue
+        grounding_mode, grounding_note = _derive_grounding_metadata(
+            field_key,
+            entry.get("value"),
+            entry.get("evidence") or {},
+        )
+        if grounding_mode:
+            entry["grounding_mode"] = grounding_mode
+        elif not _filled_text(entry.get("grounding_mode")):
+            entry.pop("grounding_mode", None)
+        if grounding_note:
+            entry["grounding_note"] = grounding_note
+        elif not _filled_text(entry.get("grounding_note")):
+            entry.pop("grounding_note", None)
+
     return {key: value for key, value in entries.items() if value}
 
 
 def _field_entry_has_evidence(entry: Optional[dict[str, Any]]) -> bool:
     evidence = (entry or {}).get("evidence") or {}
-    return any(
-        evidence.get(key) not in (None, "", [])
-        for key in ("page", "source_label", "quote", "bbox", "sample_id", "source_type")
-    )
+    bbox = evidence.get("bbox")
+    return bool(evidence.get("page") and isinstance(bbox, list) and len(bbox) >= 4)
 
 
 def _resolve_review_status(field_evidence_map: dict[str, Any]) -> tuple[str, Optional[str]]:
@@ -860,22 +2008,60 @@ def _resolve_review_status(field_evidence_map: dict[str, Any]) -> tuple[str, Opt
     return "pending_review", None
 
 
+def _computed_surface_roughness_label_for_record(record: Any, field_evidence_map: Optional[dict[str, Any]] = None) -> Optional[str]:
+    field_map = field_evidence_map or {}
+    surface_entry = field_map.get("surface_roughness") if isinstance(field_map, dict) else None
+    if isinstance(surface_entry, dict) and _filled_text(surface_entry.get("value")):
+        return _filled_text(surface_entry.get("value"))
+
+    return composite_roughness_label(
+        getattr(record, "probe_roughness", None),
+        getattr(record, "substrate_roughness", None),
+        method="rms",
+        legacy_surface_roughness=getattr(record, "surface_roughness", None),
+    )
+
+
 def _record_to_response_item(record: Any) -> dict[str, Any]:
     cof_str = record.cof_raw if record.cof_raw else (str(record.cof_value) if record.cof_value else None)
+    review_entity_type = "candidate" if isinstance(record, RecordCandidate) else "record"
+    field_evidence_map = _parse_json_object(record.field_evidence_json)
+    surface_roughness = _computed_surface_roughness_label_for_record(record, field_evidence_map)
+    lubricant_components = components_for_record(record)
+    lubricant_alias = getattr(record, "lubricant_alias", None)
+    cof_extracted = normalize_cof_extracted(getattr(record, "cof_extracted_json", None)) or derive_cof_extracted(
+        cof_str,
+        getattr(record, "cof_value", None),
+        load=getattr(record, "load_raw", None) or getattr(record, "load_value", None),
+        speed=getattr(record, "speed_value", None),
+    )
+    load_conditions = normalize_load_conditions(getattr(record, "load_conditions_json", None)) or derive_load_conditions(
+        getattr(record, "load_raw", None) or getattr(record, "load_value", None),
+    )
+    tribological_system = normalize_tribological_system(getattr(record, "tribological_system_json", None)) or derive_tribological_system(
+        getattr(record, "regime", None),
+    )
     return {
         "id": str(record.id),
         "material_name": record.material_name,
         "lubricant": record.lubricant,
         "ionic_liquid": record.lubricant,
+        "lubricant_components": lubricant_components,
+        "lubricant_alias": lubricant_alias,
+        "ionic_liquid_display": compact_lubricant_label(record.lubricant, lubricant_components, lubricant_alias),
+        "lubricant_tooltip": format_lubricant_tooltip(record.lubricant, lubricant_components, lubricant_alias),
         "cof": cof_str,
         "cof_value": record.cof_value,
         "cof_operator": record.cof_operator,
         "cof_raw": record.cof_raw,
+        "cof_extracted": cof_extracted,
         "load": record.load_raw or record.load_value,
         "load_value": record.load_value,
         "load_raw": record.load_raw,
+        "load_conditions": load_conditions,
         "speed": record.speed_value,
         "speed_value": record.speed_value,
+        "shear_rate": getattr(record, "shear_rate", None),
         "temperature": record.temperature,
         "potential": record.potential,
         "water_content": record.water_content,
@@ -886,10 +2072,12 @@ def _record_to_response_item(record: Any) -> dict[str, Any]:
         "substrate_material": record.substrate_material,
         "substrate_coating": record.substrate_coating,
         "substrate_roughness": record.substrate_roughness,
-        "surface_roughness": record.surface_roughness,
+        "surface_roughness": surface_roughness,
         "film_thickness": record.film_thickness,
         "residual_film_thickness_d": record.residual_film_thickness_d,
         "layer_spacing_delta": record.layer_spacing_delta,
+        "regime": getattr(record, "regime", None),
+        "tribological_system": tribological_system,
         "mol_ratio": record.mol_ratio,
         "cation": record.cation,
         "anion": record.anion,
@@ -905,9 +2093,10 @@ def _record_to_response_item(record: Any) -> dict[str, Any]:
         "source_figure": record.source_figure,
         "sample_id": record.sample_id,
         "series_id": record.series_id,
-        "field_evidence_json": _parse_json_object(record.field_evidence_json),
+        "field_evidence_json": field_evidence_map,
         "review_status": record.review_status,
         "record_origin": record.record_origin,
+        "review_entity_type": review_entity_type,
         "assembly_notes": record.assembly_notes,
     }
 
@@ -1029,16 +2218,64 @@ def _build_db_record_from_item(
 ) -> tuple[Any, dict[str, Any]]:
     _annotate_record_identity(item)
     confidence = _resolve_confidence(item.get("confidence"), item)
+    lubricant = item.get("ionic_liquid", item.get("lubricant", ""))
+    lubricant_components = normalize_lubricant_components(
+        item.get("lubricant_components")
+        or item.get("lubricantComponents")
+        or item.get("Lubricant_Mixture")
+        or item.get("components")
+    )
+    if not lubricant_components:
+        lubricant_components = parse_lubricant_components(
+            lubricant,
+            item.get("mol_ratio") or item.get("molRatio"),
+            item.get("cation"),
+            item.get("anion"),
+        )
+    lubricant_alias = (
+        item.get("lubricant_alias")
+        or item.get("lubricantAlias")
+        or item.get("mixture_alias")
+        or item.get("mixtureAlias")
+    )
+    cof_extracted = normalize_cof_extracted(item.get("cof_extracted") or item.get("cofExtracted"))
+    if not cof_extracted:
+        cof_extracted = derive_cof_extracted(
+            item.get("cof"),
+            _parse_cof_value(item.get("cof")),
+            load=item.get("load") or item.get("normal_load"),
+            speed=item.get("speed"),
+        )
+    load_text = item.get("load") or item.get("normal_load")
+    load_conditions = normalize_load_conditions(item.get("load_conditions") or item.get("loadConditions")) or derive_load_conditions(load_text)
+    speed_conditions = normalize_speed_conditions(item.get("speed_conditions") or item.get("speedConditions"))
+    if not speed_conditions:
+        speed_context = " ".join(
+            str(part or "")
+            for part in (item.get("evidence"), item.get("notes"), item.get("source"), item.get("source_figure"))
+            if part not in (None, "")
+        )
+        speed_conditions = derive_speed_conditions(item.get("speed"), context=speed_context)
+    speed_value = speed_value_from_conditions(speed_conditions) or item.get("speed")
+    if speed_conditions.get("scan_rate_hz") is not None and speed_conditions.get("sliding_velocity_um_s") is None:
+        speed_value = None
+    tribological_system = normalize_tribological_system(item.get("tribological_system") or item.get("tribologicalSystem")) or derive_tribological_system(item.get("regime"))
     db_record = model_cls(
         literature_id=literature_id,
         material_name=item.get("material_name", "Unknown"),
-        lubricant=item.get("ionic_liquid", item.get("lubricant", "")),
+        lubricant=lubricant,
+        lubricant_components_json=serialize_lubricant_components(lubricant_components),
+        lubricant_alias=str(lubricant_alias).strip() if lubricant_alias else None,
         cof_value=_parse_cof_value(item.get("cof")),
         cof_operator=item.get("cof_operator"),
         cof_raw=item.get("cof"),
-        load_value=item.get("load") or item.get("normal_load"),
-        load_raw=item.get("load") or item.get("normal_load"),
-        speed_value=item.get("speed"),
+        cof_extracted_json=serialize_cof_extracted(cof_extracted),
+        load_value=load_text,
+        load_raw=load_text,
+        load_conditions_json=serialize_load_conditions(load_conditions),
+        speed_value=speed_value,
+        speed_conditions_json=serialize_speed_conditions(speed_conditions),
+        shear_rate=item.get("shear_rate"),
         temperature=item.get("temperature"),
         potential=item.get("potential"),
         water_content=item.get("water_content"),
@@ -1053,6 +2290,8 @@ def _build_db_record_from_item(
         film_thickness=item.get("film_thickness"),
         residual_film_thickness_d=item.get("residual_film_thickness_d"),
         layer_spacing_delta=item.get("layer_spacing_delta"),
+        regime=item.get("regime"),
+        tribological_system_json=serialize_tribological_system(tribological_system),
         mol_ratio=item.get("mol_ratio"),
         cation=item.get("cation"),
         anion=item.get("anion"),
@@ -1071,7 +2310,7 @@ def _build_db_record_from_item(
         record_origin=record_origin,
     )
     _try_resolve_evidence_coords(db_record, item, file_path)
-    field_evidence_map = _build_field_evidence_map(item, db_record, confidence=confidence)
+    field_evidence_map = _build_field_evidence_map(item, db_record, confidence=confidence, file_path=file_path)
     review_status, assembly_notes = _resolve_review_status(field_evidence_map)
     db_record.field_evidence_json = _safe_json_dumps(field_evidence_map)
     db_record.review_status = review_status
@@ -1082,6 +2321,13 @@ def _build_db_record_from_item(
         {
             "sample_id": db_record.sample_id,
             "series_id": db_record.series_id,
+            "lubricant_components": lubricant_components,
+            "lubricant_alias": db_record.lubricant_alias,
+            "ionic_liquid_display": compact_lubricant_label(lubricant, lubricant_components, db_record.lubricant_alias),
+            "lubricant_tooltip": format_lubricant_tooltip(lubricant, lubricant_components, db_record.lubricant_alias),
+            "cof_extracted": cof_extracted,
+            "load_conditions": load_conditions,
+            "tribological_system": tribological_system,
             "field_evidence_json": field_evidence_map,
             "review_status": review_status,
             "record_origin": record_origin,
@@ -1112,8 +2358,20 @@ async def _load_cached_extraction_result(
             "ionic_liquid": r.lubricant,
             "cof": cof_str,
             "load": r.load_raw or r.load_value,
+            "load_conditions": normalize_load_conditions(getattr(r, "load_conditions_json", None)) or derive_load_conditions(r.load_raw or r.load_value),
             "speed": r.speed_value,
+            "shear_rate": getattr(r, "shear_rate", None),
             "temperature": r.temperature,
+            "potential": r.potential,
+            "water_content": r.water_content,
+            "friction_force": getattr(r, "friction_force", None),
+            "wear_rate": getattr(r, "wear_rate", None),
+            "film_thickness": getattr(r, "film_thickness", None),
+            "residual_film_thickness_d": getattr(r, "residual_film_thickness_d", None),
+            "layer_spacing_delta": getattr(r, "layer_spacing_delta", None),
+            "regime": getattr(r, "regime", None),
+            "tribological_system": normalize_tribological_system(getattr(r, "tribological_system_json", None)) or derive_tribological_system(getattr(r, "regime", None)),
+            "surface_roughness": getattr(r, "surface_roughness", None),
             "evidence": r.evidence,
             "source": r.source,
             "source_page": r.source_page,
@@ -1122,8 +2380,11 @@ async def _load_cached_extraction_result(
             "series_id": r.series_id,
         }
         parsed_field_evidence = _parse_json_object(r.field_evidence_json)
-        if not parsed_field_evidence:
-            parsed_field_evidence = _build_field_evidence_map(cached_item, r, confidence=r.confidence)
+        if not parsed_field_evidence or _field_evidence_map_looks_generic(parsed_field_evidence):
+            parsed_field_evidence = _merge_field_review_metadata(
+                _build_field_evidence_map(cached_item, r, confidence=r.confidence, file_path=literature.file_path),
+                parsed_field_evidence,
+            )
             review_status, assembly_notes = _resolve_review_status(parsed_field_evidence)
             r.field_evidence_json = _safe_json_dumps(parsed_field_evidence)
             if not r.review_status:
@@ -1150,6 +2411,25 @@ async def _load_cached_extraction_result(
         if db_row.film_thickness != normalized_film:
             db_row.film_thickness = normalized_film
             changed_db_rows = True
+        normalized_cof_extracted = serialize_cof_extracted(row.get("cof_extracted"))
+        if getattr(db_row, "cof_extracted_json", None) != normalized_cof_extracted:
+            db_row.cof_extracted_json = normalized_cof_extracted
+            changed_db_rows = True
+        normalized_load_conditions = serialize_load_conditions(row.get("load_conditions"))
+        if getattr(db_row, "load_conditions_json", None) != normalized_load_conditions:
+            db_row.load_conditions_json = normalized_load_conditions
+            changed_db_rows = True
+        normalized_tribological_system = serialize_tribological_system(row.get("tribological_system"))
+        if getattr(db_row, "tribological_system_json", None) != normalized_tribological_system:
+            db_row.tribological_system_json = normalized_tribological_system
+            changed_db_rows = True
+        normalized_components_json = serialize_lubricant_components(row.get("lubricant_components"))
+        if getattr(db_row, "lubricant_components_json", None) != normalized_components_json:
+            db_row.lubricant_components_json = normalized_components_json
+            changed_db_rows = True
+        if row.get("lubricant_alias") and getattr(db_row, "lubricant_alias", None) != row.get("lubricant_alias"):
+            db_row.lubricant_alias = row.get("lubricant_alias")
+            changed_db_rows = True
         for field in ("cation", "anion", "cation_smiles", "anion_smiles", "il_smiles", "il_inchikey", "alkyl_chain_length"):
             if getattr(db_row, field) != row.get(field):
                 setattr(db_row, field, row.get(field))
@@ -1161,6 +2441,12 @@ async def _load_cached_extraction_result(
             if 0 <= idx < len(db_records):
                 db_records[idx].lubricant = il_name
         changed_db_rows = True
+
+    if data_list and (str(literature.status or "").strip().lower() != "completed" or literature.error_message):
+        literature.status = "completed"
+        literature.error_message = None
+        changed_db_rows = True
+
     if changed_db_rows:
         await db.commit()
 
@@ -1204,6 +2490,19 @@ def _distinct_record_values(records: list[dict], field: str) -> set[str]:
     return values
 
 
+def _field_evidence_location_count(item: dict) -> int:
+    field_evidence = _parse_json_object(item.get("field_evidence_json")) or _parse_json_object(item.get("field_evidence"))
+    count = 0
+    for entry in field_evidence.values():
+        if not isinstance(entry, dict):
+            continue
+        evidence = entry.get("evidence") or {}
+        bbox = evidence.get("bbox")
+        if evidence.get("page") and isinstance(bbox, list) and len(bbox) >= 4:
+            count += 1
+    return count
+
+
 def _record_quality_snapshot(records: list[dict]) -> dict[str, int]:
     probe_values = _distinct_record_values(records, "probe_material")
     substrate_values = _distinct_record_values(records, "substrate_material")
@@ -1214,6 +2513,14 @@ def _record_quality_snapshot(records: list[dict]) -> dict[str, int]:
         "substrate_present": sum(1 for item in records or [] if _filled_text(item.get("substrate_material"))),
         "ionic_present": sum(
             1 for item in records or [] if _filled_text(item.get("ionic_liquid") or item.get("lubricant"))
+        ),
+        "load_present": sum(
+            1 for item in records or [] if _filled_text(item.get("load") or item.get("normal_load") or item.get("load_raw"))
+        ),
+        "speed_present": sum(1 for item in records or [] if _filled_text(item.get("speed") or item.get("speed_value"))),
+        "shear_rate_present": sum(1 for item in records or [] if _filled_text(item.get("shear_rate"))),
+        "field_evidence_locations": sum(
+            _field_evidence_location_count(item) for item in records or [] if isinstance(item, dict)
         ),
         "probe_distinct": len(probe_values),
         "substrate_distinct": len(substrate_values),
@@ -1246,11 +2553,38 @@ def _fallback_improves_cached_records(cached_records: list[dict], fallback_recor
             fallback["probe_present"] > cached["probe_present"],
             fallback["substrate_present"] > cached["substrate_present"],
             fallback["ionic_present"] > cached["ionic_present"],
+            fallback["load_present"] > cached["load_present"],
+            fallback["speed_present"] > cached["speed_present"],
+            fallback["shear_rate_present"] > cached["shear_rate_present"],
+            fallback["field_evidence_locations"] > cached["field_evidence_locations"],
             fallback["probe_distinct"] > cached["probe_distinct"],
             fallback["substrate_distinct"] > cached["substrate_distinct"],
             fallback["ionic_distinct"] > cached["ionic_distinct"],
         ]
     )
+
+
+def _should_replace_records_with_fallback(
+    records: list[dict],
+    fallback_records: list[dict],
+    fallback_info: dict[str, Any],
+) -> bool:
+    if not fallback_records:
+        return False
+    if not records:
+        return True
+    if not _fallback_improves_cached_records(records, fallback_records):
+        return False
+
+    parser = str((fallback_info or {}).get("parser") or "").strip()
+    if parser in {
+        "atkin_stiction_shear_thinning_figure3b",
+        "ean_mica_lateral_force_text",
+        "potential_dependent_gold_text",
+        "probe_il_substrate_table",
+    }:
+        return True
+    return len(fallback_records) >= len(records)
 
 
 async def _replace_literature_records_from_items(
@@ -1311,7 +2645,7 @@ async def _refresh_cached_records_from_fallback(
     content: str,
 ) -> tuple[dict, list[dict], dict] | None:
     fallback_records, fallback_info = extract_table_fallback_records(content or "", file_path)
-    if not _fallback_improves_cached_records(cached_records, fallback_records):
+    if not _should_replace_records_with_fallback(cached_records, fallback_records, fallback_info):
         return None
 
     saved_count = await _replace_literature_records_from_items(
@@ -1550,7 +2884,7 @@ def _apply_default_temperature(records: list[dict]) -> None:
             continue
         temperature = str(item.get("temperature") or "").strip()
         if not temperature:
-            item["temperature"] = "298.15 K"
+            item["temperature"] = DEFAULT_TEMPERATURE_VALUE
 
 
 def _format_numeric_text(value: float) -> str:
@@ -1563,6 +2897,26 @@ def _normalize_thickness_value(value: object) -> Optional[str]:
     text = str(value or "").strip()
     if not text or text.lower() in {"-", "--", "n/a", "none", "unknown"}:
         return None
+
+    uncertainty_match = re.search(
+        r"([-+]?\d*\.?\d+)\s*(?:±|\+/-|\+∕-)\s*([-+]?\d*\.?\d+)\s*(nm|μm|µm|um|pm|å|a\b|angstrom(?:s)?)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if uncertainty_match:
+        magnitude = float(uncertainty_match.group(1))
+        uncertainty = float(uncertainty_match.group(2))
+        unit = uncertainty_match.group(3).lower()
+        if unit in {"μm", "µm", "um"}:
+            magnitude *= 1000.0
+            uncertainty *= 1000.0
+        elif unit in {"pm"}:
+            magnitude /= 1000.0
+            uncertainty /= 1000.0
+        elif unit in {"å", "a", "angstrom", "angstroms"}:
+            magnitude /= 10.0
+            uncertainty /= 10.0
+        return f"{_format_numeric_text(magnitude)} ± {_format_numeric_text(uncertainty)} nm"
 
     match = re.search(r"([-+]?\d*\.?\d+)\s*(nm|μm|µm|um|pm|å|a\b|angstrom(?:s)?)", text, flags=re.IGNORECASE)
     if not match:
@@ -1585,7 +2939,12 @@ def _canonicalize_ionic_liquid_name(value: object) -> tuple[Optional[str], dict]
     if not text or _is_unknown_il(text):
         return None, {}
 
-    normalized = normalize_ionic_liquid(text) or text
+    embedded_candidates = _extract_il_candidates(text)
+    normalized = None
+    if len(embedded_candidates) == 1:
+        normalized = embedded_candidates[0]
+    else:
+        normalized = normalize_ionic_liquid(text) or text
     resolved = resolve_il(normalized)
     canonical_name = str(resolved.get("canonical_name") or "").strip()
     if canonical_name and not _is_unknown_il(canonical_name):
@@ -1613,16 +2972,76 @@ def _normalize_record_chemistry(records: list[dict]) -> None:
         for field in ("residual_film_thickness_d", "layer_spacing_delta"):
             item[field] = _normalize_thickness_value(item.get(field))
 
+        raw_lubricant = item.get("ionic_liquid") or item.get("lubricant")
+        cof_extracted = normalize_cof_extracted(item.get("cof_extracted") or item.get("cofExtracted"))
+        if not cof_extracted:
+            cof_extracted = derive_cof_extracted(
+                item.get("cof") or item.get("cof_raw"),
+                item.get("cof_value"),
+                load=item.get("load") or item.get("normal_load"),
+                speed=item.get("speed"),
+            )
+        if cof_extracted:
+            item["cof_extracted"] = cof_extracted
+        load_conditions = normalize_load_conditions(item.get("load_conditions") or item.get("loadConditions"))
+        if not load_conditions:
+            load_conditions = derive_load_conditions(item.get("load") or item.get("normal_load"))
+        if load_conditions:
+            item["load_conditions"] = load_conditions
+        speed_conditions = normalize_speed_conditions(item.get("speed_conditions") or item.get("speedConditions"))
+        if not speed_conditions:
+            speed_context = " ".join(
+                str(part or "")
+                for part in (item.get("evidence"), item.get("notes"), item.get("source"), item.get("source_figure"))
+                if part not in (None, "")
+            )
+            speed_conditions = derive_speed_conditions(item.get("speed") or item.get("speed_value"), context=speed_context)
+        if speed_conditions:
+            item["speed_conditions"] = speed_conditions
+            derived_speed = speed_value_from_conditions(speed_conditions)
+            if derived_speed:
+                item["speed"] = derived_speed
+                item["speed_value"] = derived_speed
+            elif speed_conditions.get("scan_rate_hz") is not None:
+                item["speed"] = None
+                item["speed_value"] = None
+        tribological_system = normalize_tribological_system(item.get("tribological_system") or item.get("tribologicalSystem"))
+        if not tribological_system:
+            tribological_system = derive_tribological_system(item.get("regime"))
+        if tribological_system:
+            item["tribological_system"] = tribological_system
+        lubricant_components = normalize_lubricant_components(
+            item.get("lubricant_components")
+            or item.get("lubricantComponents")
+            or item.get("Lubricant_Mixture")
+            or item.get("components")
+        )
+        if not lubricant_components:
+            lubricant_components = parse_lubricant_components(
+                raw_lubricant,
+                item.get("mol_ratio") or item.get("molRatio"),
+                item.get("cation"),
+                item.get("anion"),
+            )
+        is_mixture = len(lubricant_components) > 1
+        if item.get("lubricantAlias") and not item.get("lubricant_alias"):
+            item["lubricant_alias"] = item.get("lubricantAlias")
+        if lubricant_components:
+            item["lubricant_components"] = lubricant_components
+            alias = item.get("lubricant_alias") or item.get("lubricantAlias")
+            item["ionic_liquid_display"] = compact_lubricant_label(raw_lubricant, lubricant_components, alias)
+            item["lubricant_tooltip"] = format_lubricant_tooltip(raw_lubricant, lubricant_components, alias)
+
         il_candidates: list[object] = [
+            item.get("ionic_liquid"),
+            item.get("lubricant"),
+            item.get("cation") and item.get("anion") and f"[{item.get('cation')}][{item.get('anion')}]",
             raw_film_candidate if raw_film_candidate and not item.get("film_thickness") else None,
             item.get("evidence"),
             item.get("notes"),
-            item.get("ionic_liquid"),
-            item.get("lubricant"),
         ]
         if not any(candidate and not _is_unknown_il(candidate) for candidate in il_candidates):
             il_candidates.extend([
-                item.get("cation") and item.get("anion") and f"[{item.get('cation')}][{item.get('anion')}]",
                 raw_film_candidate,
             ])
 
@@ -1632,6 +3051,10 @@ def _normalize_record_chemistry(records: list[dict]) -> None:
             canonical_name, resolved = _canonicalize_ionic_liquid_name(candidate)
             if canonical_name:
                 break
+
+        if is_mixture:
+            canonical_name = None
+            resolved = {}
 
         if canonical_name:
             item["ionic_liquid"] = canonical_name
@@ -1786,6 +3209,33 @@ async def process_file_safe(
                     logger.info("Returning cached extraction for literature_id=%s", file_id)
                     return cached_result
                 if literature.status == "no_data":
+                    fallback_records, fallback_info = extract_table_fallback_records(
+                        content or literature.content or "",
+                        resolved_file_path,
+                    )
+                    if fallback_records:
+                        saved_count = await _replace_literature_records_from_items(
+                            db,
+                            literature,
+                            fallback_records,
+                            file_path=resolved_file_path,
+                        )
+                        if saved_count > 0:
+                            logger.info(
+                                "Recovered cached no-data literature_id=%s using fallback parser=%s saved=%s",
+                                file_id,
+                                fallback_info.get("parser"),
+                                saved_count,
+                            )
+                            metadata, data_list, cache_summary = await _load_cached_extraction_result(db, literature)
+                            cache_summary = {
+                                **cache_summary,
+                                "fallback_extraction": fallback_info,
+                                "cache_refreshed": True,
+                                "recovered_from_no_data": True,
+                            }
+                            return metadata, data_list, cache_summary
+
                     logger.info("Returning cached no-data result for literature_id=%s", file_id)
                     metadata = {
                         "title": literature.title,
@@ -1937,44 +3387,48 @@ async def process_file_safe(
                     **{k: v for k, v in (metadata or {}).items() if v not in (None, "", [])},
                 }
 
+            fallback_records: list[dict] = []
+            fallback_info: dict[str, Any] = {}
+            if content:
+                fallback_records, fallback_info = extract_table_fallback_records(content, resolved_file_path)
+
             # Deterministic IL backfill for unknown labels using PDF caption/page text context.
             if isinstance(records, list) and records:
                 _backfill_unknown_il_records(records, resolved_file_path)
-            elif content:
-                fallback_records, fallback_info = extract_table_fallback_records(content, resolved_file_path)
-                if fallback_records:
-                    logger.info(
-                        "Fallback extraction recovered %s records from %s on page %s",
-                        len(fallback_records),
-                        fallback_info.get("matched_table"),
-                        fallback_info.get("matched_page"),
-                    )
-                    records = fallback_records
-                    trace_candidates.extend(
-                        [
-                            {
-                                "stage": "fallback_table",
-                                "modality": "text",
-                                "page": item.get("source_page"),
-                                "source_figure": item.get("source_figure"),
-                                "raw": item,
-                                "normalized": item,
-                                "drop_reason": None,
-                                "merged_into": None,
-                            }
-                            for item in fallback_records
-                        ]
-                    )
-                    llm_summary = {
-                        **llm_summary,
-                        "candidate_count": max(
-                            int(llm_summary.get("candidate_count") or 0),
-                            len(fallback_records),
-                        ),
-                        "final_count": len(fallback_records),
-                        "dropped_by_reason": llm_summary.get("dropped_by_reason") or {},
-                        "fallback_extraction": fallback_info,
-                    }
+
+            if _should_replace_records_with_fallback(records if isinstance(records, list) else [], fallback_records, fallback_info):
+                previous_record_count = len(records) if isinstance(records, list) else 0
+                logger.info(
+                    "Fallback extraction selected %s records from %s on page %s (previous_records=%s)",
+                    len(fallback_records),
+                    fallback_info.get("matched_table"),
+                    fallback_info.get("matched_page"),
+                    previous_record_count,
+                )
+                records = fallback_records
+                trace_candidates.extend(
+                    [
+                        {
+                            "stage": "fallback_table",
+                            "modality": "text",
+                            "page": item.get("source_page"),
+                            "source_figure": item.get("source_figure"),
+                            "raw": item,
+                            "normalized": item,
+                            "drop_reason": None,
+                            "merged_into": None,
+                        }
+                        for item in fallback_records
+                    ]
+                )
+                llm_summary = {
+                    **llm_summary,
+                    "candidate_count": len(fallback_records),
+                    "final_count": len(fallback_records),
+                    "dropped_by_reason": llm_summary.get("dropped_by_reason") or {},
+                    "fallback_extraction": fallback_info,
+                    "fallback_replaced_record_count": previous_record_count,
+                }
 
             if isinstance(records, list) and records:
                 _apply_default_temperature(records)

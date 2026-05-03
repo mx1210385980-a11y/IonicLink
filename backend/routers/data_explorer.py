@@ -32,7 +32,34 @@ from services.relationship_graph_service import (
     drilldown_relationship_graph,
 )
 from knowledge_base import normalize_ionic_liquid
-from utils.tribopair import compose_tribopair_label, derive_legacy_material_name, derive_legacy_surface_roughness
+from utils.cof_extraction import derive_cof_extracted, normalize_cof_extracted, serialize_cof_extracted
+from utils.lubricant_mixture import (
+    compact_lubricant_label,
+    components_for_record,
+    format_lubricant_tooltip,
+    normalize_lubricant_components,
+    serialize_lubricant_components,
+)
+from utils.structured_conditions import (
+    derive_load_conditions,
+    derive_tribological_system,
+    normalize_load_conditions,
+    normalize_tribological_system,
+    serialize_load_conditions,
+    serialize_tribological_system,
+)
+from utils.speed_conditions import (
+    derive_speed_conditions,
+    normalize_speed_conditions,
+    serialize_speed_conditions,
+    speed_value_from_conditions,
+)
+from utils.tribopair import (
+    compose_tribopair_label,
+    composite_roughness_label,
+    derive_legacy_material_name,
+    derive_legacy_surface_roughness,
+)
 
 
 router = APIRouter(
@@ -52,12 +79,14 @@ def _raise_internal_error(action: str, exc: Exception) -> None:
 
 class SearchFilter(BaseModel):
     """Filter parameters for searching tribology records"""
+    record_id: Optional[int] = Field(None, alias="recordId", description="Exact record ID")
     materials: List[str] = Field(default_factory=list, description="Probe/substrate/coating search terms")
     probe_materials: List[str] = Field(default_factory=list, alias="probeMaterials", description="Probe material terms")
     substrate_materials: List[str] = Field(default_factory=list, alias="substrateMaterials", description="Substrate material terms")
     substrate_coatings: List[str] = Field(default_factory=list, alias="substrateCoatings", description="Substrate coating terms")
     lubricants: List[str] = Field(default_factory=list, description="List of lubricants")
     speed_values: List[str] = Field(default_factory=list, alias="speedValues", description="Speed condition terms")
+    shear_rate_values: List[str] = Field(default_factory=list, alias="shearRateValues", description="Shear-rate condition terms")
     temperature_values: List[str] = Field(default_factory=list, alias="temperatureValues", description="Temperature condition terms")
     potential_values: List[str] = Field(default_factory=list, alias="potentialValues", description="Potential condition terms")
     water_content_values: List[str] = Field(default_factory=list, alias="waterContentValues", description="Water content condition terms")
@@ -90,15 +119,23 @@ class RecordResponse(BaseModel):
     id: int
     material_name: str = Field(..., alias="materialName")
     lubricant: str
+    lubricant_components: List[dict] = Field(default_factory=list, alias="lubricantComponents")
+    lubricant_alias: Optional[str] = Field(None, alias="lubricantAlias")
+    ionic_liquid_display: Optional[str] = Field(None, alias="ionicLiquidDisplay")
+    lubricant_tooltip: Optional[str] = Field(None, alias="lubricantTooltip")
     
     cof_value: Optional[float] = Field(None, alias="cofValue")
     cof_operator: Optional[str] = Field(None, alias="cofOperator")
     cof_raw: Optional[str] = Field(None, alias="cofRaw")
+    cof_extracted: dict = Field(default_factory=dict, alias="cofExtracted")
     
     load_value: Optional[str] = Field(None, alias="loadValue")   # stored with units, e.g. '20 nN'
     load_raw: Optional[str] = Field(None, alias="loadRaw")
+    load_conditions: dict = Field(default_factory=dict, alias="loadConditions")
     
-    speed_value: Optional[str] = Field(None, alias="speedValue")  # stored with units, e.g. '1 碌m/s'
+    speed_value: Optional[str] = Field(None, alias="speedValue")  # stored with units, e.g. '1 μm/s'
+    speed_conditions: dict = Field(default_factory=dict, alias="speedConditions")
+    shear_rate: Optional[str] = Field(None, alias="shearRate")  # stored with units, e.g. '195-1300 s^-1'
     temperature: Optional[str] = None
     potential: Optional[str] = None
     water_content: Optional[str] = Field(None, alias="waterContent")
@@ -114,6 +151,8 @@ class RecordResponse(BaseModel):
     residual_film_thickness_d: Optional[str] = Field(None, alias="residualFilmThicknessD")
     layer_spacing_delta: Optional[str] = Field(None, alias="layerSpacingDelta")
     film_thickness: Optional[str] = Field(None, alias="filmThickness")
+    regime: Optional[str] = None
+    tribological_system: dict = Field(default_factory=dict, alias="tribologicalSystem")
     mol_ratio: Optional[str] = Field(None, alias="molRatio")
     cation: Optional[str] = None
     anion: Optional[str] = None
@@ -273,6 +312,7 @@ class RecordUpdatePayload(BaseModel):
     """Payload for updating a single tribology record"""
     cof_raw: Optional[str] = Field(None, alias="cofRaw")
     cof_value: Optional[float] = Field(None, alias="cofValue")
+    cof_extracted: Optional[dict] = Field(None, alias="cofExtracted")
     temperature: Optional[str] = None
     potential: Optional[str] = None
     water_content: Optional[str] = Field(None, alias="waterContent")
@@ -284,11 +324,18 @@ class RecordUpdatePayload(BaseModel):
     substrate_coating: Optional[str] = Field(None, alias="substrateCoating")
     substrate_roughness: Optional[str] = Field(None, alias="substrateRoughness")
     speed_value: Optional[str] = Field(None, alias="speedValue")
+    speed_conditions: Optional[dict] = Field(None, alias="speedConditions")
+    shear_rate: Optional[str] = Field(None, alias="shearRate")
     load_value: Optional[str] = Field(None, alias="loadValue")
+    load_conditions: Optional[dict] = Field(None, alias="loadConditions")
     surface_roughness: Optional[str] = Field(None, alias="surfaceRoughness")
     film_thickness: Optional[str] = Field(None, alias="filmThickness")
+    regime: Optional[str] = None
+    tribological_system: Optional[dict] = Field(None, alias="tribologicalSystem")
     material_name: Optional[str] = Field(None, alias="materialName")
     lubricant: Optional[str] = None
+    lubricant_components: Optional[List[dict]] = Field(None, alias="lubricantComponents")
+    lubricant_alias: Optional[str] = Field(None, alias="lubricantAlias")
 
     class Config:
         populate_by_name = True
@@ -350,6 +397,8 @@ def _build_conditions(filter_params: SearchFilter):
             conditions.append(TribologyData.lubricant.in_(sorted(lubricant_terms)))
     if filter_params.speed_values:
         conditions.append(TribologyData.speed_value.in_(filter_params.speed_values))
+    if filter_params.shear_rate_values:
+        conditions.append(TribologyData.shear_rate.in_(filter_params.shear_rate_values))
     if filter_params.temperature_values:
         conditions.append(TribologyData.temperature.in_(filter_params.temperature_values))
     if filter_params.potential_values:
@@ -399,18 +448,36 @@ def _confidence_input_from_record(r: TribologyData) -> dict:
         "substrate_material": r.substrate_material,
         "substrate_coating": r.substrate_coating,
         "lubricant": r.lubricant,
+        "lubricant_components": components_for_record(r),
+        "lubricant_alias": getattr(r, "lubricant_alias", None),
+        "cof_extracted": normalize_cof_extracted(getattr(r, "cof_extracted_json", None)) or derive_cof_extracted(
+            r.cof_raw,
+            r.cof_value,
+            load=r.load_raw or r.load_value,
+            speed=r.speed_value,
+        ),
         "cof_value": r.cof_value,
         "cof_raw": r.cof_raw,
         "cof_operator": r.cof_operator,
         "load_value": r.load_value,
+        "load_conditions": normalize_load_conditions(getattr(r, "load_conditions_json", None)) or derive_load_conditions(r.load_raw or r.load_value),
         "speed_value": r.speed_value,
+        "speed_conditions": normalize_speed_conditions(getattr(r, "speed_conditions_json", None)) or derive_speed_conditions(r.speed_value),
+        "shear_rate": getattr(r, "shear_rate", None),
         "temperature": r.temperature,
         "potential": r.potential,
         "water_content": r.water_content,
         "probe_roughness": r.probe_roughness,
         "substrate_roughness": r.substrate_roughness,
-        "surface_roughness": r.surface_roughness,
+        "surface_roughness": composite_roughness_label(
+            r.probe_roughness,
+            r.substrate_roughness,
+            method="rms",
+            legacy_surface_roughness=r.surface_roughness,
+        ),
         "film_thickness": r.film_thickness,
+        "regime": getattr(r, "regime", None),
+        "tribological_system": normalize_tribological_system(getattr(r, "tribological_system_json", None)) or derive_tribological_system(getattr(r, "regime", None)),
         "evidence": getattr(r, "evidence", None),
         "evidence_page": getattr(r, "evidence_page", None),
         "source": getattr(r, "source", None),
@@ -483,17 +550,36 @@ def _record_to_response(r: TribologyData) -> RecordResponse:
         )
     runtime_details = _effective_confidence_details(r)
     runtime_confidence = float(runtime_details.get("score") or 0.0)
+    lubricant_components = components_for_record(r)
+    lubricant_alias = getattr(r, "lubricant_alias", None)
+    cof_extracted = normalize_cof_extracted(getattr(r, "cof_extracted_json", None)) or derive_cof_extracted(
+        r.cof_raw,
+        r.cof_value,
+        load=r.load_raw or r.load_value,
+        speed=r.speed_value,
+    )
+    load_conditions = normalize_load_conditions(getattr(r, "load_conditions_json", None)) or derive_load_conditions(r.load_raw or r.load_value)
+    speed_conditions = normalize_speed_conditions(getattr(r, "speed_conditions_json", None)) or derive_speed_conditions(r.speed_value)
+    tribological_system = normalize_tribological_system(getattr(r, "tribological_system_json", None)) or derive_tribological_system(getattr(r, "regime", None))
 
     payload = {
         "id": r.id,
         "material_name": r.material_name,
         "lubricant": r.lubricant,
+        "lubricant_components": lubricant_components,
+        "lubricant_alias": lubricant_alias,
+        "ionic_liquid_display": compact_lubricant_label(r.lubricant, lubricant_components, lubricant_alias),
+        "lubricant_tooltip": format_lubricant_tooltip(r.lubricant, lubricant_components, lubricant_alias),
+        "cof_extracted": cof_extracted,
         "cof_value": r.cof_value,
         "cof_operator": r.cof_operator,
         "cof_raw": r.cof_raw,
         "load_value": r.load_value,
         "load_raw": r.load_raw,
+        "load_conditions": load_conditions,
         "speed_value": r.speed_value,
+        "speed_conditions": speed_conditions,
+        "shear_rate": getattr(r, "shear_rate", None),
         "temperature": r.temperature,
         "potential": r.potential,
         "water_content": r.water_content,
@@ -509,10 +595,17 @@ def _record_to_response(r: TribologyData) -> RecordResponse:
             r.substrate_material,
             r.substrate_coating,
         ),
-        "surface_roughness": r.surface_roughness,
+        "surface_roughness": composite_roughness_label(
+            r.probe_roughness,
+            r.substrate_roughness,
+            method="rms",
+            legacy_surface_roughness=r.surface_roughness,
+        ),
         "residual_film_thickness_d": r.residual_film_thickness_d,
         "layer_spacing_delta": r.layer_spacing_delta,
         "film_thickness": r.film_thickness,
+        "regime": getattr(r, "regime", None),
+        "tribological_system": tribological_system,
         "mol_ratio": r.mol_ratio,
         "cation": r.cation,
         "anion": r.anion,
@@ -547,6 +640,7 @@ async def search_records(
     skip: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(20, ge=1, le=200, description="Max records to return"),
     session: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
     scope: RequestScope = Depends(get_request_scope),
 ):
     """
@@ -554,6 +648,14 @@ async def search_records(
     鏀寔鎸夋潗鏂欍€佹鼎婊戝墏銆佽浇鑽疯寖鍥淬€丆OF鑼冨洿杩囨护
     """
     try:
+        if filter_params.record_id is not None:
+            record = await require_record_access(session, principal, filter_params.record_id)
+            return PaginatedRecordResponse(
+                total=1,
+                skip=0,
+                limit=limit,
+                items=[_record_to_response(record)],
+            )
         result = await get_agent_runtime().search_records(
             session=session,
             filter_params=filter_params,
@@ -662,9 +764,36 @@ async def update_record(
         record = await require_record_access(session, principal, record_id, write=True)
 
         update_data = payload.dict(exclude_none=True, by_alias=False)
+        components_update = update_data.pop("lubricant_components", None)
+        cof_extracted_update = update_data.pop("cof_extracted", None)
+        load_conditions_update = update_data.pop("load_conditions", None)
+        speed_conditions_update = update_data.pop("speed_conditions", None)
+        tribological_system_update = update_data.pop("tribological_system", None)
         for field, value in update_data.items():
             if hasattr(record, field):
                 setattr(record, field, value)
+        if components_update is not None:
+            record.lubricant_components_json = serialize_lubricant_components(
+                normalize_lubricant_components(components_update)
+            )
+        if cof_extracted_update is not None:
+            record.cof_extracted_json = serialize_cof_extracted(
+                normalize_cof_extracted(cof_extracted_update)
+            )
+        if load_conditions_update is not None:
+            record.load_conditions_json = serialize_load_conditions(
+                normalize_load_conditions(load_conditions_update)
+            )
+        if speed_conditions_update is not None:
+            speed_conditions = normalize_speed_conditions(speed_conditions_update)
+            record.speed_conditions_json = serialize_speed_conditions(speed_conditions)
+            derived_speed_value = speed_value_from_conditions(speed_conditions)
+            if derived_speed_value:
+                record.speed_value = derived_speed_value
+        if tribological_system_update is not None:
+            record.tribological_system_json = serialize_tribological_system(
+                normalize_tribological_system(tribological_system_update)
+            )
 
         record.material_name = derive_legacy_material_name(
             probe_material=record.probe_material,
@@ -811,6 +940,3 @@ async def resolve_ionic_liquid(
         raise
     except Exception as exc:
         _raise_internal_error("Resolve ionic liquid", exc)
-
-
-

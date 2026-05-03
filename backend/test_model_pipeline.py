@@ -5,6 +5,7 @@ import copy
 import json
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 from models.db_models import CleanedDataset
 from security import RequestScope
@@ -86,8 +87,14 @@ def test_cleaning_service_builds_pca_matrix_payload() -> None:
     assert payload["pca_info"]["explained_variance_ratio"] is not None
     assert payload["feature_coverage"][0]["label"] == "FP_PCA_1"
     assert payload["feature_coverage"][2]["label"] == "FP_PCA_3"
-    assert set(payload["rows"][0].keys()) == set(payload["matrix_columns"])
-    assert all(isinstance(value, float) or value is None for value in payload["rows"][0].values())
+    assert set(payload["matrix_columns"]).issubset(set(payload["rows"][0].keys()))
+    assert payload["rows"][0]["__record_id"] == 100
+    assert payload["rows"][0]["__literature_id"] == 1
+    assert payload["rows"][0]["__confidence"] == 0.95
+    assert all(
+        isinstance(payload["rows"][0][column], float) or payload["rows"][0][column] is None
+        for column in payload["matrix_columns"]
+    )
 
 
 def test_training_service_uses_saved_matrix_columns_automatically() -> None:
@@ -162,7 +169,7 @@ def test_training_service_uses_saved_matrix_columns_automatically() -> None:
         {
             "algorithm": "gradient_boosting",
             "hyperparameters": {"n_estimators": 50, "learning_rate": 0.06, "max_depth": 3},
-            "data_options": {"validation_split": 0.2, "random_seed": 42, "max_records": None},
+            "data_options": {"validation_split": 0.2, "random_seed": 42, "max_records": None, "split_strategy": "random_holdout", "cv_folds": 5},
         },
         metadata,
     )
@@ -173,8 +180,9 @@ def test_training_service_uses_saved_matrix_columns_automatically() -> None:
     assert prepared["dataset"]["feature_dimensions"] == 3
     assert prepared["feature_blocks"][0]["features"] == ["Temperature", "Speed", "PCA_1"]
     assert prepared["warnings"] == ["Missing numeric values in the saved matrix were median-imputed during training."]
-    assert prepared["X_train"].shape[1] == 3
-    assert prepared["X_val"].shape[1] == 3
+    assert prepared["X"].shape[1] == 3
+    assert prepared["dataset"]["filters"]["split_strategy"] == "random_holdout"
+    assert prepared["dataset"]["filters"]["cv_folds"] == 5
 
 
 def test_algorithm_options_include_catboost_when_dependency_is_available(monkeypatch) -> None:
@@ -184,6 +192,22 @@ def test_algorithm_options_include_catboost_when_dependency_is_available(monkeyp
     options = service._algorithm_options()
 
     assert any(option["key"] == "catboost" for option in options)
+
+
+def test_prediction_insights_skip_none_predictions() -> None:
+    service = ModelTrainingService()
+
+    insights = service._build_prediction_insights(
+        [
+            {"row_index": 0, "record_id": 11, "literature_id": 3, "confidence": 0.9, "actual": 0.12},
+            {"row_index": 1, "record_id": 12, "literature_id": 3, "confidence": 0.8, "actual": 0.18},
+        ],
+        np.array([None, 0.21], dtype=object),
+    )
+
+    assert len(insights["prediction_samples"]) == 1
+    assert insights["prediction_samples"][0]["record_id"] == 12
+    assert insights["largest_residuals"][0]["predicted"] == 0.21
 
 
 @pytest.mark.anyio
@@ -243,6 +267,7 @@ async def test_training_service_runs_catboost_rounds(monkeypatch) -> None:
 
     service = ModelTrainingService()
     task = model_training_service_module.TrainingTaskState(
+        run_record_id=None,
         task_id="catboost-task",
         owner_user_id=1,
         group_id=1,
@@ -250,7 +275,7 @@ async def test_training_service_runs_catboost_rounds(monkeypatch) -> None:
         config={
             "algorithm": "catboost",
             "hyperparameters": {"n_estimators": 3, "learning_rate": 0.06, "max_depth": 3},
-            "data_options": {"validation_split": 0.2, "random_seed": 42, "max_records": None},
+            "data_options": {"validation_split": 0.2, "random_seed": 42, "max_records": None, "split_strategy": "random_holdout", "cv_folds": 5},
         },
     )
 
@@ -267,6 +292,78 @@ async def test_training_service_runs_catboost_rounds(monkeypatch) -> None:
     assert task.current_round == 20
     assert len(task.history) == 20
     assert task.dataset["feature_dimensions"] == 3
+    assert "feature_importance" in task.insights
+
+
+def test_training_service_prepares_k_fold_split_and_linear_baseline() -> None:
+    rows = []
+    for index in range(12):
+        rows.append({
+            "Target_COF": 0.08 + index * 0.01,
+            "Temperature": 25.0 + index,
+            "Speed": 0.11 + index * 0.01,
+            "PCA_1": 1.5 + index * 0.05,
+            "__literature_id": 1 + (index % 4),
+            "__record_id": index + 1,
+            "__confidence": 0.9,
+        })
+
+    metadata = {
+        "summary": {
+            "raw_records": 12,
+            "target_ready_records": 12,
+            "chemistry_ready_records": 12,
+            "training_ready_records": 12,
+            "dropped_by_reason": {
+                "missing_target": 0,
+                "missing_cation_smiles": 0,
+                "missing_anion_smiles": 0,
+            },
+            "rules": {
+                "drop_missing_target": True,
+                "require_dual_smiles": True,
+            },
+        },
+        "source_scope": {
+            "requested_mode": "workspace",
+            "resolved_scope_key": "workspace:1",
+            "resolved_scope_type": "workspace",
+            "label": "Current workspace",
+            "used_fallback": False,
+        },
+        "target": {
+            "key": "cof",
+            "label": "Coefficient of Friction (COF)",
+        },
+        "target_column": "Target_COF",
+        "feature_columns": ["Temperature", "Speed", "PCA_1"],
+        "matrix_columns": ["Target_COF", "Temperature", "Speed", "PCA_1"],
+        "pca_info": None,
+    }
+
+    service = ModelTrainingService()
+    prepared = service._prepare_saved_dataset(
+        rows,
+        {
+            "algorithm": "linear_regression",
+            "hyperparameters": {"n_estimators": 50, "learning_rate": 0.06, "max_depth": 3},
+            "data_options": {
+                "validation_split": 0.2,
+                "random_seed": 42,
+                "max_records": None,
+                "split_strategy": "k_fold",
+                "cv_folds": 4,
+                "min_confidence": 0.0,
+            },
+        },
+        metadata,
+    )
+    split_plan = service._build_split_plan(prepared)
+
+    assert prepared["total_rounds"] == 1
+    assert prepared["dataset"]["split"]["strategy"] == "k_fold"
+    assert prepared["dataset"]["split"]["cv_folds"] == 4
+    assert len(split_plan) == 4
 
 
 def test_parse_water_content_ppm_treats_il_prefix_as_label_not_negative_sign() -> None:

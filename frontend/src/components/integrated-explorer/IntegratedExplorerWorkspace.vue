@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import {
   searchRecords,
@@ -20,9 +20,11 @@ import {
   ExternalLink,
   Edit,
   SlidersHorizontal,
-  FlaskConical,
-  Waves,
   X,
+  Check,
+  Layers,
+  ChevronsLeft,
+  ChevronsRight,
 } from 'lucide-vue-next'
 import ConfidencePanel from '@/components/integrated-explorer/ConfidencePanel.vue'
 import RecordCard from '@/components/integrated-explorer/RecordCard.vue'
@@ -42,21 +44,30 @@ import {
   confidenceDisplay,
   confidenceValueFor,
   formatIonicLiquidHtml,
+  lubricantDisplay,
+  lubricantStructureItems,
   tribopairDisplay,
+  tribopairParts,
+  tribopairExtras,
+  surfaceRoughnessBadge,
+  type IonStructurePreviewItem,
 } from '@/lib/integratedExplorerHelpers'
+import { normalizePotentialDisplayText } from '@/lib/potential'
 
 const props = defineProps<{
   initialDoi?: string
   sourceName?: string
   literatureMetadata?: any
   selectedFileId?: string | null
+  focusRecordId?: number | null
   externalExportRequest?: { id: number, format: ExportFormat } | null
 }>()
 
 const emit = defineEmits<{
-  'view-literature': []
+  'view-literature': [payload?: { literatureId?: number | null, recordId?: number | null }]
   'clear-doi': []
   'clear-source': []
+  'clear-focused-record': []
 }>()
 
 const PAGE_SIZE = 10
@@ -72,6 +83,7 @@ const {
   selectedSubstrateMaterial,
   selectedSubstrateCoating,
   selectedSpeedValue,
+  selectedShearRateValue,
   selectedTemperatureValue,
   selectedPotentialValue,
   selectedWaterContentValue,
@@ -106,18 +118,20 @@ const {
 
 const advancedSearchSummary = computed(() => {
   if (!hasManualFilters.value) {
-    return 'Use workspace filters to refine the current record set. Manual filters here override linked dashboard selections for the same dimension.'
+    return props.selectedFileId
+      ? '当前文献内浏览全部记录，可用高级筛选缩小到特定摩擦副、条件或区间。'
+      : '可按 DOI 搜索，或点"高级筛选"按摩擦副 / 条件 / 区间精确筛选。'
   }
-  return `Manual workspace filters active: ${activeManualFilterCount.value}. These conditions are applied on top of the current dataset view.`
+  return `已启用 ${activeManualFilterCount.value} 个筛选条件，结果在下表中实时更新。`
 })
 
-type AdvancedFilterTab = 'tribopair' | 'conditions' | 'windows'
 type AdvancedFilterState = {
   lubricant: string
   probe: string
   substrate: string
   coating: string
   speed: string
+  shearRate: string
   temperature: string
   potential: string
   water: string
@@ -128,8 +142,187 @@ type AdvancedFilterState = {
 }
 
 const showAdvancedFilters = ref(false)
-const activeAdvancedFilterTab = ref<AdvancedFilterTab>('tribopair')
 const appliedAdvancedFilterState = ref<AdvancedFilterState>(captureAdvancedFilterState())
+
+type AdvancedOptionKey =
+  | 'lubricant'
+  | 'probe'
+  | 'substrate'
+  | 'coating'
+  | 'speed'
+  | 'shearRate'
+  | 'temperature'
+  | 'potential'
+  | 'water'
+
+type AdvancedFilterField = {
+  key: AdvancedOptionKey
+  label: string
+  group: '材料层' | '工况'
+  description: string
+  options: string[]
+  selected: string
+  accentClass: string
+}
+
+const ADVANCED_OPTION_LIMIT = 36
+const activeAdvancedOptionKey = ref<AdvancedOptionKey>('lubricant')
+const advancedOptionSearch = ref('')
+
+const advancedFilterFields = computed<AdvancedFilterField[]>(() => [
+  {
+    key: 'lubricant',
+    label: '离子液体',
+    group: '材料层',
+    description: '阳离子 / 阴离子体系',
+    options: filterOptions.value.lubricants,
+    selected: selectedLubricant.value,
+    accentClass: 'bg-sky-500',
+  },
+  {
+    key: 'probe',
+    label: '探针材料',
+    group: '材料层',
+    description: '上表面或探针端',
+    options: filterOptions.value.probeMaterials,
+    selected: selectedProbeMaterial.value,
+    accentClass: 'bg-cyan-500',
+  },
+  {
+    key: 'substrate',
+    label: '基底材料',
+    group: '材料层',
+    description: '下表面 / 基底',
+    options: filterOptions.value.substrateMaterials,
+    selected: selectedSubstrateMaterial.value,
+    accentClass: 'bg-slate-700',
+  },
+  {
+    key: 'coating',
+    label: '涂层',
+    group: '材料层',
+    description: '氧化层、膜层、修饰层',
+    options: filterOptions.value.substrateCoatings,
+    selected: selectedSubstrateCoating.value,
+    accentClass: 'bg-amber-500',
+  },
+  {
+    key: 'speed',
+    label: '滑移速度',
+    group: '工况',
+    description: '线速度，单位通常为 μm/s、mm/s',
+    options: filterOptions.value.speedValues,
+    selected: selectedSpeedValue.value,
+    accentClass: 'bg-violet-500',
+  },
+  {
+    key: 'shearRate',
+    label: '剪切率',
+    group: '工况',
+    description: '速度梯度，单位通常为 s^-1',
+    options: filterOptions.value.shearRateValues || [],
+    selected: selectedShearRateValue.value,
+    accentClass: 'bg-fuchsia-500',
+  },
+  {
+    key: 'temperature',
+    label: '温度',
+    group: '工况',
+    description: '室温、高温或低温',
+    options: filterOptions.value.temperatureValues,
+    selected: selectedTemperatureValue.value,
+    accentClass: 'bg-rose-500',
+  },
+  {
+    key: 'potential',
+    label: '电势',
+    group: '工况',
+    description: '电化学窗口',
+    options: filterOptions.value.potentialValues,
+    selected: selectedPotentialValue.value,
+    accentClass: 'bg-blue-500',
+  },
+  {
+    key: 'water',
+    label: '含水量',
+    group: '工况',
+    description: '水含量 / 湿度记录',
+    options: filterOptions.value.waterContentValues,
+    selected: selectedWaterContentValue.value,
+    accentClass: 'bg-emerald-500',
+  },
+])
+
+const emptyAdvancedFilterField: AdvancedFilterField = {
+  key: 'lubricant',
+  label: '离子液体',
+  group: '材料层',
+  description: '阳离子 / 阴离子体系',
+  options: [],
+  selected: '',
+  accentClass: 'bg-sky-500',
+}
+
+const activeAdvancedFilterField = computed<AdvancedFilterField>(() => {
+  return advancedFilterFields.value.find((field) => field.key === activeAdvancedOptionKey.value)
+    || advancedFilterFields.value[0]
+    || emptyAdvancedFilterField
+})
+
+const advancedTypedCandidate = computed(() => advancedOptionSearch.value.trim())
+
+const matchingAdvancedOptions = computed(() => {
+  const activeField = activeAdvancedFilterField.value
+  const query = normalizeAdvancedOptionText(advancedOptionSearch.value)
+  if (!query) return activeField.options
+  return activeField.options.filter((option) => normalizeAdvancedOptionText(option).includes(query))
+})
+
+const visibleAdvancedOptions = computed(() => {
+  const selectedValue = activeAdvancedFilterField.value.selected
+  return [...matchingAdvancedOptions.value]
+    .sort((a, b) => {
+      if (a === selectedValue) return -1
+      if (b === selectedValue) return 1
+      return a.localeCompare(b)
+    })
+    .slice(0, ADVANCED_OPTION_LIMIT)
+})
+
+const hiddenAdvancedOptionCount = computed(() => {
+  return Math.max(0, matchingAdvancedOptions.value.length - visibleAdvancedOptions.value.length)
+})
+
+function normalizeAdvancedOptionText(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+function selectAdvancedFilterField(key: AdvancedOptionKey) {
+  activeAdvancedOptionKey.value = key
+  advancedOptionSearch.value = ''
+}
+
+function setAdvancedFilterValue(key: AdvancedOptionKey, value: string) {
+  if (key === 'lubricant') selectedLubricant.value = value
+  if (key === 'probe') selectedProbeMaterial.value = value
+  if (key === 'substrate') selectedSubstrateMaterial.value = value
+  if (key === 'coating') selectedSubstrateCoating.value = value
+  if (key === 'speed') selectedSpeedValue.value = value
+  if (key === 'shearRate') selectedShearRateValue.value = value
+  if (key === 'temperature') selectedTemperatureValue.value = value
+  if (key === 'potential') selectedPotentialValue.value = value
+  if (key === 'water') selectedWaterContentValue.value = value
+  advancedOptionSearch.value = ''
+}
+
+function clearAdvancedFilterValue(key: AdvancedOptionKey) {
+  setAdvancedFilterValue(key, '')
+}
+
+function applyAdvancedTypedValue() {
+  if (!advancedTypedCandidate.value) return
+  setAdvancedFilterValue(activeAdvancedOptionKey.value, advancedTypedCandidate.value)
+}
 
 function captureAdvancedFilterState(): AdvancedFilterState {
   return {
@@ -138,6 +331,7 @@ function captureAdvancedFilterState(): AdvancedFilterState {
     substrate: selectedSubstrateMaterial.value,
     coating: selectedSubstrateCoating.value,
     speed: selectedSpeedValue.value,
+    shearRate: selectedShearRateValue.value,
     temperature: selectedTemperatureValue.value,
     potential: selectedPotentialValue.value,
     water: selectedWaterContentValue.value,
@@ -154,6 +348,7 @@ function restoreAdvancedFilterState(state: AdvancedFilterState) {
   selectedSubstrateMaterial.value = state.substrate
   selectedSubstrateCoating.value = state.coating
   selectedSpeedValue.value = state.speed
+  selectedShearRateValue.value = state.shearRate
   selectedTemperatureValue.value = state.temperature
   selectedPotentialValue.value = state.potential
   selectedWaterContentValue.value = state.water
@@ -188,6 +383,7 @@ function removeAdvancedSearchChip(id: string) {
   if (id === 'manual-substrate') selectedSubstrateMaterial.value = ''
   if (id === 'manual-coating') selectedSubstrateCoating.value = ''
   if (id === 'manual-speed') selectedSpeedValue.value = ''
+  if (id === 'manual-shear-rate') selectedShearRateValue.value = ''
   if (id === 'manual-temperature') selectedTemperatureValue.value = ''
   if (id === 'manual-potential') selectedPotentialValue.value = ''
   if (id === 'manual-water') selectedWaterContentValue.value = ''
@@ -229,6 +425,97 @@ const {
   markGraphDirty,
 })
 
+// 批量选择 + 批量操作 ─────────────────────────────────────────
+const selectedIds = ref<Set<number>>(new Set())
+const batchActionPending = ref(false)
+const batchEditField = ref<string>('')
+const batchEditValue = ref<string>('')
+const batchError = ref('')
+
+function toggleSelectOne(recordId: number) {
+  const next = new Set(selectedIds.value)
+  if (next.has(recordId)) next.delete(recordId)
+  else next.add(recordId)
+  selectedIds.value = next
+}
+function toggleSelectPage(select: boolean) {
+  const next = new Set(selectedIds.value)
+  for (const r of result.value.items) {
+    const id = Number(r.id)
+    if (select) next.add(id)
+    else next.delete(id)
+  }
+  selectedIds.value = next
+}
+function clearSelection() {
+  selectedIds.value = new Set()
+}
+
+async function handleBatchDelete() {
+  if (!selectedIds.value.size) return
+  if (!confirm(`确定要删除选中的 ${selectedIds.value.size} 条记录？此操作不可撤销。`)) return
+  batchActionPending.value = true
+  batchError.value = ''
+  try {
+    const ids = Array.from(selectedIds.value)
+    for (const id of ids) {
+      try {
+        const { deleteTribologyRecord } = await import('@/lib/api')
+        await deleteTribologyRecord(id)
+      } catch (e: any) {
+        batchError.value = `删除记录 #${id} 失败：${e?.response?.data?.detail || e?.message || '未知错误'}`
+        break
+      }
+    }
+    clearSelection()
+    await fetchData()
+  } finally {
+    batchActionPending.value = false
+  }
+}
+
+const BATCH_FIELD_OPTIONS: Array<{ key: string; label: string }> = [
+  { key: 'substrateMaterial', label: '基底材料' },
+  { key: 'substrateCoating', label: '涂层' },
+  { key: 'probeMaterial', label: '探针材料' },
+  { key: 'temperature', label: '温度' },
+  { key: 'potential', label: '电势' },
+  { key: 'speedValue', label: '滑动速度' },
+  { key: 'shearRate', label: '剪切率' },
+  { key: 'loadValue', label: '法向载荷' },
+]
+
+async function handleBatchEdit() {
+  if (!selectedIds.value.size) return
+  if (!batchEditField.value) {
+    batchError.value = '请先选择要修改的字段'
+    return
+  }
+  if (!confirm(`将选中的 ${selectedIds.value.size} 条记录的「${
+    BATCH_FIELD_OPTIONS.find((o) => o.key === batchEditField.value)?.label || batchEditField.value
+  }」改为「${batchEditValue.value || '空'}」？`)) return
+  batchActionPending.value = true
+  batchError.value = ''
+  try {
+    const ids = Array.from(selectedIds.value)
+    const { updateTribologyRecord } = await import('@/lib/api')
+    for (const id of ids) {
+      try {
+        await updateTribologyRecord(id, { [batchEditField.value]: batchEditValue.value })
+      } catch (e: any) {
+        batchError.value = `更新记录 #${id} 失败：${e?.response?.data?.detail || e?.message || '未知错误'}`
+        break
+      }
+    }
+    batchEditField.value = ''
+    batchEditValue.value = ''
+    clearSelection()
+    await fetchData()
+  } finally {
+    batchActionPending.value = false
+  }
+}
+
 const imagePreview = ref<{
   open: boolean
   src: string
@@ -244,18 +531,12 @@ const structurePreview = ref<{
   open: boolean
   rowId: number | null
   title: string
-  cationSmiles: string | null
-  anionSmiles: string | null
-  cationLabel: string
-  anionLabel: string
+  items: IonStructurePreviewItem[]
 }>({
   open: false,
   rowId: null,
   title: '',
-  cationSmiles: null,
-  anionSmiles: null,
-  cationLabel: 'Cation',
-  anionLabel: 'Anion',
+  items: [],
 })
 type EvidenceTermHit = {
   term: string
@@ -288,14 +569,12 @@ const activeEvidenceRow = computed<InteractiveEvidenceRow | null>(() => {
   return buildInteractiveEvidenceRow(evidenceModalRecord.value)
 })
 function openStructurePreview(record: RecordResponse) {
+  const items = lubricantStructureItems(record)
   structurePreview.value = {
     open: true,
     rowId: record.id,
     title: record.lubricant || 'Chemical Structure',
-    cationSmiles: record.cationSmiles || null,
-    anionSmiles: record.anionSmiles || null,
-    cationLabel: record.cation ? `Cation: ${record.cation}` : 'Cation',
-    anionLabel: record.anion ? `Anion: ${record.anion}` : 'Anion',
+    items,
   }
 }
 
@@ -448,8 +727,8 @@ function buildInteractiveEvidenceRow(record: RecordResponse): InteractiveEvidenc
   const ionicLiquid = buildInteractiveEvidenceSnippet(record, 'Ionic liquid', record.lubricant, {
     fallbackPage: primaryPage,
     semanticTypes: ['lubricant'],
-    previewLabel: record.lubricant || undefined,
-    previewHtml: formatIonicLiquidHtml(record.lubricant),
+    previewLabel: lubricantDisplay(record),
+    previewHtml: formatIonicLiquidHtml(lubricantDisplay(record)),
   })
   const surface = buildInteractiveEvidenceSnippet(
     record,
@@ -472,6 +751,17 @@ function buildInteractiveEvidenceRow(record: RecordResponse): InteractiveEvidenc
       previewLabel: record.speedValue || undefined,
     },
   )
+  const shearRate = buildInteractiveEvidenceSnippet(
+    record,
+    'Shear rate',
+    record.shearRate,
+    {
+      fallbackPage: primaryPage,
+      preferImage: true,
+      semanticTypes: ['shear_rate'],
+      previewLabel: record.shearRate || undefined,
+    },
+  )
   const load = buildInteractiveEvidenceSnippet(
     record,
     'Load range',
@@ -490,7 +780,7 @@ function buildInteractiveEvidenceRow(record: RecordResponse): InteractiveEvidenc
     {
       fallbackPage: primaryPage,
       semanticTypes: ['potential', 'water_content'],
-      previewLabel: [record.potential, record.waterContent].filter((value) => String(value || '').trim()).join(' · ') || undefined,
+      previewLabel: [normalizePotentialDisplayText(record.potential), record.waterContent].filter((value) => String(value || '').trim()).join(' · ') || undefined,
     },
   )
   const temperature = buildInteractiveEvidenceSnippet(record, 'Temperature', record.temperature, {
@@ -507,6 +797,7 @@ function buildInteractiveEvidenceRow(record: RecordResponse): InteractiveEvidenc
       ionicLiquid,
       surface,
       speed,
+      shearRate,
       load,
       condition,
       temperature,
@@ -521,6 +812,7 @@ function interactiveEvidenceHighlightColor(tag: InteractiveEvidenceTagType): str
   if (tag === 'ionicLiquid') return 'rgba(99, 102, 241, 0.35)'
   if (tag === 'surface') return 'rgba(249, 115, 22, 0.35)'
   if (tag === 'speed') return 'rgba(14, 165, 233, 0.35)'
+  if (tag === 'shearRate') return 'rgba(217, 70, 239, 0.35)'
   if (tag === 'load') return 'rgba(6, 182, 212, 0.35)'
   if (tag === 'condition') return 'rgba(16, 185, 129, 0.35)'
   if (tag === 'temperature') return 'rgba(244, 63, 94, 0.35)'
@@ -934,6 +1226,13 @@ function handleOpenEvidenceModal(record: RecordResponse) {
   openEvidenceModal(record)
 }
 
+function handleOpenReviewRecord(record: RecordResponse) {
+  emit('view-literature', {
+    literatureId: record.literatureId ?? null,
+    recordId: record.id ?? null,
+  })
+}
+
 function handleOpenEditModal(record: RecordResponse) {
   closeEvidenceModal()
   openEditModal(record)
@@ -981,10 +1280,12 @@ function toCsv(records: RecordResponse[]): string {
     'substrateMaterial',
     'substrateCoating',
     'substrateRoughness',
+    'surfaceRoughnessCompositeRq',
     'temperature',
     'potential',
     'waterContent',
     'speedValue',
+    'shearRate',
     'loadValue',
     'filmThickness',
     'cofRaw',
@@ -1007,10 +1308,12 @@ function toCsv(records: RecordResponse[]): string {
     r.substrateMaterial || '',
     r.substrateCoating || '',
     r.substrateRoughness || '',
+    r.surfaceRoughness || '',
     r.temperature || '',
-    r.potential || '',
+    normalizePotentialDisplayText(r.potential) || '',
     r.waterContent || '',
     r.speedValue || '',
+    r.shearRate || '',
     r.loadValue || '',
     r.filmThickness || '',
     r.cofRaw || '',
@@ -1080,6 +1383,37 @@ watch(
   },
 )
 
+// 自动翻页找到目标记录（最多 12 跳，防死循环）
+const focusHopsRemaining = ref(0)
+watch(
+  () => props.focusRecordId,
+  (id) => {
+    if (id == null) return
+    focusHopsRemaining.value = 12
+    if (currentPage.value !== 1) goToPage(1)
+  },
+)
+watch(
+  [() => props.focusRecordId, () => result.value.items, () => loading.value],
+  ([id, items, isLoading]) => {
+    if (id == null || isLoading) return
+    const found = (items as any[]).some((row) => Number(row?.id) === Number(id))
+    if (found) {
+      focusHopsRemaining.value = 0
+      return
+    }
+    if (focusHopsRemaining.value <= 0) return
+    if (currentPage.value >= totalPages.value) {
+      // 整个文献集都翻完仍没找到——清掉，让 App 解除 focusedRecordId
+      focusHopsRemaining.value = 0
+      emit('clear-focused-record')
+      return
+    }
+    focusHopsRemaining.value -= 1
+    goToPage(currentPage.value + 1)
+  },
+)
+
 onMounted(async () => {
   await loadOptions()
   await fetchData()
@@ -1094,16 +1428,16 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="flex h-full flex-col overflow-hidden bg-slate-50 dark:bg-[#07111d] dark:text-slate-100">
-    <div class="border-b bg-white px-6 py-4 dark:border-slate-800 dark:bg-slate-950/80">
-      <section class="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_18px_60px_-40px_rgba(15,23,42,0.4)] dark:border-slate-800 dark:bg-slate-950/85">
-        <div class="space-y-4 p-4 md:p-5">
-          <div class="flex flex-col gap-3 xl:flex-row xl:items-center">
-            <div class="relative min-w-0 flex-1">
+    <div class="border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950/80">
+      <section class="overflow-hidden">
+        <div class="space-y-2.5">
+          <div class="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+            <div v-if="!props.selectedFileId" class="relative min-w-0 flex-1">
               <Search class="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
                 v-model="searchDoi"
                 type="text"
-                placeholder="Search by Literature DOI..."
+                placeholder="按文献 DOI 搜索…"
                 class="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50/60 pl-11 pr-12 text-sm text-slate-700 shadow-sm transition focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 dark:placeholder:text-slate-500 dark:focus:border-blue-500 dark:focus:bg-slate-900 dark:focus:ring-blue-500/10"
                 @keydown.enter.prevent="applyAdvancedFilters"
               />
@@ -1117,21 +1451,23 @@ onBeforeUnmount(() => {
               </button>
             </div>
 
-            <div class="flex flex-wrap items-center gap-2">
-              <span v-if="props.selectedFileId && props.sourceName" class="rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300">
-                <span>Source: {{ props.sourceName }}</span>
-                <button
-                  type="button"
-                  class="ml-2 inline-flex h-4 w-4 items-center justify-center rounded-full text-blue-500 transition hover:bg-blue-100 hover:text-blue-700 dark:hover:bg-blue-500/20 dark:hover:text-blue-100"
-                  title="Clear source filter"
-                  @click="emit('clear-source')"
+            <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+              <button
+                type="button"
+                class="inline-flex h-9 shrink-0 items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200 dark:hover:bg-blue-500/15"
+                @click="toggleAdvancedFilters"
+              >
+                <SlidersHorizontal class="h-4 w-4" />
+                <span>高级筛选</span>
+                <span
+                  v-if="activeManualFilterCount"
+                  class="inline-flex min-w-5 items-center justify-center rounded-full bg-blue-600 px-1.5 py-0.5 text-[11px] font-bold text-white"
                 >
-                  <X class="h-3 w-3" />
-                </button>
-              </span>
-              <span v-else class="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
-                Showing all data
-              </span>
+                  {{ activeManualFilterCount }}
+                </span>
+                <ChevronUp v-if="showAdvancedFilters" class="h-4 w-4" />
+                <ChevronDown v-else class="h-4 w-4" />
+              </button>
 
               <button
                 v-for="chip in manualFilterChips"
@@ -1147,24 +1483,10 @@ onBeforeUnmount(() => {
               <button
                 v-if="hasManualFilters"
                 type="button"
-                class="px-2 py-1 text-sm text-slate-500 underline-offset-4 transition hover:text-slate-800 hover:underline dark:text-slate-400 dark:hover:text-slate-200"
+                class="h-8 px-2 text-xs font-medium text-slate-500 underline-offset-4 transition hover:text-slate-800 hover:underline dark:text-slate-400 dark:hover:text-slate-200"
                 @click="clearAllAdvancedFilters"
               >
-                Clear all
-              </button>
-
-              <button
-                type="button"
-                class="inline-flex h-12 items-center gap-2 rounded-2xl bg-blue-600 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-                @click="toggleAdvancedFilters"
-              >
-                <SlidersHorizontal class="h-4 w-4" />
-                <span>Advanced Filters</span>
-                <span class="inline-flex min-w-6 items-center justify-center rounded-full bg-white/20 px-1.5 py-0.5 text-xs font-bold">
-                  {{ activeManualFilterCount }}
-                </span>
-                <ChevronUp v-if="showAdvancedFilters" class="h-4 w-4" />
-                <ChevronDown v-else class="h-4 w-4" />
+                清空筛选
               </button>
             </div>
           </div>
@@ -1174,242 +1496,274 @@ onBeforeUnmount(() => {
           </p>
         </div>
 
-        <div v-if="showAdvancedFilters" class="grid border-t border-slate-200 dark:border-slate-800 lg:grid-cols-[220px_minmax(0,1fr)]">
-          <div class="border-b border-slate-200 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-900/50 lg:border-b-0 lg:border-r">
-            <div class="space-y-2">
-              <button
-                type="button"
-                class="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-medium transition"
-                :class="activeAdvancedFilterTab === 'tribopair'
-                  ? 'bg-blue-50 text-blue-700 shadow-sm dark:bg-blue-500/10 dark:text-blue-300'
-                  : 'text-slate-600 hover:bg-white hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-950 dark:hover:text-slate-100'"
-                @click="activeAdvancedFilterTab = 'tribopair'"
-              >
-                <FlaskConical class="h-4 w-4" />
-                <div>
-                  <div>Tribopair Layers</div>
-                  <div class="text-xs font-normal text-slate-400 dark:text-slate-500">Probe, substrate, coating</div>
+        <div
+          v-if="showAdvancedFilters"
+          class="mt-3 overflow-hidden rounded-[1.6rem] border border-slate-200 bg-white shadow-xl shadow-slate-200/40 dark:border-slate-800 dark:bg-slate-900/90 dark:shadow-none"
+        >
+          <!-- Header -->
+          <div class="flex flex-col gap-4 border-b border-slate-100 px-5 py-4 dark:border-slate-800/60 lg:flex-row lg:items-center lg:justify-between">
+            <div class="flex min-w-0 items-center gap-3">
+              <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
+                <SlidersHorizontal class="h-5 w-5" />
+              </div>
+              <div class="min-w-0">
+                <div class="flex items-center gap-2">
+                  <h3 class="text-base font-bold text-slate-900 dark:text-white">高级筛选检索台</h3>
+                  <span v-if="activeManualFilterCount" class="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700 dark:bg-blue-500/20 dark:text-blue-300">
+                    {{ activeManualFilterCount }} active
+                  </span>
                 </div>
+                <p class="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
+                  先选字段，再搜索候选；候选列表只渲染前 {{ ADVANCED_OPTION_LIMIT }} 条，数据量大时也保持轻、快、干净。
+                </p>
+              </div>
+            </div>
+            <div class="flex shrink-0 items-center gap-2">
+              <button
+                v-if="hasManualFilters"
+                type="button"
+                class="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/50 dark:hover:text-slate-200"
+                @click="clearAllAdvancedFilters"
+              >
+                清空全部
               </button>
               <button
                 type="button"
-                class="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-medium transition"
-                :class="activeAdvancedFilterTab === 'conditions'
-                  ? 'bg-blue-50 text-blue-700 shadow-sm dark:bg-blue-500/10 dark:text-blue-300'
-                  : 'text-slate-600 hover:bg-white hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-950 dark:hover:text-slate-100'"
-                @click="activeAdvancedFilterTab = 'conditions'"
+                class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                @click="cancelAdvancedFilters"
               >
-                <SlidersHorizontal class="h-4 w-4" />
-                <div>
-                  <div>Conditions</div>
-                  <div class="text-xs font-normal text-slate-400 dark:text-slate-500">Speed, temp, potential, water</div>
-                </div>
-              </button>
-              <button
-                type="button"
-                class="flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-medium transition"
-                :class="activeAdvancedFilterTab === 'windows'
-                  ? 'bg-blue-50 text-blue-700 shadow-sm dark:bg-blue-500/10 dark:text-blue-300'
-                  : 'text-slate-600 hover:bg-white hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-950 dark:hover:text-slate-100'"
-                @click="activeAdvancedFilterTab = 'windows'"
-              >
-                <Waves class="h-4 w-4" />
-                <div>
-                  <div>Data Windows</div>
-                  <div class="text-xs font-normal text-slate-400 dark:text-slate-500">Load and COF ranges</div>
-                </div>
+                收起
               </button>
             </div>
           </div>
 
-          <div class="p-4 md:p-5">
-            <div class="mb-5">
-              <h3 class="text-sm font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">
-                {{ activeAdvancedFilterTab === 'tribopair' ? 'Tribopair Layers' : activeAdvancedFilterTab === 'conditions' ? 'Conditions' : 'Data Windows' }}
-              </h3>
-              <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                {{
-                  activeAdvancedFilterTab === 'tribopair'
-                    ? 'Layered material filters narrow records by counterface structure instead of a single merged surface label.'
-                    : activeAdvancedFilterTab === 'conditions'
-                      ? 'Match exact recorded operating conditions for speed, temperature, electrochemical potential, and water content.'
-                      : 'Use numeric windows to constrain load and COF while keeping other condition filters independent.'
-                }}
+          <!-- Body -->
+          <div class="grid divide-y divide-slate-100 dark:divide-slate-800/60 xl:grid-cols-[240px_minmax(0,1fr)_320px] xl:divide-x xl:divide-y-0">
+            <!-- Col 1: Fields Nav -->
+            <nav class="flex flex-col bg-slate-50/30 p-4 dark:bg-slate-950/20">
+              <div class="mb-4 px-1">
+                <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">字段导航</p>
+              </div>
+              <div class="space-y-1">
+                <button
+                  v-for="field in advancedFilterFields"
+                  :key="field.key"
+                  type="button"
+                  class="group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition"
+                  :class="field.key === activeAdvancedOptionKey
+                    ? 'bg-white shadow-sm ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-700'
+                    : 'text-slate-600 hover:bg-slate-100/50 dark:text-slate-400 dark:hover:bg-slate-800/30'"
+                  @click="selectAdvancedFilterField(field.key)"
+                >
+                  <span class="h-2 w-2 shrink-0 rounded-full" :class="field.accentClass" />
+                  <span class="min-w-0 flex-1">
+                    <span class="flex items-center justify-between gap-2">
+                      <span class="truncate text-sm font-semibold" :class="field.key === activeAdvancedOptionKey ? 'text-slate-900 dark:text-white' : ''">{{ field.label }}</span>
+                      <span class="text-[10px] font-medium text-slate-400">{{ field.options.length }}</span>
+                    </span>
+                    <span
+                      class="mt-0.5 block truncate text-[11px]"
+                      :class="field.key === activeAdvancedOptionKey ? 'text-slate-500 dark:text-slate-400' : 'text-slate-400/80 dark:text-slate-500/80'"
+                    >
+                      {{ field.selected || field.description }}
+                    </span>
+                  </span>
+                </button>
+              </div>
+            </nav>
+
+            <!-- Col 2: Candidates -->
+            <section class="flex flex-col p-5">
+              <div class="mb-5 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <div class="flex items-center gap-2">
+                    <span class="h-2 w-2 rounded-full" :class="activeAdvancedFilterField.accentClass" />
+                    <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                      {{ activeAdvancedFilterField.group }}
+                    </p>
+                  </div>
+                  <h3 class="mt-1 text-lg font-bold text-slate-900 dark:text-white">{{ activeAdvancedFilterField.label }}</h3>
+                </div>
+                <p class="text-xs font-medium text-slate-500 dark:text-slate-400">
+                  {{ matchingAdvancedOptions.length }} / {{ activeAdvancedFilterField.options.length }}
+                </p>
+              </div>
+
+              <div class="relative mb-4">
+                <Search class="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  v-model="advancedOptionSearch"
+                  type="search"
+                  :placeholder="`搜索 ${activeAdvancedFilterField.label} 候选…`"
+                  class="h-10 w-full rounded-xl border-0 bg-slate-100 pl-10 pr-10 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 transition placeholder:text-slate-500 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-blue-500 dark:bg-slate-800 dark:text-white dark:ring-slate-700 dark:focus:bg-slate-900"
+                  @keydown.enter.prevent="advancedTypedCandidate ? applyAdvancedTypedValue() : applyAdvancedFilters()"
+                >
+                <button
+                  v-if="advancedOptionSearch"
+                  type="button"
+                  class="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+                  @click="advancedOptionSearch = ''"
+                >
+                  <X class="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              <button
+                v-if="advancedTypedCandidate"
+                type="button"
+                class="mb-4 flex w-full items-center justify-between rounded-xl border border-dashed border-blue-200 bg-blue-50/50 px-4 py-2.5 text-left text-sm font-medium text-blue-700 transition hover:bg-blue-50 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20"
+                @click="applyAdvancedTypedValue"
+              >
+                <span class="truncate">使用 “{{ advancedTypedCandidate }}”</span>
+                <span class="ml-3 shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] uppercase text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">Enter</span>
+              </button>
+
+              <div
+                v-if="activeAdvancedFilterField.selected"
+                class="mb-4 flex items-center justify-between gap-3 rounded-xl bg-blue-50 px-4 py-3 dark:bg-blue-500/10"
+              >
+                <div class="min-w-0">
+                  <p class="text-[10px] font-bold uppercase tracking-wider text-blue-500/80 dark:text-blue-400/80">已选择</p>
+                  <p class="mt-0.5 truncate text-sm font-semibold text-blue-900 dark:text-blue-100">{{ activeAdvancedFilterField.selected }}</p>
+                </div>
+                <button
+                  type="button"
+                  class="shrink-0 rounded-lg bg-white/60 px-2.5 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-white dark:bg-slate-800 dark:text-blue-300 dark:hover:bg-slate-700"
+                  @click="clearAdvancedFilterValue(activeAdvancedFilterField.key)"
+                >
+                  清除
+                </button>
+              </div>
+
+              <div class="flex-1 min-h-0 relative">
+                <div class="absolute inset-0 overflow-auto rounded-xl border border-slate-100 bg-white dark:border-slate-800 dark:bg-slate-950/50">
+                  <button
+                    v-for="option in visibleAdvancedOptions"
+                    :key="`${activeAdvancedFilterField.key}-${option}`"
+                    type="button"
+                    class="flex w-full items-center gap-3 border-b border-slate-50 px-4 py-2.5 text-left text-sm transition last:border-b-0 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/50"
+                    :class="option === activeAdvancedFilterField.selected ? 'bg-blue-50/50 dark:bg-blue-500/10' : ''"
+                    @click="setAdvancedFilterValue(activeAdvancedFilterField.key, option)"
+                  >
+                    <span class="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-300" :class="option === activeAdvancedFilterField.selected ? 'font-semibold text-blue-700 dark:text-blue-300' : ''">{{ option }}</span>
+                    <Check v-if="option === activeAdvancedFilterField.selected" class="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                  </button>
+                  <div v-if="!visibleAdvancedOptions.length" class="px-4 py-8 text-center text-sm text-slate-400">
+                    没有匹配候选。可以直接使用当前输入作为筛选值。
+                  </div>
+                </div>
+              </div>
+              <p v-if="hiddenAdvancedOptionCount" class="mt-3 text-center text-xs text-slate-400">
+                还有 {{ hiddenAdvancedOptionCount }} 个候选未展示，继续输入可缩小范围。
               </p>
-            </div>
+            </section>
 
-            <div v-if="activeAdvancedFilterTab === 'tribopair'" class="grid gap-4 xl:grid-cols-4">
-              <div class="min-w-0">
-                <div class="mb-1.5 flex items-center justify-between gap-2">
-                  <label class="block text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Ionic Liquid</label>
-                  <span class="text-[11px] text-slate-400 dark:text-slate-500">{{ filterOptions.lubricants.length }} options</span>
+            <!-- Col 3: Values & Active -->
+            <aside class="flex flex-col bg-slate-50/30 p-5 dark:bg-slate-950/20">
+              <div class="mb-6">
+                <div class="mb-4 flex items-center justify-between">
+                  <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Active Slice</p>
+                  <span v-if="activeManualFilterCount" class="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-400">{{ activeManualFilterCount }}</span>
                 </div>
-                <select
-                  v-model="selectedLubricant"
-                  class="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 transition focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:border-blue-500 dark:focus:ring-blue-500/10"
-                >
-                  <option value="">All Ionic Liquids</option>
-                  <option v-for="l in filterOptions.lubricants" :key="l" :value="l">{{ l }}</option>
-                </select>
-              </div>
-              <div class="min-w-0">
-                <div class="mb-1.5 flex items-center justify-between gap-2">
-                  <label class="block text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Probe Material</label>
-                  <span class="text-[11px] text-slate-400 dark:text-slate-500">{{ filterOptions.probeMaterials.length }} options</span>
+                <div v-if="manualFilterChips.length" class="flex flex-wrap gap-2">
+                  <button
+                    v-for="chip in manualFilterChips"
+                    :key="chip.id"
+                    type="button"
+                    class="group flex max-w-full items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                    @click="removeAdvancedSearchChip(chip.id)"
+                  >
+                    <span class="truncate font-medium">{{ chip.label }}</span>
+                    <span class="text-slate-400 dark:text-slate-500">:</span>
+                    <span class="truncate text-slate-900 dark:text-white">{{ chip.value }}</span>
+                    <X class="ml-0.5 h-3 w-3 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300" />
+                  </button>
                 </div>
-                <select
-                  v-model="selectedProbeMaterial"
-                  class="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 transition focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:border-blue-500 dark:focus:ring-blue-500/10"
-                >
-                  <option value="">All Probes</option>
-                  <option v-for="m in filterOptions.probeMaterials" :key="m" :value="m">{{ m }}</option>
-                </select>
-              </div>
-              <div class="min-w-0">
-                <div class="mb-1.5 flex items-center justify-between gap-2">
-                  <label class="block text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Substrate</label>
-                  <span class="text-[11px] text-slate-400 dark:text-slate-500">{{ filterOptions.substrateMaterials.length }} options</span>
-                </div>
-                <select
-                  v-model="selectedSubstrateMaterial"
-                  class="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 transition focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:border-blue-500 dark:focus:ring-blue-500/10"
-                >
-                  <option value="">All Substrates</option>
-                  <option v-for="m in filterOptions.substrateMaterials" :key="m" :value="m">{{ m }}</option>
-                </select>
-              </div>
-              <div class="min-w-0">
-                <div class="mb-1.5 flex items-center justify-between gap-2">
-                  <label class="block text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Coating</label>
-                  <span class="text-[11px] text-slate-400 dark:text-slate-500">{{ filterOptions.substrateCoatings.length }} options</span>
-                </div>
-                <select
-                  v-model="selectedSubstrateCoating"
-                  class="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 transition focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:border-blue-500 dark:focus:ring-blue-500/10"
-                >
-                  <option value="">All Coatings</option>
-                  <option v-for="m in filterOptions.substrateCoatings" :key="m" :value="m">{{ m }}</option>
-                </select>
-              </div>
-            </div>
-
-            <div v-else-if="activeAdvancedFilterTab === 'conditions'" class="grid gap-4 xl:grid-cols-4">
-              <div>
-                <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Speed</label>
-                <select
-                  v-model="selectedSpeedValue"
-                  class="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 transition focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:border-blue-500 dark:focus:ring-blue-500/10"
-                >
-                  <option value="">All Speeds</option>
-                  <option v-for="value in filterOptions.speedValues" :key="value" :value="value">{{ value }}</option>
-                </select>
-              </div>
-              <div>
-                <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Temperature</label>
-                <select
-                  v-model="selectedTemperatureValue"
-                  class="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 transition focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:border-blue-500 dark:focus:ring-blue-500/10"
-                >
-                  <option value="">All Temperatures</option>
-                  <option v-for="value in filterOptions.temperatureValues" :key="value" :value="value">{{ value }}</option>
-                </select>
-              </div>
-              <div>
-                <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Potential</label>
-                <select
-                  v-model="selectedPotentialValue"
-                  class="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 transition focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:border-blue-500 dark:focus:ring-blue-500/10"
-                >
-                  <option value="">All Potentials</option>
-                  <option v-for="value in filterOptions.potentialValues" :key="value" :value="value">{{ value }}</option>
-                </select>
-              </div>
-              <div>
-                <label class="mb-1.5 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Water Content</label>
-                <select
-                  v-model="selectedWaterContentValue"
-                  class="h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 transition focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:focus:border-blue-500 dark:focus:ring-blue-500/10"
-                >
-                  <option value="">All Water Levels</option>
-                  <option v-for="value in filterOptions.waterContentValues" :key="value" :value="value">{{ value }}</option>
-                </select>
-              </div>
-            </div>
-
-            <div v-else class="grid gap-4 xl:grid-cols-2">
-              <div class="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/60">
-                <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Load Window</label>
-                <div class="flex items-center gap-3">
-                  <input
-                    v-model="loadMin"
-                    type="text"
-                    inputmode="decimal"
-                    placeholder="Min"
-                    class="h-12 w-full rounded-2xl border bg-white px-4 text-sm text-slate-700 transition focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100 dark:bg-slate-950 dark:text-slate-200 dark:focus:border-blue-500 dark:focus:ring-blue-500/10"
-                    :class="isLoadRangeInvalid ? 'border-rose-300 dark:border-rose-500/40' : 'border-slate-200 dark:border-slate-700'"
-                    @keydown.enter.prevent="applyAdvancedFilters"
-                  />
-                  <span class="text-slate-300 dark:text-slate-600">-</span>
-                  <input
-                    v-model="loadMax"
-                    type="text"
-                    inputmode="decimal"
-                    placeholder="Max"
-                    class="h-12 w-full rounded-2xl border bg-white px-4 text-sm text-slate-700 transition focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100 dark:bg-slate-950 dark:text-slate-200 dark:focus:border-blue-500 dark:focus:ring-blue-500/10"
-                    :class="isLoadRangeInvalid ? 'border-rose-300 dark:border-rose-500/40' : 'border-slate-200 dark:border-slate-700'"
-                    @keydown.enter.prevent="applyAdvancedFilters"
-                  />
-                </div>
-                <p class="mt-2 text-xs" :class="isLoadRangeInvalid ? 'text-rose-500 dark:text-rose-300' : 'text-slate-500 dark:text-slate-400'">
-                  {{ isLoadRangeInvalid ? 'Enter valid numbers and keep Min <= Max.' : 'Numeric load filter in recorded units.' }}
+                <p v-else class="text-xs text-slate-400 dark:text-slate-500">
+                  当前没有手动筛选，表格显示当前文献或全库范围。
                 </p>
               </div>
 
-              <div class="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-900/60">
-                <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">COF Window</label>
-                <div class="flex items-center gap-3">
-                  <input
-                    v-model="cofMin"
-                    type="text"
-                    inputmode="decimal"
-                    placeholder="Min"
-                    class="h-12 w-full rounded-2xl border bg-white px-4 text-sm text-slate-700 transition focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100 dark:bg-slate-950 dark:text-slate-200 dark:focus:border-blue-500 dark:focus:ring-blue-500/10"
-                    :class="isCofRangeInvalid ? 'border-rose-300 dark:border-rose-500/40' : 'border-slate-200 dark:border-slate-700'"
-                    @keydown.enter.prevent="applyAdvancedFilters"
-                  />
-                  <span class="text-slate-300 dark:text-slate-600">-</span>
-                  <input
-                    v-model="cofMax"
-                    type="text"
-                    inputmode="decimal"
-                    placeholder="Max"
-                    class="h-12 w-full rounded-2xl border bg-white px-4 text-sm text-slate-700 transition focus:border-blue-400 focus:outline-none focus:ring-4 focus:ring-blue-100 dark:bg-slate-950 dark:text-slate-200 dark:focus:border-blue-500 dark:focus:ring-blue-500/10"
-                    :class="isCofRangeInvalid ? 'border-rose-300 dark:border-rose-500/40' : 'border-slate-200 dark:border-slate-700'"
-                    @keydown.enter.prevent="applyAdvancedFilters"
-                  />
-                </div>
-                <p class="mt-2 text-xs" :class="isCofRangeInvalid ? 'text-rose-500 dark:text-rose-300' : 'text-slate-500 dark:text-slate-400'">
-                  {{ isCofRangeInvalid ? 'Enter valid numbers and keep Min <= Max.' : 'Supports partial range filtering.' }}
-                </p>
-              </div>
-            </div>
+              <div>
+                <p class="mb-4 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">数值窗口</p>
+                <div class="space-y-4">
+                  <div>
+                    <label class="mb-2 block text-xs font-medium text-slate-700 dark:text-slate-300">载荷窗口 (Load)</label>
+                    <div class="flex items-center gap-2">
+                      <input
+                        v-model="loadMin"
+                        type="text"
+                        inputmode="decimal"
+                        placeholder="Min"
+                        class="h-9 w-full rounded-lg border-0 bg-white px-3 text-sm text-slate-900 ring-1 ring-inset transition focus:ring-2 focus:ring-inset dark:bg-slate-900 dark:text-white"
+                        :class="isLoadRangeInvalid ? 'ring-rose-300 focus:ring-rose-500 dark:ring-rose-500/50' : 'ring-slate-200 focus:ring-blue-500 dark:ring-slate-700'"
+                        @keydown.enter.prevent="applyAdvancedFilters"
+                      />
+                      <span class="text-slate-400">-</span>
+                      <input
+                        v-model="loadMax"
+                        type="text"
+                        inputmode="decimal"
+                        placeholder="Max"
+                        class="h-9 w-full rounded-lg border-0 bg-white px-3 text-sm text-slate-900 ring-1 ring-inset transition focus:ring-2 focus:ring-inset dark:bg-slate-900 dark:text-white"
+                        :class="isLoadRangeInvalid ? 'ring-rose-300 focus:ring-rose-500 dark:ring-rose-500/50' : 'ring-slate-200 focus:ring-blue-500 dark:ring-slate-700'"
+                        @keydown.enter.prevent="applyAdvancedFilters"
+                      />
+                    </div>
+                    <p v-if="isLoadRangeInvalid" class="mt-1 text-[11px] text-rose-500">输入无效，最小值不能大于最大值。</p>
+                  </div>
 
-            <div class="mt-6 flex items-center justify-end gap-3 border-t border-slate-200 pt-5 dark:border-slate-800">
+                  <div>
+                    <label class="mb-2 block text-xs font-medium text-slate-700 dark:text-slate-300">COF 窗口</label>
+                    <div class="flex items-center gap-2">
+                      <input
+                        v-model="cofMin"
+                        type="text"
+                        inputmode="decimal"
+                        placeholder="Min"
+                        class="h-9 w-full rounded-lg border-0 bg-white px-3 text-sm text-slate-900 ring-1 ring-inset transition focus:ring-2 focus:ring-inset dark:bg-slate-900 dark:text-white"
+                        :class="isCofRangeInvalid ? 'ring-rose-300 focus:ring-rose-500 dark:ring-rose-500/50' : 'ring-slate-200 focus:ring-blue-500 dark:ring-slate-700'"
+                        @keydown.enter.prevent="applyAdvancedFilters"
+                      />
+                      <span class="text-slate-400">-</span>
+                      <input
+                        v-model="cofMax"
+                        type="text"
+                        inputmode="decimal"
+                        placeholder="Max"
+                        class="h-9 w-full rounded-lg border-0 bg-white px-3 text-sm text-slate-900 ring-1 ring-inset transition focus:ring-2 focus:ring-inset dark:bg-slate-900 dark:text-white"
+                        :class="isCofRangeInvalid ? 'ring-rose-300 focus:ring-rose-500 dark:ring-rose-500/50' : 'ring-slate-200 focus:ring-blue-500 dark:ring-slate-700'"
+                        @keydown.enter.prevent="applyAdvancedFilters"
+                      />
+                    </div>
+                    <p v-if="isCofRangeInvalid" class="mt-1 text-[11px] text-rose-500">输入无效，最小值不能大于最大值。</p>
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </div>
+
+          <!-- Footer -->
+          <div class="flex items-center justify-between border-t border-slate-100 bg-slate-50/50 px-5 py-3 dark:border-slate-800/60 dark:bg-slate-900/50">
+            <p class="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">
+              应用后刷新下方记录；取消会回到上一次已应用的筛选状态。
+            </p>
+            <div class="flex w-full justify-end gap-3 sm:w-auto">
               <button
                 type="button"
-                class="rounded-2xl px-4 py-2.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-200"
+                class="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200/50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
                 @click="cancelAdvancedFilters"
               >
-                Cancel
+                取消
               </button>
               <button
                 type="button"
-                class="inline-flex h-12 items-center justify-center gap-2 rounded-2xl bg-slate-900 px-5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+                class="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 dark:focus:ring-offset-slate-900"
                 :disabled="hasInvalidManualRange"
                 @click="applyAdvancedFilters"
               >
                 <Search class="h-4 w-4" />
-                Apply Filters
+                应用筛选
               </button>
             </div>
           </div>
@@ -1417,37 +1771,112 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
+    <div v-if="selectedIds.size > 0" class="px-6 pt-3">
+      <div class="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white/90 px-3 py-2.5 text-sm text-slate-700 shadow-[0_18px_42px_-34px_rgba(15,23,42,0.65)] ring-1 ring-slate-100 backdrop-blur dark:border-slate-800 dark:bg-slate-950/85 dark:text-slate-200 dark:ring-slate-800">
+        <div class="mr-1 flex items-center gap-2">
+          <span class="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-slate-950 px-2 text-xs font-black tabular-nums text-white dark:bg-white dark:text-slate-950">
+            {{ selectedIds.size }}
+          </span>
+          <span class="text-xs font-black uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Batch Edit</span>
+        </div>
+
+        <button
+          type="button"
+          class="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-bold text-slate-500 transition hover:border-slate-300 hover:bg-white hover:text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+          @click="clearSelection"
+        >
+          取消选择
+        </button>
+
+        <span class="mx-1 hidden h-6 w-px bg-slate-200 dark:bg-slate-800 sm:block" />
+
+        <select
+          v-model="batchEditField"
+          class="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:focus:border-blue-500 dark:focus:ring-blue-500/10"
+        >
+          <option value="">选择字段...</option>
+          <option v-for="opt in BATCH_FIELD_OPTIONS" :key="opt.key" :value="opt.key">{{ opt.label }}</option>
+        </select>
+        <input
+          v-model="batchEditValue"
+          type="text"
+          :placeholder="batchEditField ? '新值，留空则清除' : '先选字段'"
+          :disabled="!batchEditField"
+          class="h-9 w-48 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:focus:border-blue-500 dark:focus:ring-blue-500/10 dark:disabled:bg-slate-900"
+        >
+        <button
+          type="button"
+          class="inline-flex h-9 items-center gap-1 rounded-lg bg-slate-950 px-3 text-xs font-black text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
+          :disabled="!batchEditField || batchActionPending"
+          @click="handleBatchEdit"
+        >
+          <span v-if="batchActionPending">应用中...</span>
+          <span v-else>应用修改</span>
+        </button>
+
+        <button
+          type="button"
+          class="ml-auto inline-flex h-9 items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-3 text-xs font-black text-rose-600 transition hover:border-rose-300 hover:bg-rose-100 disabled:opacity-50 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-300"
+          :disabled="batchActionPending"
+          @click="handleBatchDelete"
+        >
+          删除选中
+        </button>
+
+        <span
+          v-if="batchError"
+          class="basis-full rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-600 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-300"
+        >
+          {{ batchError }}
+        </span>
+      </div>
+    </div>
+
     <div class="flex-1 overflow-auto px-6 py-4">
       <RecordTable
         :loading="loading"
         :records="result.items"
+        :row-number-start="rangeStart || 1"
         :deleting-row-id="deletingRowId"
         :evidence-data="evidenceData"
         :structure-preview-open="structurePreview.open"
         :structure-preview-row-id="structurePreview.rowId"
+        :focus-record-id="focusRecordId ?? null"
+        :selected-ids="selectedIds"
         :open-evidence-modal="handleOpenEvidenceModal"
+        :open-review-record="handleOpenReviewRecord"
         :open-edit-modal="handleOpenEditModal"
         :remove-record="removeRecord"
         :open-structure-preview="openStructurePreview"
+        @toggle-select="toggleSelectOne"
+        @toggle-select-page="toggleSelectPage"
       />
     </div>
 
     <div class="flex items-center justify-between border-t bg-white px-6 py-3 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-950/80 dark:text-slate-400">
       <div>
         <template v-if="result.total > 0">
-          Showing {{ rangeStart }} to {{ rangeEnd }} (Total {{ result.total }})
+          第 {{ rangeStart }}–{{ rangeEnd }} 条 / 共 {{ result.total }} 条
         </template>
         <template v-else>
-          No records found
+          暂无符合条件的记录
         </template>
       </div>
       <div class="flex items-center gap-1">
+        <button
+          class="inline-flex items-center gap-1 rounded-md border border-slate-300 px-1.5 py-1 text-slate-400 hover:bg-slate-50 hover:text-slate-600 disabled:opacity-40 dark:border-slate-700 dark:hover:bg-slate-800"
+          :disabled="currentPage === 1"
+          title="首页"
+          @click="goToPage(1)"
+        >
+          <ChevronsLeft class="h-4 w-4" />
+        </button>
         <button
           class="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-700 dark:hover:bg-slate-800"
           :disabled="currentPage === 1"
           @click="goToPage(currentPage - 1)"
         >
-          <ChevronLeft class="h-4 w-4" /> Prev
+          <ChevronLeft class="h-4 w-4" /> 上一页
         </button>
         <span class="px-2">{{ currentPage }} / {{ totalPages }}</span>
         <button
@@ -1455,7 +1884,15 @@ onBeforeUnmount(() => {
           :disabled="currentPage >= totalPages"
           @click="goToPage(currentPage + 1)"
         >
-          Next <ChevronRight class="h-4 w-4" />
+          下一页 <ChevronRight class="h-4 w-4" />
+        </button>
+        <button
+          class="inline-flex items-center gap-1 rounded-md border border-slate-300 px-1.5 py-1 text-slate-400 hover:bg-slate-50 hover:text-slate-600 disabled:opacity-40 dark:border-slate-700 dark:hover:bg-slate-800"
+          :disabled="currentPage >= totalPages"
+          title="尾页"
+          @click="goToPage(totalPages)"
+        >
+          <ChevronsRight class="h-4 w-4" />
         </button>
       </div>
     </div>
@@ -1491,6 +1928,52 @@ onBeforeUnmount(() => {
 
       <div v-if="evidenceModalRecord" class="grid h-[78vh] gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
         <aside class="space-y-4 overflow-auto pr-1">
+          <!-- Tribopair Cross-Check Card -->
+          <div class="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+            <div class="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
+              <Layers class="h-4 w-4 text-emerald-500" /> Tribopair Cross-Check
+            </div>
+            <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+              <!-- Probe -->
+              <div>
+                <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Probe</div>
+                <div class="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">
+                  {{ tribopairParts(evidenceModalRecord).probe }}
+                </div>
+                <div v-if="tribopairExtras(evidenceModalRecord).probeDetails" class="mt-0.5 text-xs text-slate-500">
+                  {{ tribopairExtras(evidenceModalRecord).probeDetails }}
+                </div>
+              </div>
+              
+              <!-- Substrate -->
+              <div>
+                <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Substrate</div>
+                <div class="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">
+                  {{ tribopairParts(evidenceModalRecord).substrate }}
+                </div>
+                <div v-if="surfaceRoughnessBadge(evidenceModalRecord)" class="mt-0.5 text-xs text-slate-500">
+                  Roughness: {{ surfaceRoughnessBadge(evidenceModalRecord)?.label }}
+                </div>
+              </div>
+
+              <!-- Coating -->
+              <div v-if="tribopairParts(evidenceModalRecord).coating">
+                <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Coating</div>
+                <div class="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">
+                  {{ tribopairParts(evidenceModalRecord).coating }}
+                </div>
+              </div>
+
+              <!-- Film Thickness -->
+              <div v-if="tribopairExtras(evidenceModalRecord).filmThickness">
+                <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Film Thickness</div>
+                <div class="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">
+                  {{ tribopairExtras(evidenceModalRecord).filmThickness }}
+                </div>
+              </div>
+            </div>
+          </div>
+
           <RecordCard
             :record="evidenceModalRecord"
             :evidence="evidenceData[evidenceModalRecord.id] || null"
@@ -1499,7 +1982,7 @@ onBeforeUnmount(() => {
 
           <div class="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
             <div class="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
-              <BookOpen class="h-4 w-4" /> Reference Source
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-book-open h-4 w-4"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> Reference Source
             </div>
             <div class="mt-4 space-y-4">
               <div>
@@ -1548,7 +2031,7 @@ onBeforeUnmount(() => {
             <div>
               <div class="text-xs font-semibold uppercase tracking-[0.24em] text-blue-200/70">Context-Aware Evidence</div>
               <div class="mt-1 text-sm text-slate-300">
-                <span class="font-semibold text-white" v-html="formatIonicLiquidHtml(evidenceModalRecord.lubricant || '--')"></span>
+                <span class="font-semibold text-white" v-html="formatIonicLiquidHtml(lubricantDisplay(evidenceModalRecord))"></span>
                 <span class="mx-2 text-slate-500">·</span>
                 <span>{{ cofDisplay(evidenceModalRecord) }}</span>
               </div>
@@ -1617,7 +2100,7 @@ onBeforeUnmount(() => {
                   <div class="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
                     Record #{{ editDrawerRecord.id }}
                   </div>
-                  <div class="mt-2 text-sm text-slate-500 dark:text-slate-400" v-html="formatIonicLiquidHtml(editDrawerRecord.lubricant || '--')"></div>
+                  <div class="mt-2 text-sm text-slate-500 dark:text-slate-400" v-html="formatIonicLiquidHtml(lubricantDisplay(editDrawerRecord))"></div>
                 </div>
                 <button
                   type="button"
@@ -1750,13 +2233,23 @@ onBeforeUnmount(() => {
                       />
                     </div>
                     <div>
-                      <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Speed</label>
+                      <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Slip Velocity</label>
                       <input
                         :value="activeEditValues.speedValue"
                         @input="(e: Event) => updateActiveEditingField('speedValue', (e.target as HTMLInputElement).value)"
                         type="text"
                         class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                         placeholder="1 μm/s"
+                      />
+                    </div>
+                    <div>
+                      <label class="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Shear Rate</label>
+                      <input
+                        :value="activeEditValues.shearRate"
+                        @input="(e: Event) => updateActiveEditingField('shearRate', (e.target as HTMLInputElement).value)"
+                        type="text"
+                        class="h-10 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        placeholder="195-1300 s^-1"
                       />
                     </div>
                     <div>
@@ -1880,19 +2373,18 @@ onBeforeUnmount(() => {
       </template>
 
       <div class="grid gap-4 md:grid-cols-2">
-        <div v-if="structurePreview.cationSmiles">
+        <div
+          v-for="item in structurePreview.items"
+          :key="item.key"
+        >
           <MoleculeViewer
-            :smiles="structurePreview.cationSmiles"
-            :label="structurePreview.cationLabel"
+            :smiles="item.smiles"
+            :label="`${item.role === 'cation' ? 'Cation' : 'Anion'}: ${item.label}`"
             size="full"
           />
         </div>
-        <div v-if="structurePreview.anionSmiles">
-          <MoleculeViewer
-            :smiles="structurePreview.anionSmiles"
-            :label="structurePreview.anionLabel"
-            size="full"
-          />
+        <div v-if="!structurePreview.items.length" class="rounded-lg border border-dashed border-slate-200 p-6 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+          No chemical structure is available for this record.
         </div>
       </div>
     </Modal>
@@ -1923,4 +2415,3 @@ onBeforeUnmount(() => {
     </div>
   </div>
 </template>
-

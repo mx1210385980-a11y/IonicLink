@@ -7,6 +7,7 @@ import {
   confidenceDisplay,
   confidenceValueFor,
   formatIonicLiquidHtml,
+  lubricantDisplay,
   tribopairDisplay,
 } from '@/lib/integratedExplorerHelpers'
 
@@ -27,7 +28,7 @@ const confidenceValue = computed(() => confidenceValueFor(props.record, props.ev
     <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
       {{ eyebrow }}
     </div>
-    <div class="mt-2 text-base font-semibold text-slate-900 dark:text-slate-100" v-html="formatIonicLiquidHtml(record.lubricant || '--')"></div>
+    <div class="mt-2 text-base font-semibold text-slate-900 dark:text-slate-100" v-html="formatIonicLiquidHtml(lubricantDisplay(record))"></div>
     <div class="mt-2 text-sm text-slate-600 dark:text-slate-300">
       {{ tribopairDisplay(record) }}
     </div>

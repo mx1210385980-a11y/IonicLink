@@ -32,6 +32,22 @@ const IONIC_LIQUID_CATION_MEMORY: Record<string, IonicLiquidAliasEntry> = {
     canonical: '1-hexyl-3-methylimidazolium',
     searchTerms: ['HMIM', '1-hexyl-3-methylimidazolium', 'hexylmethylimidazolium'],
   },
+  pyr14: {
+    canonical: 'N-methyl-N-butylpyrrolidinium',
+    searchTerms: [
+      'Pyr14',
+      'Py14',
+      'Py1,4',
+      'Py1;4',
+      'P14',
+      'N-methyl-N-butylpyrrolidinium',
+      '1-butyl-1-methylpyrrolidinium',
+    ],
+  },
+  py14: {
+    canonical: 'N-methyl-N-butylpyrrolidinium',
+    searchTerms: ['Pyr14', 'Py14', 'Py1,4', 'Py1;4', 'P14'],
+  },
 }
 
 const IONIC_LIQUID_ANION_MEMORY: Record<string, IonicLiquidAliasEntry> = {
@@ -54,6 +70,10 @@ const IONIC_LIQUID_ANION_MEMORY: Record<string, IonicLiquidAliasEntry> = {
   tfsi: {
     canonical: 'bis(trifluoromethanesulfonyl)imide',
     searchTerms: ['TFSI', 'NTf2', 'bis(trifluoromethanesulfonyl)imide'],
+  },
+  fap: {
+    canonical: 'tris(pentafluoroethyl)trifluorophosphate',
+    searchTerms: ['FAP', 'tris(pentafluoroethyl)trifluorophosphate', 'triﬂuorophosphate'],
   },
 }
 
@@ -104,7 +124,12 @@ export function getIonicLiquidEvidenceTerms(rawValue: string) {
     `[${pair.cationRaw}]-[${pair.anionRaw}]`,
     ...(cationMemory && anionMemory
       ? cationMemory.searchTerms.flatMap((cationTerm) =>
-          anionMemory.searchTerms.map((anionTerm) => `${cationTerm} ${anionTerm}`),
+          anionMemory.searchTerms.flatMap((anionTerm) => [
+            `${cationTerm} ${anionTerm}`,
+            `${cationTerm}${anionTerm}`,
+            `[${cationTerm}]${anionTerm}`,
+            `[${cationTerm}][${anionTerm}]`,
+          ]),
         )
       : []),
   ]

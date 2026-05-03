@@ -8,6 +8,10 @@ from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from utils.cof_extraction import normalize_cof_extracted
+from utils.lubricant_mixture import normalize_lubricant_components
+from utils.speed_conditions import derive_speed_conditions, normalize_speed_conditions, speed_value_from_conditions
+from utils.structured_conditions import normalize_load_conditions, normalize_tribological_system
 from utils.tribopair import compose_tribopair_label, derive_legacy_material_name, derive_legacy_surface_roughness
 
 
@@ -38,6 +42,11 @@ class LiteratureSchema(LiteratureBase):
     workspace_id: Optional[int] = Field(None, alias="workspaceId")
     created_by_user_id: Optional[int] = Field(None, alias="createdByUserId")
     scope_type: Optional[str] = Field(None, alias="scopeType")
+    status: Optional[str] = None
+    error_message: Optional[str] = Field(None, alias="errorMessage")
+    record_count: Optional[int] = Field(None, alias="recordCount")
+    candidate_count: Optional[int] = Field(None, alias="candidateCount")
+    has_pdf: Optional[bool] = Field(None, alias="hasPdf")
     created_at: datetime
 
     class Config:
@@ -48,16 +57,24 @@ class LiteratureSchema(LiteratureBase):
 class TribologyDataBase(BaseModel):
     material_name: Optional[str] = Field(None, alias="materialName")
     lubricant: str = Field("")
+    lubricant_components: List[dict[str, Any]] = Field(default_factory=list, alias="lubricantComponents")
+    lubricant_alias: Optional[str] = Field(None, alias="lubricantAlias")
+    ionic_liquid_display: Optional[str] = Field(None, alias="ionicLiquidDisplay")
+    lubricant_tooltip: Optional[str] = Field(None, alias="lubricantTooltip")
 
     cof_value: Optional[float] = Field(None, alias="cofValue")
     cof_operator: Optional[str] = Field(None, alias="cofOperator")
     cof_raw: Optional[str] = Field(None, alias="cofRaw")
+    cof_extracted: dict[str, Any] = Field(default_factory=dict, alias="cofExtracted")
 
     load_value: Optional[str] = Field(None, alias="loadValue")
     load_raw: Optional[str] = Field(None, alias="loadRaw")
+    load_conditions: dict[str, Any] = Field(default_factory=dict, alias="loadConditions")
 
     speed_value: Optional[str] = Field(None, alias="speedValue")
     speed_raw: Optional[str] = Field(None, alias="speedRaw")
+    speed_conditions: dict[str, Any] = Field(default_factory=dict, alias="speedConditions")
+    shear_rate: Optional[str] = Field(None, alias="shearRate")
     temperature: Optional[str] = None
     temperature_value: Optional[float] = Field(None, alias="temperatureValue")
 
@@ -75,6 +92,8 @@ class TribologyDataBase(BaseModel):
     residual_film_thickness_d: Optional[str] = Field(None, alias="residualFilmThicknessD")
     layer_spacing_delta: Optional[str] = Field(None, alias="layerSpacingDelta")
     film_thickness: Optional[str] = Field(None, alias="filmThickness")
+    regime: Optional[str] = None
+    tribological_system: dict[str, Any] = Field(default_factory=dict, alias="tribologicalSystem")
 
     mol_ratio: Optional[str] = Field(None, alias="molRatio")
     cation: Optional[str] = None
@@ -94,6 +113,7 @@ class TribologyDataBase(BaseModel):
     field_evidence_json: dict[str, Any] = Field(default_factory=dict, alias="fieldEvidenceJson")
     review_status: Optional[str] = Field(None, alias="reviewStatus")
     record_origin: Optional[str] = Field(None, alias="recordOrigin")
+    review_entity_type: Optional[str] = Field(None, alias="reviewEntityType")
     assembly_notes: Optional[str] = Field(None, alias="assemblyNotes")
 
     confidence: float = Field(0.9, ge=0.0, le=1.0)
@@ -110,6 +130,31 @@ class TribologyDataBase(BaseModel):
         if isinstance(value, dict):
             return value
         return {}
+
+    @field_validator("lubricant_components", mode="before")
+    @classmethod
+    def parse_lubricant_components(cls, value: Any) -> list[dict[str, Any]]:
+        return normalize_lubricant_components(value)
+
+    @field_validator("cof_extracted", mode="before")
+    @classmethod
+    def parse_cof_extracted(cls, value: Any) -> dict[str, Any]:
+        return normalize_cof_extracted(value)
+
+    @field_validator("load_conditions", mode="before")
+    @classmethod
+    def parse_load_conditions(cls, value: Any) -> dict[str, Any]:
+        return normalize_load_conditions(value)
+
+    @field_validator("speed_conditions", mode="before")
+    @classmethod
+    def parse_speed_conditions(cls, value: Any) -> dict[str, Any]:
+        return normalize_speed_conditions(value)
+
+    @field_validator("tribological_system", mode="before")
+    @classmethod
+    def parse_tribological_system(cls, value: Any) -> dict[str, Any]:
+        return normalize_tribological_system(value)
 
     @model_validator(mode="after")
     def validate_tribopair(self) -> "TribologyDataBase":
@@ -134,6 +179,17 @@ class TribologyDataBase(BaseModel):
             raise ValueError("probeMaterial is required when probe details are recorded.")
         if has_substrate_details and not self.substrate_material:
             raise ValueError("substrateMaterial is required when substrate details are recorded.")
+        speed_conditions = normalize_speed_conditions(self.speed_conditions) or derive_speed_conditions(
+            self.speed_raw or self.speed_value,
+            context=self.evidence,
+        )
+        if speed_conditions:
+            self.speed_conditions = speed_conditions
+            derived_speed_value = speed_value_from_conditions(speed_conditions)
+            if derived_speed_value:
+                self.speed_value = derived_speed_value
+            elif speed_conditions.get("scan_rate_hz") is not None:
+                self.speed_value = None
         return self
 
     class Config:

@@ -44,6 +44,7 @@ def _condition_signature(record: TribologyData) -> Tuple[str, ...]:
         _norm_text(record.residual_film_thickness_d),
         _norm_text(record.layer_spacing_delta),
         _norm_text(record.speed),
+        _norm_text(record.shear_rate),
         _norm_text(record.normal_load or record.load),
         _norm_text(record.mol_ratio),
     )
@@ -110,6 +111,7 @@ def _are_compatible(left: TribologyData, right: TribologyData) -> bool:
         ("residual_film_thickness_d", left.residual_film_thickness_d, right.residual_film_thickness_d),
         ("layer_spacing_delta", left.layer_spacing_delta, right.layer_spacing_delta),
         ("speed", left.speed, right.speed),
+        ("shear_rate", left.shear_rate, right.shear_rate),
         ("normal_load", left.normal_load or left.load, right.normal_load or right.load),
         ("mol_ratio", left.mol_ratio, right.mol_ratio),
     ]
@@ -128,6 +130,7 @@ def _merge_missing(target: TribologyData, source: TribologyData) -> TribologyDat
         "load",
         "normal_load",
         "speed",
+        "shear_rate",
         "temperature",
         "wear_rate",
         "test_duration",

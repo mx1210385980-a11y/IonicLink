@@ -7,7 +7,7 @@ from typing import Any, List
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks, Query, Request
 import base64
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,7 +38,11 @@ from security import (
 )
 from services.file_service import (
     _count_cached_record_artifacts,
+    _is_default_temperature_value,
     _normalize_legacy_no_data_state,
+    _refine_potential_evidence_from_metric_context_with_pdf,
+    _temperature_default_evidence_entry,
+    _text_explicitly_matches_field_value,
     process_file_background,
     save_upload_entry,
 )
@@ -60,6 +64,30 @@ from services.pdf_service import (
     tighten_visual_bbox_by_panel as _tighten_visual_bbox_by_panel,
     visual_hit_prefers_figure_preview as _visual_hit_prefers_figure_preview,
 )
+from utils.cof_extraction import (
+    cof_average_from_extracted,
+    derive_cof_extracted,
+    normalize_cof_extracted,
+    serialize_cof_extracted,
+)
+from utils.lubricant_mixture import (
+    compact_lubricant_label,
+    components_for_record,
+    format_lubricant_tooltip,
+)
+from utils.structured_conditions import (
+    derive_load_conditions,
+    derive_tribological_system,
+    normalize_load_conditions,
+    normalize_tribological_system,
+    serialize_load_conditions,
+    serialize_tribological_system,
+)
+from utils.speed_conditions import (
+    normalize_speed_conditions,
+    serialize_speed_conditions,
+    speed_value_from_conditions,
+)
 
 router = APIRouter(prefix="/api", tags=["extraction"])
 logger = logging.getLogger(__name__)
@@ -67,6 +95,7 @@ logger = logging.getLogger(__name__)
 _FIELD_KEY_ALIASES = {
     "ionic-liquid": "ionic_liquid",
     "source-page": "source_page",
+    "voltage": "potential",
 }
 _TRIBOLOGY_PRIMARY_METRIC_KEYS = (
     "cof",
@@ -113,34 +142,146 @@ def _field_value_from_record(record: Any, field_key: str) -> Any:
         return getattr(record, "residual_film_thickness_d", None)
     if field_key == "layer_spacing_delta":
         return getattr(record, "layer_spacing_delta", None)
+    if field_key == "regime":
+        return getattr(record, "regime", None)
     if field_key == "surface_roughness":
         return getattr(record, "surface_roughness", None)
     if field_key == "load":
         return record.load_raw or record.load_value
     if field_key == "speed":
         return record.speed_value
+    if field_key == "shear_rate":
+        return getattr(record, "shear_rate", None)
     if field_key == "temperature":
         return record.temperature
+    if field_key == "water_content":
+        return getattr(record, "water_content", None)
+    if field_key == "potential":
+        return getattr(record, "potential", None)
     if field_key == "source_page":
         return f"Page {record.source_page}" if record.source_page else None
     return None
 
 
+def _tribology_record_api_payload(record: Any) -> dict[str, Any]:
+    """Serialize candidate/final ORM records into the public TribologyData shape."""
+    cof_raw = getattr(record, "cof_raw", None)
+    cof_value = getattr(record, "cof_value", None)
+    load_raw = getattr(record, "load_raw", None)
+    load_value = getattr(record, "load_value", None)
+    speed_value = getattr(record, "speed_value", None)
+    field_evidence = _parse_field_evidence_map(getattr(record, "field_evidence_json", None))
+    record_id = getattr(record, "id", None)
+    review_entity_type = "candidate" if isinstance(record, RecordCandidate) else "record"
+    lubricant = getattr(record, "lubricant", None)
+    lubricant_components = components_for_record(record)
+    lubricant_alias = getattr(record, "lubricant_alias", None)
+    cof_extracted = normalize_cof_extracted(getattr(record, "cof_extracted_json", None)) or derive_cof_extracted(
+        cof_raw,
+        cof_value,
+        load=load_raw or load_value,
+        speed=speed_value,
+    )
+    load_conditions = normalize_load_conditions(getattr(record, "load_conditions_json", None)) or derive_load_conditions(
+        load_raw or load_value,
+    )
+    tribological_system = normalize_tribological_system(getattr(record, "tribological_system_json", None)) or derive_tribological_system(
+        getattr(record, "regime", None),
+    )
+
+    return {
+        "id": str(record_id) if record_id is not None else None,
+        "material_name": getattr(record, "material_name", "") or "",
+        "ionic_liquid": lubricant,
+        "lubricant": lubricant,
+        "lubricant_components": lubricant_components,
+        "lubricant_alias": lubricant_alias,
+        "ionic_liquid_display": compact_lubricant_label(lubricant, lubricant_components, lubricant_alias),
+        "lubricant_tooltip": format_lubricant_tooltip(lubricant, lubricant_components, lubricant_alias),
+        "load": load_raw or load_value,
+        "load_conditions": load_conditions,
+        "speed": speed_value,
+        "shear_rate": getattr(record, "shear_rate", None),
+        "temperature": getattr(record, "temperature", None),
+        "cof": cof_raw or (str(cof_value) if cof_value is not None else None),
+        "cof_value": cof_value,
+        "cof_raw": cof_raw,
+        "cof_operator": getattr(record, "cof_operator", None),
+        "cof_extracted": cof_extracted,
+        "friction_force": getattr(record, "friction_force", None),
+        "normal_load": getattr(record, "normal_load", None),
+        "wear_rate": getattr(record, "wear_rate", None),
+        "test_duration": getattr(record, "test_duration", None),
+        "contact_type": getattr(record, "contact_type", None),
+        "potential": getattr(record, "potential", None),
+        "water_content": getattr(record, "water_content", None),
+        "probe_material": getattr(record, "probe_material", None),
+        "probe_geometry": getattr(record, "probe_geometry", None),
+        "probe_radius": getattr(record, "probe_radius", None),
+        "probe_roughness": getattr(record, "probe_roughness", None),
+        "substrate_material": getattr(record, "substrate_material", None),
+        "substrate_coating": getattr(record, "substrate_coating", None),
+        "substrate_roughness": getattr(record, "substrate_roughness", None),
+        "surface_roughness": getattr(record, "surface_roughness", None),
+        "residual_film_thickness_d": getattr(record, "residual_film_thickness_d", None),
+        "layer_spacing_delta": getattr(record, "layer_spacing_delta", None),
+        "film_thickness": getattr(record, "film_thickness", None),
+        "regime": getattr(record, "regime", None),
+        "tribological_system": tribological_system,
+        "mol_ratio": getattr(record, "mol_ratio", None),
+        "cation": getattr(record, "cation", None),
+        "anion": getattr(record, "anion", None),
+        "cation_smiles": getattr(record, "cation_smiles", None),
+        "anion_smiles": getattr(record, "anion_smiles", None),
+        "il_smiles": getattr(record, "il_smiles", None),
+        "il_inchikey": getattr(record, "il_inchikey", None),
+        "alkyl_chain_length": getattr(record, "alkyl_chain_length", None),
+        "source": getattr(record, "source", None),
+        "notes": getattr(record, "notes", None),
+        "value_origin": getattr(record, "value_origin", None),
+        "evidence": getattr(record, "evidence", None),
+        "source_page": getattr(record, "source_page", None),
+        "source_figure": getattr(record, "source_figure", None),
+        "sample_id": getattr(record, "sample_id", None),
+        "series_id": getattr(record, "series_id", None),
+        "field_evidence_json": field_evidence,
+        "review_status": getattr(record, "review_status", None),
+        "record_origin": getattr(record, "record_origin", None),
+        "review_entity_type": review_entity_type,
+        "assembly_notes": getattr(record, "assembly_notes", None),
+    }
+
+
 def _field_grounding_status(entry: dict[str, Any]) -> str:
-    evidence = (entry or {}).get("evidence") or {}
-    if any(evidence.get(key) not in (None, "", []) for key in ("page", "source_label", "quote", "bbox")):
+    if str((entry or {}).get("grounding_mode") or "").strip().lower() == "inferred" and (entry or {}).get("value") not in (None, ""):
         return "grounded"
-    if any(evidence.get(key) not in (None, "", []) for key in ("sample_id", "source_type")):
+    evidence = (entry or {}).get("evidence") or {}
+    bbox = evidence.get("bbox")
+    if evidence.get("page") and isinstance(bbox, list) and len(bbox) >= 4:
+        return "grounded"
+    if any(evidence.get(key) not in (None, "", []) for key in ("page", "source_label", "quote", "sample_id", "source_type")):
         return "partial"
     return "missing"
 
 
 def _build_conditions_entry(field_map: dict[str, Any], record: Any) -> dict[str, Any]:
-    condition_values = [value for value in (record.load_raw or record.load_value, record.speed_value, record.temperature) if value]
+    condition_values = [
+        value
+        for value in (
+            getattr(record, "regime", None),
+            record.load_raw or record.load_value,
+            record.speed_value,
+            getattr(record, "shear_rate", None),
+            record.temperature,
+            getattr(record, "potential", None),
+            getattr(record, "water_content", None),
+        )
+        if value
+    ]
     primary_entry = next(
         (
             field_map.get(key)
-            for key in ("load", "speed", "temperature")
+            for key in ("regime", "load", "speed", "shear_rate", "temperature", "potential", "water_content")
             if isinstance(field_map.get(key), dict) and field_map.get(key)
         ),
         {},
@@ -150,9 +291,101 @@ def _build_conditions_entry(field_map: dict[str, Any], record: Any) -> dict[str,
         "confidence": primary_entry.get("confidence"),
         "evidence": primary_entry.get("evidence"),
         "status": _field_grounding_status(primary_entry),
+        "grounding_mode": primary_entry.get("grounding_mode"),
+        "grounding_note": primary_entry.get("grounding_note"),
         "review_state": primary_entry.get("review_state"),
         "review_note": primary_entry.get("review_note"),
     }
+
+
+def _extract_text_from_bbox(pdf_path: str | None, page_num: int | None, bbox: Any) -> str:
+    if not pdf_path or not page_num or not isinstance(bbox, list) or len(bbox) < 4:
+        return ""
+    resolved_path = _resolve_existing_path(pdf_path)
+    if not resolved_path:
+        return ""
+    try:
+        import fitz
+
+        with fitz.open(resolved_path) as doc:
+            page_index = int(page_num) - 1
+            if page_index < 0 or page_index >= len(doc):
+                return ""
+            rect = fitz.Rect(*[float(value) for value in bbox[:4]])
+            return re.sub(r"\s+", " ", doc[page_index].get_textbox(rect) or "").strip()
+    except Exception:
+        return ""
+
+
+def _clear_unverified_location(entry: dict[str, Any], note: str) -> dict[str, Any]:
+    cleaned = dict(entry or {})
+    evidence = dict(cleaned.get("evidence") or {})
+    evidence["bbox"] = None
+    evidence["matched_text"] = None
+    cleaned["evidence"] = evidence
+    existing_note = str(cleaned.get("grounding_note") or "").strip()
+    cleaned["grounding_note"] = existing_note or note
+    return cleaned
+
+
+def _sanitize_field_evidence_locations(
+    field_map: dict[str, Any],
+    *,
+    pdf_path: str | None,
+) -> dict[str, Any]:
+    sanitized: dict[str, Any] = {}
+    for key, entry in field_map.items():
+        if not isinstance(entry, dict):
+            sanitized[key] = entry
+            continue
+
+        evidence = entry.get("evidence") if isinstance(entry.get("evidence"), dict) else {}
+        source_type = str((evidence or {}).get("source_type") or "").strip().lower()
+        grounding_mode = str(entry.get("grounding_mode") or "").strip().lower()
+        if grounding_mode == "inferred" or not evidence:
+            sanitized[key] = entry
+            continue
+
+        bbox = evidence.get("bbox")
+        page_num = int(evidence.get("page") or 0)
+        if not page_num or not isinstance(bbox, list) or len(bbox) < 4:
+            sanitized[key] = entry
+            continue
+
+        matched_text = str(evidence.get("matched_text") or "").strip()
+        value = entry.get("value")
+        bbox_text = _extract_text_from_bbox(pdf_path, page_num, bbox)
+        verification_text = bbox_text or matched_text
+
+        if source_type == "table" and not matched_text:
+            if bbox_text and _text_explicitly_matches_field_value(key, value, bbox_text):
+                cleaned = dict(entry or {})
+                cleaned_evidence = dict(evidence or {})
+                cleaned_evidence["matched_text"] = bbox_text
+                cleaned["evidence"] = cleaned_evidence
+                sanitized[key] = cleaned
+                continue
+            if key == "temperature" and _is_default_temperature_value(value):
+                inferred = _temperature_default_evidence_entry(value, float(entry.get("confidence") or 0.9))
+                inferred["review_state"] = entry.get("review_state")
+                inferred["review_note"] = entry.get("review_note")
+                sanitized[key] = inferred
+                continue
+            sanitized[key] = _clear_unverified_location(
+                entry,
+                "Stored table bbox has no exact field text hit; location needs re-extraction.",
+            )
+            continue
+
+        if source_type in {"text", "table"} and not _text_explicitly_matches_field_value(key, value, verification_text):
+            sanitized[key] = _clear_unverified_location(
+                entry,
+                "Stored bbox text does not match this field value; location needs re-extraction.",
+            )
+            continue
+
+        sanitized[key] = entry
+    return sanitized
 
 
 def _build_record_field_evidence_payload(record: Any) -> dict[str, Any]:
@@ -167,10 +400,14 @@ def _build_record_field_evidence_payload(record: Any) -> dict[str, Any]:
         "film_thickness",
         "residual_film_thickness_d",
         "layer_spacing_delta",
+        "regime",
         "surface_roughness",
         "load",
         "speed",
+        "shear_rate",
         "temperature",
+        "water_content",
+        "potential",
         "source_page",
     ):
         raw_entry = field_map.get(key) if isinstance(field_map.get(key), dict) else {}
@@ -179,11 +416,22 @@ def _build_record_field_evidence_payload(record: Any) -> dict[str, Any]:
             "confidence": raw_entry.get("confidence", record.confidence),
             "evidence": raw_entry.get("evidence"),
             "status": _field_grounding_status(raw_entry),
+            "grounding_mode": raw_entry.get("grounding_mode"),
+            "grounding_note": raw_entry.get("grounding_note"),
             "review_state": raw_entry.get("review_state"),
             "review_note": raw_entry.get("review_note"),
         }
 
+    pdf_path = getattr(getattr(record, "literature", None), "file_path", None)
+    normalized_fields = _sanitize_field_evidence_locations(normalized_fields, pdf_path=pdf_path)
     normalized_fields["conditions"] = _build_conditions_entry(normalized_fields, record)
+    normalized_fields = _refine_potential_evidence_from_metric_context_with_pdf(
+        normalized_fields,
+        pdf_path,
+    )
+    for key, entry in normalized_fields.items():
+        if isinstance(entry, dict):
+            entry["status"] = _field_grounding_status(entry)
 
     return {
         "record_id": record.id,
@@ -202,6 +450,122 @@ class ReviewFieldActionPayload(BaseModel):
     note: str | None = None
 
 
+class CofExtractedUpdatePayload(BaseModel):
+    cof_extracted: dict[str, Any] | None = Field(None, alias="cofExtracted")
+
+    class Config:
+        populate_by_name = True
+
+
+class LoadConditionsUpdatePayload(BaseModel):
+    load_conditions: dict[str, Any] | None = Field(None, alias="loadConditions")
+
+    class Config:
+        populate_by_name = True
+
+
+class SpeedConditionsUpdatePayload(BaseModel):
+    speed_conditions: dict[str, Any] | None = Field(None, alias="speedConditions")
+
+    class Config:
+        populate_by_name = True
+
+
+class TribologicalSystemUpdatePayload(BaseModel):
+    tribological_system: dict[str, Any] | None = Field(None, alias="tribologicalSystem")
+
+    class Config:
+        populate_by_name = True
+
+
+def _apply_cof_extracted_update(record: Any, payload: CofExtractedUpdatePayload) -> dict[str, Any]:
+    cof_extracted = normalize_cof_extracted(payload.cof_extracted)
+    if not cof_extracted:
+        raise HTTPException(status_code=422, detail="cofExtracted must be a structured object.")
+
+    record.cof_extracted_json = serialize_cof_extracted(cof_extracted)
+    if cof_extracted.get("raw_text"):
+        record.cof_raw = str(cof_extracted.get("raw_text"))
+    average = cof_average_from_extracted(cof_extracted)
+    if average is not None:
+        record.cof_value = average
+
+    field_map = _parse_field_evidence_map(record.field_evidence_json)
+    cof_entry = field_map.get("cof") if isinstance(field_map.get("cof"), dict) else {}
+    cof_entry["value"] = record.cof_raw or (str(record.cof_value) if record.cof_value is not None else None)
+    cof_entry["review_state"] = None
+    cof_entry["review_note"] = None
+    field_map["cof"] = cof_entry
+    record.field_evidence_json = json.dumps(field_map, ensure_ascii=False)
+    _recompute_review_status(record, field_map)
+    return cof_extracted
+
+
+def _apply_load_conditions_update(record: Any, payload: LoadConditionsUpdatePayload) -> dict[str, Any]:
+    load_conditions = normalize_load_conditions(payload.load_conditions)
+    if not load_conditions:
+        raise HTTPException(status_code=422, detail="loadConditions must be a structured object.")
+
+    record.load_conditions_json = serialize_load_conditions(load_conditions)
+    if load_conditions.get("raw_text"):
+        raw_text = str(load_conditions.get("raw_text"))
+        record.load_raw = raw_text
+        record.load_value = raw_text
+
+    field_map = _parse_field_evidence_map(record.field_evidence_json)
+    load_entry = field_map.get("load") if isinstance(field_map.get("load"), dict) else {}
+    load_entry["value"] = record.load_raw or record.load_value
+    load_entry["review_state"] = None
+    load_entry["review_note"] = None
+    field_map["load"] = load_entry
+    record.field_evidence_json = json.dumps(field_map, ensure_ascii=False)
+    _recompute_review_status(record, field_map)
+    return load_conditions
+
+
+def _apply_speed_conditions_update(record: Any, payload: SpeedConditionsUpdatePayload) -> dict[str, Any]:
+    speed_conditions = normalize_speed_conditions(payload.speed_conditions)
+    if not speed_conditions:
+        raise HTTPException(status_code=422, detail="speedConditions must be a structured object.")
+
+    record.speed_conditions_json = serialize_speed_conditions(speed_conditions)
+    derived_speed_value = speed_value_from_conditions(speed_conditions)
+    if derived_speed_value:
+        record.speed_value = derived_speed_value
+    elif speed_conditions.get("scan_rate_hz") is not None:
+        record.speed_value = None
+
+    field_map = _parse_field_evidence_map(record.field_evidence_json)
+    speed_entry = field_map.get("speed") if isinstance(field_map.get("speed"), dict) else {}
+    speed_entry["value"] = record.speed_value or speed_conditions.get("raw_text")
+    speed_entry["review_state"] = None
+    speed_entry["review_note"] = None
+    field_map["speed"] = speed_entry
+    record.field_evidence_json = json.dumps(field_map, ensure_ascii=False)
+    _recompute_review_status(record, field_map)
+    return speed_conditions
+
+
+def _apply_tribological_system_update(record: Any, payload: TribologicalSystemUpdatePayload) -> dict[str, Any]:
+    tribological_system = normalize_tribological_system(payload.tribological_system)
+    if not tribological_system:
+        raise HTTPException(status_code=422, detail="tribologicalSystem must be a structured object.")
+
+    record.tribological_system_json = serialize_tribological_system(tribological_system)
+    if tribological_system.get("raw_text"):
+        record.regime = str(tribological_system.get("raw_text"))
+
+    field_map = _parse_field_evidence_map(record.field_evidence_json)
+    regime_entry = field_map.get("regime") if isinstance(field_map.get("regime"), dict) else {}
+    regime_entry["value"] = record.regime
+    regime_entry["review_state"] = None
+    regime_entry["review_note"] = None
+    field_map["regime"] = regime_entry
+    record.field_evidence_json = json.dumps(field_map, ensure_ascii=False)
+    _recompute_review_status(record, field_map)
+    return tribological_system
+
+
 def _required_field_keys(field_map: dict[str, Any]) -> list[str]:
     required = ["material", "ionic_liquid"]
     for key in _TRIBOLOGY_PRIMARY_METRIC_KEYS:
@@ -213,7 +577,7 @@ def _required_field_keys(field_map: dict[str, Any]) -> list[str]:
 
 
 def _required_field_missing(field_map: dict[str, Any]) -> list[str]:
-    return [key for key in _required_field_keys(field_map) if _field_grounding_status(field_map.get(key) or {}) == "missing"]
+    return [key for key in _required_field_keys(field_map) if _field_grounding_status(field_map.get(key) or {}) != "grounded"]
 
 
 def _persist_field_map(record: Any, field_map: dict[str, Any]) -> None:
@@ -226,15 +590,19 @@ def _target_field_keys_for_action(field_key: str, field_map: dict[str, Any]) -> 
             key
             for key in (
                 "load",
+                "regime",
                 "speed",
+                "shear_rate",
                 "temperature",
+                "potential",
+                "water_content",
                 "temperature_value",
                 "confinement_scale_value",
                 "confinement_scale_unit",
             )
             if isinstance(field_map.get(key), dict) and field_map.get(key)
         ]
-        return keys or ["load", "speed", "temperature"]
+        return keys or ["load", "speed", "shear_rate", "temperature"]
     return [field_key]
 
 
@@ -265,12 +633,18 @@ def _copy_candidate_to_final_record(candidate: RecordCandidate, record: Tribolog
     target.literature_id = candidate.literature_id
     target.material_name = candidate.material_name
     target.lubricant = candidate.lubricant
+    target.lubricant_components_json = getattr(candidate, "lubricant_components_json", None)
+    target.lubricant_alias = getattr(candidate, "lubricant_alias", None)
     target.cof_value = candidate.cof_value
     target.cof_operator = candidate.cof_operator
     target.cof_raw = candidate.cof_raw
+    target.cof_extracted_json = getattr(candidate, "cof_extracted_json", None)
     target.load_value = candidate.load_value
     target.load_raw = candidate.load_raw
+    target.load_conditions_json = getattr(candidate, "load_conditions_json", None)
     target.speed_value = candidate.speed_value
+    target.speed_conditions_json = getattr(candidate, "speed_conditions_json", None)
+    target.shear_rate = getattr(candidate, "shear_rate", None)
     target.temperature = candidate.temperature
     target.potential = candidate.potential
     target.water_content = candidate.water_content
@@ -285,6 +659,8 @@ def _copy_candidate_to_final_record(candidate: RecordCandidate, record: Tribolog
     target.residual_film_thickness_d = candidate.residual_film_thickness_d
     target.layer_spacing_delta = candidate.layer_spacing_delta
     target.film_thickness = candidate.film_thickness
+    target.regime = getattr(candidate, "regime", None)
+    target.tribological_system_json = getattr(candidate, "tribological_system_json", None)
     target.mol_ratio = candidate.mol_ratio
     target.cation = candidate.cation
     target.anion = candidate.anion
@@ -378,6 +754,8 @@ def _build_diffusion_conditions_entry(field_map: dict[str, Any], record: Any) ->
         "confidence": primary_entry.get("confidence"),
         "evidence": primary_entry.get("evidence"),
         "status": _field_grounding_status(primary_entry),
+        "grounding_mode": primary_entry.get("grounding_mode"),
+        "grounding_note": primary_entry.get("grounding_note"),
         "review_state": primary_entry.get("review_state"),
         "review_note": primary_entry.get("review_note"),
     }
@@ -409,6 +787,8 @@ def _build_diffusion_field_evidence_payload(record: Any) -> dict[str, Any]:
             "confidence": raw_entry.get("confidence", record.confidence),
             "evidence": raw_entry.get("evidence"),
             "status": _field_grounding_status(raw_entry),
+            "grounding_mode": raw_entry.get("grounding_mode"),
+            "grounding_note": raw_entry.get("grounding_note"),
             "review_state": raw_entry.get("review_state"),
             "review_note": raw_entry.get("review_note"),
         }
@@ -433,9 +813,9 @@ def _diffusion_missing_required_fields(field_map: dict[str, Any]) -> list[str]:
     missing = [
         key
         for key in _DIFFUSION_REQUIRED_FIELD_KEYS
-        if _field_grounding_status(field_map.get(key) or {}) == "missing"
+        if _field_grounding_status(field_map.get(key) or {}) != "grounded"
     ]
-    if not any(_field_grounding_status(field_map.get(key) or {}) != "missing" for key in _DIFFUSION_COEFFICIENT_FIELD_KEYS):
+    if not any(_field_grounding_status(field_map.get(key) or {}) == "grounded" for key in _DIFFUSION_COEFFICIENT_FIELD_KEYS):
         missing.append("diffusion_coefficient")
     return missing
 
@@ -450,7 +830,7 @@ def _diffusion_has_blocking_flag(field_map: dict[str, Any]) -> bool:
     coefficient_candidates = [
         entry
         for entry in coefficient_entries
-        if _field_grounding_status(entry) != "missing"
+        if _field_grounding_status(entry) == "grounded"
     ]
     if not coefficient_candidates:
         return False
@@ -832,6 +1212,7 @@ def _build_candidate_pdf_evidence_payload(literature: Any, candidate: RecordCand
         (getattr(candidate, "potential", None), "potential"),
         (getattr(candidate, "water_content", None), "water_content"),
         (getattr(candidate, "speed_value", None), "speed"),
+        (getattr(candidate, "shear_rate", None), "shear_rate"),
         (getattr(candidate, "load_value", None), "load"),
         (getattr(candidate, "surface_roughness", None), "surface_roughness"),
         (getattr(candidate, "film_thickness", None), "film_thickness"),
@@ -1239,6 +1620,7 @@ async def get_record_evidence(
         (getattr(record, "potential", None), "potential"),
         (getattr(record, "water_content", None), "water_content"),
         (getattr(record, "speed_value", None), "speed"),
+        (getattr(record, "shear_rate", None), "shear_rate"),
         (getattr(record, "load_value", None), "load"),
         (getattr(record, "surface_roughness", None), "surface_roughness"),
         (getattr(record, "film_thickness", None), "film_thickness"),
@@ -1631,6 +2013,102 @@ async def get_record_field_evidence(
     return _build_record_field_evidence_payload(record)
 
 
+@router.patch("/review/records/{record_id}/cof-extracted")
+async def update_record_cof_extracted(
+    record_id: int,
+    payload: CofExtractedUpdatePayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    record = await require_record_access(db, principal, record_id, write=True)
+    _apply_cof_extracted_update(record, payload)
+    await db.commit()
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="review_update_cof",
+        action_detail={"record_id": record.id, "literature_id": record.literature_id},
+        resource_type="record",
+        resource_id=record.id,
+        request=request,
+    )
+    return _build_record_field_evidence_payload(record)
+
+
+@router.patch("/review/records/{record_id}/load-conditions")
+async def update_record_load_conditions(
+    record_id: int,
+    payload: LoadConditionsUpdatePayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    record = await require_record_access(db, principal, record_id, write=True)
+    _apply_load_conditions_update(record, payload)
+    await db.commit()
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="review_update_load_conditions",
+        action_detail={"record_id": record.id, "literature_id": record.literature_id},
+        resource_type="record",
+        resource_id=record.id,
+        request=request,
+    )
+    return _build_record_field_evidence_payload(record)
+
+
+@router.patch("/review/records/{record_id}/speed-conditions")
+async def update_record_speed_conditions(
+    record_id: int,
+    payload: SpeedConditionsUpdatePayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    record = await require_record_access(db, principal, record_id, write=True)
+    _apply_speed_conditions_update(record, payload)
+    await db.commit()
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="review_update_speed_conditions",
+        action_detail={"record_id": record.id, "literature_id": record.literature_id},
+        resource_type="record",
+        resource_id=record.id,
+        request=request,
+    )
+    return _build_record_field_evidence_payload(record)
+
+
+@router.patch("/review/records/{record_id}/tribological-system")
+async def update_record_tribological_system(
+    record_id: int,
+    payload: TribologicalSystemUpdatePayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    record = await require_record_access(db, principal, record_id, write=True)
+    _apply_tribological_system_update(record, payload)
+    await db.commit()
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="review_update_tribological_system",
+        action_detail={"record_id": record.id, "literature_id": record.literature_id},
+        resource_type="record",
+        resource_id=record.id,
+        request=request,
+    )
+    return _build_record_field_evidence_payload(record)
+
+
 @router.get("/review/records/{record_id}/field-evidence/{field_key}")
 async def get_record_field_evidence_for_field(
     record_id: int,
@@ -1670,7 +2148,7 @@ async def confirm_record_field_evidence(
     target_keys = _target_field_keys_for_action(normalized_key, field_map)
     if not target_keys:
         raise HTTPException(status_code=404, detail=f"Field evidence '{field_key}' not found")
-    if any(_field_grounding_status(field_map.get(key) or {}) == "missing" for key in target_keys):
+    if any(_field_grounding_status(field_map.get(key) or {}) != "grounded" for key in target_keys):
         raise HTTPException(status_code=422, detail=f"Field '{field_key}' cannot be confirmed without evidence")
 
     for key in target_keys:
@@ -1798,10 +2276,109 @@ async def approve_record_review(
 @router.get("/review/candidates/{candidate_id}/field-evidence")
 async def get_candidate_field_evidence(
     candidate_id: int,
+    literature_id: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
     principal: AuthPrincipal = Depends(get_current_principal),
 ):
     candidate = await require_candidate_access(db, principal, candidate_id)
+    if literature_id is not None and candidate.literature_id != literature_id:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    return _build_record_field_evidence_payload(candidate)
+
+
+@router.patch("/review/candidates/{candidate_id}/cof-extracted")
+async def update_candidate_cof_extracted(
+    candidate_id: int,
+    payload: CofExtractedUpdatePayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    candidate = await require_candidate_access(db, principal, candidate_id, write=True)
+    _apply_cof_extracted_update(candidate, payload)
+    await db.commit()
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="review_update_candidate_cof",
+        action_detail={"candidate_id": candidate.id, "literature_id": candidate.literature_id},
+        resource_type="record_candidate",
+        resource_id=candidate.id,
+        request=request,
+    )
+    return _build_record_field_evidence_payload(candidate)
+
+
+@router.patch("/review/candidates/{candidate_id}/load-conditions")
+async def update_candidate_load_conditions(
+    candidate_id: int,
+    payload: LoadConditionsUpdatePayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    candidate = await require_candidate_access(db, principal, candidate_id, write=True)
+    _apply_load_conditions_update(candidate, payload)
+    await db.commit()
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="review_update_candidate_load_conditions",
+        action_detail={"candidate_id": candidate.id, "literature_id": candidate.literature_id},
+        resource_type="record_candidate",
+        resource_id=candidate.id,
+        request=request,
+    )
+    return _build_record_field_evidence_payload(candidate)
+
+
+@router.patch("/review/candidates/{candidate_id}/speed-conditions")
+async def update_candidate_speed_conditions(
+    candidate_id: int,
+    payload: SpeedConditionsUpdatePayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    candidate = await require_candidate_access(db, principal, candidate_id, write=True)
+    _apply_speed_conditions_update(candidate, payload)
+    await db.commit()
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="review_update_candidate_speed_conditions",
+        action_detail={"candidate_id": candidate.id, "literature_id": candidate.literature_id},
+        resource_type="record_candidate",
+        resource_id=candidate.id,
+        request=request,
+    )
+    return _build_record_field_evidence_payload(candidate)
+
+
+@router.patch("/review/candidates/{candidate_id}/tribological-system")
+async def update_candidate_tribological_system(
+    candidate_id: int,
+    payload: TribologicalSystemUpdatePayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    candidate = await require_candidate_access(db, principal, candidate_id, write=True)
+    _apply_tribological_system_update(candidate, payload)
+    await db.commit()
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="review_update_candidate_tribological_system",
+        action_detail={"candidate_id": candidate.id, "literature_id": candidate.literature_id},
+        resource_type="record_candidate",
+        resource_id=candidate.id,
+        request=request,
+    )
     return _build_record_field_evidence_payload(candidate)
 
 
@@ -1809,10 +2386,13 @@ async def get_candidate_field_evidence(
 async def get_candidate_field_evidence_for_field(
     candidate_id: int,
     field_key: str,
+    literature_id: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
     principal: AuthPrincipal = Depends(get_current_principal),
 ):
     candidate = await require_candidate_access(db, principal, candidate_id)
+    if literature_id is not None and candidate.literature_id != literature_id:
+        raise HTTPException(status_code=404, detail="Candidate not found")
     payload = _build_record_field_evidence_payload(candidate)
     normalized_key = _normalize_field_key(field_key)
     field_payload = payload["fields"].get(normalized_key)
@@ -1844,7 +2424,7 @@ async def confirm_candidate_field_evidence(
     target_keys = _target_field_keys_for_action(normalized_key, field_map)
     if not target_keys:
         raise HTTPException(status_code=404, detail=f"Field evidence '{field_key}' not found")
-    if any(_field_grounding_status(field_map.get(key) or {}) == "missing" for key in target_keys):
+    if any(_field_grounding_status(field_map.get(key) or {}) != "grounded" for key in target_keys):
         raise HTTPException(status_code=422, detail=f"Field '{field_key}' cannot be confirmed without evidence")
 
     for key in target_keys:
@@ -2029,7 +2609,7 @@ async def confirm_diffusion_record_field_evidence(
     target_keys = _target_field_keys_for_action(normalized_key, field_map)
     if not target_keys:
         raise HTTPException(status_code=404, detail=f"Field evidence '{field_key}' not found")
-    if any(_field_grounding_status(field_map.get(key) or {}) == "missing" for key in target_keys):
+    if any(_field_grounding_status(field_map.get(key) or {}) != "grounded" for key in target_keys):
         raise HTTPException(status_code=422, detail=f"Field '{field_key}' cannot be confirmed without evidence")
 
     for key in target_keys:
@@ -2198,7 +2778,7 @@ async def confirm_diffusion_candidate_field_evidence(
     target_keys = _target_field_keys_for_action(normalized_key, field_map)
     if not target_keys:
         raise HTTPException(status_code=404, detail=f"Field evidence '{field_key}' not found")
-    if any(_field_grounding_status(field_map.get(key) or {}) == "missing" for key in target_keys):
+    if any(_field_grounding_status(field_map.get(key) or {}) != "grounded" for key in target_keys):
         raise HTTPException(status_code=422, detail=f"Field '{field_key}' cannot be confirmed without evidence")
 
     for key in target_keys:
@@ -2522,11 +3102,15 @@ async def get_extracted_data(
 
         lit_id = int(file_id)
         literature = await require_literature_access(db, principal, lit_id)
-        candidate_stmt = sa_select(RecordCandidate).where(RecordCandidate.literature_id == lit_id)
+        candidate_stmt = (
+            sa_select(RecordCandidate)
+            .where(RecordCandidate.literature_id == lit_id)
+            .order_by(RecordCandidate.id.asc())
+        )
         candidate_result = await db.execute(candidate_stmt)
         candidate_records = list(candidate_result.scalars().all())
         if candidate_records:
-            return candidate_records
+            return [_tribology_record_api_payload(record) for record in candidate_records]
         records = await get_records_by_literature(
             db,
             lit_id,
@@ -2539,7 +3123,7 @@ async def get_extracted_data(
                 )
             ),
         )
-        return records
+        return [_tribology_record_api_payload(record) for record in records]
     except ValueError:
         if file_id in extracted_data_store:
             return extracted_data_store[file_id]["data"]

@@ -29,7 +29,49 @@ def _normalize_term_key(text: str) -> str:
 
 
 def _extract_number_tokens(text: str) -> list[str]:
-    return re.findall(r"\d+(?:\.\d+)?", str(text or ""))
+    return re.findall(r"\d+(?:[\.:]\d+)?", str(text or ""))
+
+
+def _number_token_to_float(token: str) -> Optional[float]:
+    try:
+        return float(str(token or "").replace(":", "."))
+    except Exception:
+        return None
+
+
+def _normalize_pdf_signs(text: str) -> str:
+    return (
+        str(text or "")
+        .replace("\u2212", "-")
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+        .replace("\uff0b", "+")
+        .replace("\x03", "-")
+        .replace("\x04", "+")
+        .replace("þ", "+")
+    )
+
+
+def _extract_first_explicit_sign(text: str) -> Optional[str]:
+    normalized = _normalize_pdf_signs(text)
+    match = re.search(r"(?<![a-zA-Z0-9])([+-])\s*\d", normalized)
+    return match.group(1) if match else None
+
+
+def _potential_sign_matches(query: str, context_text: str) -> bool:
+    query_sign = _extract_first_explicit_sign(query)
+    if not query_sign:
+        return True
+
+    query_nums = _extract_number_tokens(query)
+    if not query_nums:
+        return True
+
+    magnitude = query_nums[0]
+    escaped = re.escape(magnitude).replace(r"\.", r"[\.:]")
+    normalized_context = _normalize_pdf_signs(context_text)
+    sign_pattern = re.compile(rf"(?<![a-zA-Z0-9]){re.escape(query_sign)}\s*{escaped}(?!\d)")
+    return bool(sign_pattern.search(normalized_context))
 
 
 def _numeric_tokens_match(query: str, matched: str) -> bool:
@@ -42,17 +84,15 @@ def _numeric_tokens_match(query: str, matched: str) -> bool:
 
     matched_vals: list[float] = []
     for token in matched_nums:
-        try:
-            matched_vals.append(float(token))
-        except Exception:
-            continue
+        value = _number_token_to_float(token)
+        if value is not None:
+            matched_vals.append(value)
     if not matched_vals:
         return False
 
     for token in query_nums:
-        try:
-            qv = float(token)
-        except Exception:
+        qv = _number_token_to_float(token)
+        if qv is None:
             return False
         tol = max(1e-6, abs(qv) * 0.01)
         if not any(abs(mv - qv) <= tol for mv in matched_vals):
@@ -121,8 +161,31 @@ def _search_context_is_compatible(semantic_type: str, query: str, local_context:
     haystack = _normalize_context_text(local_context)
     if semantic == "speed":
         return any(token in haystack for token in ("um/s", "um s-1", "um s−1"))
+    if semantic == "shear_rate":
+        return any(token in haystack for token in ("shear rate", "s-1", "s^-1", "s−1"))
     if semantic == "load":
         return any(token in haystack for token in ("nn", "nanonewton", "nanonewtons"))
+    if semantic == "roughness" and _extract_number_tokens(query):
+        return any(
+            token in haystack
+            for token in ("roughness", "rms", "root-mean-square", "root mean square")
+        )
+    if semantic == "potential":
+        query_lower = _normalize_context_text(query)
+        if "ocp" in query_lower or "open circuit" in query_lower:
+            return "ocp" in haystack or "open circuit" in haystack
+
+        if _extract_number_tokens(query):
+            if not _potential_sign_matches(query, local_context):
+                return False
+            voltage_number = re.search(
+                r"(?<![a-z0-9])[-+\u2212]?\d+(?:[\.:]\d+)?\s*(?:v|volt|volts)\b",
+                haystack,
+                re.IGNORECASE,
+            )
+            if voltage_number:
+                return True
+            return any(token in haystack for token in ("potential", "voltage", "applied bias", "bias voltage"))
 
     return True
 
@@ -249,6 +312,156 @@ def _word_level_find_rect(page: fitz.Page, query: str):
     return None
 
 
+def _parse_potential_query(query: str) -> Optional[tuple[Optional[str], float]]:
+    normalized = _normalize_pdf_signs(query)
+    match = re.search(r"(?<![a-zA-Z0-9])([+-])?\s*(\d+(?:[\.:]\d+)?)\s*(?:v|volt|volts)\b", normalized, re.IGNORECASE)
+    if not match:
+        return None
+    value = _number_token_to_float(match.group(2))
+    if value is None:
+        return None
+    return match.group(1), value
+
+
+def _potential_number_matches(query_value: float, candidate_token: str) -> bool:
+    candidate_value = _number_token_to_float(candidate_token)
+    if candidate_value is None:
+        return False
+    tolerance = max(1e-6, abs(query_value) * 0.01)
+    if abs(candidate_value - query_value) <= tolerance:
+        return True
+
+    # PDF text often normalizes "-2 V" in nearby prose as "-2.0 V" / "-2:0 V".
+    if float(candidate_value).is_integer() and abs(float(candidate_value) - query_value) <= tolerance:
+        return True
+    if float(query_value).is_integer() and abs(candidate_value - float(int(query_value))) <= tolerance:
+        return True
+    return False
+
+
+def _line_text_for_word(words: list[tuple], word: tuple) -> str:
+    block_no = word[5]
+    line_no = word[6]
+    return " ".join(str(w[4]) for w in words if w[5] == block_no and w[6] == line_no).strip()
+
+
+def _candidate_raw_lines(page: fitz.Page, visible_line: str, number_token: str) -> list[str]:
+    raw_lines = [line for line in (page.get_text("text") or "").splitlines() if number_token in line]
+    if not raw_lines:
+        return []
+
+    visible_terms = [token for token in _extract_word_tokens(visible_line) if token]
+    if not visible_terms:
+        return raw_lines
+
+    ranked: list[tuple[int, str]] = []
+    for line in raw_lines:
+        normalized_line = _normalize_term_key(line)
+        score = sum(1 for token in visible_terms if token in normalized_line)
+        ranked.append((score, line))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    return [line for score, line in ranked if score > 0] or raw_lines
+
+
+def _sign_for_potential_candidate(page: fitz.Page, words: list[tuple], index: int, number_token: str) -> Optional[str]:
+    text = _normalize_pdf_signs(str(words[index][4]))
+    token_pattern = re.escape(number_token).replace(r"\:", r"[\.:]").replace(r"\.", r"[\.:]")
+    same_word = re.search(rf"([+-])\s*{token_pattern}", text)
+    if same_word:
+        return same_word.group(1)
+
+    if index > 0 and words[index - 1][5] == words[index][5] and words[index - 1][6] == words[index][6]:
+        prev = _normalize_pdf_signs(str(words[index - 1][4])).strip("()[]{}.,;:")
+        if prev in {"+", "-"}:
+            return prev
+
+    line_text = _line_text_for_word(words, words[index])
+    for raw_line in _candidate_raw_lines(page, line_text, number_token):
+        normalized_line = _normalize_pdf_signs(raw_line)
+        sign_match = re.search(rf"([+-])\s*{token_pattern}(?!\d)", normalized_line)
+        if sign_match:
+            return sign_match.group(1)
+    return None
+
+
+def _has_nearby_voltage_unit(words: list[tuple], index: int) -> Optional[int]:
+    current = _normalize_pdf_signs(str(words[index][4]))
+    if re.search(r"\d+(?:[\.:]\d+)?\s*v\b", current, re.IGNORECASE):
+        return index
+
+    for offset in range(1, 4):
+        j = index + offset
+        if j >= len(words):
+            break
+        if words[j][5] != words[index][5] or words[j][6] != words[index][6]:
+            break
+        token = str(words[j][4]).strip()
+        if re.match(r"^[vV](?:[),.;:]*)$", token):
+            return j
+        if offset == 1 and re.match(r"^(?:volt|volts)[),.;:]*$", token, re.IGNORECASE):
+            return j
+    return None
+
+
+def _potential_word_level_find_rect(page: fitz.Page, query: str):
+    parsed = _parse_potential_query(query)
+    if not parsed:
+        return None
+    query_sign, query_value = parsed
+
+    words = page.get_text("words") or []
+    if not words:
+        return None
+    words = sorted(words, key=lambda w: (w[5], w[6], w[7]))
+
+    best: Optional[tuple[float, fitz.Rect, str]] = None
+    for index, word in enumerate(words):
+        word_text = str(word[4])
+        number_tokens = _extract_number_tokens(word_text)
+        if not number_tokens:
+            continue
+        for number_token in number_tokens:
+            if not _potential_number_matches(query_value, number_token):
+                continue
+            unit_index = _has_nearby_voltage_unit(words, index)
+            if unit_index is None:
+                continue
+            candidate_sign = _sign_for_potential_candidate(page, words, index, number_token)
+            if query_sign and candidate_sign != query_sign:
+                continue
+
+            start = index
+            if candidate_sign and index > 0 and words[index - 1][5] == word[5] and words[index - 1][6] == word[6]:
+                prev = _normalize_pdf_signs(str(words[index - 1][4])).strip("()[]{}.,;:")
+                if prev == candidate_sign:
+                    start = index - 1
+
+            end = unit_index
+            x0 = min(float(words[k][0]) for k in range(start, end + 1))
+            y0 = min(float(words[k][1]) for k in range(start, end + 1))
+            x1 = max(float(words[k][2]) for k in range(start, end + 1))
+            y1 = max(float(words[k][3]) for k in range(start, end + 1))
+            rect = fitz.Rect(x0, y0, x1, y1)
+            visible_text = " ".join(str(words[k][4]) for k in range(start, end + 1)).strip()
+            matched_text = visible_text
+            if candidate_sign and not _extract_first_explicit_sign(visible_text):
+                matched_text = f"{candidate_sign}{visible_text}"
+
+            # Prefer compact matches with an explicit sign and closest numeric form.
+            value = _number_token_to_float(number_token) or query_value
+            value_penalty = abs(value - query_value)
+            sign_penalty = 0.0 if candidate_sign else 10.0
+            width_penalty = rect.width / 1000.0
+            score = value_penalty + sign_penalty + width_penalty
+            if best is None or score < best[0]:
+                best = (score, rect, matched_text)
+
+    if best:
+        _, rect, matched_text = best
+        return rect, matched_text
+    return None
+
+
 def _extract_local_context(page: fitz.Page, rect: fitz.Rect, padding: float = 28.0) -> str:
     blocks = page.get_text("blocks") or []
     if blocks:
@@ -266,6 +479,29 @@ def _extract_local_context(page: fitz.Page, rect: fitz.Rect, padding: float = 28
         return ""
 
     expanded = fitz.Rect(rect.x0 - padding, rect.y0 - padding, rect.x1 + padding, rect.y1 + padding)
+    nearby = []
+    for word in sorted(words, key=lambda w: (w[5], w[6], w[7])):
+        word_rect = fitz.Rect(float(word[0]), float(word[1]), float(word[2]), float(word[3]))
+        if expanded.intersects(word_rect):
+            nearby.append(str(word[4]))
+    return " ".join(nearby).strip()
+
+
+def _extract_tight_local_context(page: fitz.Page, rect: fitz.Rect, padding: float = 16.0) -> str:
+    expanded = fitz.Rect(
+        max(0.0, rect.x0 - padding),
+        max(0.0, rect.y0 - padding),
+        min(float(page.rect.width), rect.x1 + padding),
+        min(float(page.rect.height), rect.y1 + padding),
+    )
+    try:
+        clipped = re.sub(r"\s+", " ", (page.get_text("text", clip=expanded) or "")).strip()
+        if clipped:
+            return clipped
+    except Exception:
+        pass
+
+    words = page.get_text("words") or []
     nearby = []
     for word in sorted(words, key=lambda w: (w[5], w[6], w[7])):
         word_rect = fitz.Rect(float(word[0]), float(word[1]), float(word[2]), float(word[3]))
@@ -391,6 +627,30 @@ def find_text_coordinates(pdf_path: str, search_terms: list[dict]) -> list[dict]
 
                 for page_num in page_order:
                     page = doc[page_num]
+                    if semantic_type == "potential":
+                        potential_fallback = _potential_word_level_find_rect(page, query_clean)
+                        if potential_fallback:
+                            rect, matched_text = potential_fallback
+                            if restrict_to_anchor_bbox and ax0 is not None and not _in_anchor(rect):
+                                continue
+                            local_context = _extract_tight_local_context(page, rect)
+                            context_text = " ".join(part for part in [matched_text, local_context] if part).strip()
+                            if not _search_context_is_compatible(semantic_type, query_clean, context_text):
+                                continue
+                            results.append(
+                                {
+                                    "id": term_id,
+                                    "page": page_num + 1,
+                                    "x": round(rect.x0, 2),
+                                    "y": round(rect.y0, 2),
+                                    "w": round(rect.width, 2),
+                                    "h": round(rect.height, 2),
+                                    "matched_text": matched_text or query_clean,
+                                }
+                            )
+                            found = True
+                            break
+
                     rects = page.search_for(query_clean)
                     if rects:
                         # Validate candidates with actual extracted text to prevent
@@ -404,7 +664,11 @@ def find_text_coordinates(pdf_path: str, search_terms: list[dict]) -> list[dict]
                                 continue
                             if not _query_matches_matched_text(query_clean, matched_text):
                                 continue
-                            local_context = _extract_local_context(page, rect)
+                            local_context = (
+                                _extract_tight_local_context(page, rect)
+                                if semantic_type == "potential"
+                                else _extract_local_context(page, rect)
+                            )
                             context_text = " ".join(part for part in [matched_text, local_context] if part).strip()
                             if not _search_context_is_compatible(semantic_type, query_clean, context_text):
                                 continue
@@ -462,7 +726,11 @@ def find_text_coordinates(pdf_path: str, search_terms: list[dict]) -> list[dict]
                             continue
                         if not _query_matches_matched_text(query_clean, matched_text or ""):
                             continue
-                        local_context = _extract_local_context(page, rect)
+                        local_context = (
+                            _extract_tight_local_context(page, rect)
+                            if semantic_type == "potential"
+                            else _extract_local_context(page, rect)
+                        )
                         context_text = " ".join(part for part in [matched_text, local_context] if part).strip()
                         if not _search_context_is_compatible(semantic_type, query_clean, context_text):
                             continue

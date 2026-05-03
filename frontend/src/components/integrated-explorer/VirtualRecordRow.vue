@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Edit, Eye, Trash2 } from 'lucide-vue-next'
 
-import MoleculeViewer from '@/components/MoleculeViewer.vue'
+import LubricantStructurePreview from '@/components/integrated-explorer/LubricantStructurePreview.vue'
 import type { EvidenceResult, RecordResponse } from '@/lib/api'
 import {
   cofDisplay,
@@ -11,6 +11,8 @@ import {
   confidenceValueFor,
   formatIonicLiquidPartHtml,
   ionicLiquidParts,
+  lubricantDisplayLines,
+  lubricantTooltip,
   surfaceRoughnessBadge,
   surfaceRoughnessBadgeClass,
   tribopairParts,
@@ -50,45 +52,28 @@ function roughnessBadge(record: RecordResponse) {
     <!-- Ionic Liquid Column -->
     <div class="w-[260px] shrink-0 px-4 py-4">
       <div class="flex items-start gap-2">
-        <div v-if="record.cationSmiles || record.anionSmiles" class="shrink-0 flex gap-1 pt-0.5">
-          <button
-            v-if="record.cationSmiles"
-            type="button"
-            class="rounded-md transition hover:scale-[1.02]"
-            :class="structurePreviewOpen && structurePreviewRowId === record.id ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-950' : ''"
-            title="Show chemical structures"
-            @click.stop="emit('openStructure', record)"
-          >
-            <MoleculeViewer
-              :smiles="record.cationSmiles"
-              size="thumbnail"
-              :width="40"
-              :height="30"
-            />
-          </button>
-          <button
-            v-if="record.anionSmiles"
-            type="button"
-            class="rounded-md transition hover:scale-[1.02]"
-            :class="structurePreviewOpen && structurePreviewRowId === record.id ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-950' : ''"
-            title="Show chemical structures"
-            @click.stop="emit('openStructure', record)"
-          >
-            <MoleculeViewer
-              :smiles="record.anionSmiles"
-              size="thumbnail"
-              :width="40"
-              :height="30"
-            />
-          </button>
-        </div>
-        <div class="ionic-liquid-name min-w-0 flex-1 font-semibold leading-5 text-slate-800 dark:text-slate-100">
+        <LubricantStructurePreview
+          class="shrink-0 pt-0.5"
+          :record="record"
+          :active="structurePreviewOpen && structurePreviewRowId === record.id"
+          @open="emit('openStructure', $event)"
+        />
+        <div
+          class="ionic-liquid-name min-w-0 flex-1 font-semibold leading-5 text-slate-800 dark:text-slate-100"
+          :title="lubricantTooltip(record)"
+        >
           <span
-            v-for="(part, partIndex) in ionicLiquidParts(record.lubricant || '--')"
-            :key="`${record.id}-il-${partIndex}-${part}`"
+            v-for="(line, lineIndex) in lubricantDisplayLines(record)"
+            :key="`${record.id}-il-line-${lineIndex}-${line}`"
             class="block whitespace-normal break-words"
-            v-html="formatIonicLiquidPartHtml(part)"
-          />
+          >
+            <span
+              v-for="(part, partIndex) in ionicLiquidParts(line)"
+              :key="`${record.id}-il-${lineIndex}-${partIndex}-${part}`"
+              class="inline whitespace-normal break-words"
+              v-html="formatIonicLiquidPartHtml(part)"
+            />
+          </span>
         </div>
       </div>
     </div>
@@ -106,13 +91,23 @@ function roughnessBadge(record: RecordResponse) {
           </span>
         </div>
         <div
-          class="inline-flex min-w-0 max-w-full items-center gap-2 rounded-md bg-slate-800 px-2 py-1 shadow-sm dark:bg-slate-100"
-          :title="'Substrate: ' + tribopairParts(record).substrate"
+          class="min-w-0 max-w-full rounded-md bg-slate-800 px-2 py-1 shadow-sm dark:bg-slate-100"
+          :title="'Substrate: ' + tribopairParts(record).substrate + (roughnessBadge(record) ? ' · ' + roughnessBadge(record)?.label : '')"
         >
-          <span class="shrink-0 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Sub</span>
-          <span class="min-w-0 truncate text-[11.5px] font-semibold text-white dark:text-slate-900">
-            {{ tribopairParts(record).substrate }}
-          </span>
+          <div class="flex min-w-0 items-start gap-2">
+            <span class="shrink-0 pt-px text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Sub</span>
+            <div class="min-w-0 flex-1">
+              <div class="truncate text-[11.5px] font-semibold leading-snug text-white dark:text-slate-900">
+                {{ tribopairParts(record).substrate }}
+              </div>
+              <div
+                v-if="roughnessBadge(record)"
+                class="mt-0.5 truncate text-[10.5px] leading-snug text-slate-300 dark:text-slate-500"
+              >
+                {{ roughnessBadge(record)?.label }}
+              </div>
+            </div>
+          </div>
         </div>
         <div
           v-if="tribopairParts(record).coating"

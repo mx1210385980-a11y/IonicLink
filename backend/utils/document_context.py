@@ -56,7 +56,7 @@ def _format_length(value: str, unit: str) -> str:
 
 def _format_speed(value: str, unit: str) -> str:
     normalized_unit = _normalize_length_unit(unit)
-    rendered_unit = "um" if normalized_unit == "um" else normalized_unit
+    rendered_unit = "μm" if normalized_unit == "um" else normalized_unit
     return f"{_format_number(value)} {rendered_unit}/s".strip()
 
 
@@ -79,6 +79,21 @@ def _match_explicit_roughness(text: str) -> str | None:
     normalized = _normalize_text(text)
     if not normalized:
         return None
+
+    uncertainty_match = re.search(
+        r"\b(?P<label>rms|ra|rq)\b(?:\s+roughness)?(?:\s+was|\s*=|\s+of|\s*:)?\s*"
+        r"(?P<value>\d+(?:\.\d+)?)\s*(?:±|\+/-)\s*(?P<error>\d+(?:\.\d+)?)\s*"
+        r"(?P<unit>nm|um|pm|angstrom(?:s)?|a)\b",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if uncertainty_match:
+        label = str(uncertainty_match.group("label") or "").upper().strip()
+        value = str(uncertainty_match.group("value") or "").strip()
+        error = str(uncertainty_match.group("error") or "").strip()
+        unit = _normalize_length_unit(uncertainty_match.group("unit"))
+        rendered_unit = "um" if unit == "um" else ("angstrom" if unit == "angstrom" else unit)
+        return f"{label} {value} ± {error} {rendered_unit}".strip()
 
     prefix_match = re.search(
         r"\b(?P<label>rms|ra|rq)\b(?:\s+roughness)?(?:\s+was|\s*=|\s+of|\s*:)?\s*(?P<op><=|>=|[<>~])?\s*(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>nm|um|pm|angstrom(?:s)?|a)\b",
@@ -360,10 +375,14 @@ def apply_experimental_document_context(
         context_text=roughness_context,
         substrate_material=substrate_material_hint,
     )
-    normalized_surface_roughness = normalize_surface_roughness_value(
-        item.get("surface_roughness"),
-        context_text=roughness_context,
-        substrate_material=substrate_material_hint,
+    normalized_surface_roughness = (
+        normalize_surface_roughness_value(
+            item.get("surface_roughness"),
+            context_text=roughness_context,
+            substrate_material=substrate_material_hint,
+        )
+        if not _is_blank(item.get("surface_roughness"))
+        else None
     )
     inferred_roughness = (
         normalized_substrate_roughness
@@ -381,10 +400,6 @@ def apply_experimental_document_context(
 
     if normalized_surface_roughness:
         item["surface_roughness"] = normalized_surface_roughness
-    elif _is_blank(item.get("surface_roughness")) and (
-        item.get("substrate_roughness") or inferred_roughness
-    ):
-        item["surface_roughness"] = item.get("substrate_roughness") or inferred_roughness
 
     if not doc_context:
         return item
@@ -405,7 +420,6 @@ def apply_experimental_document_context(
         "substrate_material",
         "substrate_coating",
         "substrate_roughness",
-        "surface_roughness",
         "film_thickness",
         "material_name",
     ):
@@ -432,7 +446,4 @@ def apply_experimental_document_context(
 
     if _is_blank(item.get("material_name")) and not _is_blank(item.get("substrate_material")):
         item["material_name"] = item["substrate_material"]
-    if _is_blank(item.get("surface_roughness")) and not _is_blank(item.get("substrate_roughness")):
-        item["surface_roughness"] = item["substrate_roughness"]
-
     return item

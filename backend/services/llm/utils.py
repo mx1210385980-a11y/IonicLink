@@ -7,6 +7,8 @@ from typing import Any, List, Optional, Union
 
 from PIL import Image
 
+from services.normalization.potential import normalize_potential_text
+
 
 def clean_and_parse_json(text: str) -> Union[List, dict, None]:
     """Robust JSON cleaning and parsing function."""
@@ -177,13 +179,11 @@ def sanitize_numeric_string(value: Union[str, float, int]) -> Optional[str]:
 
 
 def sanitize_potential(value: Union[str, float, int]) -> Optional[str]:
-    if value is None:
+    normalized = normalize_potential_text(value)
+    if normalized is None:
         return None
-    s = str(value).strip()
-    if any(x in s.upper() for x in ["OCP", "OPEN", "CIRCUIT"]):
-        return "OCP"
-    if re.match(r"^[+-]?\d", s):
-        return s
+    if re.search(r"\d|\bOCP\b|\bOCV\b|open[-\s]*circuit", normalized, flags=re.IGNORECASE):
+        return normalized
     return None
 
 
@@ -255,6 +255,7 @@ def has_core_quantitative_signal(record: dict[str, Any]) -> bool:
     secondary_fields = (
         "temperature",
         "speed",
+        "shear_rate",
         "water_content",
         "concentration",
         "mol_ratio",

@@ -25,6 +25,16 @@ class ResearchGroup(Base):
     )
     literature: Mapped[List["Literature"]] = relationship("Literature", back_populates="group")
     cleaned_datasets: Mapped[List["CleanedDataset"]] = relationship("CleanedDataset", back_populates="group")
+    model_training_runs: Mapped[List["ModelTrainingRun"]] = relationship(
+        "ModelTrainingRun",
+        back_populates="group",
+        cascade="all, delete-orphan",
+    )
+    registered_models: Mapped[List["RegisteredModel"]] = relationship(
+        "RegisteredModel",
+        back_populates="group",
+        cascade="all, delete-orphan",
+    )
 
 
 class User(Base):
@@ -48,6 +58,16 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    model_training_runs: Mapped[List["ModelTrainingRun"]] = relationship(
+        "ModelTrainingRun",
+        back_populates="owner",
+        cascade="all, delete-orphan",
+    )
+    registered_models: Mapped[List["RegisteredModel"]] = relationship(
+        "RegisteredModel",
+        back_populates="created_by",
+        cascade="all, delete-orphan",
+    )
 
 
 class Workspace(Base):
@@ -67,6 +87,14 @@ class Workspace(Base):
     owner: Mapped[Optional["User"]] = relationship("User", back_populates="workspaces")
     literature: Mapped[List["Literature"]] = relationship("Literature", back_populates="workspace")
     cleaned_datasets: Mapped[List["CleanedDataset"]] = relationship("CleanedDataset", back_populates="workspace")
+    model_training_runs: Mapped[List["ModelTrainingRun"]] = relationship(
+        "ModelTrainingRun",
+        back_populates="workspace",
+    )
+    registered_models: Mapped[List["RegisteredModel"]] = relationship(
+        "RegisteredModel",
+        back_populates="workspace",
+    )
 
 
 class CleanedDataset(Base):
@@ -95,6 +123,75 @@ class CleanedDataset(Base):
     group: Mapped["ResearchGroup"] = relationship("ResearchGroup", back_populates="cleaned_datasets")
     workspace: Mapped[Optional["Workspace"]] = relationship("Workspace", back_populates="cleaned_datasets")
     created_by: Mapped["User"] = relationship("User", back_populates="cleaned_datasets")
+    model_training_runs: Mapped[List["ModelTrainingRun"]] = relationship(
+        "ModelTrainingRun",
+        back_populates="cleaned_dataset",
+    )
+    registered_models: Mapped[List["RegisteredModel"]] = relationship(
+        "RegisteredModel",
+        back_populates="source_dataset",
+    )
+
+
+class ModelTrainingRun(Base):
+    __tablename__ = "model_training_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="queued", index=True, nullable=False)
+    target_column: Mapped[str] = mapped_column(String(80), nullable=False)
+    algorithm: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    split_strategy: Mapped[str] = mapped_column(String(64), default="random_holdout", nullable=False)
+
+    group_id: Mapped[int] = mapped_column(ForeignKey("research_groups.id"), index=True, nullable=False)
+    workspace_id: Mapped[Optional[int]] = mapped_column(ForeignKey("workspaces.id"), index=True, nullable=True)
+    cleaned_dataset_id: Mapped[Optional[int]] = mapped_column(ForeignKey("cleaned_datasets.id"), index=True, nullable=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    scope_type: Mapped[str] = mapped_column(String(32), default="workspace", index=True, nullable=False)
+    scope_key: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+
+    usable_records: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    config_json: Mapped[str] = mapped_column(Text, nullable=False)
+    summary_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    started_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+
+    group: Mapped["ResearchGroup"] = relationship("ResearchGroup", back_populates="model_training_runs")
+    workspace: Mapped[Optional["Workspace"]] = relationship("Workspace", back_populates="model_training_runs")
+    cleaned_dataset: Mapped[Optional["CleanedDataset"]] = relationship("CleanedDataset", back_populates="model_training_runs")
+    owner: Mapped["User"] = relationship("User", back_populates="model_training_runs")
+    registered_models: Mapped[List["RegisteredModel"]] = relationship(
+        "RegisteredModel",
+        back_populates="training_run",
+    )
+
+
+class RegisteredModel(Base):
+    __tablename__ = "registered_models"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    training_run_id: Mapped[int] = mapped_column(ForeignKey("model_training_runs.id"), index=True, nullable=False)
+    source_dataset_id: Mapped[Optional[int]] = mapped_column(ForeignKey("cleaned_datasets.id"), index=True, nullable=True)
+
+    group_id: Mapped[int] = mapped_column(ForeignKey("research_groups.id"), index=True, nullable=False)
+    workspace_id: Mapped[Optional[int]] = mapped_column(ForeignKey("workspaces.id"), index=True, nullable=True)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    scope_type: Mapped[str] = mapped_column(String(32), default="workspace", index=True, nullable=False)
+    scope_key: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+
+    config_json: Mapped[str] = mapped_column(Text, nullable=False)
+    summary_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    training_run: Mapped["ModelTrainingRun"] = relationship("ModelTrainingRun", back_populates="registered_models")
+    source_dataset: Mapped[Optional["CleanedDataset"]] = relationship("CleanedDataset", back_populates="registered_models")
+    group: Mapped["ResearchGroup"] = relationship("ResearchGroup", back_populates="registered_models")
+    workspace: Mapped[Optional["Workspace"]] = relationship("Workspace", back_populates="registered_models")
+    created_by: Mapped["User"] = relationship("User", back_populates="registered_models")
 
 
 class Literature(Base):
@@ -172,15 +269,21 @@ class TribologyData(Base):
 
     material_name: Mapped[str] = mapped_column(String(255), nullable=False)
     lubricant: Mapped[str] = mapped_column(String(255), nullable=False)
+    lubricant_components_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    lubricant_alias: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
 
     cof_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     cof_operator: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     cof_raw: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    cof_extracted_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     load_value: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     load_raw: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    load_conditions_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     speed_value: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    speed_conditions_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    shear_rate: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     temperature: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     potential: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
@@ -197,6 +300,8 @@ class TribologyData(Base):
     residual_film_thickness_d: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     layer_spacing_delta: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     film_thickness: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    regime: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    tribological_system_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     mol_ratio: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     cation: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -241,15 +346,21 @@ class RecordCandidate(Base):
 
     material_name: Mapped[str] = mapped_column(String(255), nullable=False)
     lubricant: Mapped[str] = mapped_column(String(255), nullable=False)
+    lubricant_components_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    lubricant_alias: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
 
     cof_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     cof_operator: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     cof_raw: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    cof_extracted_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     load_value: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     load_raw: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    load_conditions_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     speed_value: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    speed_conditions_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    shear_rate: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     temperature: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     potential: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
@@ -266,6 +377,8 @@ class RecordCandidate(Base):
     residual_film_thickness_d: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     layer_spacing_delta: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     film_thickness: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    regime: Mapped[Optional[str]] = mapped_column(String(160), nullable=True)
+    tribological_system_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     mol_ratio: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     cation: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

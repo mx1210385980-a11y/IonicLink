@@ -188,6 +188,7 @@ export interface FieldEvidenceSource {
     page?: number | null
     source_label?: string | null
     quote?: string | null
+    matched_text?: string | null
     bbox?: number[] | null
     sample_id?: string | null
 }
@@ -197,6 +198,8 @@ export interface FieldEvidenceEntry {
     confidence?: number | null
     evidence?: FieldEvidenceSource | null
     status?: 'grounded' | 'partial' | 'missing' | string
+    grounding_mode?: 'explicit' | 'derived' | 'inferred' | string | null
+    grounding_note?: string | null
     review_state?: 'confirmed' | 'flagged' | string | null
     review_note?: string | null
 }
@@ -282,8 +285,10 @@ export async function getRecordFieldEvidence(recordId: number): Promise<RecordFi
     return response.data
 }
 
-export async function getCandidateFieldEvidence(candidateId: number): Promise<RecordFieldEvidenceResponse> {
-    const response = await api.get(`/api/review/candidates/${candidateId}/field-evidence`)
+export async function getCandidateFieldEvidence(candidateId: number, literatureId?: number): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.get(`/api/review/candidates/${candidateId}/field-evidence`, {
+        params: literatureId ? { literature_id: literatureId } : undefined,
+    })
     return response.data
 }
 
@@ -346,6 +351,62 @@ export async function approveReviewCandidate(candidateId: number): Promise<Recor
 
 export async function approveDiffusionReviewCandidate(candidateId: number): Promise<RecordFieldEvidenceResponse> {
     const response = await api.post(`/api/review/diffusion-candidates/${candidateId}/approve`)
+    return response.data
+}
+
+export async function updateReviewRecordCofExtracted(recordId: number, cofExtracted: CofExtracted): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.patch(`/api/review/records/${recordId}/cof-extracted`, {
+        cofExtracted,
+    })
+    return response.data
+}
+
+export async function updateReviewCandidateCofExtracted(candidateId: number, cofExtracted: CofExtracted): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.patch(`/api/review/candidates/${candidateId}/cof-extracted`, {
+        cofExtracted,
+    })
+    return response.data
+}
+
+export async function updateReviewRecordLoadConditions(recordId: number, loadConditions: LoadConditions): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.patch(`/api/review/records/${recordId}/load-conditions`, {
+        loadConditions,
+    })
+    return response.data
+}
+
+export async function updateReviewCandidateLoadConditions(candidateId: number, loadConditions: LoadConditions): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.patch(`/api/review/candidates/${candidateId}/load-conditions`, {
+        loadConditions,
+    })
+    return response.data
+}
+
+export async function updateReviewRecordSpeedConditions(recordId: number, speedConditions: SpeedConditions): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.patch(`/api/review/records/${recordId}/speed-conditions`, {
+        speedConditions,
+    })
+    return response.data
+}
+
+export async function updateReviewCandidateSpeedConditions(candidateId: number, speedConditions: SpeedConditions): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.patch(`/api/review/candidates/${candidateId}/speed-conditions`, {
+        speedConditions,
+    })
+    return response.data
+}
+
+export async function updateReviewRecordTribologicalSystem(recordId: number, tribologicalSystem: TribologicalSystem): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.patch(`/api/review/records/${recordId}/tribological-system`, {
+        tribologicalSystem,
+    })
+    return response.data
+}
+
+export async function updateReviewCandidateTribologicalSystem(candidateId: number, tribologicalSystem: TribologicalSystem): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.patch(`/api/review/candidates/${candidateId}/tribological-system`, {
+        tribologicalSystem,
+    })
     return response.data
 }
 
@@ -536,17 +597,97 @@ export async function deleteTribologyRecord(recordId: number) {
 
 export type ValidationStatus = 'unverified' | 'verified' | 'modified' | 'warning'
 
+export interface LubricantComponent {
+    compound: string
+    fraction?: number | null
+    unit?: string | null
+    role?: string | null
+}
+
+export interface CofExtracted {
+    raw_text?: string | null
+    rawText?: string | null
+    value_type?: 'single' | 'range' | 'conditional' | string | null
+    valueType?: 'single' | 'range' | 'conditional' | string | null
+    cof_min?: number | null
+    cofMin?: number | null
+    cof_max?: number | null
+    cofMax?: number | null
+    cof_average?: number | null
+    cofAverage?: number | null
+    dependent_variable?: string | null
+    dependentVariable?: string | null
+    test_condition_value?: string | null
+    testConditionValue?: string | null
+    note?: string | null
+    segments?: CofExtracted[]
+}
+
+export interface LoadConditions {
+    raw_text?: string | null
+    rawText?: string | null
+    value_type?: 'single' | 'range' | 'composite' | 'unstated' | string | null
+    valueType?: 'single' | 'range' | 'composite' | 'unstated' | string | null
+    system_total_load_N?: number | null
+    systemTotalLoadN?: number | null
+    contact_load_per_unit_N?: number | null
+    contactLoadPerUnitN?: number | null
+    contact_unit_type?: string | null
+    contactUnitType?: string | null
+    load_min_N?: number | null
+    loadMinN?: number | null
+    load_max_N?: number | null
+    loadMaxN?: number | null
+    note?: string | null
+}
+
+export interface SpeedConditions {
+    raw_text?: string | null
+    rawText?: string | null
+    value_type?: 'linear' | 'derived' | 'scan_rate' | 'unknown' | string | null
+    valueType?: 'linear' | 'derived' | 'scan_rate' | 'unknown' | string | null
+    sliding_velocity_um_s?: number | null
+    slidingVelocityUmS?: number | null
+    scan_rate_hz?: number | null
+    scanRateHz?: number | null
+    scan_length_um?: number | null
+    scanLengthUm?: number | null
+    unit_warning?: boolean | null
+    unitWarning?: boolean | null
+    calculation?: string | null
+    note?: string | null
+}
+
+export interface TribologicalSystem {
+    raw_text?: string | null
+    rawText?: string | null
+    friction_regime?: string | null
+    frictionRegime?: string | null
+    contact_geometry?: string | null
+    contactGeometry?: string | null
+    scale?: string | null
+    note?: string | null
+}
+
 export interface TribologyData {
     id?: string
     extractor_type?: ExtractorType
     material_name: string
     ionic_liquid: string
+    lubricant_components?: LubricantComponent[]
+    lubricant_alias?: string | null
+    ionic_liquid_display?: string | null
+    lubricant_tooltip?: string | null
     base_oil?: string
     concentration?: string
     load?: string
+    load_conditions?: LoadConditions | null
     speed?: string
+    speed_conditions?: SpeedConditions | null
+    shear_rate?: string
     temperature?: string
     cof?: string
+    cof_extracted?: CofExtracted | null
     wear_rate?: string
     test_duration?: string
     contact_type?: string
@@ -560,10 +701,12 @@ export interface TribologyData {
     substrate_material?: string
     substrate_coating?: string
     substrate_roughness?: string
-    surface_roughness?: string  // Surface roughness (e.g. 'RMS 4.9 nm')
+    surface_roughness?: string  // Derived/composite roughness for display/export (e.g. RMS Rq)
     residual_film_thickness_d?: string
     layer_spacing_delta?: string
     film_thickness?: string // Film thickness
+    regime?: string
+    tribological_system?: TribologicalSystem | null
     mol_ratio?: string // Mol ratio
     cation?: string // Cation
     anion?: string // Anion
@@ -583,6 +726,7 @@ export interface TribologyData {
     field_evidence_json?: Record<string, FieldEvidenceEntry>
     review_status?: string
     record_origin?: string
+    review_entity_type?: 'record' | 'candidate' | string
     assembly_notes?: string
     system_name?: string
     confinement_material_class?: string
@@ -774,9 +918,15 @@ function mapRecordForLegacySync(record: TribologyData) {
         id: record.id,
         materialName: record.material_name,
         lubricant: record.ionic_liquid,
+        lubricantComponents: record.lubricant_components,
+        lubricantAlias: record.lubricant_alias,
+        cofExtracted: record.cof_extracted,
         cofRaw: record.cof,
         loadRaw: record.load,
+        loadConditions: record.load_conditions,
         speedRaw: record.speed,
+        speedConditions: record.speed_conditions,
+        shearRate: record.shear_rate,
         probeMaterial: record.probe_material,
         probeGeometry: record.probe_geometry,
         probeRadius: record.probe_radius,
@@ -784,6 +934,8 @@ function mapRecordForLegacySync(record: TribologyData) {
         substrateMaterial: record.substrate_material,
         substrateCoating: record.substrate_coating,
         substrateRoughness: record.substrate_roughness,
+        regime: record.regime,
+        tribologicalSystem: record.tribological_system,
         validationStatus: record.validationStatus,
         adminComment: record.notes,
     }
@@ -793,13 +945,19 @@ export function mapRecordToPayload(record: TribologyData) {
     return {
         materialName: record.material_name,
         lubricant: record.ionic_liquid,
+        lubricantComponents: record.lubricant_components,
+        lubricantAlias: record.lubricant_alias,
+        cofExtracted: record.cof_extracted,
         cofValue: parseNumericValue(record.cof, /[<>~=]/g),
         cofOperator: record.cof?.match(/[<>~=]/)?.[0] || null,
         cofRaw: record.cof,
         loadValue: parseNumericValue(record.load, /[^0-9.]/g),
         loadRaw: record.load,
+        loadConditions: record.load_conditions,
         speedValue: parseNumericValue(record.speed, /[^0-9.]/g),
         speedRaw: record.speed,
+        speedConditions: record.speed_conditions,
+        shearRate: record.shear_rate,
         temperature: record.temperature,
         temperatureValue: parseNumericValue(record.temperature, /[^0-9.]/g),
         potential: record.potential,
@@ -815,6 +973,8 @@ export function mapRecordToPayload(record: TribologyData) {
         residualFilmThicknessD: record.residual_film_thickness_d,
         layerSpacingDelta: record.layer_spacing_delta,
         filmThickness: record.film_thickness,
+        regime: record.regime,
+        tribologicalSystem: record.tribological_system,
         molRatio: record.mol_ratio,
         cation: record.cation,
         anion: record.anion,
@@ -884,6 +1044,7 @@ export type FileExtractionStatus = 'uploaded' | 'processing' | 'success' | 'erro
 export interface BatchFile {
     id: string
     name: string
+    disablePdfPreview?: boolean
     scopeKey?: string
     extractor_type?: ExtractorType
     status: FileExtractionStatus
@@ -896,12 +1057,14 @@ export interface BatchFile {
 }
 
 export type SearchFilter = {
+    recordId?: number
     materials?: string[]
     probe_materials?: string[]
     substrate_materials?: string[]
     substrate_coatings?: string[]
     lubricants?: string[]
     speed_values?: string[]
+    shear_rate_values?: string[]
     temperature_values?: string[]
     potential_values?: string[]
     water_content_values?: string[]
@@ -920,6 +1083,7 @@ export interface RecordFilterOptions {
     substrateMaterials: string[]
     substrateCoatings: string[]
     speedValues: string[]
+    shearRateValues: string[]
     temperatureValues: string[]
     potentialValues: string[]
     waterContentValues: string[]
@@ -943,12 +1107,20 @@ export interface RecordResponse {
     id: number
     materialName: string
     lubricant: string
+    lubricantComponents?: LubricantComponent[] | null
+    lubricantAlias?: string | null
+    ionicLiquidDisplay?: string | null
+    lubricantTooltip?: string | null
     cofValue: number | null
     cofOperator: string | null
     cofRaw: string | null
+    cofExtracted?: CofExtracted | null
     loadValue: string | null
     loadRaw: string | null
+    loadConditions?: LoadConditions | null
     speedValue: string | null
+    speedConditions?: SpeedConditions | null
+    shearRate: string | null
     temperature: string | null
     potential: string | null
     waterContent: string | null
@@ -964,6 +1136,8 @@ export interface RecordResponse {
     residualFilmThicknessD?: string | null
     layerSpacingDelta?: string | null
     filmThickness: string | null
+    regime?: string | null
+    tribologicalSystem?: TribologicalSystem | null
     molRatio?: string | null
     cation?: string | null
     anion?: string | null
@@ -1017,11 +1191,16 @@ export interface RecordUpdatePayload {
     substrateCoating?: string
     substrateRoughness?: string
     speedValue?: string
+    speedConditions?: SpeedConditions | null
+    shearRate?: string
     loadValue?: string
     surfaceRoughness?: string
     filmThickness?: string
     materialName?: string
     lubricant?: string
+    lubricantComponents?: LubricantComponent[]
+    lubricantAlias?: string | null
+    cofExtracted?: CofExtracted | null
 }
 
 export type ComparisonOperator = 'EQ' | 'LT' | 'GT' | 'LE' | 'GE'
@@ -1039,9 +1218,15 @@ export interface Literature {
     workspaceId?: number | null
     createdByUserId?: number | null
     scopeType?: 'workspace' | 'group_library' | string | null
+    status?: string | null
+    errorMessage?: string | null
+    recordCount?: number | null
+    candidateCount?: number | null
+    hasPdf?: boolean | null
     volume?: string | null
     issue?: string | null
     pages?: string | null
+    filePath?: string | null
     file_path?: string
     created_at: string
 }
@@ -1054,6 +1239,16 @@ export interface ReprocessResult {
     metadata?: LiteratureMetadata
     needsUpload?: boolean
     agent_workflow?: AgentWorkflow
+}
+
+export interface LiteratureMetadataBackfillResult {
+    success: boolean
+    literatureId: number
+    updated: boolean
+    updatedFields: string[]
+    message: string
+    source?: string
+    metadata?: Literature
 }
 
 // Get all literature list
@@ -1074,6 +1269,13 @@ export async function getLiteratureDetails(literatureId: number) {
 export async function reprocessLiterature(literatureId: number) {
     const response = await api.post(`/api/sync/literature/${literatureId}/reprocess`)
     return response.data as ReprocessResult
+}
+
+export async function backfillLiteratureMetadata(literatureId: number, force: boolean = false) {
+    const response = await api.post(`/api/sync/literature/${literatureId}/metadata/backfill`, null, {
+        params: { force }
+    })
+    return response.data as LiteratureMetadataBackfillResult
 }
 
 export async function getAgentStatus(): Promise<AgentStatusResponse> {
@@ -1206,6 +1408,36 @@ export interface ModelTrainingMetricPoint {
     val_mae: number
 }
 
+export interface ModelTrainingFeatureImportance {
+    feature: string
+    importance: number
+}
+
+export interface ModelTrainingPredictionPoint {
+    row_index: number
+    record_id?: number | null
+    literature_id?: number | null
+    confidence?: number | null
+    actual: number
+    predicted: number
+    residual: number
+    abs_residual: number
+}
+
+export interface ModelTrainingInsights {
+    feature_importance?: ModelTrainingFeatureImportance[]
+    prediction_samples?: ModelTrainingPredictionPoint[]
+    largest_residuals?: ModelTrainingPredictionPoint[]
+    test_samples?: ModelTrainingPredictionPoint[]
+}
+
+export interface ModelTrainingTestMetrics {
+    test_r2: number
+    test_rmse: number
+    test_mae: number
+    sample_count: number
+}
+
 export interface ModelTrainingSourceScope {
     requested_mode: string
     resolved_scope_key: string
@@ -1260,6 +1492,8 @@ export interface ModelTrainingDatasetSummary {
     total_records: number
     cleaned_records: number
     usable_records: number
+    test_size?: number
+    pool_size?: number
     feature_dimensions: number
     target_column: string
     feature_columns: string[]
@@ -1291,6 +1525,8 @@ export interface ModelTrainingTaskSnapshot {
         dropped_records: number
         train_size: number
         validation_size: number
+        test_size?: number
+        pool_size?: number
         feature_dimensions: number
         selected_feature_count: number
         target: {
@@ -1324,12 +1560,16 @@ export interface ModelTrainingTaskSnapshot {
         cleaned_dataset_id?: number | null
     }
     history: ModelTrainingMetricPoint[]
+    insights?: ModelTrainingInsights
+    tune_progress?: ModelTrainingTuneProgress | null
+    test_metrics?: ModelTrainingTestMetrics | null
 }
 
 export interface ModelTrainingSummary {
     dataset: ModelTrainingDatasetSummary
     cleaning: ModelTrainingCleaningSummary
     algorithms: ModelTrainingAlgorithmOption[]
+    split_options?: ModelTrainingSplitStrategyOption[]
     pca_info: ModelCleaningPcaInfo | null
     defaults: {
         target: string
@@ -1353,6 +1593,14 @@ export interface ModelTrainingDataOptions {
     min_confidence: number
     max_records: number | null
     random_seed: number
+    split_strategy?: string
+    cv_folds?: number
+}
+
+export interface ModelTrainingSplitStrategyOption {
+    key: string
+    label: string
+    description: string
 }
 
 export interface ModelTrainingCleaningOptions {
@@ -1367,6 +1615,19 @@ export interface ModelTrainingStartPayload {
     hyperparameters: ModelTrainingHyperparameters
     data_options: ModelTrainingDataOptions
     cleaned_dataset_id?: number | null
+    tune?: boolean
+}
+
+export interface ModelTrainingTuneProgress {
+    active: boolean
+    searched: number
+    total: number
+    best_score?: number | null
+    best_params?: Record<string, unknown> | null
+    algorithm?: string
+    skipped?: boolean
+    reason?: string
+    all_results?: Array<{ params: Record<string, unknown>; score: number }>
 }
 
 export async function getModelTrainingSummary(cleanedDatasetId?: number | null) {
@@ -1626,14 +1887,21 @@ export interface TribologyRecord {
     literatureId: number
     materialName: string
     lubricant: string
+    lubricantComponents?: LubricantComponent[] | null
+    lubricantAlias?: string | null
+    ionicLiquidDisplay?: string | null
+    lubricantTooltip?: string | null
     // COF
     cofValue: number | null
     cofOperator: string | null
     cofRaw: string | null
+    cofExtracted?: CofExtracted | null
     // Load & Speed (stored as strings with units in DB, e.g. "20 nN", "5 mm/s")
     loadValue: string | null
     loadRaw: string | null
+    loadConditions?: LoadConditions | null
     speedValue: string | null
+    speedConditions?: SpeedConditions | null
     // Temperature & Environment
     temperature: string | null
     potential: string | null
@@ -1651,6 +1919,8 @@ export interface TribologyRecord {
     residualFilmThicknessD: string | null
     layerSpacingDelta: string | null
     filmThickness: string | null
+    regime?: string | null
+    tribologicalSystem?: TribologicalSystem | null
     // Molecular Info
     molRatio: string | null
     cation: string | null

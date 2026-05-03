@@ -6,6 +6,7 @@ import {
 } from 'lucide-vue-next'
 import { formatTribopairLabel, type BatchFile, type TribologyData, type LiteratureMetadata } from '@/lib/api'
 import { useValidation } from '@/composables/useValidation'
+import { normalizePotentialDisplayText } from '@/lib/potential'
 import LiteratureMetadataCard from '@/components/LiteratureMetadataCard.vue'
 import Button from '@/components/ui/Button.vue'
 import Badge from '@/components/ui/Badge.vue'
@@ -538,7 +539,7 @@ function markAllAsVerified() {
                         <Badge v-if="item.potential" class="bg-yellow-500/10 text-yellow-600 border-yellow-500/20">
                           <Zap class="w-3 h-3 mr-1" />
                           <EditableField
-                            :model-value="item.potential"
+                            :model-value="normalizePotentialDisplayText(item.potential)"
                             field-name="potential"
                             :validation-status="item.validationStatus"
                             placeholder="-"

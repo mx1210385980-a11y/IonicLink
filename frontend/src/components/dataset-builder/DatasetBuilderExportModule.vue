@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowRightLeft, Download, Upload } from 'lucide-vue-next'
+import { ArrowRight, ArrowRightLeft, Download, Upload } from 'lucide-vue-next'
 import { formatColumnLabel, formatDateTime, formatMetric } from './formatters'
 import type { SavedDatasetSummary, SubsetCard, SubsetKey } from './types'
 
@@ -30,8 +30,8 @@ function subsetPreviewColumns(columns: string[]) {
     <section class="rounded-[28px] border border-slate-200 bg-white p-6">
       <div class="grid gap-6 xl:grid-cols-[1fr_320px] xl:items-start">
         <div>
-          <h2 class="text-xl font-semibold tracking-tight text-slate-950">分流与导出</h2>
-          <p class="mt-2 text-sm leading-6 text-slate-600">把最终矩阵拆成通用池和机理池，再导出或保存到工作区给训练模块直接使用。这里会直接继承第二步选中的代表特征。</p>
+          <h2 class="text-xl font-semibold tracking-tight text-slate-950">生成训练数据集</h2>
+          <p class="mt-2 text-sm leading-6 text-slate-600">把基础数据集或增强数据集保存成平台版本。保存后 Modeling 页会直接读取，不需要学生手动搬 CSV 文件。</p>
         </div>
 
         <div class="space-y-3">
@@ -39,15 +39,15 @@ function subsetPreviewColumns(columns: string[]) {
             :value="bundleName"
             type="text"
             class="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 text-sm font-medium text-slate-700 outline-none transition focus:border-cyan-400 focus:bg-white focus:ring-4 focus:ring-cyan-100"
-            placeholder="输入导出包名称"
+            placeholder="输入数据集版本名称"
             @input="emit('update:bundleName', ($event.target as HTMLInputElement).value)"
           />
           <button type="button" class="inline-flex h-11 w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50" @click="emit('open-training', undefined)">
             <ArrowRightLeft class="h-4 w-4" />
-            打开 Model Studio
+            打开 Modeling
           </button>
           <div class="rounded-2xl bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-500">
-            当前将保留 {{ retainedFeatureColumns.length }} 个代表特征进入导出数据集。
+            当前将保留 {{ retainedFeatureColumns.length }} 个代表特征。建议先保存，再进入 Modeling 训练。
           </div>
         </div>
       </div>
@@ -89,18 +89,18 @@ function subsetPreviewColumns(columns: string[]) {
         </div>
 
         <div class="mt-5 flex flex-col gap-3 sm:flex-row">
-          <button type="button" class="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-2xl bg-slate-950 text-sm font-semibold text-white transition hover:bg-slate-800" @click="emit('download', card.key)">
-            <Download class="h-4 w-4" />
-            导出 CSV
-          </button>
           <button
             type="button"
-            class="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+            class="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-2xl bg-indigo-600 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-60"
             :disabled="subsetSavingKey === card.key"
             @click="emit('save', card.key)"
           >
             <Upload class="h-4 w-4" />
-            {{ subsetSavingKey === card.key ? '保存中...' : '保存到工作区' }}
+            {{ subsetSavingKey === card.key ? '保存中...' : '保存并接入 Modeling' }}
+          </button>
+          <button type="button" class="inline-flex h-11 flex-1 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-semibold text-slate-700 transition hover:bg-slate-50" @click="emit('download', card.key)">
+            <Download class="h-4 w-4" />
+            导出 CSV
           </button>
         </div>
 
@@ -128,8 +128,8 @@ function subsetPreviewColumns(columns: string[]) {
     <section class="rounded-[28px] border border-slate-200 bg-white p-6">
       <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
         <div>
-          <h3 class="text-lg font-semibold tracking-tight text-slate-950">已保存数据集</h3>
-          <p class="mt-1 text-sm leading-6 text-slate-600">这里会显示刚刚保存的 Dataset-A、Dataset-B，以及之前已经入库的数据矩阵。</p>
+          <h3 class="text-lg font-semibold tracking-tight text-slate-950">已保存训练版本</h3>
+          <p class="mt-1 text-sm leading-6 text-slate-600">这里显示已经入库的数据集。学生可以直接送去 Modeling 训练，也可以在需要时导出 CSV。</p>
         </div>
         <span class="text-sm font-medium text-slate-500">共 {{ savedDatasets.length }} 个</span>
       </div>
@@ -153,7 +153,8 @@ function subsetPreviewColumns(columns: string[]) {
 
           <div class="flex items-center gap-2">
             <button type="button" class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-100" @click="emit('open-training', dataset.id)">
-              训练
+              去 Modeling
+              <ArrowRight class="ml-1 inline h-3.5 w-3.5" />
             </button>
             <button
               type="button"

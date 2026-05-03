@@ -6,13 +6,15 @@ defineProps<{
   sourceName?: string
   literatureMetadata?: any
   selectedFileId?: string | null
+  focusRecordId?: number | null
   externalExportRequest?: { id: number, format: 'json' | 'csv' | 'ndjson' } | null
 }>()
 
 defineEmits<{
-  'view-literature': []
+  'view-literature': [payload?: { literatureId?: number | null, recordId?: number | null }]
   'clear-doi': []
   'clear-source': []
+  'clear-focused-record': []
 }>()
 </script>
 
@@ -22,9 +24,11 @@ defineEmits<{
     :source-name="sourceName"
     :literature-metadata="literatureMetadata"
     :selected-file-id="selectedFileId"
+    :focus-record-id="focusRecordId ?? null"
     :external-export-request="externalExportRequest"
-    @view-literature="$emit('view-literature')"
+    @view-literature="$emit('view-literature', $event)"
     @clear-doi="$emit('clear-doi')"
     @clear-source="$emit('clear-source')"
+    @clear-focused-record="$emit('clear-focused-record')"
   />
 </template>

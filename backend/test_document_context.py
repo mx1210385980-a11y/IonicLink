@@ -64,4 +64,5 @@ def test_apply_experimental_document_context_overrides_false_probe_default():
     assert enriched["probe_radius"] == "8 nm"
     assert enriched["load_value"] == "0-100 nN"
     assert enriched["speed_value"] == "6.5 μm/s"
-    assert enriched["surface_roughness"] == "RMS 0.89 nm"
+    assert enriched["substrate_roughness"] == "RMS 0.89 nm"
+    assert "surface_roughness" not in enriched

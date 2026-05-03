@@ -4,7 +4,7 @@ Unit Converter Service for IonicLink
 
 支持的单位转换：
 - 力: nN, µN, μN, mN, N → Newtons
-- 速度: mm/s, cm/s, m/s, rpm → m/s
+- 线速度: nm/s, µm/s, mm/s, cm/s, m/s → m/s
 - COF: 解析操作符 <, >, ≤, ≥, ~
 """
 
@@ -67,6 +67,11 @@ def _force_unit_factor(unit: Optional[str]) -> Optional[float]:
     return FORCE_UNITS.get(unit_lower)
 
 
+def _stable_newton_value(value: float) -> float:
+    """Keep normalized Newton values stable for exact feature/test comparisons."""
+    return round(float(value), 18)
+
+
 def parse_force_range_to_newtons(raw: Optional[str]) -> Optional[Tuple[float, float]]:
     """
     Parse a force/load range and convert both bounds to Newtons.
@@ -102,8 +107,8 @@ def parse_force_range_to_newtons(raw: Optional[str]) -> Optional[Tuple[float, fl
     except ValueError:
         return None
 
-    low = min(start_value, end_value)
-    high = max(start_value, end_value)
+    low = _stable_newton_value(min(start_value, end_value))
+    high = _stable_newton_value(max(start_value, end_value))
     return low, high
 
 
@@ -208,12 +213,14 @@ def parse_speed_to_mps(raw: Optional[str]) -> Optional[float]:
         if unit_lower == unit_key:
             return value * factor
     
-    # rpm 特殊处理 - 返回 None 表示需要手动转换
-    if 'rpm' in unit_lower:
+    # Scan frequency and angular speed are not linear sliding velocity.
+    # They require scan length/radius before conversion, so never return a
+    # numeric speed directly for these units.
+    if any(token in unit_lower for token in ("hz", "s-1", "s^-1", "rpm")):
         return None
     
-    # 未识别的单位，返回原始值
-    return value
+    # 未识别的单位不能作为线速度训练特征。
+    return None
 
 
 def parse_cof_value(raw: Optional[str]) -> Tuple[Optional[float], ComparisonOperator]:

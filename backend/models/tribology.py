@@ -6,6 +6,10 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from utils.cof_extraction import normalize_cof_extracted
+from utils.lubricant_mixture import normalize_lubricant_components
+from utils.structured_conditions import normalize_load_conditions, normalize_tribological_system
+from services.normalization.potential import normalize_potential_text
 from utils.tribopair import derive_legacy_material_name, derive_legacy_surface_roughness
 
 
@@ -16,22 +20,33 @@ class EvidenceSource(BaseModel):
     quote: Optional[str] = None
     bbox: Optional[List[float]] = None
     sample_id: Optional[str] = None
+    matched_text: Optional[str] = None
 
 
 class FieldEvidence(BaseModel):
     value: Optional[str] = None
     confidence: Optional[float] = None
     evidence: Optional[EvidenceSource] = None
+    grounding_mode: Optional[str] = None
+    grounding_note: Optional[str] = None
+    review_state: Optional[str] = None
+    review_note: Optional[str] = None
 
 
 class TribologyData(BaseModel):
     id: Optional[str] = None
     material_name: str = Field(..., description="Legacy single-surface material label")
     ionic_liquid: Optional[str] = Field("", description="Ionic liquid label")
+    lubricant_components: List[Dict[str, Any]] = Field(default_factory=list)
+    lubricant_alias: Optional[str] = None
+    ionic_liquid_display: Optional[str] = None
+    lubricant_tooltip: Optional[str] = None
     base_oil: Optional[str] = None
     concentration: Optional[str] = None
     load: Optional[str] = None
     speed: Optional[str] = None
+    speed_conditions: Dict[str, Any] = Field(default_factory=dict)
+    shear_rate: Optional[str] = None
     temperature: Optional[str] = None
     cof: Optional[str] = None
 
@@ -39,9 +54,11 @@ class TribologyData(BaseModel):
     cof_value: Optional[float] = None
     cof_raw: Optional[str] = None
     cof_operator: Optional[str] = None
+    cof_extracted: Dict[str, Any] = Field(default_factory=dict)
 
     friction_force: Optional[str] = None
     normal_load: Optional[str] = None
+    load_conditions: Dict[str, Any] = Field(default_factory=dict)
     wear_rate: Optional[str] = None
     test_duration: Optional[str] = None
     contact_type: Optional[str] = None
@@ -60,6 +77,8 @@ class TribologyData(BaseModel):
     residual_film_thickness_d: Optional[str] = None
     layer_spacing_delta: Optional[str] = None
     film_thickness: Optional[str] = None
+    regime: Optional[str] = None
+    tribological_system: Dict[str, Any] = Field(default_factory=dict)
 
     mol_ratio: Optional[str] = None
     cation: Optional[str] = None
@@ -80,6 +99,7 @@ class TribologyData(BaseModel):
     field_evidence_json: Dict[str, FieldEvidence] = Field(default_factory=dict)
     review_status: Optional[str] = None
     record_origin: Optional[str] = None
+    review_entity_type: Optional[str] = None
     assembly_notes: Optional[str] = None
 
     @model_validator(mode="before")
@@ -91,13 +111,29 @@ class TribologyData(BaseModel):
                     data["cof"] = data["cof_raw"]
                 elif data.get("cof_value") is not None:
                     data["cof"] = str(data["cof_value"])
+            if not data.get("cof_extracted") and data.get("cofExtracted"):
+                data["cof_extracted"] = data["cofExtracted"]
 
             if not data.get("ionic_liquid") and data.get("lubricant"):
                 data["ionic_liquid"] = data["lubricant"]
+            if not data.get("lubricant_components") and data.get("lubricantComponents"):
+                data["lubricant_components"] = data["lubricantComponents"]
+            if not data.get("lubricant_alias") and data.get("lubricantAlias"):
+                data["lubricant_alias"] = data["lubricantAlias"]
+            if not data.get("ionic_liquid_display") and data.get("ionicLiquidDisplay"):
+                data["ionic_liquid_display"] = data["ionicLiquidDisplay"]
+            if not data.get("lubricant_tooltip") and data.get("lubricantTooltip"):
+                data["lubricant_tooltip"] = data["lubricantTooltip"]
             if not data.get("load"):
                 data["load"] = data.get("load_raw") or data.get("load_value")
+            if not data.get("load_conditions") and data.get("loadConditions"):
+                data["load_conditions"] = data["loadConditions"]
             if not data.get("speed"):
                 data["speed"] = data.get("speed_raw") or data.get("speed_value")
+            if not data.get("shear_rate") and data.get("shearRate"):
+                data["shear_rate"] = data.get("shearRate")
+            if not data.get("tribological_system") and data.get("tribologicalSystem"):
+                data["tribological_system"] = data["tribologicalSystem"]
         return data
 
     @field_validator("field_evidence_json", mode="before")
@@ -115,28 +151,30 @@ class TribologyData(BaseModel):
             return value
         return {}
 
+    @field_validator("lubricant_components", mode="before")
+    @classmethod
+    def parse_lubricant_components(cls, value: Any) -> List[Dict[str, Any]]:
+        return normalize_lubricant_components(value)
+
+    @field_validator("cof_extracted", mode="before")
+    @classmethod
+    def parse_cof_extracted(cls, value: Any) -> Dict[str, Any]:
+        return normalize_cof_extracted(value)
+
+    @field_validator("load_conditions", mode="before")
+    @classmethod
+    def parse_load_conditions(cls, value: Any) -> Dict[str, Any]:
+        return normalize_load_conditions(value)
+
+    @field_validator("tribological_system", mode="before")
+    @classmethod
+    def parse_tribological_system(cls, value: Any) -> Dict[str, Any]:
+        return normalize_tribological_system(value)
+
     @field_validator("potential", mode="before")
     @classmethod
     def normalize_potential(cls, value):
-        if value is None:
-            return None
-        if isinstance(value, bool):
-            return str(value)
-        if isinstance(value, (int, float)):
-            numeric = float(value)
-            text = str(int(numeric)) if numeric.is_integer() else str(value)
-            return f"{text} V"
-
-        text = str(value).strip()
-        if not text:
-            return None
-
-        try:
-            numeric = float(text)
-            normalized = str(int(numeric)) if numeric.is_integer() else text
-            return f"{normalized} V"
-        except Exception:
-            return text
+        return normalize_potential_text(value)
 
     @model_validator(mode="after")
     def map_legacy_surface_fields(self):

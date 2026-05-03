@@ -9,8 +9,11 @@ from services.llm.prompts import (
     TEXT_EXTRACTION_PROMPT,
     TRIBOLOGY_EXTRACTION_PROMPT,
 )
-from services.llm_service import LLMService, _normalize_quantitative_thickness
+from services.data_sync_service import _normalize_quantitative_thickness
+from services.llm_service import LLMService
+from services.unit_converter import parse_speed_to_mps
 from utils.pdf_coords import build_search_queries_for_record
+from utils.speed_conditions import derive_speed_conditions, speed_value_from_conditions
 
 
 def test_dedup_does_not_merge_conflicting_speed_conditions():
@@ -77,6 +80,21 @@ def test_prompts_include_required_provenance_constraints():
     assert "sample_id" in ABBREV_MAPPING_PROMPT
     assert "Never place sample abbreviations" in TRIBOLOGY_EXTRACTION_PROMPT
     assert "Thickness fields must stay quantitative" in FIGURE_TABLE_EXTRACTION_PROMPT
+    assert "Never put scan frequency into `speed`" in TRIBOLOGY_EXTRACTION_PROMPT
+
+
+def test_scan_rate_is_derived_before_becoming_speed():
+    conditions = derive_speed_conditions(
+        "scan rate 2 Hz",
+        context="trace and retrace tracks of 5 μm x 5 μm under the tip",
+    )
+
+    assert conditions["value_type"] == "derived"
+    assert conditions["scan_rate_hz"] == 2
+    assert conditions["scan_length_um"] == 5
+    assert conditions["sliding_velocity_um_s"] == 20
+    assert speed_value_from_conditions(conditions) == "20 μm/s"
+    assert parse_speed_to_mps("2 Hz") is None
 
 
 def test_llm_thickness_normalizer_rejects_ionic_liquid_labels():

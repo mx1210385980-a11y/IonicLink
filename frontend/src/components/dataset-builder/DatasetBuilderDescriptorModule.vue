@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { Bar } from 'vue-chartjs'
 import { Chart as ChartJS, BarElement, CategoryScale, Legend, LinearScale, Tooltip } from 'chart.js'
 import { BarChart3, Database, TableProperties } from 'lucide-vue-next'
+import type { BuilderSubsetSummary } from './types'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Tooltip, Legend)
 
@@ -11,9 +12,11 @@ type PreviewRow = Record<string, string>
 type DatasetCard = {
   key: 'dataset_a' | 'dataset_b'
   title: string
+  code: string
   tag: string
   sampleCount: number
   summary: string
+  bestFor: string
   note: string
   previewColumns: string[]
   previewRows: PreviewRow[]
@@ -21,8 +24,10 @@ type DatasetCard = {
   tagClass: string
 }
 
-defineProps<{
+const props = defineProps<{
   descriptorSummary: unknown
+  datasetASummary: BuilderSubsetSummary | null
+  datasetBSummary: BuilderSubsetSummary | null
   selectedSourceMode: string
   rdkitStatusLabel: string
   outlierLabel: string
@@ -30,14 +35,16 @@ defineProps<{
 
 const histogramLabels = ['0.00-0.38', '0.38-0.75', '0.75-1.13', '1.13-1.50', '1.50-1.88', '1.88-2.25', '2.25-2.63', '2.63-3.00', '3.00-3.38', '3.38-3.75', '3.75-4.13', '4.13-4.50']
 
-const datasetCards: DatasetCard[] = [
+const datasetCards = computed<DatasetCard[]>(() => [
   {
     key: 'dataset_a',
-    title: 'Dataset-A',
-    tag: '不含膜厚',
-    sampleCount: 256,
-    summary: '收录仅给出界面摩擦系数及相应工况参数的数据点。旨在最大化样本规模，建立“离子液体自身性质-固体表面性质-外界环境-界面纳米摩擦系数”的通用预测模型。',
-    note: '预览来自已上传文件 `no film dataset 0312.csv`。',
+    title: '基础数据集',
+    code: 'Dataset-A',
+    tag: '覆盖优先',
+    sampleCount: props.datasetASummary?.row_count ?? 256,
+    summary: '不强制要求膜厚字段，优先保留更多文献样本。适合学生先跑通一个基线模型，理解离子性质、表面和工况如何共同影响摩擦系数。',
+    bestFor: '第一次训练、课堂演示、快速比较算法。',
+    note: '保存后会作为一个独立训练版本出现在 Modeling 页。',
     previewColumns: ['Cation', 'anion', 'surface', 'Potential', 'T', 'velocity', 'Rq', 'μ'],
     previewRows: [
       { Cation: '[EtA]+', anion: '[N]-', surface: 'mica', Potential: '0.0', T: '298', velocity: '20.0', Rq: '0.0569', μ: '0.6709' },
@@ -49,11 +56,13 @@ const datasetCards: DatasetCard[] = [
   },
   {
     key: 'dataset_b',
-    title: 'Dataset-B',
+    title: '增强数据集',
+    code: 'Dataset-B',
     tag: '含膜厚',
-    sampleCount: 212,
-    summary: '在 Dataset-A 的特征基础上额外引入关键特征膜厚 h。这部分数据用于评估微观受限膜厚对预测精度的影响，探索界面结构决定的机理。',
-    note: '预览来自已上传文件 `film dataset0312.csv`。',
+    sampleCount: props.datasetBSummary?.row_count ?? 212,
+    summary: '在基础特征之外加入膜厚 h，只使用真实给出膜厚的样本。适合进一步探索受限液膜、界面结构和预测精度之间的关系。',
+    bestFor: '机制解释、膜厚影响分析、进阶实验。',
+    note: '膜厚缺失的记录不会被硬填，会留在基础数据集中。',
     previewColumns: ['Cation', 'anion', 'surface', 'h', 'T', 'velocity', 'Rq', 'μ'],
     previewRows: [
       { Cation: '[BMIm]+', anion: '[TFSI]-', surface: 'Au(111)', h: '2.6499', T: '298', velocity: '6.0', Rq: '1.0', μ: '0.319' },
@@ -63,7 +72,7 @@ const datasetCards: DatasetCard[] = [
     frameClass: 'border-sky-200 bg-[linear-gradient(180deg,rgba(240,249,255,0.98),rgba(255,255,255,0.98))]',
     tagClass: 'bg-sky-100 text-sky-700',
   },
-]
+])
 
 const histogramData = computed(() => ({
   labels: histogramLabels,
@@ -162,9 +171,9 @@ const histogramOptions = {
           <Database class="h-6 w-6" />
         </div>
         <div>
-          <h2 class="text-[2rem] font-semibold tracking-tight text-slate-950">数据集构建与划分</h2>
+          <h2 class="text-[2rem] font-semibold tracking-tight text-slate-950">划分训练数据集</h2>
           <p class="mt-2 max-w-4xl text-sm leading-7 text-slate-600">
-            为了避免经验插补缺失膜厚特征引入不可控偏差，平台并行构建了两套数据集，并直接接入你上传的 CSV 做样例预览和分布可视化。
+            平台把同一批清洗后的记录拆成两个学生更容易理解的版本：先用基础数据集跑通训练，再用增强数据集分析膜厚机制。
           </p>
         </div>
       </div>
@@ -181,6 +190,7 @@ const histogramOptions = {
             <div class="p-8">
               <div class="flex items-start justify-between gap-4">
                 <div>
+                  <p class="text-xs font-semibold text-slate-400">{{ card.code }}</p>
                   <div class="flex items-center gap-3">
                     <h3 class="text-[2rem] font-semibold tracking-tight text-slate-950">{{ card.title }}</h3>
                     <span class="rounded-xl px-3 py-1 text-sm font-semibold" :class="card.tagClass">{{ card.tag }}</span>
@@ -193,7 +203,10 @@ const histogramOptions = {
               </div>
 
               <p class="mt-8 text-[1.02rem] leading-8 text-slate-700">{{ card.summary }}</p>
-              <p class="mt-6 text-xs font-medium text-slate-400">{{ card.note }}</p>
+              <div class="mt-6 rounded-2xl bg-white/75 px-4 py-3 text-sm leading-6 text-slate-600 ring-1 ring-slate-200/70">
+                <span class="font-semibold text-slate-900">适合：</span>{{ card.bestFor }}
+              </div>
+              <p class="mt-4 text-xs font-medium text-slate-400">{{ card.note }}</p>
             </div>
           </div>
         </article>

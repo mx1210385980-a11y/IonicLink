@@ -8,7 +8,7 @@ from pathlib import Path
 import fitz
 
 from models.db_models import TribologyData as TribologyDataDB
-from services.il_resolver_service import resolve_il
+from services.il_resolver_service import ANION_DB, CATION_DB, resolve_il
 
 logger = logging.getLogger(__name__)
 
@@ -21,12 +21,15 @@ def resolve_existing_path(raw_path: str | None) -> str | None:
     if not raw_path:
         return None
 
+    normalized_path = str(raw_path).replace("\\", "/")
     candidates = [raw_path]
-    if not os.path.isabs(raw_path):
+    if normalized_path != raw_path:
+        candidates.append(normalized_path)
+    if not os.path.isabs(normalized_path):
         backend_root = Path(__file__).resolve().parents[1]
         workspace_root = backend_root.parent
-        candidates.append(str((backend_root / raw_path).resolve()))
-        candidates.append(str((workspace_root / raw_path).resolve()))
+        candidates.append(str((backend_root / normalized_path).resolve()))
+        candidates.append(str((workspace_root / normalized_path).resolve()))
 
     for candidate in candidates:
         if candidate and os.path.exists(candidate):
@@ -44,6 +47,25 @@ def normalize_term_key(value: str) -> str:
         "",
         normalized,
     )
+
+
+def _query_dedup_key(value: str) -> str:
+    normalized = (
+        str(value or "")
+        .replace("\u2212", "-")
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+        .replace("\uff0b", "+")
+        .replace("\x03", "-")
+        .replace("\x04", "+")
+        .replace("þ", "+")
+    )
+    match = re.search(r"(?<![a-zA-Z0-9])([+-])\s*(\d+(?:[\.:]\d+)?)\s*[vV]\b", normalized)
+    if match:
+        return f"voltage:{match.group(1)}{match.group(2).replace(':', '.')}"
+    if "[" in normalized or "]" in normalized or "," in normalized or ";" in normalized:
+        return "literal:" + re.sub(r"\s+", "", normalized.lower())
+    return normalize_term_key(normalized)
 
 
 def build_term_query_variants(term: str) -> list[str]:
@@ -70,6 +92,44 @@ def build_term_query_variants(term: str) -> list[str]:
                 f"{cation} / {anion}",
             ]
         )
+        cation_aliases = [
+            cation,
+            *[
+                str(alias).strip()
+                for alias in (CATION_DB.get(cation, {}) or {}).get("aliases", [])
+                if str(alias or "").strip()
+            ],
+        ]
+        anion_aliases = [
+            anion,
+            *[
+                str(alias).strip().lstrip("[").rstrip("]").rstrip("-")
+                for alias in (ANION_DB.get(anion, {}) or {}).get("aliases", [])
+                if str(alias or "").strip()
+            ],
+        ]
+        for cation_alias in cation_aliases[:10]:
+            for anion_alias in anion_aliases[:8]:
+                if not cation_alias or not anion_alias:
+                    continue
+                variants.extend(
+                    [
+                        f"[{cation_alias}][{anion_alias}]",
+                        f"[{cation_alias}]{anion_alias}",
+                        f"{cation_alias} {anion_alias}",
+                        f"{cation_alias}{anion_alias}",
+                    ]
+                )
+                if "," in cation_alias:
+                    semi_alias = cation_alias.replace(",", ";")
+                    variants.extend(
+                        [
+                            f"[{semi_alias}][{anion_alias}]",
+                            f"[{semi_alias}]{anion_alias}",
+                            f"{semi_alias} {anion_alias}",
+                            f"{semi_alias}{anion_alias}",
+                        ]
+                    )
 
     if "m/s" in lowered or "m s" in lowered:
         unit_swaps = [(MU_SYMBOL, "u"), (MU_SYMBOL, MICRO_SIGN), (MICRO_SIGN, "u"), ("u", MU_SYMBOL)]
@@ -112,13 +172,26 @@ def build_term_query_variants(term: str) -> list[str]:
         except Exception:
             pass
 
+    signed_voltage_match = re.match(r"^\s*([+\-\u2212\u2013\x03\x04þ])\s*(\d+(?:[\.:]\d+)?)\s*[vV]\s*$", raw)
+    if signed_voltage_match:
+        sign, num = signed_voltage_match.groups()
+        normalized_sign = "+" if sign in {"\x04", "þ"} else ("-" if sign in {"\u2212", "\u2013", "\x03"} else sign)
+        signs = ["+", "\uff0b"] if normalized_sign == "+" else ["-", "\u2212", "\u2013"]
+        for sign_variant in signs:
+            variants.extend([
+                f"{sign_variant}{num} V",
+                f"{sign_variant}{num}V",
+                f"{sign_variant} {num} V",
+                f"{sign_variant} {num}V",
+            ])
+
     deduped: list[str] = []
     seen: set[str] = set()
     for item in variants:
         candidate = re.sub(r"\s+", " ", str(item or "")).strip()
         if len(candidate) < 2:
             continue
-        key = normalize_term_key(candidate)
+        key = _query_dedup_key(candidate)
         if not key or key in seen:
             continue
         seen.add(key)
@@ -210,7 +283,7 @@ def build_visual_focus_queries(record: TribologyDataDB) -> list[str]:
         for query in build_term_query_variants(term):
             if len(query.strip()) < 2:
                 continue
-            key = normalize_term_key(query)
+            key = _query_dedup_key(query)
             if not key or key in query_seen:
                 continue
             query_seen.add(key)
@@ -602,6 +675,3 @@ def visual_hit_prefers_figure_preview(
         return len(local_text) <= 100 and len(alpha_words) <= 14 and not has_sentence_punctuation
     except Exception:
         return False
-
-
-

@@ -2,36 +2,67 @@
 import { computed, ref, watch } from 'vue'
 import {
   AlertTriangle,
+  Check,
   CheckCheck,
-  Database,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   ExternalLink,
   Flag,
   FileText,
-  Pencil,
-  Quote,
+  Layers,
+  Loader2,
+  RefreshCw,
   Search,
 } from 'lucide-vue-next'
+
+import PdfViewerWithHighlight from '@/components/PdfViewerWithHighlight.vue'
 
 import {
   approveDiffusionReviewCandidate,
   approveReviewCandidate,
+  approveReviewRecord,
   confirmDiffusionCandidateFieldEvidence,
   confirmCandidateFieldEvidence,
+  confirmRecordFieldEvidence,
   flagDiffusionCandidateFieldEvidence,
   flagCandidateFieldEvidence,
+  flagRecordFieldEvidence,
   getDiffusionCandidateEvidence,
   getDiffusionCandidateFieldEvidence,
   getCandidateEvidence,
   getCandidateFieldEvidence,
+  getRecordEvidence,
+  getRecordFieldEvidence,
+  updateReviewCandidateCofExtracted,
+  updateReviewCandidateLoadConditions,
+  updateReviewCandidateSpeedConditions,
+  updateReviewCandidateTribologicalSystem,
+  updateReviewRecordCofExtracted,
+  updateReviewRecordLoadConditions,
+  updateReviewRecordSpeedConditions,
+  updateReviewRecordTribologicalSystem,
   type BatchFile,
+  type CofExtracted,
   type EvidenceResult,
   type ExtractorType,
   type FieldEvidenceEntry,
+  type LoadConditions,
   type RecordFieldEvidenceResponse,
+  type SpeedConditions,
   type TribologyData,
+  type TribologicalSystem,
   type ValidationStatus,
 } from '@/lib/api'
+import {
+  formatIonicLiquidHtml,
+  lubricantDisplay,
+  lubricantTooltip,
+} from '@/lib/integratedExplorerHelpers'
 import { getIonicLiquidEvidenceParts, getIonicLiquidEvidenceTerms } from '@/lib/ionicLiquidAliasKnowledge'
+import { normalizePotentialDisplayText } from '@/lib/potential'
 import type { HighlightRect } from '@/types/pdf-highlight'
 
 const props = defineProps<{
@@ -39,11 +70,13 @@ const props = defineProps<{
   activeScopeLabel: string
   selectedFileName: string
   selectedFile: BatchFile | null
+  initialRecordId?: string | null
   files: BatchFile[]
   highlightCount: number
   pdfUrl: string
   highlightData: HighlightRect[]
   scopeKey?: string | null
+  reextractFile?: (fileId: string) => Promise<void> | void
 }>()
 
 const emit = defineEmits<{
@@ -69,9 +102,15 @@ type RecordItem = {
   id: string
   label: string
   title: string
+  titleTooltip: string
+  titleHtml: string
+  titleIsIonicLiquid: boolean
   subtitle: string
+  probe?: string
+  substrate?: string
   metricLabel: string
   metricValue: string
+  metricTags: { label: string, value: string }[]
   status: 'review' | 'confirmed' | 'warning'
   lowConfidence: boolean
   missingEvidence: boolean
@@ -86,10 +125,34 @@ type ReviewField = {
   status: 'confirmed' | 'low_conf' | 'review'
   confidence: 'High' | 'Medium' | 'Low'
   evidenceStatus: 'Grounded' | 'Partial' | 'Missing'
-  sourceType: 'text' | 'figure' | 'table' | 'inferred'
+  groundingMode: 'explicit' | 'derived' | 'inferred' | null
+  groundingNote?: string
+  sourceType: 'text' | 'figure' | 'table' | 'calculation' | 'inferred'
   location: string
+  locationMode?: 'precise' | 'source' | 'record' | 'inferred' | 'missing'
   canConfirm: boolean
   issue?: string
+  tooltip?: string
+}
+
+type TribopairReviewPart = {
+  id: string
+  label: string
+  value: string
+  meta: string
+  status: ReviewField['evidenceStatus'] | 'Optional'
+  statusLabel: string
+  statusClass: string
+  sourceLabel: string
+  sourceType: ReviewField['sourceType']
+  fieldId: string
+  optional: boolean
+  roughness?: string
+  roughnessFieldId?: string
+  roughnessStatusLabel?: string
+  roughnessStatusClass?: string
+  roughnessSourceLabel?: string
+  highlight?: boolean
 }
 
 type EvidenceSearchMode = 'loose' | 'exact-token' | 'numeric'
@@ -99,52 +162,55 @@ type EvidenceSearchSpec = {
   mode: EvidenceSearchMode
 }
 
-type EvidenceHit = {
-  id: string
-  label: string
-  meta: string
-}
-
-type QueueIssue = {
-  id: string
-  recordId: string
-  recordLabel: string
-  fieldLabel: string
-  value: string
-  detail: string
-  severity: 'high' | 'medium'
-}
-
 const query = ref('')
 const prioritizeLowConfidence = ref(true)
 const onlyPendingRecords = ref(false)
 const onlyLowConfidenceRecords = ref(false)
 const activeFieldId = ref('material')
 const activeRecordId = ref('')
+const collapsedRecordIds = ref<Set<string>>(new Set())
+const inboxCollapsed = ref(false)
 const activeRecordEvidence = ref<EvidenceResult | null>(null)
 const evidenceCache = ref<Record<string, EvidenceResult | null>>({})
 const activeRecordFieldEvidence = ref<RecordFieldEvidenceResponse | null>(null)
 const fieldEvidenceCache = ref<Record<string, RecordFieldEvidenceResponse | null>>({})
 const reviewActionPending = ref<string | null>(null)
 const reviewActionError = ref('')
+const reextractingFileId = ref<string | null>(null)
+const cofEditRecord = ref<TribologyData | null>(null)
+const cofEditJson = ref('')
+const cofEditError = ref('')
+const loadEditRecord = ref<TribologyData | null>(null)
+const loadEditRawText = ref('')
+const loadEditSystemTotal = ref('')
+const loadEditContactLoad = ref('')
+const loadEditContactUnit = ref('')
+const loadEditError = ref('')
+const speedEditRecord = ref<TribologyData | null>(null)
+const speedEditRawText = ref('')
+const speedEditSliding = ref('')
+const speedEditRate = ref('')
+const speedEditLength = ref('')
+const speedEditError = ref('')
+const systemEditRecord = ref<TribologyData | null>(null)
+const systemEditRawText = ref('')
+const systemEditFrictionRegime = ref('unstated')
+const systemEditContactGeometry = ref('')
+const systemEditScale = ref('')
+const systemEditError = ref('')
 
-const reviewTabs = computed(() => [
-  { key: 'inbox', label: 'Inbox' },
-  { key: 'record-review', label: 'Record Review' },
-  { key: 'grounding', label: 'Grounding' },
-  { key: 'queue', label: 'Queue' },
-])
-
-const selectedReviewFile = computed<BatchFile | null>(() => props.selectedFile || props.files[0] || null)
+const reviewFiles = computed<BatchFile[]>(() => Array.isArray(props.files) ? props.files.filter(Boolean) : [])
+const selectedReviewFile = computed<BatchFile | null>(() => props.selectedFile || reviewFiles.value[0] || null)
 const activeDocumentName = computed(() => selectedReviewFile.value?.name || props.selectedFileName || 'No review document selected')
-const allRecords = computed(() => selectedReviewFile.value?.records || [])
+const allRecords = computed(() => Array.isArray(selectedReviewFile.value?.records) ? selectedReviewFile.value.records : [])
 
 const queueItems = computed<QueueItem[]>(() => {
-  const base = props.files.length
-    ? props.files.map((file) => {
-        const pendingCount = file.records.filter(recordNeedsReview).length
-        const lowConfidenceCount = file.records.filter(recordLowConfidence).length
-        const missingEvidenceCount = file.records.filter(recordNeedsEvidence).length
+  const base = reviewFiles.value.length
+    ? reviewFiles.value.map((file) => {
+        const records = Array.isArray(file.records) ? file.records : []
+        const pendingCount = records.filter(recordNeedsReview).length
+        const lowConfidenceCount = records.filter(recordLowConfidence).length
+        const missingEvidenceCount = records.filter(recordNeedsEvidence).length
         const status: QueueItem['status'] = file.status === 'success'
           ? (pendingCount || lowConfidenceCount || missingEvidenceCount ? 'pending' : 'confirmed')
           : file.status === 'processing'
@@ -154,7 +220,7 @@ const queueItems = computed<QueueItem[]>(() => {
         return {
           id: file.id,
           name: file.name,
-          recordCount: file.records.length,
+          recordCount: records.length,
           pendingCount,
           lowConfidenceCount,
           missingEvidenceCount,
@@ -191,8 +257,13 @@ const recordItems = computed<RecordItem[]>(() => {
     const extractorType = recordExtractorType(record)
     const metric = extractorType === 'diffusion'
       ? diffusionMetric(record)
-      : { label: 'COF', value: present(record.cof) }
+      : { label: 'COF', value: cofMetricValue(record) }
     const id = String(record.id || `record-${index + 1}`)
+    const title = extractorType === 'diffusion' ? present(record.system_name) : reviewIonicLiquidDisplay(record)
+    const probeRaw = extractorType === 'tribology' ? trim(record.probe_material) : ''
+    const substrateRaw = extractorType === 'tribology' ? trim(record.substrate_material) : ''
+    const subtitle = extractorType === 'diffusion' ? reviewIonicLiquidDisplay(record) : ''
+    const dedupedSubtitle = trim(subtitle) === trim(title) ? '' : subtitle
     const lowConfidence = recordLowConfidence(record)
     const missingEvidence = recordNeedsEvidence(record)
     const isApproved = String(record.review_status || '').trim().toLowerCase() === 'approved' || record.validationStatus === 'verified'
@@ -205,10 +276,16 @@ const recordItems = computed<RecordItem[]>(() => {
     return {
       id,
       label: `Record ${index + 1}`,
-      title: extractorType === 'diffusion' ? present(record.system_name) : present(record.material_name),
-      subtitle: present(record.ionic_liquid),
+      title,
+      titleTooltip: extractorType === 'diffusion' ? present(record.system_name) : reviewIonicLiquidTooltip(record),
+      titleHtml: extractorType === 'diffusion' ? title : formatIonicLiquidHtml(title),
+      titleIsIonicLiquid: extractorType !== 'diffusion',
+      subtitle: dedupedSubtitle,
+      probe: probeRaw,
+      substrate: substrateRaw,
       metricLabel: metric.label,
       metricValue: metric.value,
+      metricTags: extractorType === 'diffusion' ? [] : cofStructuredTags(record),
       status,
       lowConfidence,
       missingEvidence,
@@ -221,7 +298,7 @@ const recordItems = computed<RecordItem[]>(() => {
 const visibleRecordItems = computed(() => {
   let rows = recordItems.value
 
-  if (onlyPendingRecords.value || props.currentSection === 'queue') {
+  if (onlyPendingRecords.value) {
     rows = rows.filter((item) => item.status !== 'confirmed')
   }
 
@@ -237,12 +314,26 @@ watch(
   (items) => {
     if (!items.length) {
       activeRecordId.value = ''
+      collapsedRecordIds.value = new Set()
       return
     }
 
     const firstItem = items[0]
     if (firstItem && !items.find((item) => item.id === activeRecordId.value)) {
       activeRecordId.value = firstItem.id
+      collapsedRecordIds.value = discardCollapsedRecord(firstItem.id)
+    }
+  },
+  { immediate: true },
+)
+
+watch(
+  [recordItems, () => props.initialRecordId],
+  ([items, targetId]) => {
+    if (!targetId) return
+    if (items.some((item) => item.id === targetId)) {
+      activeRecordId.value = targetId
+      collapsedRecordIds.value = discardCollapsedRecord(targetId)
     }
   },
   { immediate: true },
@@ -258,12 +349,13 @@ const activeRecordItem = computed(() => {
 
 const activeRecord = computed<TribologyData | null>(() => activeRecordItem.value?.record || null)
 
-const documentStats = computed(() => ({
-  total: allRecords.value.length,
-  pending: allRecords.value.filter(recordNeedsReview).length,
-  lowConfidence: allRecords.value.filter(recordLowConfidence).length,
-  missingEvidence: allRecords.value.filter(recordNeedsEvidence).length,
-}))
+const documentTotal = computed(() => allRecords.value.length)
+const documentPending = computed(() => allRecords.value.filter(recordNeedsReview).length)
+const documentLowConfidence = computed(() => allRecords.value.filter(recordLowConfidence).length)
+const documentMissingEvidence = computed(() => allRecords.value.filter(recordNeedsEvidence).length)
+const queueItemCount = computed(() => queueItems.value.length)
+const recordItemCount = computed(() => recordItems.value.length)
+const visibleRecordCount = computed(() => visibleRecordItems.value.length)
 
 const activeLiteratureId = computed<number | null>(() => {
   const match = String(props.pdfUrl || '').match(/\/pdf\/(\d+)/)
@@ -284,55 +376,151 @@ const activeExtractorType = computed<ExtractorType>(() => {
   return 'tribology'
 })
 
+type ReviewRecordEntityType = 'candidate' | 'record'
+
+function reviewRecordEntityType(record: TribologyData | null | undefined): ReviewRecordEntityType {
+  const explicit = trim((record as any)?.review_entity_type || (record as any)?.reviewEntityType).toLowerCase()
+  if (explicit === 'record' || explicit === 'final' || explicit === 'final_record') return 'record'
+  if (explicit === 'candidate' || explicit === 'record_candidate') return 'candidate'
+
+  const origin = trim(record?.record_origin).toLowerCase()
+  if (origin.includes('candidate') || origin === 'llm_extraction' || origin === 'reprocessed_extraction') {
+    return 'candidate'
+  }
+  if (origin.includes('knowledge') || origin.includes('sync') || origin.includes('cached') || origin.includes('promoted')) {
+    return 'record'
+  }
+  return 'candidate'
+}
+
+function reviewCacheKey(
+  literatureId: number,
+  recordId: number,
+  extractorType: ExtractorType,
+  entityType: ReviewRecordEntityType,
+) {
+  return `${literatureId}:${extractorType}:${entityType}:${recordId}`
+}
+
+function payloadMatchesLiterature(payload: RecordFieldEvidenceResponse, literatureId: number) {
+  const payloadLiteratureId = Number(payload.literature_id || 0)
+  return !literatureId || !payloadLiteratureId || payloadLiteratureId === literatureId
+}
+
+async function fetchTribologyEvidence(
+  record: TribologyData,
+  literatureId: number,
+  entityType: ReviewRecordEntityType,
+) {
+  const recordId = Number(record.id || '')
+  const primary = entityType === 'record'
+    ? () => getRecordEvidence(literatureId, recordId)
+    : () => getCandidateEvidence(literatureId, recordId)
+  const fallback = entityType === 'record'
+    ? () => getCandidateEvidence(literatureId, recordId)
+    : () => getRecordEvidence(literatureId, recordId)
+
+  try {
+    return await primary()
+  } catch (primaryError) {
+    if (entityType === 'candidate') {
+      console.warn('[Review] Candidate evidence lookup failed; trying final record endpoint.', primaryError)
+    }
+    return fallback()
+  }
+}
+
+async function fetchTribologyFieldEvidence(
+  record: TribologyData,
+  literatureId: number,
+  entityType: ReviewRecordEntityType,
+) {
+  const recordId = Number(record.id || '')
+  const loadCandidate = async () => {
+    const payload = await getCandidateFieldEvidence(recordId, literatureId)
+    if (!payloadMatchesLiterature(payload, literatureId)) {
+      throw new Error(`Candidate field evidence belongs to literature ${payload.literature_id}, expected ${literatureId}`)
+    }
+    return payload
+  }
+  const loadRecord = async () => {
+    const payload = await getRecordFieldEvidence(recordId)
+    if (!payloadMatchesLiterature(payload, literatureId)) {
+      throw new Error(`Record field evidence belongs to literature ${payload.literature_id}, expected ${literatureId}`)
+    }
+    return payload
+  }
+  const primary = entityType === 'record' ? loadRecord : loadCandidate
+  const fallback = entityType === 'record' ? loadCandidate : loadRecord
+
+  try {
+    return await primary()
+  } catch (primaryError) {
+    if (entityType === 'candidate') {
+      console.warn('[Review] Candidate field evidence lookup failed or mismatched; trying final record endpoint.', primaryError)
+    }
+    return fallback()
+  }
+}
+
 const reviewFields = computed<ReviewField[]>(() => buildReviewFields(activeRecord.value, activeRecordFieldEvidence.value?.fields))
+const visibleReviewFields = computed(() => filterVisibleReviewFields(activeRecord.value, reviewFields.value))
+const embeddedTribopairFieldIds = new Set(['probe_roughness', 'substrate_roughness'])
 
 watch(
-  reviewFields,
-  (fields) => {
-    if (!fields.find((field) => field.id === activeFieldId.value)) {
-      activeFieldId.value = fields[0]?.id || (activeExtractorType.value === 'diffusion' ? 'system_name' : 'material')
+  [reviewFields, activeRecord],
+  ([fields]) => {
+    const visibleFields = filterVisibleReviewFields(activeRecord.value, fields)
+    const activeFieldExists = fields.some((field) => field.id === activeFieldId.value)
+    const activeFieldIsVisible = visibleFields.some((field) => field.id === activeFieldId.value)
+    const activeFieldIsEmbedded = hasStructuredTribopair(activeRecord.value) && embeddedTribopairFieldIds.has(activeFieldId.value)
+    if (!activeFieldExists || (!activeFieldIsVisible && !activeFieldIsEmbedded)) {
+      activeFieldId.value = visibleFields[0]?.id || fields[0]?.id || (activeExtractorType.value === 'diffusion' ? 'system_name' : 'material')
     }
   },
   { immediate: true },
 )
 
 watch(
-  [activeRecord, activeLiteratureId, activeExtractorType],
-  async ([record, literatureId, extractorType]) => {
-    const recordId = Number(record?.id || '')
-    if (!record || !literatureId || !Number.isFinite(recordId)) {
-      activeRecordEvidence.value = null
-      activeRecordFieldEvidence.value = null
-      return
-    }
+	  [activeRecord, activeLiteratureId, activeExtractorType],
+	  async ([record, literatureId, extractorType]) => {
+	    const recordId = Number(record?.id || '')
+	    if (!record || !literatureId || !Number.isFinite(recordId)) {
+	      activeRecordEvidence.value = null
+	      activeRecordFieldEvidence.value = null
+	      return
+	    }
 
-    const cacheKey = `${literatureId}:${recordId}`
-    if (cacheKey in evidenceCache.value) {
-      activeRecordEvidence.value = evidenceCache.value[cacheKey] ?? null
+	    const entityType = extractorType === 'diffusion' ? 'candidate' : reviewRecordEntityType(record)
+	    const cacheKey = reviewCacheKey(literatureId, recordId, extractorType, entityType)
+    const cachedEvidence = evidenceCache.value[cacheKey]
+    if (cachedEvidence) {
+      activeRecordEvidence.value = cachedEvidence
     } else {
       try {
         const evidence = extractorType === 'diffusion'
-          ? await getDiffusionCandidateEvidence(literatureId, recordId)
-          : await getCandidateEvidence(literatureId, recordId)
-        evidenceCache.value[cacheKey] = evidence
-        activeRecordEvidence.value = evidence
-      } catch {
-        evidenceCache.value[cacheKey] = null
-        activeRecordEvidence.value = null
+	          ? await getDiffusionCandidateEvidence(literatureId, recordId)
+	          : await fetchTribologyEvidence(record, literatureId, entityType)
+	        evidenceCache.value[cacheKey] = evidence
+	        activeRecordEvidence.value = evidence
+	      } catch {
+	        evidenceCache.value[cacheKey] = null
+	        activeRecordEvidence.value = null
       }
     }
 
-    if (cacheKey in fieldEvidenceCache.value) {
-      activeRecordFieldEvidence.value = fieldEvidenceCache.value[cacheKey] ?? null
-    } else {
-      try {
-        const fieldEvidence = extractorType === 'diffusion'
-          ? await getDiffusionCandidateFieldEvidence(recordId)
-          : await getCandidateFieldEvidence(recordId)
-        fieldEvidenceCache.value[cacheKey] = fieldEvidence
-        activeRecordFieldEvidence.value = fieldEvidence
-      } catch {
-        fieldEvidenceCache.value[cacheKey] = null
+    const cachedFieldEvidence = fieldEvidenceCache.value[cacheKey]
+    if (cachedFieldEvidence) {
+      activeRecordFieldEvidence.value = cachedFieldEvidence
+	    } else {
+	      try {
+	        const fieldEvidence = extractorType === 'diffusion'
+	          ? await getDiffusionCandidateFieldEvidence(recordId)
+	          : await fetchTribologyFieldEvidence(record, literatureId, entityType)
+	        fieldEvidenceCache.value[cacheKey] = fieldEvidence
+	        activeRecordFieldEvidence.value = fieldEvidence
+	      } catch {
+	        fieldEvidenceCache.value[cacheKey] = null
         activeRecordFieldEvidence.value = null
       }
     }
@@ -345,102 +533,190 @@ const activeFieldEvidenceEntry = computed(() => {
   const fieldMap = resolveRecordFieldEvidenceMap(activeRecord.value, activeRecordFieldEvidence.value?.fields)
   return fieldMap[activeField.value?.id || ''] || null
 })
-const canApproveAllVisible = computed(() => visibleRecordItems.value.length > 0 && visibleRecordItems.value.every((item) => recordCanApprove(item.record)))
-
-const queueIssues = computed<QueueIssue[]>(() => {
-  return visibleRecordItems.value.flatMap((item) => {
-    return buildReviewFields(item.record)
-      .filter((field) => field.issue)
-      .map((field) => ({
-        id: `${item.id}-${field.id}`,
-        recordId: item.id,
-        recordLabel: item.label,
-        fieldLabel: field.label,
-        value: field.value,
-        detail: field.issue || '',
-        severity: field.status === 'low_conf' ? 'high' : 'medium',
-      }))
-  })
+const canApproveAllVisible = computed(() => visibleRecordCount.value > 0 && visibleRecordItems.value.every((item) => recordCanApprove(item.record)))
+const isReextractingCurrentFile = computed(() => {
+  const fileId = selectedReviewFile.value?.id || ''
+  return Boolean(fileId && reextractingFileId.value === fileId) || selectedReviewFile.value?.status === 'processing'
 })
+const canReextractCurrentFile = computed(() => {
+  const file = selectedReviewFile.value
+  return Boolean(file?.id && file.id !== 'empty' && props.reextractFile && !isReextractingCurrentFile.value)
+})
+
+const activeRecordIndex = computed(() => visibleRecordItems.value.findIndex((item) => item.id === activeRecordId.value))
+const hasPrevRecord = computed(() => activeRecordIndex.value > 0)
+const hasNextRecord = computed(() => activeRecordIndex.value >= 0 && activeRecordIndex.value < visibleRecordCount.value - 1)
 
 const fieldEvidenceContext = computed(() => buildFieldEvidence(activeRecord.value, activeField.value, activeRecordEvidence.value, activeFieldEvidenceEntry.value))
 const evidenceExcerpt = computed(() => fieldEvidenceContext.value.excerpt)
-const activeEvidenceHit = computed(() => bestEvidenceHitForField(
-  activeRecordEvidence.value,
-  activeField.value,
-  fieldEvidenceContext.value.specs,
-))
 
 const highlightedExcerpt = computed(() => {
   return highlightTerms(evidenceExcerpt.value, fieldEvidenceContext.value.specs)
 })
 
+function normalizeResolvedBBox(value: unknown) {
+  if (!Array.isArray(value) || value.length < 4) return null
+  const coords = value.slice(0, 4).map((item) => Number(item))
+  if (!coords.every(Number.isFinite)) return null
+  return coords as [number, number, number, number]
+}
+
+function discardCollapsedRecord(recordId: string) {
+  const next = new Set(collapsedRecordIds.value)
+  next.delete(recordId)
+  return next
+}
+
+function isRecordExpanded(recordId: string) {
+  return activeRecordId.value === recordId && !collapsedRecordIds.value.has(recordId)
+}
+
+function toggleRecordItem(item: RecordItem) {
+  if (activeRecordId.value !== item.id) {
+    activeRecordId.value = item.id
+    collapsedRecordIds.value = discardCollapsedRecord(item.id)
+    return
+  }
+
+  const next = new Set(collapsedRecordIds.value)
+  if (next.has(item.id)) {
+    next.delete(item.id)
+  } else {
+    next.add(item.id)
+  }
+  collapsedRecordIds.value = next
+}
+
+function quoteMatchesFieldSpecs(quote: string, specs: EvidenceSearchSpec[]) {
+  if (!quote) return false
+  return specs.some((spec) => matchesEvidenceSpecText(quote, spec))
+}
+
+function fieldEvidenceTextMatchesSpecs(matchedText: string, quote: string, specs: EvidenceSearchSpec[]) {
+  return quoteMatchesFieldSpecs(matchedText, specs) || quoteMatchesFieldSpecs(quote, specs)
+}
+
+const activeFieldResolvedEvidence = computed(() => {
+  const fieldEntry = activeFieldEvidenceEntry.value
+  const specs = fieldEvidenceContext.value.specs
+  const entryBbox = normalizeResolvedBBox(fieldEntry?.evidence?.bbox)
+  const entryPage = Number(fieldEntry?.evidence?.page || 0)
+  const directQuote = trim(fieldEntry?.evidence?.quote)
+  const directMatchedText = trim(fieldEntry?.evidence?.matched_text)
+  const sourceType = trim(fieldEntry?.evidence?.source_type).toLowerCase()
+  const isExplicitField = trim(fieldEntry?.grounding_mode).toLowerCase() === 'explicit'
+  const isDerivedField = trim(fieldEntry?.grounding_mode).toLowerCase() === 'derived'
+  const fieldTextMatches = fieldEvidenceTextMatchesSpecs(directMatchedText, directQuote, specs)
+  const canUseStoredBBox = sourceType !== 'table' || Boolean(directMatchedText) || isExplicitField
+
+  if (entryBbox && entryPage > 0 && canUseStoredBBox && (fieldTextMatches || isDerivedField || isExplicitField)) {
+    return {
+      page: entryPage,
+      bbox: entryBbox,
+      quote: directQuote || directMatchedText,
+      imageB64: null,
+      sourceLabel: trim(fieldEntry?.evidence?.source_label),
+      sampleId: trim(fieldEntry?.evidence?.sample_id),
+      mode: 'field' as const,
+    }
+  }
+
+  return null
+})
+
 const evidenceImageUrl = computed(() => {
-  const imageB64 = activeRecordEvidence.value?.image_b64 || activeEvidenceHit.value?.image_b64
+  const imageB64 = activeFieldResolvedEvidence.value?.imageB64 || null
   return imageB64 ? `data:image/png;base64,${imageB64}` : null
 })
 
 const evidencePagePreviewUrl = computed(() => {
+  if (!activeFieldResolvedEvidence.value) return null
   const imageB64 = activeRecordEvidence.value?.page_preview_b64
   return imageB64 ? `data:image/png;base64,${imageB64}` : null
 })
 
-const evidenceHits = computed<EvidenceHit[]>(() => {
-  if (props.highlightData.length) {
-    return props.highlightData.slice(0, 8).map((item, index) => ({
-      id: item.id,
-      label: `Highlight ${index + 1}`,
-      meta: `Page ${item.page} | x ${Math.round(item.coords.x)}, y ${Math.round(item.coords.y)}`,
-    }))
+const evidenceSecondaryLabel = computed(() => activeExtractorType.value === 'diffusion' ? '体系关联' : '样品关联')
+const evidenceSecondaryValue = computed(() => {
+  if (activeExtractorType.value === 'diffusion') {
+    return activeRecord?.value?.system_name || '尚未关联'
   }
+  return activeFieldResolvedEvidence.value?.sampleId || activeFieldEvidenceEntry.value?.evidence?.sample_id || activeRecord?.value?.sample_id || '尚未关联'
+})
+const activeFieldSourceLabel = computed(() => {
+  return activeFieldEvidenceEntry.value?.evidence?.source_label || ''
+})
 
-  if (activeField.value) {
-    return [{
-      id: `field-${activeField.value.id}`,
-      label: activeField.value.label,
-      meta: activeField.value.location,
-    }]
+const recordHighlights = computed<HighlightRect[]>(() => {
+  const resolved = activeFieldResolvedEvidence.value
+  if (resolved) {
+    const [x0, y0, x1, y1] = resolved.bbox
+    const w = Math.max(0, x1 - x0)
+    const h = Math.max(0, y1 - y0)
+    if (w > 0 && h > 0) {
+      return [{
+        id: `field:${normalizeFieldKey(activeFieldId.value)}`,
+        page: resolved.page,
+        coords: { x: x0, y: y0, w, h },
+        color: 'rgba(91, 86, 234, 0.24)',
+      }]
+    }
   }
-
   return []
 })
 
-const reviewTitle = computed(() => activeDocumentName.value)
-const activeFieldDisplayLabel = computed(() => {
-  const label = activeField.value?.label
-  return label ? label.toUpperCase().replace(/_/g, ' ') : 'NO FIELD SELECTED'
+const activeHighlightId = computed(() => {
+  const id = `field:${normalizeFieldKey(activeFieldId.value)}`
+  return recordHighlights.value.some((h) => h.id === id) ? id : null
 })
-const evidenceSecondaryLabel = computed(() => activeExtractorType.value === 'diffusion' ? 'System Link' : 'Sample Alignment')
-const evidenceSecondaryValue = computed(() => {
-  if (activeExtractorType.value === 'diffusion') {
-    return activeRecord?.value?.system_name || 'Not linked yet'
+
+function handleHighlightClick(highlightId: string) {
+  const match = highlightId.startsWith('field:') ? highlightId.slice(6) : ''
+  if (!match) return
+  const field = reviewFields.value.find((item) => normalizeFieldKey(item.id) === match)
+  if (field) activeFieldId.value = field.id
+}
+
+function gotoPrevRecord() {
+  if (!hasPrevRecord.value) return
+  const previous = visibleRecordItems.value[activeRecordIndex.value - 1]
+  if (previous) {
+    activeRecordId.value = previous.id
+    collapsedRecordIds.value = discardCollapsedRecord(previous.id)
   }
-  return activeFieldEvidenceEntry.value?.evidence?.sample_id || activeRecord?.value?.sample_id || 'Not linked yet'
-})
-const reviewKicker = computed(() => {
-  if (props.currentSection === 'queue') return 'RESOLVE THE ITEMS BLOCKING FINAL CONFIRMATION.'
-  if (props.currentSection === 'grounding') return 'VERIFY FIELD EVIDENCE BEFORE CONFIRMING THIS RECORD.'
-  if (!activeRecord.value) return 'SELECT A RECORD BEFORE REVIEWING FIELD EVIDENCE.'
-  return activeRecord.value.validationStatus === 'verified'
-    ? 'THIS RECORD IS READY FOR FINAL CHECK.'
-    : 'REVIEW FIELD BY FIELD, THEN CONFIRM THE RECORD.'
-})
+}
 
-const modeSummary = computed(() => {
-  if (props.currentSection === 'queue') return `${queueIssues.value.length} issue items still need action.`
-  if (props.currentSection === 'grounding') return 'Field-level grounding is in focus. PDF evidence takes priority.'
-  return `${documentStats.value.total} records found in this literature file.`
-})
+function gotoNextRecord() {
+  if (!hasNextRecord.value) return
+  const next = visibleRecordItems.value[activeRecordIndex.value + 1]
+  if (next) {
+    activeRecordId.value = next.id
+    collapsedRecordIds.value = discardCollapsedRecord(next.id)
+  }
+}
 
-const reviewGridClass = computed(() => {
-  return 'grid min-h-0 flex-1 gap-3 xl:grid-cols-[20rem_minmax(0,1fr)]'
-})
+async function handleReextractCurrentFile() {
+  const fileId = selectedReviewFile.value?.id
+  if (!fileId || fileId === 'empty' || !props.reextractFile || isReextractingCurrentFile.value) return
 
-const reviewWorkspaceClass = computed(() => {
-  return props.currentSection === 'grounding'
-    ? 'grid min-h-0 flex-1 gap-3 overflow-y-auto custom-scrollbar xl:grid-cols-[minmax(0,0.92fr)_minmax(28rem,1.08fr)]'
-    : 'grid min-h-0 flex-1 gap-3 overflow-y-auto custom-scrollbar xl:grid-cols-[minmax(0,1fr)_24rem]'
-})
+  reextractingFileId.value = fileId
+  reviewActionPending.value = 'reextract'
+  reviewActionError.value = ''
+  activeRecordEvidence.value = null
+  activeRecordFieldEvidence.value = null
+  evidenceCache.value = {}
+  fieldEvidenceCache.value = {}
+
+  try {
+    await props.reextractFile(fileId)
+  } catch (error: any) {
+    reviewActionError.value = String(error?.response?.data?.detail || error?.message || '重新提取失败')
+  } finally {
+    reextractingFileId.value = null
+    if (reviewActionPending.value === 'reextract') {
+      reviewActionPending.value = null
+    }
+  }
+}
 
 function trim(value: unknown) {
   return String(value ?? '').trim()
@@ -448,6 +724,459 @@ function trim(value: unknown) {
 
 function present(value: unknown) {
   return trim(value) || 'Not captured yet'
+}
+
+function normalizeCofExtracted(value: unknown): CofExtracted | null {
+  if (!value) return null
+  if (typeof value === 'string') {
+    try {
+      return normalizeCofExtracted(JSON.parse(value))
+    } catch {
+      return null
+    }
+  }
+  if (typeof value !== 'object') return null
+  const raw = value as any
+  return {
+    raw_text: raw.raw_text ?? raw.rawText ?? null,
+    value_type: raw.value_type ?? raw.valueType ?? null,
+    cof_min: raw.cof_min ?? raw.cofMin ?? null,
+    cof_max: raw.cof_max ?? raw.cofMax ?? null,
+    cof_average: raw.cof_average ?? raw.cofAverage ?? null,
+    dependent_variable: raw.dependent_variable ?? raw.dependentVariable ?? null,
+    test_condition_value: raw.test_condition_value ?? raw.testConditionValue ?? null,
+    note: raw.note ?? null,
+    segments: Array.isArray(raw.segments)
+      ? raw.segments.map((segment: unknown) => normalizeCofExtracted(segment)).filter(Boolean) as CofExtracted[]
+      : undefined,
+  }
+}
+
+function deriveCofExtractedFromText(text: unknown): CofExtracted | null {
+  const raw = trim(text)
+  if (!raw) return null
+  const range = raw.match(/(\d+(?:\.\d+)?)\s*[-–]\s*(\d+(?:\.\d+)?)/)
+  if (!range) {
+    const single = Number(raw.match(/\d+(?:\.\d+)?/)?.[0])
+    if (!Number.isFinite(single)) return null
+    return {
+      raw_text: raw,
+      value_type: 'single',
+      cof_min: single,
+      cof_max: single,
+      cof_average: single,
+      dependent_variable: null,
+      test_condition_value: null,
+    }
+  }
+  const min = Number(range[1])
+  const max = Number(range[2])
+  const condition = raw.match(/\bat\s+([^;]+)/i)?.[1]?.trim() || null
+  const velocityDependent = /velocity|scan velocity|speed/i.test(raw)
+  const loadDependent = /nN|load/i.test(condition || raw)
+  const segments = raw.includes(';')
+    ? raw.split(';').map((part) => deriveCofExtractedFromText(part.trim())).filter(Boolean) as CofExtracted[]
+    : undefined
+  return {
+    raw_text: raw,
+    value_type: condition || segments?.length ? 'conditional' : 'range',
+    cof_min: Number.isFinite(min) ? min : null,
+    cof_max: Number.isFinite(max) ? max : null,
+    cof_average: Number.isFinite(min) && Number.isFinite(max) ? Number(((min + max) / 2).toFixed(6)) : null,
+    dependent_variable: loadDependent ? 'normal load' : velocityDependent ? 'scan velocity' : null,
+    test_condition_value: condition,
+    segments,
+  }
+}
+
+function cofExtractedForRecord(record: TribologyData | null | undefined): CofExtracted | null {
+  if (!record) return null
+  return normalizeCofExtracted((record as any).cof_extracted ?? (record as any).cofExtracted)
+    || deriveCofExtractedFromText(record.cof)
+}
+
+function cofStructuredTags(record: TribologyData | null | undefined): { label: string, value: string }[] {
+  const cof = cofExtractedForRecord(record)
+  if (!cof) return []
+  const valueType = trim(cof.value_type ?? cof.valueType).toLowerCase()
+  const min = cof.cof_min ?? cof.cofMin
+  const max = cof.cof_max ?? cof.cofMax
+  const hasDependency = Boolean(trim(cof.dependent_variable ?? cof.dependentVariable))
+    || Boolean(trim(cof.test_condition_value ?? cof.testConditionValue))
+    || Boolean(cof.segments?.length)
+  const isDeterminateSingle = valueType === 'single' || (min != null && max != null && Number(min) === Number(max) && !hasDependency)
+  if (isDeterminateSingle) return []
+
+  const tags: { label: string, value: string }[] = []
+  if (min != null) tags.push({ label: 'Min', value: String(min) })
+  if (max != null) tags.push({ label: 'Max', value: String(max) })
+  const avg = cof.cof_average ?? cof.cofAverage
+  if (avg != null) tags.push({ label: 'Avg', value: String(avg) })
+  const dep = trim(cof.dependent_variable ?? cof.dependentVariable)
+  if (dep) tags.push({ label: '依赖', value: dep })
+  const cond = trim(cof.test_condition_value ?? cof.testConditionValue)
+  if (cond) tags.push({ label: '条件', value: cond })
+
+  return tags
+}
+
+function cofMetricValue(record: TribologyData) {
+  const cof = cofExtractedForRecord(record)
+  if (!cof) return present(record.cof)
+  const min = cof.cof_min ?? cof.cofMin
+  const max = cof.cof_max ?? cof.cofMax
+  if (min != null && max != null && min !== max) return `${min}-${max}`
+  const average = cof.cof_average ?? cof.cofAverage
+  return average != null ? String(average) : present(record.cof)
+}
+
+const FORCE_UNIT_TO_N: Record<string, number> = {
+  kn: 1e3,
+  n: 1,
+  mn: 1e-3,
+  un: 1e-6,
+  'µn': 1e-6,
+  'μn': 1e-6,
+  nn: 1e-9,
+  pn: 1e-12,
+}
+
+function asNumberOrNull(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function forceToNewton(value: string, unit: string): number | null {
+  const parsed = Number(value)
+  const multiplier = FORCE_UNIT_TO_N[unit.trim().replace('μ', 'µ').toLowerCase()]
+  if (!Number.isFinite(parsed) || multiplier == null) return null
+  return Number((parsed * multiplier).toPrecision(12))
+}
+
+function normalizeLoadConditions(value: unknown): LoadConditions | null {
+  if (!value) return null
+  if (typeof value === 'string') {
+    try {
+      return normalizeLoadConditions(JSON.parse(value))
+    } catch {
+      return deriveLoadConditionsFromText(value)
+    }
+  }
+  if (typeof value !== 'object') return null
+  const raw = value as any
+  return {
+    raw_text: raw.raw_text ?? raw.rawText ?? null,
+    value_type: raw.value_type ?? raw.valueType ?? null,
+    system_total_load_N: raw.system_total_load_N ?? raw.systemTotalLoadN ?? null,
+    contact_load_per_unit_N: raw.contact_load_per_unit_N ?? raw.contactLoadPerUnitN ?? null,
+    contact_unit_type: raw.contact_unit_type ?? raw.contactUnitType ?? null,
+    load_min_N: raw.load_min_N ?? raw.loadMinN ?? null,
+    load_max_N: raw.load_max_N ?? raw.loadMaxN ?? null,
+    note: raw.note ?? null,
+  }
+}
+
+function deriveLoadConditionsFromText(text: unknown): LoadConditions | null {
+  const raw = trim(text)
+  if (!raw) return null
+  const matches = [...raw.matchAll(/(\d+(?:\.\d+)?)(?:\s*[-–]\s*(\d+(?:\.\d+)?))?\s*(kN|mN|µN|μN|uN|nN|pN|N)\b/gi)]
+  if (!matches.length) return null
+  const loads = matches.map((match) => {
+    const first = forceToNewton(match[1] || '', match[3] || '')
+    const second = match[2] ? forceToNewton(match[2], match[3] || '') : first
+    return { first, second, index: match.index ?? 0, end: (match.index ?? 0) + match[0].length }
+  }).filter((item) => item.first != null)
+  if (!loads.length) return null
+
+  const lower = raw.toLowerCase()
+  const payload: LoadConditions = {
+    raw_text: raw,
+    value_type: loads.length > 1 || raw.includes(';') ? 'composite' : matches[0]?.[2] ? 'range' : 'single',
+    system_total_load_N: null,
+    contact_load_per_unit_N: null,
+    contact_unit_type: null,
+    load_min_N: Math.min(...loads.map((item) => Number(item.first))),
+    load_max_N: Math.max(...loads.map((item) => Number(item.second ?? item.first))),
+  }
+  loads.forEach((item) => {
+    const segmentStart = raw.lastIndexOf(';', item.index) + 1
+    const rawSegmentEnd = raw.indexOf(';', item.end)
+    const segmentEnd = rawSegmentEnd < 0 ? raw.length : rawSegmentEnd
+    const context = lower.slice(Math.max(segmentStart, item.index - 12), Math.min(segmentEnd, item.end + 48))
+    if (context.includes('total')) payload.system_total_load_N = item.first
+    if (context.includes('per') || context.includes('/pin')) {
+      payload.contact_load_per_unit_N = item.first
+      payload.contact_unit_type = context.match(/(?:per|\/)\s*([a-z][\w-]*)/)?.[1] || null
+    }
+  })
+  if (payload.value_type === 'single' && payload.system_total_load_N == null) {
+    payload.contact_load_per_unit_N = payload.contact_load_per_unit_N ?? payload.load_min_N ?? null
+  }
+  return payload
+}
+
+function loadConditionsForRecord(record: TribologyData | null | undefined): LoadConditions | null {
+  if (!record) return null
+  return normalizeLoadConditions((record as any).load_conditions ?? (record as any).loadConditions)
+    || deriveLoadConditionsFromText(record.load)
+}
+
+function loadStructuredTags(record: TribologyData | null | undefined): { label: string, value: string }[] {
+  const load = loadConditionsForRecord(record)
+  if (!load) return []
+  const valueType = trim(load.value_type ?? load.valueType).toLowerCase()
+  const isSimple = valueType === 'single'
+    && load.system_total_load_N == null
+    && load.systemTotalLoadN == null
+    && !(trim(load.contact_unit_type ?? load.contactUnitType))
+  if (isSimple) return []
+
+  const tags: { label: string, value: string }[] = []
+  const system = load.system_total_load_N ?? load.systemTotalLoadN
+  const contact = load.contact_load_per_unit_N ?? load.contactLoadPerUnitN
+  const min = load.load_min_N ?? load.loadMinN
+  const max = load.load_max_N ?? load.loadMaxN
+  if (system != null) tags.push({ label: '系统载荷', value: `${system} N` })
+  if (contact != null) tags.push({ label: '单点载荷', value: `${contact} N` })
+  const unit = trim(load.contact_unit_type ?? load.contactUnitType)
+  if (unit) tags.push({ label: '作用对象', value: unit })
+  if (system == null && contact == null && min != null && max != null) {
+    tags.push({ label: min === max ? '载荷' : '载荷范围', value: min === max ? `${min} N` : `${min}-${max} N` })
+  }
+  return tags
+}
+
+function normalizeSpeedConditions(value: unknown): SpeedConditions | null {
+  if (!value) return null
+  if (typeof value === 'string') {
+    try {
+      return normalizeSpeedConditions(JSON.parse(value))
+    } catch {
+      return null
+    }
+  }
+  if (typeof value !== 'object') return null
+  const raw = value as any
+  const rate = raw.scan_rate_hz ?? raw.scanRateHz ?? null
+  const length = raw.scan_length_um ?? raw.scanLengthUm ?? null
+  const sliding = raw.sliding_velocity_um_s ?? raw.slidingVelocityUmS ?? null
+  const parsed: SpeedConditions = {
+    raw_text: raw.raw_text ?? raw.rawText ?? null,
+    value_type: raw.value_type ?? raw.valueType ?? (sliding != null ? 'linear' : rate != null ? 'scan_rate' : 'unknown'),
+    sliding_velocity_um_s: sliding,
+    scan_rate_hz: rate,
+    scan_length_um: length,
+    unit_warning: Boolean(raw.unit_warning ?? raw.unitWarning ?? (rate != null && sliding == null)),
+    calculation: raw.calculation ?? null,
+    note: raw.note ?? null,
+  }
+  return parsed
+}
+
+function deriveSpeedConditionsFromText(text: unknown): SpeedConditions | null {
+  const raw = trim(text)
+  if (!raw) return null
+  const normalized = raw.replace(/µ/g, 'μ')
+  const rateMatch = normalized.match(/(?:scan\s*(?:rate|frequency)|frequency)?\D{0,20}(\d+(?:\.\d+)?)\s*hz\b/i)
+  const velocityMatch = normalized.match(/(\d+(?:\.\d+)?)\s*(nm\/s|μm\/s|um\/s|mm\/s|m\/s|μm\s*s[-−]1|um\s*s[-−]1)/i)
+  const lengthMatch = normalized.match(/(?:scan\s*(?:size|length)|track(?:\s*length)?)\D{0,30}(\d+(?:\.\d+)?)\s*(nm|μm|um|mm)/i)
+    || normalized.match(/(\d+(?:\.\d+)?)\s*(nm|μm|um|mm)\s*[x×]\s*\d+(?:\.\d+)?/i)
+  const rate = rateMatch ? Number(rateMatch[1]) : null
+  const lengthRaw = lengthMatch ? Number(lengthMatch[1]) : null
+  const lengthUnit = lengthMatch ? String(lengthMatch[2]).toLowerCase().replace('μ', 'u') : ''
+  const scanLength = lengthRaw == null
+    ? null
+    : lengthUnit === 'nm'
+      ? lengthRaw / 1000
+      : lengthUnit === 'mm'
+        ? lengthRaw * 1000
+        : lengthRaw
+  let sliding: number | null = null
+  if (velocityMatch) {
+    const velocity = Number(velocityMatch[1])
+    const unit = String(velocityMatch[2]).toLowerCase().replace('μ', 'u').replace(/\s+/g, '')
+    sliding = unit.startsWith('nm') ? velocity / 1000 : unit.startsWith('mm') ? velocity * 1000 : unit.startsWith('m/') ? velocity * 1000000 : velocity
+  } else if (rate != null && scanLength != null) {
+    sliding = Number((2 * scanLength * rate).toPrecision(12))
+  }
+  if (rate == null && scanLength == null && sliding == null) return null
+  return {
+    raw_text: raw,
+    value_type: rate != null && scanLength != null && !velocityMatch ? 'derived' : sliding != null ? 'linear' : 'scan_rate',
+    sliding_velocity_um_s: sliding,
+    scan_rate_hz: rate,
+    scan_length_um: scanLength,
+    unit_warning: rate != null && sliding == null,
+    calculation: rate != null && scanLength != null && !velocityMatch ? `v = 2 x ${scanLength} μm x ${rate} Hz` : null,
+  }
+}
+
+function speedConditionsForRecord(record: TribologyData | null | undefined): SpeedConditions | null {
+  if (!record) return null
+  return normalizeSpeedConditions((record as any).speed_conditions ?? (record as any).speedConditions)
+    || deriveSpeedConditionsFromText(`${record.speed || ''} ${record.evidence || ''}`)
+}
+
+function speedStructuredTags(record: TribologyData | null | undefined): { label: string, value: string }[] {
+  const speed = speedConditionsForRecord(record)
+  if (!speed) return []
+  const sliding = speed.sliding_velocity_um_s ?? speed.slidingVelocityUmS
+  const rate = speed.scan_rate_hz ?? speed.scanRateHz
+  const length = speed.scan_length_um ?? speed.scanLengthUm
+  const warning = Boolean(speed.unit_warning ?? speed.unitWarning)
+  if (rate == null && length == null && !warning) return []
+
+  const tags: { label: string, value: string }[] = []
+  if (sliding != null) tags.push({ label: '滑移速度', value: `${sliding} μm/s` })
+  if (rate != null) tags.push({ label: '扫描频率', value: `${rate} Hz` })
+  if (length != null) tags.push({ label: '扫描长度', value: `${length} μm` })
+  if (trim(speed.calculation)) tags.push({ label: '换算', value: trim(speed.calculation) })
+  if (warning) tags.push({ label: '单位需换算', value: '需要扫描长度' })
+  return tags
+}
+
+function normalizeTribologicalSystem(value: unknown): TribologicalSystem | null {
+  if (!value) return null
+  if (typeof value === 'string') {
+    try {
+      return normalizeTribologicalSystem(JSON.parse(value))
+    } catch {
+      return deriveTribologicalSystemFromText(value)
+    }
+  }
+  if (typeof value !== 'object') return null
+  const raw = value as any
+  return {
+    raw_text: raw.raw_text ?? raw.rawText ?? null,
+    friction_regime: raw.friction_regime ?? raw.frictionRegime ?? null,
+    contact_geometry: raw.contact_geometry ?? raw.contactGeometry ?? null,
+    scale: raw.scale ?? null,
+    note: raw.note ?? null,
+  }
+}
+
+function deriveTribologicalSystemFromText(text: unknown): TribologicalSystem | null {
+  const raw = trim(text)
+  if (!raw) return null
+  const lower = raw.toLowerCase()
+  let frictionRegime = 'unstated'
+  if (lower.includes('static')) frictionRegime = 'static'
+  else if (/(kinetic|sliding|dynamic)/.test(lower)) frictionRegime = 'kinetic'
+  if (lower.includes('boundary')) frictionRegime = 'boundary'
+  else if (lower.includes('mixed')) frictionRegime = 'mixed'
+  else if (lower.includes('elastohydrodynamic') || /\behd\b/.test(lower)) frictionRegime = 'elastohydrodynamic'
+  else if (lower.includes('hydrodynamic')) frictionRegime = 'hydrodynamic'
+
+  const geometry = [
+    [/ball[-\s]*on[-\s]*(?:3|three)[-\s]*pins?/, 'ball_on_3_pins'],
+    [/ball[-\s]*on[-\s]*disk/, 'ball_on_disk'],
+    [/ball[-\s]*on[-\s]*plate/, 'ball_on_plate'],
+    [/pin[-\s]*on[-\s]*disk/, 'pin_on_disk'],
+    [/four[-\s]*ball/, 'four_ball'],
+    [/afm|ffm|colloidal\s+probe|borosilicate\s+glass\s+bead/, 'afm_colloidal_probe'],
+  ].find(([pattern]) => (pattern as RegExp).test(lower))?.[1] as string | undefined
+
+  const scale = lower.includes('nano') || lower.includes('afm') || lower.includes('ffm')
+    ? 'nano'
+    : lower.includes('micro')
+      ? 'micro'
+      : lower.includes('macro')
+        ? 'macro'
+        : null
+  return {
+    raw_text: raw,
+    friction_regime: frictionRegime,
+    contact_geometry: geometry || null,
+    scale,
+  }
+}
+
+function tribologicalSystemForRecord(record: TribologyData | null | undefined): TribologicalSystem | null {
+  if (!record) return null
+  return normalizeTribologicalSystem((record as any).tribological_system ?? (record as any).tribologicalSystem)
+    || deriveTribologicalSystemFromText(record.regime)
+}
+
+function regimeStructuredTags(record: TribologyData | null | undefined): { label: string, value: string }[] {
+  const system = tribologicalSystemForRecord(record)
+  if (!system) return []
+  const tags: { label: string, value: string }[] = []
+  const friction = trim(system.friction_regime ?? system.frictionRegime)
+  const geometry = trim(system.contact_geometry ?? system.contactGeometry)
+  const scale = trim(system.scale)
+  if (friction && friction !== 'unstated') tags.push({ label: '摩擦状态', value: friction })
+  if (geometry) tags.push({ label: '接触几何', value: geometry })
+  if (scale) tags.push({ label: '尺度', value: scale })
+  return tags
+}
+
+function structuredTagsForField(field: ReviewField, record: TribologyData | null | undefined) {
+  if (field.id === 'cof') return cofStructuredTags(record)
+  if (field.id === 'load') return loadStructuredTags(record)
+  if (field.id === 'speed') return speedStructuredTags(record)
+  if (field.id === 'regime') return regimeStructuredTags(record)
+  return []
+}
+
+function structuredFieldLocation(field: ReviewField) {
+  const source = field.groundingMode === 'inferred' || field.sourceType === 'inferred'
+    ? '推断'
+    : sourceTypeLabel(field.sourceType)
+  const location = trim(field.location)
+  const status = field.locationMode === 'precise'
+    ? '已精确定位'
+    : field.locationMode === 'source'
+      ? '继承原文定位'
+      : field.locationMode === 'record'
+        ? '继承记录来源'
+        : field.locationMode === 'inferred'
+          ? '由结构化解析推断'
+          : '未见原文定位'
+  return location ? `${status} · ${source} · ${location}` : `${status} · ${source}`
+}
+
+function structuredFieldLocationClass(field: ReviewField) {
+  if (field.locationMode === 'precise' || field.locationMode === 'source') return 'text-[#0f766e]'
+  if (field.locationMode === 'record') return 'text-[#4f46e5]'
+  if (field.locationMode === 'inferred') return 'text-[#6d28d9]'
+  return 'text-[#cf334f]'
+}
+
+function shouldShowStructuredSubfieldLocation(field: ReviewField) {
+  return field.locationMode === 'precise'
+    || field.locationMode === 'inferred'
+    || field.locationMode === 'missing'
+}
+
+function structuredSubfieldTitle(field: ReviewField) {
+  if (field.locationMode === 'source' || field.locationMode === 'record') {
+    return `来源：${sourceTypeLabel(field.sourceType)} · ${field.location}`
+  }
+  return structuredFieldLocation(field)
+}
+
+function reviewLubricantProxy(record: TribologyData | null | undefined) {
+  const source = (record || {}) as any
+  return {
+    ...source,
+    lubricant: source.lubricant || source.ionic_liquid,
+    lubricantComponents: source.lubricantComponents || source.lubricant_components,
+    lubricantAlias: source.lubricantAlias || source.lubricant_alias,
+    ionicLiquidDisplay: source.ionicLiquidDisplay || source.ionic_liquid_display,
+    lubricantTooltip: source.lubricantTooltip || source.lubricant_tooltip,
+  }
+}
+
+function reviewIonicLiquidDisplay(record: TribologyData | null | undefined) {
+  if (!record) return 'Not captured yet'
+  const display = trim(lubricantDisplay(reviewLubricantProxy(record) as any))
+  return display && display !== '--' ? display : present(record.ionic_liquid)
+}
+
+function reviewIonicLiquidTooltip(record: TribologyData | null | undefined) {
+  if (!record) return ''
+  return lubricantTooltip(reviewLubricantProxy(record) as any)
 }
 
 function normalizeFieldKey(key: string) {
@@ -464,8 +1193,25 @@ function deriveValidationStatusFromReviewStatus(reviewStatus: string | null | un
   return 'unverified'
 }
 
-function normalizeStoredFieldEvidenceMap(fieldEvidence: TribologyData['field_evidence_json'] | Record<string, FieldEvidenceEntry> | undefined) {
-  return Object.entries(fieldEvidence || {}).reduce<Record<string, FieldEvidenceEntry>>((acc, [key, value]) => {
+function normalizeStoredFieldEvidenceMap(
+  fieldEvidence: TribologyData['field_evidence_json'] | Record<string, FieldEvidenceEntry> | string | undefined,
+) {
+  let source: Record<string, FieldEvidenceEntry> = {}
+
+  if (typeof fieldEvidence === 'string') {
+    try {
+      const parsed = JSON.parse(fieldEvidence)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        source = parsed as Record<string, FieldEvidenceEntry>
+      }
+    } catch {
+      source = {}
+    }
+  } else if (fieldEvidence && typeof fieldEvidence === 'object') {
+    source = fieldEvidence as Record<string, FieldEvidenceEntry>
+  }
+
+  return Object.entries(source).reduce<Record<string, FieldEvidenceEntry>>((acc, [key, value]) => {
     acc[normalizeFieldKey(key)] = value || {}
     return acc
   }, {})
@@ -542,7 +1288,7 @@ function resolveRecordFieldEvidenceMap(
   if (!merged.conditions) {
     const conditionSource = extractorType === 'diffusion'
       ? (merged.temperature_value || merged.confinement_scale_value || merged.confinement_scale_unit || null)
-      : (merged.load || merged.speed || merged.temperature || null)
+      : (merged.load || merged.speed || merged.temperature || merged.potential || null)
     const conditionValue = summarizeConditions(record || null, extractorType)
     if (conditionValue !== 'Not captured yet') {
       merged.conditions = {
@@ -573,31 +1319,61 @@ function resolveRecordFieldEvidenceMap(
 
 function fieldEntryHasEvidence(entry: FieldEvidenceEntry | null | undefined) {
   const evidence = entry?.evidence
+  const sourceType = trim(evidence?.source_type).toLowerCase()
+  if (sourceType === 'table' && !trim(evidence?.matched_text)) return false
+  return Boolean(evidence?.page && Array.isArray(evidence.bbox) && evidence.bbox.length === 4)
+}
+
+function fieldEntryHasSourceAnchor(entry: FieldEvidenceEntry | null | undefined) {
+  const evidence = entry?.evidence
   return Boolean(
-    evidence && (
-      evidence.page
-      || trim(evidence.source_label)
-      || trim(evidence.quote)
-      || (Array.isArray(evidence.bbox) && evidence.bbox.length === 4)
-      || trim(evidence.sample_id)
-      || trim(evidence.source_type)
-    ),
+    evidence?.page
+    || trim(evidence?.source_label)
+    || trim(evidence?.quote)
+    || trim(evidence?.matched_text),
   )
+}
+
+function recordHasSourceAnchor(record: TribologyData | null | undefined) {
+  if (!record) return false
+  return Boolean(record.source_page || trim(record.source_figure) || trim(record.source) || trim(record.evidence))
 }
 
 function resolveFieldEvidenceStatus(entry: FieldEvidenceEntry | null | undefined, value: string): ReviewField['evidenceStatus'] {
   if (!trim(value) || value === 'Not captured yet') return 'Missing'
   if (!entry) return 'Missing'
-  if (entry.status === 'grounded') return 'Grounded'
-  if (entry.status === 'partial') return 'Partial'
+  if (trim(entry.grounding_mode).toLowerCase() === 'inferred') return 'Grounded'
   if (fieldEntryHasEvidence(entry)) {
-    const evidence = entry.evidence
-    if (evidence?.page || trim(evidence?.source_label) || trim(evidence?.quote) || (Array.isArray(evidence?.bbox) && evidence?.bbox.length === 4)) {
-      return 'Grounded'
-    }
-    return 'Partial'
+    return 'Grounded'
   }
+  if (entry.status === 'grounded' || entry.status === 'partial') return 'Partial'
+  if (entry.evidence && (entry.evidence.page || trim(entry.evidence.source_label) || trim(entry.evidence.quote))) return 'Partial'
   return 'Missing'
+}
+
+function resolveFieldGroundingMode(entry: FieldEvidenceEntry | null | undefined, value: string): ReviewField['groundingMode'] {
+  if (!trim(value) || value === 'Not captured yet') return null
+  const mode = trim(entry?.grounding_mode).toLowerCase()
+  if (mode === 'inferred') return 'inferred'
+  if (mode === 'derived') return 'derived'
+  if (mode === 'explicit') return 'explicit'
+  return null
+}
+
+function resolveFieldGroundingNote(entry: FieldEvidenceEntry | null | undefined) {
+  return trim(entry?.grounding_note) || undefined
+}
+
+function resolveFieldLocationMode(
+  entry: FieldEvidenceEntry | null | undefined,
+  record: TribologyData | null | undefined,
+  groundingMode: ReviewField['groundingMode'],
+): ReviewField['locationMode'] {
+  if (fieldEntryHasEvidence(entry)) return 'precise'
+  if (fieldEntryHasSourceAnchor(entry)) return 'source'
+  if (groundingMode === 'derived' || groundingMode === 'inferred') return 'inferred'
+  if (recordHasSourceAnchor(record)) return 'record'
+  return 'missing'
 }
 
 function syncRecordReviewState(recordId: string, payload: RecordFieldEvidenceResponse) {
@@ -623,7 +1399,11 @@ function applyReviewResponse(payload: RecordFieldEvidenceResponse) {
   const recordId = String(payload.record_id)
   const literatureId = Number(payload.literature_id || activeLiteratureId.value || 0)
   if (literatureId && Number.isFinite(payload.record_id)) {
-    fieldEvidenceCache.value[`${literatureId}:${payload.record_id}`] = payload
+    const extractorType = payload.extractor_type === 'diffusion' ? 'diffusion' : 'tribology'
+    const entityType = activeRecord.value && String(activeRecord.value.id || '') === recordId
+      ? reviewRecordEntityType(activeRecord.value)
+      : 'candidate'
+    fieldEvidenceCache.value[reviewCacheKey(literatureId, payload.record_id, extractorType, entityType)] = payload
   }
   if (activeRecord.value && String(activeRecord.value.id || '') === recordId) {
     activeRecordFieldEvidence.value = payload
@@ -633,6 +1413,8 @@ function applyReviewResponse(payload: RecordFieldEvidenceResponse) {
 
 function resolveFieldSourceType(entry: FieldEvidenceEntry | null | undefined, record: TribologyData | null | undefined): ReviewField['sourceType'] {
   const sourceType = trim(entry?.evidence?.source_type).toLowerCase()
+  if (sourceType.includes('inferred')) return 'inferred'
+  if (sourceType.includes('calculation') || sourceType.includes('computed') || sourceType.includes('derived')) return 'calculation'
   if (sourceType.includes('table')) return 'table'
   if (sourceType.includes('figure') || sourceType.includes('caption') || trim(entry?.evidence?.source_label).toLowerCase().startsWith('fig')) return 'figure'
   if (sourceType) return 'text'
@@ -653,19 +1435,21 @@ function hasTextEvidence(record: TribologyData | null | undefined) {
   return Boolean(trim(record.evidence) || trim(record.notes) || trim(record.source))
 }
 
-const tribologyPrimaryMetricKeys = [
-  'cof',
-  'friction_force',
-  'wear_rate',
-  'film_thickness',
-  'residual_film_thickness_d',
-  'layer_spacing_delta',
-  'surface_roughness',
-] as const
+function getTribologyPrimaryMetricKeys() {
+  return [
+    'cof',
+    'friction_force',
+    'wear_rate',
+    'film_thickness',
+    'residual_film_thickness_d',
+    'layer_spacing_delta',
+    'surface_roughness',
+  ] as const
+}
 
 function resolvePrimaryTribologyMetricKey(record: TribologyData | null | undefined) {
   if (!record) return null
-  for (const key of tribologyPrimaryMetricKeys) {
+  for (const key of getTribologyPrimaryMetricKeys()) {
     if (trim(String(record[key] ?? ''))) return key
   }
   return null
@@ -678,6 +1462,26 @@ function requiredTribologyFieldKeys(record: TribologyData | null | undefined) {
   return keys
 }
 
+function hasRecordValue(record: TribologyData | null | undefined, key: string, extractorType: ExtractorType = recordExtractorType(record)) {
+  const value = record ? fieldValueForKey(record, key, extractorType) : 'Not captured yet'
+  return trim(value) !== '' && value !== 'Not captured yet'
+}
+
+function hasFieldEntry(fieldMap: Record<string, FieldEvidenceEntry>, key: string) {
+  const entry = fieldMap[key]
+  if (!entry) return false
+  return Boolean(trim(entry.value) || fieldEntryHasEvidence(entry))
+}
+
+function shouldShowOptionalField(
+  record: TribologyData | null | undefined,
+  fieldMap: Record<string, FieldEvidenceEntry>,
+  key: string,
+  extractorType: ExtractorType = 'tribology',
+) {
+  return hasRecordValue(record, key, extractorType) || hasFieldEntry(fieldMap, key)
+}
+
 function tribologyFieldLabel(key: string) {
   if (key === 'cof') return 'COF'
   if (key === 'friction_force') return 'Friction Force'
@@ -685,7 +1489,16 @@ function tribologyFieldLabel(key: string) {
   if (key === 'film_thickness') return 'Film Thickness'
   if (key === 'residual_film_thickness_d') return 'Residual Film Thickness'
   if (key === 'layer_spacing_delta') return 'Layer Spacing'
+  if (key === 'regime') return 'Regime'
   if (key === 'surface_roughness') return 'Surface Roughness'
+  if (key === 'probe_roughness') return 'Probe Roughness'
+  if (key === 'substrate_roughness') return 'Substrate Roughness'
+  if (key === 'load') return 'Load'
+  if (key === 'speed') return 'Speed'
+  if (key === 'shear_rate') return 'Shear Rate'
+  if (key === 'temperature') return 'Temperature'
+  if (key === 'water_content') return 'Water Content'
+  if (key === 'potential') return 'Potential'
   return key
 }
 
@@ -696,7 +1509,13 @@ function tribologyFieldIssue(key: string) {
   if (key === 'film_thickness') return 'Film thickness still needs grounding confirmation.'
   if (key === 'residual_film_thickness_d') return 'Residual film thickness still needs grounding confirmation.'
   if (key === 'layer_spacing_delta') return 'Layer spacing still needs grounding confirmation.'
+  if (key === 'regime') return 'Regime still needs grounding confirmation.'
   if (key === 'surface_roughness') return 'Surface roughness still needs grounding confirmation.'
+  if (key === 'probe_roughness') return 'Probe roughness still needs grounding confirmation.'
+  if (key === 'substrate_roughness') return 'Substrate roughness still needs grounding confirmation.'
+  if (key === 'load') return 'Load still needs grounding confirmation.'
+  if (key === 'speed') return 'Speed still needs grounding confirmation.'
+  if (key === 'shear_rate') return 'Shear rate still needs grounding confirmation.'
   return 'Field still needs grounding confirmation.'
 }
 
@@ -705,13 +1524,13 @@ function recordNeedsEvidence(record: TribologyData) {
   const fieldMap = resolveRecordFieldEvidenceMap(record)
   if (extractorType === 'diffusion') {
     const missingBase = ['system_name', 'ionic_liquid']
-      .some((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) === 'Missing')
+      .some((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) !== 'Grounded')
     const coefficientMissing = ['d_total', 'd_cation', 'd_anion']
-      .every((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) === 'Missing')
+      .every((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) !== 'Grounded')
     return missingBase || coefficientMissing
   }
   return requiredTribologyFieldKeys(record)
-    .some((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) === 'Missing')
+    .some((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) !== 'Grounded')
 }
 
 function recordNeedsReview(record: TribologyData) {
@@ -728,6 +1547,27 @@ function recordLowConfidence(record: TribologyData) {
   return record.validationStatus === 'warning' || reviewStatus === 'flagged' || reviewStatus === 'needs_evidence' || missingCore
 }
 
+function flaggedRequiredFieldKeys(
+  record: TribologyData | null | undefined,
+  remoteFields?: Record<string, FieldEvidenceEntry> | null,
+) {
+  if (!record) return []
+  const extractorType = recordExtractorType(record)
+  const fieldMap = resolveRecordFieldEvidenceMap(record, remoteFields)
+  if (extractorType === 'diffusion') {
+    const flagged: string[] = ['system_name', 'ionic_liquid']
+      .filter((key) => String(fieldMap[key]?.review_state || '').trim().toLowerCase() === 'flagged')
+    const coefficientKeys = ['d_total', 'd_cation', 'd_anion']
+    const groundedCoefficients = coefficientKeys.filter((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) === 'Grounded')
+    if (groundedCoefficients.length && groundedCoefficients.every((key) => String(fieldMap[key]?.review_state || '').trim().toLowerCase() === 'flagged')) {
+      flagged.push('diffusion_coefficient')
+    }
+    return flagged
+  }
+  return requiredTribologyFieldKeys(record)
+    .filter((key) => String(fieldMap[key]?.review_state || '').trim().toLowerCase() === 'flagged')
+}
+
 function summarizeConditions(record: TribologyData | null | undefined, extractorType: ExtractorType = recordExtractorType(record)) {
   if (!record) return 'Not captured yet'
   if (extractorType === 'diffusion') {
@@ -739,7 +1579,7 @@ function summarizeConditions(record: TribologyData | null | undefined, extractor
     ].map((item) => trim(item)).filter(Boolean)
     return parts.length ? parts.join(' | ') : 'Not captured yet'
   }
-  const parts = [record.load, record.speed, record.temperature].map((item) => trim(item)).filter(Boolean)
+  const parts = [record.regime, record.load, record.speed, record.shear_rate, record.temperature, normalizePotentialDisplayText(record.potential)].map((item) => trim(item)).filter(Boolean)
   return parts.length ? parts.join(' | ') : 'Not captured yet'
 }
 
@@ -770,7 +1610,7 @@ function fieldValueForKey(record: TribologyData, key: string, extractorType: Ext
     if (key === 'confinement_geometry_class') return present(record.confinement_geometry_class)
     if (key === 'surface_functional_groups') return present(record.surface_functional_groups)
     if (key === 'confinement_dimensionality') return present(record.confinement_dimensionality)
-    if (key === 'ionic_liquid') return present(record.ionic_liquid)
+    if (key === 'ionic_liquid') return reviewIonicLiquidDisplay(record)
     if (key === 'd_total') return formatDiffusionNumber(record.D_total)
     if (key === 'd_cation') return formatDiffusionNumber(record.D_cation)
     if (key === 'd_anion') return formatDiffusionNumber(record.D_anion)
@@ -778,20 +1618,27 @@ function fieldValueForKey(record: TribologyData, key: string, extractorType: Ext
     if (key === 'temperature_value') return formatDiffusionNumber(record.temperature_value)
     if (key === 'confinement_scale_value') return formatDiffusionNumber(record.confinement_scale_value)
     if (key === 'confinement_scale_unit') return formatScientificUnit(record.confinement_scale_unit)
-    if (key === 'conditions') return summarizeConditions(record, extractorType)
     if (key === 'source_page') return record.source_page ? `Page ${record.source_page}` : 'Not captured yet'
     return 'Not captured yet'
   }
   if (key === 'material') return present(record.material_name)
-  if (key === 'ionic_liquid') return present(record.ionic_liquid)
-  if (key === 'cof') return present(record.cof)
+  if (key === 'ionic_liquid') return reviewIonicLiquidDisplay(record)
+  if (key === 'cof') return cofMetricValue(record)
   if (key === 'friction_force') return present(record.friction_force)
   if (key === 'wear_rate') return present(record.wear_rate)
   if (key === 'film_thickness') return present(record.film_thickness)
   if (key === 'residual_film_thickness_d') return present(record.residual_film_thickness_d)
   if (key === 'layer_spacing_delta') return present(record.layer_spacing_delta)
+  if (key === 'regime') return present(record.regime)
   if (key === 'surface_roughness') return present(record.surface_roughness)
-  if (key === 'conditions') return summarizeConditions(record, extractorType)
+  if (key === 'probe_roughness') return present(record.probe_roughness)
+  if (key === 'substrate_roughness') return present(record.substrate_roughness)
+  if (key === 'load') return present(record.load)
+  if (key === 'speed') return present(record.speed)
+  if (key === 'shear_rate') return present(record.shear_rate)
+  if (key === 'temperature') return present(record.temperature)
+  if (key === 'water_content') return present(record.water_content)
+  if (key === 'potential') return normalizePotentialDisplayText(record.potential) || present(record.potential)
   if (key === 'source_page') return record.source_page ? `Page ${record.source_page}` : 'Not captured yet'
   return 'Not captured yet'
 }
@@ -831,19 +1678,10 @@ function fieldEvidenceSpecs(field: ReviewField | null, record: TribologyData | n
     addEvidenceSpec(
       specs,
       cleanValue,
-      ['cof', 'friction_force', 'wear_rate', 'film_thickness', 'residual_film_thickness_d', 'layer_spacing_delta', 'surface_roughness', 'd_total', 'd_cation', 'd_anion'].includes(field.id)
+      ['cof', 'friction_force', 'wear_rate', 'film_thickness', 'residual_film_thickness_d', 'layer_spacing_delta', 'surface_roughness', 'probe_roughness', 'substrate_roughness', 'd_total', 'd_cation', 'd_anion'].includes(field.id)
         ? 'numeric'
         : 'loose',
     )
-  }
-
-  if (field.id === 'conditions') {
-    ;(extractorType === 'diffusion'
-      ? [record.temperature_value != null ? formatDiffusionNumber(record.temperature_value) : '', record.confinement_scale_value != null ? formatDiffusionNumber(record.confinement_scale_value) : '', record.confinement_scale_unit]
-      : [record.load, record.speed, record.temperature])
-      .map((item) => trim(item))
-      .filter(Boolean)
-      .forEach((item) => addEvidenceSpec(specs, item, 'loose'))
   }
 
   if (field.id === 'material') {
@@ -859,6 +1697,61 @@ function fieldEvidenceSpecs(field: ReviewField | null, record: TribologyData | n
   if (['confinement_material_class', 'confinement_geometry_class', 'surface_functional_groups', 'confinement_dimensionality'].includes(field.id)) {
     const raw = fieldValueForKey(record, field.id, extractorType)
     if (trim(raw)) addEvidenceSpec(specs, raw, 'loose')
+  }
+
+  if (field.id === 'load') {
+    const load = trim(record.load || cleanValue)
+    if (load) {
+      addEvidenceSpec(specs, load, 'loose')
+      addEvidenceSpec(specs, `load ${load}`, 'loose')
+      addEvidenceSpec(specs, `normal load ${load}`, 'loose')
+    }
+  }
+
+  if (field.id === 'speed') {
+    const speed = trim(record.speed || cleanValue)
+    if (speed) {
+      addEvidenceSpec(specs, speed, 'loose')
+      addEvidenceSpec(specs, `speed ${speed}`, 'loose')
+      addEvidenceSpec(specs, `sliding speed ${speed}`, 'loose')
+    }
+    const speedConditions = speedConditionsForRecord(record)
+    const rate = speedConditions?.scan_rate_hz ?? speedConditions?.scanRateHz
+    const length = speedConditions?.scan_length_um ?? speedConditions?.scanLengthUm
+    if (rate != null) {
+      addEvidenceSpec(specs, `${rate} Hz`, 'loose')
+      addEvidenceSpec(specs, `scan rate ${rate} Hz`, 'loose')
+    }
+    if (length != null) {
+      addEvidenceSpec(specs, `${length} μm`, 'loose')
+      addEvidenceSpec(specs, `scan size ${length}`, 'loose')
+    }
+  }
+
+  if (field.id === 'shear_rate') {
+    const shearRate = trim(record.shear_rate || cleanValue)
+    if (shearRate) {
+      addEvidenceSpec(specs, shearRate, 'loose')
+      addEvidenceSpec(specs, `shear rate ${shearRate}`, 'loose')
+      addEvidenceSpec(specs, `shear rates ${shearRate}`, 'loose')
+    }
+  }
+
+  if (field.id === 'temperature') {
+    const temperature = trim(record.temperature || cleanValue)
+    if (temperature) {
+      addEvidenceSpec(specs, temperature, 'loose')
+      addEvidenceSpec(specs, `temperature ${temperature}`, 'loose')
+    }
+  }
+
+  if (field.id === 'water_content') {
+    const waterContent = trim(record.water_content || cleanValue)
+    if (waterContent) {
+      addEvidenceSpec(specs, waterContent, 'loose')
+      addEvidenceSpec(specs, `water content ${waterContent}`, 'loose')
+      addEvidenceSpec(specs, `humidity ${waterContent}`, 'loose')
+    }
   }
 
   if (field.id === 'ionic_liquid') {
@@ -897,11 +1790,32 @@ function fieldEvidenceSpecs(field: ReviewField | null, record: TribologyData | n
     }
   }
 
-  if (['friction_force', 'wear_rate', 'film_thickness', 'residual_film_thickness_d', 'layer_spacing_delta', 'surface_roughness'].includes(field.id)) {
+  if (['friction_force', 'wear_rate', 'film_thickness', 'residual_film_thickness_d', 'layer_spacing_delta', 'surface_roughness', 'probe_roughness', 'substrate_roughness'].includes(field.id)) {
     const numeric = cleanValue.match(/[0-9]+(?:\.[0-9]+)?(?:e[-+]?\d+)?/i)?.[0]
     if (numeric) {
       addEvidenceSpec(specs, numeric, 'numeric')
       addEvidenceSpec(specs, `${tribologyFieldLabel(field.id)} ${numeric}`, 'loose')
+    }
+  }
+
+  if (field.id === 'regime') {
+    const regime = trim(record.regime || cleanValue)
+    if (regime) {
+      addEvidenceSpec(specs, regime, 'loose')
+      addEvidenceSpec(specs, regime.replace(/\blayers?\b/i, '').trim(), 'loose')
+    }
+  }
+
+  if (field.id === 'potential') {
+    const potential = trim(record.potential || cleanValue)
+    if (potential) {
+      addEvidenceSpec(specs, potential, 'loose')
+      const normalizedPotential = normalizePotentialDisplayText(potential)
+      if (normalizedPotential && normalizedPotential !== potential) {
+        addEvidenceSpec(specs, normalizedPotential, 'loose')
+      }
+      addEvidenceSpec(specs, `potential ${potential}`, 'loose')
+      addEvidenceSpec(specs, `voltage ${potential}`, 'loose')
     }
   }
 
@@ -914,6 +1828,32 @@ function fieldEvidenceSpecs(field: ReviewField | null, record: TribologyData | n
     }
   }
 
+  if (field.id === 'temperature_value') {
+    const numeric = cleanValue.match(/[0-9]+(?:\.[0-9]+)?(?:e[-+]?\d+)?/i)?.[0]
+    if (numeric) {
+      addEvidenceSpec(specs, numeric, 'numeric')
+      addEvidenceSpec(specs, `temperature ${numeric}`, 'loose')
+    }
+  }
+
+  if (field.id === 'confinement_scale_value') {
+    const numeric = cleanValue.match(/[0-9]+(?:\.[0-9]+)?(?:e[-+]?\d+)?/i)?.[0]
+    if (numeric) {
+      addEvidenceSpec(specs, numeric, 'numeric')
+      addEvidenceSpec(specs, `scale ${numeric}`, 'loose')
+      addEvidenceSpec(specs, `confinement ${numeric}`, 'loose')
+    }
+  }
+
+  if (field.id === 'confinement_scale_unit') {
+    const unit = trim(record.confinement_scale_unit || cleanValue)
+    if (unit) {
+      addEvidenceSpec(specs, unit, 'loose')
+      addEvidenceSpec(specs, `scale ${unit}`, 'loose')
+      addEvidenceSpec(specs, `confinement ${unit}`, 'loose')
+    }
+  }
+
   if (field.id === 'source_page') {
     if (record.source_page) addEvidenceSpec(specs, `Page ${record.source_page}`, 'loose')
     if (trim(record.source_figure)) addEvidenceSpec(specs, trim(record.source_figure), 'loose')
@@ -923,13 +1863,22 @@ function fieldEvidenceSpecs(field: ReviewField | null, record: TribologyData | n
   return [...specs.values()]
 }
 
-function extractEvidenceExcerpt(text: string, specs: EvidenceSearchSpec[]) {
+function extractEvidenceExcerpt(
+  text: string,
+  specs: EvidenceSearchSpec[],
+  options?: {
+    contextBefore?: number
+    contextAfter?: number
+  },
+) {
   if (!text) return ''
+  const contextBefore = options?.contextBefore ?? 110
+  const contextAfter = options?.contextAfter ?? 170
 
   const matchResult = findEvidenceMatch(text, specs)
 
   if (!matchResult) {
-    return text.slice(0, 280)
+    return text.slice(0, Math.max(180, contextBefore + contextAfter))
   }
 
   const { match } = matchResult
@@ -937,80 +1886,33 @@ function extractEvidenceExcerpt(text: string, specs: EvidenceSearchSpec[]) {
   const startBoundary = Math.max(
     text.lastIndexOf('. ', match.index),
     text.lastIndexOf('; ', match.index),
+    text.lastIndexOf(', ', match.index),
     text.lastIndexOf('\n', match.index),
   )
-  const excerptStart = Math.max(0, startBoundary >= 0 ? startBoundary + 1 : match.index - 110)
+  const excerptStart = Math.max(0, startBoundary >= 0 ? startBoundary + 1 : match.index - contextBefore)
 
   const afterIndex = match.index + match[0].length
   const sentenceEndCandidates = [
     text.indexOf('. ', afterIndex),
     text.indexOf('; ', afterIndex),
+    text.indexOf(', ', afterIndex),
     text.indexOf('\n', afterIndex),
   ].filter((index) => index >= 0)
 
   const nextBoundary = sentenceEndCandidates.length ? Math.min(...sentenceEndCandidates) : -1
-  const excerptEnd = nextBoundary >= 0 ? nextBoundary + 1 : Math.min(text.length, afterIndex + 170)
+  const excerptEnd = nextBoundary >= 0 ? nextBoundary + 1 : Math.min(text.length, afterIndex + contextAfter)
 
   return text.slice(excerptStart, excerptEnd).trim()
 }
 
-function semanticTypesForField(field: ReviewField | null) {
-  if (!field) return []
-  if (field.id === 'material') return ['material', 'substrate_material', 'probe_material', 'tribopair']
-  if (field.id === 'system_name') return ['system', 'system_name', 'sample']
-  if (field.id === 'confinement_material_class') return ['material', 'confinement_material']
-  if (field.id === 'confinement_geometry_class') return ['geometry', 'confinement_geometry']
-  if (field.id === 'surface_functional_groups') return ['surface_functional_groups', 'surface_group']
-  if (field.id === 'confinement_dimensionality') return ['dimensionality', 'confinement_dimensionality']
-  if (field.id === 'ionic_liquid') return ['ionic_liquid', 'lubricant', 'cation', 'anion']
-  if (field.id === 'cof') return ['cof', 'friction_coefficient']
-  if (field.id === 'friction_force') return ['friction_force', 'force']
-  if (field.id === 'wear_rate') return ['wear_rate']
-  if (field.id === 'film_thickness') return ['film_thickness', 'thickness']
-  if (field.id === 'residual_film_thickness_d') return ['residual_film_thickness_d', 'thickness']
-  if (field.id === 'layer_spacing_delta') return ['layer_spacing_delta', 'spacing']
-  if (field.id === 'surface_roughness') return ['surface_roughness', 'roughness']
-  if (field.id === 'd_total') return ['diffusion', 'd_total']
-  if (field.id === 'd_cation') return ['diffusion', 'd_cation']
-  if (field.id === 'd_anion') return ['diffusion', 'd_anion']
-  if (field.id === 'conditions') return ['load', 'speed', 'temperature', 'condition']
-  if (field.id === 'source_page') return ['source_page', 'figure', 'table']
-  return []
-}
-
 function matchesEvidenceSpecText(text: string, spec: EvidenceSearchSpec) {
   if (!text) return false
+  if (spec.mode === 'numeric') return numericTokensConsistent(spec.text, text)
+  const normalizedText = normalizePdfEvidenceText(text)
   const matcher = buildEvidenceMatcher(spec)
-  if (matcher.test(text)) return true
-  if (spec.mode === 'loose') return normalizeLooseText(text).includes(normalizeLooseText(spec.text))
+  if (matcher.test(normalizedText)) return true
+  if (spec.mode === 'loose') return normalizeLooseText(normalizedText).includes(normalizeLooseText(spec.text))
   return false
-}
-
-function bestEvidenceHitForField(evidence: EvidenceResult | null, field: ReviewField | null, specs: EvidenceSearchSpec[]) {
-  const hits = Array.isArray(evidence?.term_hits) ? evidence.term_hits : []
-  if (!field || !hits.length) return null
-
-  const semanticTypes = new Set(semanticTypesForField(field))
-  const semanticHits = semanticTypes.size
-    ? hits.filter((hit) => semanticTypes.has(String(hit.semantic_type || '').trim().toLowerCase()))
-    : []
-  const pools = semanticHits.length ? [semanticHits, hits] : [hits]
-
-  for (const pool of pools) {
-    for (const spec of specs) {
-      const matchedHit = pool.find((hit) => {
-        const termText = String(hit.term || '')
-        const matchedText = String(hit.matched_text || '')
-        const snippetText = String(hit.snippet_text || '')
-        return matchesEvidenceSpecText(termText, spec)
-          || matchesEvidenceSpecText(matchedText, spec)
-          || matchesEvidenceSpecText(snippetText, spec)
-      })
-      if (matchedHit) return matchedHit
-    }
-  }
-
-  return null
 }
 
 function buildFieldEvidence(
@@ -1035,19 +1937,14 @@ function buildFieldEvidence(
 
   const specs = fieldEvidenceSpecs(field, record)
   const directQuote = trim(fieldEntry?.evidence?.quote)
-  if (directQuote) {
+  const directMatchedText = trim(fieldEntry?.evidence?.matched_text)
+  const isDerivedField = trim(fieldEntry?.grounding_mode).toLowerCase() === 'derived'
+  const isInferredField = trim(fieldEntry?.grounding_mode).toLowerCase() === 'inferred'
+  if (directQuote && (fieldEvidenceTextMatchesSpecs(directMatchedText, directQuote, specs) || isDerivedField || isInferredField)) {
+    const excerptSpecs = directMatchedText ? [{ text: directMatchedText, mode: 'exact-token' as const }] : specs
     return {
-      excerpt: directQuote,
-      specs,
-    }
-  }
-
-  const bestHit = bestEvidenceHitForField(evidence, field, specs)
-  if (bestHit) {
-    const matchedText = trim(bestHit.matched_text) || trim(bestHit.term)
-    return {
-      excerpt: trim(bestHit.snippet_text) || matchedText || trim(evidence?.text_snippet) || trim(evidence?.evidence_text),
-      specs: matchedText ? [{ text: matchedText, mode: 'exact-token' as const }] : specs,
+      excerpt: extractEvidenceExcerpt(directQuote, excerptSpecs, { contextBefore: 72, contextAfter: 96 }),
+      specs: excerptSpecs,
     }
   }
 
@@ -1091,11 +1988,21 @@ function highlightTerms(text: string, specs: EvidenceSearchSpec[]) {
   return output
 }
 
+function normalizePdfEvidenceText(value: string) {
+  return String(value || '')
+    .replace(/[\u0000-\u0002\u0005-\u001f]/g, ' ')
+    .replace(/\u0003/g, '-')
+    .replace(/\u0004/g, '+')
+    .replace(/\u00b5/g, 'μ')
+    .replace(/[−–—]/g, '-')
+    .replace(/[＋þ]/g, '+')
+}
+
 function normalizeLooseText(value: string) {
-  return value
+  return normalizePdfEvidenceText(value)
     .toLowerCase()
     .replace(/[\[\](){}]/g, '')
-    .replace(/[^a-z0-9+]+/g, '')
+    .replace(/[^a-z0-9+-]+/g, '')
 }
 
 function escapeRegex(value: string) {
@@ -1103,26 +2010,27 @@ function escapeRegex(value: string) {
 }
 
 function buildLooseMatcher(term: string) {
-  const parts = term
+  const normalizedTerm = normalizePdfEvidenceText(term)
+  const parts = normalizedTerm
     .replace(/[\[\](){}]/g, ' ')
-    .split(/[^A-Za-z0-9+]+/)
+    .split(/[^A-Za-z0-9+-]+/)
     .map((item) => item.trim())
     .filter(Boolean)
 
   if (!parts.length) {
-    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const escaped = normalizedTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     return new RegExp(escaped, 'gi')
   }
 
   const pattern = parts
     .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-    .join('[\\]\\[\\s\\-_/,:;(){}]*')
+    .join('[\\]\\[\\s\\x00-\\x1F\\u00bd\\-_/,:;(){}]*')
 
   return new RegExp(pattern, 'gi')
 }
 
 function buildExactTokenMatcher(term: string) {
-  return new RegExp(`(?<![A-Za-z0-9])${escapeRegex(term)}(?![A-Za-z0-9])`, 'gi')
+  return new RegExp(`(?<![A-Za-z0-9])${escapeRegex(normalizePdfEvidenceText(term))}(?![A-Za-z0-9])`, 'gi')
 }
 
 function buildNumericMatcher(term: string) {
@@ -1139,8 +2047,20 @@ function findEvidenceMatch(text: string, specs: EvidenceSearchSpec[]) {
   const orderedSpecs = [...specs].sort((left, right) => right.text.length - left.text.length)
 
   for (const spec of orderedSpecs) {
+    if (spec.mode === 'numeric' && numericTokensConsistent(spec.text, text)) {
+      const termNum = extractNumberTokens(spec.text)[0]
+      const matchedNum = extractNumberTokens(text).find((value) => numericTokensConsistent(spec.text, value)) || termNum || spec.text
+      return {
+        spec,
+        match: {
+          index: Math.max(0, matchedNum ? text.indexOf(matchedNum) : 0),
+          0: matchedNum,
+          length: matchedNum.length,
+        } as RegExpExecArray,
+      }
+    }
     const matcher = buildEvidenceMatcher(spec)
-    const match = matcher.exec(text)
+    const match = matcher.exec(normalizePdfEvidenceText(text))
     if (!match || match.index === undefined) continue
     if (spec.mode === 'numeric' && !numericTokensConsistent(spec.text, match[0])) continue
     return { spec, match }
@@ -1157,13 +2077,13 @@ function findEvidenceMatch(text: string, specs: EvidenceSearchSpec[]) {
 }
 
 function extractNumberTokens(input: string): string[] {
-  return (String(input || '').match(/\d+(?:\.\d+)?/g) || []).map((value) => String(value))
+  return (String(input || '').match(/\d+(?:[\.:]\d+)?/g) || []).map((value) => String(value))
 }
 
 function numericTokensConsistent(term: string, matched: string): boolean {
-  const termNums = extractNumberTokens(term).map((value) => Number(value)).filter((value) => Number.isFinite(value))
+  const termNums = extractNumberTokens(term).map((value) => Number(value.replace(':', '.'))).filter((value) => Number.isFinite(value))
   if (!termNums.length) return true
-  const matchedNums = extractNumberTokens(matched).map((value) => Number(value)).filter((value) => Number.isFinite(value))
+  const matchedNums = extractNumberTokens(matched).map((value) => Number(value.replace(':', '.'))).filter((value) => Number.isFinite(value))
   if (!matchedNums.length) return false
   return termNums.every((termValue) => {
     const tolerance = Math.max(1e-6, Math.abs(termValue) * 0.01)
@@ -1179,11 +2099,13 @@ function confidenceLabel(status: ValidationStatus | undefined, value: string): R
 
 function fieldStatusFromEntry(record: TribologyData, value: string, evidence: ReviewField['evidenceStatus'], entry: FieldEvidenceEntry | null | undefined): ReviewField['status'] {
   const reviewState = String(entry?.review_state || '').trim().toLowerCase()
+  const groundingMode = trim(entry?.grounding_mode).toLowerCase()
   if (!trim(value)) return 'low_conf'
   if (reviewState === 'flagged') return 'low_conf'
-  if (reviewState === 'confirmed' && evidence !== 'Missing') return 'confirmed'
+  if (groundingMode === 'inferred') return 'confirmed'
+  if (reviewState === 'confirmed' && evidence === 'Grounded') return 'confirmed'
   if (record.validationStatus === 'verified' && evidence === 'Grounded') return 'confirmed'
-  if (record.validationStatus === 'warning' || evidence === 'Missing') return 'low_conf'
+  if (record.validationStatus === 'warning' || evidence !== 'Grounded') return 'low_conf'
   return 'review'
 }
 
@@ -1197,20 +2119,33 @@ function buildField(
 ): ReviewField {
   const value = rawValue
   const evidence = resolveFieldEvidenceStatus(entry, value)
-  const status = fieldStatusFromEntry(record, value, evidence, entry)
-  const canConfirm = trim(value) !== '' && value !== 'Not captured yet' && evidence !== 'Missing'
+  const groundingMode = resolveFieldGroundingMode(entry, value)
+  const locationMode = resolveFieldLocationMode(entry, record, groundingMode)
+  const reviewExempt = groundingMode === 'inferred'
+  const status = reviewExempt ? 'confirmed' : fieldStatusFromEntry(record, value, evidence, entry)
+  const canConfirm = !reviewExempt && trim(value) !== '' && value !== 'Not captured yet' && evidence === 'Grounded'
 
   return {
     id,
     label,
     value,
     status,
-    confidence: confidenceLabel(record.validationStatus, value),
+    confidence: reviewExempt ? 'High' : confidenceLabel(record.validationStatus, value),
     evidenceStatus: evidence,
+    groundingMode,
+    groundingNote: resolveFieldGroundingNote(entry),
     sourceType: resolveFieldSourceType(entry, record),
     location: resolveFieldLocation(entry, record),
+    locationMode,
     canConfirm,
-    issue: entry?.review_state === 'flagged'
+    tooltip: id === 'ionic_liquid'
+      ? reviewIonicLiquidTooltip(record)
+      : id === 'cof'
+        ? trim(cofExtractedForRecord(record)?.raw_text || cofExtractedForRecord(record)?.rawText || record.cof)
+        : undefined,
+    issue: reviewExempt
+      ? undefined
+      : entry?.review_state === 'flagged'
       ? (trim(entry.review_note) || issueMessage)
       : (!canConfirm ? issueMessage : undefined),
   }
@@ -1226,8 +2161,10 @@ function buildReviewFields(record: TribologyData | null, remoteFields?: Record<s
         status: 'review',
         confidence: 'Medium',
         evidenceStatus: 'Missing',
+        groundingMode: null,
         sourceType: 'inferred',
         location: `Scope ${props.activeScopeLabel}`,
+        locationMode: 'missing',
         canConfirm: false,
         issue: 'No extracted record is attached to this literature file yet.',
       },
@@ -1239,7 +2176,7 @@ function buildReviewFields(record: TribologyData | null, remoteFields?: Record<s
   if (extractorType === 'diffusion') {
     return [
       buildField('System', 'system_name', present(record.system_name), record, fieldMap.system_name, 'System name still needs grounding confirmation.'),
-      buildField('Ionic Liquid', 'ionic_liquid', present(record.ionic_liquid), record, fieldMap.ionic_liquid, 'Ionic liquid still needs grounding confirmation.'),
+      buildField('Ionic Liquid', 'ionic_liquid', reviewIonicLiquidDisplay(record), record, fieldMap.ionic_liquid, 'Ionic liquid still needs grounding confirmation.'),
       buildField('D_total', 'd_total', formatDiffusionNumber(record.D_total), record, fieldMap.d_total, 'Total diffusion coefficient still needs grounding confirmation.'),
       buildField('D_cation', 'd_cation', formatDiffusionNumber(record.D_cation), record, fieldMap.d_cation, 'Cation diffusion coefficient still needs grounding confirmation.'),
       buildField('D_anion', 'd_anion', formatDiffusionNumber(record.D_anion), record, fieldMap.d_anion, 'Anion diffusion coefficient still needs grounding confirmation.'),
@@ -1248,14 +2185,21 @@ function buildReviewFields(record: TribologyData | null, remoteFields?: Record<s
       buildField('Geometry', 'confinement_geometry_class', present(record.confinement_geometry_class), record, fieldMap.confinement_geometry_class, 'Confinement geometry still needs confirmation.'),
       buildField('Surface Groups', 'surface_functional_groups', present(record.surface_functional_groups), record, fieldMap.surface_functional_groups, 'Surface functional groups still need confirmation.'),
       buildField('Dimensionality', 'confinement_dimensionality', present(record.confinement_dimensionality), record, fieldMap.confinement_dimensionality, 'Confinement dimensionality still needs confirmation.'),
-      buildField('Diffusion Conditions', 'conditions', summarizeConditions(record, extractorType), record, fieldMap.conditions, 'Temperature or confinement scale still need confirmation.'),
-      buildField('Source Page', 'source_page', record.source_page ? `Page ${record.source_page}` : 'Not captured yet', record, fieldMap.source_page, 'No grounded page was attached to this record.'),
+      ...(shouldShowOptionalField(record, fieldMap, 'temperature_value', extractorType)
+        ? [buildField('Temperature', 'temperature_value', formatDiffusionNumber(record.temperature_value), record, fieldMap.temperature_value, 'Temperature still needs confirmation.')]
+        : []),
+      ...(shouldShowOptionalField(record, fieldMap, 'confinement_scale_value', extractorType)
+        ? [buildField('Confinement Scale', 'confinement_scale_value', formatDiffusionNumber(record.confinement_scale_value), record, fieldMap.confinement_scale_value, 'Confinement scale still needs confirmation.')]
+        : []),
+      ...(shouldShowOptionalField(record, fieldMap, 'confinement_scale_unit', extractorType)
+        ? [buildField('Confinement Unit', 'confinement_scale_unit', formatScientificUnit(record.confinement_scale_unit), record, fieldMap.confinement_scale_unit, 'Confinement unit still needs confirmation.')]
+        : []),
     ]
   }
   const primaryMetricKey = resolvePrimaryTribologyMetricKey(record)
   return [
     buildField('Material', 'material', present(record.material_name), record, fieldMap.material, 'Material still needs grounding confirmation.'),
-    buildField('Ionic Liquid', 'ionic_liquid', present(record.ionic_liquid), record, fieldMap.ionic_liquid, 'Ionic liquid still needs grounding confirmation.'),
+    buildField('Ionic Liquid', 'ionic_liquid', reviewIonicLiquidDisplay(record), record, fieldMap.ionic_liquid, 'Ionic liquid still needs grounding confirmation.'),
     ...(primaryMetricKey
       ? [
           buildField(
@@ -1268,8 +2212,216 @@ function buildReviewFields(record: TribologyData | null, remoteFields?: Record<s
           ),
         ]
       : []),
-    buildField('Test Conditions', 'conditions', summarizeConditions(record), record, fieldMap.conditions, 'Load, speed, or temperature still need confirmation.'),
-    buildField('Source Page', 'source_page', record.source_page ? `Page ${record.source_page}` : 'Not captured yet', record, fieldMap.source_page, 'No grounded page was attached to this record.'),
+    ...(shouldShowOptionalField(record, fieldMap, 'probe_roughness')
+      ? [buildField('Probe Roughness', 'probe_roughness', fieldValueForKey(record, 'probe_roughness', extractorType), record, fieldMap.probe_roughness, 'Probe roughness still needs grounding confirmation.')]
+      : []),
+    ...(shouldShowOptionalField(record, fieldMap, 'substrate_roughness')
+      ? [buildField('Substrate Roughness', 'substrate_roughness', fieldValueForKey(record, 'substrate_roughness', extractorType), record, fieldMap.substrate_roughness, 'Substrate roughness still needs grounding confirmation.')]
+      : []),
+    ...(shouldShowOptionalField(record, fieldMap, 'regime')
+      ? [buildField('Regime', 'regime', fieldValueForKey(record, 'regime', extractorType), record, fieldMap.regime, 'Regime still needs grounding confirmation.')]
+      : []),
+    ...(shouldShowOptionalField(record, fieldMap, 'load')
+      ? [buildField('Load', 'load', fieldValueForKey(record, 'load', extractorType), record, fieldMap.load, 'Load still needs grounding confirmation.')]
+      : []),
+    ...(shouldShowOptionalField(record, fieldMap, 'speed')
+      ? [buildField('Speed', 'speed', fieldValueForKey(record, 'speed', extractorType), record, fieldMap.speed, 'Speed still needs grounding confirmation.')]
+      : []),
+    ...(shouldShowOptionalField(record, fieldMap, 'shear_rate')
+      ? [buildField('Shear Rate', 'shear_rate', fieldValueForKey(record, 'shear_rate', extractorType), record, fieldMap.shear_rate, 'Shear rate still needs grounding confirmation.')]
+      : []),
+    ...(shouldShowOptionalField(record, fieldMap, 'temperature')
+      ? [buildField('Temperature', 'temperature', fieldValueForKey(record, 'temperature', extractorType), record, fieldMap.temperature, 'Temperature still needs grounding confirmation.')]
+      : []),
+    ...(shouldShowOptionalField(record, fieldMap, 'potential')
+      ? [
+          buildField(
+            'Potential',
+            'potential',
+            fieldValueForKey(record, 'potential', extractorType),
+            record,
+            fieldMap.potential,
+            'Potential still needs grounding confirmation.',
+          ),
+        ]
+      : []),
+    ...(shouldShowOptionalField(record, fieldMap, 'water_content')
+      ? [buildField('Water Content', 'water_content', fieldValueForKey(record, 'water_content', extractorType), record, fieldMap.water_content, 'Water content still needs grounding confirmation.')]
+      : []),
+  ]
+}
+
+function firstCaptured(...values: Array<string | null | undefined>) {
+  return values.map((value) => trim(value)).find(Boolean) || ''
+}
+
+function hasStructuredTribopair(record: TribologyData | null | undefined) {
+  if (!record || recordExtractorType(record) !== 'tribology') return false
+  return Boolean(
+    trim(record.probe_material)
+    || trim(record.probe_geometry)
+    || trim(record.probe_radius)
+    || trim(record.probe_roughness)
+    || trim(record.substrate_material)
+    || trim(record.substrate_coating)
+    || trim(record.substrate_roughness)
+    || trim(record.surface_roughness),
+  )
+}
+
+function filterVisibleReviewFields(record: TribologyData | null | undefined, fields: ReviewField[]) {
+  if (!hasStructuredTribopair(record)) return fields
+  return fields.filter((field) => !['material', 'probe_roughness', 'substrate_roughness'].includes(field.id))
+}
+
+function fieldEntryForAny(fieldMap: Record<string, FieldEvidenceEntry>, keys: string[]) {
+  return keys.map((key) => fieldMap[key]).find((entry) => Boolean(entry)) || null
+}
+
+function tribopairPartStatus(
+  entry: FieldEvidenceEntry | null | undefined,
+  value: string,
+  optional = false,
+): TribopairReviewPart['status'] {
+  if (!trim(value)) return optional ? 'Optional' : 'Missing'
+  return resolveFieldEvidenceStatus(entry, value)
+}
+
+function tribopairPartStatusLabel(status: TribopairReviewPart['status']) {
+  if (status === 'Grounded') return '已定位'
+  if (status === 'Partial') return '缺定位'
+  if (status === 'Optional') return '可选'
+  return '待核验'
+}
+
+function tribopairPartStatusClass(status: TribopairReviewPart['status'], sourceType?: ReviewField['sourceType']) {
+  if (sourceType === 'calculation') return 'border-[#ddd6fe] bg-[#f5f3ff] text-[#6d28d9]'
+  if (status === 'Grounded') return 'border-[#bbf7d0] bg-[#ecfdf3] text-[#087443]'
+  if (status === 'Partial') return 'border-[#fed7aa] bg-[#fff7ed] text-[#c2410c]'
+  if (status === 'Optional') return 'border-[#e2e8f0] bg-white text-[#64748b]'
+  return 'border-[#fecdd3] bg-[#fff5f6] text-[#cf334f]'
+}
+
+function roughnessPillClass(part: TribopairReviewPart) {
+  if (part.roughnessFieldId === 'probe_roughness') {
+    return part.status === 'Missing'
+      ? 'border-[#bfdbfe] bg-[#eff6ff] text-[#2563eb]'
+      : 'border-[#93c5fd] bg-[#dbeafe] text-[#1d4ed8] hover:bg-[#bfdbfe]'
+  }
+  if (part.roughnessFieldId === 'substrate_roughness') {
+    return part.status === 'Missing'
+      ? 'border-[#99f6e4] bg-[#f0fdfa] text-[#0f766e]'
+      : 'border-[#5eead4] bg-[#ccfbf1] text-[#0f766e] hover:bg-[#99f6e4]'
+  }
+  return part.roughnessStatusClass || 'border-[#e2e8f0] bg-[#f1f5f9] text-slate-500'
+}
+
+function tribopairPartSource(entry: FieldEvidenceEntry | null | undefined, record: TribologyData) {
+  if (trim(entry?.grounding_mode).toLowerCase() === 'inferred') return '推断'
+  const sourceType = sourceTypeLabel(resolveFieldSourceType(entry, record))
+  const page = entry?.evidence?.page
+  const label = trim(entry?.evidence?.source_label)
+  if (page && label) return `${sourceType} · Page ${page} | ${label}`
+  if (page) return `${sourceType} · Page ${page}`
+  if (label) return `${sourceType} · ${label}`
+  return sourceType
+}
+
+function buildTribopairReviewPart(
+  record: TribologyData,
+  fieldMap: Record<string, FieldEvidenceEntry>,
+  config: {
+    id: string
+    label: string
+    value: string
+    meta?: string
+    roughness?: string
+    roughnessKey?: string
+    highlight?: boolean
+    keys: string[]
+    fieldId: string
+    optional?: boolean
+  },
+): TribopairReviewPart {
+  const entry = fieldEntryForAny(fieldMap, config.keys)
+  const status = tribopairPartStatus(entry, config.value, config.optional)
+  const sourceType = resolveFieldSourceType(entry, record)
+  const roughnessEntry = config.roughnessKey ? fieldMap[config.roughnessKey] : null
+  const roughnessStatus = config.roughnessKey
+    ? tribopairPartStatus(roughnessEntry, config.roughness || '', false)
+    : null
+  const roughnessSourceType = roughnessEntry ? resolveFieldSourceType(roughnessEntry, record) : undefined
+  return {
+    id: config.id,
+    label: config.label,
+    value: trim(config.value) || (config.optional ? '未记录' : '未提取'),
+    meta: trim(config.meta),
+    status,
+    statusLabel: sourceType === 'calculation' ? '推导计算' : tribopairPartStatusLabel(status),
+    statusClass: tribopairPartStatusClass(status, sourceType),
+    sourceLabel: status === 'Optional' ? '非必填层' : tribopairPartSource(entry, record),
+    sourceType,
+    fieldId: config.fieldId,
+    optional: Boolean(config.optional),
+    roughness: config.roughness,
+    roughnessFieldId: config.roughnessKey,
+    roughnessStatusLabel: roughnessStatus ? tribopairPartStatusLabel(roughnessStatus) : undefined,
+    roughnessStatusClass: roughnessStatus ? tribopairPartStatusClass(roughnessStatus, roughnessSourceType) : undefined,
+    roughnessSourceLabel: roughnessEntry ? tribopairPartSource(roughnessEntry, record) : undefined,
+    highlight: config.highlight,
+  }
+}
+
+function buildTribopairReviewParts(record: TribologyData | null | undefined, remoteFields?: Record<string, FieldEvidenceEntry> | null): TribopairReviewPart[] {
+  if (!record || recordExtractorType(record) !== 'tribology') return []
+  const fieldMap = resolveRecordFieldEvidenceMap(record, remoteFields)
+  const probeMeta = [
+    trim(record.probe_geometry) ? `几何 ${trim(record.probe_geometry)}` : '',
+    trim(record.probe_radius) ? `半径 ${trim(record.probe_radius)}` : '',
+  ].filter(Boolean).join(' · ')
+  const substrateValue = firstCaptured(record.substrate_material, record.material_name)
+  const substrateMeta = ''
+  const compositeRoughnessValue = trim(fieldMap.surface_roughness?.value)
+  const roughnessValue = firstCaptured(compositeRoughnessValue, record.surface_roughness, record.substrate_roughness, record.probe_roughness)
+
+  return [
+    buildTribopairReviewPart(record, fieldMap, {
+      id: 'probe',
+      label: 'Probe',
+      value: trim(record.probe_material),
+      meta: probeMeta,
+      roughness: trim(record.probe_roughness),
+      roughnessKey: 'probe_roughness',
+      keys: ['probe_material', 'material'],
+      fieldId: 'material',
+    }),
+    buildTribopairReviewPart(record, fieldMap, {
+      id: 'substrate',
+      label: 'Substrate',
+      value: substrateValue,
+      meta: substrateMeta,
+      roughness: trim(record.substrate_roughness),
+      roughnessKey: 'substrate_roughness',
+      keys: ['substrate_material', 'material'],
+      fieldId: 'material',
+    }),
+    buildTribopairReviewPart(record, fieldMap, {
+      id: 'coating',
+      label: 'Coating',
+      value: trim(record.substrate_coating),
+      keys: ['substrate_coating', 'material'],
+      fieldId: 'material',
+      optional: true,
+    }),
+    buildTribopairReviewPart(record, fieldMap, {
+      id: 'roughness',
+      label: 'Roughness',
+      value: roughnessValue,
+      highlight: true,
+      keys: ['surface_roughness', 'substrate_roughness', 'probe_roughness', 'material'],
+      fieldId: reviewFields.value.some((field) => field.id === 'surface_roughness') ? 'surface_roughness' : 'material',
+      optional: true,
+    }),
   ]
 }
 
@@ -1279,25 +2431,368 @@ function recordCanApprove(record: TribologyData | null | undefined, remoteFields
   const fieldMap = resolveRecordFieldEvidenceMap(record, remoteFields)
   if (extractorType === 'diffusion') {
     const baseReady = ['system_name', 'ionic_liquid']
-      .every((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) !== 'Missing')
+      .every((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) === 'Grounded')
     const coefficientReady = ['d_total', 'd_cation', 'd_anion']
-      .some((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) !== 'Missing')
-    return baseReady && coefficientReady
+      .some((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) === 'Grounded')
+    if (!baseReady || !coefficientReady) return false
+    return flaggedRequiredFieldKeys(record, remoteFields).length === 0
+  }
+  const hasMissingRequired = requiredTribologyFieldKeys(record)
+    .some((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) !== 'Grounded')
+  if (hasMissingRequired) return false
+  return flaggedRequiredFieldKeys(record, remoteFields).length === 0
+}
+
+function missingRequiredFieldLabels(record: TribologyData | null | undefined, remoteFields?: Record<string, FieldEvidenceEntry> | null) {
+  if (!record) return []
+  const extractorType = recordExtractorType(record)
+  const fieldMap = resolveRecordFieldEvidenceMap(record, remoteFields)
+  if (extractorType === 'diffusion') {
+    const labels: string[] = []
+    for (const key of ['system_name', 'ionic_liquid']) {
+      if (resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) !== 'Grounded') {
+        labels.push(key === 'system_name' ? 'System' : 'Ionic Liquid')
+      }
+    }
+    const coefficientMissing = ['d_total', 'd_cation', 'd_anion']
+      .every((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) !== 'Grounded')
+    if (coefficientMissing) labels.push('Diffusion Coefficient')
+    return labels
   }
   return requiredTribologyFieldKeys(record)
-    .every((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) !== 'Missing')
+    .filter((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType)) !== 'Grounded')
+    .map((key) => tribologyFieldLabel(key))
+}
+
+function recordApprovalBlockedReason(record: TribologyData | null | undefined, remoteFields?: Record<string, FieldEvidenceEntry> | null) {
+  if (!record || recordCanApprove(record, remoteFields)) return ''
+
+  const missingLabels = missingRequiredFieldLabels(record, remoteFields)
+  if (missingLabels.length) {
+    return `完成前需补齐证据字段：${missingLabels.join('、')}`
+  }
+
+  const flaggedLabels = flaggedRequiredFieldKeys(record, remoteFields).map((key) => {
+    if (key === 'system_name') return 'System'
+    if (key === 'ionic_liquid') return 'Ionic Liquid'
+    if (key === 'diffusion_coefficient') return 'Diffusion Coefficient'
+    return tribologyFieldLabel(key)
+  })
+  if (flaggedLabels.length) {
+    return `完成前需先处理已标记字段：${flaggedLabels.join('、')}`
+  }
+
+  return '当前记录仍有未完成的审核字段。'
+}
+
+const approvalBlockedReason = computed(() => {
+  return recordApprovalBlockedReason(activeRecord.value, activeRecordFieldEvidence.value?.fields)
+})
+
+function usesRecordReviewEndpoint(record: TribologyData | null | undefined) {
+  return recordExtractorType(record) === 'tribology' && reviewRecordEntityType(record) === 'record'
+}
+
+async function confirmReviewFieldPayload(record: TribologyData, fieldId: string) {
+  const recordId = Number(record.id || '')
+  if (recordExtractorType(record) === 'diffusion') {
+    return confirmDiffusionCandidateFieldEvidence(recordId, fieldId)
+  }
+  return usesRecordReviewEndpoint(record)
+    ? confirmRecordFieldEvidence(recordId, fieldId)
+    : confirmCandidateFieldEvidence(recordId, fieldId)
+}
+
+async function flagReviewFieldPayload(record: TribologyData, fieldId: string, note: string) {
+  const recordId = Number(record.id || '')
+  if (recordExtractorType(record) === 'diffusion') {
+    return flagDiffusionCandidateFieldEvidence(recordId, fieldId, note)
+  }
+  return usesRecordReviewEndpoint(record)
+    ? flagRecordFieldEvidence(recordId, fieldId, note)
+    : flagCandidateFieldEvidence(recordId, fieldId, note)
+}
+
+async function approveReviewRecordPayload(record: TribologyData) {
+  const recordId = Number(record.id || '')
+  if (recordExtractorType(record) === 'diffusion') {
+    return approveDiffusionReviewCandidate(recordId)
+  }
+  return usesRecordReviewEndpoint(record)
+    ? approveReviewRecord(recordId)
+    : approveReviewCandidate(recordId)
+}
+
+function openCofEditor(record: TribologyData) {
+  const current = cofExtractedForRecord(record) || {
+    raw_text: record.cof || '',
+    value_type: 'single',
+    cof_min: null,
+    cof_max: null,
+    cof_average: null,
+    dependent_variable: null,
+    test_condition_value: null,
+  }
+  cofEditRecord.value = record
+  cofEditJson.value = JSON.stringify(current, null, 2)
+  cofEditError.value = ''
+}
+
+function closeCofEditor() {
+  cofEditRecord.value = null
+  cofEditJson.value = ''
+  cofEditError.value = ''
+}
+
+function openLoadEditor(record: TribologyData) {
+  const current = loadConditionsForRecord(record) || {
+    raw_text: record.load || '',
+    value_type: 'unstated',
+    system_total_load_N: null,
+    contact_load_per_unit_N: null,
+    contact_unit_type: null,
+    load_min_N: null,
+    load_max_N: null,
+  }
+  loadEditRecord.value = record
+  loadEditRawText.value = trim(current.raw_text ?? current.rawText ?? record.load)
+  const systemTotal = current.system_total_load_N ?? current.systemTotalLoadN
+  const contactLoad = current.contact_load_per_unit_N ?? current.contactLoadPerUnitN
+  loadEditSystemTotal.value = systemTotal == null ? '' : String(systemTotal)
+  loadEditContactLoad.value = contactLoad == null ? '' : String(contactLoad)
+  loadEditContactUnit.value = trim(current.contact_unit_type ?? current.contactUnitType)
+  loadEditError.value = ''
+}
+
+function closeLoadEditor() {
+  loadEditRecord.value = null
+  loadEditRawText.value = ''
+  loadEditSystemTotal.value = ''
+  loadEditContactLoad.value = ''
+  loadEditContactUnit.value = ''
+  loadEditError.value = ''
+}
+
+function openSpeedEditor(record: TribologyData) {
+  const current = speedConditionsForRecord(record) || {
+    raw_text: record.speed || '',
+    value_type: 'linear',
+    sliding_velocity_um_s: null,
+    scan_rate_hz: null,
+    scan_length_um: null,
+    unit_warning: false,
+  }
+  speedEditRecord.value = record
+  speedEditRawText.value = trim(current.raw_text ?? current.rawText ?? record.speed)
+  const sliding = current.sliding_velocity_um_s ?? current.slidingVelocityUmS
+  const rate = current.scan_rate_hz ?? current.scanRateHz
+  const length = current.scan_length_um ?? current.scanLengthUm
+  speedEditSliding.value = sliding == null ? '' : String(sliding)
+  speedEditRate.value = rate == null ? '' : String(rate)
+  speedEditLength.value = length == null ? '' : String(length)
+  speedEditError.value = ''
+}
+
+function closeSpeedEditor() {
+  speedEditRecord.value = null
+  speedEditRawText.value = ''
+  speedEditSliding.value = ''
+  speedEditRate.value = ''
+  speedEditLength.value = ''
+  speedEditError.value = ''
+}
+
+function openSystemEditor(record: TribologyData) {
+  const current = tribologicalSystemForRecord(record) || {
+    raw_text: record.regime || '',
+    friction_regime: 'unstated',
+    contact_geometry: null,
+    scale: null,
+  }
+  systemEditRecord.value = record
+  systemEditRawText.value = trim(current.raw_text ?? current.rawText ?? record.regime)
+  systemEditFrictionRegime.value = trim(current.friction_regime ?? current.frictionRegime) || 'unstated'
+  systemEditContactGeometry.value = trim(current.contact_geometry ?? current.contactGeometry)
+  systemEditScale.value = trim(current.scale)
+  systemEditError.value = ''
+}
+
+function closeSystemEditor() {
+  systemEditRecord.value = null
+  systemEditRawText.value = ''
+  systemEditFrictionRegime.value = 'unstated'
+  systemEditContactGeometry.value = ''
+  systemEditScale.value = ''
+  systemEditError.value = ''
+}
+
+async function saveCofEditor() {
+  const record = cofEditRecord.value
+  const recordId = Number(record?.id || '')
+  if (!record || !Number.isFinite(recordId)) return
+  let parsed: CofExtracted
+  try {
+    parsed = JSON.parse(cofEditJson.value)
+  } catch {
+    cofEditError.value = 'JSON 格式不正确。'
+    return
+  }
+
+  reviewActionPending.value = `cof-edit:${recordId}`
+  cofEditError.value = ''
+  reviewActionError.value = ''
+  try {
+    const payload = usesRecordReviewEndpoint(record)
+      ? await updateReviewRecordCofExtracted(recordId, parsed)
+      : await updateReviewCandidateCofExtracted(recordId, parsed)
+    ;(record as any).cof_extracted = parsed
+    record.cof = trim(parsed.raw_text || parsed.rawText || record.cof)
+    applyReviewResponse(payload)
+    closeCofEditor()
+  } catch (error: any) {
+    cofEditError.value = String(error?.response?.data?.detail || error?.message || '保存 COF 结构失败')
+  } finally {
+    reviewActionPending.value = null
+  }
+}
+
+async function saveLoadEditor() {
+  const record = loadEditRecord.value
+  const recordId = Number(record?.id || '')
+  if (!record || !Number.isFinite(recordId)) return
+  const systemTotal = asNumberOrNull(loadEditSystemTotal.value)
+  const contactLoad = asNumberOrNull(loadEditContactLoad.value)
+  if (loadEditSystemTotal.value && systemTotal == null) {
+    loadEditError.value = '系统载荷必须是数字，单位固定为 N。'
+    return
+  }
+  if (loadEditContactLoad.value && contactLoad == null) {
+    loadEditError.value = '单点载荷必须是数字，单位固定为 N。'
+    return
+  }
+  const current = loadConditionsForRecord(record)
+  const parsed: LoadConditions = {
+    raw_text: loadEditRawText.value || record.load || '',
+    value_type: systemTotal != null && contactLoad != null
+      ? 'composite'
+      : current?.value_type || current?.valueType || 'single',
+    system_total_load_N: systemTotal,
+    contact_load_per_unit_N: contactLoad,
+    contact_unit_type: loadEditContactUnit.value || null,
+    load_min_N: current?.load_min_N ?? current?.loadMinN ?? contactLoad ?? systemTotal,
+    load_max_N: current?.load_max_N ?? current?.loadMaxN ?? contactLoad ?? systemTotal,
+  }
+
+  reviewActionPending.value = `load-edit:${recordId}`
+  loadEditError.value = ''
+  reviewActionError.value = ''
+  try {
+    const payload = usesRecordReviewEndpoint(record)
+      ? await updateReviewRecordLoadConditions(recordId, parsed)
+      : await updateReviewCandidateLoadConditions(recordId, parsed)
+    ;(record as any).load_conditions = parsed
+    record.load = trim(parsed.raw_text || parsed.rawText || record.load)
+    applyReviewResponse(payload)
+    closeLoadEditor()
+  } catch (error: any) {
+    loadEditError.value = String(error?.response?.data?.detail || error?.message || '保存载荷结构失败')
+  } finally {
+    reviewActionPending.value = null
+  }
+}
+
+async function saveSpeedEditor() {
+  const record = speedEditRecord.value
+  const recordId = Number(record?.id || '')
+  if (!record || !Number.isFinite(recordId)) return
+  const slidingInput = asNumberOrNull(speedEditSliding.value)
+  const rate = asNumberOrNull(speedEditRate.value)
+  const length = asNumberOrNull(speedEditLength.value)
+  if (speedEditSliding.value && slidingInput == null) {
+    speedEditError.value = '滑移速度必须是数字，单位固定为 μm/s。'
+    return
+  }
+  if (speedEditRate.value && rate == null) {
+    speedEditError.value = '扫描频率必须是数字，单位固定为 Hz。'
+    return
+  }
+  if (speedEditLength.value && length == null) {
+    speedEditError.value = '扫描长度必须是数字，单位固定为 μm。'
+    return
+  }
+  const derivedSliding = slidingInput ?? (rate != null && length != null ? Number((2 * length * rate).toPrecision(12)) : null)
+  const parsed: SpeedConditions = {
+    raw_text: speedEditRawText.value || record.speed || '',
+    value_type: rate != null && length != null && slidingInput == null
+      ? 'derived'
+      : derivedSliding != null
+        ? 'linear'
+        : rate != null
+          ? 'scan_rate'
+          : 'unknown',
+    sliding_velocity_um_s: derivedSliding,
+    scan_rate_hz: rate,
+    scan_length_um: length,
+    unit_warning: rate != null && derivedSliding == null,
+    calculation: rate != null && length != null && slidingInput == null ? `v = 2 x ${length} μm x ${rate} Hz` : null,
+  }
+
+  reviewActionPending.value = `speed-edit:${recordId}`
+  speedEditError.value = ''
+  reviewActionError.value = ''
+  try {
+    const payload = usesRecordReviewEndpoint(record)
+      ? await updateReviewRecordSpeedConditions(recordId, parsed)
+      : await updateReviewCandidateSpeedConditions(recordId, parsed)
+    ;(record as any).speed_conditions = parsed
+    record.speed = derivedSliding != null ? `${derivedSliding} μm/s` : ''
+    applyReviewResponse(payload)
+    closeSpeedEditor()
+  } catch (error: any) {
+    speedEditError.value = String(error?.response?.data?.detail || error?.message || '保存速度结构失败')
+  } finally {
+    reviewActionPending.value = null
+  }
+}
+
+async function saveSystemEditor() {
+  const record = systemEditRecord.value
+  const recordId = Number(record?.id || '')
+  if (!record || !Number.isFinite(recordId)) return
+  const parsed: TribologicalSystem = {
+    raw_text: systemEditRawText.value || record.regime || '',
+    friction_regime: systemEditFrictionRegime.value || 'unstated',
+    contact_geometry: systemEditContactGeometry.value || null,
+    scale: systemEditScale.value || null,
+  }
+
+  reviewActionPending.value = `system-edit:${recordId}`
+  systemEditError.value = ''
+  reviewActionError.value = ''
+  try {
+    const payload = usesRecordReviewEndpoint(record)
+      ? await updateReviewRecordTribologicalSystem(recordId, parsed)
+      : await updateReviewCandidateTribologicalSystem(recordId, parsed)
+    ;(record as any).tribological_system = parsed
+    record.regime = trim(parsed.raw_text || parsed.rawText || record.regime)
+    applyReviewResponse(payload)
+    closeSystemEditor()
+  } catch (error: any) {
+    systemEditError.value = String(error?.response?.data?.detail || error?.message || '保存测试机制结构失败')
+  } finally {
+    reviewActionPending.value = null
+  }
 }
 
 async function handleConfirmField(field: ReviewField) {
-  const recordId = Number(activeRecord.value?.id || '')
-  if (!field.canConfirm || !Number.isFinite(recordId)) return
+  const record = activeRecord.value
+  const recordId = Number(record?.id || '')
+  if (!record || !field.canConfirm || !Number.isFinite(recordId)) return
 
   reviewActionPending.value = `confirm:${recordId}:${field.id}`
   reviewActionError.value = ''
   try {
-    const payload = activeExtractorType.value === 'diffusion'
-      ? await confirmDiffusionCandidateFieldEvidence(recordId, field.id)
-      : await confirmCandidateFieldEvidence(recordId, field.id)
+    const payload = await confirmReviewFieldPayload(record, field.id)
     applyReviewResponse(payload)
   } catch (error: any) {
     reviewActionError.value = String(error?.response?.data?.detail || error?.message || 'Failed to confirm field')
@@ -1307,16 +2802,15 @@ async function handleConfirmField(field: ReviewField) {
 }
 
 async function handleFlagActiveField(fieldId?: string) {
-  const recordId = Number(activeRecord.value?.id || '')
+  const record = activeRecord.value
+  const recordId = Number(record?.id || '')
   const targetFieldId = fieldId || activeField.value?.id
-  if (!targetFieldId || !Number.isFinite(recordId)) return
+  if (!record || !targetFieldId || !Number.isFinite(recordId)) return
 
   reviewActionPending.value = `flag:${recordId}:${targetFieldId}`
   reviewActionError.value = ''
   try {
-    const payload = activeExtractorType.value === 'diffusion'
-      ? await flagDiffusionCandidateFieldEvidence(recordId, targetFieldId, 'Flagged from review UI')
-      : await flagCandidateFieldEvidence(recordId, targetFieldId, 'Flagged from review UI')
+    const payload = await flagReviewFieldPayload(record, targetFieldId, 'Flagged from review UI')
     applyReviewResponse(payload)
   } catch (error: any) {
     reviewActionError.value = String(error?.response?.data?.detail || error?.message || 'Failed to flag field')
@@ -1336,9 +2830,7 @@ async function handleApproveRecord(record?: TribologyData | null) {
   reviewActionPending.value = `approve:${recordId}`
   reviewActionError.value = ''
   try {
-    const payload = activeExtractorType.value === 'diffusion'
-      ? await approveDiffusionReviewCandidate(recordId)
-      : await approveReviewCandidate(recordId)
+    const payload = await approveReviewRecordPayload(target)
     applyReviewResponse(payload)
   } catch (error: any) {
     reviewActionError.value = String(error?.response?.data?.detail || error?.message || 'Failed to approve record')
@@ -1350,7 +2842,7 @@ async function handleApproveRecord(record?: TribologyData | null) {
 async function handleApproveAll() {
   if (!canApproveAllVisible.value) return
 
-  if (visibleRecordItems.value.length === 1) {
+  if (visibleRecordCount.value === 1) {
     await handleApproveRecord(visibleRecordItems.value[0]?.record || null)
     return
   }
@@ -1362,9 +2854,7 @@ async function handleApproveAll() {
       if (!recordCanApprove(item.record)) {
         throw new Error(`Record ${item.label} is missing required evidence`)
       }
-      const payload = activeExtractorType.value === 'diffusion'
-        ? await approveDiffusionReviewCandidate(Number(item.record.id))
-        : await approveReviewCandidate(Number(item.record.id))
+      const payload = await approveReviewRecordPayload(item.record)
       applyReviewResponse(payload)
     }
   } catch (error: any) {
@@ -1381,512 +2871,1053 @@ function queueTone(status: QueueItem['status']) {
 }
 
 function queueLabel(status: QueueItem['status']) {
-  if (status === 'confirmed') return 'Confirmed'
-  if (status === 'in_progress') return 'In Progress'
-  return 'Pending'
-}
-
-function recordTone(status: RecordItem['status']) {
-  if (status === 'confirmed') return 'border-[#e4ebf5] bg-white opacity-80 hover:opacity-100'
-  if (status === 'warning') return 'border-[#eadfca] bg-white opacity-95'
-  return 'border-[#e4ebf5] bg-white opacity-80 hover:opacity-100'
+  if (status === 'confirmed') return '已完成'
+  if (status === 'in_progress') return '处理中'
+  return '待审'
 }
 
 function recordBadge(status: RecordItem['status']) {
-  if (status === 'confirmed') return { label: 'Confirmed', className: 'bg-[#e8fff2] text-[#0b9d63]' }
-  if (status === 'warning') return { label: 'Needs Review', className: 'bg-[#fff4da] text-[#c97a00]' }
-  return { label: 'In Review', className: 'bg-[#edf2ff] text-[#3d56d2]' }
+  if (status === 'confirmed') return { label: '已确认', className: 'bg-[#e8fff2] text-[#0b9d63]' }
+  if (status === 'warning') return { label: '需关注', className: 'bg-[#fff4da] text-[#c97a00]' }
+  return { label: '待审核', className: 'bg-[#edf2ff] text-[#3d56d2]' }
 }
 
-function fieldTone(field: ReviewField) {
+function fieldRowTone(field: ReviewField) {
   if (field.id === activeFieldId.value) return 'border-[#b8c1ff] bg-[#fbfcff] ring-1 ring-[#c5cbff]'
-  if (field.status === 'confirmed') return 'border-[#e5ebf4] bg-white'
-  if (field.status === 'low_conf') return 'border-[#f1ddbd] bg-white'
-  return 'border-[#e5ebf4] bg-white'
+  if (field.status === 'low_conf') return 'border-[#f1ddbd] bg-white hover:border-[#dcc89e]'
+  if (field.status === 'confirmed') return 'border-[#e5ebf4] bg-white opacity-90 hover:opacity-100'
+  return 'border-[#e5ebf4] bg-white hover:border-[#cdd5e2]'
 }
 
-function issueTone(severity: QueueIssue['severity']) {
-  return severity === 'high'
-    ? 'border-[#ffd4da] bg-[#fff5f6] text-[#ef3958]'
-    : 'border-[#ffe8c7] bg-[#fffbf4] text-[#b97113]'
+function confidenceText(confidence: ReviewField['confidence']) {
+  if (confidence === 'High') return '高'
+  if (confidence === 'Medium') return '中'
+  return '低'
+}
+
+function sourceTypeLabel(sourceType: ReviewField['sourceType']) {
+  if (sourceType === 'figure') return '图'
+  if (sourceType === 'table') return '表'
+  if (sourceType === 'calculation') return '计算'
+  if (sourceType === 'text') return '正文'
+  return '推断'
+}
+
+function presentZh(value: string) {
+  return value === 'Not captured yet' ? '尚未提取' : value
 }
 </script>
 
+
 <template>
   <div class="flex h-full min-h-0 flex-col gap-3 overflow-hidden bg-[#f1f5f9] p-3">
-    <section class="shell-surface px-4 py-3.5 sm:px-5">
-      <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div class="flex flex-wrap items-center gap-2">
-          <button
-            v-for="tab in reviewTabs"
-            :key="tab.key"
-            type="button"
-            class="inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-sm font-semibold transition"
-            :class="currentSection === tab.key
-              ? 'border-transparent bg-[#101b29] text-white shadow-[0_16px_34px_-24px_rgba(15,23,42,0.9)]'
-              : 'border-black/8 bg-white text-slate-600 hover:bg-[#f8fbff] hover:text-slate-900'"
-            @click="emit('change-section', tab.key)"
-          >
-            {{ tab.label }}
-          </button>
-        </div>
+    <!-- ─── 顶部状态条 ─────────────────────────────────────────────── -->
+    <section class="shell-surface flex flex-wrap items-center gap-3 px-4 py-2.5 sm:px-5">
+      <button
+        type="button"
+        class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[0.6rem] border border-[#e2e8f0] bg-white text-slate-500 transition hover:bg-[#f8fbff] hover:text-slate-800"
+        :title="inboxCollapsed ? '展开文献列表' : '收起文献列表'"
+        @click="inboxCollapsed = !inboxCollapsed"
+      >
+        <ChevronsRight v-if="inboxCollapsed" class="h-4 w-4" />
+        <ChevronsLeft v-else class="h-4 w-4" />
+      </button>
 
-        <div class="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            class="inline-flex items-center rounded-full border border-black/8 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-[#f8fbff]"
-            @click="emit('open-pipeline')"
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-2">
+          <FileText class="h-4 w-4 shrink-0 text-[#7d8eaa]" />
+          <h1 class="truncate text-[0.95rem] font-semibold text-slate-900">
+            {{ activeDocumentName }}
+          </h1>
+          <span
+            v-if="documentTotal"
+            class="shrink-0 rounded-full bg-[#edf2ff] px-2.5 py-0.5 text-xs font-semibold text-[#3d56d2]"
           >
-            Back To Pipeline
-          </button>
-          <button
-            type="button"
-            class="inline-flex items-center rounded-full border border-black/8 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-[#f8fbff]"
-            @click="emit('open-knowledge')"
+            待审 {{ documentPending }} / {{ documentTotal }}
+          </span>
+          <span
+            v-if="documentLowConfidence"
+            class="shrink-0 rounded-full bg-[#fff4da] px-2.5 py-0.5 text-xs font-semibold text-[#c97a00]"
           >
-            Open Knowledge
-          </button>
+            低置信度 {{ documentLowConfidence }}
+          </span>
+          <span
+            v-if="documentMissingEvidence"
+            class="shrink-0 rounded-full bg-[#fff5f6] px-2.5 py-0.5 text-xs font-semibold text-[#cf334f]"
+          >
+            缺证据 {{ documentMissingEvidence }}
+          </span>
         </div>
       </div>
+
+      <div class="flex shrink-0 items-center gap-1.5">
+        <button
+          type="button"
+          class="inline-flex items-center gap-1 rounded-[0.6rem] border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[#f8fbff] hover:text-slate-900"
+          :disabled="!hasPrevRecord"
+          title="上一条"
+          @click="gotoPrevRecord"
+        >
+          <ChevronLeft class="h-3.5 w-3.5" />
+          上一条
+        </button>
+        <span v-if="activeRecordIndex >= 0" class="text-xs font-medium text-slate-500 tabular-nums">
+          {{ activeRecordIndex + 1 }} / {{ visibleRecordCount }}
+        </span>
+        <button
+          type="button"
+          class="inline-flex items-center gap-1 rounded-[0.6rem] border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[#f8fbff] hover:text-slate-900"
+          :disabled="!hasNextRecord"
+          title="下一条"
+          @click="gotoNextRecord"
+        >
+          下一条
+          <ChevronRight class="h-3.5 w-3.5" />
+        </button>
+
+        <span class="mx-2 h-5 w-px bg-[#e2e8f0]" />
+
+        <button
+          type="button"
+          class="inline-flex items-center gap-1.5 rounded-[0.6rem] border border-[#bfdbfe] bg-[#eff6ff] px-3 py-1.5 text-xs font-semibold text-[#1d4ed8] transition hover:border-[#93c5fd] hover:bg-[#dbeafe] disabled:cursor-not-allowed disabled:border-[#dbeafe] disabled:bg-[#f8fbff] disabled:text-slate-400"
+          :disabled="!canReextractCurrentFile"
+          title="对当前文献强制重新提取，重新生成候选记录和字段证据"
+          @click="handleReextractCurrentFile"
+        >
+          <Loader2 v-if="reviewActionPending === 'reextract'" class="h-3.5 w-3.5 animate-spin" />
+          <RefreshCw v-else class="h-3.5 w-3.5" />
+          {{ reviewActionPending === 'reextract' ? '提取中' : '重新提取' }}
+        </button>
+
+        <button
+          type="button"
+          class="inline-flex items-center gap-1.5 rounded-[0.6rem] bg-[#5b56ea] px-3.5 py-1.5 text-xs font-semibold text-white shadow-[0_10px_24px_-18px_rgba(91,86,234,0.85)] transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3] disabled:shadow-none"
+          :disabled="!canApproveAllVisible || reviewActionPending === 'approve-all'"
+          @click="handleApproveAll"
+        >
+          <Loader2 v-if="reviewActionPending === 'approve-all'" class="h-3.5 w-3.5 animate-spin" />
+          <CheckCheck v-else class="h-3.5 w-3.5" />
+          {{ visibleRecordCount === 1 ? '确认本条' : '全部确认' }}
+        </button>
+
+        <button
+          type="button"
+          class="inline-flex items-center gap-1 rounded-[0.6rem] border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-[#f8fbff] hover:text-slate-900"
+          @click="emit('open-pipeline')"
+        >
+          返回提取
+        </button>
+        <button
+          type="button"
+          class="inline-flex items-center gap-1 rounded-[0.6rem] border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-[#f8fbff] hover:text-slate-900"
+          @click="emit('open-knowledge')"
+        >
+          打开知识库
+        </button>
+      </div>
+
+      <p
+        v-if="reviewActionError"
+        class="basis-full rounded-[0.6rem] border border-[#ffd4da] bg-[#fff5f6] px-3 py-1.5 text-xs text-[#cf334f]"
+      >
+        {{ reviewActionError }}
+      </p>
+      <p
+        v-else-if="approvalBlockedReason"
+        class="basis-full rounded-[0.6rem] border border-[#f1ddbd] bg-[#fffaf0] px-3 py-1.5 text-xs text-[#9a5b00]"
+      >
+        {{ approvalBlockedReason }}
+      </p>
     </section>
 
-    <div :class="reviewGridClass">
-      <aside class="min-h-0 overflow-hidden rounded-[1.65rem] border border-[#e2e8f0] bg-[#eef3f9]">
-        <div class="border-b border-[#dfe7f1] px-5 py-5">
-          <div class="flex items-center justify-between gap-3">
-            <p class="text-[11px] font-bold uppercase tracking-[0.24em] text-[#8fa0ba]">LITERATURE INBOX</p>
-            <span class="inline-flex h-7 min-w-7 items-center justify-center rounded-[0.55rem] bg-[#dfe6f2] px-2 text-sm font-semibold text-[#5e6b84]">
-              {{ queueItems.length }}
+    <!-- ─── 主区：左 文献列表 / 中 PDF / 右 数据卡片 ──────────── -->
+    <div
+      class="grid min-h-0 flex-1 gap-3"
+      :class="inboxCollapsed
+        ? 'xl:grid-cols-[3rem_minmax(0,1fr)_24rem]'
+        : 'xl:grid-cols-[15rem_minmax(0,1fr)_24rem]'"
+    >
+      <!-- ── 左：文献列表 ──────────────────────────────── -->
+      <aside
+        v-if="!inboxCollapsed"
+        class="flex min-h-0 flex-col overflow-hidden rounded-[1.25rem] border border-[#e2e8f0] bg-white"
+      >
+        <div class="border-b border-[#eef2f6] px-3 py-3">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">文献列表</p>
+            <span class="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-md bg-[#eef2ff] px-1.5 text-[11px] font-semibold text-[#5061d1]">
+              {{ queueItemCount }}
             </span>
           </div>
-
-          <div class="mt-3 relative">
-            <Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <div class="relative mt-2">
+            <Search class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
             <input
               v-model="query"
               type="text"
-              class="h-10 w-full rounded-[0.85rem] border border-[#dde5ef] bg-white pl-9 pr-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-[#b7c6ef]"
-              placeholder="Filter documents..."
+              class="h-8 w-full rounded-[0.55rem] border border-[#e2e8f0] bg-white pl-7 pr-2 text-xs text-slate-700 outline-none placeholder:text-slate-400 focus:border-[#b7c6ef]"
+              placeholder="搜索文献..."
             >
           </div>
-
-          <label class="mt-4 inline-flex items-center gap-2 text-sm font-medium text-slate-700">
-            <input v-model="prioritizeLowConfidence" type="checkbox" class="h-4 w-4 rounded border-slate-300 text-[#ef3958] focus:ring-[#ef3958]">
-            Prioritize Low Confidence
+          <label class="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-600">
+            <input
+              v-model="prioritizeLowConfidence"
+              type="checkbox"
+              class="h-3.5 w-3.5 rounded border-slate-300 text-[#5b56ea] focus:ring-[#5b56ea]"
+            >
+            优先显示低置信度
           </label>
         </div>
 
-        <div class="min-h-0 space-y-2 overflow-y-auto px-4 py-4">
+        <div class="min-h-0 flex-1 space-y-1.5 overflow-y-auto custom-scrollbar p-2">
           <button
             v-for="item in queueItems"
             :key="item.id"
             type="button"
-            class="w-full rounded-[1.15rem] border bg-white px-4 py-4 text-left shadow-[0_10px_28px_-26px_rgba(15,23,42,0.28)] transition"
+            class="w-full rounded-[0.75rem] border px-2.5 py-2 text-left transition"
             :class="item.selected
-              ? 'border-[#aebdfc] ring-1 ring-[#aebdfc]/30'
-              : 'border-[#e5ebf4] opacity-85 hover:border-[#d8e0eb] hover:opacity-100'"
+              ? 'border-[#aebdfc] bg-[#f5f7ff] ring-1 ring-[#aebdfc]/40'
+              : 'border-[#eef2f6] bg-white hover:border-[#d8e0eb] hover:bg-[#f8fbff]'"
             @click="item.id !== 'empty' && emit('select-file', item.id)"
           >
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <p class="line-clamp-2 text-[0.98rem] font-semibold leading-6 tracking-[-0.03em]" :class="item.selected ? 'text-[#2c3ea8]' : 'text-slate-800'">{{ item.name }}</p>
-              </div>
-              <AlertTriangle v-if="item.alert" class="mt-1 h-4 w-4 shrink-0 text-[#f5a623]" />
+            <div class="flex items-start justify-between gap-1.5">
+              <p
+                class="line-clamp-2 text-xs font-semibold leading-snug"
+                :class="item.selected ? 'text-[#2c3ea8]' : 'text-slate-800'"
+              >
+                {{ item.name }}
+              </p>
+              <AlertTriangle v-if="item.alert" class="mt-0.5 h-3 w-3 shrink-0 text-[#f5a623]" />
             </div>
-
-            <div class="mt-3 flex items-center gap-2">
-              <span class="inline-flex rounded-[0.5rem] px-2 py-1 text-[0.72rem] font-bold uppercase tracking-[0.14em]" :class="queueTone(item.status)">
+            <div class="mt-1.5 flex flex-wrap items-center gap-1">
+              <span
+                class="inline-flex rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
+                :class="queueTone(item.status)"
+              >
                 {{ queueLabel(item.status) }}
               </span>
-              <span class="text-xs text-slate-500">{{ item.recordCount }} records</span>
-            </div>
-
-            <div class="mt-4 grid grid-cols-3 gap-2 border-t border-[#edf1f6] pt-3 text-[10px] uppercase tracking-[0.14em] text-[#8ea2c0]">
-              <div>
-                <p>Pending</p>
-                <p class="mt-1 text-sm font-semibold normal-case tracking-normal text-slate-950">{{ item.pendingCount }}</p>
-              </div>
-              <div>
-                <p>Low Conf</p>
-                <p class="mt-1 text-sm font-semibold normal-case tracking-normal text-slate-950">{{ item.lowConfidenceCount }}</p>
-              </div>
-              <div>
-                <p>No Evidence</p>
-                <p class="mt-1 text-sm font-semibold normal-case tracking-normal text-slate-950">{{ item.missingEvidenceCount }}</p>
-              </div>
+              <span class="text-[10px] text-slate-500">{{ item.recordCount }} 条</span>
+              <span
+                v-if="item.lowConfidenceCount + item.missingEvidenceCount"
+                class="text-[10px] font-semibold text-[#cf334f]"
+              >
+                {{ item.lowConfidenceCount + item.missingEvidenceCount }} 待处理
+              </span>
             </div>
           </button>
         </div>
       </aside>
 
-      <div :class="reviewWorkspaceClass">
-      <section class="self-start overflow-hidden rounded-[1.8rem] border border-[#e2e8f0] bg-white shadow-[0_18px_40px_-32px_rgba(15,23,42,0.22)]">
-        <div class="border-b border-[#eef2f6] px-6 py-5">
-          <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-            <div class="min-w-0">
-              <h2 class="max-w-[22ch] text-[2rem] font-semibold leading-[1.03] tracking-[-0.06em] text-slate-950">
-                {{ reviewTitle }}
-              </h2>
-              <p class="mt-3 text-[11px] font-bold uppercase tracking-[0.24em] text-[#8fa0ba]">
-                {{ reviewKicker }} <span class="text-[#93a2ba]">• {{ modeSummary }}</span>
-              </p>
-            </div>
+      <aside
+        v-else
+        class="flex min-h-0 flex-col items-center gap-1.5 overflow-y-auto rounded-[1.25rem] border border-[#e2e8f0] bg-white py-3"
+      >
+        <button
+          v-for="item in queueItems"
+          :key="item.id"
+          type="button"
+          class="relative flex h-8 w-8 items-center justify-center rounded-[0.55rem] text-[10px] font-bold uppercase transition"
+          :class="item.selected
+            ? 'bg-[#5b56ea] text-white'
+            : 'bg-[#f1f5f9] text-slate-500 hover:bg-[#e2e8f0]'"
+          :title="item.name"
+          @click="item.id !== 'empty' && emit('select-file', item.id)"
+        >
+          {{ item.name.slice(0, 2) }}
+          <span
+            v-if="item.alert"
+            class="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-[#f5a623] ring-2 ring-white"
+          />
+        </button>
+      </aside>
 
-            <div class="flex shrink-0 items-center gap-2">
-              <button
-                type="button"
-                class="inline-flex items-center gap-2 rounded-[0.85rem] border border-[#d9e2ef] bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-[#f8fbff]"
-                :disabled="!activeField"
-                @click="() => handleFlagActiveField()"
-              >
-                <Flag class="h-4 w-4" />
-                Escalate
-              </button>
-              <button
-                type="button"
-                class="inline-flex items-center gap-2 rounded-[0.85rem] px-5 py-2.5 text-sm font-semibold transition"
-                :class="canApproveAllVisible
-                  ? 'bg-[#5b56ea] text-white shadow-[0_18px_36px_-24px_rgba(91,86,234,0.85)] hover:bg-[#4c47d9]'
-                  : 'cursor-not-allowed bg-[#d7ddf7] text-white/80'"
-                :disabled="!canApproveAllVisible || reviewActionPending === 'approve-all'"
-                @click="handleApproveAll"
-              >
-                <CheckCheck class="h-4 w-4" />
-                {{ visibleRecordItems.length === 1 ? 'Approve Record' : 'Approve All' }}
-              </button>
-            </div>
+      <!-- ── 中：PDF 内联预览 ──────────────────────── -->
+      <section class="flex min-h-0 flex-col overflow-hidden rounded-[1.25rem] border border-[#e2e8f0] bg-white">
+        <div class="flex items-center justify-between border-b border-[#eef2f6] px-4 py-2.5">
+          <div class="flex items-center gap-2">
+            <FileText class="h-4 w-4 text-[#7d8eaa]" />
+            <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">原文预览</p>
+            <span
+              v-if="activeField"
+              class="rounded-md bg-[#f5f7ff] px-2 py-0.5 text-[11px] font-medium text-[#5061d1]"
+            >
+              当前字段：{{ activeField.label }}
+            </span>
           </div>
-          <p
-            v-if="reviewActionError"
-            class="mt-3 rounded-[0.8rem] border border-[#ffd4da] bg-[#fff5f6] px-3 py-2 text-sm text-[#cf334f]"
+          <a
+            v-if="pdfUrl"
+            :href="pdfUrl"
+            target="_blank"
+            rel="noreferrer"
+            class="inline-flex items-center gap-1 text-[11px] font-medium text-[#5b56ea] transition hover:text-[#403bcb]"
           >
-            {{ reviewActionError }}
-          </p>
+            新窗口打开
+            <ExternalLink class="h-3 w-3" />
+          </a>
         </div>
 
-        <div class="space-y-5 bg-white px-6 py-4">
-          <section class="rounded-[1.2rem] border border-[#eef2f6] bg-[#f8fafc]">
-            <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div class="px-4 pt-4">
-                <div class="flex items-center gap-2">
-                  <Database class="h-4 w-4 text-[#7d8eaa]" />
-                  <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#6c84aa]">Record Rail</p>
-                </div>
-              </div>
-
-              <div class="flex flex-wrap items-center gap-1 rounded-[0.8rem] bg-[#edf2f7] p-1 lg:mr-4 lg:mt-4">
-                <button
-                  type="button"
-                  class="inline-flex items-center rounded-[0.65rem] px-3 py-1.5 text-sm font-semibold transition"
-                  :class="onlyPendingRecords ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
-                  @click="onlyPendingRecords = !onlyPendingRecords"
-                >
-                  Only Pending
-                </button>
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1 rounded-[0.65rem] px-3 py-1.5 text-sm font-semibold transition"
-                  :class="onlyLowConfidenceRecords ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'"
-                  @click="onlyLowConfidenceRecords = !onlyLowConfidenceRecords"
-                >
-                  Low Confidence
-                </button>
-              </div>
-            </div>
-
-            <div class="mt-4 flex gap-3 overflow-x-auto px-4 pb-4 custom-scrollbar">
-              <button
-                v-for="item in visibleRecordItems"
-                :key="item.id"
-                type="button"
-                class="shrink-0 min-w-[14.5rem] rounded-[1rem] border p-4 text-left transition"
-                :class="item.id === activeRecordItem?.id
-                  ? 'scale-[1.02] border-[#8c96ff] bg-white shadow-[0_16px_36px_-28px_rgba(91,86,234,0.45)] ring-1 ring-[#8c96ff]/20'
-                  : recordTone(item.status)"
-                @click="activeRecordId = item.id"
-              >
-                <div class="flex items-start justify-between gap-3">
-                  <div>
-                    <p class="text-[11px] font-bold uppercase tracking-[0.18em]" :class="item.id === activeRecordItem?.id ? 'text-[#5b56ea]' : 'text-[#9aa8bc]'">{{ item.label }}</p>
-                    <p class="mt-2 text-base font-semibold text-slate-950">{{ item.title }}</p>
-                    <p class="mt-1 text-sm text-slate-500">{{ item.subtitle }}</p>
-                  </div>
-                  <span class="inline-flex rounded-[0.5rem] px-2 py-1 text-[0.7rem] font-bold uppercase tracking-[0.14em]" :class="recordBadge(item.status).className">
-                    {{ recordBadge(item.status).label }}
-                  </span>
-                </div>
-
-                <div class="mt-4 text-sm text-slate-700">
-                  <span class="font-medium">{{ item.metricLabel }}</span> {{ item.metricValue }}
-                </div>
-
-                <div class="mt-4 flex flex-wrap gap-2">
-                  <span
-                    v-if="item.lowConfidence"
-                    class="inline-flex rounded-full bg-[#fff4da] px-2.5 py-1 text-xs font-semibold text-[#c97a00]"
-                  >
-                    Low confidence
-                  </span>
-                  <span
-                    v-if="item.missingEvidence"
-                    class="inline-flex rounded-full bg-[#fff1f3] px-2.5 py-1 text-xs font-semibold text-[#ef3958]"
-                  >
-                    Missing evidence
-                  </span>
-                </div>
-                <div v-if="item.id === activeRecordItem?.id" class="mt-4 h-1 w-10 rounded-full bg-[#5b56ea]" />
-              </button>
-
-              <div
-                v-if="!visibleRecordItems.length"
-                class="flex min-h-[10rem] min-w-full items-center justify-center rounded-[1rem] border border-dashed border-[#dbe4f2] bg-white text-sm text-slate-500"
-              >
-                No records match the current review filters.
-              </div>
-            </div>
-          </section>
-
-          <section
-            v-if="currentSection === 'queue'"
-            class="space-y-3"
-          >
-            <div class="flex items-center justify-between gap-3">
-              <div>
-                <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#6c84aa]">Issue Queue</p>
-                <p class="mt-2 text-sm text-slate-500">
-                  These items still block confirmation for the selected literature file.
-                </p>
-              </div>
-              <span class="inline-flex rounded-full bg-[#eef2ff] px-3 py-1 text-sm font-semibold text-[#5061d1]">
-                {{ queueIssues.length }}
-              </span>
-            </div>
-
-            <article
-              v-for="issue in queueIssues"
-              :key="issue.id"
-              class="rounded-[1.1rem] border px-4 py-4"
-              :class="issueTone(issue.severity)"
-              @click="activeRecordId = issue.recordId"
-            >
-              <div class="flex items-start justify-between gap-4">
-                <div class="min-w-0">
-                  <p class="text-[11px] font-semibold uppercase tracking-[0.18em]">{{ issue.recordLabel }} | {{ issue.fieldLabel }}</p>
-                  <p class="mt-3 text-base font-semibold text-slate-950">{{ issue.value }}</p>
-                  <p class="mt-2 text-sm">{{ issue.detail }}</p>
-                </div>
-                <AlertTriangle class="mt-1 h-4 w-4 shrink-0" />
-              </div>
-            </article>
-
-            <div
-              v-if="!queueIssues.length"
-              class="rounded-[1rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] px-4 py-5 text-sm text-slate-500"
-            >
-              No blocking issues remain for the current literature file.
-            </div>
-          </section>
-
-          <section v-else class="space-y-4">
-            <div class="flex items-center justify-between gap-3">
-              <div>
-                <h3 class="text-[1.05rem] font-bold text-slate-900">
-                  {{ activeRecordItem ? `${activeRecordItem.label} Review` : 'Record Review' }}
-                </h3>
-              </div>
-              <div class="flex flex-wrap items-center gap-3 text-[11px] font-bold uppercase tracking-[0.16em] text-[#9aa8bc]">
-                <span class="text-[#d38a11]">{{ documentStats.lowConfidence }} Low Conf</span>
-                <span class="text-[#d5dbe6]">|</span>
-                <span>{{ documentStats.missingEvidence }} No Evidence</span>
-              </div>
-            </div>
-
-            <article
-              v-for="field in reviewFields"
-              :key="field.id"
-              class="relative cursor-pointer overflow-hidden rounded-[1.2rem] border p-5 shadow-[0_12px_24px_-24px_rgba(15,23,42,0.18)] transition"
-              :class="fieldTone(field)"
-              @click="activeFieldId = field.id"
-            >
-              <div v-if="field.id === activeFieldId" class="absolute inset-y-0 left-0 w-1 bg-[#5b56ea]" />
-              <div class="flex items-start justify-between gap-4">
-                <div class="min-w-0 pl-1">
-                  <div class="flex flex-wrap items-center gap-2">
-                    <p class="text-[11px] font-bold uppercase tracking-[0.24em]" :class="field.id === activeFieldId ? 'text-[#5b56ea]' : 'text-[#7f90aa]'">{{ field.label }}</p>
-                    <span
-                      v-if="field.confidence !== 'High'"
-                      class="h-2.5 w-2.5 rounded-full"
-                      :class="field.confidence === 'Low' ? 'bg-[#f05f6f]' : 'bg-[#f0b544]'"
-                    />
-                  </div>
-                  <p class="mt-4 text-[1.85rem] font-semibold tracking-[-0.04em] text-slate-950">{{ field.value }}</p>
-                  <p class="mt-3 flex items-center gap-1.5 text-[12px] text-[#8a98ad]">
-                    <FileText class="h-3.5 w-3.5" />
-                    {{ field.sourceType }} | {{ field.location }}
-                  </p>
-                </div>
-
-                <div class="flex shrink-0 items-center gap-1 text-slate-400" :class="field.id === activeFieldId ? 'opacity-100' : 'opacity-45'">
-                  <button type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-[0.6rem] transition hover:bg-slate-100 hover:text-slate-700">
-                    <Pencil class="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    class="inline-flex h-8 w-8 items-center justify-center rounded-[0.6rem] transition hover:bg-slate-100 hover:text-slate-700"
-                    @click.stop="activeFieldId = field.id; handleFlagActiveField(field.id)"
-                  >
-                    <Flag class="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    class="ml-1 inline-flex items-center rounded-[0.75rem] border px-3.5 py-2 text-sm font-bold uppercase tracking-[0.12em] transition"
-                    :class="field.canConfirm
-                      ? (field.id === activeFieldId ? 'border-[#5b56ea] bg-[#5b56ea] text-white hover:bg-[#4c47d9]' : 'border-[#dbe2eb] bg-white text-slate-500 hover:border-[#cdd5e2] hover:text-slate-700')
-                      : 'cursor-not-allowed border-[#e5e7eb] bg-[#f8fafc] text-slate-300'"
-                    :disabled="!field.canConfirm || reviewActionPending === `confirm:${Number(activeRecord?.id || '')}:${field.id}`"
-                    @click.stop="handleConfirmField(field)"
-                  >
-                    Confirm
-                  </button>
-                </div>
-              </div>
-
-              <div
-                v-if="field.issue"
-                class="mt-4 rounded-[0.85rem] border border-[#ffd4da] bg-[#fff5f6] px-3.5 py-3 text-sm text-[#ef3958]"
-              >
-                {{ field.issue }}
-              </div>
-            </article>
-          </section>
+        <div class="min-h-0 flex-1 overflow-hidden bg-[#f8fafc]">
+          <PdfViewerWithHighlight
+            v-if="pdfUrl"
+            :key="pdfUrl"
+            :src="pdfUrl"
+            :highlights="recordHighlights"
+            :active-id="activeHighlightId"
+            @highlight-click="handleHighlightClick"
+          />
+          <div v-else class="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+            <FileText class="h-12 w-12 text-slate-300" />
+            <p class="text-sm font-semibold text-slate-700">暂无可预览的 PDF</p>
+            <p class="text-xs text-slate-500">从左侧文献列表选择一篇已提取的论文，即可在此查看原文与高亮。</p>
+          </div>
         </div>
       </section>
 
-      <aside class="sticky top-0 self-start overflow-hidden rounded-[1.8rem] border border-[#e2e8f0] bg-white shadow-[0_18px_40px_-32px_rgba(15,23,42,0.22)]">
-        <div class="border-b border-[#eef2f6] bg-[#f8fafc] px-5 py-4">
-          <div class="flex items-center justify-between gap-3">
-            <div class="flex items-center gap-2">
-              <Quote class="h-4 w-4 text-[#8ea2c0]" />
-              <p class="text-[11px] font-bold uppercase tracking-[0.24em] text-[#8ea2c0]">Evidence Inspector</p>
-            </div>
-            <a
-              v-if="pdfUrl"
-              :href="pdfUrl"
-              target="_blank"
-              rel="noreferrer"
-              class="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-[0.14em] text-[#5b56ea] transition hover:text-[#403bcb]"
+      <!-- ── 右：数据卡片 ──────────────────────────── -->
+      <aside class="flex min-h-0 flex-col overflow-hidden rounded-[1.25rem] border border-[#e2e8f0] bg-white">
+        <div class="border-b border-[#eef2f6] px-4 py-2.5">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">提取记录</p>
+            <span class="text-[11px] font-medium text-slate-500">{{ visibleRecordCount }} / {{ recordItemCount }}</span>
+          </div>
+          <div class="mt-2 flex flex-wrap items-center gap-1">
+            <button
+              type="button"
+              class="rounded-[0.5rem] px-2 py-1 text-[11px] font-semibold transition"
+              :class="onlyPendingRecords ? 'bg-[#101b29] text-white' : 'bg-[#f1f5f9] text-slate-600 hover:bg-[#e2e8f0]'"
+              @click="onlyPendingRecords = !onlyPendingRecords"
             >
-              Jump To PDF
-              <ExternalLink class="h-3.5 w-3.5" />
-            </a>
-            <Search v-else class="h-4 w-4 text-slate-400" />
+              只看待审
+            </button>
+            <button
+              type="button"
+              class="rounded-[0.5rem] px-2 py-1 text-[11px] font-semibold transition"
+              :class="onlyLowConfidenceRecords ? 'bg-[#101b29] text-white' : 'bg-[#f1f5f9] text-slate-600 hover:bg-[#e2e8f0]'"
+              @click="onlyLowConfidenceRecords = !onlyLowConfidenceRecords"
+            >
+              只看低置信度
+            </button>
           </div>
         </div>
 
-        <div class="space-y-6 px-5 py-6">
-          <div>
-            <p class="text-[11px] font-bold uppercase tracking-[0.22em] text-[#8ea2c0]">Focus Field</p>
-            <p class="mt-2 text-[1.8rem] font-bold tracking-[-0.04em] text-[#2f3ea5]">
-              {{ activeFieldDisplayLabel }}
-            </p>
-          </div>
-
-          <div class="space-y-3 rounded-[1.1rem] border border-[#eef2f6] bg-[#f8fafc] p-4">
-            <div>
-              <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#9aa8bc]">Resolved Value</p>
-              <p class="mt-1 text-[1.05rem] font-semibold text-slate-900">{{ activeField?.value || 'Not captured yet' }}</p>
-            </div>
-            <div class="h-px w-full bg-[#e6ebf2]" />
-            <dl class="grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#9aa8bc]">Evidence Type</dt>
-                <dd class="mt-1 font-medium text-slate-700">{{ activeField?.sourceType || 'inferred' }}</dd>
-              </div>
-              <div>
-                <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#9aa8bc]">Location</dt>
-                <dd class="mt-1 font-medium text-slate-700">{{ activeField?.location || `Scope ${activeScopeLabel}` }}</dd>
-              </div>
-              <div>
-                <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#9aa8bc]">Source Label</dt>
-                <dd class="mt-1 font-medium text-slate-700">{{ activeFieldEvidenceEntry?.evidence?.source_label || 'Not linked yet' }}</dd>
-              </div>
-              <div>
-                <dt class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#9aa8bc]">{{ evidenceSecondaryLabel }}</dt>
-                <dd class="mt-1 font-medium text-slate-700">{{ evidenceSecondaryValue }}</dd>
-              </div>
-            </dl>
-          </div>
-
-          <div>
-            <p class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#8ea2c0]">
-              <FileText class="h-3.5 w-3.5" />
-              Evidence Preview
-            </p>
-            <div class="relative mt-3 rounded-[1.15rem] border border-[#f2e5bf] bg-[#fff8e8] p-5">
-              <p class="font-serif text-[1.03rem] leading-10 text-[#39455c]" v-html="highlightedExcerpt" />
-              <Quote class="pointer-events-none absolute bottom-2 right-2 h-10 w-10 rotate-180 text-[#7b5d18]/10" />
-            </div>
-          </div>
-
-          <div v-if="evidenceImageUrl || evidencePagePreviewUrl">
-            <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8ea2c0]">PDF Crop Preview</p>
-            <div class="mt-3 space-y-3">
-              <div
-                v-if="evidenceImageUrl"
-                class="overflow-hidden rounded-[1rem] border border-[#e4e9f2] bg-[#f8fafc]"
-              >
-                <img :src="evidenceImageUrl" alt="Evidence crop preview" class="max-h-[18rem] w-full object-contain bg-white" />
-              </div>
-              <div
-                v-if="evidencePagePreviewUrl"
-                class="overflow-hidden rounded-[1rem] border border-[#e4e9f2] bg-[#f8fafc]"
-              >
-                <img :src="evidencePagePreviewUrl" alt="Evidence page preview" class="max-h-[18rem] w-full object-contain bg-white" />
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8ea2c0]">Evidence Hits</p>
-            <div class="mt-3 space-y-2">
-              <div
-                v-for="hit in evidenceHits"
-                :key="hit.id"
-                class="rounded-[0.95rem] border border-[#e4e9f2] bg-white px-3.5 py-3 text-sm text-slate-600"
-              >
-                <p class="font-semibold text-slate-900">{{ hit.label }}</p>
-                <p class="mt-1 text-sm text-slate-500">{{ hit.meta }}</p>
-              </div>
-              <div
-                v-if="!evidenceHits.length"
-                class="rounded-[0.95rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] px-3.5 py-3 text-sm text-slate-500"
-              >
-                No grounded evidence is attached to the active field yet.
-              </div>
-            </div>
-          </div>
-
-          <div class="rounded-[1rem] border border-[#e4e9f2] bg-white p-4">
-            <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8ea2c0]">PDF Preview</p>
-            <p class="mt-3 text-sm text-slate-600">
-              {{ pdfUrl
-                ? `Open the linked PDF and inspect ${activeField?.location || 'the referenced source'}.`
-                : 'No PDF is linked yet. Grounding is currently limited to extracted evidence text.' }}
-            </p>
-            <a
-              v-if="pdfUrl"
-              :href="pdfUrl"
-              target="_blank"
-              rel="noreferrer"
-              class="mt-4 inline-flex items-center gap-2 rounded-[0.8rem] border border-[#d9e2ef] bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-[#f8fbff]"
+        <div class="min-h-0 flex-1 space-y-2 overflow-y-auto custom-scrollbar p-3">
+          <article
+            v-for="item in visibleRecordItems"
+            :key="item.id"
+            class="relative rounded-[0.95rem] border transition hover:z-10"
+            :class="item.id === activeRecordId
+              ? 'border-[#aebdfc] bg-white shadow-[0_12px_28px_-22px_rgba(91,86,234,0.45)] ring-1 ring-[#aebdfc]/50 z-10'
+              : 'border-[#eef2f6] bg-white hover:border-[#d8e0eb]'"
+          >
+            <button
+              type="button"
+              class="flex w-full items-start justify-between gap-3 px-3.5 py-3 text-left"
+              :aria-expanded="isRecordExpanded(item.id)"
+              :title="isRecordExpanded(item.id) ? '收起记录详情' : '展开记录详情'"
+              @click="toggleRecordItem(item)"
             >
-              Open PDF
-              <ExternalLink class="h-4 w-4" />
-            </a>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[11px] font-bold uppercase tracking-[0.16em] text-[#7f90aa]">{{ item.label }}</span>
+                  <span
+                    class="rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
+                    :class="recordBadge(item.status).className"
+                  >
+                    {{ recordBadge(item.status).label }}
+                  </span>
+                </div>
+                <div class="mt-1">
+                  <p class="truncate text-sm font-bold text-slate-900">
+                    <span v-if="item.titleIsIonicLiquid" v-html="item.titleHtml" />
+                    <span v-else>{{ item.title }}</span>
+                  </p>
+                  <div
+                    v-if="item.titleTooltip"
+                    class="mt-2 flex flex-col gap-1.5 border-l-[1.5px] border-[#c7d2fe]/70 pl-2.5"
+                  >
+                    <div
+                      v-for="(part, i) in item.titleTooltip.split(';')"
+                      :key="i"
+                      class="flex items-baseline"
+                    >
+                      <template v-if="part.includes('=')">
+                        <span class="text-[10px] font-bold text-[#334155]">{{ part.split('=').slice(1).join('=').trim() }}</span>
+                      </template>
+                      <template v-else-if="part.includes(':')">
+                        <span class="text-[9.5px] font-medium text-[#64748b]">{{ (part.split(':')[0] || '').trim() }}</span>
+                        <div class="mx-1.5 flex-1 border-b-[1.5px] border-dotted border-[#cbd5e1]/60"></div>
+                        <span class="text-[10px] font-semibold tabular-nums text-[#0f172a]">{{ part.split(':').slice(1).join(':').trim() }}</span>
+                      </template>
+                      <template v-else>
+                        <span class="text-[9.5px] font-medium text-[#64748b]">{{ part.trim() }}</span>
+                      </template>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="item.probe || item.substrate" class="mt-2.5 flex items-center gap-1.5 rounded-[0.45rem] bg-[#f8fafc] px-2 py-1.5 border border-[#e2e8f0]/60">
+                  <div class="flex h-4 w-4 shrink-0 items-center justify-center rounded-[0.25rem] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] border border-[#e2e8f0]">
+                    <Layers class="h-2.5 w-2.5 text-slate-400" />
+                  </div>
+                  <div class="flex min-w-0 flex-1 items-center gap-1.5 truncate">
+                    <span v-if="item.probe" class="truncate text-[10px] font-bold text-slate-700" title="Probe / Pin">{{ item.probe }}</span>
+                    <span v-if="item.probe && item.substrate" class="shrink-0 text-[10px] font-black text-slate-300">/</span>
+                    <span v-if="item.substrate" class="truncate text-[10px] font-medium text-slate-500" title="Substrate / Disk">{{ item.substrate }}</span>
+                  </div>
+                </div>
+                <div v-else-if="item.subtitle" class="mt-2.5 flex items-center gap-1.5 rounded-[0.45rem] bg-[#f8fafc] px-2 py-1.5 border border-[#e2e8f0]/60">
+                  <div class="flex h-4 w-4 shrink-0 items-center justify-center rounded-[0.25rem] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)] border border-[#e2e8f0]">
+                    <Layers class="h-2.5 w-2.5 text-slate-400" />
+                  </div>
+                  <p class="truncate text-[10px] font-medium text-slate-600">
+                    {{ item.subtitle }}
+                  </p>
+                </div>
+                <p class="mt-1.5 text-xs">
+                  <span class="font-bold uppercase tracking-[0.12em] text-[#7f90aa]">{{ item.metricLabel }}</span>
+                  <span class="ml-1.5 font-semibold text-slate-900">{{ item.metricValue }}</span>
+                </p>
+                <div v-if="item.metricTags.length" class="mt-1.5 flex flex-wrap gap-1.5">
+                  <span
+                    v-for="tag in item.metricTags"
+                    :key="`${item.id}-${tag.label}`"
+                    class="inline-flex items-center overflow-hidden rounded-[0.45rem] border border-[#dce5ef] bg-white text-[9.5px] shadow-[0_2px_4px_-2px_rgba(0,0,0,0.03)]"
+                  >
+                    <span class="bg-[#f4f7fb] px-1.5 py-[2px] font-bold text-[#667793] border-r border-[#dce5ef]/60">{{ tag.label }}</span>
+                    <span class="px-1.5 py-[2px] font-bold text-[#334155]">{{ tag.value }}</span>
+                  </span>
+                </div>
+              </div>
+              <div class="flex shrink-0 items-start gap-1.5">
+                <button
+                  type="button"
+                  class="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-[#5b56ea] px-2.5 text-[10px] font-bold normal-case tracking-normal text-white transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3]"
+                  :disabled="!recordCanApprove(item.record, activeRecordFieldEvidence?.fields) || reviewActionPending === `approve:${Number(item.record.id || '')}`"
+                  :title="recordApprovalBlockedReason(item.record, activeRecordFieldEvidence?.fields) || '确认这条 Record 下所有字段'"
+                  @click.stop="handleApproveRecord(item.record)"
+                >
+                  <Loader2
+                    v-if="reviewActionPending === `approve:${Number(item.record.id || '')}`"
+                    class="h-3 w-3 animate-spin"
+                  />
+                  <CheckCheck v-else class="h-3 w-3" />
+                  确认本条
+                </button>
+                <ChevronDown
+                  class="mt-1.5 h-4 w-4 shrink-0 text-slate-400 transition"
+                  :class="isRecordExpanded(item.id) ? 'rotate-180 text-[#5b56ea]' : ''"
+                />
+              </div>
+            </button>
+
+            <!-- 展开：字段列表 -->
+            <div v-if="isRecordExpanded(item.id)" class="border-t border-[#eef2f6] bg-[#fbfcff] px-3 py-2.5 rounded-b-[0.95rem]">
+              <div
+                v-if="recordExtractorType(item.record) === 'tribology'"
+                class="mb-2"
+              >
+                <div class="flex items-center justify-between px-1 pb-1.5">
+                  <div class="flex items-center gap-1.5">
+                    <Layers class="h-3.5 w-3.5 text-[#087443]" />
+                    <span class="text-[10px] font-black uppercase tracking-[0.16em] text-[#7f90aa]">TRIBOPAIR</span>
+                  </div>
+                  <span
+                    v-if="!trim(item.record.probe_material) && !trim(item.record.substrate_material)"
+                    class="rounded-full bg-[#fff7ed] px-1.5 py-0.5 text-[9px] font-bold text-[#c2410c]"
+                  >
+                    Legacy
+                  </span>
+                </div>
+
+                <div class="flex flex-col gap-[1px] overflow-hidden rounded-[0.6rem] border border-[#eef2f6] bg-[#eef2f6]">
+                  <button
+                    v-for="part in buildTribopairReviewParts(item.record, activeRecordFieldEvidence?.fields)"
+                    :key="part.id"
+                    type="button"
+                    class="group flex min-h-[44px] items-center gap-3 px-3 py-2 text-left transition"
+                    :class="[
+                      part.highlight ? 'bg-[#fffdf5] hover:bg-[#fff9e6]' : 'bg-[#fbfdff] hover:bg-[#f2f7fd]'
+                    ]"
+                    :title="`${part.label}: ${part.value}${part.meta ? ' · ' + part.meta : ''} · ${part.sourceLabel}`"
+                    @click="activeFieldId = part.fieldId"
+                  >
+                    <span
+                      class="w-[72px] shrink-0 text-[10px] font-black uppercase tracking-[0.11em]"
+                      :class="part.highlight ? 'text-[#b45309]' : 'text-[#8fa0ba]'"
+                    >
+                      {{ part.label }}
+                    </span>
+                    
+                    <div class="flex min-w-0 flex-1 flex-col justify-center">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span
+                          class="truncate font-bold"
+                          :class="[
+                            part.value === '未提取' ? 'text-slate-400' : 'text-slate-900',
+                            part.highlight ? 'text-[14px] text-[#92400e]' : 'text-xs'
+                          ]"
+                        >
+                          {{ part.value }}
+                        </span>
+                        
+                        <span
+                          v-if="part.roughness"
+                          role="button"
+                          tabindex="0"
+                          class="inline-flex shrink-0 items-center gap-1 rounded-[4px] border px-1.5 py-0.5 text-[9px] font-bold transition hover:brightness-95 focus:outline-none focus:ring-2 focus:ring-[#b8c1ff]"
+                          :class="roughnessPillClass(part)"
+                          :title="`${part.roughnessFieldId === 'probe_roughness' ? 'Probe roughness' : 'Substrate roughness'}: ${part.roughness}${part.roughnessSourceLabel ? ' · ' + part.roughnessSourceLabel : ''}`"
+                          @click.stop="activeFieldId = part.roughnessFieldId || part.fieldId"
+                          @keydown.enter.stop.prevent="activeFieldId = part.roughnessFieldId || part.fieldId"
+                          @keydown.space.stop.prevent="activeFieldId = part.roughnessFieldId || part.fieldId"
+                        >
+                          <span>{{ part.roughness }}</span>
+                          <span v-if="part.roughnessStatusLabel" class="opacity-80">· {{ part.roughnessStatusLabel }}</span>
+                        </span>
+
+                        <span
+                          class="shrink-0 rounded-[4px] border px-1 py-0.5 text-[8px] font-bold leading-none"
+                          :class="part.statusClass"
+                        >
+                          {{ part.statusLabel }}
+                        </span>
+                      </div>
+                      <div class="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[9.5px] leading-4 text-slate-500">
+                        <span v-if="part.meta" class="min-w-0 max-w-full break-words whitespace-normal">{{ part.meta }}</span>
+                        <span v-if="part.meta && part.sourceLabel !== '非必填层'" class="text-slate-300">|</span>
+                        <span
+                          v-if="part.sourceLabel !== '非必填层'"
+                          class="min-w-0 max-w-full break-words whitespace-normal"
+                          :class="part.highlight ? 'text-[#b45309]/70' : 'text-[#7f90aa]'"
+                        >
+                          {{ part.sourceLabel }}
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              <p
+                v-if="!visibleReviewFields.length"
+                class="rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-white px-3 py-3 text-xs text-slate-500"
+              >
+                此记录暂无可审核字段。
+              </p>
+              <div v-else class="space-y-1.5">
+                <button
+                  v-for="field in visibleReviewFields"
+                  :key="field.id"
+                  type="button"
+                  class="group w-full rounded-[0.7rem] border px-3 py-2 text-left transition"
+                  :class="fieldRowTone(field)"
+                  @click="activeFieldId = field.id"
+                >
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-1.5">
+                        <span
+                          class="text-[10px] font-bold uppercase tracking-[0.14em]"
+                          :class="field.id === activeFieldId ? 'text-[#5b56ea]' : 'text-[#7f90aa]'"
+                        >{{ field.label }}</span>
+                        <span
+                          v-if="field.confidence !== 'High'"
+                          class="rounded px-1 py-0.5 text-[9px] font-semibold"
+                          :class="field.confidence === 'Low' ? 'bg-[#fff5f6] text-[#cf334f]' : 'bg-[#fff4da] text-[#b97113]'"
+                        >
+                          置信度{{ confidenceText(field.confidence) }}
+                        </span>
+                        <span
+                          v-if="structuredTagsForField(field, item.record).length && field.locationMode === 'inferred'"
+                          class="rounded bg-[#f3f0ff] px-1 py-0.5 text-[9px] font-semibold text-[#6d28d9]"
+                        >推断</span>
+                        <span
+                          v-else-if="structuredTagsForField(field, item.record).length && (field.locationMode === 'source' || field.locationMode === 'record')"
+                          class="rounded bg-[#eef2ff] px-1 py-0.5 text-[9px] font-semibold text-[#4f46e5]"
+                        >原文来源</span>
+                        <span
+                          v-else-if="field.evidenceStatus === 'Missing'"
+                          class="rounded bg-[#fff5f6] px-1 py-0.5 text-[9px] font-semibold text-[#cf334f]"
+                        >缺证据</span>
+                        <span
+                          v-else-if="field.evidenceStatus === 'Partial'"
+                          class="rounded bg-[#fff5f6] px-1 py-0.5 text-[9px] font-semibold text-[#cf334f]"
+                        >缺定位</span>
+                        <button
+                          v-if="field.id === 'cof' && cofStructuredTags(item.record).length"
+                          type="button"
+                          class="inline-flex h-5 shrink-0 items-center rounded-md border border-[#c7d2fe] bg-white px-1.5 text-[9px] font-bold text-[#4f46e5] transition hover:bg-[#eef2ff]"
+                          title="编辑结构化 COF"
+                          @click.stop="openCofEditor(item.record)"
+                        >
+                          结构化编辑
+                        </button>
+                        <button
+                          v-if="field.id === 'load' && loadStructuredTags(item.record).length"
+                          type="button"
+                          class="inline-flex h-5 shrink-0 items-center rounded-md border border-[#c7d2fe] bg-white px-1.5 text-[9px] font-bold text-[#4f46e5] transition hover:bg-[#eef2ff]"
+                          title="编辑结构化载荷"
+                          @click.stop="openLoadEditor(item.record)"
+                        >
+                          结构化编辑
+                        </button>
+                        <button
+                          v-if="field.id === 'speed' && speedStructuredTags(item.record).length"
+                          type="button"
+                          class="inline-flex h-5 shrink-0 items-center rounded-md border border-[#c7d2fe] bg-white px-1.5 text-[9px] font-bold text-[#4f46e5] transition hover:bg-[#eef2ff]"
+                          title="编辑结构化速度"
+                          @click.stop="openSpeedEditor(item.record)"
+                        >
+                          结构化编辑
+                        </button>
+                        <button
+                          v-if="field.id === 'regime' && regimeStructuredTags(item.record).length"
+                          type="button"
+                          class="inline-flex h-5 shrink-0 items-center rounded-md border border-[#c7d2fe] bg-white px-1.5 text-[9px] font-bold text-[#4f46e5] transition hover:bg-[#eef2ff]"
+                          title="编辑结构化测试机制"
+                          @click.stop="openSystemEditor(item.record)"
+                        >
+                          结构化编辑
+                        </button>
+                      </div>
+                      <p
+                        v-if="!structuredTagsForField(field, item.record).length"
+                        class="mt-1 truncate text-sm font-semibold text-slate-900"
+                        :title="field.tooltip || presentZh(field.value)"
+                      >
+                        <span v-if="field.id === 'ionic_liquid'" v-html="formatIonicLiquidHtml(presentZh(field.value))" />
+                        <span v-else>{{ presentZh(field.value) }}</span>
+                      </p>
+                      <div v-else class="mt-1.5 grid gap-1.5">
+                        <div
+                          v-for="tag in structuredTagsForField(field, item.record)"
+                          :key="`field-${field.id}-${tag.label}`"
+                          role="button"
+                          tabindex="0"
+                          class="group/tag rounded-[0.55rem] border border-[#dce5ef] bg-white px-2 py-1.5 shadow-[0_2px_4px_-2px_rgba(0,0,0,0.03)] transition hover:border-[#b8c1ff] hover:bg-[#fbfcff]"
+                          :title="structuredSubfieldTitle(field)"
+                          @click.stop="activeFieldId = field.id"
+                          @keydown.enter.stop.prevent="activeFieldId = field.id"
+                          @keydown.space.stop.prevent="activeFieldId = field.id"
+                        >
+                          <div class="flex min-w-0 flex-wrap items-center gap-1.5 text-[10px]">
+                            <span class="rounded-[0.35rem] bg-[#f4f7fb] px-1.5 py-[2px] font-bold text-[#667793]">{{ tag.label }}</span>
+                            <span class="min-w-0 break-words font-bold text-[#334155]">{{ tag.value }}</span>
+                          </div>
+                          <p
+                            v-if="shouldShowStructuredSubfieldLocation(field)"
+                            class="mt-1 truncate text-[9.5px] font-semibold"
+                            :class="structuredFieldLocationClass(field)"
+                          >
+                            定位：{{ structuredFieldLocation(field) }}
+                          </p>
+                        </div>
+                      </div>
+                      <p class="mt-1 flex min-w-0 items-center gap-1.5 truncate text-[11px] text-slate-500">
+                        <span>来源：</span>
+                        <span
+                          v-if="field.groundingMode === 'inferred' || field.sourceType === 'inferred'"
+                          class="inline-flex shrink-0 rounded-md border border-[#c4b5fd] bg-[#f3f0ff] px-1.5 py-0.5 text-[10px] font-bold text-[#5b21b6]"
+                        >
+                          推断
+                        </span>
+                        <span v-else>{{ sourceTypeLabel(field.sourceType) }}</span>
+                        <span class="shrink-0 text-slate-300">·</span>
+                        <span class="truncate">{{ field.location }}</span>
+                      </p>
+                      <p
+                        v-if="field.issue && field.id === activeFieldId"
+                        class="mt-1.5 rounded-[0.4rem] bg-[#fff5f6] px-2 py-1 text-[11px] text-[#cf334f]"
+                      >
+                        {{ field.issue }}
+                      </p>
+                    </div>
+
+                    <div
+                      class="flex shrink-0 items-center gap-0.5 transition"
+                      :class="field.id === activeFieldId ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'"
+                    >
+                      <button
+                        type="button"
+                        class="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-[#fff5f6] hover:text-[#cf334f]"
+                        title="标记存疑"
+                        @click.stop="handleFlagActiveField(field.id)"
+                      >
+                        <Flag class="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        class="inline-flex h-7 w-7 items-center justify-center rounded-md transition disabled:cursor-not-allowed disabled:text-slate-300"
+                        :class="field.canConfirm
+                          ? 'text-[#5b56ea] hover:bg-[#eef2ff]'
+                          : ''"
+                        :disabled="!field.canConfirm || reviewActionPending === `confirm:${Number(activeRecord?.id || '')}:${field.id}`"
+                        title="确认本字段"
+                        @click.stop="handleConfirmField(field)"
+                      >
+                        <Loader2
+                          v-if="reviewActionPending === `confirm:${Number(activeRecord?.id || '')}:${field.id}`"
+                          class="h-3.5 w-3.5 animate-spin"
+                        />
+                        <Check v-else class="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </button>
+              </div>
+
+              <!-- 当前字段的原文片段 -->
+              <div v-if="evidenceExcerpt" class="mt-3 rounded-[0.7rem] border border-[#f2e5bf] bg-[#fffbf0] p-2.5">
+                <p class="text-[10px] font-bold uppercase tracking-[0.16em] text-[#b97113]">原文片段 · {{ activeField?.label }}</p>
+                <p class="mt-1.5 font-serif text-[12.5px] leading-6 text-[#4a5568]" v-html="highlightedExcerpt" />
+                <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500">
+                  <span v-if="activeField?.location">📍 {{ activeField.location }}</span>
+                  <span v-if="activeFieldSourceLabel">📑 {{ activeFieldSourceLabel }}</span>
+                  <span v-if="evidenceSecondaryValue !== '尚未关联'">🔗 {{ evidenceSecondaryLabel }}：{{ evidenceSecondaryValue }}</span>
+                </div>
+                <p
+                  v-if="activeField?.groundingMode === 'derived' && activeField.groundingNote"
+                  class="mt-2 rounded-[0.45rem] border border-[#d8e0ff] bg-[#f5f7ff] px-2 py-1.5 text-[11px] text-[#5061d1]"
+                >
+                  推导说明：{{ activeField.groundingNote }}
+                </p>
+              </div>
+
+              <div
+                v-if="evidenceImageUrl || evidencePagePreviewUrl"
+                class="mt-2.5 grid gap-2"
+                :class="evidenceImageUrl && evidencePagePreviewUrl ? 'grid-cols-2' : 'grid-cols-1'"
+              >
+                <img
+                  v-if="evidenceImageUrl"
+                  :src="evidenceImageUrl"
+                  alt="证据截图"
+                  class="max-h-[10rem] w-full rounded-[0.6rem] border border-[#e4e9f2] bg-white object-contain"
+                >
+                <img
+                  v-if="evidencePagePreviewUrl"
+                  :src="evidencePagePreviewUrl"
+                  alt="所在页预览"
+                  class="max-h-[10rem] w-full rounded-[0.6rem] border border-[#e4e9f2] bg-white object-contain"
+                >
+              </div>
+            </div>
+          </article>
+
+          <div
+            v-if="!visibleRecordCount"
+            class="flex min-h-[12rem] flex-col items-center justify-center gap-2 rounded-[0.85rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] px-4 text-center"
+          >
+            <FileText class="h-8 w-8 text-slate-300" />
+            <p class="text-sm font-semibold text-slate-700">
+              {{ recordItemCount ? '当前筛选下无记录' : '尚未选择文献' }}
+            </p>
+            <p class="text-xs text-slate-500">
+              {{ recordItemCount ? '试试关闭筛选条件，或切换其他文献。' : '从左侧选择一篇文献开始审核。' }}
+            </p>
           </div>
         </div>
       </aside>
-      </div>
+    </div>
+
+    <div
+      v-if="cofEditRecord"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4"
+      @click.self="closeCofEditor"
+    >
+      <section class="w-full max-w-2xl overflow-hidden rounded-2xl border border-[#dbe4f2] bg-white shadow-2xl">
+        <div class="border-b border-[#eef2f6] px-5 py-4">
+          <p class="text-[11px] font-black uppercase tracking-[0.18em] text-[#7f90aa]">结构化 COF 编辑</p>
+          <p class="mt-1 text-sm font-semibold text-slate-900">{{ reviewIonicLiquidDisplay(cofEditRecord) }}</p>
+          <p class="mt-1 text-xs text-slate-500">把范围、条件节点或拐点写入 JSON 后再确认记录。</p>
+        </div>
+        <div class="p-5">
+          <textarea
+            v-model="cofEditJson"
+            class="min-h-[18rem] w-full resize-y rounded-xl border border-[#dbe4f2] bg-[#fbfcff] p-3 font-mono text-xs leading-5 text-slate-800 outline-none transition focus:border-[#aebdfc] focus:ring-2 focus:ring-[#dce3ff]"
+            spellcheck="false"
+          />
+          <p v-if="cofEditError" class="mt-2 rounded-lg bg-[#fff5f6] px-3 py-2 text-xs font-semibold text-[#cf334f]">
+            {{ cofEditError }}
+          </p>
+        </div>
+        <div class="flex items-center justify-end gap-2 border-t border-[#eef2f6] px-5 py-3">
+          <button
+            type="button"
+            class="rounded-lg border border-[#dbe4f2] px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-[#f8fafc]"
+            @click="closeCofEditor"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 rounded-lg bg-[#5b56ea] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3]"
+            :disabled="reviewActionPending === `cof-edit:${Number(cofEditRecord?.id || '')}`"
+            @click="saveCofEditor"
+          >
+            <Loader2
+              v-if="reviewActionPending === `cof-edit:${Number(cofEditRecord?.id || '')}`"
+              class="h-3.5 w-3.5 animate-spin"
+            />
+            保存结构
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div
+      v-if="loadEditRecord"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4"
+      @click.self="closeLoadEditor"
+    >
+      <section class="w-full max-w-xl overflow-hidden rounded-2xl border border-[#dbe4f2] bg-white shadow-2xl">
+        <div class="border-b border-[#eef2f6] px-5 py-4">
+          <p class="text-[11px] font-black uppercase tracking-[0.18em] text-[#7f90aa]">结构化载荷编辑</p>
+          <p class="mt-1 text-sm font-semibold text-slate-900">{{ reviewIonicLiquidDisplay(loadEditRecord) }}</p>
+          <p class="mt-1 text-xs text-slate-500">把复合载荷拆成模型可直接读取的 N 单位数值。</p>
+        </div>
+        <div class="grid gap-3 p-5">
+          <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+            原始载荷文本
+            <input
+              v-model="loadEditRawText"
+              class="h-10 rounded-lg border border-[#dbe4f2] bg-[#fbfcff] px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-[#aebdfc] focus:ring-2 focus:ring-[#dce3ff]"
+            >
+          </label>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+              系统载荷
+              <div class="flex overflow-hidden rounded-lg border border-[#dbe4f2] bg-[#fbfcff] focus-within:border-[#aebdfc] focus-within:ring-2 focus-within:ring-[#dce3ff]">
+                <input
+                  v-model="loadEditSystemTotal"
+                  inputmode="decimal"
+                  class="h-10 min-w-0 flex-1 bg-transparent px-3 text-sm font-semibold text-slate-800 outline-none"
+                  placeholder="5"
+                >
+                <span class="flex items-center border-l border-[#dbe4f2] px-3 text-xs font-black text-[#7f90aa]">N</span>
+              </div>
+            </label>
+            <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+              单点载荷
+              <div class="flex overflow-hidden rounded-lg border border-[#dbe4f2] bg-[#fbfcff] focus-within:border-[#aebdfc] focus-within:ring-2 focus-within:ring-[#dce3ff]">
+                <input
+                  v-model="loadEditContactLoad"
+                  inputmode="decimal"
+                  class="h-10 min-w-0 flex-1 bg-transparent px-3 text-sm font-semibold text-slate-800 outline-none"
+                  placeholder="2.36"
+                >
+                <span class="flex items-center border-l border-[#dbe4f2] px-3 text-xs font-black text-[#7f90aa]">N</span>
+              </div>
+            </label>
+          </div>
+          <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+            作用对象
+            <input
+              v-model="loadEditContactUnit"
+              class="h-10 rounded-lg border border-[#dbe4f2] bg-[#fbfcff] px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-[#aebdfc] focus:ring-2 focus:ring-[#dce3ff]"
+              placeholder="pin"
+            >
+          </label>
+          <p v-if="loadEditError" class="rounded-lg bg-[#fff5f6] px-3 py-2 text-xs font-semibold text-[#cf334f]">
+            {{ loadEditError }}
+          </p>
+        </div>
+        <div class="flex items-center justify-end gap-2 border-t border-[#eef2f6] px-5 py-3">
+          <button
+            type="button"
+            class="rounded-lg border border-[#dbe4f2] px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-[#f8fafc]"
+            @click="closeLoadEditor"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 rounded-lg bg-[#5b56ea] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3]"
+            :disabled="reviewActionPending === `load-edit:${Number(loadEditRecord?.id || '')}`"
+            @click="saveLoadEditor"
+          >
+            <Loader2
+              v-if="reviewActionPending === `load-edit:${Number(loadEditRecord?.id || '')}`"
+              class="h-3.5 w-3.5 animate-spin"
+            />
+            保存结构
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div
+      v-if="speedEditRecord"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4"
+      @click.self="closeSpeedEditor"
+    >
+      <section class="w-full max-w-xl overflow-hidden rounded-2xl border border-[#dbe4f2] bg-white shadow-2xl">
+        <div class="border-b border-[#eef2f6] px-5 py-4">
+          <p class="text-[11px] font-black uppercase tracking-[0.18em] text-[#7f90aa]">结构化速度编辑</p>
+          <p class="mt-1 text-sm font-semibold text-slate-900">{{ reviewIonicLiquidDisplay(speedEditRecord) }}</p>
+          <p class="mt-1 text-xs text-slate-500">Hz 只表示扫描频率；只有换算后的线速度才会写入滑移速度字段。</p>
+        </div>
+        <div class="grid gap-3 p-5">
+          <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+            原始速度/扫描文本
+            <input
+              v-model="speedEditRawText"
+              class="h-10 rounded-lg border border-[#dbe4f2] bg-[#fbfcff] px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-[#aebdfc] focus:ring-2 focus:ring-[#dce3ff]"
+            >
+          </label>
+          <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+            滑移线速度
+            <div class="flex overflow-hidden rounded-lg border border-[#dbe4f2] bg-[#fbfcff] focus-within:border-[#aebdfc] focus-within:ring-2 focus-within:ring-[#dce3ff]">
+              <input
+                v-model="speedEditSliding"
+                inputmode="decimal"
+                class="h-10 min-w-0 flex-1 bg-transparent px-3 text-sm font-semibold text-slate-800 outline-none"
+                placeholder="20"
+              >
+              <span class="flex items-center border-l border-[#dbe4f2] px-3 text-xs font-black text-[#7f90aa]">μm/s</span>
+            </div>
+          </label>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+              扫描频率
+              <div class="flex overflow-hidden rounded-lg border border-[#dbe4f2] bg-[#fbfcff] focus-within:border-[#aebdfc] focus-within:ring-2 focus:ring-[#dce3ff]">
+                <input
+                  v-model="speedEditRate"
+                  inputmode="decimal"
+                  class="h-10 min-w-0 flex-1 bg-transparent px-3 text-sm font-semibold text-slate-800 outline-none"
+                  placeholder="2"
+                >
+                <span class="flex items-center border-l border-[#dbe4f2] px-3 text-xs font-black text-[#7f90aa]">Hz</span>
+              </div>
+            </label>
+            <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+              单程扫描长度
+              <div class="flex overflow-hidden rounded-lg border border-[#dbe4f2] bg-[#fbfcff] focus-within:border-[#aebdfc] focus-within:ring-2 focus:ring-[#dce3ff]">
+                <input
+                  v-model="speedEditLength"
+                  inputmode="decimal"
+                  class="h-10 min-w-0 flex-1 bg-transparent px-3 text-sm font-semibold text-slate-800 outline-none"
+                  placeholder="5"
+                >
+                <span class="flex items-center border-l border-[#dbe4f2] px-3 text-xs font-black text-[#7f90aa]">μm</span>
+              </div>
+            </label>
+          </div>
+          <p v-if="speedEditError" class="rounded-lg bg-[#fff5f6] px-3 py-2 text-xs font-semibold text-[#cf334f]">
+            {{ speedEditError }}
+          </p>
+        </div>
+        <div class="flex items-center justify-end gap-2 border-t border-[#eef2f6] px-5 py-3">
+          <button
+            type="button"
+            class="rounded-lg border border-[#dbe4f2] px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-[#f8fafc]"
+            @click="closeSpeedEditor"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 rounded-lg bg-[#5b56ea] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3]"
+            :disabled="reviewActionPending === `speed-edit:${Number(speedEditRecord?.id || '')}`"
+            @click="saveSpeedEditor"
+          >
+            <Loader2
+              v-if="reviewActionPending === `speed-edit:${Number(speedEditRecord?.id || '')}`"
+              class="h-3.5 w-3.5 animate-spin"
+            />
+            保存结构
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div
+      v-if="systemEditRecord"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4"
+      @click.self="closeSystemEditor"
+    >
+      <section class="w-full max-w-xl overflow-hidden rounded-2xl border border-[#dbe4f2] bg-white shadow-2xl">
+        <div class="border-b border-[#eef2f6] px-5 py-4">
+          <p class="text-[11px] font-black uppercase tracking-[0.18em] text-[#7f90aa]">结构化测试机制编辑</p>
+          <p class="mt-1 text-sm font-semibold text-slate-900">{{ reviewIonicLiquidDisplay(systemEditRecord) }}</p>
+          <p class="mt-1 text-xs text-slate-500">把摩擦状态和接触几何拆成可枚举特征。</p>
+        </div>
+        <div class="grid gap-3 p-5">
+          <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+            原始机制文本
+            <input
+              v-model="systemEditRawText"
+              class="h-10 rounded-lg border border-[#dbe4f2] bg-[#fbfcff] px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-[#aebdfc] focus:ring-2 focus:ring-[#dce3ff]"
+            >
+          </label>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+              摩擦状态
+              <select
+                v-model="systemEditFrictionRegime"
+                class="h-10 rounded-lg border border-[#dbe4f2] bg-[#fbfcff] px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-[#aebdfc] focus:ring-2 focus:ring-[#dce3ff]"
+              >
+                <option value="static">static</option>
+                <option value="kinetic">kinetic</option>
+                <option value="boundary">boundary</option>
+                <option value="mixed">mixed</option>
+                <option value="hydrodynamic">hydrodynamic</option>
+                <option value="elastohydrodynamic">elastohydrodynamic</option>
+                <option value="unstated">unstated</option>
+              </select>
+            </label>
+            <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+              接触几何
+              <select
+                v-model="systemEditContactGeometry"
+                class="h-10 rounded-lg border border-[#dbe4f2] bg-[#fbfcff] px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-[#aebdfc] focus:ring-2 focus:ring-[#dce3ff]"
+              >
+                <option value="">未指定</option>
+                <option value="ball_on_disk">ball_on_disk</option>
+                <option value="ball_on_3_pins">ball_on_3_pins</option>
+                <option value="ball_on_plate">ball_on_plate</option>
+                <option value="pin_on_disk">pin_on_disk</option>
+                <option value="four_ball">four_ball</option>
+                <option value="afm_colloidal_probe">afm_colloidal_probe</option>
+              </select>
+            </label>
+          </div>
+          <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+            尺度
+            <select
+              v-model="systemEditScale"
+              class="h-10 rounded-lg border border-[#dbe4f2] bg-[#fbfcff] px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-[#aebdfc] focus:ring-2 focus:ring-[#dce3ff]"
+            >
+              <option value="">未指定</option>
+              <option value="macro">macro</option>
+              <option value="micro">micro</option>
+              <option value="nano">nano</option>
+            </select>
+          </label>
+          <p v-if="systemEditError" class="rounded-lg bg-[#fff5f6] px-3 py-2 text-xs font-semibold text-[#cf334f]">
+            {{ systemEditError }}
+          </p>
+        </div>
+        <div class="flex items-center justify-end gap-2 border-t border-[#eef2f6] px-5 py-3">
+          <button
+            type="button"
+            class="rounded-lg border border-[#dbe4f2] px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-[#f8fafc]"
+            @click="closeSystemEditor"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 rounded-lg bg-[#5b56ea] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3]"
+            :disabled="reviewActionPending === `system-edit:${Number(systemEditRecord?.id || '')}`"
+            @click="saveSystemEditor"
+          >
+            <Loader2
+              v-if="reviewActionPending === `system-edit:${Number(systemEditRecord?.id || '')}`"
+              class="h-3.5 w-3.5 animate-spin"
+            />
+            保存结构
+          </button>
+        </div>
+      </section>
     </div>
   </div>
 </template>

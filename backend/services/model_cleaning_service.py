@@ -29,6 +29,7 @@ from services.model_training_service import (
     _safe_float,
     target_column_name,
 )
+from utils.tribopair import composite_roughness_nm, parse_roughness_nm
 
 logger = logging.getLogger(__name__)
 
@@ -1035,32 +1036,16 @@ class ModelCleaningService:
 
     @staticmethod
     def _parse_roughness_nm(raw: Any) -> float | None:
-        text = str(raw or "").strip().lower()
-        if not text:
-            return None
-        if "atomically flat" in text or "freshly cleaved" in text:
-            return 0.1
-        match = re.search(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", text)
-        if not match:
-            return None
-        numeric = _safe_float(match.group(0))
-        if numeric is None:
-            return None
-        if "pm" in text:
-            return numeric * 0.001
-        if "um" in text:
-            return numeric * 1000.0
-        if "mm" in text:
-            return numeric * 1_000_000.0
-        return numeric
+        return parse_roughness_nm(raw)
 
     @staticmethod
     def _builder_surface_roughness_value(row: dict[str, Any]) -> float | None:
-        for field in ("surface_roughness", "substrate_roughness", "probe_roughness"):
-            value = ModelCleaningService._parse_roughness_nm(row.get(field))
-            if value is not None:
-                return value
-        return None
+        return composite_roughness_nm(
+            row.get("probe_roughness"),
+            row.get("substrate_roughness"),
+            method="rms",
+            legacy_surface_roughness=row.get("surface_roughness"),
+        )
 
     @staticmethod
     def _builder_probe_roughness_value(row: dict[str, Any]) -> float | None:
@@ -1513,9 +1498,12 @@ class ModelCleaningService:
         process_columns: list[str],
         fingerprint_columns: list[str],
         fingerprint_values: np.ndarray,
-    ) -> dict[str, float | None]:
-        matrix_row: dict[str, float | None] = {
+    ) -> dict[str, Any]:
+        matrix_row: dict[str, Any] = {
             target_column: self._jsonable_number(row.get("cof_value")),
+            "__record_id": row.get("record_id"),
+            "__literature_id": row.get("literature_id"),
+            "__confidence": self._jsonable_number(row.get("confidence")),
         }
         for key, column_name in zip(keep_features, process_columns):
             matrix_row[column_name] = self._jsonable_number(row.get(PROCESS_FEATURE_LOOKUP[key]["normalized_field"]))

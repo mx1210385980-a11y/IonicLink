@@ -120,6 +120,8 @@ async def init_db():
             ExtractionCandidate,
             ExtractionRun,
             Literature,
+            ModelTrainingRun,
+            RegisteredModel,
             ResearchGroup,
             TribologyData,
             User,

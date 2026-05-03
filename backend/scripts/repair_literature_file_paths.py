@@ -17,7 +17,8 @@ SEARCH_ROOTS = [
 
 
 def resolve_existing_path(raw_path: str) -> Path | None:
-    path = Path(raw_path)
+    normalized_path = raw_path.replace("\\", "/")
+    path = Path(normalized_path)
     candidates: list[Path] = []
     if path.is_absolute():
         candidates.append(path.resolve())
@@ -48,9 +49,9 @@ def build_name_index() -> dict[str, list[Path]]:
 def normalize_storage_path(path: Path) -> str:
     path = path.resolve()
     try:
-        return str(path.relative_to(BACKEND_ROOT)).replace("/", "\\")
+        return str(path.relative_to(BACKEND_ROOT)).replace("\\", "/")
     except ValueError:
-        return str(path.relative_to(WORKSPACE_ROOT)).replace("/", "\\")
+        return str(path.relative_to(WORKSPACE_ROOT)).replace("\\", "/")
 
 
 def choose_repair_path(raw_path: str, file_name_index: dict[str, list[Path]]) -> Path | None:

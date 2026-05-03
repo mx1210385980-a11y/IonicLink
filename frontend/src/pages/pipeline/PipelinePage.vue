@@ -354,19 +354,19 @@ function statusBadge(status: string) {
 }
 
 function statusBadgeClass(status: string) {
-  if (status === 'processing') return 'border-[#cfd8ff] bg-[#eef2ff] text-[#3f55c4]'
-  if (status === 'success') return 'border-[#b7efcf] bg-[#e9fff2] text-[#0f9f63]'
-  if (status === 'no_data') return 'border-[#d8c7ff] bg-[#f5efff] text-[#7a4de8]'
-  if (status === 'error') return 'border-[#ffc9cf] bg-[#fff1f3] text-[#ef3958]'
-  return 'border-[#d8e2ef] bg-[#f8fbff] text-[#7e91aa]'
+  if (status === 'processing') return 'border-blue-200 bg-blue-50 text-blue-700'
+  if (status === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+  if (status === 'no_data') return 'border-amber-200 bg-amber-50 text-amber-700'
+  if (status === 'error') return 'border-rose-200 bg-rose-50 text-rose-700'
+  return 'border-slate-200 bg-slate-50 text-slate-500'
 }
 
 function progressTone(status: string) {
-  if (status === 'processing') return 'bg-[linear-gradient(90deg,#5a5de8_0%,#6674ff_100%)]'
-  if (status === 'success') return 'bg-[linear-gradient(90deg,#1cc985_0%,#15b77a_100%)]'
-  if (status === 'no_data') return 'bg-[linear-gradient(90deg,#8b5cf6_0%,#a855f7_100%)]'
-  if (status === 'error') return 'bg-[linear-gradient(90deg,#ff5573_0%,#ef3958_100%)]'
-  return 'bg-[linear-gradient(90deg,#c9d3e5_0%,#b9c6de_100%)]'
+  if (status === 'processing') return 'bg-blue-600'
+  if (status === 'success') return 'bg-emerald-500'
+  if (status === 'no_data') return 'bg-amber-500'
+  if (status === 'error') return 'bg-rose-500'
+  return 'bg-slate-200'
 }
 
 function inferActiveStage(activeRun: ExtractionRunDetail | null, file: BatchFile | null) {
@@ -465,9 +465,9 @@ function formatAgentMessage(message: AgentMessage) {
 }
 
 function logToneClass(tone: InspectorLog['tone']) {
-  if (tone === 'agent') return 'text-[#7df5d8]'
-  if (tone === 'system') return 'text-[#9cb7ff]'
-  return 'text-[#d5def1]'
+  if (tone === 'agent') return 'text-emerald-400'
+  if (tone === 'system') return 'text-blue-400'
+  return 'text-slate-300'
 }
 </script>
 
@@ -487,7 +487,7 @@ function logToneClass(tone: InspectorLog['tone']) {
         <div class="flex flex-wrap items-center gap-2.5">
           <button
             type="button"
-            class="inline-flex items-center gap-2 rounded-[0.95rem] bg-[linear-gradient(135deg,#5b56ea_0%,#4a57df_100%)] px-5 py-3 text-sm font-semibold text-white shadow-[0_22px_44px_-28px_rgba(74,87,223,0.82)] transition hover:brightness-105"
+            class="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-slate-800"
             @click="triggerUpload"
           >
             <Upload class="h-4 w-4" />
@@ -496,10 +496,10 @@ function logToneClass(tone: InspectorLog['tone']) {
 
           <button
             type="button"
-            class="inline-flex items-center gap-2 rounded-[0.95rem] px-5 py-3 text-sm font-semibold transition"
+            class="inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-medium transition"
             :class="canBatchExtract
-              ? 'bg-[#111827] text-white hover:bg-[#1f2937]'
-              : 'cursor-not-allowed bg-[#dbe2ea] text-white/75'"
+              ? 'bg-slate-100 text-slate-900 hover:bg-slate-200'
+              : 'cursor-not-allowed bg-slate-50 text-slate-400'"
             :disabled="!canBatchExtract"
             @click="triggerBatchExtract"
           >
@@ -507,13 +507,13 @@ function logToneClass(tone: InspectorLog['tone']) {
             Extract Queue
           </button>
 
-          <div class="inline-flex flex-wrap items-center gap-1 rounded-[1rem] border border-[#d9e2ef] bg-white p-1">
+          <div class="inline-flex flex-wrap items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
             <button
               v-for="option in extractorOptions"
               :key="option.key"
               type="button"
-              class="inline-flex items-center rounded-[0.8rem] px-3 py-2 text-sm font-semibold transition"
-              :class="activeExtractorType === option.key ? 'bg-[#101b29] text-[#f4d18f]' : 'text-slate-600 hover:bg-[#f8fbff]'"
+              class="inline-flex items-center rounded-lg px-3 py-1.5 text-sm font-medium transition"
+              :class="activeExtractorType === option.key ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'"
               @click="setActiveExtractor(option.key)"
             >
               {{ option.label }}
@@ -527,14 +527,14 @@ function logToneClass(tone: InspectorLog['tone']) {
             <input
               v-model="searchQuery"
               type="text"
-              class="h-11 w-full rounded-[0.95rem] border border-[#d9e2ef] bg-white pl-10 pr-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-[#b7c6ef]"
+              class="h-10 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-500 focus:border-slate-400 focus:ring-1 focus:ring-slate-400"
               placeholder="Search runs..."
             >
           </div>
 
           <button
             type="button"
-            class="inline-flex h-11 items-center gap-2 rounded-[0.95rem] border border-[#d9e2ef] bg-white px-3.5 text-sm font-medium text-slate-600 transition hover:bg-[#f8fbff]"
+            class="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
             :title="`Filter: ${filterLabel()}`"
             @click="cycleFilter"
           >
@@ -549,8 +549,8 @@ function logToneClass(tone: InspectorLog['tone']) {
       <section class="shell-surface flex min-h-0 flex-col overflow-hidden">
         <div class="flex items-start justify-between gap-3 border-b border-black/8 px-5 py-4">
           <div>
-            <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8ea2c0]">{{ queueEyebrow }}</p>
-            <h2 class="mt-1 text-[1.05rem] font-semibold tracking-[-0.04em] text-slate-950">
+            <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-500">{{ queueEyebrow }}</p>
+            <h2 class="mt-1 text-base font-semibold text-slate-900">
               {{ queueTitle }}
             </h2>
             <p class="mt-2 text-sm text-slate-500">
@@ -560,10 +560,10 @@ function logToneClass(tone: InspectorLog['tone']) {
           <div class="flex flex-wrap items-center justify-end gap-3">
             <button
               type="button"
-              class="inline-flex items-center gap-2 rounded-[0.9rem] border px-3.5 py-2 text-sm font-medium transition"
+              class="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium transition"
               :class="currentSection === 'batch'
-                ? 'border-[#d8c7ff] bg-[#f5efff] text-[#6d3fe0]'
-                : 'border-[#d9e2ef] bg-white text-slate-700 hover:bg-[#f8fbff]'"
+                ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                : 'border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50'"
               @click="emit('change-section', currentSection === 'batch' ? 'runs' : 'batch')"
             >
               <Bot class="h-4 w-4" />
@@ -583,15 +583,15 @@ function logToneClass(tone: InspectorLog['tone']) {
               v-for="item in queueItems"
               :key="item.id"
               type="button"
-              class="w-full rounded-[1.2rem] border px-4 py-3.5 text-left transition"
+              class="w-full rounded-xl border px-4 py-4 text-left transition"
               :class="item.isSelected
-                ? 'border-[#aebdfc] bg-[#f7f9ff] shadow-[0_18px_42px_-34px_rgba(74,87,223,0.5)]'
-                : 'border-black/8 bg-white hover:border-[#d5ddf2] hover:bg-[#fbfcff]'"
+                ? 'border-slate-300 bg-slate-50/50 shadow-sm'
+                : 'border-slate-100 bg-white hover:border-slate-200 hover:bg-slate-50/50'"
               @click="emit('select-file', item.id)"
             >
               <div class="flex items-start justify-between gap-3">
                 <div class="flex min-w-0 items-start gap-3">
-                  <div class="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-[0.9rem] bg-[#f3f6fb] text-[#7e91aa]">
+                  <div class="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
                     <FileText class="h-5 w-5" />
                   </div>
 
@@ -640,8 +640,8 @@ function logToneClass(tone: InspectorLog['tone']) {
         <div class="border-b border-black/8 px-5 py-5">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8ea2c0]">RUN INSPECTOR</p>
-              <h2 class="mt-2 truncate text-[1rem] font-semibold tracking-[-0.04em] text-slate-950">
+              <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-500">RUN INSPECTOR</p>
+              <h2 class="mt-1 truncate text-base font-semibold text-slate-900">
                 {{ inspectorFileName }}
               </h2>
             </div>
@@ -653,7 +653,7 @@ function logToneClass(tone: InspectorLog['tone']) {
 
         <div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
           <div>
-            <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8ea2c0]">Execution Stages</p>
+            <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-500">Execution Stages</p>
             <div class="mt-4 space-y-4">
               <div
                 v-for="step in inspectorSteps"
@@ -664,12 +664,12 @@ function logToneClass(tone: InspectorLog['tone']) {
                   <div
                     class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border"
                     :class="step.state === 'complete'
-                      ? 'border-[#17bf79] bg-[#edfff5] text-[#17bf79]'
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-600'
                       : step.state === 'active'
-                        ? 'border-[#7f92ff] bg-[#eef2ff] text-[#5865f2]'
+                        ? 'border-blue-200 bg-blue-50 text-blue-600'
                         : step.state === 'error'
-                          ? 'border-[#ffb9c4] bg-[#fff1f3] text-[#ef3958]'
-                          : 'border-[#d9e2ef] bg-white text-[#d0d9e7]'"
+                          ? 'border-rose-200 bg-rose-50 text-rose-600'
+                          : 'border-slate-200 bg-slate-50 text-slate-400'"
                   >
                     <CheckCircle2 v-if="step.state === 'complete'" class="h-3.5 w-3.5" />
                     <LoaderCircle v-else-if="step.state === 'active'" class="h-3.5 w-3.5 animate-spin" />
@@ -682,39 +682,39 @@ function logToneClass(tone: InspectorLog['tone']) {
                     {{ step.label }}
                   </span>
                 </div>
-                <span class="shrink-0 text-sm text-[#8ea2c0]">{{ step.meta }}</span>
+                <span class="shrink-0 text-sm text-slate-400">{{ step.meta }}</span>
               </div>
             </div>
           </div>
 
           <div class="mt-8">
-            <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8ea2c0]">Live Agent Logs</p>
-            <div class="mt-3 rounded-[1rem] bg-[#121a2d] px-4 py-4 text-[12px] leading-7 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+            <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-500">Live Agent Logs</p>
+            <div class="mt-3 rounded-xl bg-slate-900 px-4 py-4 text-xs leading-relaxed shadow-inner">
               <div v-for="entry in inspectorLogs" :key="entry.id" class="flex items-start gap-3">
-                <span class="text-[#50607d]">&gt;</span>
+                <span class="text-slate-600">&gt;</span>
                 <p class="font-mono" :class="logToneClass(entry.tone)">
-                  <span class="mr-2 text-[#7da1ff]">[{{ entry.prefix }}]</span>{{ entry.message }}
+                  <span class="mr-2 text-slate-500">[{{ entry.prefix }}]</span>{{ entry.message }}
                 </p>
               </div>
             </div>
           </div>
 
           <div class="mt-8 grid gap-2">
-            <div class="rounded-[0.95rem] border border-black/8 bg-white/70 px-3.5 py-3 text-sm text-slate-600">
-              <span class="mr-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#8ea2c0]">Queue</span>
+            <div class="rounded-xl border border-slate-100 bg-slate-50/50 px-3.5 py-3 text-sm text-slate-600">
+              <span class="mr-2 text-[11px] font-semibold uppercase tracking-widest text-slate-400">Queue</span>
               {{ inspectorSummary.queue }}
             </div>
             <div
-              class="rounded-[0.95rem] border px-3.5 py-3 text-sm"
+              class="rounded-xl border px-3.5 py-3 text-sm"
               :class="inspectorStatus === 'NO DATA'
-                ? 'border-[#d8c7ff] bg-[#f5efff] text-[#6d3fe0]'
-                : 'border-black/8 bg-white/70 text-slate-600'"
+                ? 'border-amber-100 bg-amber-50/50 text-amber-700'
+                : 'border-slate-100 bg-slate-50/50 text-slate-600'"
             >
-              <span class="mr-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#8ea2c0]">Run State</span>
+              <span class="mr-2 text-[11px] font-semibold uppercase tracking-widest text-slate-400">Run State</span>
               {{ inspectorStatus }} / {{ inspectorSummary.state }}
             </div>
-            <div class="rounded-[0.95rem] border border-black/8 bg-white/70 px-3.5 py-3 text-sm text-slate-600">
-              <span class="mr-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#8ea2c0]">Scope</span>
+            <div class="rounded-xl border border-slate-100 bg-slate-50/50 px-3.5 py-3 text-sm text-slate-600">
+              <span class="mr-2 text-[11px] font-semibold uppercase tracking-widest text-slate-400">Scope</span>
               {{ inspectorSummary.scope }}
             </div>
           </div>
@@ -722,10 +722,10 @@ function logToneClass(tone: InspectorLog['tone']) {
           <div class="mt-4 grid gap-2 sm:grid-cols-2">
             <button
               type="button"
-              class="inline-flex items-center justify-center rounded-[0.95rem] px-4 py-3 text-sm font-semibold transition"
+              class="inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-sm font-medium transition"
               :class="canExtractSelected
-                ? 'bg-[linear-gradient(135deg,#5b56ea_0%,#4a57df_100%)] text-white hover:brightness-105'
-                : 'cursor-not-allowed bg-[#dbe2ea] text-white/75'"
+                ? 'bg-slate-900 text-white shadow-sm hover:bg-slate-800'
+                : 'cursor-not-allowed bg-slate-100 text-slate-400'"
               :disabled="!canExtractSelected"
               @click="triggerSelectedExtract"
             >
@@ -733,7 +733,7 @@ function logToneClass(tone: InspectorLog['tone']) {
             </button>
             <button
               type="button"
-              class="inline-flex items-center justify-center rounded-[0.95rem] bg-[#111827] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#1f2937]"
+              class="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 shadow-sm transition hover:bg-slate-50"
               @click="emit('open-review')"
             >
               Open Review

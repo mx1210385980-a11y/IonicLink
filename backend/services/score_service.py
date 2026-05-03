@@ -207,6 +207,7 @@ def calculate_confidence_details(record: Dict[str, Any]) -> Dict[str, Any]:
     # Condition richness
     condition_fields = [
         _pick(record, "speed_value", "speedValue", "speed"),
+        _pick(record, "shear_rate", "shearRate"),
         _pick(record, "load_value", "loadValue", "load", "normal_load"),
         _pick(record, "temperature"),
         _pick(record, "potential"),

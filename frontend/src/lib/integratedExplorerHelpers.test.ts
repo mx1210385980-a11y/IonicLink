@@ -4,15 +4,23 @@ import type { EvidenceResult, RecordResponse } from '@/lib/api'
 import {
   applyLiveConfidence,
   cofDisplay,
+  conditionChipDisplayParts,
   conditionGroups,
   confidenceDetailsFor,
+  detailedConditionChips,
   formatIonicLiquidPartHtml,
   formatIonicLiquidHtml,
   ionicLiquidParts,
+  lubricantDisplay,
+  lubricantDisplayLines,
+  lubricantStructureItems,
+  lubricantStructureLayout,
+  lubricantTooltip,
   normalizeConfidenceDetails,
   surfaceRoughnessBadge,
   tribopairParts,
 } from '@/lib/integratedExplorerHelpers'
+import { normalizePotentialDisplayText } from '@/lib/potential'
 
 function createRecord(overrides: Partial<RecordResponse> = {}): RecordResponse {
   return {
@@ -25,6 +33,7 @@ function createRecord(overrides: Partial<RecordResponse> = {}): RecordResponse {
     loadValue: '15 nN',
     loadRaw: '15 nN',
     speedValue: '2 um/s',
+    shearRate: null,
     temperature: '298 K',
     potential: '1.0 V',
     waterContent: 'dry',
@@ -143,6 +152,47 @@ describe('integratedExplorerHelpers', () => {
     expect(groups.map((group) => group.key)).toEqual(['env', 'dyn', 'surf'])
   })
 
+  it('formats shear-rate and qualitative load chips without default units', () => {
+    const chips = detailedConditionChips(createRecord({
+      speedValue: null,
+      shearRate: '195-1300 s^-1',
+      loadValue: 'low load; n = 3 region up to ~10 μN',
+    }))
+    const shearRate = chips.find((chip) => chip.key === 'shear_rate')
+    const load = chips.find((chip) => chip.key === 'load')
+
+    expect(shearRate && conditionChipDisplayParts(shearRate)).toEqual({
+      label: '剪切率',
+      value: '195–1300',
+      unit: 's^-1',
+    })
+    expect(load && conditionChipDisplayParts(load)).toEqual({
+      label: '低载荷',
+      value: '≤10',
+      unit: 'μN',
+    })
+  })
+
+  it('keeps high-load squeeze-out conditions compact instead of inferring nN', () => {
+    const chips = detailedConditionChips(createRecord({
+      loadValue: 'high load after n = 3 squeeze-out',
+    }))
+    const load = chips.find((chip) => chip.key === 'load')
+
+    expect(load && conditionChipDisplayParts(load)).toEqual({
+      label: '高载荷',
+      value: 'squeeze-out',
+      unit: '',
+    })
+  })
+
+  it('normalizes potential labels for OCP reference display', () => {
+    expect(normalizePotentialDisplayText('-0.16 V (OCP)')).toBe('-0.16 V vs OCP')
+    expect(normalizePotentialDisplayText('OCP')).toBe('0 V vs OCP')
+    expect(normalizePotentialDisplayText('160 mV below OCP')).toBe('-0.16 V vs OCP')
+    expect(normalizePotentialDisplayText('+250 mV vs Ag/AgCl')).toBe('+0.25 V vs Ag/AgCl')
+  })
+
   it('marks estimated surface roughness values separately', () => {
     expect(surfaceRoughnessBadge(createRecord({ surfaceRoughness: 'Atomically flat mica' }))).toEqual({
       label: 'Atomically flat mica',
@@ -169,9 +219,50 @@ describe('integratedExplorerHelpers', () => {
   })
 
   it('renders phosphonium aliases with a full numeric subscript and exposes bracketed ionic liquid parts', () => {
-    expect(formatIonicLiquidPartHtml('[P66614]')).toBe('[P<sub>66614</sub>]')
+    expect(formatIonicLiquidPartHtml('[P66614]')).toBe('[P<sub>6,6,6,14</sub>]')
     expect(formatIonicLiquidPartHtml('[P4,4,4,1]')).toBe('[P<sub>4,4,4,1</sub>]')
     expect(formatIonicLiquidPartHtml('[P6,6,6,14]')).toBe('[P<sub>6,6,6,14</sub>]')
+    expect(formatIonicLiquidHtml('[P66614][BTA] (80 wt%)')).toBe('[P<sub>6,6,6,14</sub>][BTA] (80 wt%)')
     expect(ionicLiquidParts('[P66614][TFSI]')).toEqual(['[P66614]', '[TFSI]'])
+  })
+
+  it('does not apply mixture display affordances to pure ionic liquids', () => {
+    const pure = createRecord({
+      lubricant: '[EMIM][EtSO4]',
+      lubricantComponents: [],
+      ionicLiquidDisplay: '[EMIM][EtSO4]',
+    })
+
+    expect(lubricantDisplay(pure)).toBe('[EMIM][EtSO4]')
+    expect(lubricantTooltip(pure)).toBe('')
+  })
+
+  it('keeps compact display and tooltip details for ionic liquid mixtures', () => {
+    const mixture = createRecord({
+      lubricant: '[P66614][BTA]:[P66614][Doc] = 4:1 mass ratio',
+      lubricantComponents: [
+        { compound: '[P66614][BTA]', fraction: 80, unit: 'wt%' },
+        { compound: '[P66614][Doc]', fraction: 20, unit: 'wt%' },
+      ],
+    })
+
+    expect(lubricantDisplay(mixture)).toBe('[P6,6,6,14] [BTA]/[Doc] (4:1 wt)')
+    expect(lubricantDisplayLines(mixture)).toEqual([
+      '[P6,6,6,14][BTA]',
+      '[P6,6,6,14][Doc]',
+      '(4:1 wt)',
+    ])
+    const layout = lubricantStructureLayout(mixture)
+    expect(layout?.kind).toBe('shared-cation')
+    expect(layout?.cation?.label).toBe('[P6,6,6,14]')
+    expect(layout?.anions?.map((item) => item.label)).toEqual(['[BTA]', '[Doc]'])
+    expect(layout?.cation?.smiles).toContain('[P+]')
+    expect(layout?.anions?.every((item) => Boolean(item.smiles))).toBe(true)
+    expect(lubricantStructureItems(mixture).map((item) => item.label)).toEqual([
+      '[P6,6,6,14]',
+      '[BTA]',
+      '[Doc]',
+    ])
+    expect(lubricantTooltip(mixture)).toContain('[P6,6,6,14][BTA]: 80 wt%')
   })
 })

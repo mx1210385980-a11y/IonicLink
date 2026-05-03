@@ -8,14 +8,18 @@ Two-tier strategy:
 """
 
 import logging
+import os
 import re
+from functools import lru_cache
 from typing import Optional, Dict, List, Any, Iterable, Tuple
 
 from knowledge_base import il_kb, normalize_ionic_liquid
+from utils.lubricant_mixture import normalize_lubricant_components
 
 logger = logging.getLogger(__name__)
 
-# Try importing pubchempy; gracefully degrade if not installed
+# Try importing pubchempy; gracefully degrade if not installed.  Network lookups
+# are still opt-in below; installing the package must not make read paths block.
 try:
     import pubchempy as pcp
     HAS_PUBCHEMPY = True
@@ -105,7 +109,7 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
         "full_name": "N-methyl-N-butylpyrrolidinium",
         "family": "pyrrolidinium",
         "alkyl_chain_length": 4,
-        "aliases": ["pyr14", "P14", "p14"],
+        "aliases": ["pyr14", "P14", "p14", "Py14", "py14", "Py1,4", "py1,4", "BMP", "bmp", "BMPyrr", "bmpyrr"],
     },
     # Piperidinium-based
     "PIP14": {
@@ -314,6 +318,11 @@ ANION_DB: Dict[str, Dict[str, Any]] = {
         "full_name": "dodecyl sulfate",
         "aliases": ["ds", "DS-", "dodecyl sulfate", "SDS"],
     },
+    "EtSO4": {
+        "smiles": "CCOS([O-])(=O)=O",
+        "full_name": "ethyl sulfate",
+        "aliases": ["etso4", "EtSO4-", "ethylsulfate", "ethyl sulfate", "C2H5SO4"],
+    },
     "OMs": {
         "smiles": "CS([O-])(=O)=O",
         "full_name": "mesylate",
@@ -502,7 +511,7 @@ def parse_il_notation(name: str) -> Dict[str, Optional[str]]:
 
 def _smiles_to_inchikey(smiles: str) -> Optional[str]:
     """Convert SMILES to InChIKey using PubChemPy."""
-    if not HAS_PUBCHEMPY or not smiles:
+    if not HAS_PUBCHEMPY or not _PUBCHEM_ONLINE_ENABLED or not smiles:
         return None
     try:
         compounds = pcp.get_compounds(smiles, 'smiles')
@@ -515,7 +524,7 @@ def _smiles_to_inchikey(smiles: str) -> Optional[str]:
 
 def _pubchem_lookup(name: str) -> Optional[Dict[str, str]]:
     """Try to resolve an IL via PubChemPy (online fallback)."""
-    if not HAS_PUBCHEMPY:
+    if not HAS_PUBCHEMPY or not _PUBCHEM_ONLINE_ENABLED:
         return None
     try:
         compounds = pcp.get_compounds(name, 'name')
@@ -528,6 +537,77 @@ def _pubchem_lookup(name: str) -> Optional[Dict[str, str]]:
     except Exception as e:
         logger.warning("PubChemPy lookup failed for %s: %s", name, e)
     return None
+
+
+# Family markers used to confirm a PubChem hit is actually an ionic liquid
+# rather than a small molecule that happens to share a name.
+_IL_FAMILY_MARKERS = (
+    "imidazolium",
+    "pyridinium",
+    "pyrrolidinium",
+    "piperidinium",
+    "ammonium",
+    "phosphonium",
+    "morpholinium",
+    "guanidinium",
+    "sulfonium",
+    "azepanium",
+    "oxazolium",
+    "thiazolium",
+    "ionic liquid",
+)
+
+# Online PubChem lookups are intentionally disabled by default. Knowledge,
+# review, and PDF evidence endpoints call the IL resolver frequently; once
+# PubChemPy is installed, implicit network calls can make those UI paths hang.
+_PUBCHEM_ONLINE_ENABLED = os.environ.get("IL_RESOLVER_ENABLE_PUBCHEM", "0") in ("1", "true", "True", "yes", "YES")
+_PUBCHEM_ADMISSION_ENABLED = _PUBCHEM_ONLINE_ENABLED and os.environ.get("IL_RESOLVER_PUBCHEM_ADMISSION", "1") not in ("0", "false", "False", "")
+
+
+@lru_cache(maxsize=2048)
+def _pubchem_is_ionic_liquid(name: str) -> bool:
+    """
+    Online fallback admission check.
+
+    Heuristic: PubChem hit is treated as an IL when either
+      (a) any synonym/IUPAC name contains a known IL family marker, or
+      (b) the canonical SMILES looks salt-like (`+` and `-` separated by `.`).
+
+    Cached per-process to avoid re-querying the same name during a batch.
+    Negative results are also cached; restart the backend to invalidate.
+    """
+    if not HAS_PUBCHEMPY or not _PUBCHEM_ADMISSION_ENABLED:
+        return False
+    cleaned = (name or "").strip()
+    if not cleaned:
+        return False
+    try:
+        compounds = pcp.get_compounds(cleaned, 'name')
+    except Exception as e:
+        logger.warning("PubChem IL admission check failed for %s: %s", cleaned, e)
+        return False
+    if not compounds:
+        return False
+    c = compounds[0]
+
+    text_parts: list[str] = []
+    iupac = getattr(c, "iupac_name", None)
+    if isinstance(iupac, str):
+        text_parts.append(iupac)
+    synonyms = getattr(c, "synonyms", None)
+    if isinstance(synonyms, list):
+        text_parts.extend(s for s in synonyms if isinstance(s, str))
+    haystack = " ".join(text_parts).lower()
+    if any(marker in haystack for marker in _IL_FAMILY_MARKERS):
+        logger.info("PubChem admission: %s matched IL family marker", cleaned)
+        return True
+
+    smiles = getattr(c, "connectivity_smiles", None) or getattr(c, "canonical_smiles", "") or ""
+    if "." in smiles and "+" in smiles and "-" in smiles:
+        logger.info("PubChem admission: %s matched salt-like SMILES (%s)", cleaned, smiles)
+        return True
+
+    return False
 
 
 def resolve_il(name: str) -> Dict[str, Any]:
@@ -611,7 +691,7 @@ def resolve_il(name: str) -> Dict[str, Any]:
             result["il_inchikey"] = inchikey
     
     # Step 7: PubChemPy fallback if local resolution is incomplete
-    if not result["il_smiles"] and HAS_PUBCHEMPY:
+    if not result["il_smiles"] and HAS_PUBCHEMPY and _PUBCHEM_ONLINE_ENABLED:
         logger.info("IL resolver local miss for %s; trying PubChemPy", name)
         pubchem_result = _pubchem_lookup(name)
         if pubchem_result:
@@ -656,7 +736,16 @@ def is_supported_ionic_liquid_name(name: Optional[str]) -> bool:
     cation_canonical = _find_cation(cation_raw) if cation_raw else None
     anion_canonical = _find_anion(anion_raw) if anion_raw else None
 
-    return bool(cation_canonical and anion_canonical)
+    if cation_canonical and anion_canonical:
+        return True
+
+    # Online fallback: ask PubChem before rejecting. Catches ILs whose
+    # cation/anion notation is not yet in the local CATION_DB / ANION_DB.
+    if _pubchem_is_ionic_liquid(normalized):
+        logger.info("Admitting %s as IL via PubChem fallback (local resolver missed)", normalized)
+        return True
+
+    return False
 
 
 def filter_to_supported_ionic_liquid_records(data_items: List[dict]) -> tuple[List[dict], List[dict]]:
@@ -668,7 +757,15 @@ def filter_to_supported_ionic_liquid_records(data_items: List[dict]) -> tuple[Li
 
     for item in data_items or []:
         lubricant = item.get("ionic_liquid") or item.get("lubricant") or ""
-        if is_supported_ionic_liquid_name(lubricant):
+        components = normalize_lubricant_components(
+            item.get("lubricant_components")
+            or item.get("lubricantComponents")
+            or item.get("Lubricant_Mixture")
+        )
+        component_supported = bool(components) and all(
+            is_supported_ionic_liquid_name(component.get("compound")) for component in components
+        )
+        if is_supported_ionic_liquid_name(lubricant) or component_supported:
             kept.append(item)
         else:
             dropped.append(item)

@@ -16,7 +16,20 @@ from services.score_service import calculate_confidence, calculate_confidence_de
 from services.unit_converter import parse_force_range_to_newtons, parse_force_to_newtons
 from services.usage_metrics_service import get_usage_metrics_service
 from knowledge_base import normalize_ionic_liquid
-from utils.tribopair import compose_tribopair_label
+from utils.cof_extraction import derive_cof_extracted, normalize_cof_extracted
+from utils.lubricant_mixture import (
+    compact_lubricant_label,
+    components_for_record,
+    format_lubricant_tooltip,
+)
+from utils.structured_conditions import (
+    derive_load_conditions,
+    derive_tribological_system,
+    normalize_load_conditions,
+    normalize_tribological_system,
+)
+from utils.speed_conditions import derive_speed_conditions, normalize_speed_conditions
+from utils.tribopair import compose_tribopair_label, composite_roughness_label
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +41,8 @@ async def _execute_counted(session: AsyncSession, stmt: Any, *, operation: str):
 
 def _build_conditions(filter_params: Any):
     conditions = []
+    if getattr(filter_params, "record_id", None) is not None:
+        conditions.append(TribologyData.id == filter_params.record_id)
     if getattr(filter_params, "materials", None):
         terms = [term for term in getattr(filter_params, "materials", None) or [] if str(term or "").strip()]
         if terms:
@@ -65,6 +80,16 @@ def _build_conditions(filter_params: Any):
         conditions.append(TribologyData.cof_value >= filter_params.cof_min)
     if getattr(filter_params, "cof_max", None) is not None:
         conditions.append(TribologyData.cof_value <= filter_params.cof_max)
+    if getattr(filter_params, "speed_values", None):
+        conditions.append(TribologyData.speed_value.in_(filter_params.speed_values))
+    if getattr(filter_params, "shear_rate_values", None):
+        conditions.append(TribologyData.shear_rate.in_(filter_params.shear_rate_values))
+    if getattr(filter_params, "temperature_values", None):
+        conditions.append(TribologyData.temperature.in_(filter_params.temperature_values))
+    if getattr(filter_params, "potential_values", None):
+        conditions.append(TribologyData.potential.in_(filter_params.potential_values))
+    if getattr(filter_params, "water_content_values", None):
+        conditions.append(TribologyData.water_content.in_(filter_params.water_content_values))
     if getattr(filter_params, "doi", None):
         conditions.append(Literature.doi == filter_params.doi)
     if getattr(filter_params, "file_id", None):
@@ -132,18 +157,36 @@ def build_confidence_input(record: TribologyData) -> dict[str, Any]:
         "substrate_material": record.substrate_material,
         "substrate_coating": record.substrate_coating,
         "lubricant": record.lubricant,
+        "lubricant_components": components_for_record(record),
+        "lubricant_alias": getattr(record, "lubricant_alias", None),
+        "cof_extracted": normalize_cof_extracted(getattr(record, "cof_extracted_json", None)) or derive_cof_extracted(
+            record.cof_raw,
+            record.cof_value,
+            load=record.load_raw or record.load_value,
+            speed=record.speed_value,
+        ),
         "cof_value": record.cof_value,
         "cof_raw": record.cof_raw,
         "cof_operator": record.cof_operator,
         "load_value": record.load_value,
+        "load_conditions": normalize_load_conditions(getattr(record, "load_conditions_json", None)) or derive_load_conditions(record.load_raw or record.load_value),
         "speed_value": record.speed_value,
+        "speed_conditions": normalize_speed_conditions(getattr(record, "speed_conditions_json", None)) or derive_speed_conditions(record.speed_value),
+        "shear_rate": getattr(record, "shear_rate", None),
         "temperature": record.temperature,
         "potential": record.potential,
         "water_content": record.water_content,
         "probe_roughness": record.probe_roughness,
         "substrate_roughness": record.substrate_roughness,
-        "surface_roughness": record.surface_roughness,
+        "surface_roughness": composite_roughness_label(
+            record.probe_roughness,
+            record.substrate_roughness,
+            method="rms",
+            legacy_surface_roughness=record.surface_roughness,
+        ),
         "film_thickness": record.film_thickness,
+        "regime": getattr(record, "regime", None),
+        "tribological_system": normalize_tribological_system(getattr(record, "tribological_system_json", None)) or derive_tribological_system(getattr(record, "regime", None)),
         "evidence": getattr(record, "evidence", None),
         "evidence_page": getattr(record, "evidence_page", None),
         "source": getattr(record, "source", None),
@@ -203,16 +246,35 @@ def _record_to_payload(record: TribologyData) -> dict[str, Any]:
         }
 
     runtime_details = effective_confidence_details(record)
+    lubricant_components = components_for_record(record)
+    lubricant_alias = getattr(record, "lubricant_alias", None)
+    cof_extracted = normalize_cof_extracted(getattr(record, "cof_extracted_json", None)) or derive_cof_extracted(
+        record.cof_raw,
+        record.cof_value,
+        load=record.load_raw or record.load_value,
+        speed=record.speed_value,
+    )
+    load_conditions = normalize_load_conditions(getattr(record, "load_conditions_json", None)) or derive_load_conditions(record.load_raw or record.load_value)
+    speed_conditions = normalize_speed_conditions(getattr(record, "speed_conditions_json", None)) or derive_speed_conditions(record.speed_value)
+    tribological_system = normalize_tribological_system(getattr(record, "tribological_system_json", None)) or derive_tribological_system(getattr(record, "regime", None))
     payload = {
         "id": record.id,
         "material_name": record.material_name,
         "lubricant": record.lubricant,
+        "lubricant_components": lubricant_components,
+        "lubricant_alias": lubricant_alias,
+        "ionic_liquid_display": compact_lubricant_label(record.lubricant, lubricant_components, lubricant_alias),
+        "lubricant_tooltip": format_lubricant_tooltip(record.lubricant, lubricant_components, lubricant_alias),
+        "cof_extracted": cof_extracted,
         "cof_value": record.cof_value,
         "cof_operator": record.cof_operator,
         "cof_raw": record.cof_raw,
         "load_value": record.load_value,
         "load_raw": record.load_raw,
+        "load_conditions": load_conditions,
         "speed_value": record.speed_value,
+        "speed_conditions": speed_conditions,
+        "shear_rate": getattr(record, "shear_rate", None),
         "temperature": record.temperature,
         "potential": record.potential,
         "water_content": record.water_content,
@@ -228,10 +290,17 @@ def _record_to_payload(record: TribologyData) -> dict[str, Any]:
             record.substrate_material,
             record.substrate_coating,
         ),
-        "surface_roughness": record.surface_roughness,
+        "surface_roughness": composite_roughness_label(
+            record.probe_roughness,
+            record.substrate_roughness,
+            method="rms",
+            legacy_surface_roughness=record.surface_roughness,
+        ),
         "residual_film_thickness_d": record.residual_film_thickness_d,
         "layer_spacing_delta": record.layer_spacing_delta,
         "film_thickness": record.film_thickness,
+        "regime": getattr(record, "regime", None),
+        "tribological_system": tribological_system,
         "mol_ratio": record.mol_ratio,
         "cation": record.cation,
         "anion": record.anion,
@@ -341,6 +410,7 @@ async def get_filter_options(
         ("filter_options.materials.coating", TribologyData.substrate_coating),
         ("filter_options.materials.legacy", TribologyData.material_name),
         ("filter_options.conditions.speed", TribologyData.speed_value),
+        ("filter_options.conditions.shear_rate", TribologyData.shear_rate),
         ("filter_options.conditions.temperature", TribologyData.temperature),
         ("filter_options.conditions.potential", TribologyData.potential),
         ("filter_options.conditions.water_content", TribologyData.water_content),
@@ -351,6 +421,7 @@ async def get_filter_options(
         "substrateMaterials": set(),
         "substrateCoatings": set(),
         "speedValues": set(),
+        "shearRateValues": set(),
         "temperatureValues": set(),
         "potentialValues": set(),
         "waterContentValues": set(),
@@ -377,6 +448,8 @@ async def get_filter_options(
             option_values["materials"].update(cleaned)
         elif column is TribologyData.speed_value:
             option_values["speedValues"].update(cleaned)
+        elif column is TribologyData.shear_rate:
+            option_values["shearRateValues"].update(cleaned)
         elif column is TribologyData.temperature:
             option_values["temperatureValues"].update(cleaned)
         elif column is TribologyData.potential:
@@ -406,6 +479,7 @@ async def get_filter_options(
         "substrateMaterials": sorted(option_values["substrateMaterials"]),
         "substrateCoatings": sorted(option_values["substrateCoatings"]),
         "speedValues": sorted(option_values["speedValues"]),
+        "shearRateValues": sorted(option_values["shearRateValues"]),
         "temperatureValues": sorted(option_values["temperatureValues"]),
         "potentialValues": sorted(option_values["potentialValues"]),
         "waterContentValues": sorted(option_values["waterContentValues"]),

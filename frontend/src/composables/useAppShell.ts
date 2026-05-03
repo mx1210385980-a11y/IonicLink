@@ -74,6 +74,8 @@ export function useAppShell(
   const authError = ref('')
   const groundingHighlightData = ref<HighlightRect[]>([])
   const defaultExtractorType = ref<ExtractorType>('tribology')
+  const hydratingFileIds = new Set<string>()
+  const reviewEvidenceHydratedFileIds = new Set<string>()
 
   const activeScope = computed(() => getActiveScope())
   const availableScopes = computed(() => sessionState.user?.availableScopes || [])
@@ -92,6 +94,8 @@ export function useAppShell(
 
   const groundingPdfUrl = computed(() => {
     if (!selectedFileId.value) return ''
+    const batchFile = batchFiles.value.find((file) => file.id === selectedFileId.value)
+    if (batchFile?.disablePdfPreview) return ''
     return `/api/pdf/${selectedFileId.value}`
   })
 
@@ -118,6 +122,37 @@ export function useAppShell(
 
   let extractionPollTimer: ReturnType<typeof setInterval> | null = null
 
+  function hasUsableFieldLocation(entry: any) {
+    const evidence = entry?.evidence
+    return Boolean(evidence?.page && Array.isArray(evidence.bbox) && evidence.bbox.length >= 4)
+  }
+
+  function recordNeedsReviewEvidenceHydration(record: TribologyData) {
+    const fieldMap = (record.field_evidence_json || {}) as Record<string, any>
+    const keys = ['material', 'ionic_liquid']
+    if (String(record.cof || '').trim()) keys.push('cof')
+    if (String(record.potential || '').trim()) keys.push('potential')
+
+    return keys.some((key) => {
+      const entry = fieldMap[key]
+      const fallbackValue = key === 'material'
+        ? record.material_name
+        : key === 'ionic_liquid'
+          ? record.ionic_liquid
+          : key === 'cof'
+            ? record.cof
+            : record.potential
+      const value = String(entry?.value ?? fallbackValue ?? '').trim()
+      if (!value) return false
+      if (String(entry?.grounding_mode || '').trim().toLowerCase() === 'inferred') return false
+      return !hasUsableFieldLocation(entry)
+    })
+  }
+
+  function fileNeedsReviewEvidenceHydration(batchFile: BatchFile) {
+    return batchFile.records.some((record) => recordNeedsReviewEvidenceHydration(record))
+  }
+
   watch([() => selectedFileId.value, () => currentView.value, () => currentSection.value], async ([fileId, view, section]) => {
     if (!fileId) {
       explorerDoi.value = ''
@@ -125,6 +160,45 @@ export function useAppShell(
     }
 
     const batchFile = batchFiles.value.find((file) => file.id === fileId)
+    const shouldHydrateCachedRecords = (
+      batchFile
+      && ['success', 'no_data'].includes(String(batchFile.status || '').toLowerCase())
+      && batchFile.records.length === 0
+      && !hydratingFileIds.has(fileId)
+    )
+    const shouldHydrateStaleReviewRecords = (
+      batchFile
+      && view === 'review'
+      && ['success', 'no_data'].includes(String(batchFile.status || '').toLowerCase())
+      && batchFile.records.length > 0
+      && !reviewEvidenceHydratedFileIds.has(fileId)
+      && !hydratingFileIds.has(fileId)
+      && fileNeedsReviewEvidenceHydration(batchFile)
+    )
+
+    if (shouldHydrateCachedRecords && batchFile) {
+      hydratingFileIds.add(fileId)
+      try {
+        await hydrateCompletedUpload(batchFile)
+      } catch (error) {
+        console.warn(`[Workspace] Failed to hydrate cached records for ${fileId}:`, error)
+      } finally {
+        hydratingFileIds.delete(fileId)
+      }
+    }
+
+    if (shouldHydrateStaleReviewRecords && batchFile) {
+      hydratingFileIds.add(fileId)
+      reviewEvidenceHydratedFileIds.add(fileId)
+      try {
+        await hydrateCompletedUpload(batchFile)
+      } catch (error) {
+        console.warn(`[Review] Failed to refresh field evidence for ${fileId}:`, error)
+      } finally {
+        hydratingFileIds.delete(fileId)
+      }
+    }
+
     if (batchFile?.metadata?.doi) {
       explorerDoi.value = batchFile.metadata.doi
     } else if (batchFile?.status === 'success' && batchFile.records.length > 0) {
@@ -133,7 +207,12 @@ export function useAppShell(
       explorerDoi.value = ''
     }
 
-    if (view !== 'review' || section !== 'grounding') {
+    if (view !== 'review') {
+      groundingHighlightData.value = []
+      return
+    }
+    void section
+    if (batchFile?.disablePdfPreview) {
       groundingHighlightData.value = []
       return
     }
@@ -152,7 +231,7 @@ export function useAppShell(
       console.warn('[Grounding] Failed to fetch highlights:', error)
       groundingHighlightData.value = []
     }
-  })
+  }, { immediate: true })
 
   function deriveValidationStatus(reviewStatus?: string | null): TribologyData['validationStatus'] {
     const normalized = String(reviewStatus || '').trim().toLowerCase()
@@ -341,14 +420,77 @@ export function useAppShell(
   }
 
   function normalizeExtractionPayload(fileId: string, response: ExtractionResponse) {
-    const metadata = (response.metadata || undefined) as BatchFile['metadata']
+    const normalizeMetadata = (value: unknown): BatchFile['metadata'] | undefined => {
+      if (!value || typeof value !== 'object') return undefined
+      const raw = value as Record<string, unknown>
+      const title = String(raw.title || '').trim()
+      const authors = String(raw.authors || '').trim()
+      const doi = String(raw.doi || '').trim()
+      const journal = String(raw.journal || '').trim()
+      const yearCandidate = Number(raw.year)
+      const normalizedYear = Number.isFinite(yearCandidate) && yearCandidate > 0
+        ? Math.round(yearCandidate)
+        : new Date().getFullYear()
+      const optionalText = (field: unknown) => {
+        const normalized = String(field || '').trim()
+        return normalized || null
+      }
+
+      return {
+        title,
+        authors,
+        doi,
+        journal,
+        year: normalizedYear,
+        issn: optionalText(raw.issn),
+        volume: optionalText(raw.volume),
+        issue: optionalText(raw.issue),
+        pages: optionalText(raw.pages),
+      }
+    }
+
+    const metadata = normalizeMetadata(response.metadata)
     const extractorType = (response.extractor_type || response.extraction_summary?.extractor_type || 'tribology') as ExtractorType
     const rawRecords = Array.isArray(response.data) ? response.data : []
+    const parseFieldEvidenceMap = (value: unknown) => {
+      if (!value) return undefined
+      if (typeof value === 'string') {
+        try {
+          const parsed = JSON.parse(value)
+          return parsed && typeof parsed === 'object' ? parsed : undefined
+        } catch {
+          return undefined
+        }
+      }
+      return typeof value === 'object' ? value as TribologyData['field_evidence_json'] : undefined
+    }
+    const parseSourceBbox = (value: unknown) => {
+      if (Array.isArray(value)) return value
+      if (typeof value === 'string') {
+        try {
+          const parsed = JSON.parse(value)
+          return Array.isArray(parsed) ? parsed : null
+        } catch {
+          return null
+        }
+      }
+      return null
+    }
     const records = rawRecords.map((record: any, index: number) => ({
       ...record,
       id: record.id || `${fileId}-${index}-${Date.now()}`,
       fileId,
       extractor_type: record.extractor_type || extractorType,
+      cof_extracted: record.cof_extracted || record.cofExtracted || null,
+      load_conditions: record.load_conditions || record.loadConditions || null,
+      tribological_system: record.tribological_system || record.tribologicalSystem || null,
+      lubricant_components: record.lubricant_components || record.lubricantComponents || [],
+      lubricant_alias: record.lubricant_alias || record.lubricantAlias || null,
+      ionic_liquid_display: record.ionic_liquid_display || record.ionicLiquidDisplay || null,
+      lubricant_tooltip: record.lubricant_tooltip || record.lubricantTooltip || null,
+      review_entity_type: record.review_entity_type || record.reviewEntityType || 'candidate',
+      field_evidence_json: parseFieldEvidenceMap(record.field_evidence_json),
+      source_bbox: parseSourceBbox(record.source_bbox),
       validationStatus: record.validationStatus || deriveValidationStatus(record.review_status),
     }))
 

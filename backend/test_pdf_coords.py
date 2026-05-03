@@ -98,3 +98,93 @@ def test_find_text_coordinates_keeps_cof_numeric_hit_when_context_mentions_mu(tm
 
     assert len(hits) == 1
     assert hits[0]["matched_text"] == "0.10"
+
+
+def test_find_text_coordinates_rejects_potential_numeric_without_voltage_context(tmp_path: Path):
+    pdf_path = tmp_path / "potential_not_plain_number.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=900, height=200)
+    page.insert_text((40, 72), "The roughness was 0.5 nm and the load was 30 nN.", fontsize=12)
+    doc.save(pdf_path)
+    doc.close()
+
+    hits = find_text_coordinates(
+        str(pdf_path),
+        [{"id": "potential", "queries": ["0.5"], "semantic_type": "potential"}],
+    )
+
+    assert len(hits) == 1
+    assert hits[0]["matched_text"] is None
+
+
+def test_find_text_coordinates_accepts_potential_numeric_with_voltage_context(tmp_path: Path):
+    pdf_path = tmp_path / "potential_voltage_context.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=900, height=200)
+    page.insert_text((40, 72), "Friction coefficient measured under applied potential 0.5 V.", fontsize=12)
+    doc.save(pdf_path)
+    doc.close()
+
+    hits = find_text_coordinates(
+        str(pdf_path),
+        [{"id": "potential", "queries": ["0.5"], "semantic_type": "potential"}],
+    )
+
+    assert len(hits) == 1
+    assert hits[0]["matched_text"] == "0.5"
+
+
+def test_find_text_coordinates_keeps_positive_potential_away_from_negative_value(tmp_path: Path):
+    pdf_path = tmp_path / "potential_sign_guard.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=1000, height=240)
+    page.insert_text(
+        (40, 72),
+        "The similarity of the -1 and -2 V data is discussed. "
+        "The friction coefficient is high at 0.45 (+1 V).",
+        fontsize=12,
+    )
+    doc.save(pdf_path)
+    doc.close()
+
+    hits = find_text_coordinates(
+        str(pdf_path),
+        [{"id": "potential", "queries": ["+1 V"], "semantic_type": "potential"}],
+    )
+
+    assert len(hits) == 1
+    assert "+" in (hits[0]["matched_text"] or "")
+
+
+def test_find_text_coordinates_tightly_matches_pdf_encoded_signed_potentials(tmp_path: Path):
+    pdf_path = tmp_path / "encoded_potential_signs.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=1000, height=240)
+    page.insert_text(
+        (40, 72),
+        (
+            "Small forces: 0.20 for \x031 V and 0.19 for \x032 V. "
+            "High at 0.45 ( þ 1 V) and 0.59 ( þ 1:5 V)."
+        ),
+        fontsize=12,
+    )
+    doc.save(pdf_path)
+    doc.close()
+
+    minus_two = find_text_coordinates(
+        str(pdf_path),
+        [{"id": "potential", "queries": ["-2 V"], "semantic_type": "potential"}],
+    )[0]
+    plus_one = find_text_coordinates(
+        str(pdf_path),
+        [{"id": "potential", "queries": ["+1 V"], "semantic_type": "potential"}],
+    )[0]
+    plus_one_point_five = find_text_coordinates(
+        str(pdf_path),
+        [{"id": "potential", "queries": ["+1.5 V"], "semantic_type": "potential"}],
+    )[0]
+
+    assert minus_two["matched_text"].startswith("-2")
+    assert minus_two["w"] < 35
+    assert "þ 1 V" in plus_one["matched_text"]
+    assert "1:5 V" in plus_one_point_five["matched_text"]

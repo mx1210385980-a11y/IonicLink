@@ -45,6 +45,8 @@ class DataOptionPayload(BaseModel):
     min_confidence: float = Field(DEFAULT_DATA_OPTIONS["min_confidence"], ge=0.0, le=1.0)
     max_records: int | None = Field(DEFAULT_DATA_OPTIONS["max_records"], ge=10, le=500)
     random_seed: int = Field(DEFAULT_DATA_OPTIONS["random_seed"], ge=1, le=9999)
+    split_strategy: str = DEFAULT_DATA_OPTIONS["split_strategy"]
+    cv_folds: int = Field(DEFAULT_DATA_OPTIONS["cv_folds"], ge=3, le=8)
 
 
 class CleaningOptionPayload(BaseModel):
@@ -59,6 +61,16 @@ class TrainingStartPayload(BaseModel):
     hyperparameters: HyperparameterPayload = Field(default_factory=HyperparameterPayload)
     data_options: DataOptionPayload = Field(default_factory=DataOptionPayload)
     cleaned_dataset_id: int | None = None
+    tune: bool = False  # 启用后会先做超参数网格搜索，再用最佳参数训练
+
+
+class RegisterModelPayload(BaseModel):
+    name: str | None = None
+    description: str | None = None
+
+
+class ModelPredictionPayload(BaseModel):
+    cleaned_dataset_id: int
 
 
 @router.get("/summary", response_model=dict)
@@ -184,6 +196,144 @@ async def get_training_task(
     except Exception as exc:
         _raise_internal_error("Get training task", exc)
     return {"task": task.snapshot(include_history=True)}
+
+
+@router.get("/runs", response_model=dict)
+async def list_training_runs(
+    limit: int = Query(12, ge=1, le=50),
+    session: AsyncSession = Depends(get_db_session),
+    scope: RequestScope = Depends(get_request_scope),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    try:
+        items = await get_model_training_service().list_runs(
+            session,
+            group_id=principal.group.id,
+            scope_key=scope.scope_key,
+            limit=limit,
+        )
+        return {"items": items}
+    except Exception as exc:
+        _raise_internal_error("List training runs", exc)
+
+
+@router.get("/runs/{task_id}", response_model=dict)
+async def get_training_run(
+    task_id: str,
+    session: AsyncSession = Depends(get_db_session),
+    scope: RequestScope = Depends(get_request_scope),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    try:
+        task = await get_model_training_service().get_run(
+            session,
+            task_id=task_id,
+            group_id=principal.group.id,
+            scope_key=scope.scope_key,
+        )
+        if task is None:
+            raise HTTPException(status_code=404, detail="Training run not found.")
+        return {"task": task}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_internal_error("Get training run", exc)
+
+
+@router.post("/runs/{task_id}/register", response_model=dict)
+async def register_training_run(
+    task_id: str,
+    payload: RegisterModelPayload,
+    session: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    try:
+        item = await get_model_training_service().register_run(
+            session,
+            task_id=task_id,
+            group_id=principal.group.id,
+            scope_key=scope.scope_key,
+            owner_user_id=principal.user.id,
+            workspace_id=scope.workspace.id if scope.workspace else None,
+            scope_type=scope.scope_type,
+            name=payload.name,
+            description=payload.description,
+        )
+        return {"model": item}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Training run not found.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        _raise_internal_error("Register training run", exc)
+
+
+@router.get("/registry", response_model=dict)
+async def list_registered_models(
+    session: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    try:
+        items = await get_model_training_service().list_registered_models(
+            session,
+            group_id=principal.group.id,
+            scope_key=scope.scope_key,
+        )
+        return {"items": items}
+    except Exception as exc:
+        _raise_internal_error("List registered models", exc)
+
+
+@router.delete("/registry/{registry_id}", response_model=dict)
+async def delete_registered_model(
+    registry_id: int,
+    session: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    try:
+        await get_model_training_service().delete_registered_model(
+            session,
+            registry_id=registry_id,
+            group_id=principal.group.id,
+            scope_key=scope.scope_key,
+        )
+        return {"ok": True}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Registered model not found.") from exc
+    except Exception as exc:
+        _raise_internal_error("Delete registered model", exc)
+
+
+@router.post("/registry/{registry_id}/predict", response_model=dict)
+async def predict_with_registered_model(
+    registry_id: int,
+    payload: ModelPredictionPayload,
+    session: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    try:
+        target_dataset = await require_cleaned_dataset_access(session, principal, payload.cleaned_dataset_id)
+        target_dataset = await get_model_cleaning_service().upgrade_dataset_if_needed(session, target_dataset)
+        result = await get_model_training_service().predict_with_registered_model(
+            session,
+            registry_id=registry_id,
+            group_id=principal.group.id,
+            scope_key=scope.scope_key,
+            target_dataset=target_dataset,
+        )
+        return {"prediction": result}
+    except HTTPException:
+        raise
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Registered model not found.") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        _raise_internal_error("Predict with registered model", exc)
 
 
 @router.post("/tasks/{task_id}/cancel", response_model=dict)

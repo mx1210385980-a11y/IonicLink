@@ -24,9 +24,6 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
 
 function resolvePdfContentUrl(src: string): string {
   const normalized = String(src || '').trim()
-  if (/\/api\/pdf\/\d+$/i.test(normalized)) {
-    return `${normalized}/content`
-  }
   return normalized
 }
 
@@ -96,6 +93,22 @@ const highlightsByPage = computed(() => {
   return map
 })
 
+const highlightSignature = computed(() => {
+  return (props.highlights || [])
+    .map((item) => {
+      const { id, page, coords } = item
+      return [
+        id,
+        page,
+        coords?.x,
+        coords?.y,
+        coords?.w,
+        coords?.h,
+      ].join(':')
+    })
+    .join('|')
+})
+
 /** Helper to safely get page metadata */
 function getPageMeta(pageNum: number): PageMeta {
   return pageMetas.value[pageNum - 1] ?? { width: 612, height: 792 }
@@ -132,7 +145,6 @@ async function fetchPdfBytes(): Promise<Uint8Array> {
 
   const pdfContentPath = resolvePdfContentUrl(props.src)
   const resp = await authFetch(resolveApiUrl(pdfContentPath), { mode: 'cors' })
-  console.log('[PdfViewer] fetched URL', pdfContentPath, 'status', resp.status, 'headers', [...resp.headers.entries()])
 
   if (resp.status === 401) {
     throw new Error('Not authenticated. Please sign in again.')
@@ -144,18 +156,29 @@ async function fetchPdfBytes(): Promise<Uint8Array> {
     throw new Error(`PDF fetch failed: ${resp.status} ${resp.statusText}`)
   }
 
-  const payload = await resp.json()
-  const dataB64 = String(payload?.data_b64 || '')
-  if (!dataB64) {
-    throw new Error('PDF content payload is empty.')
+  let bytes: Uint8Array
+  const contentType = String(resp.headers.get('content-type') || '').toLowerCase()
+  if (contentType.includes('application/json')) {
+    const payload = await resp.json()
+    const dataB64 = String(payload?.data_b64 || '')
+    if (!dataB64) {
+      throw new Error('PDF content payload is empty.')
+    }
+    const binary = window.atob(dataB64)
+    bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i)
+    }
+  } else {
+    bytes = new Uint8Array(await resp.arrayBuffer())
   }
-  const binary = window.atob(dataB64)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i += 1) {
-    bytes[i] = binary.charCodeAt(i)
+  if (!bytes.byteLength) {
+    throw new Error('PDF content is empty.')
   }
   revokeAuthenticatedBlobUrl()
-  authenticatedPdfBlobUrl.value = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }))
+  const pdfBuffer = new ArrayBuffer(bytes.byteLength)
+  new Uint8Array(pdfBuffer).set(bytes)
+  authenticatedPdfBlobUrl.value = URL.createObjectURL(new Blob([pdfBuffer], { type: 'application/pdf' }))
   return bytes
 }
 
@@ -241,6 +264,7 @@ async function renderAllPages(pdf: any) {
       currentScale.value = scale
 
       const viewport = page.getViewport({ scale })
+      const outputScale = Math.min(2.5, Math.max(1, window.devicePixelRatio || 1))
 
       // Get the canvas inside the page wrapper
       const pageEl = pagesRef.value?.[i - 1]
@@ -252,8 +276,8 @@ async function renderAllPages(pdf: any) {
       const ctx = canvas.getContext('2d')
       if (!ctx) continue
 
-      canvas.width = viewport.width
-      canvas.height = viewport.height
+      canvas.width = Math.floor(viewport.width * outputScale)
+      canvas.height = Math.floor(viewport.height * outputScale)
       canvas.style.width = `${viewport.width}px`
       canvas.style.height = `${viewport.height}px`
 
@@ -261,7 +285,11 @@ async function renderAllPages(pdf: any) {
       pageEl.style.width = `${viewport.width}px`
       pageEl.style.height = `${viewport.height}px`
 
-      await page.render({ canvasContext: ctx, viewport }).promise
+      await page.render({
+        canvasContext: ctx,
+        viewport,
+        transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined,
+      }).promise
     } catch (e: any) {
       console.error(`[PdfViewer] failed to render page ${i}:`, e)
       // stop further rendering and show user-facing error
@@ -285,8 +313,8 @@ async function scrollToHighlightWhenReady(id: string, retries = 12) {
 }
 
 watch(
-  () => [props.activeId, isLoading.value, pageCount.value] as const,
-  async ([id, loading]) => {
+  () => [props.activeId, highlightSignature.value, isLoading.value, pageCount.value] as const,
+  async ([id, _signature, loading]) => {
     if (!id || loading || pageCount.value < 1) return
     await scrollToHighlightWhenReady(id)
   },

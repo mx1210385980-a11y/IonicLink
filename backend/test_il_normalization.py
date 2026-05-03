@@ -1,5 +1,7 @@
-from services.file_service import _normalize_record_chemistry
+from services.file_service import _canonicalize_ionic_liquid_name, _normalize_record_chemistry
 from services.il_resolver_service import resolve_il
+from services.normalization import normalize_extraction_row
+from services.normalization.potential import normalize_potential_text
 from services.data_sync_service import _normalize_quantitative_thickness
 
 
@@ -49,6 +51,27 @@ def test_sync_thickness_normalizer_drops_non_quantitative_labels():
     assert _normalize_quantitative_thickness("0.7 nm") == "0.7 nm"
 
 
+def test_normalize_potential_text_uses_consistent_reference_notation():
+    assert normalize_potential_text("-0.16 V (OCP)") == "-0.16 V vs OCP"
+    assert normalize_potential_text("OCP") == "0 V vs OCP"
+    assert normalize_potential_text("160 mV below OCP") == "-0.16 V vs OCP"
+    assert normalize_potential_text("+250 mV vs Ag/AgCl") == "+0.25 V vs Ag/AgCl"
+
+
+def test_normalize_extraction_row_normalizes_potential_reference():
+    row = normalize_extraction_row(
+        {
+            "material_name": "Au(111)",
+            "ionic_liquid": "[Pyr14][FAP]",
+            "cof": "0.19",
+            "potential": "-0.16 V (OCP)",
+        },
+        fallback_page=None,
+    )
+
+    assert row["potential"] == "-0.16 V vs OCP"
+
+
 def test_normalize_record_chemistry_can_recover_lubricant_from_evidence_text():
     records = [
         {
@@ -77,3 +100,31 @@ def test_normalize_record_chemistry_does_not_replace_with_unparsed_sentence():
 
     assert records[0]["ionic_liquid"] == "[HMIM][I]"
     assert records[0]["lubricant"] == "[HMIM][I]"
+
+
+def test_normalize_record_chemistry_recovers_mixed_notation_embedded_in_sentence():
+    canonical_name, resolved = _canonicalize_ionic_liquid_name(
+        "Lateral force versus normal load for different surface potentials for [Py1,4]FAP confined between a silica colloid probe and the Au(111) electrode surface."
+    )
+
+    assert canonical_name == "[Pyr14][FAP]"
+    assert resolved["cation"] == "Pyr14"
+    assert resolved["anion"] == "FAP"
+
+
+def test_row_normalizer_replaces_source_label_placeholder_with_il_from_sample_context():
+    normalized = normalize_extraction_row(
+        {
+            "source": "Text",
+            "source_figure": "Fig. 1",
+            "ionic_liquid": "Text",
+            "sample_id": "Au(111) in [Py1,4]FAP",
+            "tribopair": {"coating": "[Py1,4]FAP"},
+            "evidence": "Small lateral forces and low friction coefficients (0.20 for -1 V and 0.19 for -2 V).",
+        },
+        fallback_page=2,
+        page_context="Cyclic voltammogram and friction force for Au(111) in [Py1,4]FAP.",
+    )
+
+    assert normalized["source"] == "Text"
+    assert resolve_il(normalized["ionic_liquid"])["canonical_name"] == "[Pyr14][FAP]"

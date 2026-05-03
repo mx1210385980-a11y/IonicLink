@@ -15,6 +15,7 @@ import {
   type RelationshipGraphSelection,
   type SearchFilter,
 } from '@/lib/api'
+import { normalizePotentialDisplayText } from '@/lib/potential'
 
 const props = defineProps<{
   filter: SearchFilter
@@ -108,7 +109,7 @@ function recordConditions(record: RecordResponse): string[] {
     record.loadValue ? `Load ${record.loadValue}` : '',
     record.speedValue ? `Speed ${record.speedValue}` : '',
     record.waterContent ? `Water ${record.waterContent}` : '',
-    record.potential ? `Potential ${record.potential}` : '',
+    record.potential ? `Potential ${normalizePotentialDisplayText(record.potential)}` : '',
   ].filter(Boolean)
 }
 

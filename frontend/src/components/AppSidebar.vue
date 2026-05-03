@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { computed, type Component } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, type Component } from 'vue'
 import {
   Beaker,
   BookOpen,
+  ChevronLeft,
+  ChevronRight,
   Database,
   FileText,
   FlaskConical,
@@ -31,6 +33,9 @@ interface Scope {
   key: string
   label: string
 }
+
+const SIDEBAR_COLLAPSE_STORAGE_KEY = 'ioniclink-sidebar-collapsed'
+const AUTO_COLLAPSE_WIDTH = 1440
 
 const props = defineProps<{
   currentView: AppView
@@ -69,6 +74,34 @@ const secondaryNav: NavItem[] = [
 const visibleSecondaryNav = computed(() =>
   secondaryNav.filter((item) => !item.adminOnly || props.canAccessAdmin),
 )
+const isCollapsed = ref(false)
+const hasStoredCollapsePreference = ref(false)
+const collapsedPaperItems = computed(() => props.batchFiles.slice(0, 8))
+
+function resolveAutoCollapsed() {
+  if (typeof window === 'undefined') return false
+  return window.innerWidth < AUTO_COLLAPSE_WIDTH
+}
+
+function applyAutoCollapsed() {
+  if (hasStoredCollapsePreference.value) return
+  isCollapsed.value = resolveAutoCollapsed()
+}
+
+function persistCollapsedPreference() {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(SIDEBAR_COLLAPSE_STORAGE_KEY, isCollapsed.value ? '1' : '0')
+}
+
+function toggleSidebarCollapse() {
+  isCollapsed.value = !isCollapsed.value
+  hasStoredCollapsePreference.value = true
+  persistCollapsedPreference()
+}
+
+function handleResize() {
+  applyAutoCollapsed()
+}
 
 function statusDotClass(file: BatchFile): string {
   if (file.status === 'processing') return 'bg-blue-400 animate-pulse'
@@ -120,20 +153,55 @@ function truncateName(name: string, maxLen = 22): string {
   }
   return name.slice(0, maxLen - 1) + '…'
 }
+
+onMounted(() => {
+  if (typeof window === 'undefined') return
+  const stored = window.localStorage.getItem(SIDEBAR_COLLAPSE_STORAGE_KEY)
+  if (stored === '1' || stored === '0') {
+    hasStoredCollapsePreference.value = true
+    isCollapsed.value = stored === '1'
+  } else {
+    applyAutoCollapsed()
+  }
+  window.addEventListener('resize', handleResize)
+})
+
+onBeforeUnmount(() => {
+  if (typeof window === 'undefined') return
+  window.removeEventListener('resize', handleResize)
+})
 </script>
 
 <template>
-  <aside class="flex h-screen w-[220px] shrink-0 flex-col bg-[#0b1520] text-slate-300 overflow-hidden z-50">
+  <aside
+    class="relative z-50 flex h-screen shrink-0 flex-col overflow-hidden bg-[#0b1520] text-slate-300 transition-[width] duration-300"
+    :class="isCollapsed ? 'w-[4.9rem]' : 'w-[220px]'"
+  >
+    <button
+      type="button"
+      class="absolute right-2 top-3 flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-white/6 hover:text-slate-200"
+      :title="isCollapsed ? (isChinese ? '展开侧栏' : 'Expand sidebar') : (isChinese ? '收起侧栏' : 'Collapse sidebar')"
+      @click="toggleSidebarCollapse"
+    >
+      <ChevronRight v-if="isCollapsed" class="h-4 w-4" />
+      <ChevronLeft v-else class="h-4 w-4" />
+    </button>
+
     <!-- Brand -->
-    <div class="flex items-center gap-2.5 px-4 py-4 border-b border-white/6">
+    <div
+      class="flex border-b border-white/6"
+      :class="isCollapsed ? 'justify-center px-2 py-4' : 'items-center gap-2.5 px-4 py-4'"
+    >
       <button
         type="button"
         class="flex h-8 w-8 shrink-0 items-center justify-center rounded-[0.6rem] bg-[#f4d18f]/10 text-[#f4d18f] hover:bg-[#f4d18f]/18 transition"
+        :title="isChinese ? '打开内容中心' : 'Open Content Center'"
         @click="emit('navigate', 'blog', 'articles')"
       >
         <Beaker class="h-4 w-4" />
       </button>
       <button
+        v-if="!isCollapsed"
         type="button"
         class="brand-serif text-[1.1rem] leading-none text-white hover:text-[#f4d18f] transition"
         @click="emit('navigate', 'home')"
@@ -143,15 +211,16 @@ function truncateName(name: string, maxLen = 22): string {
     </div>
 
     <!-- Primary nav -->
-    <nav class="mt-2 px-2 flex flex-col gap-0.5">
+    <nav class="mt-2 flex flex-col gap-0.5" :class="isCollapsed ? 'px-2' : 'px-2'">
       <button
         v-for="item in primaryNav"
         :key="item.key"
         type="button"
-        class="group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13.5px] font-medium transition-all"
+        class="group relative flex rounded-lg text-[13.5px] font-medium transition-all"
         :class="currentView === item.key
-          ? 'bg-white/8 text-[#f4d18f]'
-          : 'text-slate-400 hover:bg-white/5 hover:text-slate-100'"
+          ? (isCollapsed ? 'justify-center bg-white/8 px-0 py-2.5 text-[#f4d18f]' : 'items-center gap-2.5 bg-white/8 px-2.5 py-2 text-[#f4d18f]')
+          : (isCollapsed ? 'justify-center px-0 py-2.5 text-slate-400 hover:bg-white/5 hover:text-slate-100' : 'items-center gap-2.5 px-2.5 py-2 text-slate-400 hover:bg-white/5 hover:text-slate-100')"
+        :title="item.label"
         @click="emit('navigate', item.key)"
       >
         <component
@@ -159,17 +228,18 @@ function truncateName(name: string, maxLen = 22): string {
           class="h-4 w-4 shrink-0 transition-colors"
           :class="currentView === item.key ? 'text-[#f4d18f]' : 'text-slate-500 group-hover:text-slate-300'"
         />
-        {{ item.label }}
+        <span v-if="!isCollapsed">{{ item.label }}</span>
         <span
           v-if="item.key === 'review' && batchFiles.some(f => f.status === 'success' && f.hasWarnings)"
-          class="ml-auto h-1.5 w-1.5 rounded-full bg-amber-400"
+          class="h-1.5 w-1.5 rounded-full bg-amber-400"
+          :class="isCollapsed ? 'absolute right-2 top-2' : 'ml-auto'"
         />
       </button>
     </nav>
 
     <!-- Papers section -->
     <div class="mt-3 flex flex-col min-h-0 flex-1">
-      <div class="px-4 mb-1.5 flex items-center justify-between">
+      <div v-if="!isCollapsed" class="mb-1.5 flex items-center justify-between px-4">
         <p class="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-600">
           {{ isChinese ? '论文' : 'Papers' }}
           <span v-if="batchFiles.length" class="ml-1 text-slate-500">{{ batchFiles.length }}</span>
@@ -183,7 +253,11 @@ function truncateName(name: string, maxLen = 22): string {
         </button>
       </div>
 
-      <div class="flex-1 overflow-y-auto px-2 pb-2 scrollbar-hide" style="scrollbar-width: none;">
+      <div
+        v-if="!isCollapsed"
+        class="flex-1 overflow-y-auto px-2 pb-2 scrollbar-hide"
+        style="scrollbar-width: none;"
+      >
         <button
           type="button"
           class="group mb-1 w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-all"
@@ -228,27 +302,75 @@ function truncateName(name: string, maxLen = 22): string {
           </span>
         </button>
       </div>
+
+      <div
+        v-else
+        class="flex flex-1 flex-col items-center gap-2 overflow-y-auto px-2 pb-2 pt-1 scrollbar-hide"
+        style="scrollbar-width: none;"
+      >
+        <button
+          type="button"
+          class="group flex h-10 w-10 items-center justify-center rounded-xl transition-all"
+          :class="selectedFileId === null
+            ? 'bg-white/8 text-slate-100'
+            : 'text-slate-400 hover:bg-white/4 hover:text-slate-200'"
+          :title="isChinese ? '当前范围总库' : 'Scope Library'"
+          @click="openScopeLibrary"
+        >
+          <Database class="h-4 w-4 shrink-0 text-slate-500 group-hover:text-slate-300" />
+        </button>
+
+        <button
+          type="button"
+          class="flex h-10 w-10 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white/4 hover:text-slate-200"
+          :title="isChinese ? '上传论文' : 'Upload paper'"
+          @click="emit('navigate', 'pipeline', 'upload')"
+        >
+          <FileText class="h-4 w-4" />
+        </button>
+
+        <div class="my-1 h-px w-8 bg-white/8" />
+
+        <button
+          v-for="file in collapsedPaperItems"
+          :key="file.id"
+          type="button"
+          class="relative flex h-10 w-10 items-center justify-center rounded-xl transition-all"
+          :class="selectedFileId === file.id
+            ? 'bg-white/8 text-slate-100'
+            : 'text-slate-400 hover:bg-white/4 hover:text-slate-200'"
+          :title="truncateName(file.name, 36)"
+          @click="handlePaperClick(file)"
+        >
+          <FileText class="h-4 w-4 text-slate-500" />
+          <span
+            class="absolute bottom-2 right-2 inline-block h-1.5 w-1.5 rounded-full"
+            :class="statusDotClass(file)"
+          />
+        </button>
+      </div>
     </div>
 
     <!-- Secondary nav + footer -->
-    <div class="border-t border-white/6 px-2 pt-2 pb-1 flex flex-col gap-0.5">
+    <div class="flex flex-col gap-0.5 border-t border-white/6 px-2 pb-1 pt-2">
       <button
         v-for="item in visibleSecondaryNav"
         :key="item.key"
         type="button"
-        class="group flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-all"
+        class="group flex rounded-lg text-[13px] font-medium transition-all"
         :class="currentView === item.key
-          ? 'bg-white/8 text-[#f4d18f]'
-          : 'text-slate-500 hover:bg-white/5 hover:text-slate-300'"
+          ? (isCollapsed ? 'justify-center bg-white/8 px-0 py-2 text-[#f4d18f]' : 'items-center gap-2.5 bg-white/8 px-2.5 py-1.5 text-[#f4d18f]')
+          : (isCollapsed ? 'justify-center px-0 py-2 text-slate-500 hover:bg-white/5 hover:text-slate-300' : 'items-center gap-2.5 px-2.5 py-1.5 text-slate-500 hover:bg-white/5 hover:text-slate-300')"
+        :title="item.label"
         @click="emit('navigate', item.key)"
       >
         <component :is="item.icon" class="h-3.5 w-3.5 shrink-0" />
-        {{ item.label }}
+        <span v-if="!isCollapsed">{{ item.label }}</span>
       </button>
     </div>
 
     <!-- Scope selector -->
-    <div class="px-3 pb-2 border-t border-white/6 pt-2">
+    <div v-if="!isCollapsed" class="border-t border-white/6 px-3 pb-2 pt-2">
       <label class="block">
         <span class="block text-[9.5px] font-semibold uppercase tracking-[0.22em] text-slate-600 mb-0.5">
           {{ isChinese ? '研究范围' : 'Scope' }}
@@ -266,19 +388,33 @@ function truncateName(name: string, maxLen = 22): string {
     </div>
 
     <!-- User block -->
-    <div class="px-3 py-2.5 border-t border-white/6 flex items-center gap-2">
-      <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/8">
+    <div
+      class="border-t border-white/6"
+      :class="isCollapsed ? 'px-2 py-2' : 'px-3 py-2.5'"
+    >
+      <div
+        class="flex"
+        :class="isCollapsed ? 'flex-col items-center gap-2' : 'items-center gap-2'"
+      >
+      <div
+        class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/8"
+        :title="operatorName"
+      >
         <UserCircle2 class="h-4 w-4 text-slate-400" />
       </div>
-      <div class="flex-1 min-w-0">
+      <div v-if="!isCollapsed" class="flex-1 min-w-0">
         <p class="text-[12.5px] font-semibold text-slate-200 truncate leading-tight">{{ operatorName }}</p>
         <p class="text-[10px] text-slate-500 uppercase tracking-[0.14em] truncate">{{ operatorRole }}</p>
       </div>
-      <div class="flex items-center gap-0.5">
+      <div
+        class="flex items-center"
+        :class="isCollapsed ? 'flex-col gap-1' : 'gap-0.5'"
+      >
         <LanguageToggle class="opacity-70 hover:opacity-100 transition" />
         <button
           type="button"
           class="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:text-slate-200 hover:bg-white/6 transition"
+          :title="isChinese ? '切换主题' : 'Toggle theme'"
           @click="emit('toggleDark')"
         >
           <Sun v-if="isDark" class="h-3.5 w-3.5" />
@@ -287,10 +423,12 @@ function truncateName(name: string, maxLen = 22): string {
         <button
           type="button"
           class="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:text-red-400 hover:bg-white/6 transition"
+          :title="isChinese ? '退出登录' : 'Sign out'"
           @click="emit('logout')"
         >
           <LogOut class="h-3.5 w-3.5" />
         </button>
+      </div>
       </div>
     </div>
   </aside>

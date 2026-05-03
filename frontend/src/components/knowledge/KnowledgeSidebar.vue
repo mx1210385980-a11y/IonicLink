@@ -10,8 +10,6 @@ type KnowledgeMode = {
 const props = defineProps<{
   currentSection: string
   modes: KnowledgeMode[]
-  activeScopeLabel: string
-  selectedSourceName: string
   selectedRecordCount: number
 }>()
 
@@ -20,89 +18,93 @@ const emit = defineEmits<{
   openReview: []
 }>()
 
+
+
 function iconFor(section: string) {
   if (section === 'graph') return GitBranch
   if (section === 'cleaning') return Sparkles
   if (section === 'datasets') return FolderKanban
   return Database
 }
+
+function labelZh(label: string) {
+  switch (label) {
+    case 'Data Grid': return '数据浏览'
+    case 'Graph View': return '关系图'
+    case 'Data Quality': return '质量检查'
+    case 'Dataset Builder': return '训练数据集'
+    default: return label
+  }
+}
+
+function descriptionFor(section: string) {
+  if (section === 'graph') return '阳/阴离子对热图'
+  if (section === 'cleaning') return '检查缺失 / 异常'
+  if (section === 'datasets') return '保存版本 / 送 Modeling'
+  return '查看全部记录'
+}
+
+function statusFor(mode: KnowledgeMode) {
+  if (mode.key === 'explorer') return props.selectedRecordCount > 0 ? `${props.selectedRecordCount} 条` : '待选择'
+  if (mode.key === 'cleaning') return mode.count ? `待处理 ${mode.count}` : '可继续'
+  if (mode.key === 'datasets') return props.selectedRecordCount > 0 ? '可生成' : '待数据'
+  if (mode.key === 'graph') return '可查看'
+  return ''
+}
+
+function statusClass(mode: KnowledgeMode) {
+  if (mode.key === props.currentSection) return 'bg-[#eef0ff] text-[#4c4fdc]'
+  if (mode.key === 'cleaning' && mode.count) return 'bg-[#fff0d9] text-[#a05a00]'
+  if (mode.key === 'datasets' && props.selectedRecordCount > 0) return 'bg-[#e8f8f1] text-[#047857]'
+  return 'bg-white/80 text-slate-500'
+}
+
+
 </script>
 
 <template>
-  <aside class="flex min-h-0 flex-col rounded-[1.8rem] border border-[#dbe5f0] bg-[#eff4fa] p-4">
-    <div>
-      <p class="text-[11px] font-bold uppercase tracking-[0.24em] text-[#8ca0ba]">Asset Explorer</p>
-      <div class="mt-4 space-y-2">
-        <button
-          v-for="mode in props.modes"
-          :key="mode.key"
-          type="button"
-          class="flex w-full items-center justify-between rounded-[1rem] border px-3.5 py-3 text-left transition"
-          :class="mode.key === props.currentSection
-            ? 'border-[#cfd9ff] bg-white text-[#4c4fdc] shadow-[0_18px_35px_-28px_rgba(76,79,220,0.6)]'
-            : 'border-transparent bg-transparent text-slate-700 hover:border-[#d9e3ef] hover:bg-white/80'"
-          @click="emit('select', mode.key)"
+  <aside class="flex min-h-0 flex-col rounded-[1.25rem] border border-[#dbe5f0] bg-[#eff4fa] p-2">
+    <div class="space-y-1">
+      <button
+        v-for="mode in props.modes"
+        :key="mode.key"
+        type="button"
+        class="flex w-full items-center justify-between gap-1.5 rounded-[0.7rem] border px-2 py-2 text-left transition"
+        :class="mode.key === props.currentSection
+          ? 'border-[#cfd9ff] bg-white text-[#4c4fdc] shadow-[0_12px_22px_-20px_rgba(76,79,220,0.55)]'
+          : 'border-transparent bg-transparent text-slate-700 hover:border-[#d9e3ef] hover:bg-white/80'"
+        @click="emit('select', mode.key)"
+      >
+        <span class="flex min-w-0 items-center gap-2">
+          <component :is="iconFor(mode.key)" class="h-3.5 w-3.5 shrink-0" />
+          <span class="min-w-0">
+            <span class="block truncate text-[13px] font-semibold leading-4">{{ labelZh(mode.label) }}</span>
+            <span class="mt-0.5 block truncate text-[10px] font-normal leading-3 text-slate-500">{{ descriptionFor(mode.key) }}</span>
+          </span>
+        </span>
+        <span
+          class="shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-semibold tabular-nums"
+          :class="statusClass(mode)"
         >
-          <span class="flex items-center gap-3">
-            <component :is="iconFor(mode.key)" class="h-4.5 w-4.5" />
-            <span class="text-[1rem] font-semibold">{{ mode.label }}</span>
-          </span>
-          <span
-            v-if="mode.count !== undefined && mode.count !== null"
-            class="rounded-[0.65rem] px-2 py-1 text-xs font-semibold"
-            :class="mode.key === props.currentSection ? 'bg-[#eef0ff] text-[#4c4fdc]' : 'bg-[#ffeef1] text-[#f04d75]'"
-          >
-            {{ mode.count }}
-          </span>
-        </button>
-      </div>
+          {{ statusFor(mode) }}
+        </span>
+      </button>
     </div>
 
-    <div class="mt-8">
-      <div class="flex items-center justify-between gap-3">
-        <p class="text-[11px] font-bold uppercase tracking-[0.24em] text-[#8ca0ba]">Pinned Assets</p>
-        <span class="text-sm text-[#93a2b8]">...</span>
-      </div>
 
-      <div class="mt-4 space-y-3">
-        <article class="rounded-[1.15rem] border border-white/70 bg-white/88 px-4 py-4 shadow-[0_14px_32px_-28px_rgba(15,23,42,0.35)]">
-          <p class="text-[0.98rem] font-semibold tracking-[-0.03em] text-slate-900">{{ props.selectedSourceName }}</p>
-          <div class="mt-2 flex items-center gap-3 text-sm text-slate-500">
-            <span>{{ props.selectedRecordCount }} records</span>
-            <span class="font-semibold text-[#5a6f8d]">ACTIVE SOURCE</span>
-          </div>
-        </article>
 
-        <article class="rounded-[1.15rem] border border-white/70 bg-white/88 px-4 py-4 shadow-[0_14px_32px_-28px_rgba(15,23,42,0.35)]">
-          <p class="text-[0.98rem] font-semibold tracking-[-0.03em] text-slate-900">{{ props.activeScopeLabel }}</p>
-          <div class="mt-2 flex items-center gap-3 text-sm text-slate-500">
-            <span>Scope-linked library</span>
-            <span class="font-semibold text-[#5a6f8d]">WORKSPACE</span>
-          </div>
-        </article>
-
-        <article class="rounded-[1.15rem] border border-dashed border-[#d7e0ed] bg-[#f8fbff] px-4 py-4">
-          <p class="text-[0.95rem] font-semibold tracking-[-0.02em] text-slate-800">Dataset Builder Queue</p>
-          <p class="mt-2 text-sm leading-6 text-slate-500">
-            Promote verified records into a clean, exportable asset bundle from the right-hand rail.
-          </p>
-        </article>
-
-        <button
-          type="button"
-          class="inline-flex w-full items-center justify-between rounded-[1.1rem] border border-[#d7e0ed] bg-white px-4 py-3.5 text-left transition hover:bg-[#f8fbff]"
-          @click="emit('openReview')"
-        >
-          <span class="flex items-center gap-3">
-            <BookOpen class="h-4.5 w-4.5 text-[#4c4fdc]" />
-            <span>
-              <span class="block text-[0.96rem] font-semibold text-slate-900">Literature Mgmt</span>
-              <span class="mt-1 block text-sm text-slate-500">Back to review queue and source papers</span>
-            </span>
-          </span>
-          <ArrowUpRight class="h-4 w-4 text-slate-400" />
-        </button>
-      </div>
+    <div class="mt-auto pt-3">
+      <button
+        type="button"
+        class="inline-flex w-full items-center justify-between rounded-[0.7rem] border border-[#d7e0ed] bg-white px-2.5 py-2 text-left text-[13px] transition hover:bg-[#f8fbff]"
+        @click="emit('openReview')"
+      >
+        <span class="flex min-w-0 items-center gap-2">
+          <BookOpen class="h-3.5 w-3.5 shrink-0 text-[#4c4fdc]" />
+          <span class="font-semibold text-slate-800">返回审核</span>
+        </span>
+        <ArrowUpRight class="h-3.5 w-3.5 text-slate-400" />
+      </button>
     </div>
   </aside>
 </template>

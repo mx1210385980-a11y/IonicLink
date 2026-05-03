@@ -10,6 +10,7 @@ import LoginScreen from '@/components/LoginScreen.vue'
 import type { HomeSuggestedAction } from '@/composables/useHomeSummary'
 import { useAppShell } from '@/composables/useAppShell'
 import { useI18n } from '@/composables/useI18n'
+import { getLiteratureDetails, type BatchFile, type TribologyData, type ValidationStatus } from '@/lib/api'
 import type { AppSection, AppView } from '@/lib/platform'
 import AdminPage from '@/pages/admin/AdminPage.vue'
 import HelpPage from '@/pages/help/HelpPage.vue'
@@ -46,7 +47,16 @@ const statusLabelKeys = {
 
 const fileUploadRef = ref<FileUploadBridge>()
 const chatPanelRef = ref<ChatPanelBridge>()
+
+// 从异常诊断面板跳转过来时高亮的目标记录 id（一次性，用户切走后清掉）
+const focusedRecordId = ref<number | null>(null)
+const reviewTargetRecordId = ref<string | null>(null)
 const { isChinese, t } = useI18n()
+
+type ReviewTarget = {
+  literatureId?: number | null
+  recordId?: number | null
+}
 
 const {
   activeExtractionFileName,
@@ -65,7 +75,6 @@ const {
   handleChat,
   handleClearFiles,
   handleExtract,
-  handleLiteratureView,
   handleLogin,
   handleLogout,
   handleRemoveFile,
@@ -151,7 +160,169 @@ function clearExplorerDoi() {
   explorerDoi.value = ''
 }
 
+function parseRecordBbox(value: unknown): number[] | null {
+  if (Array.isArray(value)) {
+    const coords = value.map((item) => Number(item))
+    return coords.length >= 4 && coords.every((item) => Number.isFinite(item)) ? coords : null
+  }
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      return parseRecordBbox(JSON.parse(value))
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
+function parseFieldEvidence(value: unknown): TribologyData['field_evidence_json'] {
+  if (!value) return undefined
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value)
+      return parsed && typeof parsed === 'object' ? parsed : undefined
+    } catch {
+      return undefined
+    }
+  }
+  return typeof value === 'object' ? value as TribologyData['field_evidence_json'] : undefined
+}
+
+function validationStatusFromReviewStatus(reviewStatus: unknown): ValidationStatus {
+  const normalized = String(reviewStatus || '').trim().toLowerCase()
+  if (normalized === 'approved') return 'verified'
+  if (normalized === 'flagged' || normalized === 'needs_evidence') return 'warning'
+  return 'unverified'
+}
+
+function normalizeReviewRecord(record: any): TribologyData {
+  const cofValue = record.cof ?? record.cofRaw ?? record.cof_raw ?? record.cofValue
+  return {
+    id: String(record.id || ''),
+    extractor_type: record.extractor_type || 'tribology',
+    material_name: record.material_name ?? record.materialName ?? '',
+    ionic_liquid: record.ionic_liquid ?? record.lubricant ?? '',
+    lubricant_components: record.lubricant_components ?? record.lubricantComponents ?? [],
+    lubricant_alias: record.lubricant_alias ?? record.lubricantAlias ?? null,
+    ionic_liquid_display: record.ionic_liquid_display ?? record.ionicLiquidDisplay ?? null,
+    lubricant_tooltip: record.lubricant_tooltip ?? record.lubricantTooltip ?? null,
+    load: record.load ?? record.loadRaw ?? record.load_raw ?? record.loadValue ?? '',
+    load_conditions: record.load_conditions ?? record.loadConditions ?? null,
+    speed: record.speed ?? record.speedValue ?? record.speed_value ?? '',
+    speed_conditions: record.speed_conditions ?? record.speedConditions ?? null,
+    shear_rate: record.shear_rate ?? record.shearRate ?? '',
+    temperature: record.temperature ?? '',
+    potential: record.potential ?? '',
+    water_content: record.water_content ?? record.waterContent ?? '',
+    cof: cofValue == null ? '' : String(cofValue),
+    cof_extracted: record.cof_extracted ?? record.cofExtracted ?? null,
+    probe_material: record.probe_material ?? record.probeMaterial ?? '',
+    probe_geometry: record.probe_geometry ?? record.probeGeometry ?? '',
+    probe_radius: record.probe_radius ?? record.probeRadius ?? '',
+    probe_roughness: record.probe_roughness ?? record.probeRoughness ?? '',
+    substrate_material: record.substrate_material ?? record.substrateMaterial ?? record.materialName ?? '',
+    substrate_coating: record.substrate_coating ?? record.substrateCoating ?? '',
+    substrate_roughness: record.substrate_roughness ?? record.substrateRoughness ?? '',
+    surface_roughness: record.surface_roughness ?? record.surfaceRoughness ?? '',
+    residual_film_thickness_d: record.residual_film_thickness_d ?? record.residualFilmThicknessD ?? '',
+    layer_spacing_delta: record.layer_spacing_delta ?? record.layerSpacingDelta ?? '',
+    film_thickness: record.film_thickness ?? record.filmThickness ?? '',
+    regime: record.regime ?? '',
+    tribological_system: record.tribological_system ?? record.tribologicalSystem ?? null,
+    mol_ratio: record.mol_ratio ?? record.molRatio ?? '',
+    cation: record.cation ?? '',
+    anion: record.anion ?? '',
+    cation_smiles: record.cation_smiles ?? record.cationSmiles ?? '',
+    anion_smiles: record.anion_smiles ?? record.anionSmiles ?? '',
+    il_smiles: record.il_smiles ?? record.ilSmiles ?? '',
+    il_inchikey: record.il_inchikey ?? record.ilInchikey ?? '',
+    alkyl_chain_length: record.alkyl_chain_length ?? record.alkylChainLength ?? undefined,
+    source: record.source ?? '',
+    source_page: record.source_page ?? record.sourcePage ?? record.evidencePage ?? undefined,
+    source_bbox: parseRecordBbox(record.source_bbox ?? record.sourceBbox ?? record.evidenceBbox),
+    source_figure: record.source_figure ?? record.sourceFigure ?? '',
+    evidence: record.evidence ?? '',
+    sample_id: record.sample_id ?? record.sampleId ?? '',
+    series_id: record.series_id ?? record.seriesId ?? '',
+    field_evidence_json: parseFieldEvidence(record.field_evidence_json ?? record.fieldEvidenceJson),
+    review_status: record.review_status ?? record.reviewStatus ?? '',
+    record_origin: record.record_origin ?? record.recordOrigin ?? 'knowledge_record',
+    review_entity_type: record.review_entity_type ?? record.reviewEntityType ?? 'record',
+    assembly_notes: record.assembly_notes ?? record.assemblyNotes ?? '',
+    validationStatus: validationStatusFromReviewStatus(record.review_status ?? record.reviewStatus),
+  }
+}
+
+async function ensureReviewFileForTarget(target: ReviewTarget) {
+  const literatureId = Number(target.literatureId || 0)
+  if (!Number.isFinite(literatureId) || literatureId <= 0) return
+  const existingIndex = batchFiles.value.findIndex((file) => String(file.id) === String(literatureId))
+  const targetRecordId = target.recordId ? String(target.recordId) : ''
+  if (existingIndex >= 0 && targetRecordId) {
+    const existingFile = batchFiles.value[existingIndex]
+    const hasTargetFinalRecord = existingFile?.records.some((record) => {
+      const entityType = String(record.review_entity_type || '').trim().toLowerCase()
+      return String(record.id || '') === targetRecordId && entityType === 'record'
+    })
+    if (hasTargetFinalRecord) return
+  } else if (existingIndex >= 0) {
+    return
+  }
+
+  try {
+    const details = await getLiteratureDetails(literatureId)
+    const records = (details.tribologyData || []).map(normalizeReviewRecord)
+    const batchFile: BatchFile = {
+      id: String(literatureId),
+      name: details.title || details.doi || `Literature ${literatureId}`,
+      status: 'success',
+      progress: 100,
+      progressMessage: 'Loaded from literature library',
+      metadata: {
+        title: details.title || '',
+        authors: details.authors || '',
+        doi: details.doi || '',
+        journal: details.journal || '',
+        year: details.year || new Date().getFullYear(),
+        volume: details.volume || null,
+        issue: details.issue || null,
+        pages: details.pages || null,
+      },
+      records,
+      hasWarnings: records.some((record) => record.validationStatus !== 'verified'),
+    }
+    if (existingIndex >= 0) {
+      batchFiles.value.splice(existingIndex, 1, batchFile)
+    } else {
+      batchFiles.value.push(batchFile)
+    }
+  } catch (error) {
+    console.warn('[Review] Failed to hydrate literature for review target:', error)
+  }
+}
+
+async function openReviewTarget(target?: ReviewTarget) {
+  reviewTargetRecordId.value = target?.recordId ? String(target.recordId) : null
+
+  if (target?.literatureId) {
+    await ensureReviewFileForTarget(target)
+    selectedFileId.value = String(target.literatureId)
+  }
+
+  navigateTo('review', 'inbox')
+}
+
+async function handleReviewReextract(fileId: string) {
+  if (!fileId) return
+  reviewTargetRecordId.value = null
+  selectedFileId.value = fileId
+  await handleExtract(fileId, true)
+  selectedFileId.value = selectedFileId.value || fileId
+  navigateTo('review', 'inbox')
+}
+
 function openLatestReview() {
+  reviewTargetRecordId.value = null
   if (latestReviewFile.value) {
     selectedFileId.value = latestReviewFile.value.id
   }
@@ -172,6 +343,7 @@ async function retryLatestFailedRun() {
 }
 
 function openReviewQueue() {
+  reviewTargetRecordId.value = null
   navigateTo('review', 'queue')
 }
 
@@ -336,11 +508,13 @@ function handleHomeAction(action: HomeSuggestedAction) {
             :active-scope-label="activeScopeLabel"
             :selected-file-name="selectedFileName"
             :selected-file="selectedFile"
+            :initial-record-id="reviewTargetRecordId"
             :files="batchFiles"
             :highlight-count="groundingHighlightData.length"
             :pdf-url="groundingPdfUrl"
             :highlight-data="groundingHighlightData"
             :scope-key="sessionState.activeScopeKey"
+            :reextract-file="handleReviewReextract"
             @change-section="handleSectionChange"
             @select-file="setSelectedFile"
             @open-pipeline="navigateTo('pipeline', 'upload')"
@@ -356,10 +530,13 @@ function handleHomeAction(action: HomeSuggestedAction) {
             :explorer-doi="explorerDoi"
             :selected-file="selectedFile"
             :selected-file-id="selectedFileId"
+            :focus-record-id="focusedRecordId"
             :scope-key="sessionState.activeScopeKey"
+            @clear-focused-record="focusedRecordId = null"
             @change-section="handleSectionChange"
             @open-training="openTrainingWorkbench"
-            @open-review="handleLiteratureView"
+            @open-review="openReviewTarget"
+            @select-source="setSelectedFile"
             @clear-doi="clearExplorerDoi"
             @clear-source="setSelectedFile(null)"
           />
@@ -373,6 +550,11 @@ function handleHomeAction(action: HomeSuggestedAction) {
             :scope-key="sessionState.activeScopeKey"
             @change-section="handleSectionChange"
             @open-knowledge="navigateTo('knowledge', 'cleaning')"
+            @inspect-record="(payload) => {
+              setSelectedFile(String(payload.literatureId))
+              focusedRecordId = payload.recordId ?? null
+              navigateTo('knowledge', 'explorer')
+            }"
           />
 
           <AdminPage

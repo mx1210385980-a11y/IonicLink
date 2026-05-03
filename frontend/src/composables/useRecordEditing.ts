@@ -16,6 +16,7 @@ export type EditableRecordValues = {
   potential: string
   waterContent: string
   speedValue: string
+  shearRate: string
   loadValue: string
   probeMaterial: string
   probeGeometry: string
@@ -54,6 +55,7 @@ export function useRecordEditing(options: UseRecordEditingOptions) {
         potential: record.potential ?? '',
         waterContent: record.waterContent ?? '',
         speedValue: record.speedValue ?? '',
+        shearRate: record.shearRate ?? '',
         loadValue: record.loadValue ?? '',
         probeMaterial: record.probeMaterial ?? '',
         probeGeometry: record.probeGeometry ?? '',
@@ -101,6 +103,7 @@ export function useRecordEditing(options: UseRecordEditingOptions) {
       const potential = vals.potential.trim()
       const waterContent = vals.waterContent.trim()
       const speedValue = vals.speedValue.trim()
+      const shearRate = vals.shearRate.trim()
       const loadValue = vals.loadValue.trim()
       const probeMaterial = vals.probeMaterial.trim()
       const probeGeometry = vals.probeGeometry.trim()
@@ -117,6 +120,7 @@ export function useRecordEditing(options: UseRecordEditingOptions) {
         potential,
         waterContent,
         speedValue,
+        shearRate,
         loadValue,
         probeMaterial,
         probeGeometry,
@@ -135,6 +139,7 @@ export function useRecordEditing(options: UseRecordEditingOptions) {
       record.potential = potential
       record.waterContent = waterContent
       record.speedValue = speedValue
+      record.shearRate = shearRate
       record.loadValue = loadValue
       record.probeMaterial = probeMaterial || null
       record.probeGeometry = probeGeometry || null

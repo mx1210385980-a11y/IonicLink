@@ -41,8 +41,11 @@ export interface EvidenceMap {
   ionicLiquid?: EvidenceSnippet
   surface?: EvidenceSnippet
   speed?: EvidenceSnippet
+  shearRate?: EvidenceSnippet
   load?: EvidenceSnippet
   condition?: EvidenceSnippet
+  potential?: EvidenceSnippet
+  waterContent?: EvidenceSnippet
   temperature?: EvidenceSnippet
 }
 
@@ -58,8 +61,11 @@ export const evidenceTagOrder = [
   'ionicLiquid',
   'surface',
   'speed',
+  'shearRate',
   'load',
   'condition',
+  'potential',
+  'waterContent',
   'temperature',
 ] as const
 
@@ -117,6 +123,16 @@ export const tagColors: Record<EvidenceTagType, TagColorClasses> = {
     pillMutedText: 'text-slate-500',
     glow: 'shadow-[0_0_0_1px_rgba(14,165,233,0.42),0_0_36px_rgba(14,165,233,0.15)]',
   },
+  shearRate: {
+    bg: 'bg-fuchsia-100/90',
+    text: 'text-fuchsia-700',
+    ring: 'ring-fuchsia-300/80',
+    pillBg: 'bg-fuchsia-50',
+    pillText: 'text-fuchsia-700',
+    pillMutedBg: 'bg-slate-100',
+    pillMutedText: 'text-slate-500',
+    glow: 'shadow-[0_0_0_1px_rgba(217,70,239,0.42),0_0_36px_rgba(217,70,239,0.15)]',
+  },
   load: {
     bg: 'bg-cyan-100/90',
     text: 'text-cyan-700',
@@ -137,6 +153,26 @@ export const tagColors: Record<EvidenceTagType, TagColorClasses> = {
     pillMutedText: 'text-slate-500',
     glow: 'shadow-[0_0_0_1px_rgba(16,185,129,0.42),0_0_36px_rgba(16,185,129,0.14)]',
   },
+  potential: {
+    bg: 'bg-emerald-100/90',
+    text: 'text-emerald-700',
+    ring: 'ring-emerald-300/80',
+    pillBg: 'bg-emerald-50',
+    pillText: 'text-emerald-700',
+    pillMutedBg: 'bg-slate-100',
+    pillMutedText: 'text-slate-500',
+    glow: 'shadow-[0_0_0_1px_rgba(16,185,129,0.42),0_0_36px_rgba(16,185,129,0.14)]',
+  },
+  waterContent: {
+    bg: 'bg-lime-100/90',
+    text: 'text-lime-700',
+    ring: 'ring-lime-300/80',
+    pillBg: 'bg-lime-50',
+    pillText: 'text-lime-700',
+    pillMutedBg: 'bg-slate-100',
+    pillMutedText: 'text-slate-500',
+    glow: 'shadow-[0_0_0_1px_rgba(132,204,22,0.42),0_0_36px_rgba(132,204,22,0.14)]',
+  },
   temperature: {
     bg: 'bg-rose-100/90',
     text: 'text-rose-700',
@@ -154,8 +190,11 @@ const tagLabels: Record<EvidenceTagType, string> = {
   ionicLiquid: 'Lubricant',
   surface: 'Surface',
   speed: 'Speed',
+  shearRate: 'Shear rate',
   load: 'Load',
   condition: 'Condition',
+  potential: 'Potential',
+  waterContent: 'Water',
   temperature: 'Temp',
 }
 
@@ -338,8 +377,10 @@ function getPanelGradient(activeTag: EvidenceTagType): string {
       return 'from-slate-950 via-slate-950 to-sky-950/35'
     case 'load':
       return 'from-slate-950 via-slate-950 to-cyan-950/35'
-    case 'condition':
+    case 'potential':
       return 'from-slate-950 via-slate-950 to-emerald-950/35'
+    case 'waterContent':
+      return 'from-slate-950 via-slate-950 to-lime-950/35'
     case 'temperature':
       return 'from-slate-950 via-slate-950 to-rose-950/35'
     case 'ionicLiquid':

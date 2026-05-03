@@ -3,8 +3,17 @@ from types import SimpleNamespace
 
 from models.tribology import TribologyData
 from routers.extraction import _build_record_field_evidence_payload
+from services.file_service import _build_field_evidence_map
+from services.file_service import _derive_grounding_metadata
+from services.file_service import _field_evidence_map_looks_generic
+from services.file_service import _field_query_variants
 from services.file_service import _get_drop_reason_for_final_record
+from services.file_service import _locate_field_evidence_for_value
+from services.file_service import _merge_field_review_metadata
+from services.file_service import _refine_potential_evidence_from_metric_context_with_pdf
+from services.file_service import _refine_potential_evidence_from_metric_context
 from services.file_service import _build_record_uniqueness_key
+from services.pdf_service import build_term_query_variants
 from services.llm.deduplication import deduplicate_records
 from services.llm.utils import has_core_quantitative_signal
 
@@ -142,3 +151,302 @@ def test_review_payload_requires_primary_metric_for_non_cof_record():
     payload = _build_record_field_evidence_payload(record)
 
     assert payload["required_fields"] == ["material", "ionic_liquid", "layer_spacing_delta"]
+
+
+def test_review_payload_includes_potential_field_and_conditions_summary():
+    record = SimpleNamespace(
+        id=9,
+        literature_id=10,
+        sample_id=None,
+        series_id=None,
+        review_status="pending_review",
+        record_origin="llm_extraction",
+        assembly_notes=None,
+        confidence=0.88,
+        material_name="Au(111)",
+        lubricant="[Py1,4][FAP]",
+        cof_raw="0.45",
+        cof_value=0.45,
+        load_raw="15-75 nN",
+        load_value="15-75 nN",
+        speed_value=None,
+        temperature="298.15 K",
+        potential="+1 V",
+        water_content="Dry",
+        source_page=4,
+        field_evidence_json=json.dumps(
+            {
+                "material": {"value": "Au(111)", "evidence": {"page": 4, "quote": "Au(111)"}},
+                "ionic_liquid": {"value": "[Py1,4][FAP]", "evidence": {"page": 4, "quote": "[Py1,4][FAP]"}},
+                "cof": {"value": "0.45", "evidence": {"page": 4, "quote": "0.45"}},
+                "potential": {"value": "+1 V", "evidence": {"page": 4, "quote": "+1 V"}},
+                "water_content": {"value": "Dry", "evidence": {"page": 4, "quote": "dry conditions"}},
+            }
+        ),
+        friction_force=None,
+        wear_rate=None,
+        film_thickness=None,
+        residual_film_thickness_d=None,
+        layer_spacing_delta=None,
+        surface_roughness=None,
+    )
+
+    payload = _build_record_field_evidence_payload(record)
+
+    assert payload["fields"]["potential"]["value"] == "+1 V"
+    assert payload["fields"]["potential"]["status"] == "grounded"
+    assert payload["fields"]["water_content"]["value"] == "Dry"
+    assert payload["fields"]["conditions"]["value"] == "15-75 nN | 298.15 K | +1 V | Dry"
+
+
+def test_review_payload_exposes_grounding_mode_for_derived_temperature():
+    record = SimpleNamespace(
+        id=11,
+        literature_id=10,
+        sample_id=None,
+        series_id=None,
+        review_status="pending_review",
+        record_origin="llm_extraction",
+        assembly_notes=None,
+        confidence=0.88,
+        material_name="Au(111)",
+        lubricant="[Py1,4][FAP]",
+        cof_raw="0.45",
+        cof_value=0.45,
+        load_raw=None,
+        load_value=None,
+        speed_value=None,
+        temperature="298.15 K",
+        potential=None,
+        water_content=None,
+        source_page=4,
+        field_evidence_json=json.dumps(
+            {
+                "material": {"value": "Au(111)", "evidence": {"page": 4, "quote": "Au(111)"}},
+                "ionic_liquid": {"value": "[Py1,4][FAP]", "evidence": {"page": 4, "quote": "[Py1,4][FAP]"}},
+                "cof": {"value": "0.45", "evidence": {"page": 4, "quote": "0.45"}},
+                "temperature": {
+                    "value": "298.15 K",
+                    "grounding_mode": "derived",
+                    "grounding_note": "Normalized from room-temperature wording.",
+                    "evidence": {"page": 4, "quote": "room temperature"},
+                },
+            }
+        ),
+        friction_force=None,
+        wear_rate=None,
+        film_thickness=None,
+        residual_film_thickness_d=None,
+        layer_spacing_delta=None,
+        surface_roughness=None,
+    )
+
+    payload = _build_record_field_evidence_payload(record)
+
+    assert payload["fields"]["temperature"]["grounding_mode"] == "derived"
+    assert payload["fields"]["temperature"]["grounding_note"] == "Normalized from room-temperature wording."
+
+
+def test_build_field_evidence_map_prefers_field_specific_hits(monkeypatch):
+    def fake_locate(**kwargs):
+        field_key = kwargs["field_key"]
+        if field_key == "material":
+            return {
+                "source_type": "text",
+                "page": 3,
+                "source_label": "Text",
+                "quote": "Au(111) electrode surface",
+                "bbox": [10.0, 10.0, 40.0, 20.0],
+            }
+        if field_key == "cof":
+            return {
+                "source_type": "figure",
+                "page": 2,
+                "source_label": "Fig. 2",
+                "quote": "COF = 0.45",
+                "bbox": [100.0, 120.0, 145.0, 130.0],
+            }
+        return None
+
+    monkeypatch.setattr("services.file_service._locate_field_evidence_for_value", fake_locate)
+    monkeypatch.setattr("services.file_service._resolve_existing_path", lambda path: path)
+
+    db_record = SimpleNamespace(
+        source="Fig. 2",
+        source_figure="Fig. 2",
+        evidence_page=2,
+        source_page=2,
+        evidence_bbox="[1, 2, 3, 4]",
+        sample_id=None,
+    )
+    item = {
+        "material_name": "Au(111)",
+        "ionic_liquid": "[Pyr14][FAP]",
+        "cof": "0.45",
+        "evidence": "Generic figure caption",
+        "source": "Fig. 2",
+        "source_page": 2,
+    }
+
+    field_map = _build_field_evidence_map(item, db_record, confidence=0.93, file_path="/tmp/fake.pdf")
+
+    assert field_map["material"]["evidence"]["page"] == 3
+    assert field_map["material"]["evidence"]["quote"] == "Au(111) electrode surface"
+    assert field_map["cof"]["evidence"]["bbox"] == [100.0, 120.0, 145.0, 130.0]
+    assert field_map["ionic_liquid"]["evidence"]["quote"] == "Generic figure caption"
+
+
+def test_field_evidence_map_generic_detection_flags_cloned_entries():
+    generic_map = {
+        "material": {"value": "Au(111)", "evidence": {"page": 2, "source_label": "Fig. 2", "quote": "Generic caption", "bbox": [1, 2, 3, 4]}},
+        "ionic_liquid": {"value": "[Pyr14][FAP]", "evidence": {"page": 2, "source_label": "Fig. 2", "quote": "Generic caption", "bbox": [1, 2, 3, 4]}},
+        "cof": {"value": "0.45", "evidence": {"page": 2, "source_label": "Fig. 2", "quote": "Generic caption", "bbox": [1, 2, 3, 4]}},
+    }
+
+    assert _field_evidence_map_looks_generic(generic_map) is True
+
+
+def test_merge_field_review_metadata_preserves_manual_annotations():
+    rebuilt_map = {
+        "material": {"value": "Au(111)", "evidence": {"page": 3, "quote": "Au(111) electrode surface"}},
+        "cof": {"value": "0.45", "evidence": {"page": 2, "quote": "COF = 0.45"}},
+    }
+    existing_map = {
+        "material": {"value": "Au(111)", "review_state": "confirmed"},
+        "cof": {"value": "0.45", "review_state": "flagged", "review_note": "Need manual check"},
+    }
+
+    merged = _merge_field_review_metadata(rebuilt_map, existing_map)
+
+    assert merged["material"]["review_state"] == "confirmed"
+    assert merged["cof"]["review_state"] == "flagged"
+    assert merged["cof"]["review_note"] == "Need manual check"
+
+
+def test_locate_field_evidence_marks_text_hits_outside_figure_anchor(monkeypatch):
+    monkeypatch.setattr("services.file_service._resolve_existing_path", lambda path: path)
+    monkeypatch.setattr("services.pdf_service.build_term_query_variants", lambda value: [value])
+    monkeypatch.setattr("utils.pdf_coords.normalize_source_label", lambda value: value)
+    monkeypatch.setattr(
+        "utils.pdf_coords.find_figure_bbox",
+        lambda *args, **kwargs: (2, [449.24, 93.52, 593.3, 543.98]),
+    )
+    monkeypatch.setattr(
+        "utils.pdf_coords.find_text_coordinates",
+        lambda *args, **kwargs: [
+            {"id": "material", "page": 2, "x": 394.98, "y": 233.46, "w": 35.4, "h": 10.46, "matched_text": "Au(111)"}
+        ],
+    )
+
+    evidence = _locate_field_evidence_for_value(
+        file_path="/tmp/fake.pdf",
+        field_key="material",
+        field_value="Au(111)",
+        source_label="Fig. 2",
+        page_hint=2,
+        anchor_bbox=None,
+        source_type="figure",
+    )
+
+    assert evidence is not None
+    assert evidence["source_type"] == "text"
+    assert evidence["source_label"] == "Text"
+
+
+def test_field_query_variants_expand_ocp_and_ionic_liquid_aliases():
+    potential_queries = _field_query_variants("potential", "-0.16 V (OCP)")
+    ionic_queries = _field_query_variants("ionic_liquid", "[Pyr14][FAP]")
+    load_queries = _field_query_variants("load", "15-75 nN")
+
+    assert "open circuit potential" in potential_queries
+    assert "−0.16 V" in potential_queries
+    assert "[Py1,4]FAP" in ionic_queries
+    assert "normal load" in load_queries
+
+
+def test_pdf_term_query_variants_expand_ionic_liquid_aliases_for_evidence_hits():
+    variants = build_term_query_variants("[Pyr14][FAP]")
+
+    assert "[Py1,4]FAP" in variants
+    assert "[Py1;4]FAP" in variants
+
+
+def test_derive_grounding_metadata_marks_temperature_normalization_as_derived():
+    mode, note = _derive_grounding_metadata(
+        "temperature",
+        "298.15 K",
+        {"quote": "Room-temperature ionic liquids were studied.", "matched_text": "Room-temperature"},
+    )
+
+    assert mode == "derived"
+    assert note == "Normalized from room-temperature wording."
+
+
+def test_refine_potential_evidence_prefers_metric_quote_with_exact_voltage():
+    entries = {
+        "cof": {
+            "value": "0.20",
+            "evidence": {
+                "page": 2,
+                "source_label": "Text",
+                "quote": "Small lateral forces and low friction coefficients (0.20 for -1 V and 0.19 for -2 V).",
+                "bbox": [10.0, 10.0, 40.0, 20.0],
+                "matched_text": "0.20",
+            },
+        },
+        "potential": {
+            "value": "-1 V",
+            "evidence": {
+                "page": 2,
+                "source_label": "Text",
+                "quote": "friction increases strongly with potential in the range from -1.75 to -0.5 V.",
+                "bbox": [50.0, 50.0, 120.0, 60.0],
+                "matched_text": "-1.75 to -0.5 V",
+            },
+        },
+    }
+
+    refined = _refine_potential_evidence_from_metric_context(entries)
+
+    assert refined["potential"]["evidence"]["quote"].startswith("Small lateral forces")
+    assert refined["potential"]["evidence"]["bbox"] == [10.0, 10.0, 40.0, 20.0]
+
+
+def test_refine_potential_evidence_uses_refined_voltage_bbox(monkeypatch):
+    monkeypatch.setattr(
+        "services.file_service._refine_potential_bbox_near_metric_evidence",
+        lambda **kwargs: {
+            "page": 2,
+            "bbox": [50.0, 10.0, 70.0, 20.0],
+            "matched_text": "-1 V",
+            "quote": "0.20 for -1 V and 0.19 for -2 V",
+        },
+    )
+
+    entries = {
+        "cof": {
+            "value": "0.20",
+            "evidence": {
+                "page": 2,
+                "source_label": "Text",
+                "quote": "Small lateral forces and low friction coefficients (0.20 for -1 V and 0.19 for -2 V).",
+                "bbox": [10.0, 10.0, 40.0, 20.0],
+                "matched_text": "0.20",
+            },
+        },
+        "potential": {
+            "value": "-1 V",
+            "evidence": {
+                "page": 2,
+                "source_label": "Text",
+                "quote": "friction increases strongly with potential in the range from -1.75 to -0.5 V.",
+                "bbox": [50.0, 50.0, 120.0, 60.0],
+                "matched_text": "-1.75 to -0.5 V",
+            },
+        },
+    }
+
+    refined = _refine_potential_evidence_from_metric_context_with_pdf(entries, "/tmp/fake.pdf")
+
+    assert refined["potential"]["evidence"]["matched_text"] == "-1 V"
+    assert refined["potential"]["evidence"]["bbox"] == [50.0, 10.0, 70.0, 20.0]

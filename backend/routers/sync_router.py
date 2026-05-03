@@ -17,6 +17,7 @@ from schemas import (
     SyncResult
 )
 from services.sync_facade_service import (
+    backfill_literature_metadata_payload,
     delete_literature_payload,
     get_literature_by_doi_payload,
     get_literature_detail_payload,
@@ -308,6 +309,33 @@ async def get_tribology_records(
 
 
 # ============== Reprocess Endpoint ==============
+
+@router.post("/literature/{literature_id}/metadata/backfill")
+async def backfill_literature_metadata_endpoint(
+    literature_id: int,
+    force: bool = False,
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    """
+    Fill missing literature metadata without touching confirmed tribology records.
+
+    Uses Crossref when a stable DOI is present; otherwise reads cached/full-text
+    source content and runs the metadata-only extractor, then updates only empty
+    or temporary metadata fields.
+    """
+    try:
+        await require_literature_access(db, principal, literature_id, write=True)
+        return await backfill_literature_metadata_payload(
+            db,
+            literature_id=literature_id,
+            force=force,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_internal_error("Backfill literature metadata", exc)
+
 
 @router.post("/literature/{literature_id}/reprocess")
 async def reprocess_literature_endpoint(
