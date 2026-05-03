@@ -353,6 +353,58 @@ def _text_matches_field_or_alias(field_key: str, value: Any, entry: dict[str, An
     return False
 
 
+def _refresh_visual_source_evidence(entry: dict[str, Any], *, pdf_path: str | None) -> dict[str, Any]:
+    evidence = entry.get("evidence") if isinstance(entry.get("evidence"), dict) else {}
+    source_type = str((evidence or {}).get("source_type") or "").strip().lower()
+    source_label = str((evidence or {}).get("source_label") or "").strip()
+    page_num = int((evidence or {}).get("page") or 0)
+    if (
+        not pdf_path
+        or not page_num
+        or not source_label
+        or not (
+            source_type in {"figure", "visual", "image"}
+            or source_label.lower().startswith("fig")
+        )
+    ):
+        return entry
+
+    try:
+        from utils.pdf_coords import find_figure_bbox, normalize_source_label
+
+        normalized_label = normalize_source_label(source_label) or source_label
+        fig_page, fig_bbox = find_figure_bbox(
+            pdf_path,
+            normalized_label,
+            page_hint=page_num,
+            restrict_to_page_hint=True,
+        )
+        if not fig_page or not fig_bbox:
+            return entry
+        if not fig_bbox:
+            return entry
+        refreshed = dict(entry)
+        refreshed_evidence = dict(evidence)
+        refreshed_evidence.update(
+            {
+                "source_type": "figure",
+                "page": int(fig_page),
+                "source_label": normalized_label,
+                "bbox": [float(value) for value in fig_bbox],
+                "matched_text": None,
+            }
+        )
+        refreshed["evidence"] = refreshed_evidence
+        refreshed.setdefault("grounding_mode", "source_anchor")
+        refreshed.setdefault(
+            "grounding_note",
+            "Value is anchored to the source figure; exact numeric text may be read from the image rather than selectable PDF text.",
+        )
+        return refreshed
+    except Exception:
+        return entry
+
+
 def _sanitize_field_evidence_locations(
     field_map: dict[str, Any],
     *,
@@ -370,6 +422,10 @@ def _sanitize_field_evidence_locations(
         if grounding_mode == "inferred" or not evidence:
             sanitized[key] = entry
             continue
+
+        entry = _refresh_visual_source_evidence(entry, pdf_path=pdf_path)
+        evidence = entry.get("evidence") if isinstance(entry.get("evidence"), dict) else {}
+        source_type = str((evidence or {}).get("source_type") or "").strip().lower()
 
         bbox = evidence.get("bbox")
         page_num = int(evidence.get("page") or 0)
@@ -436,11 +492,27 @@ def _build_record_field_evidence_payload(record: Any) -> dict[str, Any]:
         "source_page",
     ):
         raw_entry = field_map.get(key) if isinstance(field_map.get(key), dict) else {}
+        evidence = raw_entry.get("evidence") if isinstance(raw_entry.get("evidence"), dict) else None
+        if evidence:
+            evidence_source_type = str(evidence.get("source_type") or "").strip().lower()
+            evidence_source_label = str(evidence.get("source_label") or "").strip()
+            if (
+                getattr(record, "source_page", None)
+                and (
+                    evidence_source_type in {"figure", "visual", "image"}
+                    or evidence_source_label.lower().startswith("fig")
+                )
+            ):
+                evidence = {
+                    **evidence,
+                    "page": getattr(record, "source_page", None),
+                    "source_label": evidence_source_label or getattr(record, "source_figure", None) or getattr(record, "source", None),
+                }
         normalized_fields[key] = {
             **raw_entry,
             "value": raw_entry.get("value", _field_value_from_record(record, key)),
             "confidence": raw_entry.get("confidence", record.confidence),
-            "evidence": raw_entry.get("evidence"),
+            "evidence": evidence,
             "status": _field_grounding_status(raw_entry),
             "grounding_mode": raw_entry.get("grounding_mode"),
             "grounding_note": raw_entry.get("grounding_note"),

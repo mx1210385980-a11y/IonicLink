@@ -617,7 +617,7 @@ const activeFieldResolvedEvidence = computed(() => {
       bbox: entryBbox,
       quote: directQuote || directMatchedText,
       imageB64: null,
-      sourceLabel: trim(fieldEntry?.evidence?.source_label),
+      sourceLabel: formatReviewSourceLabel(fieldEntry?.evidence?.source_label),
       sampleId: trim(fieldEntry?.evidence?.sample_id),
       mode: 'field' as const,
     }
@@ -645,7 +645,7 @@ const evidenceSecondaryValue = computed(() => {
   return activeFieldResolvedEvidence.value?.sampleId || activeFieldEvidenceEntry.value?.evidence?.sample_id || activeRecord?.value?.sample_id || '尚未关联'
 })
 const activeFieldSourceLabel = computed(() => {
-  return activeFieldEvidenceEntry.value?.evidence?.source_label || ''
+  return formatReviewSourceLabel(activeFieldEvidenceEntry.value?.evidence?.source_label)
 })
 
 const recordHighlights = computed<HighlightRect[]>(() => {
@@ -722,6 +722,13 @@ async function handleReextractCurrentFile() {
 
 function trim(value: unknown) {
   return String(value ?? '').trim()
+}
+
+function formatReviewSourceLabel(value: unknown) {
+  return trim(value).replace(
+    /\b(Fig(?:ure)?\.?\s*\d+)\s*([A-Z])\b/g,
+    (_match, prefix, panel) => `${prefix.replace(/^Figure/i, 'Fig.')}${String(panel).toLowerCase()}`,
+  )
 }
 
 function present(value: unknown) {
@@ -1431,7 +1438,7 @@ function resolveFieldSourceType(entry: FieldEvidenceEntry | null | undefined, re
 
 function resolveFieldLocation(entry: FieldEvidenceEntry | null | undefined, record: TribologyData | null | undefined) {
   const page = entry?.evidence?.page
-  const label = trim(entry?.evidence?.source_label)
+  const label = formatReviewSourceLabel(entry?.evidence?.source_label)
   if (page && label) return `Page ${page} | ${label}`
   if (page) return `Page ${page}`
   if (label) return label
@@ -1605,9 +1612,9 @@ function inferSourceType(record: TribologyData | null | undefined): ReviewField[
 
 function evidenceLocation(record: TribologyData | null | undefined) {
   if (!record) return `Scope ${props.activeScopeLabel}`
-  if (record.source_page && trim(record.source_figure)) return `Page ${record.source_page} | ${record.source_figure}`
+  if (record.source_page && trim(record.source_figure)) return `Page ${record.source_page} | ${formatReviewSourceLabel(record.source_figure)}`
   if (record.source_page) return `Page ${record.source_page}`
-  if (trim(record.source_figure)) return `Figure ${trim(record.source_figure)}`
+  if (trim(record.source_figure)) return `Figure ${formatReviewSourceLabel(record.source_figure)}`
   return `Scope ${props.activeScopeLabel}`
 }
 
@@ -2328,7 +2335,7 @@ function tribopairPartSource(entry: FieldEvidenceEntry | null | undefined, recor
   if (trim(entry?.grounding_mode).toLowerCase() === 'inferred') return '推断'
   const sourceType = sourceTypeLabel(resolveFieldSourceType(entry, record))
   const page = entry?.evidence?.page
-  const label = trim(entry?.evidence?.source_label)
+  const label = formatReviewSourceLabel(entry?.evidence?.source_label)
   if (page && label) return `${sourceType} · Page ${page} | ${label}`
   if (page) return `${sourceType} · Page ${page}`
   if (label) return `${sourceType} · ${label}`

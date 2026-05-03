@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 from routers.extraction import _sanitize_field_evidence_locations
@@ -6,6 +7,8 @@ from services.il_resolver_service import filter_to_supported_ionic_liquid_record
 from services.normalization.row_normalizer import normalize_extraction_row
 from utils.document_context import extract_experimental_document_context
 from utils.cof_guard import unsupported_figure_cof_reason
+
+PALACIO_PDF = Path("Reference/2010-Palacio M, Bhushan B. A review of ionic liquids for green molecular lubrication in nanotechnology[J]. Tribology Letters, 2010, 40(2) 247-268.pdf")
 
 
 def test_coefficient_of_friction_phrase_is_valid_metric_context():
@@ -130,3 +133,26 @@ def test_review_sanitizer_keeps_ionic_liquid_alias_bbox_for_standardized_value()
     evidence = sanitized["ionic_liquid"]["evidence"]
     assert evidence["bbox"] == [345.66, 693.84, 375.54, 703.8]
     assert evidence["matched_text"] == "L-F206"
+
+
+def test_review_sanitizer_refreshes_visual_anchor_to_source_page_subfigure():
+    fields = {
+        "cof": {
+            "value": "0.08",
+            "evidence": {
+                "source_type": "figure",
+                "page": 7,
+                "source_label": "Fig. 5A",
+                "bbox": [43.02, 445.6, 180.08, 721.93],
+                "matched_text": None,
+            },
+            "grounding_mode": "source_anchor",
+        }
+    }
+
+    sanitized = _sanitize_field_evidence_locations(fields, pdf_path=str(PALACIO_PDF))
+
+    evidence = sanitized["cof"]["evidence"]
+    assert evidence["page"] == 7
+    assert evidence["source_label"] == "Fig. 5A"
+    assert evidence["bbox"] == [77.04, 51.24, 324.65, 385.63]

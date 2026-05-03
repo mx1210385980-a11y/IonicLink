@@ -1475,7 +1475,10 @@ def _locate_field_evidence_for_value(
                 pdf_path,
                 normalized_source,
                 page_hint=resolved_page_hint,
-                restrict_to_page_hint=False,
+                restrict_to_page_hint=bool(
+                    resolved_page_hint
+                    and _is_visual_source_type(effective_source_type, normalized_source)
+                ),
             )
             if fig_page and fig_bbox:
                 if not resolved_page_hint:
@@ -1606,7 +1609,10 @@ def _locate_source_anchor_evidence(
                 pdf_path,
                 normalized_source,
                 page_hint=resolved_page_hint or None,
-                restrict_to_page_hint=False,
+                restrict_to_page_hint=bool(
+                    resolved_page_hint
+                    and _is_visual_source_type(effective_source_type, normalized_source)
+                ),
             )
             if anchor_page and anchor_bbox:
                 bbox = [float(value) for value in anchor_bbox]
@@ -1732,11 +1738,15 @@ def _build_field_evidence_map(item: dict, db_record: TribologyData, *, confidenc
         )
     }
     source_label = getattr(db_record, "source", None) or getattr(db_record, "source_figure", None) or item.get("source")
-    page = getattr(db_record, "evidence_page", None) or getattr(db_record, "source_page", None) or item.get("source_page")
+    source_page = getattr(db_record, "source_page", None) or item.get("source_page")
+    evidence_page = getattr(db_record, "evidence_page", None)
     quote = _filled_text(item.get("evidence")) or _filled_text(item.get("notes")) or None
-    bbox = _parse_json_bbox(getattr(db_record, "evidence_bbox", None))
     sample_id = _filled_text(item.get("sample_id")) or None
-    source_type = _infer_source_type(source_label) if any([source_label, page, quote, bbox, sample_id]) else None
+    raw_bbox = _parse_json_bbox(getattr(db_record, "evidence_bbox", None))
+    source_type = _infer_source_type(source_label) if any([source_label, source_page, evidence_page, quote, raw_bbox, sample_id]) else None
+    page = source_page if _is_visual_source_type(source_type, source_label) and source_page else evidence_page or source_page
+    has_resolved_file = bool(_resolve_existing_path(file_path))
+    bbox = None if has_resolved_file and _is_visual_source_type(source_type, source_label) else raw_bbox
 
     entries = {
         "material": _build_field_evidence_entry(
@@ -1988,6 +1998,23 @@ def _build_field_evidence_map(item: dict, db_record: TribologyData, *, confidenc
                 if entry.get("grounding_mode") == "source_anchor":
                     entry.pop("grounding_mode", None)
                     entry.pop("grounding_note", None)
+            elif _is_visual_source_type(source_type, source_label):
+                source_anchor = _locate_source_anchor_evidence(
+                    file_path=resolved_file_path,
+                    source_label=source_label,
+                    page_hint=int(page) if page else None,
+                    source_type=source_type,
+                )
+                if source_anchor:
+                    entry["evidence"] = {
+                        **(entry.get("evidence") or {}),
+                        **source_anchor,
+                        "sample_id": sample_id,
+                    }
+                    entry["grounding_mode"] = "source_anchor"
+                    entry["grounding_note"] = (
+                        "Value is anchored to the source figure; exact numeric text may be read from the image rather than selectable PDF text."
+                    )
             entries[field_key] = entry
 
     if "potential" not in provided_field_keys:
