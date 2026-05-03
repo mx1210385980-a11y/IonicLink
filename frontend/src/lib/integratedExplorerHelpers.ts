@@ -884,7 +884,7 @@ export function lubricantTooltip(record: RecordResponse): string {
   const alias = lubricantAliasDisplay(record)
   
   if (components.length <= 1) {
-    return alias ? `文献别名: ${alias} · 标准离子形式: ${lubricantDisplay(record)}` : ''
+    return alias ? `文献别名: ${alias}; 标准离子形式: ${lubricantDisplay(record)}` : ''
   }
 
   const details = components

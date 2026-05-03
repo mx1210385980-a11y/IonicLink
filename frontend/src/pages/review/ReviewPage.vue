@@ -3251,9 +3251,14 @@ function presentZh(value: string) {
                         <span class="text-[10px] font-bold text-[#334155]">{{ part.split('=').slice(1).join('=').trim() }}</span>
                       </template>
                       <template v-else-if="part.includes(':')">
-                        <span class="text-[9.5px] font-medium text-[#64748b]">{{ (part.split(':')[0] || '').trim() }}</span>
+                        <span class="w-[4.85rem] shrink-0 text-[9.5px] font-medium leading-4 text-[#64748b]">{{ (part.split(':')[0] || '').trim() }}</span>
                         <div class="mx-1.5 flex-1 border-b-[1.5px] border-dotted border-[#cbd5e1]/60"></div>
-                        <span class="text-[10px] font-semibold tabular-nums text-[#0f172a]">{{ part.split(':').slice(1).join(':').trim() }}</span>
+                        <span
+                          v-if="(part.split(':')[0] || '').trim() === '标准离子形式'"
+                          class="min-w-0 text-[10px] font-semibold tabular-nums text-[#0f172a]"
+                          v-html="formatIonicLiquidHtml(part.split(':').slice(1).join(':').trim())"
+                        />
+                        <span v-else class="min-w-0 text-[10px] font-semibold tabular-nums text-[#0f172a]">{{ part.split(':').slice(1).join(':').trim() }}</span>
                       </template>
                       <template v-else>
                         <span class="text-[9.5px] font-medium text-[#64748b]">{{ part.trim() }}</span>
