@@ -93,7 +93,7 @@ def test_figure_inferred_value_keeps_figure_bbox_as_field_anchor():
     assert field_map["cof"]["grounding_mode"] == "source_anchor"
 
 
-def test_review_figure_estimate_filter_keeps_unresolved_il_aliases_only_in_permissive_mode():
+def test_review_figure_estimate_filter_keeps_known_aliases_in_strict_mode_and_controls_in_permissive_mode():
     records = [
         {"ionic_liquid": "L-F206", "cof": "0.08"},
         {"ionic_liquid": "BHPT", "cof": "0.02"},
@@ -103,7 +103,7 @@ def test_review_figure_estimate_filter_keeps_unresolved_il_aliases_only_in_permi
     strict_kept, _ = filter_to_supported_ionic_liquid_records(records)
     permissive_kept, permissive_dropped = filter_to_supported_ionic_liquid_records(records, allow_likely=True)
 
-    assert strict_kept == []
+    assert [row["ionic_liquid"] for row in strict_kept] == ["L-F206", "BHPT"]
     assert [row["ionic_liquid"] for row in permissive_kept] == ["L-F206", "BHPT"]
     assert [row["ionic_liquid"] for row in permissive_dropped] == ["Z-TETRAOL"]
     assert is_likely_ionic_liquid_name("BHPET")

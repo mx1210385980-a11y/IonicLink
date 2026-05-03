@@ -11,6 +11,7 @@ import {
   formatIonicLiquidPartHtml,
   formatIonicLiquidHtml,
   ionicLiquidParts,
+  lubricantAliasDisplay,
   lubricantDisplay,
   lubricantDisplayLines,
   lubricantStructureItems,
@@ -222,7 +223,10 @@ describe('integratedExplorerHelpers', () => {
     expect(formatIonicLiquidPartHtml('[P66614]')).toBe('[P<sub>6,6,6,14</sub>]')
     expect(formatIonicLiquidPartHtml('[P4,4,4,1]')).toBe('[P<sub>4,4,4,1</sub>]')
     expect(formatIonicLiquidPartHtml('[P6,6,6,14]')).toBe('[P<sub>6,6,6,14</sub>]')
-    expect(formatIonicLiquidHtml('[P66614][BTA] (80 wt%)')).toBe('[P<sub>6,6,6,14</sub>][BTA] (80 wt%)')
+    const ratioHtml = formatIonicLiquidHtml('[P66614][BTA] (80 wt%)')
+    expect(ratioHtml).toContain('[P<sub>6,6,6,14</sub>][BTA]')
+    expect(ratioHtml).toContain('Ratio')
+    expect(ratioHtml).toContain('80 wt%')
     expect(ionicLiquidParts('[P66614][TFSI]')).toEqual(['[P66614]', '[TFSI]'])
   })
 
@@ -235,6 +239,19 @@ describe('integratedExplorerHelpers', () => {
 
     expect(lubricantDisplay(pure)).toBe('[EMIM][EtSO4]')
     expect(lubricantTooltip(pure)).toBe('')
+  })
+
+  it('keeps literature aliases separate from standardized ionic liquid labels', () => {
+    const aliased = createRecord({
+      lubricant: '[EHIM][TFSI]',
+      lubricantAlias: 'L-F206',
+      ionicLiquidDisplay: '[EHIM][TFSI]',
+    })
+
+    expect(lubricantDisplay(aliased)).toBe('[EHIM][TFSI]')
+    expect(lubricantAliasDisplay(aliased)).toBe('L-F206')
+    expect(lubricantDisplayLines(aliased)).toEqual(['[EHIM][TFSI]'])
+    expect(lubricantTooltip(aliased)).toContain('文献别名: L-F206')
   })
 
   it('keeps compact display and tooltip details for ionic liquid mixtures', () => {

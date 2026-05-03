@@ -217,6 +217,7 @@ def format_lubricant_tooltip(
 ) -> str:
     component_list = normalize_lubricant_components(components) or parse_lubricant_components(lubricant)
     compact = compact_lubricant_label(lubricant, component_list, alias=None)
+    alias_text = str(alias or "").strip()
     parts: list[str] = []
     for component in component_list:
         label = str(component.get("compound") or "").strip()
@@ -227,4 +228,6 @@ def format_lubricant_tooltip(
         parts.append(label)
 
     detail = "; ".join(parts) if parts else str(lubricant or "").strip()
+    if alias_text and alias_text != compact and alias_text != detail:
+        detail = f"{detail or compact} (literature alias: {alias_text})"
     return detail or compact

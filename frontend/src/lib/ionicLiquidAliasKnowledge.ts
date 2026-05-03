@@ -32,6 +32,26 @@ const IONIC_LIQUID_CATION_MEMORY: Record<string, IonicLiquidAliasEntry> = {
     canonical: '1-hexyl-3-methylimidazolium',
     searchTerms: ['HMIM', '1-hexyl-3-methylimidazolium', 'hexylmethylimidazolium'],
   },
+  ehim: {
+    canonical: '1-ethyl-3-hexylimidazolium',
+    searchTerms: ['EHIM', 'C2C6IM', '1-ethyl-3-hexylimidazolium', 'ethylhexylimidazolium'],
+  },
+  bhpt: {
+    canonical: 'BHPT dication',
+    searchTerms: [
+      'BHPT',
+      'dicationic IL BHPT',
+      '1,10-(pentane-1,5-diyl)bis(3-hydroxyethyl-1H-imidazolium-1-yl)',
+    ],
+  },
+  bhpet: {
+    canonical: 'BHPET dication',
+    searchTerms: [
+      'BHPET',
+      'dicationic IL BHPET',
+      '1,10-(3,6,9,12,15-pentaoxapentadecane-1,15-diyl)bis(3-hydroxyethyl-1H-imidazolium-1-yl)',
+    ],
+  },
   pyr14: {
     canonical: 'N-methyl-N-butylpyrrolidinium',
     searchTerms: [
@@ -107,6 +127,14 @@ function uniqueTerms(input: string[]) {
   })
 }
 
+function pairAliasTerms(pair: IonicLiquidEvidenceParts) {
+  if (pair.cationKey === 'ehim' && pair.anionKey === 'tfsi') return ['L-F206', 'LF206']
+  if (pair.cationKey === 'ehim' && pair.anionKey === 'bf4') return ['L-B206', 'LB206']
+  if (pair.cationKey === 'bhpt' && pair.anionKey === 'tfsi') return ['BHPT', '[BHPT][TFSI]2']
+  if (pair.cationKey === 'bhpet' && pair.anionKey === 'tfsi') return ['BHPET', '[BHPET][TFSI]2']
+  return []
+}
+
 export function getIonicLiquidEvidenceTerms(rawValue: string) {
   const value = String(rawValue || '').trim()
   if (!value) return []
@@ -118,6 +146,7 @@ export function getIonicLiquidEvidenceTerms(rawValue: string) {
   const anionMemory = IONIC_LIQUID_ANION_MEMORY[pair.anionKey]
 
   const terms = [
+    ...pairAliasTerms(pair),
     ...(anionMemory?.searchTerms || []),
     value,
     `[${pair.cationRaw}] [${pair.anionRaw}]`,

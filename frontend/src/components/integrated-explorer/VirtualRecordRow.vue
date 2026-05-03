@@ -11,6 +11,7 @@ import {
   confidenceValueFor,
   formatIonicLiquidPartHtml,
   ionicLiquidParts,
+  lubricantAliasDisplay,
   lubricantDisplayLines,
   lubricantTooltip,
   surfaceRoughnessBadge,
@@ -73,6 +74,13 @@ function roughnessBadge(record: RecordResponse) {
               class="inline whitespace-normal break-words"
               v-html="formatIonicLiquidPartHtml(part)"
             />
+          </span>
+          <span
+            v-if="lubricantAliasDisplay(record)"
+            class="mt-1 inline-flex w-fit max-w-full items-center gap-1.5 rounded-[0.25rem] border border-amber-200 bg-amber-50 px-1.5 py-[2px] text-[9.5px] font-bold leading-none text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
+          >
+            <span class="shrink-0 text-[8.5px] font-black uppercase tracking-wider text-amber-600/80 dark:text-amber-300/80">Alias</span>
+            <span class="min-w-0 truncate">{{ lubricantAliasDisplay(record) }}</span>
           </span>
         </div>
       </div>

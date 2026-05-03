@@ -58,6 +58,7 @@ import {
 } from '@/lib/api'
 import {
   formatIonicLiquidHtml,
+  lubricantAliasDisplay,
   lubricantDisplay,
   lubricantTooltip,
 } from '@/lib/integratedExplorerHelpers'
@@ -1178,6 +1179,11 @@ function reviewIonicLiquidDisplay(record: TribologyData | null | undefined) {
 function reviewIonicLiquidTooltip(record: TribologyData | null | undefined) {
   if (!record) return ''
   return lubricantTooltip(reviewLubricantProxy(record) as any)
+}
+
+function reviewIonicLiquidAlias(record: TribologyData | null | undefined) {
+  if (!record) return ''
+  return lubricantAliasDisplay(reviewLubricantProxy(record) as any)
 }
 
 function normalizeFieldKey(key: string) {
@@ -3480,14 +3486,24 @@ function presentZh(value: string) {
                           结构化编辑
                         </button>
                       </div>
-                      <p
-                        v-if="!structuredTagsForField(field, item.record).length"
-                        class="mt-1 truncate text-sm font-semibold text-slate-900"
-                        :title="field.tooltip || presentZh(field.value)"
-                      >
-                        <span v-if="field.id === 'ionic_liquid'" v-html="formatIonicLiquidHtml(presentZh(field.value))" />
-                        <span v-else>{{ presentZh(field.value) }}</span>
-                      </p>
+                      <div v-if="!structuredTagsForField(field, item.record).length">
+                        <p
+                          class="mt-1 truncate text-sm font-semibold text-slate-900"
+                          :title="field.tooltip || presentZh(field.value)"
+                        >
+                          <span v-if="field.id === 'ionic_liquid'" v-html="formatIonicLiquidHtml(presentZh(field.value))" />
+                          <span v-else>{{ presentZh(field.value) }}</span>
+                        </p>
+                        <div
+                          v-if="field.id === 'ionic_liquid' && reviewIonicLiquidAlias(item.record)"
+                          class="mt-1.5 flex min-w-0 flex-wrap items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-800"
+                          :title="`文献中的 ${reviewIonicLiquidAlias(item.record)} 是样品代号，平台已映射为标准离子形式 ${reviewIonicLiquidDisplay(item.record)}`"
+                        >
+                          <span class="shrink-0 rounded-[0.3rem] bg-white/80 px-1.5 py-[1px] text-[9px] font-black text-amber-600 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.35)]">文献别名</span>
+                          <span class="font-black">{{ reviewIonicLiquidAlias(item.record) }}</span>
+                          <span class="text-amber-700/80">已映射为上方标准离子形式</span>
+                        </div>
+                      </div>
                       <div v-else class="mt-1.5 grid gap-1.5">
                         <div
                           v-for="tag in structuredTagsForField(field, item.record)"

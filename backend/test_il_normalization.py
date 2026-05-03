@@ -1,5 +1,5 @@
 from services.file_service import _canonicalize_ionic_liquid_name, _normalize_record_chemistry
-from services.il_resolver_service import resolve_il
+from services.il_resolver_service import resolve_il, resolve_ionic_liquid_alias
 from services.normalization import normalize_extraction_row
 from services.normalization.potential import normalize_potential_text
 from services.data_sync_service import _normalize_quantitative_thickness
@@ -12,6 +12,43 @@ def test_resolve_il_normalizes_full_name_and_phosphonium_display():
 
     phosphonium = resolve_il("[P66614][TFSI]")
     assert phosphonium["canonical_name"] == "[P6,6,6,14][TFSI]"
+
+
+def test_resolve_il_maps_palacio_sample_aliases_to_ion_forms():
+    l_f206 = resolve_il("L-F206")
+    assert l_f206["canonical_name"] == "[EHIM][TFSI]"
+    assert l_f206["cation"] == "EHIM"
+    assert l_f206["anion"] == "TFSI"
+    assert l_f206["lubricant_alias"] == "L-F206"
+
+    l_b206 = resolve_il("L-B206 (1-ethyl-3-hexylimidazolium tetrafluoroborate)")
+    assert l_b206["canonical_name"] == "[EHIM][BF4]"
+    assert l_b206["lubricant_alias"] == "L-B206"
+
+    bhpt = resolve_il("BHPT")
+    assert bhpt["canonical_name"] == "[BHPT][TFSI]2"
+    assert bhpt["anion_stoichiometry"] == 2
+
+    assert resolve_ionic_liquid_alias("BHPET (Dicationic IL)")["canonical_name"] == "[BHPET][TFSI]2"
+
+
+def test_normalize_record_chemistry_preserves_literature_alias_for_standardized_il():
+    records = [
+        {"ionic_liquid": "L-F206", "cof": "0.08"},
+        {"ionic_liquid": "BHPET (Dicationic IL)", "cof": "0.04"},
+    ]
+
+    _normalize_record_chemistry(records)
+
+    assert records[0]["ionic_liquid"] == "[EHIM][TFSI]"
+    assert records[0]["lubricant_alias"] == "L-F206"
+    assert records[0]["cation"] == "EHIM"
+    assert records[0]["anion"] == "TFSI"
+
+    assert records[1]["ionic_liquid"] == "[BHPET][TFSI]2"
+    assert records[1]["lubricant_alias"] == "BHPET"
+    assert records[1]["cation"] == "BHPET"
+    assert records[1]["anion"] == "TFSI"
 
 
 def test_normalize_record_chemistry_clears_il_from_film_field_and_uses_bracket_notation():

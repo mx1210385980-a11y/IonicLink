@@ -33,7 +33,13 @@ from services.llm.utils import normalize_record_value
 from knowledge_base import normalize_ionic_liquid
 from services.score_service import calculate_confidence
 from services.fallback_extraction_service import extract_metadata_fallback, extract_table_fallback_records
-from services.il_resolver_service import ANION_DB, CATION_DB, filter_to_supported_ionic_liquid_records, resolve_il
+from services.il_resolver_service import (
+    ANION_DB,
+    CATION_DB,
+    filter_to_supported_ionic_liquid_records,
+    resolve_il,
+    resolve_ionic_liquid_alias,
+)
 from services.extraction_trace_service import (
     add_extraction_candidates,
     create_extraction_run,
@@ -2283,6 +2289,8 @@ def _build_db_record_from_item(
         or item.get("mixture_alias")
         or item.get("mixtureAlias")
     )
+    if not lubricant_alias:
+        lubricant_alias = (resolve_ionic_liquid_alias(lubricant) or {}).get("alias")
     cof_extracted = normalize_cof_extracted(item.get("cof_extracted") or item.get("cofExtracted"))
     if not cof_extracted:
         cof_extracted = derive_cof_extracted(
@@ -3014,6 +3022,24 @@ def _canonicalize_ionic_liquid_name(value: object) -> tuple[Optional[str], dict]
     return None, resolved
 
 
+def _canonical_pair_parts(canonical_name: object, resolved: dict) -> tuple[Optional[str], Optional[str]]:
+    canonical_text = str(canonical_name or "").strip()
+    match = re.match(r"^\[([^\]]+)\]\s*\[([^\]]+)\](?:\d+)?$", canonical_text)
+    if match:
+        return match.group(1), match.group(2)
+    return resolved.get("cation"), resolved.get("anion")
+
+
+def _refines_same_cation_pair(current_name: object, current_resolved: dict, next_name: object, next_resolved: dict) -> bool:
+    current_cation, current_anion = _canonical_pair_parts(current_name, current_resolved)
+    next_cation, next_anion = _canonical_pair_parts(next_name, next_resolved)
+    if not current_cation or not next_cation or current_cation != next_cation:
+        return False
+    if not current_anion or not next_anion or current_anion == next_anion:
+        return False
+    return len(str(next_anion)) > len(str(current_anion))
+
+
 def _normalize_record_chemistry(records: list[dict]) -> None:
     for item in records or []:
         if not isinstance(item, dict):
@@ -3084,25 +3110,38 @@ def _normalize_record_chemistry(records: list[dict]) -> None:
             item["ionic_liquid_display"] = compact_lubricant_label(raw_lubricant, lubricant_components, alias)
             item["lubricant_tooltip"] = format_lubricant_tooltip(raw_lubricant, lubricant_components, alias)
 
-        il_candidates: list[object] = [
-            item.get("ionic_liquid"),
-            item.get("lubricant"),
-            item.get("cation") and item.get("anion") and f"[{item.get('cation')}][{item.get('anion')}]",
-            raw_film_candidate if raw_film_candidate and not item.get("film_thickness") else None,
-            item.get("evidence"),
-            item.get("notes"),
+        il_candidates: list[tuple[str, object]] = [
+            ("ionic_liquid", item.get("ionic_liquid")),
+            ("lubricant", item.get("lubricant")),
+            ("components", item.get("cation") and item.get("anion") and f"[{item.get('cation')}][{item.get('anion')}]"),
+            ("film_thickness", raw_film_candidate if raw_film_candidate and not item.get("film_thickness") else None),
+            ("evidence", item.get("evidence")),
+            ("notes", item.get("notes")),
         ]
-        if not any(candidate and not _is_unknown_il(candidate) for candidate in il_candidates):
+        if not any(candidate and not _is_unknown_il(candidate) for _, candidate in il_candidates):
             il_candidates.extend([
-                raw_film_candidate,
+                ("film_thickness", raw_film_candidate),
             ])
 
         canonical_name: Optional[str] = None
         resolved: dict = {}
-        for candidate in il_candidates:
-            canonical_name, resolved = _canonicalize_ionic_liquid_name(candidate)
-            if canonical_name:
-                break
+        canonical_matches: list[tuple[str, Optional[str], dict]] = []
+        for label, candidate in il_candidates:
+            candidate_name, candidate_resolved = _canonicalize_ionic_liquid_name(candidate)
+            if candidate_name:
+                canonical_matches.append((label, candidate_name, candidate_resolved))
+        if canonical_matches:
+            _, canonical_name, resolved = canonical_matches[0]
+            for label, candidate_name, candidate_resolved in canonical_matches[1:]:
+                if label in {"film_thickness", "evidence", "notes"} and _refines_same_cation_pair(
+                    canonical_name,
+                    resolved,
+                    candidate_name,
+                    candidate_resolved,
+                ):
+                    canonical_name = candidate_name
+                    resolved = candidate_resolved
+                    break
 
         if is_mixture:
             canonical_name = None
@@ -3111,11 +3150,19 @@ def _normalize_record_chemistry(records: list[dict]) -> None:
         if canonical_name:
             item["ionic_liquid"] = canonical_name
             item["lubricant"] = canonical_name
+            resolved_alias = (
+                resolved.get("lubricant_alias")
+                or resolved.get("alias")
+                or (resolve_ionic_liquid_alias(raw_lubricant or "") or {}).get("alias")
+            )
+            if resolved_alias and not item.get("lubricant_alias"):
+                item["lubricant_alias"] = resolved_alias
 
+        cation_part, anion_part = _canonical_pair_parts(resolved.get("canonical_name"), resolved)
         if resolved.get("cation"):
-            item["cation"] = resolved["canonical_name"].split("][")[0].lstrip("[") if resolved.get("canonical_name") else resolved["cation"]
+            item["cation"] = cation_part or resolved["cation"]
         if resolved.get("anion"):
-            item["anion"] = resolved["canonical_name"].split("][")[-1].rstrip("]") if resolved.get("canonical_name") else resolved["anion"]
+            item["anion"] = anion_part or resolved["anion"]
         if resolved.get("cation_smiles"):
             item["cation_smiles"] = resolved["cation_smiles"]
         if resolved.get("anion_smiles"):

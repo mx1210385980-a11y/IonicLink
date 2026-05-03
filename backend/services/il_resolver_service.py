@@ -61,6 +61,21 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
         "alkyl_chain_length": 6,
         "aliases": ["C6MIM", "C6mim", "hmim", "HMIM+"],
     },
+    "EHIM": {
+        "smiles": "CCCCCCn1cc[n+](CC)c1",
+        "display_name": "EHIM",
+        "full_name": "1-ethyl-3-hexylimidazolium",
+        "family": "imidazolium",
+        "alkyl_chain_length": 6,
+        "aliases": [
+            "ehim",
+            "EHIM+",
+            "C2C6IM",
+            "C2C6Im",
+            "1-ethyl-3-hexylimidazolium",
+            "1 ethyl 3 hexylimidazolium",
+        ],
+    },
     "OMIM": {
         "smiles": "CCCCCCCCn1cc[n+](C)c1",
         "display_name": "OMIM",
@@ -212,6 +227,32 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
         "alkyl_chain_length": 3,
         "aliases": ["hc3c1c1"],
     },
+    "BHPT": {
+        "smiles": "",
+        "display_name": "BHPT",
+        "full_name": "1,10-(pentane-1,5-diyl)bis(3-hydroxyethyl-1H-imidazolium-1-yl)",
+        "family": "dicationic imidazolium",
+        "alkyl_chain_length": 5,
+        "aliases": [
+            "BHPT",
+            "bhpt",
+            "1,10-(pentane-1,5-diyl)bis(3-hydroxyethyl-1H-imidazolium-1-yl)",
+            "pentane-1,5-diyl bis hydroxyethyl imidazolium",
+        ],
+    },
+    "BHPET": {
+        "smiles": "",
+        "display_name": "BHPET",
+        "full_name": "1,10-(3,6,9,12,15-pentaoxapentadecane-1,15-diyl)bis(3-hydroxyethyl-1H-imidazolium-1-yl)",
+        "family": "dicationic imidazolium",
+        "alkyl_chain_length": 15,
+        "aliases": [
+            "BHPET",
+            "bhpet",
+            "1,10-(3,6,9,12,15-pentaoxapentadecane-1,15-diyl)bis(3-hydroxyethyl-1H-imidazolium-1-yl)",
+            "pentaoxapentadecane bis hydroxyethyl imidazolium",
+        ],
+    },
 }
 
 ANION_DB: Dict[str, Dict[str, Any]] = {
@@ -231,6 +272,7 @@ ANION_DB: Dict[str, Dict[str, Any]] = {
         "aliases": [
             "tfsi", "NTf2", "ntf2", "Tf2N", "tf2n", "TFSI-", "NTf2-", "BTA", "bta",
             "bis(trifluoromethanesulfonyl)imide", "bis(trifluoromethane)sulfonamide",
+            "bis(trifluoromethanesulfonyl)amide", "bis(trifluoromethylsulfonyl)amide",
         ],
     },
     "BOB": {
@@ -359,6 +401,103 @@ def _build_lookup(db: Dict[str, Dict]) -> Dict[str, str]:
 _cation_lookup = _build_lookup(CATION_DB)
 _anion_lookup = _build_lookup(ANION_DB)
 
+_PALACIO_ALIAS_DB: list[Dict[str, Any]] = [
+    {
+        "alias": "L-F206",
+        "canonical_name": "[EHIM][TFSI]",
+        "cation": "EHIM",
+        "anion": "TFSI",
+        "anion_stoichiometry": 1,
+        "full_name": "1-ethyl-3-hexylimidazolium bis(trifluoromethylsulfonyl)imide",
+        "aliases": [
+            "L-F206",
+            "LF206",
+            "1-ethyl-3-hexylimidazolium-bis(trifluoromethylsulfonyl)-imide",
+            "1-ethyl-3-hexylimidazolium bis(trifluoromethylsulfonyl)imide",
+            "1-ethyl-3-hexylimidazolium bis(trifluoromethanesulfonyl)imide",
+        ],
+    },
+    {
+        "alias": "L-B206",
+        "canonical_name": "[EHIM][BF4]",
+        "cation": "EHIM",
+        "anion": "BF4",
+        "anion_stoichiometry": 1,
+        "full_name": "1-ethyl-3-hexylimidazolium tetrafluoroborate",
+        "aliases": [
+            "L-B206",
+            "LB206",
+            "1-ethyl-3-hexylimidazolium tetrafluoroborate",
+        ],
+    },
+    {
+        "alias": "BHPT",
+        "canonical_name": "[BHPT][TFSI]2",
+        "cation": "BHPT",
+        "anion": "TFSI",
+        "anion_stoichiometry": 2,
+        "full_name": "1,10-(pentane-1,5-diyl)bis(3-hydroxyethyl-1H-imidazolium-1-yl) di[bis(trifluoromethanesulfonyl)amide]",
+        "aliases": [
+            "BHPT",
+            "dicationic IL BHPT",
+            "1,10-(pentane-1,5-diyl)bis(3-hydroxyethyl-1H-imidazolium-1-yl)",
+        ],
+    },
+    {
+        "alias": "BHPET",
+        "canonical_name": "[BHPET][TFSI]2",
+        "cation": "BHPET",
+        "anion": "TFSI",
+        "anion_stoichiometry": 2,
+        "full_name": "1,10-(3,6,9,12,15-pentaoxapentadecane-1,15-diyl)bis(3-hydroxyethyl-1H-imidazolium-1-yl) di[bis(trifluoromethanesulfonyl)amide]",
+        "aliases": [
+            "BHPET",
+            "dicationic IL BHPET",
+            "1,10-(3,6,9,12,15-pentaoxapentadecane-1,15-diyl)bis(3-hydroxyethyl-1H-imidazolium-1-yl)",
+        ],
+    },
+]
+
+
+def _alias_lookup_key(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+_palacio_alias_lookup: Dict[str, Dict[str, Any]] = {}
+for _entry in _PALACIO_ALIAS_DB:
+    for _term in [_entry["alias"], _entry["canonical_name"]]:
+        _key = _alias_lookup_key(_term)
+        if _key:
+            _palacio_alias_lookup[_key] = _entry
+
+
+def resolve_ionic_liquid_alias(value: Any) -> Optional[Dict[str, Any]]:
+    """Resolve paper/sample aliases that carry known cation/anion chemistry."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+
+    candidates = [text, normalize_ionic_liquid(text) or ""]
+    for candidate in candidates:
+        key = _alias_lookup_key(candidate)
+        if key in _palacio_alias_lookup:
+            return dict(_palacio_alias_lookup[key])
+
+    compact_text = _alias_lookup_key(text)
+    for entry in _PALACIO_ALIAS_DB:
+        alias_terms = [entry.get("alias"), *(term for term in entry.get("aliases", []) if len(str(term or "")) <= 18)]
+        for term in alias_terms:
+            term_text = str(term or "").strip()
+            if not term_text:
+                continue
+            if re.fullmatch(r"[A-Za-z]-?[A-Za-z]?\d{3}|BHPET|BHPT", term_text, flags=re.IGNORECASE):
+                pattern = rf"(?<![A-Za-z0-9]){re.escape(term_text)}(?![A-Za-z0-9])"
+                if re.search(pattern, text, flags=re.IGNORECASE):
+                    return dict(entry)
+            elif _alias_lookup_key(term_text) and _alias_lookup_key(term_text) in compact_text:
+                return dict(entry)
+    return None
+
 _NON_IL_PATTERNS = [
     r"^\s*\d+(?:\.\d+)?\s*(?:wt\.?%|mass\.?%|vol\.?%)?\s*water\s*$",
     r"^\s*water\s*$",
@@ -416,6 +555,38 @@ def _format_cation_display(cation: Optional[str]) -> Optional[str]:
 
 def _format_anion_display(anion: Optional[str]) -> Optional[str]:
     return str(anion) if anion else None
+
+
+def _apply_alias_resolution(result: Dict[str, Any], alias_entry: Dict[str, Any]) -> Dict[str, Any]:
+    cation = alias_entry.get("cation")
+    anion = alias_entry.get("anion")
+    cation_info = CATION_DB.get(str(cation or ""), {})
+    anion_info = ANION_DB.get(str(anion or ""), {})
+
+    result.update(
+        {
+            "canonical_name": alias_entry.get("canonical_name"),
+            "cation": cation,
+            "anion": anion,
+            "cation_smiles": cation_info.get("smiles"),
+            "anion_smiles": anion_info.get("smiles"),
+            "alkyl_chain_length": cation_info.get("alkyl_chain_length"),
+            "lubricant_alias": alias_entry.get("alias"),
+            "alias": alias_entry.get("alias"),
+            "alias_full_name": alias_entry.get("full_name"),
+            "anion_stoichiometry": alias_entry.get("anion_stoichiometry"),
+        }
+    )
+
+    if result.get("cation_smiles") and result.get("anion_smiles"):
+        anion_count = int(alias_entry.get("anion_stoichiometry") or 1)
+        anion_smiles = ".".join([str(result["anion_smiles"])] * max(anion_count, 1))
+        result["il_smiles"] = f"{result['cation_smiles']}.{anion_smiles}"
+        inchikey = _smiles_to_inchikey(result["il_smiles"])
+        if inchikey:
+            result["il_inchikey"] = inchikey
+
+    return result
 
 
 # ============================================================
@@ -629,6 +800,7 @@ def resolve_il(name: str) -> Dict[str, Any]:
             "il_smiles": str|None,
             "il_inchikey": str|None,
             "alkyl_chain_length": int|None,
+            "lubricant_alias": str|None,
         }
     """
     result = {
@@ -641,10 +813,18 @@ def resolve_il(name: str) -> Dict[str, Any]:
         "il_smiles": None,
         "il_inchikey": None,
         "alkyl_chain_length": None,
+        "lubricant_alias": None,
+        "alias": None,
+        "alias_full_name": None,
+        "anion_stoichiometry": None,
     }
     
     if not name or not name.strip() or name.strip().lower() in ("unknown il", "unknown", "-", "n/a", "none", ""):
         return result
+
+    alias_entry = resolve_ionic_liquid_alias(name)
+    if alias_entry:
+        return _apply_alias_resolution(result, alias_entry)
 
     normalized_name = normalize_ionic_liquid(name) or name
 
@@ -714,6 +894,9 @@ def is_supported_ionic_liquid_name(name: Optional[str]) -> bool:
     raw = str(name or "").strip()
     if not raw or raw.lower() in {"unknown il", "unknown", "-", "n/a", "none", "--"}:
         return False
+
+    if resolve_ionic_liquid_alias(raw):
+        return True
 
     normalized = normalize_ionic_liquid(raw) or raw
     normalized_lower = normalized.lower()

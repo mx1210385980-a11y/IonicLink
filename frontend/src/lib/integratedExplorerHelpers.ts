@@ -520,6 +520,10 @@ function recordLubricantRaw(record: RecordResponse): string {
   return String(record.lubricant ?? (record as any).ionic_liquid ?? '').trim()
 }
 
+function recordLubricantAlias(record: RecordResponse): string {
+  return String(record.lubricantAlias ?? (record as any).lubricant_alias ?? '').trim()
+}
+
 function canonicalIonToken(token: string): string {
   const trimmed = String(token || '').trim()
   const phosphonium = trimmed.match(/^([PNpn])(\d+)$/)
@@ -650,18 +654,19 @@ function normalizeAnionStructureKey(input: string): string {
 }
 
 function parseIonicLiquidCompound(compound: string) {
-  const match = String(compound || '').trim().match(/^\[([^\]]+)\]\s*\[([^\]]+)\]$/)
+  const match = String(compound || '').trim().match(/^\[([^\]]+)\]\s*\[([^\]]+)\](\d+)?$/)
   if (!match) return null
   const cationToken = match[1] || ''
   const anionToken = match[2] || ''
+  const anionCount = match[3] || ''
   return {
     cationToken,
     anionToken,
     cationKey: normalizeCationStructureKey(cationToken),
     anionKey: normalizeAnionStructureKey(anionToken),
     cationLabel: `[${canonicalIonToken(cationToken)}]`,
-    anionLabel: `[${anionToken}]`,
-    label: canonicalIonicLiquidLabel(`[${cationToken}][${anionToken}]`),
+    anionLabel: `[${anionToken}]${anionCount}`,
+    label: canonicalIonicLiquidLabel(`[${cationToken}][${anionToken}]${anionCount}`),
   }
 }
 
@@ -782,6 +787,18 @@ export function lubricantDisplay(record: RecordResponse): string {
   return canonicalIonicLiquidLabel(recordLubricantRaw(record) || '--')
 }
 
+export function lubricantAliasDisplay(record: RecordResponse): string {
+  const alias = recordLubricantAlias(record)
+  if (!alias) return ''
+  const display = lubricantDisplay(record)
+  const raw = recordLubricantRaw(record)
+  const normalizedAlias = alias.replace(/\s+/g, '').toLowerCase()
+  const normalizedDisplay = display.replace(/\s+/g, '').toLowerCase()
+  const normalizedRaw = raw.replace(/\s+/g, '').toLowerCase()
+  if (normalizedAlias === normalizedDisplay || normalizedAlias === normalizedRaw) return ''
+  return alias
+}
+
 export function lubricantDisplayLines(record: RecordResponse): string[] {
   const components = recordLubricantComponents(record)
   if (components.length <= 1) return [lubricantDisplay(record)]
@@ -864,9 +881,10 @@ export function lubricantStructureItems(record: RecordResponse): IonStructurePre
 
 export function lubricantTooltip(record: RecordResponse): string {
   const components = recordLubricantComponents(record)
+  const alias = lubricantAliasDisplay(record)
   
   if (components.length <= 1) {
-    return ''
+    return alias ? `文献别名: ${alias} · 标准离子形式: ${lubricantDisplay(record)}` : ''
   }
 
   const details = components
@@ -877,7 +895,8 @@ export function lubricantTooltip(record: RecordResponse): string {
     .join('; ')
 
   const compact = compactMixtureLabel(components) || recordLubricantRaw(record) || '--'
-  return details || compact
+  const tooltip = details || compact
+  return alias ? `${tooltip} · 文献别名: ${alias}` : tooltip
 }
 
 function renderChemicalDigitsAsSubscriptHtml(input: string): string {
