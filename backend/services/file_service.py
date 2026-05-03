@@ -773,6 +773,15 @@ def _build_field_evidence_entry(
     }
 
 
+def _is_visual_source_type(source_type: Any, source_label: Any = None) -> bool:
+    source_type_text = _filled_text(source_type).lower()
+    source_label_text = _filled_text(source_label).lower()
+    return (
+        source_type_text in {"figure", "visual", "image"}
+        or bool(re.search(r"\bfig(?:ure)?\.?\s*\d+", source_label_text, flags=re.IGNORECASE))
+    )
+
+
 def _field_value_for_evidence(item: dict[str, Any], field_key: str) -> Any:
     if field_key == "material":
         return item.get("material_name")
@@ -1922,8 +1931,16 @@ def _build_field_evidence_map(item: dict, db_record: TribologyData, *, confidenc
         if field_key in provided_field_keys:
             continue
         evidence = entry.get("evidence") or {}
-        evidence["bbox"] = None
-        evidence["matched_text"] = None
+        if _is_visual_source_type(evidence.get("source_type"), evidence.get("source_label")) and _evidence_has_location(evidence):
+            evidence["matched_text"] = None
+            entry.setdefault("grounding_mode", "source_anchor")
+            entry.setdefault(
+                "grounding_note",
+                "Value is anchored to the source figure; exact numeric text may be read from the image rather than selectable PDF text.",
+            )
+        else:
+            evidence["bbox"] = None
+            evidence["matched_text"] = None
         entry["evidence"] = evidence
         entries[field_key] = entry
 
@@ -1962,6 +1979,9 @@ def _build_field_evidence_map(item: dict, db_record: TribologyData, *, confidenc
                     **located,
                     "sample_id": sample_id,
                 }
+                if entry.get("grounding_mode") == "source_anchor":
+                    entry.pop("grounding_mode", None)
+                    entry.pop("grounding_note", None)
             entries[field_key] = entry
 
     if "potential" not in provided_field_keys:

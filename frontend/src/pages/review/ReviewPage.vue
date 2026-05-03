@@ -606,10 +606,11 @@ const activeFieldResolvedEvidence = computed(() => {
   const sourceType = trim(fieldEntry?.evidence?.source_type).toLowerCase()
   const isExplicitField = trim(fieldEntry?.grounding_mode).toLowerCase() === 'explicit'
   const isDerivedField = trim(fieldEntry?.grounding_mode).toLowerCase() === 'derived'
+  const isFigureAnchor = sourceType.includes('figure') || trim(fieldEntry?.evidence?.source_label).toLowerCase().startsWith('fig')
   const fieldTextMatches = fieldEvidenceTextMatchesSpecs(directMatchedText, directQuote, specs)
   const canUseStoredBBox = sourceType !== 'table' || Boolean(directMatchedText) || isExplicitField
 
-  if (entryBbox && entryPage > 0 && canUseStoredBBox && (fieldTextMatches || isDerivedField || isExplicitField)) {
+  if (entryBbox && entryPage > 0 && canUseStoredBBox && (fieldTextMatches || isDerivedField || isExplicitField || isFigureAnchor)) {
     return {
       page: entryPage,
       bbox: entryBbox,
@@ -1357,6 +1358,7 @@ function resolveFieldGroundingMode(entry: FieldEvidenceEntry | null | undefined,
   if (mode === 'inferred') return 'inferred'
   if (mode === 'derived') return 'derived'
   if (mode === 'explicit') return 'explicit'
+  if (mode === 'source_anchor') return 'explicit'
   return null
 }
 
