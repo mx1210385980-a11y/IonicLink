@@ -12,6 +12,7 @@ import {
   uploadFile,
   type AgentWorkflow,
   type BatchFile,
+  type ExtractionProfile,
   type ExtractorType,
   type ExtractionResponse,
   type ExtractionRunDetail,
@@ -758,7 +759,7 @@ export function useAppShell(
   async function executeExtraction(
     fileId: string,
     force: boolean = false,
-    options: { trackActiveRun?: boolean } = {},
+    options: { trackActiveRun?: boolean; profile?: ExtractionProfile } = {},
   ) {
     const batchFile = findBatchFile(fileId)
     if (!batchFile) {
@@ -775,6 +776,7 @@ export function useAppShell(
 
     try {
       const extractorType = batchFile.extractor_type || 'tribology'
+      const extractionProfile = options.profile || 'high_accuracy'
       latestAgentWorkflow.value = null
       if (trackActiveRun) {
         startExtractionTracking(fileId)
@@ -785,7 +787,7 @@ export function useAppShell(
         force ? t('progress.reanalyzing_document') : t('progress.dispatching_workflow'),
       )
 
-      let response = await extractData(fileId, force, 'high_accuracy', undefined, extractorType)
+      let response = await extractData(fileId, force, extractionProfile, undefined, extractorType)
       latestAgentWorkflow.value = response.agent_workflow || null
       if (trackActiveRun) {
         syncActiveRunFromResponse(fileId, response, 0, response.status === 'processing' ? 'running' : undefined)
@@ -805,7 +807,7 @@ export function useAppShell(
           throw new Error(terminalRun.error_message || t('progress.background_failed'))
         }
 
-        response = await extractData(fileId, false, 'high_accuracy', undefined, extractorType)
+        response = await extractData(fileId, false, extractionProfile, undefined, extractorType)
         latestAgentWorkflow.value = response.agent_workflow || latestAgentWorkflow.value
         if (trackActiveRun) {
           syncActiveRunFromResponse(fileId, response, 0)
@@ -990,7 +992,7 @@ export function useAppShell(
     chatPanelRef.value?.addMessage('assistant', t('chat.upload_batch_complete', { success: successCount, fail: failCount }))
   }
 
-  async function handleExtract(fileId: string, force: boolean = false) {
+  async function handleExtract(fileId: string, force: boolean = false, options: { profile?: ExtractionProfile } = {}) {
     const batchFile = findBatchFile(fileId)
     if (!batchFile) return
 
@@ -1000,7 +1002,7 @@ export function useAppShell(
         force ? t('chat.reanalyzing_literature') : t('chat.analyzing_literature'),
       )
 
-      const result = await executeExtraction(fileId, force)
+      const result = await executeExtraction(fileId, force, options)
 
       if (result.success && result.recordCount > 0) {
         chatPanelRef.value?.addMessage(

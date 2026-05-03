@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from services.file_service import _build_field_evidence_map
+from services.il_resolver_service import filter_to_supported_ionic_liquid_records, is_likely_ionic_liquid_name
 from services.normalization.row_normalizer import normalize_extraction_row
 from utils.document_context import extract_experimental_document_context
 from utils.cof_guard import unsupported_figure_cof_reason
@@ -90,3 +91,19 @@ def test_figure_inferred_value_keeps_figure_bbox_as_field_anchor():
     assert cof_evidence["page"] == 11
     assert cof_evidence["bbox"] == [359.99, 49.68, 509.08, 284.66]
     assert field_map["cof"]["grounding_mode"] == "source_anchor"
+
+
+def test_review_figure_estimate_filter_keeps_unresolved_il_aliases_only_in_permissive_mode():
+    records = [
+        {"ionic_liquid": "L-F206", "cof": "0.08"},
+        {"ionic_liquid": "BHPT", "cof": "0.02"},
+        {"ionic_liquid": "Z-TETRAOL", "cof": "0.15"},
+    ]
+
+    strict_kept, _ = filter_to_supported_ionic_liquid_records(records)
+    permissive_kept, permissive_dropped = filter_to_supported_ionic_liquid_records(records, allow_likely=True)
+
+    assert strict_kept == []
+    assert [row["ionic_liquid"] for row in permissive_kept] == ["L-F206", "BHPT"]
+    assert [row["ionic_liquid"] for row in permissive_dropped] == ["Z-TETRAOL"]
+    assert is_likely_ionic_liquid_name("BHPET")

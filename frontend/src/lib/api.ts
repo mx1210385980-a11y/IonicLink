@@ -103,10 +103,12 @@ export async function uploadFile(file: File) {
 }
 
 // Extract Data
+export type ExtractionProfile = 'high_accuracy' | 'standard' | 'review_figure_estimate'
+
 export async function extractData(
     fileId: string,
     force: boolean = false,
-    profile: 'high_accuracy' | 'standard' = 'high_accuracy',
+    profile: ExtractionProfile = 'high_accuracy',
     strictCofMode?: boolean,
     extractorType: ExtractorType = 'tribology',
 ): Promise<ExtractionResponse> {

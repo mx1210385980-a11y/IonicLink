@@ -316,7 +316,7 @@ async function handleReviewReextract(fileId: string) {
   if (!fileId) return
   reviewTargetRecordId.value = null
   selectedFileId.value = fileId
-  await handleExtract(fileId, true)
+  await handleExtract(fileId, true, { profile: 'review_figure_estimate' })
   selectedFileId.value = selectedFileId.value || fileId
   navigateTo('review', 'inbox')
 }

@@ -3142,9 +3142,10 @@ async def process_file_safe(
     Handles caching logic internally.
     """
     profile = (profile or "high_accuracy").strip().lower()
-    if profile not in {"high_accuracy", "standard"}:
+    if profile not in {"high_accuracy", "standard", "review_figure_estimate"}:
         profile = "high_accuracy"
-    resolved_strict_cof_mode = (profile == "high_accuracy") if strict_cof_mode is None else bool(strict_cof_mode)
+    allow_likely_ils = profile == "review_figure_estimate"
+    resolved_strict_cof_mode = (profile in {"high_accuracy", "review_figure_estimate"}) if strict_cof_mode is None else bool(strict_cof_mode)
     logger.info(
         "Starting isolated processing literature_id=%s profile=%s strict_cof_mode=%s force=%s",
         file_id,
@@ -3214,7 +3215,7 @@ async def process_file_safe(
                         now_utc = datetime.utcnow()
                         last_touch = running_run.updated_at or running_run.created_at
                         if last_touch:
-                            stale_minutes = 4 if profile == "high_accuracy" else 3
+                            stale_minutes = 4 if profile in {"high_accuracy", "review_figure_estimate"} else 3
                             is_stale = (now_utc - last_touch) > timedelta(minutes=stale_minutes)
                         if not is_stale and running_run.created_at:
                             has_progress = bool((running_run.summary_json or "").strip() and (running_run.summary_json or "").strip() != "{}")
@@ -3370,22 +3371,23 @@ async def process_file_safe(
                 }
 
                 try:
-                    await update_extraction_run_progress(
-                        db,
-                        run_id=run_id,
-                        candidate_count=summary_patch["candidate_count"],
-                        dropped_by_reason=summary_patch["dropped_by_reason"],
-                        page_coverage=summary_patch["page_coverage"],
-                        summary_patch=summary_patch,
-                    )
-                    await db.commit()
+                    async with async_session_maker() as progress_db:
+                        await update_extraction_run_progress(
+                            progress_db,
+                            run_id=run_id,
+                            candidate_count=summary_patch["candidate_count"],
+                            dropped_by_reason=summary_patch["dropped_by_reason"],
+                            page_coverage=summary_patch["page_coverage"],
+                            summary_patch=summary_patch,
+                        )
+                        await progress_db.commit()
                     last_progress_flush = now_mono
                 except Exception as progress_err:
                     # Progress persistence must never break extraction.
                     logger.warning("Progress persistence failed for run_id=%s: %s", run_id, progress_err)
 
             # Call LLM (smart routing: pass pdf_path so visual pages go to Qwen-VL only)
-            extract_timeout_s = 960 if profile == "high_accuracy" else 720
+            extract_timeout_s = 960 if profile in {"high_accuracy", "review_figure_estimate"} else 720
             try:
                 if images:
                     result = await asyncio.wait_for(
@@ -3485,7 +3487,7 @@ async def process_file_safe(
             if isinstance(records, list) and records:
                 _apply_default_temperature(records)
                 _normalize_record_chemistry(records)
-                records, dropped_non_il = filter_to_supported_ionic_liquid_records(records)
+                records, dropped_non_il = filter_to_supported_ionic_liquid_records(records, allow_likely=allow_likely_ils)
                 _annotate_records_with_identity(records)
                 if dropped_non_il:
                     logger.info("Dropped %s non-ionic-liquid records before persistence", len(dropped_non_il))
@@ -3599,6 +3601,9 @@ async def process_file_safe(
                     "page_coverage": llm_summary.get("page_coverage") or {},
                     "page_candidate_counts": llm_summary.get("page_candidate_counts") or {},
                     "progress_log": llm_summary.get("progress_log") or [],
+                    "profile": profile,
+                    "figure_estimate_count": int(llm_summary.get("figure_estimate_count") or 0),
+                    "allow_figure_estimates": bool(llm_summary.get("allow_figure_estimates")),
                     "merge_report": merge_report,
                 }
                 await finalize_extraction_run(

@@ -627,10 +627,12 @@ class LLMService:
         strict_cof_mode: bool = False,
     ) -> List[TribologyData]:
         profile = (profile or "high_accuracy").lower()
-        high_accuracy = profile == "high_accuracy"
+        allow_figure_estimates = profile == "review_figure_estimate"
+        high_accuracy = profile in {"high_accuracy", "review_figure_estimate"}
 
         candidates: List[dict[str, Any]] = []
         dropped_by_reason: Dict[str, int] = {}
+        figure_estimate_count = 0
         page_texts: dict[int, str] = {}
         page_coverage = {"total_pages": 0, "visual_pages": [], "text_pages": []}
         abbrev_map: dict[str, dict[str, Any]] = {}
@@ -1025,6 +1027,28 @@ class LLMService:
                     continue
             quality_drop = self._drop_reason_for_candidate(norm, str(c.get("modality") or ""))
             if quality_drop:
+                if (
+                    allow_figure_estimates
+                    and quality_drop in {
+                        "figure_cof_without_numeric_support",
+                        "figure_cof_without_metric_context",
+                        "figure_legend_without_numeric_support",
+                    }
+                    and has_explicit_numeric_value(norm.get("cof"))
+                ):
+                    figure_estimate_count += 1
+                    norm["value_origin"] = "figure_estimate"
+                    norm["figure_estimate_reason"] = quality_drop
+                    norm["confidence"] = min(float(norm.get("confidence") or 0.72), 0.72)
+                    norm.setdefault(
+                        "notes",
+                        "COF value is an image-derived estimate retained for review; verify against the figure before promotion.",
+                    )
+                    c["drop_reason"] = None
+                    c["admission_reason"] = "figure_estimate"
+                    _bump_page_count(c.get("page"), str(c.get("modality") or "unknown"), kept=True)
+                    normalized_rows.append(norm)
+                    continue
                 c["drop_reason"] = quality_drop
                 dropped_by_reason[quality_drop] = dropped_by_reason.get(quality_drop, 0) + 1
                 _bump_page_count(c.get("page"), str(c.get("modality") or "unknown"), dropped=True)
@@ -1086,7 +1110,10 @@ class LLMService:
                     item["material_name"] = mat_candidates[0]
 
         converted_data = resolve_and_enrich_records(converted_data)
-        converted_data, dropped_non_il = filter_to_supported_ionic_liquid_records(converted_data)
+        converted_data, dropped_non_il = filter_to_supported_ionic_liquid_records(
+            converted_data,
+            allow_likely=allow_figure_estimates,
+        )
         if dropped_non_il:
             await _log_progress(
                 "stage_d.il_filter",
@@ -1118,6 +1145,9 @@ class LLMService:
             "page_candidate_counts": page_candidate_counts,
             "progress_log": progress_log[-300:],
             "strict_cof_mode": bool(strict_cof_mode),
+            "profile": profile,
+            "figure_estimate_count": figure_estimate_count,
+            "allow_figure_estimates": allow_figure_estimates,
         }
         await _log_progress(
             "stage_e.finalize",
@@ -1267,7 +1297,14 @@ class LLMService:
                 "value_origin": r.value_origin,
                 "evidence": r.evidence,
             }
-            row["confidence"] = calculate_confidence(row)
+            computed_confidence = calculate_confidence(row)
+            record_confidence = getattr(r, "confidence", None)
+            if record_confidence is not None:
+                try:
+                    computed_confidence = min(computed_confidence, float(record_confidence))
+                except Exception:
+                    pass
+            row["confidence"] = computed_confidence
             data.append(row)
 
         debug = self._last_extraction_debug or {}
@@ -1280,6 +1317,9 @@ class LLMService:
             "page_candidate_counts": debug.get("page_candidate_counts") or {},
             "progress_log": debug.get("progress_log") or [],
             "strict_cof_mode": bool(debug.get("strict_cof_mode")),
+            "profile": debug.get("profile") or extraction_profile,
+            "figure_estimate_count": int(debug.get("figure_estimate_count") or 0),
+            "allow_figure_estimates": bool(debug.get("allow_figure_estimates")),
         }
 
         return {

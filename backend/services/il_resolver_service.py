@@ -748,7 +748,36 @@ def is_supported_ionic_liquid_name(name: Optional[str]) -> bool:
     return False
 
 
-def filter_to_supported_ionic_liquid_records(data_items: List[dict]) -> tuple[List[dict], List[dict]]:
+_LIKELY_IL_LABEL_RE = re.compile(
+    r"(?:\bL-[FB]\d{3}\b|\bBHPT\b|\bBHPET\b|ionic\s+liquid|imidazolium|pyridinium|pyrrolidinium|"
+    r"phosphonium|ammonium|guanidinium|dicationic|hexafluorophosphate|tetrafluoroborate|"
+    r"bis\s*\(?trifluoromethylsulfonyl\)?|(?:BMIM|EMIM|HMIM|OMIM|MMIM|DMIM)[-\s]?(?:PF6|BF4|TFSI|NTf2))",
+    re.IGNORECASE,
+)
+_NON_IL_CONTROL_RE = re.compile(
+    r"^(?:si(?:\(?100\)?)?|silicon|z-?tetraol|pfpe|x-?1p|steel|sapphire|mica|diamond|au|gold)$",
+    re.IGNORECASE,
+)
+
+
+def is_likely_ionic_liquid_name(value: Any) -> bool:
+    """Permissive review-mode label check for IL aliases not yet in the resolver."""
+    text = str(value or "").strip()
+    if not text:
+        return False
+    compact = re.sub(r"\s+", "", text)
+    if _NON_IL_CONTROL_RE.fullmatch(compact) or _NON_IL_CONTROL_RE.fullmatch(text):
+        return False
+    if is_supported_ionic_liquid_name(text):
+        return True
+    return bool(_LIKELY_IL_LABEL_RE.search(text))
+
+
+def filter_to_supported_ionic_liquid_records(
+    data_items: List[dict],
+    *,
+    allow_likely: bool = False,
+) -> tuple[List[dict], List[dict]]:
     """
     Keep only ionic-liquid records and return (kept, dropped).
     """
@@ -765,7 +794,12 @@ def filter_to_supported_ionic_liquid_records(data_items: List[dict]) -> tuple[Li
         component_supported = bool(components) and all(
             is_supported_ionic_liquid_name(component.get("compound")) for component in components
         )
-        if is_supported_ionic_liquid_name(lubricant) or component_supported:
+        supported = is_supported_ionic_liquid_name(lubricant) or component_supported
+        likely = allow_likely and (
+            is_likely_ionic_liquid_name(lubricant)
+            or any(is_likely_ionic_liquid_name(component.get("compound")) for component in components)
+        )
+        if supported or likely:
             kept.append(item)
         else:
             dropped.append(item)

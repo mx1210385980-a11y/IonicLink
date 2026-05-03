@@ -2976,7 +2976,7 @@ async def extract_data(
     file_id: str,
     request: Request,
     force: bool = False,
-    profile: str = Query("high_accuracy", pattern="^(high_accuracy|standard)$"),
+    profile: str = Query("high_accuracy", pattern="^(high_accuracy|standard|review_figure_estimate)$"),
     extractor_type: str = Query("tribology", pattern="^(tribology|diffusion)$"),
     strict_cof_mode: bool | None = Query(None),
     db: AsyncSession = Depends(get_db),
