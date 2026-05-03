@@ -402,6 +402,8 @@ def normalize_extraction_row(
         ).lower()
         space_l = f"{local_space_l} {panel_ctx.lower()} {page_ctx.lower()}".strip()
         surface_patterns = [
+            (r"\bsi\s*\(?100\)?\b|\bsilicon\s*\(?100\)?\b", "Si(100)"),
+            (r"\bsilicon\b|\bsi\s+substrate\b|\bsi\s+surface\b", "Silicon"),
             (r"\bau\s*\(?111\)?\b|\bgold\s*\(?111\)?\b", "Au(111)"),
             (r"\bmica\b", "Mica"),
             (r"\bhopg\b|\bgraphite\b", "HOPG"),

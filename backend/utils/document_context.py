@@ -182,6 +182,16 @@ def _select_experimental_text(page_texts: dict[int, str]) -> str:
     normalized_pages = {page: _normalize_text(text) for page, text in page_texts.items()}
     ordered_pages = sorted(normalized_pages)
     selected: set[int] = set()
+    first_pages_text = "\n".join(normalized_pages[page] for page in ordered_pages[:3]).lower()
+    looks_like_review = bool(re.search(r"\b(?:a\s+)?review\s+of\b|\breview\s+article\b", first_pages_text))
+
+    reference_start = None
+    for page in ordered_pages:
+        if re.search(r"(?:^|\n)\s*references\s*(?:\n|$)", normalized_pages[page], flags=re.IGNORECASE):
+            reference_start = page
+            break
+    if reference_start is not None:
+        ordered_pages = [page for page in ordered_pages if page < reference_start]
 
     heading_pages = [
         page
@@ -196,6 +206,11 @@ def _select_experimental_text(page_texts: dict[int, str]) -> str:
             candidate = page + offset
             if candidate in normalized_pages:
                 selected.add(candidate)
+
+    # Review papers summarize multiple source studies, so document-level defaults
+    # can incorrectly leak one cited experiment into another figure.
+    if looks_like_review and not heading_pages:
+        return ""
 
     keyword_pages = [
         page
