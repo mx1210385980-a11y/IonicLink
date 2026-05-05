@@ -24,6 +24,9 @@ export type QualityIssueCard = {
   status: string
   explanation: string
   studentAction: string
+  trainingTreatment: string
+  knowledgeTreatment: string
+  blockingScope: 'sample' | 'recipe' | 'knowledge'
   icon: Component
 }
 
@@ -114,7 +117,10 @@ export function useQualityIssues(opts: {
       severity: missingTargetCount.value > 0 ? 'action' : 'ok',
       status: form.drop_missing_target ? '已按推荐排除' : '建议排除后再训练',
       explanation: '模型必须知道每条样本的摩擦系数,缺少目标值的记录不能直接进入训练。',
-      studentAction: '保留"有 μ/COF 的样本"开关,必要时回到审核页补充原文证据。',
+      studentAction: '保留"有 μ/COF 的样本"开关,必要时回到审核页补充原文事实。',
+      trainingTreatment: '训练视图会排除缺目标值的记录;Knowledge 中仍保留这些文献事实。',
+      knowledgeTreatment: '如果文献实际给出了 μ/COF,再回 Review 补全目标值和证据。',
+      blockingScope: 'sample',
       icon: FileWarning,
     },
     {
@@ -122,14 +128,17 @@ export function useQualityIssues(opts: {
       title: '审核与证据状态',
       value: missingEvidenceCount.value,
       unit: '条缺定位/证据',
-      severity: blockedReviewCount.value > 0 || missingEvidenceCount.value > 0 ? 'action' : pendingReviewCount.value > 0 ? 'watch' : 'ok',
+      severity: blockedReviewCount.value > 0 ? 'action' : missingEvidenceCount.value > 0 || pendingReviewCount.value > 0 ? 'watch' : 'ok',
       status: blockedReviewCount.value > 0
         ? `${blockedReviewCount.value} 条被存疑或需补证据`
         : pendingReviewCount.value > 0
           ? `${pendingReviewCount.value} 条还未最终确认`
           : '证据链已通过',
-      explanation: '训练前需要把待审、存疑、缺定位记录挡在数据集外,避免没有原文支撑的值落入模型。',
-      studentAction: '优先回到 Review 处理 flagged / needs_evidence;原文没有直接定位的字段应标为推断或派生。',
+      explanation: '证据定位是 Knowledge 的可追溯性指标,不应强迫训练分支删除仍有用的事实字段。',
+      studentAction: '训练时忽略证据定位字段;只有发现事实值可能错误时,再回 Review 修正。',
+      trainingTreatment: '默认不把证据页码/bbox 作为模型特征;严格复现实验时可只选已审记录。',
+      knowledgeTreatment: 'Review 继续用于补定位、确认别名和保留原文出处。',
+      blockingScope: 'knowledge',
       icon: ListChecks,
     },
     {
@@ -141,6 +150,9 @@ export function useQualityIssues(opts: {
       status: lowConfidenceCount.value > 0 ? '建议抽样复核' : '置信度稳定',
       explanation: '低置信度不一定是错误,但更容易包含单位、定位或字段拆解问题。',
       studentAction: '先复核低置信度里的 COF、载荷、电势和混合比例,再决定是否进入训练。',
+      trainingTreatment: '基线训练可以保留;正式模型可导出后按置信度再筛选一版。',
+      knowledgeTreatment: '低置信度记录保留在 Knowledge 中,便于后续追溯和补证据。',
+      blockingScope: 'recipe',
       icon: AlertTriangle,
     },
     {
@@ -152,6 +164,9 @@ export function useQualityIssues(opts: {
       status: selectedTrainingView.value.label,
       explanation: '训练视图按实验尺度和方法筛选 macro / AFM 数据,避免把不同物理尺度当成同分布样本。',
       studentAction: '预测宏观 COF/磨损时选"宏观性能预测";研究 AFM 信号时选"AFM 表面响应";做跨尺度假设时选"跨尺度数据池"。',
+      trainingTreatment: '当前配方只冻结选定训练视图,不会拆分或删除统一 Knowledge。',
+      knowledgeTreatment: 'Knowledge 保留 macro / AFM 全量记录,靠 scale_regime 和 test_method 区分。',
+      blockingScope: 'recipe',
       icon: Workflow,
     },
     {
@@ -159,10 +174,17 @@ export function useQualityIssues(opts: {
       title: '离子结构可用性',
       value: missingChemistryFieldCount.value,
       unit: '个 SMILES 缺口',
-      severity: missingChemistryFieldCount.value > 0 ? 'action' : 'ok',
-      status: `${chemistryReadyCount.value} 条记录可生成分子描述符`,
-      explanation: '阳离子和阴离子 SMILES 会生成结构描述符,是后续特征筛选和建模的基础。',
-      studentAction: '优先补齐缺失的 SMILES;只做覆盖率探索时可以临时关闭严格要求。',
+      severity: missingChemistryFieldCount.value > 0 ? (form.require_dual_smiles ? 'action' : 'watch') : 'ok',
+      status: form.require_dual_smiles
+        ? `${chemistryReadyCount.value} 条记录可生成分子描述符`
+        : '当前配方允许无 SMILES 记录',
+      explanation: 'SMILES 只对分子结构特征模型是硬要求;工况/材料基线模型可以先舍弃结构描述符。',
+      studentAction: '要做结构模型就补齐 SMILES;要先看工况影响,可切到"工况基线"配方。',
+      trainingTreatment: form.require_dual_smiles
+        ? '结构配方会排除无双离子 SMILES 的记录。'
+        : '工况基线会保留这些记录,并在导出特征中舍弃离子描述符。',
+      knowledgeTreatment: 'Knowledge 继续保留缺 SMILES 的离子液体和文献别名,后续可补结构。',
+      blockingScope: 'recipe',
       icon: Database,
     },
     {
@@ -174,6 +196,9 @@ export function useQualityIssues(opts: {
       status: mixtureRatioGapCount.value > 0 ? '需要补 components' : '比例字段可用',
       explanation: 'ILM 或 IL/oil 混合物必须把每个组分和比例拆进 components,否则同一工况会出现不同 COF。',
       studentAction: '重点检查带 oil、ILM、molar ratio、wt% 的记录,把比例写成结构化数组。',
+      trainingTreatment: '当前配方可先不选混合比例特征;做混合物模型前再单独补齐。',
+      knowledgeTreatment: 'Review 中保留原文比例描述,后续沉淀成 components。',
+      blockingScope: 'recipe',
       icon: Wand2,
     },
     {
@@ -187,6 +212,9 @@ export function useQualityIssues(opts: {
         : '温度/速度/载荷/比例字段已结构化',
       explanation: '载荷、速度、电势和混合比例要拆成数值特征,复合长句不能直接作为训练输入。',
       studentAction: '中位数只能做基线占位;正式训练前应回到文献把 scan rate、load per pin、IL/oil ratio 等拆准。',
+      trainingTreatment: '训练数据集可以舍弃覆盖率差的工况字段,或用中位数生成基线版本。',
+      knowledgeTreatment: 'Knowledge 保留原始条件文本和结构化拆解状态。',
+      blockingScope: 'recipe',
       icon: Workflow,
     },
     {
@@ -198,6 +226,9 @@ export function useQualityIssues(opts: {
       status: conditionCollisionGroupCount.value > 0 ? `${conditionCollisionRecordCount.value} 条记录需核对` : '未发现同条件不同 COF',
       explanation: '同一材料、润滑剂和工况下出现多个不同 COF,通常意味着比例、载荷或电势缺了一个子字段。',
       studentAction: '先排查混合比例和结构化工况;确实是重复实验时再保留为重复测量。',
+      trainingTreatment: '基线版本可保留重复实验;需要严格建模时再按均值聚合或排除冲突组。',
+      knowledgeTreatment: 'Knowledge 不删除重复实验,因为它们可能代表真实重复测量或不同子条件。',
+      blockingScope: 'recipe',
       icon: AlertTriangle,
     },
     {
@@ -209,6 +240,9 @@ export function useQualityIssues(opts: {
       status: form.remove_target_outliers ? '已移出训练池' : '保留但会提示风险',
       explanation: '极端 μ/COF 可能是真实特殊现象,也可能是单位或抽取错误。',
       studentAction: '课堂练习可先保留观察;正式训练前建议逐条检查证据。',
+      trainingTreatment: '可导出保留异常值和移除异常值两版数据集进行对比。',
+      knowledgeTreatment: '异常值保留在 Knowledge 中,除非 Review 确认为抽取错误。',
+      blockingScope: 'recipe',
       icon: AlertTriangle,
     },
     {
@@ -222,6 +256,9 @@ export function useQualityIssues(opts: {
       studentAction: filmMissingCount.value > 0
         ? `不要强行补膜厚;${filmMissingCount.value} 条样本会留在基础数据集中。`
         : '当前样本都可以进入增强数据集。',
+      trainingTreatment: '平台自动生成基础版和膜厚增强版,不要求所有样本都有膜厚。',
+      knowledgeTreatment: '膜厚作为 Knowledge 的可选机制字段保留。',
+      blockingScope: 'recipe',
       icon: ListChecks,
     },
     {
@@ -233,6 +270,9 @@ export function useQualityIssues(opts: {
       status: trainingReadyCount.value >= 10 ? '已达到 Modeling 最低要求' : '少于 10 条,暂不建议训练',
       explanation: '样本太少时模型评估不稳定,训练结果更像演示而不是可靠实验。',
       studentAction: '如果不足 10 条,先扩大文献范围或降低筛选限制。',
+      trainingTreatment: '这是训练分支的真正硬门槛:样本数不足时不生成训练版本。',
+      knowledgeTreatment: 'Knowledge 不受样本数限制,继续沉淀已有记录。',
+      blockingScope: 'sample',
       icon: CheckCircle2,
     },
   ])
@@ -261,9 +301,9 @@ export function useQualityIssues(opts: {
     }
     if (actionIssueCount.value > 0) {
       return {
-        tone: 'action',
-        label: `还差 ${actionIssueCount.value} 项关键问题`,
-        helper: '修完红色项后即可生成基线数据集。',
+        tone: 'watch',
+        label: `${actionIssueCount.value} 类问题需要配方处理`,
+        helper: '这些问题不必都回 Review 修;可以通过排除字段、切换配方或保留为基线版本处理。',
       }
     }
     if (watchIssueCount.value > 0) {
@@ -283,7 +323,7 @@ export function useQualityIssues(opts: {
   const cleaningStageLabel = computed(() => {
     if (!rawRecordCount.value) return '等待数据'
     if (trainingReadyCount.value < 10) return '样本不足'
-    if (actionIssueCount.value > 0) return '需要清洗'
+    if (actionIssueCount.value > 0) return '选择配方'
     if (watchIssueCount.value > 0) return '可以做基线'
     return '已准备好'
   })
@@ -312,10 +352,10 @@ export function useQualityIssues(opts: {
     }
     if (actionIssueCount.value > 0) {
       return {
-        target: 'review',
-        label: '去 Review 修数据',
-        title: '先处理关键问题',
-        description: '有些问题会直接污染训练,比如缺证据、混合比例缺失或同条件 COF 冲突。先回 Review 处理这些记录。',
+        target: 'datasets',
+        label: '生成/调整训练集',
+        title: '用训练配方处理问题',
+        description: '这些问题多数属于建模选择:可以排除字段、切换非结构基线、保留重复实验,事实错误再回 Review。',
       }
     }
     if (watchIssueCount.value > 0) {
@@ -349,10 +389,10 @@ export function useQualityIssues(opts: {
       tone: trainingReadyCount.value >= 10 ? 'emerald' : 'rose',
     },
     {
-      label: '必须处理',
+      label: '配方处理',
       value: actionIssueCount.value,
-      helper: actionIssueCount.value ? '先修完再训练' : '没有阻塞项',
-      tone: actionIssueCount.value ? 'rose' : 'emerald',
+      helper: actionIssueCount.value ? '不阻塞基线' : '没有处理项',
+      tone: actionIssueCount.value ? 'amber' : 'emerald',
     },
     {
       label: '建议确认',
