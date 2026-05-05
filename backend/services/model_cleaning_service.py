@@ -60,10 +60,12 @@ DEFAULT_CLEANING_WORKBENCH_OPTIONS = {
 IMPORTED_DATASET_KIND = "imported_csv"
 IMPORTED_TARGET_ALIASES = {
     "cof",
+    "mu",
     "coefficientoffriction",
     "frictioncoefficient",
     "frictionfactor",
     "targetcof",
+    "targetmu",
 }
 
 LOAD_RANGE_FEATURE_KEYS = ["load_min", "load_max", "load_span", "load_is_range"]
@@ -74,7 +76,7 @@ NUMERIC_PREVIEW_FIELDS = [
     for feature in PROCESS_FEATURE_DEFINITIONS
 ]
 
-DATASET_BUILDER_TARGET_COLUMN = "Mu"
+DATASET_BUILDER_TARGET_COLUMN = "COF"
 DATASET_BUILDER_FILM_THICKNESS_COLUMN = "Film_Thickness"
 
 DATASET_BUILDER_MACRO_FEATURES = [
@@ -448,6 +450,21 @@ class ModelCleaningService:
         config_payload = json.loads(dataset.config_json or "{}")
         summary_payload = json.loads(dataset.summary_json or "{}")
         if self._dataset_kind(config_payload, summary_payload) == IMPORTED_DATASET_KIND:
+            target_column = str(summary_payload.get("target_column") or "").strip()
+            if target_column:
+                target_payload = self._build_import_target_payload(target_column)
+                current_target = summary_payload.get("target") or {}
+                needs_target_upgrade = (
+                    dataset.target_key != target_payload["key"]
+                    or current_target.get("key") != target_payload["key"]
+                    or current_target.get("label") != target_payload["label"]
+                )
+                if needs_target_upgrade:
+                    dataset.target_key = target_payload["key"]
+                    summary_payload["target"] = target_payload
+                    dataset.summary_json = json.dumps(summary_payload, ensure_ascii=False)
+                    await session.commit()
+                    await session.refresh(dataset)
             return dataset
         rows = json.loads(dataset.rows_json or "[]")
         raw_keep_features = ((config_payload.get("feature_config") or {}).get("keep_features")) or []
@@ -713,7 +730,8 @@ class ModelCleaningService:
         return str(value or "").replace("\ufeff", "").strip()
 
     def _normalize_import_lookup_key(self, value: str | None) -> str:
-        return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
+        text = str(value or "").strip().lower().replace("μ", "mu").replace("µ", "mu")
+        return re.sub(r"[^a-z0-9]+", "", text)
 
     def _resolve_import_target_column(self, fieldnames: list[str], requested: str | None) -> str:
         if requested:
@@ -782,7 +800,7 @@ class ModelCleaningService:
         if normalized in IMPORTED_TARGET_ALIASES:
             return {
                 "key": "cof",
-                "label": "Coefficient of Friction (COF)",
+                "label": TARGET_DEFINITIONS["cof"]["label"],
                 "column_name": target_column,
             }
         return {
@@ -1236,7 +1254,7 @@ class ModelCleaningService:
         return {
             "feature_count": len(feature_columns),
             "analyzable_rows": len(builder_rows),
-            "target_label": "Mu / COF",
+            "target_label": TARGET_DEFINITIONS["cof"]["label"],
             "heatmap": {
                 "features": display_features,
                 "matrix": heatmap_matrix,

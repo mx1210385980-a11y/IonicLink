@@ -127,7 +127,11 @@ const isRandomForest = computed(() => form.algorithm === 'random_forest')
 const usableRecords = computed(() => activeTask.value?.dataset.usable_records || summary.value?.dataset.usable_records || 0)
 const progressPercent = computed(() => Math.round((currentPoint.value?.progress || 0) * 100))
 const validationSplitPercent = computed(() => Math.round((form.data_options.validation_split || 0) * 100))
-const targetLabel = computed(() => summary.value?.dataset.target?.label || formatColumnLabel(summary.value?.dataset.target_column || form.target))
+const targetLabel = computed(() => targetDisplayLabel(
+  summary.value?.dataset.target?.label
+  || summary.value?.dataset.target_column
+  || form.target,
+))
 const datasetTitle = computed(() => selectedDataset.value?.name || summary.value?.dataset.name || '训练工作台')
 
 const chartOptions = computed(() => ({
@@ -438,6 +442,22 @@ const tuneBestParamEntries = computed(() => {
 const compareSucceeded = computed(() => compareResults.value.filter((row) => row.status === 'completed' && row.valR2 != null))
 const compareSorted = computed(() => [...compareSucceeded.value].sort((a, b) => Number(b.valR2) - Number(a.valR2)))
 const compareBestAlgorithm = computed(() => compareSorted.value[0] || null)
+const negativeR2Diagnostic = computed(() => {
+  const currentValR2 = currentPoint.value?.val_r2
+  const completedSingleRun = activeTask.value?.status === 'completed' && typeof currentValR2 === 'number' && currentValR2 < 0
+  const completedCompare = compareTotal.value > 0 && compareResults.value.length >= compareTotal.value && !compareMode.value
+  const comparedScores = compareSucceeded.value
+    .map((row) => row.valR2)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+  const allComparedNegative = completedCompare && comparedScores.length > 0 && Math.max(...comparedScores) < 0
+  if (!completedSingleRun && !allComparedNegative) return null
+
+  const featureCount = activeTask.value?.dataset?.feature_dimensions || summary.value?.dataset.feature_dimensions || 0
+  return {
+    title: allComparedNegative ? '全部算法的验证集 R² 都低于 0' : '当前模型的验证集 R² 低于 0',
+    message: `这不是显示错误,而是模型比“直接预测训练均值”还差。当前数据集只有 ${formatNumber(featureCount)} 个特征,建议回到数据准备重新生成包含更多离子描述符和工况协变量的训练集,再做宏观/AFM 视图筛选。`,
+  }
+})
 const compareProgressLabel = computed(() => {
   if (!compareMode.value && !compareTotal.value) return ''
   const done = compareResults.value.length
@@ -458,6 +478,19 @@ const compareChartData = computed(() => ({
     },
   ],
 }))
+
+const compareR2Axis = computed(() => {
+  const values = compareSorted.value
+    .map((row) => Number(row.valR2))
+    .filter((value) => Number.isFinite(value))
+  if (!values.length) return { min: 0, max: 1 }
+  const min = Math.min(0, ...values)
+  const max = Math.max(0, ...values)
+  return {
+    min: min < 0 ? Math.floor((min - 0.05) * 10) / 10 : 0,
+    max: max <= 0 ? 0.05 : Math.min(1, Math.ceil((max + 0.05) * 10) / 10),
+  }
+})
 
 const compareChartOptions = computed(() => ({
   indexAxis: 'y' as const,
@@ -487,8 +520,8 @@ const compareChartOptions = computed(() => ({
   },
   scales: {
     x: {
-      min: 0,
-      max: 1,
+      min: compareR2Axis.value.min,
+      max: compareR2Axis.value.max,
       grid: { color: 'rgba(148,163,184,0.12)' },
       border: { color: 'rgba(148,163,184,0.18)' },
       ticks: { color: 'rgba(71,85,105,0.72)', callback: (v: any) => Number(v).toFixed(2) },
@@ -588,6 +621,14 @@ function formatNumber(value: number | null | undefined) {
 
 function formatDateTime(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString() : '--'
+}
+
+function targetDisplayLabel(value: string | null | undefined) {
+  const normalized = String(value || '').trim().toLowerCase().replace(/[μµ]/g, 'mu').replace(/[^a-z0-9]+/g, '')
+  if (['mu', 'cof', 'targetcof', 'targetmu', 'frictioncoefficient', 'coefficientoffriction'].includes(normalized)) {
+    return '摩擦系数 μ/COF'
+  }
+  return formatColumnLabel(value)
 }
 
 function formatColumnLabel(value: string | null | undefined) {
@@ -1269,6 +1310,19 @@ watch(
             <ul class="mt-1.5 space-y-1 text-xs leading-5 text-[#854d0e]">
               <li v-for="warning in runWarnings" :key="warning">· {{ warning }}</li>
             </ul>
+          </section>
+
+          <section
+            v-if="negativeR2Diagnostic"
+            class="rounded-[0.85rem] border border-[#ffd4da] bg-[#fff5f6] px-4 py-3"
+          >
+            <p class="flex items-center gap-1.5 text-xs font-semibold text-[#cf334f]">
+              <AlertTriangle class="h-3.5 w-3.5" />
+              {{ negativeR2Diagnostic.title }}
+            </p>
+            <p class="mt-1.5 text-xs leading-5 text-[#9f1239]">
+              {{ negativeR2Diagnostic.message }}
+            </p>
           </section>
 
           <!-- 自动调参进度 / 结果 -->

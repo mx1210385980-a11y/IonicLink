@@ -100,10 +100,19 @@ class _ScaledRegressor:
 
 TARGET_DEFINITIONS: dict[str, dict[str, Any]] = {
     "cof": {
-        "label": "Coefficient of Friction (COF)",
+        "label": "摩擦系数 μ/COF",
         "field": "cof_value",
         "column_name": "Target_COF",
     },
+}
+
+TARGET_DISPLAY_ALIASES = {
+    "cof",
+    "mu",
+    "targetcof",
+    "targetmu",
+    "coefficientoffriction",
+    "frictioncoefficient",
 }
 
 BASE_ALGORITHM_DEFINITIONS: dict[str, dict[str, Any]] = {
@@ -617,6 +626,26 @@ def target_column_name(target_key: str) -> str:
     return str(target["column_name"])
 
 
+def _target_lookup_key(value: Any) -> str:
+    text = str(value or "").strip().lower().replace("μ", "mu").replace("µ", "mu")
+    return re.sub(r"[^a-z0-9]+", "", text)
+
+
+def target_display_payload(*, key: Any = None, label: Any = None, column: Any = None) -> dict[str, str]:
+    values = [_target_lookup_key(value) for value in (key, label, column)]
+    if any(value in TARGET_DISPLAY_ALIASES for value in values):
+        return {
+            "key": "cof",
+            "label": TARGET_DEFINITIONS["cof"]["label"],
+            "column": str(column or target_column_name("cof")),
+        }
+    return {
+        "key": str(key or "target"),
+        "label": str(label or column or "Target"),
+        "column": str(column or ""),
+    }
+
+
 def _normalize_split_strategy(value: Any) -> str:
     strategy = str(value or DEFAULT_DATA_OPTIONS["split_strategy"]).strip().lower()
     if strategy not in SPLIT_STRATEGY_DEFINITIONS:
@@ -805,6 +834,11 @@ class ModelTrainingService:
                 "usable_records": usable_records,
                 "feature_dimensions": len(feature_columns),
                 "target_column": target_column,
+                "target": target_display_payload(
+                    key=metadata.get("target", {}).get("key") if isinstance(metadata.get("target"), dict) else dataset.target_key,
+                    label=metadata.get("target", {}).get("label") if isinstance(metadata.get("target"), dict) else None,
+                    column=target_column,
+                ),
                 "feature_columns": feature_columns,
                 "columns": [target_column, *feature_columns],
                 "rdkit_enabled": RDKit_AVAILABLE,
@@ -842,6 +876,7 @@ class ModelTrainingService:
                 "usable_records": cleaned_records,
                 "feature_dimensions": 0,
                 "target_column": target_column,
+                "target": target_display_payload(key="cof", column=target_column),
                 "feature_columns": [],
                 "columns": [target_column],
                 "rdkit_enabled": RDKit_AVAILABLE,
@@ -1752,7 +1787,12 @@ class ModelTrainingService:
         if effective_cv_folds != cv_folds and split_strategy != "random_holdout":
             warnings.append(f"Cross-validation folds were reduced from {cv_folds} to {effective_cv_folds} to keep each validation fold large enough to evaluate.")
 
-        target_label = metadata.get("target", {}).get("label") or TARGET_DEFINITIONS["cof"]["label"]
+        metadata_target = metadata.get("target") if isinstance(metadata.get("target"), dict) else {}
+        target_payload = target_display_payload(
+            key=metadata_target.get("key"),
+            label=metadata_target.get("label"),
+            column=target_column,
+        )
         split_label = SPLIT_STRATEGY_DEFINITIONS[split_strategy]["label"]
         cleaning_rules = (metadata.get("summary") or {}).get("rules") or {}
         training_view = normalize_training_view(cleaning_rules.get("training_view"))
@@ -1795,8 +1835,8 @@ class ModelTrainingService:
                 "feature_dimensions": int(X.shape[1]),
                 "selected_feature_count": int(len(feature_columns)),
                 "target": {
-                    "key": str(metadata.get("target", {}).get("key") or "cof"),
-                    "label": str(target_label),
+                    "key": target_payload["key"],
+                    "label": target_payload["label"],
                     "column": target_column,
                 },
                 "target_column": target_column,

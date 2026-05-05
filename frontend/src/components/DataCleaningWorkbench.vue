@@ -72,8 +72,22 @@ const buildErrorMessage = ref('')
 const showDetails = ref(false)
 const trainingPlanTitle = '离子结构 + 工况协变量模型'
 const trainingPlanTreatment = '正式训练要求阴/阳离子 SMILES,自动加入离子描述符;载荷、速度、温度、基底等只作为协变量。'
+const FEATURE_BUDGET = 64
+const MIN_DESCRIPTOR_FEATURES_PER_ION = 20
 
 const availableFeatures = computed(() => datasetASummary.value?.columns.filter((c) => c !== datasetASummary.value?.target_column) || [])
+
+function isCationDescriptor(column: string) {
+  return column.startsWith('Cation_')
+}
+
+function isAnionDescriptor(column: string) {
+  return column.startsWith('Anion_')
+}
+
+function isIonDescriptor(column: string) {
+  return isCationDescriptor(column) || isAnionDescriptor(column)
+}
 
 const recommendedFeatures = computed<string[]>(() => {
   const strongest = screeningSummary.value?.strongest_to_target || []
@@ -81,16 +95,38 @@ const recommendedFeatures = computed<string[]>(() => {
   const surfaceAlerts = screeningSummary.value?.surface_bias_alerts || []
   const correlationMap = new Map(strongest.map((item) => [item.feature, item.abs_correlation]))
 
-  const available = new Set(availableFeatures.value)
+  const availableFeaturesList = availableFeatures.value
+  const available = new Set(availableFeaturesList)
   const picked: string[] = []
   const pickedSet = new Set<string>()
   const groupedSet = new Set<string>()
 
   const add = (feature: string) => {
+    if (picked.length >= FEATURE_BUDGET) return
     if (!available.has(feature) || pickedSet.has(feature)) return
     picked.push(feature)
     pickedSet.add(feature)
   }
+
+  const rank = (features: string[]) => [...features].sort((a, b) =>
+    (correlationMap.get(b) || 0) - (correlationMap.get(a) || 0) || a.localeCompare(b),
+  )
+
+  const addRanked = (features: string[], limit: number) => {
+    let added = 0
+    for (const feature of rank(features)) {
+      if (pickedSet.has(feature)) continue
+      add(feature)
+      added += 1
+      if (added >= limit || picked.length >= FEATURE_BUDGET) break
+    }
+  }
+
+  const macroFeatures = availableFeaturesList.filter((feature) => !isIonDescriptor(feature))
+  const cationFeatures = availableFeaturesList.filter(isCationDescriptor)
+  const anionFeatures = availableFeaturesList.filter(isAnionDescriptor)
+
+  macroFeatures.forEach(add)
 
   for (const group of ionicGroups) {
     const features = group.features.filter((f) => available.has(f))
@@ -104,12 +140,16 @@ const recommendedFeatures = computed<string[]>(() => {
     const rep = [...features].sort((a, b) => (correlationMap.get(b) || 0) - (correlationMap.get(a) || 0))[0]
     if (rep) add(rep)
   }
+
+  addRanked(cationFeatures, MIN_DESCRIPTOR_FEATURES_PER_ION)
+  addRanked(anionFeatures, MIN_DESCRIPTOR_FEATURES_PER_ION)
+
   for (const item of strongest) {
     if (!available.has(item.feature) || groupedSet.has(item.feature)) continue
     add(item.feature)
-    if (picked.length >= 10) break
   }
-  return picked.length ? picked : [...available].slice(0, 10)
+  addRanked([...cationFeatures, ...anionFeatures], FEATURE_BUDGET)
+  return picked.length ? picked : availableFeaturesList.slice(0, FEATURE_BUDGET)
 })
 
 const retainedFeatureColumns = computed(() => recommendedFeatures.value)
