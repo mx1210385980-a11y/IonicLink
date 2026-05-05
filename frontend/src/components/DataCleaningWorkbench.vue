@@ -3,14 +3,12 @@ import { computed, onMounted, ref } from 'vue'
 import {
   AlertTriangle,
   ArrowRight,
-  Atom,
   BookOpen,
   CheckCircle2,
   ChevronRight,
   Loader2,
   Package,
   RotateCcw,
-  SlidersHorizontal,
   Sparkles,
   Target,
   XCircle,
@@ -371,32 +369,6 @@ onMounted(() => {
                   </div>
                 </div>
 
-                <div class="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,0.95fr)]">
-                  <div class="rounded-xl border border-indigo-200 bg-indigo-50/70 p-3">
-                    <div class="flex items-start gap-3">
-                      <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white">
-                        <Atom class="h-4 w-4" />
-                      </div>
-                      <div class="min-w-0">
-                        <p class="text-[11px] font-bold uppercase tracking-wider text-indigo-700">主训练路径</p>
-                        <p class="mt-0.5 text-sm font-semibold text-slate-950">{{ trainingPlanTitle }}</p>
-                        <p class="mt-1 text-xs leading-5 text-slate-600">{{ trainingPlanTreatment }}</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="rounded-xl border border-slate-200 bg-white p-3">
-                    <div class="flex items-start gap-3">
-                      <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
-                        <SlidersHorizontal class="h-4 w-4" />
-                      </div>
-                      <div class="min-w-0">
-                        <p class="text-[11px] font-bold uppercase tracking-wider text-slate-500">诊断而非训练分支</p>
-                        <p class="mt-0.5 text-sm font-semibold text-slate-900">仅工况消融</p>
-                        <p class="mt-1 text-xs leading-5 text-slate-500">只用于评估工况偏差和结构特征增益,不在这里生成独立数据集。</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
               </div>
 
               <aside class="border-t border-slate-200 bg-slate-50 p-4 sm:p-5 lg:border-l lg:border-t-0">
