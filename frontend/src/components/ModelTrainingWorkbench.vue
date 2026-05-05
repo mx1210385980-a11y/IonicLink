@@ -612,7 +612,11 @@ function statusBadgeClass(status: string | null | undefined) {
 }
 
 function formatMetric(value: number | null | undefined, digits = 4) {
-  return value == null || Number.isNaN(Number(value)) ? '--' : Number(value).toFixed(digits)
+  if (value == null || Number.isNaN(Number(value))) return '--'
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return '--'
+  if (Math.abs(numeric) >= 10000) return numeric.toExponential(2)
+  return numeric.toFixed(digits)
 }
 
 function formatNumber(value: number | null | undefined) {

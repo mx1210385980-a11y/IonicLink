@@ -77,9 +77,10 @@ class _ScaledRegressor:
     误导，导致 `_build_feature_importance` 拿到 None 后 float() 抛异常。
     """
 
-    def __init__(self, scaler: StandardScaler, estimator: Any) -> None:
+    def __init__(self, scaler: StandardScaler, estimator: Any, target_scaler: StandardScaler | None = None) -> None:
         self.scaler = scaler
         self.estimator = estimator
+        self.target_scaler = target_scaler
         if hasattr(estimator, "feature_importances_"):
             self.feature_importances_ = estimator.feature_importances_
         elif hasattr(estimator, "coef_"):
@@ -87,7 +88,10 @@ class _ScaledRegressor:
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> "_ScaledRegressor":
         X_scaled = self.scaler.fit_transform(X)
-        self.estimator.fit(X_scaled, y)
+        y_fit = y
+        if self.target_scaler is not None:
+            y_fit = self.target_scaler.fit_transform(np.asarray(y, dtype=np.float32).reshape(-1, 1)).ravel()
+        self.estimator.fit(X_scaled, y_fit)
         if hasattr(self.estimator, "feature_importances_"):
             self.feature_importances_ = self.estimator.feature_importances_
         elif hasattr(self.estimator, "coef_"):
@@ -95,7 +99,10 @@ class _ScaledRegressor:
         return self
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        return self.estimator.predict(self.scaler.transform(X))
+        prediction = np.asarray(self.estimator.predict(self.scaler.transform(X)), dtype=np.float32)
+        if self.target_scaler is not None:
+            prediction = self.target_scaler.inverse_transform(prediction.reshape(-1, 1)).ravel()
+        return prediction
 
 
 TARGET_DEFINITIONS: dict[str, dict[str, Any]] = {
@@ -1016,18 +1023,22 @@ class ModelTrainingService:
                 return model
             scaler = StandardScaler()
             X_scaled = scaler.fit_transform(X_train)
+            target_scaler = StandardScaler()
+            y_scaled = target_scaler.fit_transform(np.asarray(y_train, dtype=np.float32).reshape(-1, 1)).ravel()
+            mlp_learning_rate = learning_rate if 0.0001 <= learning_rate <= 0.01 else 0.001
             estimator = MLPRegressor(
                 hidden_layer_sizes=(64, 32),
                 activation="relu",
                 solver="adam",
-                learning_rate_init=max(0.001, learning_rate),
+                learning_rate_init=mlp_learning_rate,
+                alpha=max(0.0001, l2_leaf_reg * 0.0005),
                 max_iter=500,
                 random_state=random_seed,
                 early_stopping=True,
                 validation_fraction=0.1,
             )
-            estimator.fit(X_scaled, y_train)
-            return _ScaledRegressor(scaler=scaler, estimator=estimator)
+            estimator.fit(X_scaled, y_scaled)
+            return _ScaledRegressor(scaler=scaler, estimator=estimator, target_scaler=target_scaler)
 
         raise ValueError(f"Unsupported algorithm '{algorithm}'.")
 
@@ -2057,6 +2068,8 @@ class ModelTrainingService:
         if algorithm == "mlp":
             scaler = StandardScaler()
             X_scaled = scaler.fit_transform(X)
+            target_scaler = StandardScaler()
+            y_scaled = target_scaler.fit_transform(np.asarray(y, dtype=np.float32).reshape(-1, 1)).ravel()
             hidden = params.get("hidden_layer_sizes", (64, 32))
             if isinstance(hidden, list):
                 hidden = tuple(hidden)
@@ -2064,15 +2077,15 @@ class ModelTrainingService:
                 hidden_layer_sizes=hidden,
                 activation="relu",
                 solver="adam",
-                learning_rate_init=float(params.get("learning_rate_init", 0.001)),
+                learning_rate_init=min(0.01, max(0.0001, float(params.get("learning_rate_init", 0.001)))),
                 alpha=float(params.get("alpha", 0.0001)),
                 max_iter=500,
                 random_state=random_seed,
                 early_stopping=True,
                 validation_fraction=0.1,
             )
-            estimator.fit(X_scaled, y)
-            return _ScaledRegressor(scaler=scaler, estimator=estimator)
+            estimator.fit(X_scaled, y_scaled)
+            return _ScaledRegressor(scaler=scaler, estimator=estimator, target_scaler=target_scaler)
         raise ValueError(f"Unsupported algorithm '{algorithm}' for tuning.")
 
     async def _tune_hyperparameters(
