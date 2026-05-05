@@ -187,29 +187,29 @@ const subsetCards = computed<SubsetCard[]>(() => {
 const stepperSteps = computed<StepperStep[]>(() => [
   {
     key: 'quality',
-    title: '质量检查',
-    hint: '缺失/异常/可训练数',
+    title: '看看数据有没有问题',
+    hint: '挑出不能用的记录',
     metric: actionIssueCount.value,
-    metricLabel: '关键',
+    metricLabel: '需修',
   },
   {
     key: 'descriptor',
-    title: '划分数据集',
-    hint: '基础与增强两版本',
+    title: '把数据分成两份',
+    hint: '基础版 + 含膜厚版',
     metric: 2,
-    metricLabel: '版本',
+    metricLabel: '份',
   },
   {
     key: 'reduction',
-    title: '选择特征',
-    hint: '保留代表特征',
+    title: '挑出关键特征',
+    hint: '保留对预测有帮助的',
     metric: retainedFeatureColumns.value.length,
     metricLabel: '已选',
   },
   {
     key: 'export',
-    title: '生成数据集',
-    hint: '保存供 Modeling',
+    title: '保存,送去训练',
+    hint: '让 Modeling 页能读到',
     metric: (datasetASummary.value?.row_count ?? 0) + (datasetBSummary.value?.row_count ?? 0),
     metricLabel: '样本',
   },
@@ -345,14 +345,25 @@ onMounted(() => {
         />
 
         <section v-if="activeModule === 'quality'" class="grid gap-3 xl:grid-cols-[minmax(0,1fr)_18rem]">
-          <div class="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
-            <div class="mb-3 flex items-center justify-between gap-3">
-              <h2 class="text-base font-semibold tracking-tight text-slate-950">质量检查</h2>
-              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
-                清洗分 {{ qualityScore }}
-              </span>
+          <div class="min-w-0 space-y-3">
+            <div class="rounded-2xl border border-amber-100 bg-amber-50/50 p-3.5">
+              <div class="flex items-start gap-2.5">
+                <span class="mt-0.5 inline-flex h-5 shrink-0 items-center rounded-full bg-amber-200/70 px-2 text-[10px] font-bold text-amber-900">第 1 步</span>
+                <div class="min-w-0">
+                  <p class="text-sm font-semibold text-slate-900">看看每条数据能不能给模型用。</p>
+                  <p class="mt-1 text-xs leading-5 text-slate-600">为什么:模型从你提供的数据中学习,如果数据缺关键字段或有错误,模型也学不准。下面红色的"需处理"必须先修;黄色的"需确认"可以先做基线再回头看。</p>
+                </div>
+              </div>
             </div>
-            <QualityIssueList :cards="qualityIssueCards" />
+            <div class="min-w-0 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+              <div class="mb-3 flex items-center justify-between gap-3">
+                <h2 class="text-base font-semibold tracking-tight text-slate-950">数据问题清单</h2>
+                <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                  清洗分 {{ qualityScore }}
+                </span>
+              </div>
+              <QualityIssueList :cards="qualityIssueCards" />
+            </div>
           </div>
 
           <CleaningRulesPanel

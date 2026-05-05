@@ -52,14 +52,17 @@ function progressValueClass(tone: ProgressTone) {
       <div class="min-w-0">
         <div class="inline-flex items-center gap-1.5 rounded-full border border-indigo-100 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-indigo-700">
           <Sparkles class="h-3 w-3" />
-          数据清洗工作台
+          目标:训练一个能预测摩擦系数的模型
         </div>
         <h1 class="mt-2 text-xl font-semibold tracking-tight text-slate-950 sm:text-2xl">
-          先清洗,再训练
+          准备训练数据
           <span class="ml-2 inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700 align-middle">
             {{ stageLabel }}
           </span>
         </h1>
+        <p class="mt-1.5 max-w-2xl text-xs leading-5 text-slate-500 sm:text-sm">
+          这一页会把你选好的文献整理成模型能学习的训练数据。下面 4 步,跟着系统提示一步一步走就行。
+        </p>
       </div>
 
       <button

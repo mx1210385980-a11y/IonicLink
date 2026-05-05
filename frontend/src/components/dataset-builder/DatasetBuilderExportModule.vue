@@ -45,14 +45,24 @@ function formatMatrixCell(value: number | string | null | undefined) {
 
 <template>
   <div class="space-y-4">
+    <div class="rounded-2xl border border-amber-100 bg-amber-50/50 p-3.5">
+      <div class="flex items-start gap-2.5">
+        <span class="mt-0.5 inline-flex h-5 shrink-0 items-center rounded-full bg-amber-200/70 px-2 text-[10px] font-bold text-amber-900">第 4 步</span>
+        <div class="min-w-0">
+          <p class="text-sm font-semibold text-slate-900">把整理好的数据存到工作区,Modeling 页就能直接读到。</p>
+          <p class="mt-1 text-xs leading-5 text-slate-600">为什么:存好之后,你不需要手动搬 CSV 文件。在 Modeling 页选择这一版数据,就能开始训练模型了。建议两个数据集都保存:基础版用来训练第一个模型,增强版用来分析膜厚的影响。</p>
+        </div>
+      </div>
+    </div>
+
     <section class="rounded-3xl border border-slate-200 bg-white p-5">
       <div class="flex flex-wrap items-center gap-3">
         <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
           <Save class="h-4 w-4" />
         </div>
         <div class="min-w-0 flex-1">
-          <h2 class="text-lg font-semibold tracking-tight text-slate-950">命名并保存训练数据集</h2>
-          <p class="mt-0.5 text-xs text-slate-500">保存后会出现在 Modeling 页,无需手动搬 CSV。当前保留 {{ retainedFeatureColumns.length }} 个代表特征。</p>
+          <h2 class="text-lg font-semibold tracking-tight text-slate-950">给数据集起个名字</h2>
+          <p class="mt-0.5 text-xs text-slate-500">起完名字,下面两个数据集就可以分别保存。当前保留 {{ retainedFeatureColumns.length }} 个特征。</p>
         </div>
       </div>
 

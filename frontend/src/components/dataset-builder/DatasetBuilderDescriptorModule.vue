@@ -144,15 +144,25 @@ const activePreviewCard = computed(() => datasetCards.value.find((card) => card.
 
 <template>
   <div class="space-y-4">
+    <div class="rounded-2xl border border-amber-100 bg-amber-50/50 p-3.5">
+      <div class="flex items-start gap-2.5">
+        <span class="mt-0.5 inline-flex h-5 shrink-0 items-center rounded-full bg-amber-200/70 px-2 text-[10px] font-bold text-amber-900">第 2 步</span>
+        <div class="min-w-0">
+          <p class="text-sm font-semibold text-slate-900">把通过检查的数据自动分成两个训练版本。</p>
+          <p class="mt-1 text-xs leading-5 text-slate-600">为什么:不是每篇文献都报告了膜厚 (h)。所以系统先做一份"不要膜厚"的<b>基础数据集</b>(样本多,先跑通模型);再做一份"必须有膜厚"的<b>增强数据集</b>(样本少但能分析膜厚机制)。这一步你不用操作,看下结果就行。</p>
+        </div>
+      </div>
+    </div>
+
     <section class="rounded-3xl border border-slate-200 bg-white p-5">
       <div class="flex items-start gap-3">
         <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
           <Database class="h-4 w-4" />
         </div>
         <div>
-          <h2 class="text-2xl font-semibold tracking-tight text-slate-950">划分训练数据集</h2>
+          <h2 class="text-2xl font-semibold tracking-tight text-slate-950">两个训练版本</h2>
           <p class="mt-1.5 max-w-3xl text-sm leading-6 text-slate-500">
-            同一批清洗后的记录被自动拆成两个训练版本:基础数据集跑通基线,增强数据集分析膜厚机制。
+            同一批清洗后的记录被自动拆成两份:基础数据集跑通基线,增强数据集分析膜厚机制。
           </p>
         </div>
       </div>

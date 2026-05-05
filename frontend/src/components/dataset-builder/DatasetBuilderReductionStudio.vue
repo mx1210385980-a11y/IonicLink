@@ -226,7 +226,17 @@ function closeAtlas() {
 </script>
 
 <template>
-  <div class="space-y-5">
+  <div class="space-y-4">
+    <div class="rounded-2xl border border-amber-100 bg-amber-50/50 p-3.5">
+      <div class="flex items-start gap-2.5">
+        <span class="mt-0.5 inline-flex h-5 shrink-0 items-center rounded-full bg-amber-200/70 px-2 text-[10px] font-bold text-amber-900">第 3 步</span>
+        <div class="min-w-0">
+          <p class="text-sm font-semibold text-slate-900">从所有字段里挑出对预测最有帮助的几个。</p>
+          <p class="mt-1 text-xs leading-5 text-slate-600">为什么:特征不是越多越好。重复或没用的特征会让模型学得更慢、更不准。系统已经帮你标了"推荐"的字段,直接点"应用推荐"就够用;想自己微调,可以在下面勾选;想看证据(相关性、共线性),展开"分析依据"。</p>
+        </div>
+      </div>
+    </div>
+
     <section class="rounded-3xl border border-slate-200 bg-white p-6">
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div class="flex items-start gap-3">
@@ -234,9 +244,9 @@ function closeAtlas() {
             <Layers3 class="h-5 w-5" />
           </div>
           <div>
-            <h2 class="text-2xl font-semibold tracking-tight text-slate-950">选择代表特征</h2>
+            <h2 class="text-2xl font-semibold tracking-tight text-slate-950">选择保留特征</h2>
             <p class="mt-1.5 max-w-2xl text-sm leading-6 text-slate-500">
-              直接勾选要保留的字段,所选会传给下一步导出。需要参考依据时再展开下方“分析依据”。
+              先点"应用推荐"快速完成,再按需调整。所选字段会传到下一步导出。
             </p>
           </div>
         </div>
