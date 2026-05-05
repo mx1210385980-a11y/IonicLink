@@ -264,6 +264,7 @@ watch(
               :current-section="currentSection"
               @change-section="emit('change-section', $event)"
               @open-training="emit('open-training', $event)"
+              @open-review="emit('open-review')"
             />
           </div>
 

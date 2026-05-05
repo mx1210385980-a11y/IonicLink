@@ -1527,6 +1527,17 @@ export interface ModelTrainingCleaningSummary {
         missing_anion_smiles: number
         outside_training_view?: number
     }
+    quality_gates?: {
+        pending_review_records?: number
+        blocked_review_records?: number
+        missing_evidence_records?: number
+        low_confidence_records?: number
+        mixture_ratio_gaps?: number
+        structured_condition_gaps?: number
+        condition_collision_groups?: number
+        condition_collision_records?: number
+        feature_gaps?: Record<string, number>
+    }
     rules: {
         training_view?: string
         drop_missing_target: boolean
