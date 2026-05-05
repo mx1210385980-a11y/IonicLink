@@ -90,8 +90,7 @@ const qualityIssueCount = computed(() => {
 const sidebarModes = computed(() => [
   { key: 'explorer', label: 'Data Grid', count: selectedRecordCount.value || undefined },
   { key: 'graph', label: 'Graph View' },
-  { key: 'cleaning', label: 'Data Quality', count: qualityIssueCount.value || undefined },
-  { key: 'datasets', label: 'Dataset Builder' },
+  { key: 'cleaning', label: 'Training Data', count: qualityIssueCount.value || undefined },
 ])
 
 const sourceLabel = computed(() => {
@@ -104,8 +103,8 @@ const modeMeta = computed<{ label: string }>(() => {
   const modes: Record<string, { label: string }> = {
     explorer: { label: 'Data Grid' },
     graph: { label: isDiffusionScope.value ? 'Evidence View' : 'Graph View' },
-    cleaning: { label: 'Data Quality' },
-    datasets: { label: isDiffusionScope.value ? 'Feature Builder' : 'Dataset Builder' },
+    cleaning: { label: 'Training Data' },
+    datasets: { label: 'Training Data' },
   }
   return modes[props.currentSection] ?? modes.explorer!
 })
