@@ -144,6 +144,7 @@ BASE_ALGORITHM_DEFINITIONS: dict[str, dict[str, Any]] = {
         "description": "前馈神经网络，能学习复杂非线性关系；在小样本下需要更多调参（自动做特征标准化）。",
     },
 }
+DISABLED_TRAINING_ALGORITHMS = {"mlp"}
 
 PROCESS_FEATURE_DEFINITIONS: list[dict[str, Any]] = [
     {
@@ -914,12 +915,12 @@ class ModelTrainingService:
                 "label": "极端梯度提升（XGBoost）",
                 "description": "工业界使用最广泛的梯度提升实现，对结构化数据表现稳定，支持 L1/L2 正则。",
             }
-        # 排序：树模型在前，线性/SVR/MLP 在后，便于学生从效果好的开始尝试
-        order = ["gradient_boosting", "random_forest", "catboost", "xgboost", "svr", "mlp", "linear_regression"]
+        # 排序：树模型在前，线性/SVR 在后，便于学生从效果好的开始尝试
+        order = ["gradient_boosting", "random_forest", "catboost", "xgboost", "svr", "linear_regression"]
         return [
             {"key": key, **definitions[key]}
             for key in order
-            if key in definitions
+            if key in definitions and key not in DISABLED_TRAINING_ALGORITHMS
         ]
 
     def _split_options(self) -> list[dict[str, Any]]:
@@ -1008,7 +1009,7 @@ class ModelTrainingService:
             return model
 
         if algorithm == "svr":
-            # SVR / MLP 是一次性拟合（没有"轮次"概念）；为保留与梯度提升同样的进度条，我们
+            # SVR 是一次性拟合（没有"轮次"概念）；为保留与梯度提升同样的进度条，我们
             # 在第一轮就训练完整模型，后续轮次直接复用即可（loop 仍然会调用，但开销可忽略）。
             if model is not None:
                 return model
@@ -1064,12 +1065,15 @@ class ModelTrainingService:
             saved_dataset.id,
         )
         rows, metadata = self._load_saved_dataset_rows(saved_dataset)
+        algorithm = str(config.get("algorithm") or "gradient_boosting")
+        if algorithm in DISABLED_TRAINING_ALGORITHMS:
+            raise ValueError(f"Algorithm '{algorithm}' is disabled for new training runs.")
         task_id = uuid.uuid4().hex
         run = ModelTrainingRun(
             task_id=task_id,
             status="queued",
             target_column=str(config.get("target") or self._target_column_from_metadata(metadata)),
-            algorithm=str(config.get("algorithm") or "gradient_boosting"),
+            algorithm=algorithm,
             split_strategy=_normalize_split_strategy((config.get("data_options") or {}).get("split_strategy")),
             group_id=group_id,
             workspace_id=scope_filter_values.get("workspace_id"),

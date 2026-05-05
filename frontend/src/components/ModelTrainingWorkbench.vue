@@ -59,6 +59,7 @@ type ComparisonRow = {
   valRmse: number | null
   valMae: number | null
   finishedAt: string
+  snapshot?: ModelTrainingTaskSnapshot | null
   error?: string | null
 }
 
@@ -78,6 +79,7 @@ const cancelling = ref(false)
 const socketRef = ref<WebSocket | null>(null)
 const completedTaskIds = new Set<string>()
 const showAdvanced = ref(false)
+const HIDDEN_ALGORITHMS = new Set(['mlp'])
 
 // 全算法对比模式
 const compareMode = ref(false)
@@ -122,6 +124,7 @@ const history = computed(() => activeTask.value?.history || [])
 const currentPoint = computed(() => activeTask.value?.current || null)
 const hasSavedDatasets = computed(() => savedDatasets.value.length > 0)
 const selectedDataset = computed(() => savedDatasets.value.find((dataset) => dataset.id === selectedCleanedDatasetId.value) || null)
+const availableAlgorithms = computed(() => (summary.value?.algorithms || []).filter((algorithm) => !HIDDEN_ALGORITHMS.has(algorithm.key)))
 const runWarnings = computed(() => activeTask.value?.warnings || [])
 const isRandomForest = computed(() => form.algorithm === 'random_forest')
 const usableRecords = computed(() => activeTask.value?.dataset.usable_records || summary.value?.dataset.usable_records || 0)
@@ -439,13 +442,15 @@ const tuneBestParamEntries = computed(() => {
 })
 
 // 算法对比 ─────────────────────────────────────────────────────
-const compareSucceeded = computed(() => compareResults.value.filter((row) => row.status === 'completed' && row.valR2 != null))
+const visibleCompareResults = computed(() => compareResults.value.filter((row) => !HIDDEN_ALGORITHMS.has(row.algorithm)))
+const compareSucceeded = computed(() => visibleCompareResults.value.filter((row) => row.status === 'completed' && row.valR2 != null))
 const compareSorted = computed(() => [...compareSucceeded.value].sort((a, b) => Number(b.valR2) - Number(a.valR2)))
+const compareFailed = computed(() => visibleCompareResults.value.filter((row) => row.status !== 'completed'))
 const compareBestAlgorithm = computed(() => compareSorted.value[0] || null)
 const negativeR2Diagnostic = computed(() => {
   const currentValR2 = currentPoint.value?.val_r2
   const completedSingleRun = activeTask.value?.status === 'completed' && typeof currentValR2 === 'number' && currentValR2 < 0
-  const completedCompare = compareTotal.value > 0 && compareResults.value.length >= compareTotal.value && !compareMode.value
+  const completedCompare = compareTotal.value > 0 && visibleCompareResults.value.length >= compareTotal.value && !compareMode.value
   const comparedScores = compareSucceeded.value
     .map((row) => row.valR2)
     .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
@@ -460,7 +465,7 @@ const negativeR2Diagnostic = computed(() => {
 })
 const compareProgressLabel = computed(() => {
   if (!compareMode.value && !compareTotal.value) return ''
-  const done = compareResults.value.length
+  const done = visibleCompareResults.value.length
   const total = compareTotal.value || done
   return `${done} / ${total}`
 })
@@ -730,6 +735,7 @@ function openSocket(taskId: string) {
 }
 
 function recordCompareResult(snapshot: ModelTrainingTaskSnapshot) {
+  if (HIDDEN_ALGORITHMS.has(snapshot.config.algorithm)) return
   const existing = compareResults.value.find((row) => row.taskId === snapshot.task_id)
   const row: ComparisonRow = {
     algorithm: snapshot.config.algorithm,
@@ -739,10 +745,25 @@ function recordCompareResult(snapshot: ModelTrainingTaskSnapshot) {
     valRmse: snapshot.current?.val_rmse ?? null,
     valMae: snapshot.current?.val_mae ?? null,
     finishedAt: snapshot.finished_at || snapshot.created_at,
+    snapshot,
     error: snapshot.error,
   }
   if (existing) Object.assign(existing, row)
   else compareResults.value.push(row)
+}
+
+function canViewCompareResult(row: ComparisonRow) {
+  return Boolean(row.snapshot) && !compareMode.value && activeTask.value?.status !== 'running'
+}
+
+function isCompareRowActive(row: ComparisonRow) {
+  return activeTask.value?.task_id === row.taskId
+}
+
+function viewCompareResult(row: ComparisonRow) {
+  if (!canViewCompareResult(row) || !row.snapshot) return
+  activeTask.value = row.snapshot
+  form.algorithm = row.algorithm
 }
 
 async function onTaskTerminal(snapshot: ModelTrainingTaskSnapshot) {
@@ -798,7 +819,7 @@ async function runNextCompareItem() {
 async function handleCompareAll() {
   if (!summary.value || selectedCleanedDatasetId.value == null) return
   if (compareMode.value || activeTask.value?.status === 'running') return
-  const algorithms = summary.value.algorithms.map((alg) => alg.key)
+  const algorithms = availableAlgorithms.value.map((alg) => alg.key)
   if (!algorithms.length) return
   compareResults.value = []
   compareQueue.value = algorithms.slice()
@@ -963,7 +984,7 @@ watch(
           v-if="!compareMode"
           type="button"
           class="inline-flex items-center gap-1.5 rounded-[0.6rem] border border-[#5b56ea] bg-white px-3 py-1.5 text-xs font-semibold text-[#5b56ea] transition hover:bg-[#f5f7ff] disabled:cursor-not-allowed disabled:border-[#cfd2f3] disabled:text-[#cfd2f3]"
-          :disabled="starting || selectedCleanedDatasetId == null || usableRecords < 10 || activeTask?.status === 'running' || !summary || !summary.algorithms.length"
+          :disabled="starting || selectedCleanedDatasetId == null || usableRecords < 10 || activeTask?.status === 'running' || !summary || !availableAlgorithms.length"
           title="依次跑全部算法，自动选出表现最好的一个"
           @click="handleCompareAll"
         >
@@ -1098,7 +1119,7 @@ watch(
               </p>
               <div class="space-y-1.5">
                 <label
-                  v-for="algorithm in summary.algorithms"
+                  v-for="algorithm in availableAlgorithms"
                   :key="algorithm.key"
                   class="flex cursor-pointer items-start gap-2 rounded-[0.65rem] border px-3 py-2 transition"
                   :class="form.algorithm === algorithm.key
@@ -1388,7 +1409,7 @@ watch(
 
           <!-- ⭐ 算法对比结果 -->
           <section
-            v-if="compareMode || compareResults.length"
+            v-if="compareMode || visibleCompareResults.length"
             class="rounded-[0.95rem] border bg-white p-4"
             :class="compareMode ? 'border-[#aebdfc] ring-1 ring-[#aebdfc]/40' : 'border-[#eef2f6]'"
           >
@@ -1412,7 +1433,7 @@ watch(
                 </p>
               </div>
               <span class="shrink-0 text-[10px] text-slate-400 tabular-nums">
-                完成 {{ compareResults.length }} / {{ compareTotal || compareResults.length }}
+                完成 {{ visibleCompareResults.length }} / {{ compareTotal || visibleCompareResults.length }}
               </span>
             </div>
 
@@ -1420,28 +1441,48 @@ watch(
               <Bar :data="compareChartData" :options="compareChartOptions" />
             </div>
 
-            <div v-if="compareResults.length" class="mt-3 space-y-1.5">
-              <div
+            <div v-if="visibleCompareResults.length" class="mt-3 space-y-1.5">
+              <button
                 v-for="(row, idx) in compareSorted"
                 :key="row.taskId"
-                class="flex items-center gap-3 rounded-[0.6rem] border px-3 py-2 text-xs"
-                :class="idx === 0 && row.status === 'completed'
-                  ? 'border-[#aebdfc] bg-[#f5f7ff]'
-                  : 'border-[#eef2f6] bg-white'"
+                type="button"
+                class="flex w-full items-center gap-3 rounded-[0.6rem] border px-3 py-2 text-left text-xs transition"
+                :class="[
+                  isCompareRowActive(row)
+                    ? 'border-[#5b56ea] bg-[#f5f7ff] ring-1 ring-[#aebdfc]/50'
+                    : idx === 0 && row.status === 'completed'
+                      ? 'border-[#aebdfc] bg-[#f5f7ff]'
+                      : 'border-[#eef2f6] bg-white',
+                  canViewCompareResult(row) ? 'cursor-pointer hover:border-[#aebdfc] hover:bg-[#f8faff]' : 'cursor-default',
+                ]"
+                :disabled="!canViewCompareResult(row)"
+                @click="viewCompareResult(row)"
               >
                 <span
                   class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
-                  :class="idx === 0 ? 'bg-[#5b56ea] text-white' : 'bg-slate-100 text-slate-600'"
+                  :class="isCompareRowActive(row) || idx === 0 ? 'bg-[#5b56ea] text-white' : 'bg-slate-100 text-slate-600'"
                 >{{ idx + 1 }}</span>
                 <span class="min-w-0 flex-1 truncate font-medium text-slate-800">
                   {{ algorithmLabelZh(row.algorithm) }}
                 </span>
+                <span
+                  v-if="isCompareRowActive(row)"
+                  class="hidden shrink-0 rounded-full bg-[#edf2ff] px-2 py-0.5 text-[10px] font-semibold text-[#3d56d2] sm:inline"
+                >
+                  正在查看
+                </span>
+                <span
+                  v-else-if="canViewCompareResult(row)"
+                  class="hidden shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 sm:inline"
+                >
+                  查看
+                </span>
                 <span class="shrink-0 font-semibold text-slate-900 tabular-nums">R²={{ formatMetric(row.valR2, 3) }}</span>
                 <span class="shrink-0 text-slate-500 tabular-nums">RMSE={{ formatMetric(row.valRmse, 3) }}</span>
                 <span class="hidden shrink-0 text-slate-400 sm:inline tabular-nums">MAE={{ formatMetric(row.valMae, 3) }}</span>
-              </div>
+              </button>
               <div
-                v-for="row in compareResults.filter((r) => r.status !== 'completed')"
+                v-for="row in compareFailed"
                 :key="`failed-${row.taskId}`"
                 class="flex items-center gap-3 rounded-[0.6rem] border border-[#ffe4e6] bg-[#fff5f6] px-3 py-2 text-xs text-[#cf334f]"
               >
