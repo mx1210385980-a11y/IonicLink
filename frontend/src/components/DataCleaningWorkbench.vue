@@ -16,7 +16,7 @@ import {
   XCircle,
 } from 'lucide-vue-next'
 import type { ModelCleaningMatrixRow } from '@/lib/api'
-import type { BuilderSubsetSummary, SubsetCard, SubsetKey } from './dataset-builder/types'
+import type { BuilderSubsetSummary, SubsetCard } from './dataset-builder/types'
 import { formatDateTime } from './dataset-builder/formatters'
 import { useCleaningPreview } from './cleaning/useCleaningPreview'
 import { useQualityIssues } from './cleaning/useQualityIssues'
@@ -127,67 +127,58 @@ function applyDatasetRecipe(mode: RecipeMode) {
   void runPreview(true)
 }
 
-const availableFeatures = computed<Record<SubsetKey, string[]>>(() => ({
-  dataset_a: datasetASummary.value?.columns.filter((c) => c !== datasetASummary.value?.target_column) || [],
-  dataset_b: datasetBSummary.value?.columns.filter((c) => c !== datasetBSummary.value?.target_column) || [],
-}))
+const availableFeatures = computed(() => datasetASummary.value?.columns.filter((c) => c !== datasetASummary.value?.target_column) || [])
 
-const recommendedFeatures = computed<Record<SubsetKey, string[]>>(() => {
+const recommendedFeatures = computed<string[]>(() => {
   const strongest = screeningSummary.value?.strongest_to_target || []
   const ionicGroups = screeningSummary.value?.ionic_collinearity_groups || []
   const surfaceAlerts = screeningSummary.value?.surface_bias_alerts || []
   const correlationMap = new Map(strongest.map((item) => [item.feature, item.abs_correlation]))
 
-  const buildFor = (key: SubsetKey): string[] => {
-    const available = new Set(availableFeatures.value[key].filter(featureAllowedByRecipe))
-    const picked: string[] = []
-    const pickedSet = new Set<string>()
-    const groupedSet = new Set<string>()
+  const available = new Set(availableFeatures.value.filter(featureAllowedByRecipe))
+  const picked: string[] = []
+  const pickedSet = new Set<string>()
+  const groupedSet = new Set<string>()
 
-    const add = (feature: string) => {
-      if (!available.has(feature) || pickedSet.has(feature)) return
-      picked.push(feature)
-      pickedSet.add(feature)
-    }
-
-    for (const group of ionicGroups) {
-      const features = group.features.filter((f) => available.has(f))
-      features.forEach((f) => groupedSet.add(f))
-      const rep = [...features].sort((a, b) => (correlationMap.get(b) || 0) - (correlationMap.get(a) || 0))[0]
-      if (rep) add(rep)
-    }
-    for (const alert of surfaceAlerts) {
-      const features = alert.features.filter((f) => available.has(f))
-      features.forEach((f) => groupedSet.add(f))
-      const rep = [...features].sort((a, b) => (correlationMap.get(b) || 0) - (correlationMap.get(a) || 0))[0]
-      if (rep) add(rep)
-    }
-    for (const item of strongest) {
-      if (!available.has(item.feature) || groupedSet.has(item.feature)) continue
-      add(item.feature)
-      if (picked.length >= 10) break
-    }
-    if (key === 'dataset_b' && available.has('Film_Thickness')) add('Film_Thickness')
-    return picked.length ? picked : [...available].slice(0, 10)
+  const add = (feature: string) => {
+    if (!available.has(feature) || pickedSet.has(feature)) return
+    picked.push(feature)
+    pickedSet.add(feature)
   }
 
-  return { dataset_a: buildFor('dataset_a'), dataset_b: buildFor('dataset_b') }
+  for (const group of ionicGroups) {
+    const features = group.features.filter((f) => available.has(f))
+    features.forEach((f) => groupedSet.add(f))
+    const rep = [...features].sort((a, b) => (correlationMap.get(b) || 0) - (correlationMap.get(a) || 0))[0]
+    if (rep) add(rep)
+  }
+  for (const alert of surfaceAlerts) {
+    const features = alert.features.filter((f) => available.has(f))
+    features.forEach((f) => groupedSet.add(f))
+    const rep = [...features].sort((a, b) => (correlationMap.get(b) || 0) - (correlationMap.get(a) || 0))[0]
+    if (rep) add(rep)
+  }
+  for (const item of strongest) {
+    if (!available.has(item.feature) || groupedSet.has(item.feature)) continue
+    add(item.feature)
+    if (picked.length >= 10) break
+  }
+  return picked.length ? picked : [...available].slice(0, 10)
 })
 
-const retainedFeatureColumns = computed(() => Array.from(new Set([
-  ...recommendedFeatures.value.dataset_a,
-  ...recommendedFeatures.value.dataset_b,
-])))
+const retainedFeatureColumns = computed(() => recommendedFeatures.value)
 
-function filterSubsetSummary(key: SubsetKey, summary: BuilderSubsetSummary | null) {
+function filterTrainingSummary(summary: BuilderSubsetSummary | null) {
   if (!summary) return null
-  const selected = new Set(recommendedFeatures.value[key])
+  const selected = new Set(recommendedFeatures.value)
   const cols = summary.columns.filter((c) => c === summary.target_column || selected.has(c))
   const pickRow = (row: ModelCleaningMatrixRow) => Object.fromEntries(
     cols.map((c) => [c, row[c] ?? null]),
   ) as ModelCleaningMatrixRow
   return {
     ...summary,
+    name: 'Training Dataset',
+    description: `${activeRecipe.value.title} generated from the current Knowledge view.`,
     columns: cols,
     rows: summary.rows.map(pickRow),
     preview_rows: summary.preview_rows.map(pickRow),
@@ -200,19 +191,11 @@ const buildableSubsets = computed<SubsetCard[]>(() => {
   return [
     {
       key: 'dataset_a',
-      label: 'Dataset-A',
-      title: '基础版',
-      summary: filterSubsetSummary('dataset_a', datasetASummary.value),
+      label: 'Training Dataset',
+      title: '训练数据集',
+      summary: filterTrainingSummary(datasetASummary.value),
       accent: 'sky',
-      description: `${activeRecipe.value.title}:覆盖优先,不要求膜厚,适合先训练一个稳定的基线模型。`,
-    },
-    {
-      key: 'dataset_b',
-      label: 'Dataset-B',
-      title: '增强版',
-      summary: filterSubsetSummary('dataset_b', datasetBSummary.value),
-      accent: 'emerald',
-      description: `${activeRecipe.value.title}:加入膜厚 h,适合分析界面结构与摩擦的关系。`,
+      description: `${activeRecipe.value.title}:当前只冻结一个训练数据集版本。`,
     },
   ]
 })
@@ -232,8 +215,7 @@ const droppedCount = computed(() => {
   return Object.values(dropped).reduce((sum, v) => sum + Number(v || 0), 0)
 })
 
-const datasetAPersonal = computed(() => filterSubsetSummary('dataset_a', datasetASummary.value))
-const datasetBPersonal = computed(() => filterSubsetSummary('dataset_b', datasetBSummary.value))
+const trainingDatasetSummary = computed(() => filterTrainingSummary(datasetASummary.value))
 
 async function autoBuild() {
   if (!canBuild.value || buildingState.value === 'building') return
@@ -333,7 +315,7 @@ const primaryActionLabel = computed(() => {
 
 const primaryActionHelp = computed(() => {
   if (buildingState.value === 'done') return '训练数据集已保存,下一步到 Modeling 选择模型。'
-  if (canBuild.value) return `将按「${activeRecipe.value.title}」冻结 Dataset-A 和 Dataset-B 两个版本。`
+  if (canBuild.value) return `将按「${activeRecipe.value.title}」冻结一个训练数据集版本。`
   if (trainingReadyCount.value < 10) return '样本不足时不生成训练版本,先扩大文献范围或放宽当前配方。'
   return '先等待当前数据体检完成。'
 })
@@ -483,18 +465,8 @@ onMounted(() => {
 
             <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
               <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">当前配方会生成</p>
-              <div class="mt-2 grid grid-cols-2 gap-2">
-                <div>
-                  <p class="text-xs text-slate-500">Dataset-A</p>
-                  <p class="text-xl font-semibold tabular-nums text-slate-950">{{ datasetAPersonal?.row_count ?? 0 }}</p>
-                  <p class="text-[11px] text-slate-500">基础版</p>
-                </div>
-                <div>
-                  <p class="text-xs text-slate-500">Dataset-B</p>
-                  <p class="text-xl font-semibold tabular-nums text-slate-950">{{ datasetBPersonal?.row_count ?? 0 }}</p>
-                  <p class="text-[11px] text-slate-500">膜厚增强</p>
-                </div>
-              </div>
+              <p class="mt-2 text-xl font-semibold tabular-nums text-slate-950">{{ trainingDatasetSummary?.row_count ?? 0 }} 行</p>
+              <p class="mt-0.5 text-xs text-slate-500">{{ trainingDatasetSummary?.feature_count ?? 0 }} 个特征 · 单一训练数据集版本</p>
               <p class="mt-2 text-xs leading-5 text-slate-500">{{ primaryActionHelp }}</p>
             </div>
           </div>
@@ -558,23 +530,15 @@ onMounted(() => {
             <h2 class="text-base font-semibold tracking-tight text-slate-950">生成训练数据集</h2>
           </div>
           <p class="mt-1.5 text-sm leading-6 text-slate-600">
-            系统会按当前配方整理出两份训练集。基础版样本多、能跑通模型;增强版加入膜厚字段,适合分析机制。
+            系统会按当前配方整理出一份训练数据集。先保证流程清楚、样本覆盖稳定;膜厚等机制字段后续再作为配方开关加入。
           </p>
 
-          <div class="mt-4 grid gap-3 sm:grid-cols-2">
-            <article class="rounded-xl border border-violet-200 bg-violet-50/50 p-4">
-              <p class="text-[11px] font-bold uppercase tracking-wider text-violet-700">基础版 · Dataset-A</p>
-              <p class="mt-1 text-3xl font-semibold tabular-nums text-slate-950">{{ datasetAPersonal?.row_count ?? 0 }}</p>
-              <p class="mt-0.5 text-xs text-slate-500">行 · {{ datasetAPersonal?.feature_count ?? 0 }} 个特征</p>
-              <p class="mt-2 text-xs leading-5 text-slate-600">{{ activeRecipe.title }}的第一版训练视图,用于快速建立基线。</p>
-            </article>
-            <article class="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4">
-              <p class="text-[11px] font-bold uppercase tracking-wider text-emerald-700">增强版 · Dataset-B</p>
-              <p class="mt-1 text-3xl font-semibold tabular-nums text-slate-950">{{ datasetBPersonal?.row_count ?? 0 }}</p>
-              <p class="mt-0.5 text-xs text-slate-500">行 · {{ datasetBPersonal?.feature_count ?? 0 }} 个特征</p>
-              <p class="mt-2 text-xs leading-5 text-slate-600">在当前配方基础上加入膜厚 h,用于机制增强分析。</p>
-            </article>
-          </div>
+          <article class="mt-4 rounded-xl border border-violet-200 bg-violet-50/50 p-4">
+            <p class="text-[11px] font-bold uppercase tracking-wider text-violet-700">训练数据集</p>
+            <p class="mt-1 text-3xl font-semibold tabular-nums text-slate-950">{{ trainingDatasetSummary?.row_count ?? 0 }}</p>
+            <p class="mt-0.5 text-xs text-slate-500">行 · {{ trainingDatasetSummary?.feature_count ?? 0 }} 个特征</p>
+            <p class="mt-2 text-xs leading-5 text-slate-600">{{ activeRecipe.title }}的当前训练视图,用于快速建立基线并进入 Modeling。</p>
+          </article>
 
           <button
             type="button"
@@ -584,7 +548,7 @@ onMounted(() => {
           >
             <Loader2 v-if="buildingState === 'building'" class="h-4 w-4 animate-spin" />
             <Sparkles v-else class="h-4 w-4" />
-            {{ buildingState === 'building' ? '正在生成...' : '一键生成两份训练集' }}
+            {{ buildingState === 'building' ? '正在生成...' : '一键生成训练数据集' }}
           </button>
           <p v-if="buildErrorMessage" class="mt-2 text-xs text-rose-600">{{ buildErrorMessage }}</p>
           <p class="mt-3 text-[11px] leading-5 text-slate-400">

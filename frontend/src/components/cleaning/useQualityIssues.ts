@@ -251,12 +251,12 @@ export function useQualityIssues(opts: {
       value: enhancedDatasetCount.value,
       unit: '条含膜厚',
       severity: enhancedDatasetCount.value > 0 ? 'ok' : 'watch',
-      status: `${Math.round(filmCoverageRatio.value * 100)}% 可进入增强数据集`,
-      explanation: '膜厚不是所有文献都会给出,所以平台会自动分成基础数据集和增强数据集。',
+      status: `${Math.round(filmCoverageRatio.value * 100)}% 样本含膜厚`,
+      explanation: '膜厚不是所有文献都会给出,现阶段只作为可选机制字段观察,不再单独拆一份数据集。',
       studentAction: filmMissingCount.value > 0
-        ? `不要强行补膜厚;${filmMissingCount.value} 条样本会留在基础数据集中。`
-        : '当前样本都可以进入增强数据集。',
-      trainingTreatment: '平台自动生成基础版和膜厚增强版,不要求所有样本都有膜厚。',
+        ? `不要强行补膜厚;${filmMissingCount.value} 条样本会继续留在同一个训练数据集中。`
+        : '当前样本都带膜厚,后续可把膜厚打开为正式特征。',
+      trainingTreatment: '当前只生成一个训练数据集;膜厚后续作为配方开关加入。',
       knowledgeTreatment: '膜厚作为 Knowledge 的可选机制字段保留。',
       blockingScope: 'recipe',
       icon: ListChecks,
