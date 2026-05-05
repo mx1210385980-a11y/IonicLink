@@ -348,7 +348,7 @@ function openReviewQueue() {
 }
 
 function openDatasetBuilder() {
-  navigateTo('knowledge', 'cleaning')
+  navigateTo('knowledge', 'datasets')
 }
 
 function handleHomeAction(action: HomeSuggestedAction) {
