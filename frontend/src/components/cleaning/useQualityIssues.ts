@@ -26,7 +26,7 @@ export type QualityIssueCard = {
   studentAction: string
   trainingTreatment: string
   knowledgeTreatment: string
-  blockingScope: 'sample' | 'recipe' | 'knowledge'
+  blockingScope: 'sample' | 'modeling' | 'knowledge'
   icon: Component
 }
 
@@ -150,9 +150,9 @@ export function useQualityIssues(opts: {
       status: lowConfidenceCount.value > 0 ? '建议抽样复核' : '置信度稳定',
       explanation: '低置信度不一定是错误,但更容易包含单位、定位或字段拆解问题。',
       studentAction: '先复核低置信度里的 COF、载荷、电势和混合比例,再决定是否进入训练。',
-      trainingTreatment: '基线训练可以保留;正式模型可导出后按置信度再筛选一版。',
+      trainingTreatment: '正式训练默认可保留;需要稳健性检查时再按置信度导出一版敏感性分析。',
       knowledgeTreatment: '低置信度记录保留在 Knowledge 中,便于后续追溯和补证据。',
-      blockingScope: 'recipe',
+      blockingScope: 'modeling',
       icon: AlertTriangle,
     },
     {
@@ -164,9 +164,9 @@ export function useQualityIssues(opts: {
       status: selectedTrainingView.value.label,
       explanation: '训练视图按实验尺度和方法筛选 macro / AFM 数据,避免把不同物理尺度当成同分布样本。',
       studentAction: '预测宏观 COF/磨损时选"宏观性能预测";研究 AFM 信号时选"AFM 表面响应";做跨尺度假设时选"跨尺度数据池"。',
-      trainingTreatment: '当前配方只冻结选定训练视图,不会拆分或删除统一 Knowledge。',
+      trainingTreatment: '当前结构训练集只冻结选定训练视图,不会拆分或删除统一 Knowledge。',
       knowledgeTreatment: 'Knowledge 保留 macro / AFM 全量记录,靠 scale_regime 和 test_method 区分。',
-      blockingScope: 'recipe',
+      blockingScope: 'modeling',
       icon: Workflow,
     },
     {
@@ -175,16 +175,14 @@ export function useQualityIssues(opts: {
       value: missingChemistryFieldCount.value,
       unit: '个 SMILES 缺口',
       severity: missingChemistryFieldCount.value > 0 ? (form.require_dual_smiles ? 'action' : 'watch') : 'ok',
-      status: form.require_dual_smiles
-        ? `${chemistryReadyCount.value} 条记录可生成分子描述符`
-        : '当前配方允许无 SMILES 记录',
-      explanation: 'SMILES 只对分子结构特征模型是硬要求;工况/材料基线模型可以先舍弃结构描述符。',
-      studentAction: '要做结构模型就补齐 SMILES;要先看工况影响,可切到"工况基线"配方。',
+      status: `${chemistryReadyCount.value} 条记录可生成分子描述符`,
+      explanation: '材料性能预测的主模型需要离子结构信息;工况字段只是协变量,不能替代阴/阳离子描述符。',
+      studentAction: '补齐阳离子和阴离子 SMILES;缺结构的记录继续留在 Knowledge,但不进入正式训练集。',
       trainingTreatment: form.require_dual_smiles
-        ? '结构配方会排除无双离子 SMILES 的记录。'
-        : '工况基线会保留这些记录,并在导出特征中舍弃离子描述符。',
+        ? '结构训练集会排除无双离子 SMILES 的记录。'
+        : '当前未要求双离子 SMILES,但正式结构模型仍建议重新开启该要求。',
       knowledgeTreatment: 'Knowledge 继续保留缺 SMILES 的离子液体和文献别名,后续可补结构。',
-      blockingScope: 'recipe',
+      blockingScope: 'modeling',
       icon: Database,
     },
     {
@@ -196,9 +194,9 @@ export function useQualityIssues(opts: {
       status: mixtureRatioGapCount.value > 0 ? '需要补 components' : '比例字段可用',
       explanation: 'ILM 或 IL/oil 混合物必须把每个组分和比例拆进 components,否则同一工况会出现不同 COF。',
       studentAction: '重点检查带 oil、ILM、molar ratio、wt% 的记录,把比例写成结构化数组。',
-      trainingTreatment: '当前配方可先不选混合比例特征;做混合物模型前再单独补齐。',
+      trainingTreatment: '当前结构训练集可先不选混合比例特征;做混合物模型前再单独补齐。',
       knowledgeTreatment: 'Review 中保留原文比例描述,后续沉淀成 components。',
-      blockingScope: 'recipe',
+      blockingScope: 'modeling',
       icon: Wand2,
     },
     {
@@ -211,10 +209,10 @@ export function useQualityIssues(opts: {
         ? `${repairCount.value} 个空值已按${form.missing_value_strategy === 'median' ? '中位数' : form.missing_value_strategy}处理`
         : '温度/速度/载荷/比例字段已结构化',
       explanation: '载荷、速度、电势和混合比例要拆成数值特征,复合长句不能直接作为训练输入。',
-      studentAction: '中位数只能做基线占位;正式训练前应回到文献把 scan rate、load per pin、IL/oil ratio 等拆准。',
-      trainingTreatment: '训练数据集可以舍弃覆盖率差的工况字段,或用中位数生成基线版本。',
+      studentAction: '中位数只能作为缺失值填补;正式训练前应回到文献把 scan rate、load per pin、IL/oil ratio 等拆准。',
+      trainingTreatment: '训练数据集会保留关键工况作为协变量;覆盖率差或语义不稳的字段应从特征中舍弃。',
       knowledgeTreatment: 'Knowledge 保留原始条件文本和结构化拆解状态。',
-      blockingScope: 'recipe',
+      blockingScope: 'modeling',
       icon: Workflow,
     },
     {
@@ -226,9 +224,9 @@ export function useQualityIssues(opts: {
       status: conditionCollisionGroupCount.value > 0 ? `${conditionCollisionRecordCount.value} 条记录需核对` : '未发现同条件不同 COF',
       explanation: '同一材料、润滑剂和工况下出现多个不同 COF,通常意味着比例、载荷或电势缺了一个子字段。',
       studentAction: '先排查混合比例和结构化工况;确实是重复实验时再保留为重复测量。',
-      trainingTreatment: '基线版本可保留重复实验;需要严格建模时再按均值聚合或排除冲突组。',
+      trainingTreatment: '重复实验可以保留为重复测量;同条件冲突明显时再按均值聚合或排除冲突组。',
       knowledgeTreatment: 'Knowledge 不删除重复实验,因为它们可能代表真实重复测量或不同子条件。',
-      blockingScope: 'recipe',
+      blockingScope: 'modeling',
       icon: AlertTriangle,
     },
     {
@@ -242,7 +240,7 @@ export function useQualityIssues(opts: {
       studentAction: '课堂练习可先保留观察;正式训练前建议逐条检查证据。',
       trainingTreatment: '可导出保留异常值和移除异常值两版数据集进行对比。',
       knowledgeTreatment: '异常值保留在 Knowledge 中,除非 Review 确认为抽取错误。',
-      blockingScope: 'recipe',
+      blockingScope: 'modeling',
       icon: AlertTriangle,
     },
     {
@@ -256,9 +254,9 @@ export function useQualityIssues(opts: {
       studentAction: filmMissingCount.value > 0
         ? `不要强行补膜厚;${filmMissingCount.value} 条样本会继续留在同一个训练数据集中。`
         : '当前样本都带膜厚,后续可把膜厚打开为正式特征。',
-      trainingTreatment: '当前只生成一个训练数据集;膜厚后续作为配方开关加入。',
+      trainingTreatment: '当前只生成一个训练数据集;膜厚后续作为特征开关加入。',
       knowledgeTreatment: '膜厚作为 Knowledge 的可选机制字段保留。',
-      blockingScope: 'recipe',
+      blockingScope: 'modeling',
       icon: ListChecks,
     },
     {
@@ -302,14 +300,14 @@ export function useQualityIssues(opts: {
     if (actionIssueCount.value > 0) {
       return {
         tone: 'watch',
-        label: `${actionIssueCount.value} 类问题需要配方处理`,
-        helper: '这些问题不必都回 Review 修;可以通过排除字段、切换配方或保留为基线版本处理。',
+        label: `${actionIssueCount.value} 类问题需要建模处理`,
+        helper: '这些问题不必都回 Review 修;可以通过样本筛选、字段舍弃或后续敏感性分析处理。',
       }
     }
     if (watchIssueCount.value > 0) {
       return {
         tone: 'watch',
-        label: '可以生成基线数据集',
+        label: '可以生成训练数据集',
         helper: `仍有 ${watchIssueCount.value} 项需确认,可继续也可先核对。`,
       }
     }
@@ -323,8 +321,8 @@ export function useQualityIssues(opts: {
   const cleaningStageLabel = computed(() => {
     if (!rawRecordCount.value) return '等待数据'
     if (trainingReadyCount.value < 10) return '样本不足'
-    if (actionIssueCount.value > 0) return '选择配方'
-    if (watchIssueCount.value > 0) return '可以做基线'
+    if (actionIssueCount.value > 0) return '确认建模处理'
+    if (watchIssueCount.value > 0) return '可继续训练'
     return '已准备好'
   })
 
@@ -354,16 +352,16 @@ export function useQualityIssues(opts: {
       return {
         target: 'datasets',
         label: '生成/调整训练集',
-        title: '用训练配方处理问题',
-        description: '这些问题多数属于建模选择:可以排除字段、切换非结构基线、保留重复实验,事实错误再回 Review。',
+        title: '用训练视图处理问题',
+        description: '这些问题多数属于建模选择:可以排除字段、筛选样本、保留重复实验;事实错误再回 Review。',
       }
     }
     if (watchIssueCount.value > 0) {
       return {
         target: 'datasets',
-        label: '生成基线数据集',
-        title: '可以先生成基线',
-        description: '剩下的问题多是需要确认的风险项。可以先生成一个基线数据集,同时保留后续复核入口。',
+        label: '生成训练数据集',
+        title: '可以生成结构训练集',
+        description: '剩下的问题多是需要确认的风险项。可以先生成训练数据集,同时保留后续复核入口。',
       }
     }
     return {
@@ -389,15 +387,15 @@ export function useQualityIssues(opts: {
       tone: trainingReadyCount.value >= 10 ? 'emerald' : 'rose',
     },
     {
-      label: '配方处理',
+      label: '建模处理',
       value: actionIssueCount.value,
-      helper: actionIssueCount.value ? '不阻塞基线' : '没有处理项',
+      helper: actionIssueCount.value ? '不阻塞主训练' : '没有处理项',
       tone: actionIssueCount.value ? 'amber' : 'emerald',
     },
     {
       label: '建议确认',
       value: watchIssueCount.value,
-      helper: watchIssueCount.value ? '可先做基线' : '风险较低',
+      helper: watchIssueCount.value ? '可继续训练' : '风险较低',
       tone: watchIssueCount.value ? 'amber' : 'emerald',
     },
   ])

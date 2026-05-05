@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, type Component } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import {
   AlertTriangle,
   ArrowRight,
@@ -49,7 +49,6 @@ const {
   selectedSourceMode,
   selectedTrainingView,
   initialize,
-  runPreview,
   saveSubsetCardToWorkspace,
   exportSavedDataset,
 } = useCleaningPreview()
@@ -73,58 +72,8 @@ const {
 const buildingState = ref<'idle' | 'building' | 'done' | 'error'>('idle')
 const buildErrorMessage = ref('')
 const showDetails = ref(false)
-type RecipeMode = 'molecular' | 'process'
-const recipeMode = ref<RecipeMode>('molecular')
-
-type DatasetRecipe = {
-  key: RecipeMode
-  icon: Component
-  label: string
-  title: string
-  description: string
-  treatment: string
-}
-
-const molecularRecipe: DatasetRecipe = {
-  key: 'molecular',
-  icon: Atom,
-  label: '结构特征',
-  title: '离子结构模型',
-  description: '要求阴/阳离子 SMILES,使用分子描述符预测 μ/COF。',
-  treatment: '无 SMILES 的记录会留在 Knowledge,但不进入这一版训练集。',
-}
-
-const datasetRecipeOptions: DatasetRecipe[] = [
-  molecularRecipe,
-  {
-    key: 'process',
-    icon: SlidersHorizontal,
-    label: '工况基线',
-    title: '非结构基线模型',
-    description: '舍弃离子描述符,优先使用材料、载荷、速度、温度等工况字段。',
-    treatment: '适合 SMILES 尚未补齐时先生成一个可训练分支。',
-  },
-]
-
-const datasetRecipes = computed(() => datasetRecipeOptions)
-const activeRecipe = computed(() => datasetRecipes.value.find((recipe) => recipe.key === recipeMode.value) || molecularRecipe)
-const includeMolecularDescriptors = computed(() => recipeMode.value === 'molecular')
-
-function isMolecularDescriptor(column: string) {
-  return column.startsWith('Cation_') || column.startsWith('Anion_')
-}
-
-function featureAllowedByRecipe(column: string) {
-  return includeMolecularDescriptors.value || !isMolecularDescriptor(column)
-}
-
-function applyDatasetRecipe(mode: RecipeMode) {
-  recipeMode.value = mode
-  form.require_dual_smiles = mode === 'molecular'
-  buildingState.value = 'idle'
-  buildErrorMessage.value = ''
-  void runPreview(true)
-}
+const trainingPlanTitle = '离子结构 + 工况协变量模型'
+const trainingPlanTreatment = '正式训练要求阴/阳离子 SMILES,自动加入离子描述符;载荷、速度、温度、基底等只作为协变量。'
 
 const availableFeatures = computed(() => datasetASummary.value?.columns.filter((c) => c !== datasetASummary.value?.target_column) || [])
 
@@ -134,7 +83,7 @@ const recommendedFeatures = computed<string[]>(() => {
   const surfaceAlerts = screeningSummary.value?.surface_bias_alerts || []
   const correlationMap = new Map(strongest.map((item) => [item.feature, item.abs_correlation]))
 
-  const available = new Set(availableFeatures.value.filter(featureAllowedByRecipe))
+  const available = new Set(availableFeatures.value)
   const picked: string[] = []
   const pickedSet = new Set<string>()
   const groupedSet = new Set<string>()
@@ -177,7 +126,7 @@ function filterTrainingSummary(summary: BuilderSubsetSummary | null) {
   return {
     ...summary,
     name: 'Training Dataset',
-    description: `${activeRecipe.value.title} generated from the current Knowledge view.`,
+    description: `${trainingPlanTitle} generated from the current Knowledge view.`,
     columns: cols,
     rows: summary.rows.map(pickRow),
     preview_rows: summary.preview_rows.map(pickRow),
@@ -194,7 +143,7 @@ const buildableSubsets = computed<SubsetCard[]>(() => {
       title: '训练数据集',
       summary: filterTrainingSummary(datasetASummary.value),
       accent: 'sky',
-      description: `${activeRecipe.value.title}:当前只冻结一个训练数据集版本。`,
+      description: `${trainingPlanTitle}:当前只冻结一个训练数据集版本。`,
     },
   ]
 })
@@ -280,8 +229,8 @@ const verdictView = computed(() => {
   if (verdictTone.value === 'caution') {
     return {
       icon: AlertTriangle,
-      headline: `${trainingReadyCount.value} 条可训练,还有 ${actionIssueCount.value + watchIssueCount.value} 类配方处理项`,
-      subtext: '这些问题不必都回 Review 修;本页会冻结一个训练视图,通过舍弃字段、切换配方或保留基线版本来处理。',
+      headline: `${trainingReadyCount.value} 条可训练,还有 ${actionIssueCount.value + watchIssueCount.value} 类建模处理项`,
+      subtext: '这些问题不必都回 Review 修;本页会冻结结构特征训练视图,通过样本筛选、字段舍弃或后续诊断来处理。',
     }
   }
   return {
@@ -307,8 +256,8 @@ const primaryActionLabel = computed(() => {
 
 const primaryActionHelp = computed(() => {
   if (buildingState.value === 'done') return '训练数据集已保存,下一步到 Modeling 选择模型。'
-  if (canBuild.value) return `将按「${activeRecipe.value.title}」冻结一个训练数据集版本。`
-  if (trainingReadyCount.value < 10) return '样本不足时不生成训练版本,先扩大文献范围或放宽当前配方。'
+  if (canBuild.value) return '将冻结一个包含离子描述符和工况协变量的训练数据集版本。'
+  if (trainingReadyCount.value < 10) return '样本不足时不生成训练版本,先扩大文献范围或补齐结构字段。'
   return '先等待当前数据体检完成。'
 })
 
@@ -371,7 +320,7 @@ onMounted(() => {
                       生成摩擦系数预测训练集
                     </h1>
                     <p class="mt-1 text-sm leading-6 text-slate-600">
-                      从 Knowledge 冻结一个训练视图;Review 继续保留完整事实和证据。
+                      从 Knowledge 冻结一个结构特征训练视图;Review 继续保留完整事实和证据。
                     </p>
                   </div>
                 </div>
@@ -409,8 +358,8 @@ onMounted(() => {
 
                 <div class="mt-4 grid gap-2 sm:grid-cols-3">
                   <div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
-                    <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">1 选择配方</p>
-                    <p class="mt-1 text-sm font-medium text-slate-800">{{ activeRecipe.title }}</p>
+                    <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">1 结构特征</p>
+                    <p class="mt-1 text-sm font-medium text-slate-800">双离子 SMILES + 描述符</p>
                   </div>
                   <div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
                     <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">2 冻结版本</p>
@@ -422,31 +371,31 @@ onMounted(() => {
                   </div>
                 </div>
 
-                <div class="mt-4 grid gap-2 sm:grid-cols-2">
-                  <button
-                    v-for="recipe in datasetRecipes"
-                    :key="recipe.key"
-                    type="button"
-                    class="rounded-xl border p-3 text-left transition"
-                    :class="recipeMode === recipe.key ? 'border-slate-950 bg-slate-950 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-900 hover:border-slate-300 hover:bg-slate-50'"
-                    @click="applyDatasetRecipe(recipe.key)"
-                  >
+                <div class="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,0.95fr)]">
+                  <div class="rounded-xl border border-indigo-200 bg-indigo-50/70 p-3">
                     <div class="flex items-start gap-3">
-                      <div
-                        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-                        :class="recipeMode === recipe.key ? 'bg-white/12 text-white' : 'bg-slate-100 text-slate-500'"
-                      >
-                        <component :is="recipe.icon" class="h-4 w-4" />
+                      <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white">
+                        <Atom class="h-4 w-4" />
                       </div>
                       <div class="min-w-0">
-                        <p class="text-[11px] font-bold uppercase tracking-wider" :class="recipeMode === recipe.key ? 'text-slate-200' : 'text-slate-500'">
-                          {{ recipe.label }}
-                        </p>
-                        <p class="mt-0.5 text-sm font-semibold">{{ recipe.title }}</p>
-                        <p class="mt-1 text-xs leading-5" :class="recipeMode === recipe.key ? 'text-slate-300' : 'text-slate-600'">{{ recipe.description }}</p>
+                        <p class="text-[11px] font-bold uppercase tracking-wider text-indigo-700">主训练路径</p>
+                        <p class="mt-0.5 text-sm font-semibold text-slate-950">{{ trainingPlanTitle }}</p>
+                        <p class="mt-1 text-xs leading-5 text-slate-600">{{ trainingPlanTreatment }}</p>
                       </div>
                     </div>
-                  </button>
+                  </div>
+                  <div class="rounded-xl border border-slate-200 bg-white p-3">
+                    <div class="flex items-start gap-3">
+                      <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500">
+                        <SlidersHorizontal class="h-4 w-4" />
+                      </div>
+                      <div class="min-w-0">
+                        <p class="text-[11px] font-bold uppercase tracking-wider text-slate-500">诊断而非训练分支</p>
+                        <p class="mt-0.5 text-sm font-semibold text-slate-900">仅工况消融</p>
+                        <p class="mt-1 text-xs leading-5 text-slate-500">只用于评估工况偏差和结构特征增益,不在这里生成独立数据集。</p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -521,7 +470,7 @@ onMounted(() => {
               </div>
             </div>
             <p v-else class="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-              当前配方没有阻塞项,可以直接生成训练数据集。
+              当前结构训练视图没有阻塞项,可以直接生成训练数据集。
             </p>
             <p v-if="buildErrorMessage" class="mt-2 text-xs text-rose-600">{{ buildErrorMessage }}</p>
           </section>
@@ -591,11 +540,12 @@ onMounted(() => {
             <span class="text-xs font-normal text-slate-400">展开看细节</span>
           </summary>
           <div class="mt-3 space-y-2 border-t border-slate-200 pt-3 text-xs leading-6 text-slate-600">
-            <p>· 当前训练配方:{{ activeRecipe.title }}。{{ activeRecipe.treatment }}</p>
+            <p>· 当前训练路径:{{ trainingPlanTitle }}。{{ trainingPlanTreatment }}</p>
             <p>· 样本来源:{{ selectedSourceMode }}。</p>
             <p>· 自动选择了 {{ retainedFeatureColumns.length }} 个对预测最有帮助的特征(去掉了重复或共线的字段)。</p>
-            <p>· 已检查 {{ qualityIssueCards.length }} 类质量问题,仅在训练视图中排除了 {{ droppedCount }} 条不适合当前配方的记录。</p>
+            <p>· 已检查 {{ qualityIssueCards.length }} 类质量问题,仅在训练视图中排除了 {{ droppedCount }} 条不适合结构训练的记录。</p>
             <p>· Review/证据定位继续服务 Knowledge 追溯,不是训练集生成的唯一入口。</p>
+            <p>· 仅工况模型后续可作为消融诊断,用于证明离子描述符带来的增益,不作为这里的训练分支。</p>
             <p v-if="descriptorSummary?.rdkit_enabled">· 已用 RDKit 自动生成离子结构描述符。</p>
             <p v-else>· RDKit 未启用,目前仅使用宏观字段。</p>
           </div>
@@ -610,7 +560,7 @@ onMounted(() => {
     >
       <div class="mx-auto flex w-full max-w-[1080px] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div class="min-w-0">
-          <p class="text-xs font-semibold text-slate-950">{{ activeRecipe.title }} · {{ trainingReadyCount }} 条可训练</p>
+          <p class="text-xs font-semibold text-slate-950">{{ trainingPlanTitle }} · {{ trainingReadyCount }} 条可训练</p>
           <p class="mt-0.5 truncate text-xs text-slate-500">{{ primaryActionHelp }}</p>
         </div>
         <div class="flex shrink-0 items-center gap-2">

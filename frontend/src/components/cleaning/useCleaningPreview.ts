@@ -11,7 +11,7 @@ import {
 } from '@/lib/api'
 import type { BuilderSubsetSummary, SubsetCard, SubsetKey } from '../dataset-builder/types'
 
-export type CleaningPresetKey = 'balanced' | 'strict' | 'coverage'
+export type CleaningPresetKey = 'balanced' | 'strict'
 
 export const DEFAULT_KEEP_FEATURES = [
   'temperature',
@@ -47,7 +47,6 @@ export const TRAINING_VIEW_OPTIONS = [
 export const STARTER_PRESETS = [
   { key: 'balanced' as const, label: '平衡模式', badge: '推荐', summary: '兼顾样本量与完整性。' },
   { key: 'strict' as const, label: '严格模式', badge: '严格', summary: '更适合复现实验和小样本验证。' },
-  { key: 'coverage' as const, label: '扩展模式', badge: '扩展', summary: '优先保留更多记录,形成更大的总池。' },
 ]
 
 function defaultBundleName() {
@@ -123,20 +122,11 @@ export function useCleaningPreview() {
 
   const activePresetKey = computed<CleaningPresetKey | null>(() => {
     if (form.source_mode === 'current_scope' && form.drop_missing_target && form.require_dual_smiles && form.remove_target_outliers) return 'strict'
-    if (form.source_mode === 'group_library_fallback' && form.drop_missing_target && !form.require_dual_smiles && !form.remove_target_outliers) return 'coverage'
     if (form.source_mode === 'group_library_fallback' && form.drop_missing_target && form.require_dual_smiles && !form.remove_target_outliers) return 'balanced'
     return null
   })
 
   function applyStarterPreset(presetKey: CleaningPresetKey) {
-    if (presetKey === 'balanced') {
-      form.source_mode = 'group_library_fallback'
-      form.drop_missing_target = true
-      form.require_dual_smiles = true
-      form.remove_target_outliers = false
-      form.iqr_multiplier = 1.5
-      return
-    }
     if (presetKey === 'strict') {
       form.source_mode = 'current_scope'
       form.drop_missing_target = true
@@ -147,7 +137,7 @@ export function useCleaningPreview() {
     }
     form.source_mode = 'group_library_fallback'
     form.drop_missing_target = true
-    form.require_dual_smiles = false
+    form.require_dual_smiles = true
     form.remove_target_outliers = false
     form.iqr_multiplier = 1.5
   }
