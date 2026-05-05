@@ -61,7 +61,6 @@ const {
   watchIssueCount,
   trainingReadyCount,
   rawRecordCount,
-  readyRatio,
 } = useQualityIssues({
   preview,
   form,
@@ -292,13 +291,6 @@ const verdictView = computed(() => {
   }
 })
 
-const verdictBgClass = computed(() => {
-  if (verdictTone.value === 'ready') return 'border-emerald-200 bg-emerald-50/60'
-  if (verdictTone.value === 'caution') return 'border-amber-200 bg-amber-50/60'
-  if (verdictTone.value === 'loading') return 'border-slate-200 bg-slate-50/60'
-  return 'border-rose-200 bg-rose-50/60'
-})
-
 const verdictIconClass = computed(() => {
   if (verdictTone.value === 'ready') return 'text-emerald-600'
   if (verdictTone.value === 'caution') return 'text-amber-600'
@@ -319,6 +311,9 @@ const primaryActionHelp = computed(() => {
   if (trainingReadyCount.value < 10) return '样本不足时不生成训练版本,先扩大文献范围或放宽当前配方。'
   return '先等待当前数据体检完成。'
 })
+
+const displayIssueCards = computed(() => actionIssueCards.value.slice(0, 4))
+const issueTotalCount = computed(() => actionIssueCount.value + watchIssueCount.value)
 
 function handlePrimaryAction() {
   if (buildingState.value === 'building') return
@@ -341,220 +336,195 @@ onMounted(() => {
 <template>
   <div class="flex h-full min-h-0 flex-col bg-[#f5f7fb]">
     <div class="min-h-0 flex-1 overflow-y-auto custom-scrollbar">
-      <div class="mx-auto w-full max-w-[1080px] space-y-3 px-4 py-4 sm:px-6">
-
-      <section class="rounded-2xl border border-indigo-100 bg-white p-4">
-        <div class="flex items-start gap-3">
-          <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white">
-            <Target class="h-5 w-5" />
-          </div>
-          <div class="min-w-0">
-            <p class="text-[11px] font-semibold uppercase tracking-wider text-indigo-700">目标</p>
-            <h1 class="mt-0.5 text-lg font-semibold tracking-tight text-slate-950 sm:text-xl">
-              训练一个能预测摩擦系数 (μ/COF) 的模型
-            </h1>
-            <p class="mt-1 text-sm leading-6 text-slate-600">
-              下面会从 Knowledge 派生一个独立训练视图。Review 继续沉淀完整事实,训练分支只冻结当前配方需要的字段和样本。
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <section v-if="errorMessage" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
-        <div class="flex items-center gap-2">
-          <AlertTriangle class="h-4 w-4 shrink-0" />
-          <span>{{ errorMessage }}</span>
-        </div>
-      </section>
-
-      <section v-if="statusMessage && buildingState === 'done'" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-        <div class="flex items-center gap-2">
-          <Sparkles class="h-4 w-4 shrink-0" />
-          <span>{{ statusMessage }}</span>
-        </div>
-      </section>
-
-      <section v-if="loading && !preview" class="rounded-2xl border border-slate-200 bg-white p-10 text-center">
-        <Loader2 class="mx-auto h-7 w-7 animate-spin text-slate-400" />
-        <p class="mt-3 text-sm font-medium text-slate-600">正在分析你的数据...</p>
-        <p class="mt-1 text-xs text-slate-400">通常只需要几秒钟</p>
-      </section>
-
-      <template v-else-if="preview && builder">
-
-        <section class="grid grid-cols-3 gap-2">
-          <div class="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-            <div class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-              <BookOpen class="h-3.5 w-3.5" />
-              原始记录
-            </div>
-            <p class="mt-1 text-2xl font-semibold tabular-nums text-slate-950">{{ rawRecordCount }}</p>
-            <p class="mt-0.5 text-[11px] leading-4 text-slate-500">来自当前文献库</p>
-          </div>
-          <div class="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-            <div class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-              <CheckCircle2 class="h-3.5 w-3.5" :class="trainingReadyCount >= 10 ? 'text-emerald-600' : 'text-rose-500'" />
-              可训练
-            </div>
-            <p class="mt-1 text-2xl font-semibold tabular-nums" :class="trainingReadyCount >= 10 ? 'text-emerald-700' : 'text-rose-600'">
-              {{ trainingReadyCount }}
-            </p>
-            <p class="mt-0.5 text-[11px] leading-4 text-slate-500">{{ Math.round(readyRatio * 100) }}% 进入当前配方</p>
-          </div>
-          <div class="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-            <div class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
-              <XCircle class="h-3.5 w-3.5" :class="droppedCount > 0 ? 'text-slate-500' : 'text-emerald-600'" />
-              已自动排除
-            </div>
-            <p class="mt-1 text-2xl font-semibold tabular-nums text-slate-700">{{ droppedCount }}</p>
-            <p class="mt-0.5 text-[11px] leading-4 text-slate-500">仅从训练视图移除</p>
+      <div class="mx-auto w-full max-w-[1120px] space-y-3 px-4 py-4 sm:px-6">
+        <section v-if="errorMessage" class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+          <div class="flex items-center gap-2">
+            <AlertTriangle class="h-4 w-4 shrink-0" />
+            <span>{{ errorMessage }}</span>
           </div>
         </section>
 
-        <section class="rounded-2xl border border-indigo-200 bg-white p-4 shadow-sm">
-          <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div class="min-w-0">
-              <div class="flex items-center gap-2">
-                <Package class="h-4 w-4 text-indigo-600" />
-                <h2 class="text-base font-semibold tracking-tight text-slate-950">下一步怎么做</h2>
-              </div>
-              <p class="mt-1 text-sm leading-6 text-slate-600">
-                1 选训练配方,2 生成数据集版本,3 到 Modeling 开始训练。下面的黄色问题只影响当前训练配方,不会改写 Knowledge。
-              </p>
-            </div>
-            <button
-              type="button"
-              class="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
-              :disabled="buildingState === 'building' || previewLoading"
-              @click="handlePrimaryAction"
-            >
-              <Loader2 v-if="buildingState === 'building' || previewLoading" class="h-4 w-4 animate-spin" />
-              <Sparkles v-else-if="buildingState !== 'done'" class="h-4 w-4" />
-              <ArrowRight v-else class="h-4 w-4" />
-              {{ primaryActionLabel }}
-            </button>
+        <section v-if="statusMessage && buildingState === 'done'" class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          <div class="flex items-center gap-2">
+            <Sparkles class="h-4 w-4 shrink-0" />
+            <span>{{ statusMessage }}</span>
           </div>
+        </section>
 
-          <div class="mt-4 grid gap-2 md:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]">
-            <div class="grid gap-2 sm:grid-cols-2">
-              <button
-                v-for="recipe in datasetRecipes"
-                :key="recipe.key"
-                type="button"
-                class="rounded-xl border p-3 text-left transition"
-                :class="recipeMode === recipe.key ? 'border-indigo-300 bg-indigo-50 ring-2 ring-indigo-100' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'"
-                @click="applyDatasetRecipe(recipe.key)"
-              >
+        <section v-if="loading && !preview" class="rounded-2xl border border-slate-200 bg-white p-10 text-center">
+          <Loader2 class="mx-auto h-7 w-7 animate-spin text-slate-400" />
+          <p class="mt-3 text-sm font-medium text-slate-600">正在分析你的数据...</p>
+          <p class="mt-1 text-xs text-slate-400">通常只需要几秒钟</p>
+        </section>
+
+        <template v-else-if="preview && builder">
+          <section class="rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <div class="grid gap-0 lg:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]">
+              <div class="p-4 sm:p-5">
                 <div class="flex items-start gap-3">
-                  <div
-                    class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
-                    :class="recipeMode === recipe.key ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-500'"
-                  >
-                    <component :is="recipe.icon" class="h-4 w-4" />
+                  <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-950 text-white">
+                    <Target class="h-5 w-5" />
                   </div>
                   <div class="min-w-0">
-                    <p class="text-[11px] font-bold uppercase tracking-wider" :class="recipeMode === recipe.key ? 'text-indigo-700' : 'text-slate-500'">
-                      {{ recipe.label }}
+                    <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Dataset Workflow</p>
+                    <h1 class="mt-0.5 text-xl font-semibold tracking-tight text-slate-950">
+                      生成摩擦系数预测训练集
+                    </h1>
+                    <p class="mt-1 text-sm leading-6 text-slate-600">
+                      从 Knowledge 冻结一个训练视图;Review 继续保留完整事实和证据。
                     </p>
-                    <p class="mt-0.5 text-sm font-semibold text-slate-950">{{ recipe.title }}</p>
-                    <p class="mt-1 text-xs leading-5 text-slate-600">{{ recipe.description }}</p>
                   </div>
                 </div>
-              </button>
-            </div>
 
-            <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">当前配方会生成</p>
-              <p class="mt-2 text-xl font-semibold tabular-nums text-slate-950">{{ trainingDatasetSummary?.row_count ?? 0 }} 行</p>
-              <p class="mt-0.5 text-xs text-slate-500">{{ trainingDatasetSummary?.feature_count ?? 0 }} 个特征 · 单一训练数据集版本</p>
-              <p class="mt-2 text-xs leading-5 text-slate-500">{{ primaryActionHelp }}</p>
-            </div>
-          </div>
-        </section>
-
-        <section class="rounded-2xl border p-5" :class="verdictBgClass">
-          <div class="flex items-start gap-3">
-            <component :is="verdictView.icon" class="mt-0.5 h-6 w-6 shrink-0" :class="verdictIconClass" />
-            <div class="min-w-0 flex-1">
-              <p class="text-base font-semibold tracking-tight text-slate-950">{{ verdictView.headline }}</p>
-              <p class="mt-1 text-sm leading-6 text-slate-700">{{ verdictView.subtext }}</p>
-
-              <ul v-if="(verdictTone === 'blocked' || verdictTone === 'caution') && actionIssueCards.length" class="mt-3 space-y-1.5">
-                <li
-                  v-for="card in actionIssueCards.slice(0, 3)"
-                  :key="card.key"
-                  class="flex items-start gap-2 rounded-lg bg-white/75 px-3 py-2 text-sm ring-1"
-                  :class="verdictTone === 'blocked' ? 'ring-rose-100' : 'ring-amber-100'"
-                >
-                  <component :is="card.icon" class="mt-0.5 h-4 w-4 shrink-0" :class="verdictTone === 'blocked' ? 'text-rose-500' : 'text-amber-600'" />
-                  <div class="min-w-0">
-                    <p>
-                      <span class="font-medium text-slate-900">{{ card.title }}</span>
-                      <span class="ml-1 text-slate-500">— {{ card.value }} {{ card.unit }}</span>
-                    </p>
-                    <p class="mt-0.5 text-xs leading-5 text-slate-500">{{ card.trainingTreatment }}</p>
+                <div class="mt-4 grid gap-2 sm:grid-cols-4">
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      <BookOpen class="h-3.5 w-3.5" />
+                      原始
+                    </div>
+                    <p class="mt-1 text-xl font-semibold tabular-nums text-slate-950">{{ rawRecordCount }}</p>
                   </div>
-                </li>
-                <li v-if="actionIssueCards.length > 3" class="px-3 py-1 text-xs text-slate-500">
-                  还有 {{ actionIssueCards.length - 3 }} 项,可在训练配方里处理;事实错误再回 Review。
-                </li>
-              </ul>
+                  <div class="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
+                    <div class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-emerald-700">
+                      <CheckCircle2 class="h-3.5 w-3.5" />
+                      可训练
+                    </div>
+                    <p class="mt-1 text-xl font-semibold tabular-nums text-emerald-700">{{ trainingReadyCount }}</p>
+                  </div>
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      <XCircle class="h-3.5 w-3.5" />
+                      排除
+                    </div>
+                    <p class="mt-1 text-xl font-semibold tabular-nums text-slate-700">{{ droppedCount }}</p>
+                  </div>
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div class="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+                      <Package class="h-3.5 w-3.5" />
+                      特征
+                    </div>
+                    <p class="mt-1 text-xl font-semibold tabular-nums text-slate-950">{{ trainingDatasetSummary?.feature_count ?? 0 }}</p>
+                  </div>
+                </div>
 
-              <div class="mt-4 flex flex-wrap gap-2">
+                <div class="mt-4 grid gap-2 sm:grid-cols-3">
+                  <div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                    <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">1 选择配方</p>
+                    <p class="mt-1 text-sm font-medium text-slate-800">{{ activeRecipe.title }}</p>
+                  </div>
+                  <div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                    <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">2 冻结版本</p>
+                    <p class="mt-1 text-sm font-medium text-slate-800">{{ trainingDatasetSummary?.row_count ?? 0 }} 行进入训练集</p>
+                  </div>
+                  <div class="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                    <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-400">3 训练模型</p>
+                    <p class="mt-1 text-sm font-medium text-slate-800">保存后跳转 Modeling</p>
+                  </div>
+                </div>
+
+                <div class="mt-4 grid gap-2 sm:grid-cols-2">
+                  <button
+                    v-for="recipe in datasetRecipes"
+                    :key="recipe.key"
+                    type="button"
+                    class="rounded-xl border p-3 text-left transition"
+                    :class="recipeMode === recipe.key ? 'border-slate-950 bg-slate-950 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-900 hover:border-slate-300 hover:bg-slate-50'"
+                    @click="applyDatasetRecipe(recipe.key)"
+                  >
+                    <div class="flex items-start gap-3">
+                      <div
+                        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                        :class="recipeMode === recipe.key ? 'bg-white/12 text-white' : 'bg-slate-100 text-slate-500'"
+                      >
+                        <component :is="recipe.icon" class="h-4 w-4" />
+                      </div>
+                      <div class="min-w-0">
+                        <p class="text-[11px] font-bold uppercase tracking-wider" :class="recipeMode === recipe.key ? 'text-slate-200' : 'text-slate-500'">
+                          {{ recipe.label }}
+                        </p>
+                        <p class="mt-0.5 text-sm font-semibold">{{ recipe.title }}</p>
+                        <p class="mt-1 text-xs leading-5" :class="recipeMode === recipe.key ? 'text-slate-300' : 'text-slate-600'">{{ recipe.description }}</p>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              <aside class="border-t border-slate-200 bg-slate-50 p-4 sm:p-5 lg:border-l lg:border-t-0">
+                <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">将生成</p>
+                <h2 class="mt-1 text-lg font-semibold tracking-tight text-slate-950">训练数据集</h2>
+                <div class="mt-4 grid grid-cols-2 gap-2">
+                  <div>
+                    <p class="text-xs text-slate-500">样本</p>
+                    <p class="mt-1 text-3xl font-semibold tabular-nums text-slate-950">{{ trainingDatasetSummary?.row_count ?? 0 }}</p>
+                  </div>
+                  <div>
+                    <p class="text-xs text-slate-500">特征</p>
+                    <p class="mt-1 text-3xl font-semibold tabular-nums text-slate-950">{{ trainingDatasetSummary?.feature_count ?? 0 }}</p>
+                  </div>
+                </div>
+                <p class="mt-3 text-xs leading-5 text-slate-500">{{ primaryActionHelp }}</p>
                 <button
-                  v-if="verdictTone === 'empty' || (verdictTone === 'blocked' && trainingReadyCount < 10)"
                   type="button"
-                  class="inline-flex h-10 items-center gap-1.5 rounded-xl bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800"
-                  @click="goExplorer"
+                  class="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  :disabled="buildingState === 'building' || previewLoading"
+                  @click="handlePrimaryAction"
                 >
-                  去数据浏览选记录
-                  <ArrowRight class="h-4 w-4" />
+                  <Loader2 v-if="buildingState === 'building' || previewLoading" class="h-4 w-4 animate-spin" />
+                  <Sparkles v-else-if="buildingState !== 'done'" class="h-4 w-4" />
+                  <ArrowRight v-else class="h-4 w-4" />
+                  {{ primaryActionLabel }}
                 </button>
                 <button
                   v-if="verdictTone === 'caution'"
                   type="button"
-                  class="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  class="mt-2 inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                   @click="goReview"
                 >
                   回 Review 修事实
-                  <ArrowRight class="h-4 w-4" />
                 </button>
+              </aside>
+            </div>
+          </section>
+
+          <section class="rounded-2xl border border-slate-200 bg-white p-4">
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div class="flex items-center gap-2">
+                <component :is="verdictView.icon" class="h-5 w-5 shrink-0" :class="verdictIconClass" />
+                <div>
+                  <h2 class="text-base font-semibold tracking-tight text-slate-950">{{ verdictView.headline }}</h2>
+                  <p class="mt-0.5 text-xs leading-5 text-slate-500">{{ verdictView.subtext }}</p>
+                </div>
+              </div>
+              <span
+                class="inline-flex h-8 items-center rounded-full px-3 text-xs font-semibold"
+                :class="verdictTone === 'ready' ? 'bg-emerald-100 text-emerald-700' : verdictTone === 'blocked' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'"
+              >
+                {{ issueTotalCount }} 类处理项
+              </span>
+            </div>
+
+            <div v-if="displayIssueCards.length" class="mt-3 grid gap-2 sm:grid-cols-2">
+              <div
+                v-for="card in displayIssueCards"
+                :key="card.key"
+                class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2"
+              >
+                <div class="flex items-center gap-2">
+                  <component :is="card.icon" class="h-4 w-4 shrink-0 text-amber-600" />
+                  <p class="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">
+                    {{ card.title }}
+                    <span class="font-normal text-slate-500"> · {{ card.value }} {{ card.unit }}</span>
+                  </p>
+                </div>
+                <p class="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">{{ card.trainingTreatment }}</p>
               </div>
             </div>
-          </div>
-        </section>
-
-        <section v-if="canBuild && buildingState !== 'done'" class="rounded-2xl border border-slate-200 bg-white p-5">
-          <div class="flex items-center gap-2">
-            <Package class="h-4 w-4 text-indigo-600" />
-            <h2 class="text-base font-semibold tracking-tight text-slate-950">生成训练数据集</h2>
-          </div>
-          <p class="mt-1.5 text-sm leading-6 text-slate-600">
-            系统会按当前配方整理出一份训练数据集。先保证流程清楚、样本覆盖稳定;膜厚等机制字段后续再作为配方开关加入。
-          </p>
-
-          <article class="mt-4 rounded-xl border border-violet-200 bg-violet-50/50 p-4">
-            <p class="text-[11px] font-bold uppercase tracking-wider text-violet-700">训练数据集</p>
-            <p class="mt-1 text-3xl font-semibold tabular-nums text-slate-950">{{ trainingDatasetSummary?.row_count ?? 0 }}</p>
-            <p class="mt-0.5 text-xs text-slate-500">行 · {{ trainingDatasetSummary?.feature_count ?? 0 }} 个特征</p>
-            <p class="mt-2 text-xs leading-5 text-slate-600">{{ activeRecipe.title }}的当前训练视图,用于快速建立基线并进入 Modeling。</p>
-          </article>
-
-          <button
-            type="button"
-            class="mt-4 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 text-base font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
-            :disabled="buildingState === 'building'"
-            @click="autoBuild"
-          >
-            <Loader2 v-if="buildingState === 'building'" class="h-4 w-4 animate-spin" />
-            <Sparkles v-else class="h-4 w-4" />
-            {{ buildingState === 'building' ? '正在生成...' : '一键生成训练数据集' }}
-          </button>
-          <p v-if="buildErrorMessage" class="mt-2 text-xs text-rose-600">{{ buildErrorMessage }}</p>
-          <p class="mt-3 text-[11px] leading-5 text-slate-400">
-            生成后会保存到工作区,Modeling 页可直接读取。Knowledge 不会被改写;想换配方可以稍后再生成新版本。
-          </p>
-        </section>
+            <p v-else class="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+              当前配方没有阻塞项,可以直接生成训练数据集。
+            </p>
+            <p v-if="buildErrorMessage" class="mt-2 text-xs text-rose-600">{{ buildErrorMessage }}</p>
+          </section>
 
         <section v-if="savedDatasets.length > 0" class="rounded-2xl border border-emerald-200 bg-white p-5">
           <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 pb-3">
