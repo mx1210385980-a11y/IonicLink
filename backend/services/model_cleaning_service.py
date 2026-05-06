@@ -82,6 +82,19 @@ NUMERIC_PREVIEW_FIELDS = [
 
 DATASET_BUILDER_TARGET_COLUMN = "COF"
 DATASET_BUILDER_FILM_THICKNESS_COLUMN = "Film_Thickness"
+DATASET_BUILDER_IDENTIFIER_COLUMNS = [
+    "__record_id",
+    "__literature_id",
+    "__confidence",
+    "__cation",
+    "__anion",
+    "__cation_smiles",
+    "__anion_smiles",
+    "__experiment_scale",
+    "__experiment_method",
+    "__measurement_type",
+    "__training_view",
+]
 
 SURFACE_DESCRIPTOR_LOOKUP = {
     "au_111": {
@@ -923,6 +936,9 @@ class ModelCleaningService:
         for fieldname in fieldnames:
             if fieldname == target_column:
                 continue
+            if fieldname.startswith("__"):
+                identifier_columns.append(fieldname)
+                continue
             values = [str(row.get(fieldname) or "").strip() for row in raw_rows]
             non_empty_values = [value for value in values if value]
             if not non_empty_values:
@@ -1042,6 +1058,8 @@ class ModelCleaningService:
             "mol_ratio": record.mol_ratio,
             "confidence": record.confidence,
             "cof_value": record.cof_value,
+            "cation": record.cation,
+            "anion": record.anion,
             "cation_smiles": record.cation_smiles,
             "anion_smiles": record.anion_smiles,
             "temperature": record.temperature,
@@ -1659,10 +1677,21 @@ class ModelCleaningService:
         ]
         cation_cache: dict[str, dict[str, float | None]] = {}
         anion_cache: dict[str, dict[str, float | None]] = {}
-        builder_rows: list[dict[str, float | None]] = []
+        builder_rows: list[dict[str, Any]] = []
 
         for row in rows:
-            builder_row: dict[str, float | None] = {
+            builder_row: dict[str, Any] = {
+                "__record_id": row.get("record_id"),
+                "__literature_id": row.get("literature_id"),
+                "__confidence": self._jsonable_number(row.get("confidence")),
+                "__cation": row.get("cation"),
+                "__anion": row.get("anion"),
+                "__cation_smiles": row.get("cation_smiles"),
+                "__anion_smiles": row.get("anion_smiles"),
+                "__experiment_scale": row.get("experiment_scale"),
+                "__experiment_method": row.get("experiment_method"),
+                "__measurement_type": row.get("measurement_type"),
+                "__training_view": row.get("training_view"),
                 target_column: self._jsonable_number(row.get(target_field)),
             }
             cation_descriptors = self._descriptor_block_from_smiles(row.get("cation_smiles"), prefix="Cation", cache=cation_cache)
@@ -1690,7 +1719,7 @@ class ModelCleaningService:
     def _build_descriptor_generation_summary(
         self,
         source_rows: list[dict[str, Any]],
-        builder_rows: list[dict[str, float | None]],
+        builder_rows: list[dict[str, Any]],
         descriptor_columns: list[str],
     ) -> dict[str, Any]:
         total = len(builder_rows)
@@ -1771,7 +1800,7 @@ class ModelCleaningService:
 
     def _build_builder_screening(
         self,
-        builder_rows: list[dict[str, float | None]],
+        builder_rows: list[dict[str, Any]],
         descriptor_columns: list[str],
         macro_columns: list[str],
         target_column: str,
@@ -1866,7 +1895,7 @@ class ModelCleaningService:
 
     def _build_feature_importance_ranking(
         self,
-        builder_rows: list[dict[str, float | None]],
+        builder_rows: list[dict[str, Any]],
         feature_columns: list[str],
         target_column: str,
     ) -> dict[str, Any]:
@@ -1949,13 +1978,18 @@ class ModelCleaningService:
 
     def _build_builder_subsets(
         self,
-        builder_rows: list[dict[str, float | None]],
+        builder_rows: list[dict[str, Any]],
         descriptor_columns: list[str],
         macro_columns: list[str],
         target_column: str,
     ) -> dict[str, Any]:
-        dataset_a_columns = [target_column, *[column for column in [*macro_columns, *descriptor_columns] if column != DATASET_BUILDER_FILM_THICKNESS_COLUMN]]
-        dataset_b_columns = [target_column, *macro_columns, *descriptor_columns]
+        dataset_a_feature_columns = [
+            column for column in [*macro_columns, *descriptor_columns]
+            if column != DATASET_BUILDER_FILM_THICKNESS_COLUMN
+        ]
+        dataset_b_feature_columns = [*macro_columns, *descriptor_columns]
+        dataset_a_columns = [*DATASET_BUILDER_IDENTIFIER_COLUMNS, target_column, *dataset_a_feature_columns]
+        dataset_b_columns = [*DATASET_BUILDER_IDENTIFIER_COLUMNS, target_column, *dataset_b_feature_columns]
 
         dataset_a_rows = [
             {column: row.get(column) for column in dataset_a_columns}
@@ -1975,7 +2009,7 @@ class ModelCleaningService:
                 "columns": dataset_a_columns,
                 "rows": dataset_a_rows,
                 "row_count": len(dataset_a_rows),
-                "feature_count": max(0, len(dataset_a_columns) - 1),
+                "feature_count": len(dataset_a_feature_columns),
                 "preview_rows": dataset_a_rows[:12],
             },
             "dataset_b": {
@@ -1985,7 +2019,7 @@ class ModelCleaningService:
                 "columns": dataset_b_columns,
                 "rows": dataset_b_rows,
                 "row_count": len(dataset_b_rows),
-                "feature_count": max(0, len(dataset_b_columns) - 1),
+                "feature_count": len(dataset_b_feature_columns),
                 "preview_rows": dataset_b_rows[:12],
             },
         }

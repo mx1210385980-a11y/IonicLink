@@ -1518,6 +1518,9 @@ export interface ModelTrainingPredictionPoint {
     record_id?: number | null
     literature_id?: number | null
     confidence?: number | null
+    cation?: string | null
+    friction_bin?: number | null
+    joint_stratum?: string | null
     actual: number
     predicted: number
     residual: number
@@ -1529,12 +1532,21 @@ export interface ModelTrainingInsights {
     prediction_samples?: ModelTrainingPredictionPoint[]
     largest_residuals?: ModelTrainingPredictionPoint[]
     test_samples?: ModelTrainingPredictionPoint[]
+    external_samples?: ModelTrainingPredictionPoint[]
+    external_metrics?: ModelTrainingExternalMetrics | null
 }
 
 export interface ModelTrainingTestMetrics {
-    test_r2: number
+    test_r2: number | null
     test_rmse: number
     test_mae: number
+    sample_count: number
+}
+
+export interface ModelTrainingExternalMetrics {
+    external_r2: number | null
+    external_rmse: number
+    external_mae: number
     sample_count: number
 }
 
@@ -1628,6 +1640,7 @@ export interface ModelTrainingDatasetSummary {
     cleaned_records: number
     usable_records: number
     test_size?: number
+    external_size?: number
     pool_size?: number
     feature_dimensions: number
     target_column: string
@@ -1639,6 +1652,19 @@ export interface ModelTrainingDatasetSummary {
         key: string
         label: string
         column?: string
+    }
+    split?: {
+        strategy: string
+        label: string
+        cv_folds?: number | null
+        train_pool_size?: number
+        test_size?: number
+        external_size?: number
+        target_bin_count?: number
+        strata_count?: number
+        singleton_strata?: number
+        cation_count?: number
+        missing_cation_count?: number
     }
 }
 
@@ -1661,6 +1687,7 @@ export interface ModelTrainingTaskSnapshot {
         train_size: number
         validation_size: number
         test_size?: number
+        external_size?: number
         pool_size?: number
         feature_dimensions: number
         selected_feature_count: number
@@ -1675,6 +1702,19 @@ export interface ModelTrainingTaskSnapshot {
             training_view?: string
         }
         cleaning?: ModelTrainingCleaningSummary
+        split?: {
+            strategy: string
+            label: string
+            cv_folds?: number | null
+            train_pool_size?: number
+            test_size?: number
+            external_size?: number
+            target_bin_count?: number
+            strata_count?: number
+            singleton_strata?: number
+            cation_count?: number
+            missing_cation_count?: number
+        }
         source_scope?: ModelTrainingSourceScope
         target_column?: string
         feature_columns?: string[]

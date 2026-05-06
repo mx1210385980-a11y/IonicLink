@@ -126,6 +126,20 @@ const PROCESS_FEATURE_OPTIONS = [
   { key: 'alkyl_chain_length', label: '烷基链长', column: 'Alkyl_Chain_Length' },
 ] as const
 
+const BUILDER_METADATA_COLUMNS = [
+  '__record_id',
+  '__literature_id',
+  '__confidence',
+  '__cation',
+  '__anion',
+  '__cation_smiles',
+  '__anion_smiles',
+  '__experiment_scale',
+  '__experiment_method',
+  '__measurement_type',
+  '__training_view',
+] as const
+
 const SURFACE_FEATURE_COLUMNS = [
   'gamma_s',
   'sigma_s',
@@ -246,6 +260,7 @@ const selectedProcessFeatureColumns = computed<Set<string>>(() => new Set(
     .filter((option) => selectedProcessFeatureSet.value.has(option.key))
     .map((option) => option.column),
 ))
+const builderMetadataColumnSet = new Set<string>(BUILDER_METADATA_COLUMNS)
 const smilesScreeningSummary = computed(() => preview.value?.summary.smiles_screening || null)
 const smilesDescriptorReadyCount = computed(() => smilesScreeningSummary.value?.descriptor_ready_records ?? 0)
 const smilesInvalidCount = computed(() =>
@@ -533,7 +548,7 @@ const retainedFeatureColumns = computed(() => recommendedFeatures.value)
 function filterTrainingSummary(summary: BuilderSubsetSummary | null) {
   if (!summary) return null
   const selected = new Set(recommendedFeatures.value)
-  const cols = summary.columns.filter((c) => c === summary.target_column || selected.has(c))
+  const cols = summary.columns.filter((c) => builderMetadataColumnSet.has(c) || c === summary.target_column || selected.has(c))
   const pickRow = (row: ModelCleaningMatrixRow) => Object.fromEntries(
     cols.map((c) => [c, row[c] ?? null]),
   ) as ModelCleaningMatrixRow
@@ -544,7 +559,7 @@ function filterTrainingSummary(summary: BuilderSubsetSummary | null) {
     columns: cols,
     rows: summary.rows.map(pickRow),
     preview_rows: summary.preview_rows.map(pickRow),
-    feature_count: Math.max(0, cols.length - 1),
+    feature_count: cols.filter((c) => c !== summary.target_column && !builderMetadataColumnSet.has(c)).length,
   }
 }
 

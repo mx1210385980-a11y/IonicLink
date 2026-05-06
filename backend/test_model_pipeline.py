@@ -37,6 +37,8 @@ def _cleaning_row(
         "lubricant": "Synthetic IL",
         "confidence": 0.95,
         "cof_value": cof_value,
+        "cation": None,
+        "anion": None,
         "cation_smiles": cation_smiles,
         "anion_smiles": anion_smiles,
         "temperature": None,
@@ -399,6 +401,65 @@ def test_training_service_prepares_k_fold_split_and_linear_baseline() -> None:
     assert len(split_plan) == 4
 
 
+def test_training_service_prepares_joint_stratified_thesis_split() -> None:
+    rows = []
+    for index in range(128):
+        rows.append({
+            "Target_COF": 0.02 + index * 0.005,
+            "Temperature": 25.0 + index * 0.1,
+            "Speed": 0.1 + index * 0.001,
+            "__cation": f"cat-{index % 4}",
+            "__literature_id": 1 + (index % 12),
+            "__record_id": index + 1,
+            "__confidence": 0.9,
+        })
+    rows.append({
+        "Target_COF": 0.91,
+        "Temperature": 40.0,
+        "Speed": 0.2,
+        "__cation": "rare-singleton",
+        "__literature_id": 99,
+        "__record_id": 999,
+        "__confidence": 0.9,
+    })
+
+    metadata = {
+        "target": {"key": "cof", "label": "Coefficient of Friction (COF)"},
+        "target_column": "Target_COF",
+        "feature_columns": ["Temperature", "Speed"],
+        "matrix_columns": ["__record_id", "__cation", "Target_COF", "Temperature", "Speed"],
+        "summary": {"rules": {"training_view": "all"}},
+    }
+
+    service = ModelTrainingService()
+    prepared = service._prepare_saved_dataset(
+        rows,
+        {
+            "algorithm": "gradient_boosting",
+            "hyperparameters": {"n_estimators": 20, "learning_rate": 0.06, "max_depth": 3},
+            "data_options": {
+                "validation_split": 0.2,
+                "random_seed": 42,
+                "max_records": None,
+                "split_strategy": "joint_stratified",
+                "cv_folds": 5,
+                "min_confidence": 0.0,
+            },
+        },
+        metadata,
+    )
+    split_plan = service._build_split_plan(prepared)
+
+    assert prepared["dataset"]["split"]["strategy"] == "joint_stratified"
+    assert prepared["dataset"]["split"]["strata_count"] >= 8
+    assert prepared["dataset"]["external_size"] >= 1
+    assert prepared["dataset"]["test_size"] > 0
+    assert prepared["dataset"]["pool_size"] > 0
+    assert len(split_plan) >= 2
+    assert set(prepared["external_idx"].tolist()).isdisjoint(set(prepared["train_pool_idx"].tolist()))
+    assert set(prepared["external_idx"].tolist()).isdisjoint(set(prepared["test_idx"].tolist()))
+
+
 def test_parse_water_content_ppm_treats_il_prefix_as_label_not_negative_sign() -> None:
     assert _parse_water_content_ppm("IL-44%") == 440000.0
     assert _parse_water_content_ppm("IL-0%") == 0.0
@@ -494,6 +555,26 @@ def test_cleaning_service_builds_imported_csv_payload() -> None:
     assert payload["rows"][0]["friction coefficient"] == 0.12
     assert payload["summary"]["training_ready_records"] == 2
     assert payload["target"]["key"] == "cof"
+
+
+def test_cleaning_service_treats_builder_metadata_columns_as_identifiers() -> None:
+    service = ModelCleaningService()
+    csv_text = "\n".join([
+        "__record_id,__literature_id,__cation,Temperature,COF",
+        "1,10,[BMIM],298,0.12",
+        "2,10,[EMIM],303,0.15",
+    ])
+
+    payload = service._build_imported_csv_payload(
+        csv_text,
+        filename="builder-training.csv",
+        target_column="COF",
+        scope=RequestScope(scope_type="workspace", group_id=1, scope_key="workspace:1", workspace=None),
+    )
+
+    assert payload["feature_columns"] == ["Temperature"]
+    assert payload["import_metadata"]["identifier_columns"] == ["__record_id", "__literature_id", "__cation"]
+    assert payload["rows"][0]["__cation"] == "[BMIM]"
 
 
 def test_cleaning_service_skips_upgrade_for_imported_dataset() -> None:

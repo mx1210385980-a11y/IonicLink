@@ -16,7 +16,7 @@ defineEmits<{
     literatureId?: number | null
     recordId?: number | null
     rowIndex?: number | null
-    source: 'val' | 'test'
+    source: 'val' | 'test' | 'external'
     actual: number
     predicted: number
     residual: number

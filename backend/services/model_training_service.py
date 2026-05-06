@@ -15,7 +15,7 @@ from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import GroupKFold, KFold, train_test_split
+from sklearn.model_selection import GroupKFold, KFold, StratifiedKFold, train_test_split
 from sklearn.neural_network import MLPRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVR
@@ -306,9 +306,11 @@ DEFAULT_DATA_OPTIONS = {
     "min_confidence": 0.0,
     "max_records": None,
     "random_seed": 42,
-    "split_strategy": "k_fold",  # 默认走 5 折 CV，避免单次随机切分的"运气分数"
+    "split_strategy": "joint_stratified",
     "cv_folds": 5,
 }
+
+JOINT_STRATIFICATION_BINS = 8
 
 DEFAULT_CLEANING_OPTIONS = {
     "source_mode": "group_library_fallback",
@@ -361,6 +363,10 @@ TUNE_PARAM_GRIDS: dict[str, list[dict[str, Any]]] = {
 }
 
 SPLIT_STRATEGY_DEFINITIONS: dict[str, dict[str, str]] = {
+    "joint_stratified": {
+        "label": "论文复现：阳离子 × μ 分箱",
+        "description": "按阳离子类型和摩擦系数分箱构建联合标签；单样本标签进入外部文献验证集，多样本标签再按 8:2 分层切训练/测试。",
+    },
     "k_fold": {
         "label": "5 折交叉验证（K-Fold CV）",
         "description": "数据切 5 份，每份轮流当验证集训练 5 次，最终指标为 5 次平均——是模型真实泛化能力的可靠估计。",
@@ -770,6 +776,8 @@ def _serialize_record(record: TribologyData) -> dict[str, Any]:
         "confidence": record.confidence,
         "lubricant_components": getattr(record, "lubricant_components_json", None),
         "mol_ratio": record.mol_ratio,
+        "cation": record.cation,
+        "anion": record.anion,
         "cation_smiles": record.cation_smiles,
         "anion_smiles": record.anion_smiles,
         "load_value": record.load_value,
@@ -1741,6 +1749,97 @@ class ModelTrainingService:
             count += 1
         return count
 
+    def _normalize_joint_cation_label(self, row: dict[str, Any]) -> str:
+        for field in ("__cation", "cation", "Cation", "cation_label", "__cation_smiles", "cation_smiles", "Cation_SMILES"):
+            value = str(row.get(field) or "").strip()
+            if value:
+                normalized = re.sub(r"\s+", "", value).lower()
+                return normalized[:96] or "unknown"
+        return "unknown"
+
+    def _target_quantile_edges(self, values: list[float], *, bins: int = JOINT_STRATIFICATION_BINS) -> list[float]:
+        usable = np.asarray([value for value in values if math.isfinite(value)], dtype=float)
+        if usable.size < 2 or np.isclose(float(np.var(usable)), 0.0):
+            return []
+        quantiles = np.quantile(usable, np.linspace(0, 1, bins + 1)[1:-1])
+        edges: list[float] = []
+        for value in quantiles.tolist():
+            numeric = float(value)
+            if not edges or not np.isclose(edges[-1], numeric):
+                edges.append(numeric)
+        return edges
+
+    def _target_bin_index(self, value: float, edges: list[float]) -> int:
+        if not edges:
+            return 0
+        return int(np.searchsorted(np.asarray(edges, dtype=float), float(value), side="right"))
+
+    def _build_joint_stratification(self, eligible_rows: list[dict[str, Any]]) -> tuple[np.ndarray, dict[str, Any]]:
+        target_values = [float(row["_target_value"]) for row in eligible_rows]
+        edges = self._target_quantile_edges(target_values)
+        labels: list[str] = []
+        missing_cation_count = 0
+        cation_counts: dict[str, int] = {}
+        stratum_counts: dict[str, int] = {}
+
+        for row in eligible_rows:
+            cation_label = self._normalize_joint_cation_label(row)
+            if cation_label == "unknown":
+                missing_cation_count += 1
+            friction_bin = self._target_bin_index(float(row["_target_value"]), edges)
+            stratum = f"{cation_label}|mu_bin_{friction_bin}"
+            row["_cation_label"] = cation_label
+            row["_friction_bin"] = friction_bin
+            row["_joint_stratum"] = stratum
+            cation_counts[cation_label] = cation_counts.get(cation_label, 0) + 1
+            stratum_counts[stratum] = stratum_counts.get(stratum, 0) + 1
+            labels.append(stratum)
+
+        singleton_strata = sum(1 for count in stratum_counts.values() if count == 1)
+        return np.asarray(labels, dtype=object), {
+            "target_bin_count": len(edges) + 1 if edges else 1,
+            "target_bin_edges": [round(float(edge), 6) for edge in edges],
+            "cation_count": len(cation_counts),
+            "missing_cation_count": missing_cation_count,
+            "strata_count": len(stratum_counts),
+            "singleton_strata": singleton_strata,
+        }
+
+    def _joint_stratified_holdout_indices(
+        self,
+        labels: np.ndarray,
+        *,
+        test_fraction: float,
+        random_seed: int,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        rng = np.random.default_rng(random_seed)
+        label_to_indices: dict[str, list[int]] = {}
+        for index, label in enumerate(labels.tolist()):
+            label_to_indices.setdefault(str(label), []).append(index)
+
+        train_pool: list[int] = []
+        test: list[int] = []
+        external: list[int] = []
+        for label in sorted(label_to_indices):
+            indices = np.asarray(label_to_indices[label], dtype=int)
+            rng.shuffle(indices)
+            if len(indices) == 1:
+                external.extend(indices.tolist())
+                continue
+            test_count = max(1, int(round(len(indices) * test_fraction)))
+            test_count = min(test_count, len(indices) - 1)
+            test.extend(indices[:test_count].tolist())
+            train_pool.extend(indices[test_count:].tolist())
+
+        rng.shuffle(train_pool)
+        rng.shuffle(test)
+        rng.shuffle(external)
+        return (
+            np.asarray(train_pool, dtype=int),
+            np.asarray(test, dtype=int),
+            np.asarray(external, dtype=int),
+        )
+
     def _prepare_saved_dataset(self, rows: list[dict[str, Any]], config: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
         target_column = self._target_column_from_metadata(metadata)
         feature_columns = self._feature_columns_from_dataset_metadata(rows, metadata)
@@ -1801,10 +1900,23 @@ class ModelTrainingService:
             dtype=object,
         )
         distinct_groups = len(set(groups.tolist()))
+        joint_labels, joint_summary = self._build_joint_stratification(eligible_rows)
 
-        # 留出 ~15% 作为测试集——训练全程不可见，最终给学生"出考卷"用
+        # 留出测试集——训练全程不可见，最终给学生"出考卷"用。
         all_indices = np.arange(len(eligible_rows))
-        if len(all_indices) >= 30:
+        external_idx = np.array([], dtype=int)
+        if split_strategy == "joint_stratified":
+            train_pool_idx, test_idx, external_idx = self._joint_stratified_holdout_indices(
+                joint_labels,
+                test_fraction=validation_split,
+                random_seed=int(random_seed) + 1000,
+            )
+            if len(train_pool_idx) < 10:
+                # 极端稀疏数据无法按论文规则留下足够训练池时，回退为随机训练池以保持可用性。
+                train_pool_idx = all_indices
+                test_idx = np.array([], dtype=int)
+                external_idx = np.array([], dtype=int)
+        elif len(all_indices) >= 30:
             test_pool_seed = int(random_seed) + 1000
             train_pool_idx, test_idx = train_test_split(
                 all_indices,
@@ -1824,6 +1936,16 @@ class ModelTrainingService:
         # train_pool_idx / test_idx 已经在前面切好；train/val 都在 train_pool 里再切
         pool_size = int(len(train_pool_idx))
         held_out_test_size = int(len(test_idx))
+        external_size = int(len(external_idx))
+        if split_strategy == "joint_stratified":
+            train_pool_labels = joint_labels[train_pool_idx] if len(train_pool_idx) else np.asarray([], dtype=object)
+            label_counts = {
+                str(label): int(np.sum(train_pool_labels == label))
+                for label in set(train_pool_labels.tolist())
+            }
+            min_label_count = min(label_counts.values(), default=0)
+            if min_label_count >= 2 and len(label_counts) >= 2:
+                effective_cv_folds = min(effective_cv_folds, min_label_count)
         if split_strategy == "random_holdout":
             if pool_size < 7:
                 raise ValueError("The validation split is too aggressive for the selected dataset.")
@@ -1850,6 +1972,13 @@ class ModelTrainingService:
             warnings.append(f"{dropped_low_confidence} rows were excluded because their confidence was below the selected threshold.")
         if effective_cv_folds != cv_folds and split_strategy != "random_holdout":
             warnings.append(f"Cross-validation folds were reduced from {cv_folds} to {effective_cv_folds} to keep each validation fold large enough to evaluate.")
+        if split_strategy == "joint_stratified":
+            if joint_summary["missing_cation_count"]:
+                warnings.append(f"{joint_summary['missing_cation_count']} rows did not carry a cation label; their joint split label used 'unknown'.")
+            if external_size:
+                warnings.append(f"{external_size} singleton cation × μ-bin strata were reserved as external literature validation rows.")
+            if not held_out_test_size:
+                warnings.append("Joint stratified split fell back to the full pool because too few rows remained for training.")
 
         metadata_target = metadata.get("target") if isinstance(metadata.get("target"), dict) else {}
         target_payload = target_display_payload(
@@ -1866,14 +1995,19 @@ class ModelTrainingService:
             "X": X,
             "y": y,
             "groups": groups,
+            "joint_labels": joint_labels,
             "train_pool_idx": train_pool_idx,
             "test_idx": test_idx,
+            "external_idx": external_idx,
             "row_metadata": [
                 {
                     "row_index": int(row["_row_index"]),
                     "record_id": row.get("_record_id"),
                     "literature_id": row.get("_literature_id"),
                     "confidence": row.get("_confidence"),
+                    "cation": row.get("_cation_label"),
+                    "friction_bin": row.get("_friction_bin"),
+                    "joint_stratum": row.get("_joint_stratum"),
                     "experiment_scale": row.get("__experiment_scale"),
                     "experiment_method": row.get("__experiment_method"),
                     "measurement_type": row.get("__measurement_type"),
@@ -1895,6 +2029,7 @@ class ModelTrainingService:
                 "train_size": train_size,
                 "validation_size": validation_size,
                 "test_size": held_out_test_size,
+                "external_size": external_size,
                 "pool_size": pool_size,
                 "feature_dimensions": int(X.shape[1]),
                 "selected_feature_count": int(len(feature_columns)),
@@ -1918,6 +2053,10 @@ class ModelTrainingService:
                     "strategy": split_strategy,
                     "label": split_label,
                     "cv_folds": effective_cv_folds if split_strategy != "random_holdout" else None,
+                    "train_pool_size": pool_size,
+                    "test_size": held_out_test_size,
+                    "external_size": external_size,
+                    **(joint_summary if split_strategy == "joint_stratified" else {}),
                 },
                 "cleaning": metadata.get("summary", {}),
                 "pca_info": metadata.get("pca_info"),
@@ -1962,6 +2101,37 @@ class ModelTrainingService:
             return [
                 {
                     "label": f"Fold {fold_index}",
+                    "train_idx": pool_idx[train_rel],
+                    "val_idx": pool_idx[val_rel],
+                }
+                for fold_index, (train_rel, val_rel) in enumerate(splitter.split(X[pool_idx], y[pool_idx]), start=1)
+            ]
+
+        if split_strategy == "joint_stratified":
+            joint_labels = np.asarray(prepared.get("joint_labels"), dtype=object)
+            pool_labels = joint_labels[pool_idx] if len(joint_labels) == len(y) else np.asarray([], dtype=object)
+            label_counts = {
+                str(label): int(np.sum(pool_labels == label))
+                for label in set(pool_labels.tolist())
+            }
+            min_label_count = min(label_counts.values(), default=0)
+            if len(label_counts) >= 2 and min_label_count >= 2:
+                n_splits = min(cv_folds, min_label_count)
+                splitter = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_seed)
+                return [
+                    {
+                        "label": f"Joint Fold {fold_index}",
+                        "train_idx": pool_idx[train_rel],
+                        "val_idx": pool_idx[val_rel],
+                    }
+                    for fold_index, (train_rel, val_rel) in enumerate(splitter.split(X[pool_idx], pool_labels), start=1)
+                ]
+
+            n_splits = min(cv_folds, len(pool_idx))
+            splitter = KFold(n_splits=n_splits, shuffle=True, random_state=random_seed)
+            return [
+                {
+                    "label": f"Joint Fallback Fold {fold_index}",
                     "train_idx": pool_idx[train_rel],
                     "val_idx": pool_idx[val_rel],
                 }
@@ -2287,7 +2457,8 @@ class ModelTrainingService:
 
             # 自动调参：在常规训练前先做一次小规模网格搜索
             if bool(task.config.get("tune")):
-                await self._tune_hyperparameters(task, X, y)
+                tune_pool_idx = np.asarray(prepared.get("train_pool_idx") if prepared.get("train_pool_idx") is not None else np.arange(len(y)))
+                await self._tune_hyperparameters(task, X[tune_pool_idx], y[tune_pool_idx])
                 if task.cancel_requested or task.status in {"cancelled", "failed"}:
                     return
 
@@ -2385,6 +2556,7 @@ class ModelTrainingService:
             # 用整个训练池训练最终模型，再在隔离的测试集上"开盲考"
             train_pool_idx = np.asarray(prepared.get("train_pool_idx") if prepared.get("train_pool_idx") is not None else np.arange(len(y)))
             test_idx = np.asarray(prepared.get("test_idx") if prepared.get("test_idx") is not None else np.array([], dtype=int))
+            external_idx = np.asarray(prepared.get("external_idx") if prepared.get("external_idx") is not None else np.array([], dtype=int))
             X_pool = X[train_pool_idx]
             y_pool = y[train_pool_idx]
 
@@ -2403,19 +2575,24 @@ class ModelTrainingService:
                     y_train=y_pool,
                 )
 
-            test_metrics: dict[str, Any] | None = None
-            test_samples: list[dict[str, Any]] = []
-            if final_model is not None and len(test_idx) >= 2 and not np.isclose(np.var(y[test_idx]), 0.0):
+            def evaluate_index_set(indices: np.ndarray, *, metric_prefix: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+                metrics: dict[str, Any] | None = None
+                samples: list[dict[str, Any]] = []
+                if final_model is None or len(indices) == 0:
+                    return metrics, samples
                 try:
-                    y_test_true = y[test_idx]
-                    y_test_pred = np.asarray(final_model.predict(X[test_idx]), dtype=np.float32)
-                    test_metrics = {
-                        "test_r2": float(r2_score(y_test_true, y_test_pred)),
-                        "test_rmse": float(math.sqrt(mean_squared_error(y_test_true, y_test_pred))),
-                        "test_mae": float(mean_absolute_error(y_test_true, y_test_pred)),
-                        "sample_count": int(len(test_idx)),
+                    y_true = y[indices]
+                    y_pred = np.asarray(final_model.predict(X[indices]), dtype=np.float32)
+                    r2_value = None
+                    if len(indices) >= 2 and not np.isclose(np.var(y_true), 0.0):
+                        r2_value = float(r2_score(y_true, y_pred))
+                    metrics = {
+                        f"{metric_prefix}_r2": r2_value,
+                        f"{metric_prefix}_rmse": float(math.sqrt(mean_squared_error(y_true, y_pred))),
+                        f"{metric_prefix}_mae": float(mean_absolute_error(y_true, y_pred)),
+                        "sample_count": int(len(indices)),
                     }
-                    for absolute_index, predicted in zip(test_idx.tolist(), y_test_pred.tolist()):
+                    for absolute_index, predicted in zip(indices.tolist(), y_pred.tolist()):
                         meta = row_metadata[absolute_index] if absolute_index < len(row_metadata) else {}
                         actual = _safe_float(meta.get("actual"))
                         pred = _safe_float(predicted)
@@ -2427,6 +2604,9 @@ class ModelTrainingService:
                                 "row_index": meta.get("row_index", absolute_index),
                                 "record_id": meta.get("record_id"),
                                 "literature_id": meta.get("literature_id"),
+                                "cation": meta.get("cation"),
+                                "friction_bin": meta.get("friction_bin"),
+                                "joint_stratum": meta.get("joint_stratum"),
                                 "actual": actual,
                                 "predicted": pred,
                                 "residual": residual,
@@ -2434,8 +2614,12 @@ class ModelTrainingService:
                             }
                         )
                 except Exception as exc:
-                    logger.warning("Test-set evaluation failed: %s", exc)
-                    test_metrics = None
+                    logger.warning("%s-set evaluation failed: %s", metric_prefix, exc)
+                    metrics = None
+                return metrics, samples
+
+            test_metrics, test_samples = evaluate_index_set(test_idx, metric_prefix="test")
+            external_metrics, external_samples = evaluate_index_set(external_idx, metric_prefix="external")
 
             task.test_metrics = test_metrics
 
@@ -2443,6 +2627,8 @@ class ModelTrainingService:
                 "feature_importance": self._build_feature_importance(final_model, task.dataset.get("feature_columns", [])),
                 **self._build_prediction_insights(row_metadata, oof_predictions),
                 "test_samples": test_samples,
+                "external_samples": external_samples,
+                "external_metrics": external_metrics,
             }
 
             task.status = "completed"

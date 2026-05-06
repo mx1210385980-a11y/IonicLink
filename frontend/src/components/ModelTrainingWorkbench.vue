@@ -97,7 +97,7 @@ const emit = defineEmits<{
     literatureId?: number | null
     recordId?: number | null
     rowIndex?: number | null
-    source: 'val' | 'test'
+    source: 'val' | 'test' | 'external'
     actual: number
     predicted: number
     residual: number
@@ -109,7 +109,7 @@ const form = reactive<ModelTrainingStartPayload>({
   target: 'Target_COF',
   algorithm: 'gradient_boosting',
   hyperparameters: { n_estimators: 120, learning_rate: 0.06, max_depth: 3, l2_leaf_reg: 3, random_strength: 1 },
-  data_options: { validation_split: 0.2, min_confidence: 0, max_records: null, random_seed: 42, split_strategy: 'k_fold', cv_folds: 5 },
+  data_options: { validation_split: 0.2, min_confidence: 0, max_records: null, random_seed: 42, split_strategy: 'joint_stratified', cv_folds: 5 },
   cleaned_dataset_id: null,
 })
 
@@ -225,17 +225,21 @@ const errorChartData = computed(() => ({
 const insights = computed(() => activeTask.value?.insights || null)
 const predictionSamples = computed(() => insights.value?.prediction_samples || [])
 const testSamples = computed(() => insights.value?.test_samples || [])
+const externalSamples = computed(() => insights.value?.external_samples || [])
+const externalMetrics = computed(() => insights.value?.external_metrics || null)
 const featureImportances = computed(() => (insights.value?.feature_importance || []).slice(0, 10))
 const testMetrics = computed(() => activeTask.value?.test_metrics || null)
+const datasetSplit = computed(() => activeTask.value?.dataset?.split || summary.value?.dataset?.split || null)
 
 const allScatterSamples = computed(() => [
   ...predictionSamples.value,
   ...testSamples.value,
+  ...externalSamples.value,
 ])
 
 // 异常样本诊断：把验证 OOF 和测试样本合起来，按残差降序取 Top 10
 type DiagSample = {
-  source: 'val' | 'test'
+  source: 'val' | 'test' | 'external'
   recordId: number | null
   literatureId: number | null
   actual: number
@@ -267,6 +271,18 @@ const topResiduals = computed<DiagSample[]>(() => {
   for (const s of testSamples.value) {
     merged.push({
       source: 'test',
+      recordId: nullableNumber(s.record_id),
+      literatureId: nullableNumber(s.literature_id),
+      actual: Number(s.actual),
+      predicted: Number(s.predicted),
+      residual: Number(s.residual ?? (Number(s.predicted) - Number(s.actual))),
+      absResidual: Number(s.abs_residual ?? Math.abs(Number(s.predicted) - Number(s.actual))),
+      rowIndex: nullableNumber(s.row_index),
+    })
+  }
+  for (const s of externalSamples.value) {
+    merged.push({
+      source: 'external',
       recordId: nullableNumber(s.record_id),
       literatureId: nullableNumber(s.literature_id),
       actual: Number(s.actual),
@@ -321,6 +337,7 @@ const predictionRange = computed(() => {
 const predictionScatterData = computed(() => {
   const valSamples = predictionSamples.value
   const testSamplesData = testSamples.value
+  const externalSamplesData = externalSamples.value
   const { min, max } = predictionRange.value
   return {
     datasets: [
@@ -359,6 +376,18 @@ const predictionScatterData = computed(() => {
         pointRadius: 5.5,
         pointHoverRadius: 8,
         pointStyle: 'rectRot' as const,
+        showLine: false,
+      },
+      {
+        type: 'line' as const,
+        label: `外部文献验证 · ${externalSamplesData.length}`,
+        data: externalSamplesData.map((sample) => ({ x: sample.actual, y: sample.predicted })),
+        backgroundColor: 'rgba(245, 158, 11, 0.82)',
+        borderColor: 'rgba(255,255,255,0.9)',
+        borderWidth: 1,
+        pointRadius: 5.5,
+        pointHoverRadius: 8,
+        pointStyle: 'triangle' as const,
         showLine: false,
       },
     ],
@@ -1235,7 +1264,7 @@ watch(
                 </div>
 
                 <p class="text-[11px] leading-5 text-slate-500">
-                  随机种子 {{ form.data_options.random_seed }}<template v-if="form.data_options.split_strategy === 'random_holdout'"> · 验证集占比 {{ validationSplitPercent }}%</template><template v-else> · 折数 {{ form.data_options.cv_folds || 5 }}</template>
+                  随机种子 {{ form.data_options.random_seed }}<template v-if="form.data_options.split_strategy === 'random_holdout'"> · 验证集占比 {{ validationSplitPercent }}%</template><template v-else-if="form.data_options.split_strategy === 'joint_stratified'"> · 测试集约 {{ validationSplitPercent }}% · {{ form.data_options.cv_folds || 5 }} 折 CV</template><template v-else> · 折数 {{ form.data_options.cv_folds || 5 }}</template>
                 </p>
               </div>
             </section>
@@ -1292,7 +1321,7 @@ watch(
               <p
                 class="text-[10px] font-bold uppercase tracking-[0.18em]"
                 :class="testMetrics ? 'text-[#5b56ea]' : 'text-[#8fa0ba]'"
-                title='完全藏起来不参与训练的 15% 数据，最后给模型出一份"考卷"。这个数字才是论文里报告的最终成绩，反映模型对全新样本的真实预测能力。'
+                title='完全藏起来不参与训练的数据，最后给模型出一份"考卷"。论文复现策略下按阳离子 × μ 分箱做 8:2 分层切分。'
               >
                 测试集 R²
               </p>
@@ -1321,6 +1350,36 @@ watch(
                 RMSE {{ formatMetric(currentPoint?.val_rmse, 3) }} · MAE {{ formatMetric(currentPoint?.val_mae, 3) }}
               </p>
             </div>
+          </section>
+
+          <section
+            v-if="datasetSplit"
+            class="rounded-[0.85rem] border border-[#eef2f6] bg-[#fbfcff] px-4 py-3"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p class="text-[10px] font-bold uppercase tracking-[0.18em] text-[#64748b]">数据划分策略</p>
+                <p class="mt-1 text-sm font-semibold text-slate-900">{{ datasetSplit.label }}</p>
+              </div>
+              <div class="flex flex-wrap gap-1.5 text-[11px] font-semibold text-slate-600">
+                <span class="rounded-full bg-white px-2.5 py-1 ring-1 ring-[#e2e8f0]">训练池 {{ datasetSplit.train_pool_size ?? activeTask?.dataset?.pool_size ?? 0 }}</span>
+                <span class="rounded-full bg-white px-2.5 py-1 ring-1 ring-[#e2e8f0]">测试集 {{ datasetSplit.test_size ?? activeTask?.dataset?.test_size ?? 0 }}</span>
+                <span class="rounded-full bg-white px-2.5 py-1 ring-1 ring-[#e2e8f0]">外部验证 {{ datasetSplit.external_size ?? activeTask?.dataset?.external_size ?? 0 }}</span>
+                <span v-if="datasetSplit.cv_folds" class="rounded-full bg-white px-2.5 py-1 ring-1 ring-[#e2e8f0]">{{ datasetSplit.cv_folds }} 折 CV</span>
+              </div>
+            </div>
+            <p
+              v-if="datasetSplit.strategy === 'joint_stratified'"
+              class="mt-2 text-xs leading-5 text-slate-500"
+            >
+              联合标签 {{ datasetSplit.strata_count ?? 0 }} 组 · 单样本外部层 {{ datasetSplit.singleton_strata ?? 0 }} 组 · μ 分箱 {{ datasetSplit.target_bin_count ?? 0 }} 档 · 阳离子 {{ datasetSplit.cation_count ?? 0 }} 类
+            </p>
+            <p
+              v-if="externalMetrics"
+              class="mt-1 text-xs leading-5 text-slate-500"
+            >
+              外部文献验证 RMSE {{ formatMetric(externalMetrics.external_rmse, 3) }} · MAE {{ formatMetric(externalMetrics.external_mae, 3) }} · {{ externalMetrics.sample_count }} 行
+            </p>
           </section>
 
           <!-- 运行警告 -->
