@@ -1264,17 +1264,26 @@ onMounted(() => {
                     <p class="text-xs font-semibold text-slate-900">筛选排序</p>
                     <span class="text-[11px] text-slate-500">按综合分排序</span>
                   </div>
-                  <div class="max-h-72 overflow-auto custom-scrollbar">
-                    <table class="min-w-full text-left text-[11px]">
+                  <div>
+                    <table class="w-full table-fixed text-left text-[11px]">
+                      <colgroup>
+                        <col class="w-[18%]">
+                        <col class="w-[24%]">
+                        <col class="w-[9%]">
+                        <col class="w-[9%]">
+                        <col class="w-[9%]">
+                        <col class="w-[11%]">
+                        <col class="w-[20%]">
+                      </colgroup>
                       <thead class="sticky top-0 bg-white text-slate-500 shadow-sm">
                         <tr>
-                          <th class="px-3 py-2 font-semibold">符号</th>
-                          <th class="px-3 py-2 font-semibold">含义</th>
-                          <th class="px-3 py-2 font-semibold">类型</th>
-                          <th class="px-3 py-2 font-semibold">覆盖</th>
-                          <th class="px-3 py-2 font-semibold">|r|</th>
-                          <th class="px-3 py-2 font-semibold">重要性</th>
-                          <th class="px-3 py-2 font-semibold">结果</th>
+                          <th class="px-2 py-2 font-semibold">符号</th>
+                          <th class="px-2 py-2 font-semibold">含义</th>
+                          <th class="px-2 py-2 font-semibold">类型</th>
+                          <th class="px-2 py-2 font-semibold">覆盖</th>
+                          <th class="px-2 py-2 font-semibold">|r|</th>
+                          <th class="px-2 py-2 font-semibold">重要性</th>
+                          <th class="px-2 py-2 font-semibold">结果</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1283,21 +1292,25 @@ onMounted(() => {
                           :key="row.feature"
                           class="border-b border-slate-50"
                         >
-                          <td class="max-w-[9rem] truncate px-3 py-2 font-semibold text-slate-800" :title="row.feature">
+                          <td class="truncate px-2 py-2 font-semibold text-slate-800" :title="row.feature">
                             {{ formatFeatureSymbol(row.feature) }}
                           </td>
-                          <td class="max-w-[13rem] truncate px-3 py-2 text-slate-500" :title="formatFeatureMeaning(row.feature)">
+                          <td class="truncate px-2 py-2 text-slate-500" :title="formatFeatureMeaning(row.feature)">
                             {{ formatFeatureMeaning(row.feature) }}
                           </td>
-                          <td class="px-3 py-2 text-slate-500">{{ row.role }}</td>
-                          <td class="px-3 py-2 tabular-nums text-slate-700">{{ formatPercent(row.coverage) }}</td>
-                          <td class="px-3 py-2 tabular-nums text-slate-700">{{ formatCorrelation(row.correlation) }}</td>
-                          <td class="px-3 py-2 tabular-nums text-slate-700">{{ row.importance.toFixed(4) }}</td>
-                          <td class="px-3 py-2">
-                            <span class="rounded-full px-2 py-0.5 font-semibold" :class="decisionPillClass(row.decision)">
+                          <td class="px-2 py-2">
+                            <span class="inline-flex whitespace-nowrap rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">
+                              {{ row.role }}
+                            </span>
+                          </td>
+                          <td class="whitespace-nowrap px-2 py-2 tabular-nums text-slate-700">{{ formatPercent(row.coverage) }}</td>
+                          <td class="whitespace-nowrap px-2 py-2 tabular-nums text-slate-700">{{ formatCorrelation(row.correlation) }}</td>
+                          <td class="whitespace-nowrap px-2 py-2 tabular-nums text-slate-700">{{ row.importance.toFixed(4) }}</td>
+                          <td class="px-2 py-2">
+                            <span class="inline-flex whitespace-nowrap rounded-full px-2 py-0.5 font-semibold" :class="decisionPillClass(row.decision)">
                               {{ decisionLabel(row.decision) }}
                             </span>
-                            <p class="mt-1 max-w-[10rem] truncate text-[10px] text-slate-400" :title="row.reason">{{ row.reason }}</p>
+                            <p class="mt-1 truncate text-[10px] text-slate-400" :title="row.reason">{{ row.reason }}</p>
                           </td>
                         </tr>
                       </tbody>
