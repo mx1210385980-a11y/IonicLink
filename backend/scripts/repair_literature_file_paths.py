@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import sqlite3
 from pathlib import Path
 
@@ -46,6 +47,29 @@ def build_name_index() -> dict[str, list[Path]]:
     return index
 
 
+def file_hash(path: Path) -> str | None:
+    try:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def build_hash_index() -> dict[str, list[Path]]:
+    index: dict[str, list[Path]] = {}
+    for root in SEARCH_ROOTS:
+        if not root.exists():
+            continue
+        for path in root.rglob("*.pdf"):
+            digest = file_hash(path)
+            if digest:
+                index.setdefault(digest, []).append(path.resolve())
+    return index
+
+
 def normalize_storage_path(path: Path) -> str:
     path = path.resolve()
     try:
@@ -54,10 +78,20 @@ def normalize_storage_path(path: Path) -> str:
         return str(path.relative_to(WORKSPACE_ROOT)).replace("\\", "/")
 
 
-def choose_repair_path(raw_path: str, file_name_index: dict[str, list[Path]]) -> Path | None:
+def choose_repair_path(
+    raw_path: str,
+    file_name_index: dict[str, list[Path]],
+    file_hash_index: dict[str, list[Path]],
+    stored_hash: str | None,
+) -> Path | None:
     resolved = resolve_existing_path(raw_path)
     if resolved:
         return resolved
+
+    if stored_hash:
+        hash_matches = file_hash_index.get(stored_hash.strip().lower(), [])
+        if len(hash_matches) == 1:
+            return hash_matches[0]
 
     basename = Path(raw_path).name.lower()
     matches = file_name_index.get(basename, [])
@@ -69,6 +103,7 @@ def choose_repair_path(raw_path: str, file_name_index: dict[str, list[Path]]) ->
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Repair stale literature.file_path values.")
     parser.add_argument("--limit", type=int, default=None, help="Only process up to N rows needing repair.")
+    parser.add_argument("--scope-key", default=None, help="Only repair literature rows in this scope_key.")
     parser.add_argument("--dry-run", action="store_true", help="Report fixes without writing them.")
     return parser.parse_args()
 
@@ -80,14 +115,16 @@ def main() -> None:
 
     try:
         query = """
-            SELECT id, title, file_path
+            SELECT id, title, file_path, file_hash
             FROM literature
             WHERE file_path IS NOT NULL
               AND TRIM(file_path) != ''
+              AND (:scope_key IS NULL OR scope_key = :scope_key)
             ORDER BY id
         """
-        rows = conn.execute(query).fetchall()
+        rows = conn.execute(query, {"scope_key": args.scope_key}).fetchall()
         file_name_index = build_name_index()
+        file_hash_index = build_hash_index()
 
         scanned = 0
         repaired = 0
@@ -115,7 +152,7 @@ def main() -> None:
                 repaired += 1
                 continue
 
-            repaired_path = choose_repair_path(raw_path, file_name_index)
+            repaired_path = choose_repair_path(raw_path, file_name_index, file_hash_index, row["file_hash"])
             if not repaired_path:
                 unresolved += 1
                 print(f"unresolved literature_id={row['id']} path={raw_path} title={row['title']}")

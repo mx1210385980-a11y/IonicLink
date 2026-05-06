@@ -494,6 +494,9 @@ def _confidence_input_from_record(r: TribologyData) -> dict:
         "source_figure": getattr(r, "source_figure", None),
         "evidence_bbox": getattr(r, "evidence_bbox", None),
         "value_origin": getattr(r, "value_origin", None),
+        "field_evidence_json": getattr(r, "field_evidence_json", None),
+        "review_status": getattr(r, "review_status", None),
+        "model_confidence": getattr(r, "confidence", None),
     }
 
 
@@ -526,24 +529,7 @@ def _is_generic_source_label(value: Optional[str]) -> bool:
 
 
 def _effective_confidence_details(r: TribologyData) -> dict:
-    runtime_details = calculate_confidence_details(_confidence_input_from_record(r))
-    runtime_confidence = float(runtime_details.get("score") or 0.0)
-    stored_confidence = float(getattr(r, "confidence", 0.0) or 0.0)
-    effective_confidence = max(runtime_confidence, stored_confidence)
-    if effective_confidence <= runtime_confidence:
-        return runtime_details
-
-    details = dict(runtime_details)
-    boosts = [dict(item) for item in runtime_details.get("boosts", [])]
-    uplift = round(effective_confidence - runtime_confidence, 4)
-    if uplift > 0:
-        boosts.append({"reason": "stored_promotion", "value": uplift})
-    details["boosts"] = boosts
-    details["boost_total"] = round(sum(float(item.get("value") or 0.0) for item in boosts), 4)
-    details["boost_percent"] = round(details["boost_total"] * 100.0, 1)
-    details["score"] = round(effective_confidence, 4)
-    details["percent"] = round(effective_confidence * 100.0, 1)
-    return details
+    return calculate_confidence_details(_confidence_input_from_record(r))
 
 
 def _record_to_response(r: TribologyData) -> RecordResponse:
@@ -860,7 +846,7 @@ async def update_record(
             raise HTTPException(status_code=422, detail="substrateMaterial is required when substrate details are recorded.")
 
         details = calculate_confidence_details(_confidence_input_from_record(record))
-        record.confidence = max(float(getattr(record, "confidence", 0.0) or 0.0), float(details.get("score") or 0.0))
+        record.confidence = float(details.get("score") or 0.0)
 
         await session.commit()
         await log_activity(
@@ -918,12 +904,7 @@ async def promote_record_confidence(
             record.evidence_bbox = incoming["evidence_bbox"]
 
         recomputed = calculate_confidence_details(_confidence_input_from_record(record))
-        promoted_confidence = float(incoming.get("confidence") or 0.0)
-        record.confidence = max(
-            float(getattr(record, "confidence", 0.0) or 0.0),
-            float(recomputed.get("score") or 0.0),
-            promoted_confidence,
-        )
+        record.confidence = float(recomputed.get("score") or 0.0)
 
         await session.commit()
         await session.refresh(record)

@@ -191,6 +191,7 @@ export interface FieldEvidenceSource {
     source_label?: string | null
     quote?: string | null
     matched_text?: string | null
+    matchedText?: string | null
     bbox?: number[] | null
     sample_id?: string | null
 }
@@ -215,6 +216,9 @@ export interface RecordFieldEvidenceResponse {
     review_status?: string | null
     record_origin?: string | null
     assembly_notes?: string | null
+    confidence?: number | null
+    confidence_details?: ConfidenceDetails | null
+    confidenceDetails?: ConfidenceDetails | null
     required_fields: string[]
     fields: Record<string, FieldEvidenceEntry>
 }
@@ -336,6 +340,27 @@ export async function flagCandidateFieldEvidence(candidateId: number, fieldKey: 
 
 export async function flagDiffusionCandidateFieldEvidence(candidateId: number, fieldKey: string, note?: string | null): Promise<RecordFieldEvidenceResponse> {
     const response = await api.post(`/api/review/diffusion-candidates/${candidateId}/fields/${fieldKey}/flag`, {
+        note: note ?? null,
+    })
+    return response.data
+}
+
+export async function unflagRecordFieldEvidence(recordId: number, fieldKey: string, note?: string | null): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/records/${recordId}/fields/${fieldKey}/unflag`, {
+        note: note ?? null,
+    })
+    return response.data
+}
+
+export async function unflagCandidateFieldEvidence(candidateId: number, fieldKey: string, note?: string | null): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/candidates/${candidateId}/fields/${fieldKey}/unflag`, {
+        note: note ?? null,
+    })
+    return response.data
+}
+
+export async function unflagDiffusionCandidateFieldEvidence(candidateId: number, fieldKey: string, note?: string | null): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/diffusion-candidates/${candidateId}/fields/${fieldKey}/unflag`, {
         note: note ?? null,
     })
     return response.data
@@ -599,6 +624,26 @@ export async function deleteTribologyRecord(recordId: number) {
 
 export type ValidationStatus = 'unverified' | 'verified' | 'modified' | 'warning'
 
+export interface ConfidenceDetails {
+    base_score?: number
+    base_percent?: number
+    score: number
+    percent?: number
+    band?: string
+    components?: Record<string, number>
+    required_slots?: Array<{
+        name: string
+        completeness?: number
+        grounding?: number
+    }>
+    penalties?: { reason: string, value: number }[]
+    boosts?: { reason: string, value: number }[]
+    penalty_total?: number
+    penalty_percent?: number
+    boost_total?: number
+    boost_percent?: number
+}
+
 export interface LubricantComponent {
     compound: string
     fraction?: number | null
@@ -759,6 +804,9 @@ export interface TribologyData {
     record_origin?: string
     review_entity_type?: 'record' | 'candidate' | string
     assembly_notes?: string
+    confidence?: number | null
+    confidence_details?: ConfidenceDetails | null
+    confidenceDetails?: ConfidenceDetails | null
     system_name?: string
     confinement_material_class?: string
     confinement_geometry_class?: string
@@ -825,6 +873,9 @@ export interface ExtractionSummary {
     final_count: number
     dropped_by_reason: Record<string, number>
     page_coverage: Record<string, any>
+    current_stage?: string
+    current_message?: string
+    no_data_reason?: string
     page_candidate_counts?: Record<string, {
         total: number
         figure: number
@@ -1908,6 +1959,16 @@ export async function importCleanedDatasetCsv(payload: {
 export async function getCleanedDataset(datasetId: number) {
     const response = await api.get(`/api/model-cleaning/datasets/${datasetId}`)
     return response.data as { dataset: SavedCleanedDatasetDetail }
+}
+
+export async function updateCleanedDataset(datasetId: number, payload: { name: string; description?: string | null }) {
+    const response = await api.patch(`/api/model-cleaning/datasets/${datasetId}`, payload)
+    return response.data as { dataset: SavedCleanedDatasetDetail }
+}
+
+export async function deleteCleanedDataset(datasetId: number) {
+    const response = await api.delete(`/api/model-cleaning/datasets/${datasetId}`)
+    return response.data as { success: boolean; dataset_id: number }
 }
 
 export async function downloadCleanedDataset(datasetId: number) {

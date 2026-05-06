@@ -43,6 +43,12 @@ def _normalize_unit(value: Any) -> str | None:
     return unit
 
 
+def _is_base_oil_component(component: dict[str, Any]) -> bool:
+    role = str(component.get("role") or "").strip().lower()
+    compound = str(component.get("compound") or "").strip().lower()
+    return role in {"base_oil", "oil", "solvent"} or "oil" in compound or compound in {"degdbe", "peg", "pao"}
+
+
 def normalize_lubricant_components(value: Any) -> list[dict[str, Any]]:
     """Normalize user/LLM mixture payloads into a stable component list."""
     if value in (None, "", []):
@@ -129,6 +135,19 @@ def _fraction_components(compounds: list[str], ratio_values: list[float], unit: 
     ]
 
 
+def _ratio_components(
+    compounds: list[str],
+    ratio_values: list[float],
+    unit: str | None,
+    roles: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    components = _fraction_components(compounds, ratio_values, unit)
+    for index, component in enumerate(components):
+        if roles and index < len(roles) and roles[index]:
+            component["role"] = roles[index]
+    return components
+
+
 def parse_lubricant_components(
     lubricant: Any,
     mol_ratio: Any = None,
@@ -143,7 +162,7 @@ def parse_lubricant_components(
     if ratio_values and unit is None:
         unit = "mol%" if mol_ratio else "wt%"
     if len(compounds) >= 2 and len(ratio_values) == 2:
-        return _fraction_components(compounds[:2], ratio_values, unit)
+        return _ratio_components(compounds[:2], ratio_values, unit)
 
     cation_text = str(cation or "").strip()
     anion_text = str(anion or "").strip()
@@ -151,7 +170,7 @@ def parse_lubricant_components(
     if cation_text and len(anion_parts) >= 2 and len(ratio_values) == 2:
         cation_label = cation_text if cation_text.startswith("[") else f"[{cation_text}]"
         compounds = [f"{cation_label}{anion_part}" for anion_part in anion_parts[:2]]
-        return _fraction_components(compounds, ratio_values, unit)
+        return _ratio_components(compounds, ratio_values, unit)
 
     return []
 
@@ -172,15 +191,47 @@ def _component_ratio_label(components: list[dict[str, Any]]) -> str | None:
     fractions = [_as_float(component.get("fraction")) for component in components]
     if not fractions or any(value is None for value in fractions):
         return None
-    scaled = [int(round(float(value) * 1000)) for value in fractions]
-    common = reduce(gcd, [abs(value) for value in scaled if value])
-    ratio_parts = [str(value // common) if common else str(value) for value in scaled]
+    values = [float(value) for value in fractions if value is not None]
+    total = sum(values)
+    if total <= 0:
+        return None
+    ratio_parts = _approximate_ratio_parts(values)
     units = {_normalize_unit(component.get("unit")) for component in components if component.get("unit")}
     suffix = ""
     if len(units) == 1:
         unit = next(iter(units))
-        suffix = " wt" if unit == "wt%" else f" {unit}".rstrip()
+        if unit == "wt%":
+            suffix = " wt"
+        elif unit == "mol%":
+            suffix = " mol"
+        else:
+            suffix = f" {unit}".rstrip()
     return f"{':'.join(ratio_parts)}{suffix}"
+
+
+def _approximate_ratio_parts(values: list[float]) -> list[str]:
+    total = sum(values)
+    if total <= 0:
+        return [str(_compact_number(value)) for value in values]
+    best_parts: list[int] | None = None
+    best_error = float("inf")
+    for total_parts in range(len(values), 201):
+        parts = [max(1, int(round(value / total * total_parts))) for value in values]
+        if sum(parts) != total_parts:
+            continue
+        error = sum(abs(part / total_parts - value / total) for part, value in zip(parts, values))
+        if error < best_error:
+            best_error = error
+            best_parts = parts
+            if error < 1e-6:
+                break
+
+    if not best_parts or best_error > 0.002:
+        scaled = [int(round(float(value) * 1000)) for value in values]
+        common = reduce(gcd, [abs(value) for value in scaled if value]) if any(scaled) else 1
+        best_parts = [value // common if common else value for value in scaled]
+    common = reduce(gcd, [abs(value) for value in best_parts if value]) if any(best_parts) else 1
+    return [str(value // common if common else value) for value in best_parts]
 
 
 def compact_lubricant_label(
@@ -191,6 +242,15 @@ def compact_lubricant_label(
     component_list = normalize_lubricant_components(components) or parse_lubricant_components(lubricant)
     if len(component_list) == 1:
         return str(component_list[0].get("compound") or "").strip() or str(lubricant or "").strip() or "--"
+
+    base_oil_components = [component for component in component_list if _is_base_oil_component(component)]
+    il_components = [component for component in component_list if component not in base_oil_components]
+    if len(il_components) == 1 and base_oil_components:
+        il_label = str(il_components[0].get("compound") or "").strip()
+        oil_label = str(base_oil_components[0].get("compound") or "").strip()
+        ratio = _component_ratio_label(component_list)
+        label = f"{il_label} / {oil_label}" if oil_label else il_label
+        return f"{label} ({ratio})" if ratio else label
 
     parsed = [
         re.match(r"^\[([^\]]+)\]\[([^\]]+)\]$", str(component.get("compound") or "").strip())

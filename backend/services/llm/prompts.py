@@ -116,6 +116,11 @@ Rules:
   `lubricant_components` as an array of `{compound, fraction, unit}` entries. For example,
   `[P66614][BTA]:[P66614][Doc] = 4:1 mass ratio` becomes
   `[{"compound":"[P66614][BTA]","fraction":80,"unit":"wt%"},{"compound":"[P66614][Doc]","fraction":20,"unit":"wt%"}]`.
+  If an ionic liquid is used as an additive in base oil, the base oil is part of the lubricant
+  condition. Do not output only the ionic liquid. For `IL:oil = 1:70` in DEGDBE oil, fill
+  `mol_ratio: "1:70"` and `lubricant_components` with both components, e.g.
+  `[{"compound":"[P6,6,6,14][BScB]","fraction":1.4085,"unit":"mol%","role":"additive"},{"compound":"DEGDBE oil","fraction":98.5915,"unit":"mol%","role":"base_oil"}]`.
+  Split otherwise identical COF records by this ratio.
   Use `lubricant_alias` only when the paper explicitly defines a short mixture name.
 - Valid quantitative fields include cof, friction_force, load/normal_load, film_thickness,
   residual_film_thickness_d, layer_spacing_delta, surface_roughness, wear_rate.
@@ -127,7 +132,7 @@ Rules:
   If a text says `5 N total load; 2.36 N per pin`, extract
   `system_total_load_N: 5.0`, `contact_load_per_unit_N: 2.36`, and `contact_unit_type: "pin"`.
 - Use `regime` for the original human-readable phrase, but also fill `tribological_system`.
-  `friction_regime` MUST be one of: `static`, `kinetic`, `boundary`, `mixed`,
+  `friction_regime` MUST be one of: `static`, `kinetic`, `boundary`, `superlubric`, `mixed`,
   `hydrodynamic`, `elastohydrodynamic`, `unstated`.
   Put contact geometry in `contact_geometry` as a compact enum-style label such as
   `ball_on_disk`, `ball_on_3_pins`, `pin_on_disk`, `four_ball`, or `afm_colloidal_probe`.
@@ -247,6 +252,7 @@ Figure/table-specific rules:
   store `load` and `normal_load` as `15-75 nN` for the derived record.
 - Do not invent a shared COF for legend-only condition maps. If a legend lists symbols/conditions but no per-condition numeric coefficient is shown, return no COF row for that legend entry.
 - If a COF would need to be estimated from the slope of a plotted fit line, leave `cof` null unless the figure/text explicitly prints the numeric value.
+- If a plotted fit/slope label explicitly prints `μ=...` or `COF=...` inside a figure panel, extract it as COF. When the printed label visibly applies to multiple legend conditions in the same panel, output one record per condition and explain the shared-label mapping in `notes`.
 - Keep trend-only caption summaries out of structured records.
 - Capture explicit sample codes into `sample_id` and `series_id` when present.
 """
@@ -262,6 +268,7 @@ Output format:
 
 Hard rules:
 - Focus on legend-style entries such as "in air μ=0.013", "0 V μ=0.019", "+1.5 V μ=0.001".
+- Also capture panel annotations where a curve is labeled directly, e.g. "μ=0.002" beside the plotted series in a lateral-force-vs-load panel.
 - Each legend entry must become one record.
 - Put the friction coefficient numeric text into `cof`.
 - Map legend condition label to fields when possible:

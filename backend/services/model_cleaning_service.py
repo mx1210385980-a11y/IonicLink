@@ -11,11 +11,11 @@ from typing import Any, Callable
 
 import numpy as np
 from sklearn.decomposition import PCA
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from models.db_models import CleanedDataset, TribologyData
+from models.db_models import CleanedDataset, ModelTrainingRun, RegisteredModel, TribologyData
 from security import AuthPrincipal, RequestScope, ensure_scope_writable, literature_scope_conditions
 from services.model_training_service import (
     DEFAULT_CLEANING_OPTIONS,
@@ -30,6 +30,7 @@ from services.model_training_service import (
     target_column_name,
 )
 from utils.experiment_profile import build_experiment_profile, normalize_training_view, record_matches_training_view
+from utils.lubricant_mixture import normalize_lubricant_components
 from utils.tribopair import composite_roughness_nm, parse_roughness_nm
 
 logger = logging.getLogger(__name__)
@@ -123,6 +124,20 @@ DATASET_BUILDER_MACRO_FEATURES = [
         "getter": lambda row: _safe_float(row.get("normalized_load_n")),
     },
     {
+        "key": "system_total_load",
+        "label": "System Total Load",
+        "column_name": "System_Total_Load",
+        "group": "Environment",
+        "getter": lambda row: _safe_float(row.get("normalized_system_total_load_n")),
+    },
+    {
+        "key": "contact_load_per_unit",
+        "label": "Contact Load Per Unit",
+        "column_name": "Contact_Load_Per_Unit",
+        "group": "Environment",
+        "getter": lambda row: _safe_float(row.get("normalized_contact_load_per_unit_n")),
+    },
+    {
         "key": "potential",
         "label": "Applied Potential",
         "column_name": "Potential",
@@ -135,6 +150,20 @@ DATASET_BUILDER_MACRO_FEATURES = [
         "column_name": "Water_Content",
         "group": "Environment",
         "getter": lambda row: _safe_float(row.get("normalized_water_content_ppm")),
+    },
+    {
+        "key": "il_additive_mol_fraction",
+        "label": "IL Additive Mol Fraction",
+        "column_name": "IL_Additive_Mol_Fraction",
+        "group": "Environment",
+        "getter": lambda row: _safe_float(row.get("normalized_il_additive_mol_fraction")),
+    },
+    {
+        "key": "base_oil_mol_fraction",
+        "label": "Base Oil Mol Fraction",
+        "column_name": "Base_Oil_Mol_Fraction",
+        "group": "Environment",
+        "getter": lambda row: _safe_float(row.get("normalized_base_oil_mol_fraction")),
     },
     {
         "key": "film_thickness",
@@ -408,6 +437,34 @@ class ModelCleaningService:
         if dataset is None:
             return None
         return await self.upgrade_dataset_if_needed(session, dataset)
+
+    async def update_dataset_metadata(
+        self,
+        session: AsyncSession,
+        dataset: CleanedDataset,
+        *,
+        name: str,
+        description: str | None,
+    ) -> CleanedDataset:
+        dataset.name = name.strip()
+        dataset.description = (description or "").strip() or None
+        await session.commit()
+        await session.refresh(dataset)
+        return await self.upgrade_dataset_if_needed(session, dataset)
+
+    async def delete_dataset(self, session: AsyncSession, dataset: CleanedDataset) -> None:
+        await session.execute(
+            update(ModelTrainingRun)
+            .where(ModelTrainingRun.cleaned_dataset_id == dataset.id)
+            .values(cleaned_dataset_id=None)
+        )
+        await session.execute(
+            update(RegisteredModel)
+            .where(RegisteredModel.source_dataset_id == dataset.id)
+            .values(source_dataset_id=None)
+        )
+        await session.delete(dataset)
+        await session.commit()
 
     def dataset_payload(self, dataset: CleanedDataset) -> dict[str, Any]:
         summary_payload = json.loads(dataset.summary_json)
@@ -879,19 +936,30 @@ class ModelCleaningService:
             "literature_id": record.literature_id,
             "material_name": record.material_name,
             "lubricant": record.lubricant,
+            "lubricant_components": getattr(record, "lubricant_components_json", None),
+            "mol_ratio": record.mol_ratio,
             "confidence": record.confidence,
             "cof_value": record.cof_value,
             "cation_smiles": record.cation_smiles,
             "anion_smiles": record.anion_smiles,
             "temperature": record.temperature,
             "speed_value": record.speed_value,
+            "speed_conditions": getattr(record, "speed_conditions_json", None),
             "load_value": record.load_value,
             "load_raw": record.load_raw,
+            "load_conditions": getattr(record, "load_conditions_json", None),
             "potential": record.potential,
             "water_content": record.water_content,
             "film_thickness": record.film_thickness,
             "regime": getattr(record, "regime", None),
             "tribological_system": getattr(record, "tribological_system_json", None),
+            "review_status": getattr(record, "review_status", None),
+            "record_origin": getattr(record, "record_origin", None),
+            "field_evidence_json": getattr(record, "field_evidence_json", None),
+            "source": record.source,
+            "source_page": record.source_page,
+            "source_figure": record.source_figure,
+            "evidence": record.evidence,
             "probe_roughness": record.probe_roughness,
             "substrate_roughness": record.substrate_roughness,
             "surface_roughness": record.surface_roughness,
@@ -903,31 +971,49 @@ class ModelCleaningService:
             "normalized_speed_mps": _feature_value({
                 "normalized_speed_mps": None,
                 "speed_value": record.speed_value,
+                "speed_conditions": getattr(record, "speed_conditions_json", None),
             }, "speed"),
             "normalized_load_n": _feature_value({
                 "normalized_load_n": None,
                 "load_value": record.load_value,
                 "load_raw": record.load_raw,
+                "load_conditions": getattr(record, "load_conditions_json", None),
             }, "load"),
+            "normalized_system_total_load_n": _feature_value({
+                "normalized_system_total_load_n": None,
+                "load_value": record.load_value,
+                "load_raw": record.load_raw,
+                "load_conditions": getattr(record, "load_conditions_json", None),
+            }, "system_total_load"),
+            "normalized_contact_load_per_unit_n": _feature_value({
+                "normalized_contact_load_per_unit_n": None,
+                "load_value": record.load_value,
+                "load_raw": record.load_raw,
+                "load_conditions": getattr(record, "load_conditions_json", None),
+            }, "contact_load_per_unit"),
             "normalized_load_min_n": _feature_value({
                 "normalized_load_min_n": None,
                 "load_value": record.load_value,
                 "load_raw": record.load_raw,
+                "load_conditions": getattr(record, "load_conditions_json", None),
             }, "load_min"),
             "normalized_load_max_n": _feature_value({
                 "normalized_load_max_n": None,
                 "load_value": record.load_value,
                 "load_raw": record.load_raw,
+                "load_conditions": getattr(record, "load_conditions_json", None),
             }, "load_max"),
             "normalized_load_span_n": _feature_value({
                 "normalized_load_span_n": None,
                 "load_value": record.load_value,
                 "load_raw": record.load_raw,
+                "load_conditions": getattr(record, "load_conditions_json", None),
             }, "load_span"),
             "normalized_load_is_range": _feature_value({
                 "normalized_load_is_range": None,
                 "load_value": record.load_value,
                 "load_raw": record.load_raw,
+                "load_conditions": getattr(record, "load_conditions_json", None),
             }, "load_is_range"),
             "normalized_potential_v": _feature_value({
                 "normalized_potential_v": None,
@@ -937,6 +1023,14 @@ class ModelCleaningService:
                 "normalized_water_content_ppm": None,
                 "water_content": record.water_content,
             }, "water_content"),
+            "normalized_il_additive_mol_fraction": _feature_value({
+                "normalized_il_additive_mol_fraction": None,
+                "lubricant_components": getattr(record, "lubricant_components_json", None),
+            }, "il_additive_mol_fraction"),
+            "normalized_base_oil_mol_fraction": _feature_value({
+                "normalized_base_oil_mol_fraction": None,
+                "lubricant_components": getattr(record, "lubricant_components_json", None),
+            }, "base_oil_mol_fraction"),
             "normalized_film_thickness_nm": _feature_value({
                 "normalized_film_thickness_nm": None,
                 "film_thickness": record.film_thickness,
@@ -959,6 +1053,164 @@ class ModelCleaningService:
             }
         )
         return row
+
+    def _parse_json_mapping(self, value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str) and value.strip():
+            try:
+                parsed = json.loads(value)
+            except Exception:
+                return {}
+            return parsed if isinstance(parsed, dict) else {}
+        return {}
+
+    def _field_has_grounded_evidence(self, field_map: dict[str, Any], key: str) -> bool:
+        entry = field_map.get(key)
+        if not isinstance(entry, dict):
+            return False
+        if str(entry.get("grounding_mode") or "").strip().lower() in {"inferred", "derived"}:
+            return True
+        status = str(entry.get("status") or "").strip().lower()
+        if status == "grounded":
+            return True
+        evidence = entry.get("evidence")
+        if not isinstance(evidence, dict):
+            return False
+        return bool(evidence.get("page") and (evidence.get("bbox") or evidence.get("quote") or evidence.get("source_label")))
+
+    def _field_has_extracted_value(self, row: dict[str, Any], key: str, entry: dict[str, Any]) -> bool:
+        def present(value: Any) -> bool:
+            if _safe_float(value) is not None:
+                return True
+            text = str(value or "").strip()
+            return bool(text and text.lower() not in {"-", "--", "na", "n/a", "none", "null", "unknown", "未记录", "不详"})
+
+        if present(entry.get("value")):
+            return True
+
+        field_lookup = {
+            "material": ("material_name",),
+            "ionic_liquid": ("lubricant", "lubricant_components"),
+            "cof": ("cof_value",),
+            "load": ("normalized_load_n", "load_value", "load_raw", "load_conditions"),
+            "speed": ("normalized_speed_mps", "speed_value", "speed_conditions"),
+            "temperature": ("normalized_temperature_c", "temperature"),
+            "potential": ("normalized_potential_v", "potential"),
+            "water_content": ("normalized_water_content_ppm", "water_content"),
+            "film_thickness": ("normalized_film_thickness_nm", "film_thickness"),
+            "surface_roughness": ("surface_roughness", "probe_roughness", "substrate_roughness"),
+            "roughness": ("surface_roughness", "probe_roughness", "substrate_roughness"),
+        }
+        return any(present(row.get(field)) for field in field_lookup.get(key, ()))
+
+    def _record_missing_evidence(self, row: dict[str, Any]) -> bool:
+        status = str(row.get("review_status") or "").strip().lower()
+        if status in {"flagged", "needs_evidence"}:
+            return True
+        field_map = self._parse_json_mapping(row.get("field_evidence_json"))
+        if field_map:
+            required = (
+                "material",
+                "ionic_liquid",
+                "cof",
+                "load",
+                "speed",
+                "temperature",
+                "potential",
+                "water_content",
+                "film_thickness",
+                "surface_roughness",
+                "roughness",
+            )
+            return any(
+                self._field_has_extracted_value(row, key, entry)
+                and not self._field_has_grounded_evidence(field_map, key)
+                for key in required
+                if isinstance((entry := field_map.get(key)), dict)
+            )
+        return not bool(row.get("source_page") or str(row.get("source") or row.get("source_figure") or row.get("evidence") or "").strip())
+
+    def _mixture_ratio_gap(self, row: dict[str, Any]) -> bool:
+        components = normalize_lubricant_components(row.get("lubricant_components"))
+        mol_ratio = str(row.get("mol_ratio") or "").strip()
+        lubricant = str(row.get("lubricant") or "").strip().lower()
+        if mol_ratio and not components:
+            return True
+        if components:
+            return any(
+                component.get("fraction") in (None, "")
+                or not str(component.get("unit") or "").strip()
+                for component in components
+            )
+        return bool("oil" in lubricant and ("[" in lubricant or "ionic" in lubricant))
+
+    def _condition_collision_diagnostics(self, rows: list[dict[str, Any]]) -> dict[str, int]:
+        groups: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            key = (
+                row.get("material_name"),
+                row.get("lubricant"),
+                row.get("mol_ratio"),
+                row.get("temperature"),
+                row.get("speed_value"),
+                row.get("load_value") or row.get("load_raw"),
+                row.get("potential"),
+                row.get("water_content"),
+                row.get("experiment_method"),
+            )
+            groups[key].append(row)
+
+        collision_groups = 0
+        collision_records = 0
+        for members in groups.values():
+            if len(members) < 2:
+                continue
+            cof_values = {
+                round(float(value), 6)
+                for value in (_safe_float(member.get("cof_value")) for member in members)
+                if value is not None
+            }
+            if len(cof_values) <= 1:
+                continue
+            collision_groups += 1
+            collision_records += len(members)
+        return {
+            "condition_collision_groups": collision_groups,
+            "condition_collision_records": collision_records,
+        }
+
+    def _quality_gate_summary(
+        self,
+        rows: list[dict[str, Any]],
+        scoped_rows: list[dict[str, Any]],
+        *,
+        options: dict[str, Any],
+    ) -> dict[str, Any]:
+        feature_gaps: dict[str, int] = {}
+        for key in options["feature_config"]["keep_features"]:
+            definition = PROCESS_FEATURE_LOOKUP.get(key)
+            if not definition:
+                continue
+            normalized_field = definition["normalized_field"]
+            feature_gaps[key] = sum(1 for row in scoped_rows if _safe_float(row.get(normalized_field)) is None)
+
+        collision = self._condition_collision_diagnostics(scoped_rows)
+        approved_statuses = {"approved", "accepted"}
+        return {
+            "pending_review_records": sum(1 for row in scoped_rows if str(row.get("review_status") or "").strip().lower() not in approved_statuses),
+            "blocked_review_records": sum(1 for row in scoped_rows if str(row.get("review_status") or "").strip().lower() in {"flagged", "needs_evidence"}),
+            "missing_evidence_records": sum(1 for row in scoped_rows if self._record_missing_evidence(row)),
+            "low_confidence_records": sum(
+                1
+                for row in scoped_rows
+                if (confidence := _safe_float(row.get("confidence"))) is not None and confidence < 0.8
+            ),
+            "mixture_ratio_gaps": sum(1 for row in scoped_rows if self._mixture_ratio_gap(row)),
+            "feature_gaps": feature_gaps,
+            "structured_condition_gaps": sum(feature_gaps.get(key, 0) for key in ("load", "speed", "potential", "temperature")),
+            **collision,
+        }
 
     def _clean_rows(self, rows: list[dict[str, Any]], *, target_key: str, options: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         target_def = TARGET_DEFINITIONS[target_key]
@@ -988,6 +1240,7 @@ class ModelCleaningService:
         outlier_count = self._flag_outliers(working_rows, target_def["field"], options["iqr_multiplier"])
         if options["remove_target_outliers"]:
             working_rows = [row for row in working_rows if not row.get("is_target_outlier")]
+        quality_gates = self._quality_gate_summary(rows, scoped_rows, options=options)
 
         summary = {
             "raw_records": raw_count,
@@ -1004,6 +1257,7 @@ class ModelCleaningService:
                 "missing_anion_smiles": sum(1 for row in scoped_rows if not str(row.get("anion_smiles") or "").strip()),
                 "outside_training_view": 0 if training_view == "all" else max(0, raw_count - len(view_ready_rows)),
             },
+            "quality_gates": quality_gates,
             "rules": {
                 "training_view": training_view,
                 "drop_missing_target": options["drop_missing_target"],

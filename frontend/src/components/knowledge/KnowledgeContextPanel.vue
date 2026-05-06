@@ -33,17 +33,17 @@ const isDatasetSection = computed(() => props.currentSection === 'datasets')
 const nextStepTitle = computed(() => {
   if (isCleaningSection.value) return '下一步：生成训练数据集'
   if (isDatasetSection.value) return '下一步：训练模型'
-  return '下一步：检查数据质量'
+  return '下一步：数据清洗'
 })
 const nextStepDescription = computed(() => {
   if (isCleaningSection.value) return '确认缺失和异常后，把可用记录划分为基础数据集和增强数据集。'
   if (isDatasetSection.value) return '保存数据集版本后，Modeling 会直接读取这个训练版本。'
-  return '先进入质量检查，避免脏数据直接进入训练。'
+  return '先进入数据清洗，避免脏数据直接进入训练。'
 })
 const nextStepButton = computed(() => {
   if (isCleaningSection.value) return '生成训练数据集'
   if (isDatasetSection.value) return '打开 Modeling'
-  return '进入质量检查'
+  return '进入数据清洗'
 })
 
 function shortcutHint(section: string) {
@@ -67,10 +67,23 @@ function handlePrimaryNext() {
 
 const literatureQuery = ref('')
 
+function isNoDataLiterature(item: Literature) {
+  return String(item.status || '').trim().toLowerCase() === 'no_data'
+}
+
+function sortLiteratureForList(items: Literature[]) {
+  return [...items].sort((a, b) => {
+    const aNoData = isNoDataLiterature(a) ? 1 : 0
+    const bNoData = isNoDataLiterature(b) ? 1 : 0
+    if (aNoData !== bNoData) return aNoData - bNoData
+    return Number(b.id || 0) - Number(a.id || 0)
+  })
+}
+
 const filteredLiterature = computed(() => {
   const query = literatureQuery.value.trim().toLowerCase()
-  const items = props.literatureItems || []
-  if (!query) return items.slice(0, 24)
+  const items = sortLiteratureForList(props.literatureItems || [])
+  if (!query) return items
   return items
     .filter((item) => {
       const haystack = [
@@ -79,10 +92,10 @@ const filteredLiterature = computed(() => {
         item.authors,
         item.journal,
         item.year,
+        item.errorMessage,
       ].join(' ').toLowerCase()
       return haystack.includes(query)
     })
-    .slice(0, 24)
 })
 
 function isActiveSource(item: Literature) {
@@ -113,6 +126,20 @@ function authorsSummary(item: Literature) {
   return authors
     .replace(/\s*;\s*/g, '; ')
     .replace(/\s+/g, ' ')
+}
+
+function noDataReason(item: Literature) {
+  if (!isNoDataLiterature(item)) return ''
+  const message = String(item.errorMessage || '').trim()
+  const normalized = message.toLowerCase().replace(/[。.]$/, '')
+  if (!message || ['no tribology data found', 'no extractable records found', 'no extractable diffusion records found'].includes(normalized)) {
+    return '未找到可抽取的离子液体摩擦/磨损结构化数据。'
+  }
+  return message
+}
+
+function showBibliographyMeta(item: Literature) {
+  return !isNoDataLiterature(item)
 }
 
 
@@ -256,8 +283,11 @@ function literatureCountLabel(item: Literature) {
               </div>
             </div>
             
-            <div class="mt-1 flex flex-col gap-1 pr-8">
-              <div class="flex items-center gap-1.5 text-[10px]">
+            <div
+              class="mt-1 flex flex-col"
+              :class="isNoDataLiterature(item) ? 'gap-1.5' : 'gap-1 pr-8'"
+            >
+              <div v-if="showBibliographyMeta(item)" class="flex items-center gap-1.5 text-[10px]">
                 <span
                   v-if="displayYear(item)"
                   class="shrink-0 rounded-[4px] bg-[#f1f5f9] px-1.5 py-0.5 font-bold text-slate-600 border border-[#e2e8f0]"
@@ -268,7 +298,7 @@ function literatureCountLabel(item: Literature) {
                   {{ item.journal }}
                 </span>
               </div>
-              <div class="flex flex-col gap-0.5 text-[9.5px] text-[#8090aa]">
+              <div v-if="showBibliographyMeta(item)" class="flex flex-col gap-0.5 text-[9.5px] text-[#8090aa]">
                 <span v-if="authorsSummary(item)" class="line-clamp-2 font-medium leading-3.5" :title="authorsSummary(item)">
                   {{ authorsSummary(item) }}
                 </span>
@@ -277,6 +307,13 @@ function literatureCountLabel(item: Literature) {
                   {{ displayDoi(item) }}
                 </span>
               </div>
+              <p
+                v-if="noDataReason(item)"
+                class="line-clamp-3 rounded-[0.6rem] border border-[#fed7aa] bg-[#fff7ed] px-2.5 py-1.5 text-[10px] font-bold leading-[1.45] text-[#8a4b00]"
+                :title="noDataReason(item)"
+              >
+                {{ noDataReason(item) }}
+              </p>
             </div>
           </button>
         </div>

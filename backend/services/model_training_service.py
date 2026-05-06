@@ -28,6 +28,7 @@ from models.db_models import CleanedDataset, ModelTrainingRun, RegisteredModel, 
 from security import literature_scope_conditions
 from services.unit_converter import parse_force_range_to_newtons, parse_force_to_newtons, parse_speed_to_mps
 from utils.experiment_profile import build_experiment_profile, normalize_training_view, record_matches_training_view
+from utils.lubricant_mixture import normalize_lubricant_components
 from utils.speed_conditions import normalize_speed_conditions
 
 logger = logging.getLogger(__name__)
@@ -236,6 +237,22 @@ PROCESS_FEATURE_DEFINITIONS: list[dict[str, Any]] = [
         "normalized_field": "normalized_water_content_ppm",
     },
     {
+        "key": "il_additive_mol_fraction",
+        "label": "IL Additive Mol Fraction",
+        "group": "Process",
+        "description": "Mole fraction of the ionic-liquid additive in an IL/base-oil lubricant blend.",
+        "column_name": "IL_Additive_Mol_Fraction",
+        "normalized_field": "normalized_il_additive_mol_fraction",
+    },
+    {
+        "key": "base_oil_mol_fraction",
+        "label": "Base Oil Mol Fraction",
+        "group": "Process",
+        "description": "Mole fraction of the base-oil component in an IL/base-oil lubricant blend.",
+        "column_name": "Base_Oil_Mol_Fraction",
+        "normalized_field": "normalized_base_oil_mol_fraction",
+    },
+    {
         "key": "film_thickness",
         "label": "Film Thickness",
         "group": "Process",
@@ -406,6 +423,28 @@ def _normalize_microunit_text(raw: str | None) -> str:
         .replace("碌", "u")
         .replace("渭", "u")
     )
+
+
+def _component_mol_fraction(record: dict[str, Any], role: str) -> float | None:
+    components = normalize_lubricant_components(record.get("lubricant_components") or record.get("lubricantComponents"))
+    if not components:
+        return None
+    role = role.lower()
+    for component in components:
+        component_role = str(component.get("role") or "").strip().lower()
+        compound = str(component.get("compound") or "").strip().lower()
+        unit = str(component.get("unit") or "").strip().lower()
+        if unit != "mol%":
+            continue
+        is_base_oil = component_role in {"base_oil", "oil", "solvent"} or "oil" in compound or compound in {"degdbe", "peg", "pao"}
+        if role == "base_oil" and not is_base_oil:
+            continue
+        if role == "additive" and is_base_oil:
+            continue
+        fraction = _safe_float(component.get("fraction"))
+        if fraction is not None:
+            return fraction / 100.0
+    return None
 
 
 def _parse_temperature_celsius(raw: str | None) -> float | None:
@@ -616,6 +655,14 @@ def _feature_value(record: dict[str, Any], key: str) -> float | None:
         if _safe_float(record.get("normalized_water_content_ppm")) is not None:
             return _safe_float(record.get("normalized_water_content_ppm"))
         return _parse_water_content_ppm(record.get("water_content"))
+    if key == "il_additive_mol_fraction":
+        if _safe_float(record.get("normalized_il_additive_mol_fraction")) is not None:
+            return _safe_float(record.get("normalized_il_additive_mol_fraction"))
+        return _component_mol_fraction(record, "additive")
+    if key == "base_oil_mol_fraction":
+        if _safe_float(record.get("normalized_base_oil_mol_fraction")) is not None:
+            return _safe_float(record.get("normalized_base_oil_mol_fraction"))
+        return _component_mol_fraction(record, "base_oil")
     if key == "film_thickness":
         if _safe_float(record.get("normalized_film_thickness_nm")) is not None:
             return _safe_float(record.get("normalized_film_thickness_nm"))
@@ -721,6 +768,8 @@ def _serialize_record(record: TribologyData) -> dict[str, Any]:
         "literature_id": record.literature_id,
         "cof_value": record.cof_value,
         "confidence": record.confidence,
+        "lubricant_components": getattr(record, "lubricant_components_json", None),
+        "mol_ratio": record.mol_ratio,
         "cation_smiles": record.cation_smiles,
         "anion_smiles": record.anion_smiles,
         "load_value": record.load_value,

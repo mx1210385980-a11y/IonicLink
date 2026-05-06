@@ -7,6 +7,7 @@ import json
 import math
 import os
 import re
+import shutil
 import uuid
 import asyncio
 import logging
@@ -31,7 +32,7 @@ from services.data_sync_service import get_literature_by_id
 from services.doi_service import DOIService
 from services.llm.utils import normalize_record_value
 from knowledge_base import normalize_ionic_liquid
-from services.score_service import calculate_confidence
+from services.score_service import calculate_confidence, calculate_confidence_details
 from services.fallback_extraction_service import extract_metadata_fallback, extract_table_fallback_records
 from services.il_resolver_service import (
     ANION_DB,
@@ -56,6 +57,7 @@ from utils.lubricant_mixture import (
     parse_lubricant_components,
     serialize_lubricant_components,
 )
+from utils.no_data_reason import build_no_data_reason, is_generic_no_data_message
 from utils.structured_conditions import (
     derive_load_conditions,
     derive_tribological_system,
@@ -75,18 +77,20 @@ from security import AuthPrincipal, RequestScope, build_scope_key, can_manage_li
 from utils.tribopair import composite_roughness_label
 
 TEMP_UPLOAD_DIR = "temp_uploads"
+EXTRACTED_REFERENCE_DIR = os.path.join("Reference", "Extracted")
 DEFAULT_TEMPERATURE_VALUE = "298.15 K"
 logger = logging.getLogger(__name__)
 _SOURCE_ANCHOR_CACHE: dict[tuple[str, str, int, str], Optional[dict[str, Any]]] = {}
 
 
 def _resolve_confidence(raw: object, record_like: dict) -> float:
+    scoring_input = dict(record_like or {})
     try:
         if raw is not None and str(raw).strip() != "":
-            return float(raw)
+            scoring_input["model_confidence"] = float(raw)
     except Exception:
-        pass
-    return float(calculate_confidence(record_like or {}))
+        scoring_input["model_confidence"] = raw
+    return float(calculate_confidence(scoring_input))
 
 
 def _title_key(value: Optional[str]) -> str:
@@ -97,12 +101,216 @@ def _title_key(value: Optional[str]) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _workspace_root() -> str:
+    backend_root = os.path.dirname(os.path.dirname(__file__))
+    return os.path.dirname(backend_root)
+
+
+def _path_is_within(path: str, parent: str) -> bool:
+    try:
+        return os.path.commonpath([os.path.abspath(path), os.path.abspath(parent)]) == os.path.abspath(parent)
+    except ValueError:
+        return False
+
+
+def _file_sha256(path: str) -> Optional[str]:
+    try:
+        digest = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
+def _clean_filename_part(value: Optional[object]) -> str:
+    text = str(value or "").strip()
+    text = re.sub(r"\.pdf$", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"[/:*?\"<>|]+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip(" ._-")
+    return text
+
+
+def _author_filename_token(authors: Optional[object]) -> str:
+    text = _clean_filename_part(authors)
+    if not text:
+        return ""
+    first_author = re.split(r"\s*(?:;|\band\b|&)\s*", text, maxsplit=1, flags=re.IGNORECASE)[0]
+    first_author = first_author.split(",")[0].strip()
+    tokens = re.findall(r"[A-Za-z][A-Za-z'-]*", first_author)
+    if not tokens:
+        return ""
+    return tokens[0].lower()
+
+
+def _reference_pdf_basename_for_hash(file_hash: Optional[str], source_path: str) -> str:
+    if not file_hash:
+        return ""
+    reference_root = os.path.join(_workspace_root(), "Reference")
+    extracted_root = os.path.join(_workspace_root(), EXTRACTED_REFERENCE_DIR)
+    if not os.path.isdir(reference_root):
+        return ""
+
+    matches: list[str] = []
+    for dirpath, _, filenames in os.walk(reference_root):
+        if _path_is_within(dirpath, extracted_root):
+            continue
+        for filename in filenames:
+            if not filename.lower().endswith(".pdf"):
+                continue
+            candidate = os.path.join(dirpath, filename)
+            try:
+                if os.path.samefile(candidate, source_path):
+                    continue
+            except OSError:
+                pass
+            if _file_sha256(candidate) == file_hash:
+                matches.append(filename)
+
+    if not matches:
+        return ""
+    return sorted(matches, key=lambda item: (len(item), item.lower()))[0]
+
+
+def _build_extracted_pdf_filename(literature, source_path: str, source_hash: Optional[str] = None) -> str:
+    source_name = _clean_filename_part(os.path.basename(source_path))
+    if source_name and not re.fullmatch(r"\d+", source_name):
+        filename = source_name
+    else:
+        reference_name = _reference_pdf_basename_for_hash(source_hash, source_path)
+        if reference_name:
+            filename = _clean_filename_part(reference_name)
+        else:
+            title = _clean_filename_part(getattr(literature, "title", None))
+            if not title or title.lower().startswith("temp-"):
+                title = f"literature-{getattr(literature, 'id', 'unknown')}"
+            parts = []
+            year = getattr(literature, "year", None)
+            try:
+                if int(year or 0) > 0:
+                    parts.append(str(int(year)))
+            except (TypeError, ValueError):
+                pass
+            author_token = _author_filename_token(getattr(literature, "authors", None))
+            if author_token:
+                parts.append(author_token)
+            parts.append(title)
+            filename = "-".join(parts)
+
+    filename = _clean_filename_part(filename)[:220].strip(" ._-") or f"literature-{getattr(literature, 'id', 'unknown')}"
+    if not filename.lower().endswith(".pdf"):
+        filename = f"{filename}.pdf"
+    return filename
+
+
+def _unique_extracted_pdf_path(source_path: str, filename: str, source_hash: Optional[str]) -> str:
+    target_dir = os.path.join(_workspace_root(), EXTRACTED_REFERENCE_DIR)
+    os.makedirs(target_dir, exist_ok=True)
+
+    stem, ext = os.path.splitext(filename)
+    ext = ext or ".pdf"
+    for index in range(0, 100):
+        suffix = "" if index == 0 else f"-{index}"
+        candidate = os.path.join(target_dir, f"{stem}{suffix}{ext}")
+        if not os.path.exists(candidate):
+            return candidate
+        try:
+            if os.path.samefile(source_path, candidate):
+                return candidate
+        except OSError:
+            pass
+        if source_hash and _file_sha256(candidate) == source_hash:
+            return candidate
+    return os.path.join(target_dir, f"{stem}-{uuid.uuid4().hex[:8]}{ext}")
+
+
+def _archive_completed_literature_pdf(literature, source_path: Optional[str] = None) -> Optional[str]:
+    """Move completed extraction PDFs into Reference/Extracted and update literature.file_path."""
+    resolved_source = source_path or _resolve_existing_path(getattr(literature, "file_path", None))
+    if not resolved_source or not os.path.exists(resolved_source):
+        return None
+    if os.path.splitext(resolved_source)[1].lower() != ".pdf":
+        return None
+
+    workspace_root = _workspace_root()
+    extracted_root = os.path.join(workspace_root, EXTRACTED_REFERENCE_DIR)
+    source_hash = _file_sha256(resolved_source)
+    filename = _build_extracted_pdf_filename(literature, resolved_source, source_hash)
+    target_path = _unique_extracted_pdf_path(resolved_source, filename, source_hash)
+
+    already_archived = _path_is_within(resolved_source, extracted_root)
+    try:
+        same_file = os.path.exists(target_path) and os.path.samefile(resolved_source, target_path)
+    except OSError:
+        same_file = False
+
+    if not already_archived and not same_file:
+        backend_root = os.path.dirname(os.path.dirname(__file__))
+        source_is_managed = any(
+            _path_is_within(resolved_source, parent)
+            for parent in (
+                os.path.join(backend_root, TEMP_UPLOAD_DIR),
+                os.path.join(workspace_root, TEMP_UPLOAD_DIR),
+                os.path.join(workspace_root, "Reference"),
+            )
+        )
+
+        if os.path.exists(target_path) and source_hash and _file_sha256(target_path) == source_hash:
+            if source_is_managed:
+                os.remove(resolved_source)
+        elif source_is_managed:
+            shutil.move(resolved_source, target_path)
+        else:
+            shutil.copy2(resolved_source, target_path)
+    else:
+        target_path = resolved_source
+
+    relative_path = os.path.relpath(target_path, workspace_root).replace(os.sep, "/")
+    literature.file_path = relative_path
+    if source_hash and not getattr(literature, "file_hash", None):
+        literature.file_hash = source_hash
+    logger.info("Archived completed literature PDF literature_id=%s path=%s", getattr(literature, "id", None), relative_path)
+    return relative_path
+
+
+def _normalize_doi_scan_text(value: str) -> str:
+    text = str(value or "").replace("\u00a0", " ")
+    return re.sub(
+        r"\b10\.\s*(\d{4,9})\s*/\s*",
+        lambda match: f"10.{match.group(1)}/",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+
+def _doi_front_matter_window(text_content: str, *, limit: int = 12000) -> str:
+    text = str(text_content or "")
+    if not text:
+        return ""
+
+    cutoff = min(len(text), limit)
+    for pattern in (
+        r"\n\s*(?:references|notes\s+and\s+references|literature\s+cited)\s*\n",
+        r"\n\s*REFERENCES\s*\n",
+    ):
+        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+            cutoff = min(cutoff, match.start())
+            break
+    return text[:cutoff]
+
+
 def _extract_doi_candidates(text_content: str, filename: str) -> list[str]:
+    """Return DOI candidates suitable for upload de-duplication.
+
+    Only scan the front matter and filename. Full-text scans pick up cited
+    reference DOIs, which can make an upload resolve to a different paper.
+    """
     patterns = [
         r"\b10\.\d{4,9}/[-._;()/:A-Z0-9]+\b",
         r"\b10\.\d{4,9}/\S+\b",
     ]
-    merged = f"{text_content or ''}\n{filename or ''}"
+    merged = _normalize_doi_scan_text(f"{_doi_front_matter_window(text_content)}\n{filename or ''}")
     doi_service = DOIService()
     seen: set[str] = set()
     out: list[str] = []
@@ -930,7 +1138,7 @@ def _field_context_query_variants(field_key: str, value: Any) -> list[str]:
                 f"bare {text}",
                 f"uncoated {text}",
             ])
-    elif field_key == "surface_roughness":
+    elif field_key in {"surface_roughness", "probe_roughness", "substrate_roughness"}:
         queries.extend([
             f"RMS roughness was smaller than {text}",
             f"roughness was smaller than {text}",
@@ -986,21 +1194,33 @@ def _field_query_variants(field_key: str, value: Any) -> list[str]:
         return []
 
     queries = _field_context_query_variants(field_key, text)
-    queries.extend(build_term_query_variants(text))
     if field_key == "ionic_liquid":
+        queries.extend(build_term_query_variants(text))
         queries.extend(_ionic_liquid_query_variants(text))
-    if field_key == "cof":
+    elif field_key == "cof":
         numeric_match = re.search(r"-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?", text)
         if numeric_match:
             numeric = numeric_match.group(0)
-            queries.extend([
-                numeric,
-                f"μ = {numeric}",
-                f"mu = {numeric}",
-                f"COF {numeric}",
-                f"coefficient of friction {numeric}",
-            ])
+            numeric_terms = [numeric]
+            try:
+                numeric_value = float(numeric)
+                if abs(numeric_value) < 1:
+                    numeric_terms.insert(0, f"{numeric_value:.3f}")
+                elif numeric_value.is_integer():
+                    numeric_terms.insert(0, f"{numeric_value:.1f}")
+            except Exception:
+                pass
+            for term in dict.fromkeys(term for term in numeric_terms if term):
+                queries.extend(build_term_query_variants(term))
+                queries.extend([
+                    term,
+                    f"μ = {term}",
+                    f"mu = {term}",
+                    f"COF {term}",
+                    f"coefficient of friction {term}",
+                ])
     elif field_key == "potential":
+        queries.extend(build_term_query_variants(text))
         queries.extend([f"potential {text}", f"voltage {text}"])
         magnitude_match = re.search(r"([+-]?\d+(?:[\.:]\d+)?)", text)
         if magnitude_match:
@@ -1033,17 +1253,24 @@ def _field_query_variants(field_key: str, value: Any) -> list[str]:
         if re.search(r"\bocp\b", text, flags=re.IGNORECASE):
             queries.extend(["OCP", "open circuit potential", "at OCP", "potential at OCP"])
     elif field_key == "load":
+        queries.extend(build_term_query_variants(text))
         queries.extend([f"load {text}", f"normal load {text}"])
         if re.search(r"\d+\s*[-–—]\s*\d+\s*n\s*n", text, flags=re.IGNORECASE):
             queries.extend(["normal load", "normal load (nN)", "load (nN)"])
     elif field_key == "speed":
+        queries.extend(build_term_query_variants(text))
         queries.extend([f"speed {text}", f"scan speed {text}", f"sliding speed {text}"])
     elif field_key == "shear_rate":
+        queries.extend(build_term_query_variants(text))
         queries.extend([f"shear rate {text}", f"shear rates {text}", str(text)])
     elif field_key == "temperature":
+        queries.extend(build_term_query_variants(text))
         queries.extend([f"temperature {text}"])
     elif field_key == "water_content":
+        queries.extend(build_term_query_variants(text))
         queries.extend([f"water content {text}", f"humidity {text}"])
+    else:
+        queries.extend(build_term_query_variants(text))
 
     deduped: list[str] = []
     seen: set[str] = set()
@@ -1063,7 +1290,11 @@ def _field_allows_global_context_fallback(field_key: str, value: Any) -> bool:
     value_text = _filled_text(value)
     if not value_text:
         return False
-    if field_key in {"material", "ionic_liquid", "surface_roughness", "regime"}:
+    if field_key in {"material", "ionic_liquid", "surface_roughness", "probe_roughness", "substrate_roughness", "regime"}:
+        return True
+    if field_key == "cof":
+        return True
+    if field_key == "speed":
         return True
     if field_key == "load" and len(re.findall(r"\d+(?:\.\d+)?", value_text)) >= 2:
         return True
@@ -1187,6 +1418,263 @@ def _refine_potential_evidence_from_metric_context(entries: dict[str, Any]) -> d
     return _refine_potential_evidence_from_metric_context_with_pdf(entries, None)
 
 
+def _locate_table_potential_header_from_metric(
+    *,
+    pdf_path: str,
+    page_num: int,
+    metric_bbox: list[float],
+    potential_value: Any,
+) -> Optional[dict[str, Any]]:
+    if not pdf_path or page_num < 1 or not metric_bbox or len(metric_bbox) != 4:
+        return None
+    try:
+        with fitz.open(pdf_path) as doc:
+            page = doc[int(page_num) - 1]
+            metric_x0, metric_y0, metric_x1, _ = [float(value) for value in metric_bbox]
+            metric_cx = (metric_x0 + metric_x1) / 2.0
+            y_min = max(0.0, metric_y0 - 90.0)
+            y_max = max(0.0, metric_y0 - 2.0)
+            words = sorted(page.get_text("words"), key=lambda word: (float(word[1]), float(word[0])))
+            candidates: list[tuple[float, list[float], str]] = []
+            for idx, word in enumerate(words):
+                x0, y0, x1, y1, text, *_ = word
+                text = str(text or "").strip()
+                if not (y_min <= float(y0) <= y_max) or not re.search(r"\d", text):
+                    continue
+                if idx + 1 >= len(words):
+                    continue
+                next_word = words[idx + 1]
+                nx0, ny0, nx1, ny1, next_text, *_ = next_word
+                next_text = str(next_text or "").strip()
+                if next_text.lower() != "v":
+                    continue
+                if abs(float(ny0) - float(y0)) > 3.0 or float(nx0) - float(x1) > 10.0:
+                    continue
+                bbox = [float(x0), float(y0), float(nx1), float(max(y1, ny1))]
+                center_x = (bbox[0] + bbox[2]) / 2.0
+                candidates.append((abs(center_x - metric_cx), bbox, f"{text} {next_text}"))
+            if not candidates:
+                return None
+            _, bbox, pdf_text = min(candidates, key=lambda item: item[0])
+            matched_text = _filled_text(potential_value) or pdf_text
+            return {
+                "page": page_num,
+                "bbox": bbox,
+                "matched_text": matched_text,
+                "quote": _extract_field_quote_from_bbox(pdf_path, page_num, bbox, fallback_term=matched_text),
+            }
+    except Exception:
+        return None
+
+
+def _potential_value_parts(value: Any) -> tuple[Optional[float], str]:
+    text = _filled_text(value)
+    match = re.search(r"([+-]?)\s*(\d+(?:[\.:]\d+)?)", text)
+    if not match:
+        return None, ""
+    try:
+        magnitude = float(match.group(2).replace(":", "."))
+    except Exception:
+        return None, ""
+    return magnitude, match.group(1) or ""
+
+
+def _potential_header_matches_value(header_text: str, potential_value: Any) -> bool:
+    target_magnitude, target_sign = _potential_value_parts(potential_value)
+    if target_magnitude is None:
+        return False
+
+    header = (
+        _filled_text(header_text)
+        .replace("\u2212", "-")
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+        .replace("\uff0b", "+")
+    )
+    match = re.search(r"([+-]?)\s*(\d+(?:[\.:]\d+)?)\s*v\b", header, flags=re.IGNORECASE)
+    if not match:
+        return False
+    try:
+        header_magnitude = float(match.group(2).replace(":", "."))
+    except Exception:
+        return False
+    if abs(header_magnitude - target_magnitude) > max(1e-6, abs(target_magnitude) * 0.01):
+        return False
+
+    header_sign = match.group(1) or ""
+    if abs(target_magnitude) < 1e-12:
+        return header_sign in {"", "+"}
+    if target_sign == "+":
+        return header_sign == "+"
+    if target_sign == "-":
+        # Some PDFs drop the minus glyph in table headers. An unsigned non-zero
+        # header in a signed voltage table is therefore treated as cathodic.
+        return header_sign in {"", "-"}
+    return True
+
+
+def _center_in_bbox(bbox: Optional[list[float]], candidate_bbox: list[float], *, margin: float = 12.0) -> bool:
+    if not bbox or len(bbox) != 4 or len(candidate_bbox) != 4:
+        return True
+    ax0, ay0, ax1, ay1 = [float(value) for value in bbox]
+    bx0, by0, bx1, by1 = [float(value) for value in candidate_bbox]
+    cx = (bx0 + bx1) / 2.0
+    cy = (by0 + by1) / 2.0
+    return (ax0 - margin) <= cx <= (ax1 + margin) and (ay0 - margin) <= cy <= (ay1 + margin)
+
+
+def _table_potential_header_candidates(
+    *,
+    pdf_path: str,
+    page_num: int,
+    anchor_bbox: Optional[list[float]] = None,
+    y_min: Optional[float] = None,
+    y_max: Optional[float] = None,
+) -> list[tuple[list[float], str]]:
+    if not pdf_path or page_num < 1:
+        return []
+    try:
+        with fitz.open(pdf_path) as doc:
+            page = doc[int(page_num) - 1]
+            words = sorted(page.get_text("words"), key=lambda word: (float(word[1]), float(word[0])))
+            candidates: list[tuple[list[float], str]] = []
+            for idx, word in enumerate(words):
+                x0, y0, x1, y1, text, *_ = word
+                text = str(text or "").strip()
+                if y_min is not None and float(y0) < y_min:
+                    continue
+                if y_max is not None and float(y0) > y_max:
+                    continue
+                if not re.search(r"[+-]?\d+(?:[\.:]\d+)?$", text):
+                    continue
+                if idx + 1 >= len(words):
+                    continue
+                next_word = words[idx + 1]
+                nx0, ny0, nx1, ny1, next_text, *_ = next_word
+                next_text = str(next_text or "").strip()
+                if next_text.lower() != "v":
+                    continue
+                if abs(float(ny0) - float(y0)) > 3.0 or float(nx0) - float(x1) > 10.0:
+                    continue
+                bbox = [float(x0), float(y0), float(nx1), float(max(y1, ny1))]
+                if not _center_in_bbox(anchor_bbox, bbox):
+                    continue
+                candidates.append((bbox, f"{text} {next_text}"))
+            return candidates
+    except Exception:
+        return []
+
+
+def _locate_table_potential_header_by_value(
+    *,
+    pdf_path: str,
+    page_num: int,
+    potential_value: Any,
+    anchor_bbox: Optional[list[float]] = None,
+) -> Optional[dict[str, Any]]:
+    candidates = [
+        (bbox, text)
+        for bbox, text in _table_potential_header_candidates(
+            pdf_path=pdf_path,
+            page_num=page_num,
+            anchor_bbox=anchor_bbox,
+        )
+        if _potential_header_matches_value(text, potential_value)
+    ]
+    if not candidates:
+        return None
+
+    if anchor_bbox and len(anchor_bbox) == 4:
+        ax0, ay0, ax1, ay1 = [float(value) for value in anchor_bbox]
+        anchor_center = ((ax0 + ax1) / 2.0, (ay0 + ay1) / 2.0)
+    else:
+        anchor_center = None
+
+    def _score(item: tuple[list[float], str]) -> tuple[float, float]:
+        bbox, _ = item
+        if not anchor_center:
+            return (float(bbox[1]), float(bbox[0]))
+        cx = (float(bbox[0]) + float(bbox[2])) / 2.0
+        cy = (float(bbox[1]) + float(bbox[3])) / 2.0
+        return (math.hypot(cx - anchor_center[0], cy - anchor_center[1]), float(bbox[0]))
+
+    bbox, pdf_text = min(candidates, key=_score)
+    matched_text = _filled_text(potential_value) or pdf_text
+    return {
+        "page": page_num,
+        "bbox": bbox,
+        "matched_text": matched_text,
+        "quote": _extract_field_quote_from_bbox(pdf_path, page_num, bbox, fallback_term=matched_text),
+    }
+
+
+def _numeric_word_matches_value(text: str, value: Any) -> bool:
+    target_match = re.search(r"-?\d+(?:[\.:]\d+)?(?:[eE][-+]?\d+)?", _filled_text(value))
+    candidate_match = re.search(r"-?\d+(?:[\.:]\d+)?(?:[eE][-+]?\d+)?", _filled_text(text))
+    if not target_match or not candidate_match:
+        return False
+    try:
+        target = float(target_match.group(0).replace(":", "."))
+        candidate = float(candidate_match.group(0).replace(":", "."))
+    except Exception:
+        return False
+    return abs(candidate - target) <= max(1e-6, abs(target) * 0.01)
+
+
+def _word_has_adjacent_voltage_unit(words: list[Any], index: int) -> bool:
+    if index < 0 or index >= len(words):
+        return False
+    x0, y0, x1, _, *_ = words[index]
+    for neighbor_index in (index - 1, index + 1):
+        if neighbor_index < 0 or neighbor_index >= len(words):
+            continue
+        nx0, ny0, nx1, _, text, *_ = words[neighbor_index]
+        if str(text or "").strip().lower() != "v":
+            continue
+        if abs(float(ny0) - float(y0)) <= 3.0 and min(abs(float(nx0) - float(x1)), abs(float(x0) - float(nx1))) <= 10.0:
+            return True
+    return False
+
+
+def _locate_table_numeric_value(
+    *,
+    pdf_path: str,
+    page_num: int,
+    field_value: Any,
+    anchor_bbox: Optional[list[float]] = None,
+) -> Optional[dict[str, Any]]:
+    if not pdf_path or page_num < 1:
+        return None
+    try:
+        with fitz.open(pdf_path) as doc:
+            page = doc[int(page_num) - 1]
+            words = sorted(page.get_text("words"), key=lambda word: (float(word[1]), float(word[0])))
+            candidates: list[tuple[float, list[float], str]] = []
+            for idx, word in enumerate(words):
+                x0, y0, x1, y1, text, *_ = word
+                text = str(text or "").strip()
+                if not _numeric_word_matches_value(text, field_value):
+                    continue
+                bbox = [float(x0), float(y0), float(x1), float(y1)]
+                if not _center_in_bbox(anchor_bbox, bbox):
+                    continue
+                if _word_has_adjacent_voltage_unit(words, idx):
+                    continue
+                distance = _bbox_center_distance(anchor_bbox, bbox) if anchor_bbox else float(y0)
+                candidates.append((distance, bbox, text))
+            if not candidates:
+                return None
+            _, bbox, matched_text = min(candidates, key=lambda item: (item[0], item[1][1], item[1][0]))
+            return {
+                "page": page_num,
+                "bbox": bbox,
+                "matched_text": matched_text,
+                "quote": _extract_field_quote_from_bbox(pdf_path, page_num, bbox, fallback_term=matched_text),
+            }
+    except Exception:
+        return None
+
+
 def _refine_potential_bbox_near_metric_evidence(
     *,
     file_path: Optional[str],
@@ -1201,10 +1689,29 @@ def _refine_potential_bbox_near_metric_evidence(
     if not pdf_path or page_num < 1 or not isinstance(metric_bbox, list) or len(metric_bbox) != 4:
         return None
 
+    metric_source_type = str(metric_evidence.get("source_type") or "").strip().lower()
+    metric_source_label = str(metric_evidence.get("source_label") or "").strip()
+    if _looks_like_table_source(metric_source_type, metric_source_label):
+        table_header = _locate_table_potential_header_from_metric(
+            pdf_path=pdf_path,
+            page_num=page_num,
+            metric_bbox=[float(value) for value in metric_bbox],
+            potential_value=potential_value,
+        )
+        if table_header:
+            return table_header
+
     magnitude_match = re.search(r"(\d+(?:\.\d+)?)", _filled_text(potential_value))
     if not magnitude_match:
         return None
     magnitude = magnitude_match.group(1)
+    magnitude_values = [magnitude]
+    try:
+        magnitude_float = float(magnitude)
+        if magnitude_float.is_integer():
+            magnitude_values.append(f"{magnitude_float:.1f}")
+    except Exception:
+        pass
     value_text = _filled_text(potential_value)
     sign_match = re.search(r"([+-])\s*\d", value_text)
     sign = sign_match.group(1) if sign_match else ""
@@ -1215,23 +1722,27 @@ def _refine_potential_bbox_near_metric_evidence(
         sign_variants = ["-", "\u2212", "\u2013"]
 
     query_candidates = []
-    for sign_variant in sign_variants:
-        query_candidates.extend([
-            f"{sign_variant}{magnitude} V",
-            f"{sign_variant}{magnitude}V",
-        ])
-        if sign_variant:
+    for magnitude_candidate in dict.fromkeys(magnitude_values):
+        for sign_variant in sign_variants:
             query_candidates.extend([
-                f"{sign_variant} {magnitude} V",
-                f"{sign_variant} {magnitude}V",
+                f"{sign_variant}{magnitude_candidate} V",
+                f"{sign_variant}{magnitude_candidate}V",
             ])
-    if not sign:
-        query_candidates.extend([
-            f"{magnitude} V",
-            f"{magnitude}V",
-        ])
-    if "." in magnitude:
-        colon_magnitude = magnitude.replace(".", ":")
+            if sign_variant:
+                query_candidates.extend([
+                    f"{sign_variant} {magnitude_candidate} V",
+                    f"{sign_variant} {magnitude_candidate}V",
+                ])
+        if not sign or sign == "-":
+            # Some PDFs drop the minus glyph in table headers. Keep unsigned
+            # candidates and let proximity to the metric column disambiguate.
+            query_candidates.extend([
+                f"{magnitude_candidate} V",
+                f"{magnitude_candidate}V",
+            ])
+        if "." not in magnitude_candidate:
+            continue
+        colon_magnitude = magnitude_candidate.replace(".", ":")
         for sign_variant in sign_variants:
             query_candidates.extend([
                 f"{sign_variant}{colon_magnitude} V",
@@ -1242,7 +1753,7 @@ def _refine_potential_bbox_near_metric_evidence(
                     f"{sign_variant} {colon_magnitude} V",
                     f"{sign_variant} {colon_magnitude}V",
                 ])
-        if not sign:
+        if not sign or sign == "-":
             query_candidates.extend([
                 f"{colon_magnitude} V",
                 f"{colon_magnitude}V",
@@ -1395,6 +1906,29 @@ def _source_label_has_precise_region(source_type: Optional[str], source_label: O
     return bool(re.search(r"\b(?:fig(?:ure)?\.?|table|tab\.?)\s*[a-z]?\d+", source_text, flags=re.IGNORECASE))
 
 
+def _looks_like_table_source(source_type: Optional[str], source_label: Optional[str]) -> bool:
+    normalized_type = str(source_type or "").strip().lower()
+    source_text = _filled_text(source_label).lower()
+    return normalized_type == "table" or bool(re.search(r"\b(?:table|tab\.)\s*[a-z]?\d+", source_text))
+
+
+def _expand_table_anchor_bbox(pdf_path: str, page_num: Optional[int], bbox: Optional[list[float]]) -> Optional[list[float]]:
+    if not pdf_path or not page_num or not bbox or len(bbox) != 4:
+        return bbox
+    try:
+        with fitz.open(pdf_path) as doc:
+            page = doc[int(page_num) - 1]
+            x0, y0, x1, y1 = [float(value) for value in bbox]
+            return [
+                max(0.0, x0 - 12.0),
+                max(0.0, y0 - 12.0),
+                min(float(page.rect.width), x1 + 24.0),
+                min(float(page.rect.height), y1 + 150.0),
+            ]
+    except Exception:
+        return bbox
+
+
 def _field_location_match_is_reliable(field_key: str, value: Any, evidence: dict[str, Any]) -> bool:
     matched_text = _filled_text(evidence.get("matched_text"))
     quote = _filled_text(evidence.get("quote"))
@@ -1484,22 +2018,49 @@ def _locate_field_evidence_for_value(
                 if not resolved_page_hint:
                     resolved_page_hint = int(fig_page)
                 resolved_anchor_bbox = [float(value) for value in fig_bbox]
+                if _looks_like_table_source(effective_source_type, normalized_source):
+                    resolved_anchor_bbox = _expand_table_anchor_bbox(pdf_path, resolved_page_hint, resolved_anchor_bbox)
         except Exception:
             pass
+
+    if _looks_like_table_source(effective_source_type, normalized_source) and resolved_page_hint:
+        table_located: Optional[dict[str, Any]] = None
+        if field_key == "potential":
+            table_located = _locate_table_potential_header_by_value(
+                pdf_path=pdf_path,
+                page_num=resolved_page_hint,
+                potential_value=field_value,
+                anchor_bbox=resolved_anchor_bbox,
+            )
+        elif field_key == "cof":
+            table_located = _locate_table_numeric_value(
+                pdf_path=pdf_path,
+                page_num=resolved_page_hint,
+                field_value=field_value,
+                anchor_bbox=resolved_anchor_bbox,
+            )
+        if table_located:
+            located = {
+                "source_type": effective_source_type or "table",
+                "source_label": normalized_source,
+                **table_located,
+            }
+            if _field_location_match_is_reliable(field_key, value_text, located):
+                return located
 
     queries = _field_query_variants(field_key, value_text)
     if not queries:
         return None
 
-    def _find_hit(*, use_source_context: bool) -> tuple[Optional[dict[str, Any]], bool]:
+    def _find_hit(*, use_source_context: bool, use_anchor_bbox: bool = True) -> tuple[Optional[dict[str, Any]], bool, bool]:
         has_source_context = bool(resolved_page_hint or resolved_anchor_bbox)
         if use_source_context and not has_source_context:
-            return None, False
+            return None, False, False
         if not use_source_context and not _field_allows_global_context_fallback(field_key, value_text):
-            return None, False
+            return None, False, False
 
         search_page_hint = resolved_page_hint if use_source_context else None
-        search_anchor_bbox = resolved_anchor_bbox if use_source_context else None
+        search_anchor_bbox = resolved_anchor_bbox if use_source_context and use_anchor_bbox else None
         hits = find_text_coordinates(
             pdf_path,
             [{
@@ -1513,16 +2074,23 @@ def _locate_field_evidence_for_value(
                 "restrict_to_anchor_bbox": bool(search_anchor_bbox),
             }],
         )
-        return _select_best_field_hit(hits, page_hint=search_page_hint, anchor_bbox=search_anchor_bbox), not use_source_context
+        return (
+            _select_best_field_hit(hits, page_hint=search_page_hint, anchor_bbox=search_anchor_bbox),
+            not use_source_context,
+            bool(search_anchor_bbox),
+        )
 
     hit: Optional[dict[str, Any]] = None
     used_global_fallback = False
+    enforced_anchor_bbox = False
     if field_key == "load":
-        hit, used_global_fallback = _find_hit(use_source_context=False)
+        hit, used_global_fallback, enforced_anchor_bbox = _find_hit(use_source_context=False)
     if not hit:
-        hit, used_global_fallback = _find_hit(use_source_context=True)
+        hit, used_global_fallback, enforced_anchor_bbox = _find_hit(use_source_context=True)
+    if not hit and resolved_anchor_bbox:
+        hit, used_global_fallback, enforced_anchor_bbox = _find_hit(use_source_context=True, use_anchor_bbox=False)
     if not hit:
-        hit, used_global_fallback = _find_hit(use_source_context=False)
+        hit, used_global_fallback, enforced_anchor_bbox = _find_hit(use_source_context=False)
     if not hit:
         return None
 
@@ -1541,7 +2109,7 @@ def _locate_field_evidence_for_value(
         resolved_source_label = None
     if not used_global_fallback and resolved_page_hint and page != resolved_page_hint:
         return None
-    if not used_global_fallback and resolved_anchor_bbox and not _bbox_intersects(resolved_anchor_bbox, bbox):
+    if not used_global_fallback and enforced_anchor_bbox and resolved_anchor_bbox and not _bbox_intersects(resolved_anchor_bbox, bbox):
         return None
 
     located = {
@@ -1744,7 +2312,7 @@ def _build_field_evidence_map(item: dict, db_record: TribologyData, *, confidenc
     sample_id = _filled_text(item.get("sample_id")) or None
     raw_bbox = _parse_json_bbox(getattr(db_record, "evidence_bbox", None))
     source_type = _infer_source_type(source_label) if any([source_label, source_page, evidence_page, quote, raw_bbox, sample_id]) else None
-    page = source_page if _is_visual_source_type(source_type, source_label) and source_page else evidence_page or source_page
+    page = evidence_page or source_page
     has_resolved_file = bool(_resolve_existing_path(file_path))
     bbox = None if has_resolved_file and _is_visual_source_type(source_type, source_label) else raw_bbox
 
@@ -1979,6 +2547,8 @@ def _build_field_evidence_map(item: dict, db_record: TribologyData, *, confidenc
                 continue
             if field_key in provided_field_keys:
                 continue
+            if field_key == "temperature" and _is_default_temperature_value(entry.get("value")):
+                continue
             field_value = _field_value_for_evidence(item, field_key)
             located = _locate_field_evidence_for_value(
                 file_path=resolved_file_path,
@@ -2114,7 +2684,7 @@ def _record_to_response_item(record: Any) -> dict[str, Any]:
     )
     if tribological_system:
         tribological_system = {**tribological_system, **experiment_profile}
-    return {
+    payload = {
         "id": str(record.id),
         "material_name": record.material_name,
         "lubricant": record.lubricant,
@@ -2177,6 +2747,16 @@ def _record_to_response_item(record: Any) -> dict[str, Any]:
         "review_entity_type": review_entity_type,
         "assembly_notes": record.assembly_notes,
     }
+    confidence_details = calculate_confidence_details(
+        {
+            **payload,
+            "field_evidence_json": field_evidence_map,
+            "model_confidence": getattr(record, "confidence", None),
+        }
+    )
+    payload["confidence"] = float(confidence_details.get("score") or 0.0)
+    payload["confidence_details"] = confidence_details
+    return payload
 
 
 async def _count_cached_record_artifacts(db: AsyncSession, literature_id: int) -> tuple[int, int]:
@@ -2190,8 +2770,7 @@ async def _count_cached_record_artifacts(db: AsyncSession, literature_id: int) -
 
 
 def _is_no_data_message(value: Optional[str]) -> bool:
-    normalized = str(value or "").strip().lower()
-    return normalized in {"no tribology data found", "no extractable records found"}
+    return is_generic_no_data_message(value)
 
 
 def _parse_summary_json(raw: Optional[str]) -> dict[str, Any]:
@@ -2255,7 +2834,14 @@ async def _normalize_legacy_no_data_state(
     if not legacy_no_data:
         return False
 
-    no_data_message = "No extractable records found"
+    no_data_message = build_no_data_reason(
+        literature=literature,
+        content=getattr(literature, "content", None),
+        summary=summary,
+        fallback=getattr(literature, "error_message", None)
+        or (getattr(latest_run, "error_message", None) if latest_run else None)
+        or summary_message,
+    )
     literature.status = "no_data"
     literature.error_message = no_data_message
 
@@ -2280,6 +2866,7 @@ async def _normalize_legacy_no_data_state(
         summary["final_count"] = 0
         summary["current_stage"] = "stage_e.finalize"
         summary["current_message"] = no_data_message
+        summary["no_data_reason"] = no_data_message
         summary["progress_log"] = progress_log
         latest_run.summary_json = json.dumps(summary, ensure_ascii=False)
 
@@ -2342,6 +2929,7 @@ def _build_db_record_from_item(
     tribological_system = normalize_tribological_system(item.get("tribological_system") or item.get("tribologicalSystem")) or derive_tribological_system(item.get("regime"))
     experiment_profile = build_experiment_profile({**item, "tribological_system": tribological_system})
     tribological_system = {**tribological_system, **experiment_profile} if tribological_system else experiment_profile
+    resolved_record_origin = _filled_text(item.get("record_origin")) or record_origin
     db_record = model_cls(
         literature_id=literature_id,
         material_name=item.get("material_name", "Unknown"),
@@ -2389,11 +2977,24 @@ def _build_db_record_from_item(
         source_figure=item.get("source_figure"),
         sample_id=item.get("sample_id"),
         series_id=item.get("series_id"),
-        record_origin=record_origin,
+        record_origin=resolved_record_origin,
     )
     _try_resolve_evidence_coords(db_record, item, file_path)
     field_evidence_map = _build_field_evidence_map(item, db_record, confidence=confidence, file_path=file_path)
     review_status, assembly_notes = _resolve_review_status(field_evidence_map)
+    item_assembly_notes = _filled_text(item.get("assembly_notes"))
+    if item_assembly_notes:
+        assembly_notes = "; ".join(part for part in (assembly_notes, item_assembly_notes) if part)
+    confidence_details = calculate_confidence_details(
+        {
+            **item,
+            "field_evidence_json": field_evidence_map,
+            "review_status": review_status,
+            "model_confidence": item.get("confidence"),
+        }
+    )
+    confidence = float(confidence_details.get("score") or confidence)
+    db_record.confidence = confidence
     db_record.field_evidence_json = _safe_json_dumps(field_evidence_map)
     db_record.review_status = review_status
     db_record.assembly_notes = assembly_notes
@@ -2417,8 +3018,10 @@ def _build_db_record_from_item(
             "training_view": experiment_profile["training_view"],
             "field_evidence_json": field_evidence_map,
             "review_status": review_status,
-            "record_origin": record_origin,
+            "record_origin": resolved_record_origin,
             "assembly_notes": assembly_notes,
+            "confidence": confidence,
+            "confidence_details": confidence_details,
         }
     )
     return db_record, response_item
@@ -2514,6 +3117,15 @@ async def _load_cached_extraction_result(
         if getattr(db_row, "lubricant_components_json", None) != normalized_components_json:
             db_row.lubricant_components_json = normalized_components_json
             changed_db_rows = True
+        row_confidence = row.get("confidence")
+        if row_confidence is not None:
+            try:
+                row_confidence_value = float(row_confidence)
+            except Exception:
+                row_confidence_value = None
+            if row_confidence_value is not None and abs(float(getattr(db_row, "confidence", 0.0) or 0.0) - row_confidence_value) > 0.0001:
+                db_row.confidence = row_confidence_value
+                changed_db_rows = True
         if row.get("lubricant_alias") and getattr(db_row, "lubricant_alias", None) != row.get("lubricant_alias"):
             db_row.lubricant_alias = row.get("lubricant_alias")
             changed_db_rows = True
@@ -2561,6 +3173,255 @@ async def _load_cached_extraction_result(
 
 def _filled_text(value: object) -> str:
     return str(value or "").strip()
+
+
+def _is_review_literature(literature: Literature, content: Optional[str] = None) -> bool:
+    haystack = " ".join(
+        _filled_text(part)
+        for part in (
+            getattr(literature, "title", None),
+            getattr(literature, "journal", None),
+            (content or getattr(literature, "content", None) or "")[:12000],
+        )
+        if _filled_text(part)
+    ).lower()
+    return bool(
+        re.search(r"\breview\b|\breview article\b", haystack)
+        or "view article online" in haystack and "copyright" in haystack and "review" in haystack
+    )
+
+
+def _canonical_lubricant_key(value: Any) -> str:
+    text = _filled_text(value)
+    if not text:
+        return ""
+    try:
+        resolved = resolve_il(text)
+        cation = _filled_text((resolved or {}).get("cation"))
+        anion = _filled_text((resolved or {}).get("anion"))
+        if cation and anion:
+            return re.sub(r"[^a-z0-9]+", "", f"{cation}{anion}".lower())
+    except Exception:
+        pass
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
+
+
+def _canonical_material_key(value: Any) -> str:
+    text = _filled_text(value).lower()
+    replacements = {
+        "silica": "sio2",
+        "silicon dioxide": "sio2",
+        "gold": "au",
+        "au111": "au111",
+        "au(111)": "au111",
+    }
+    compact = re.sub(r"[^a-z0-9]+", "", text)
+    return replacements.get(text, replacements.get(compact, compact))
+
+
+def _record_metric_value(record_like: Any, metric_key: str) -> Any:
+    if isinstance(record_like, dict):
+        if metric_key == "cof":
+            return record_like.get("cof") or record_like.get("cof_raw") or record_like.get("cof_value")
+        return record_like.get(metric_key)
+    if metric_key == "cof":
+        return getattr(record_like, "cof_raw", None) or getattr(record_like, "cof_value", None)
+    return getattr(record_like, metric_key, None)
+
+
+def _numeric_values_close(a: Any, b: Any, *, relative_tolerance: float = 0.06) -> bool:
+    av = _parse_cof_value(str(a)) if _filled_text(a) else None
+    bv = _parse_cof_value(str(b)) if _filled_text(b) else None
+    if av is None or bv is None:
+        return False
+    tolerance = max(1e-4, abs(av) * relative_tolerance)
+    return abs(av - bv) <= tolerance
+
+
+def _short_title(value: Any, limit: int = 96) -> str:
+    text = re.sub(r"\s+", " ", _filled_text(value))
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
+def _row_to_review_match_payload(row: Any, literature: Literature, entity_type: str) -> dict[str, Any]:
+    return {
+        "entity_type": entity_type,
+        "record_id": getattr(row, "id", None),
+        "literature_id": getattr(row, "literature_id", None),
+        "title": getattr(literature, "title", None),
+        "doi": getattr(literature, "doi", None),
+        "journal": getattr(literature, "journal", None),
+        "year": getattr(literature, "year", None),
+        "record_origin": getattr(row, "record_origin", None),
+        "review_status": getattr(row, "review_status", None),
+        "material_name": getattr(row, "material_name", None),
+        "lubricant": getattr(row, "lubricant", None),
+        "probe_material": getattr(row, "probe_material", None),
+        "substrate_material": getattr(row, "substrate_material", None),
+        "substrate_coating": getattr(row, "substrate_coating", None),
+        "cof": getattr(row, "cof_raw", None) or getattr(row, "cof_value", None),
+        "regime": getattr(row, "regime", None),
+        "film_thickness": getattr(row, "film_thickness", None),
+        "source_page": getattr(row, "source_page", None),
+        "source_figure": getattr(row, "source_figure", None),
+    }
+
+
+def _review_canonical_match_score(item: dict[str, Any], candidate: dict[str, Any]) -> tuple[float, list[str]]:
+    metric_key = _resolve_primary_metric_key(item)
+    if not metric_key:
+        return 0.0, []
+
+    matched_fields: list[str] = []
+    score = 0.0
+
+    item_il = _canonical_lubricant_key(item.get("ionic_liquid") or item.get("lubricant"))
+    candidate_il = _canonical_lubricant_key(candidate.get("lubricant"))
+    if item_il and candidate_il and item_il == candidate_il:
+        score += 0.34
+        matched_fields.append("ionic_liquid")
+    else:
+        return 0.0, matched_fields
+
+    if _numeric_values_close(_record_metric_value(item, metric_key), candidate.get(metric_key) or candidate.get("cof")):
+        score += 0.34
+        matched_fields.append(metric_key)
+    else:
+        return 0.0, matched_fields
+
+    item_probe = _canonical_material_key(item.get("probe_material"))
+    item_substrate = _canonical_material_key(item.get("substrate_material"))
+    candidate_probe = _canonical_material_key(candidate.get("probe_material"))
+    candidate_substrate = _canonical_material_key(candidate.get("substrate_material"))
+    if item_probe and candidate_probe and item_probe == candidate_probe:
+        score += 0.1
+        matched_fields.append("probe_material")
+    if item_substrate and candidate_substrate and item_substrate == candidate_substrate:
+        score += 0.1
+        matched_fields.append("substrate_material")
+
+    item_regime = _filled_text(item.get("regime")).lower()
+    candidate_regime = _filled_text(candidate.get("regime")).lower()
+    if item_regime and candidate_regime:
+        item_nums = set(re.findall(r"\d+(?:\.\d+)?", item_regime))
+        candidate_nums = set(re.findall(r"\d+(?:\.\d+)?", candidate_regime))
+        if item_nums & candidate_nums or item_regime in candidate_regime or candidate_regime in item_regime:
+            score += 0.08
+            matched_fields.append("regime")
+
+    item_film = _filled_text(item.get("film_thickness"))
+    candidate_film = _filled_text(candidate.get("film_thickness"))
+    if item_film and candidate_film and _numeric_values_close(item_film, candidate_film, relative_tolerance=0.04):
+        score += 0.04
+        matched_fields.append("film_thickness")
+
+    return min(score, 1.0), matched_fields
+
+
+def _annotate_review_record_with_canonical_match(item: dict[str, Any], match: dict[str, Any], score: float, matched_fields: list[str]) -> None:
+    source_title = _short_title(match.get("title"))
+    source_label = source_title or f"Literature {match.get('literature_id')}"
+    canonical_payload = {
+        "kind": "review_secondary_source",
+        "match_score": round(float(score), 3),
+        "matched_fields": matched_fields,
+        "canonical_record": {
+            "entity_type": match.get("entity_type"),
+            "record_id": match.get("record_id"),
+            "literature_id": match.get("literature_id"),
+            "title": match.get("title"),
+            "doi": match.get("doi"),
+            "journal": match.get("journal"),
+            "year": match.get("year"),
+            "cof": match.get("cof"),
+            "source_page": match.get("source_page"),
+            "source_figure": match.get("source_figure"),
+        },
+    }
+    field_evidence = _parse_json_object(item.get("field_evidence_json")) or _parse_json_object(item.get("field_evidence"))
+    field_evidence["_canonical_source"] = {
+        "value": f"Linked to {source_label}",
+        "confidence": score,
+        "evidence": {
+            "source_type": "canonical_record",
+            "page": match.get("source_page"),
+            "source_label": source_label,
+            "quote": (
+                "This review-derived row matches an existing extraction from the original/canonical literature. "
+                "Use the canonical record for training or deduplicated knowledge exports."
+            ),
+            "bbox": None,
+            "sample_id": None,
+            "matched_text": None,
+        },
+        "grounding_mode": "secondary_source",
+        "canonical": canonical_payload,
+    }
+
+    metric_key = _resolve_primary_metric_key(item)
+    if metric_key and isinstance(field_evidence.get(metric_key), dict):
+        field_evidence[metric_key]["canonical"] = canonical_payload
+        note = _filled_text(field_evidence[metric_key].get("grounding_note"))
+        link_note = f"Secondary review value linked to canonical literature #{match.get('literature_id')} record #{match.get('record_id')}."
+        field_evidence[metric_key]["grounding_note"] = " ".join(part for part in (note, link_note) if part)
+
+    item["field_evidence_json"] = field_evidence
+    item["record_origin"] = "review_secondary"
+    note = (
+        f"Review-derived secondary record matched canonical literature #{match.get('literature_id')} "
+        f"record #{match.get('record_id')} ({source_label})."
+    )
+    item["assembly_notes"] = "; ".join(part for part in (_filled_text(item.get("assembly_notes")), note) if part)
+
+
+async def _annotate_review_secondary_records(
+    db: AsyncSession,
+    literature: Literature,
+    records: list[dict],
+    *,
+    content: Optional[str] = None,
+) -> dict[str, Any]:
+    if not records or not _is_review_literature(literature, content):
+        return {"review_detected": False, "linked_count": 0}
+
+    candidate_rows: list[dict[str, Any]] = []
+    for model_cls, entity_type in ((RecordCandidate, "candidate"), (TribologyData, "record")):
+        stmt = select(model_cls, Literature).join(Literature, model_cls.literature_id == Literature.id).where(
+            model_cls.literature_id != literature.id
+        )
+        if _filled_text(getattr(literature, "scope_type", None)) and _filled_text(getattr(literature, "scope_key", None)):
+            stmt = stmt.where(
+                Literature.scope_type == literature.scope_type,
+                Literature.scope_key == literature.scope_key,
+            )
+        result = await db.execute(stmt)
+        for row, source_literature in result.all():
+            candidate_rows.append(_row_to_review_match_payload(row, source_literature, entity_type))
+
+    linked_count = 0
+    for item in records:
+        if not isinstance(item, dict):
+            continue
+        best_match: Optional[dict[str, Any]] = None
+        best_score = 0.0
+        best_fields: list[str] = []
+        for candidate in candidate_rows:
+            score, fields = _review_canonical_match_score(item, candidate)
+            if score > best_score:
+                best_match = candidate
+                best_score = score
+                best_fields = fields
+        if best_match and best_score >= 0.78 and {"ionic_liquid", _resolve_primary_metric_key(item) or ""}.issubset(set(best_fields)):
+            _annotate_review_record_with_canonical_match(item, best_match, best_score, best_fields)
+            linked_count += 1
+
+    return {
+        "review_detected": True,
+        "linked_count": linked_count,
+        "candidate_pool": len(candidate_rows),
+    }
 
 
 def _distinct_record_values(records: list[dict], field: str) -> set[str]:
@@ -2665,6 +3526,7 @@ def _should_replace_records_with_fallback(
 
     parser = str((fallback_info or {}).get("parser") or "").strip()
     if parser in {
+        "atkin_graphite_superlubricity_figure2",
         "atkin_stiction_shear_thinning_figure3b",
         "ean_mica_lateral_force_text",
         "potential_dependent_gold_text",
@@ -2690,6 +3552,12 @@ async def _replace_literature_records_from_items(
     normalized_records, _ = filter_to_supported_ionic_liquid_records(normalized_records)
     _annotate_records_with_identity(normalized_records)
     normalized_records, _, _ = _final_merge_records(normalized_records)
+    await _annotate_review_secondary_records(
+        db,
+        literature,
+        normalized_records,
+        content=getattr(literature, "content", None),
+    )
 
     new_records_db: list[RecordCandidate] = []
     for item in normalized_records:
@@ -2719,6 +3587,7 @@ async def _replace_literature_records_from_items(
     db.add_all(new_records_db)
     literature.status = "completed"
     literature.error_message = None
+    _archive_completed_literature_pdf(literature, file_path)
     await db.commit()
     return len(new_records_db)
 
@@ -3364,6 +4233,21 @@ async def process_file_safe(
                             return metadata, data_list, cache_summary
 
                     logger.info("Returning cached no-data result for literature_id=%s", file_id)
+                    no_data_message = build_no_data_reason(
+                        literature=literature,
+                        metadata={
+                            "title": literature.title,
+                            "doi": literature.doi,
+                            "authors": literature.authors,
+                            "journal": literature.journal,
+                            "year": literature.year,
+                        },
+                        content=content or literature.content,
+                        fallback=literature.error_message,
+                    )
+                    if literature.error_message != no_data_message:
+                        literature.error_message = no_data_message
+                        await db.commit()
                     metadata = {
                         "title": literature.title,
                         "doi": literature.doi,
@@ -3383,8 +4267,9 @@ async def process_file_safe(
                         "page_coverage": {},
                         "page_candidate_counts": {},
                         "current_stage": "stage_e.finalize",
-                        "current_message": "No extractable records found",
-                        "progress_log": [{"stage": "stage_e.finalize", "message": "No extractable records found"}],
+                        "current_message": no_data_message,
+                        "no_data_reason": no_data_message,
+                        "progress_log": [{"stage": "stage_e.finalize", "message": no_data_message}],
                     }
                 logger.warning("Completed literature_id=%s has no cached records; rerunning extraction", file_id)
             
@@ -3574,6 +4459,17 @@ async def process_file_safe(
 
                 # Stage E final merge (single dedup pass only).
                 records, merge_report, stage_e_candidates = _final_merge_records(records)
+                review_link_summary = await _annotate_review_secondary_records(
+                    db,
+                    literature,
+                    records,
+                    content=content,
+                )
+                if review_link_summary.get("linked_count"):
+                    llm_summary = {
+                        **llm_summary,
+                        "review_secondary_linking": review_link_summary,
+                    }
 
                 new_records_db: list[RecordCandidate] = []
                 response_rows: list[tuple[RecordCandidate, dict[str, Any]]] = []
@@ -3646,6 +4542,7 @@ async def process_file_safe(
                 
                 literature.status = "completed"
                 literature.error_message = None
+                _archive_completed_literature_pdf(literature, resolved_file_path)
                 logger.info("Saved %s extracted records for literature_id=%s", len(new_records_db), literature.id)
 
                 await add_extraction_candidates(
@@ -3692,7 +4589,13 @@ async def process_file_safe(
                 await db.commit()
                 return metadata, response_data_list, extraction_summary
             else:
-                no_data_message = "No extractable records found"
+                no_data_message = build_no_data_reason(
+                    literature=literature,
+                    metadata=metadata,
+                    content=content or literature.content,
+                    summary=llm_summary,
+                    fallback=llm_summary.get("no_data_reason") or llm_summary.get("current_message"),
+                )
                 logger.info("%s for literature_id=%s", no_data_message, literature.id)
                 literature.status = "no_data"
                 literature.error_message = no_data_message
@@ -3713,6 +4616,7 @@ async def process_file_safe(
                     "page_candidate_counts": llm_summary.get("page_candidate_counts") or {},
                     "current_stage": "stage_e.finalize",
                     "current_message": no_data_message,
+                    "no_data_reason": no_data_message,
                     "progress_log": [
                         *(llm_summary.get("progress_log") or []),
                         {"stage": "stage_e.finalize", "message": no_data_message},
@@ -3734,6 +4638,7 @@ async def process_file_safe(
                         final_count=len(cached_data),
                         dropped_by_reason=extraction_summary["dropped_by_reason"],
                         summary=extraction_summary,
+                        error_message=no_data_message,
                     )
                     await db.commit()
                     return (metadata or cached_metadata), cached_data, extraction_summary
@@ -3746,6 +4651,7 @@ async def process_file_safe(
                     final_count=0,
                     dropped_by_reason=extraction_summary["dropped_by_reason"],
                     summary=extraction_summary,
+                    error_message=no_data_message,
                 )
                 await db.commit()
                 return metadata, [], extraction_summary
@@ -3966,6 +4872,12 @@ async def reprocess_literature(
             if dropped_non_il:
                 logger.info("Dropped %s non-ionic-liquid records during reprocess", len(dropped_non_il))
         data_list, _merge_report, _ = _final_merge_records(data_list)
+        await _annotate_review_secondary_records(
+            db,
+            literature,
+            data_list,
+            content=content,
+        )
         
         # Step 5: Atomic Replace
         new_records: list[RecordCandidate] = []
@@ -4008,6 +4920,8 @@ async def reprocess_literature(
              if metadata_dict.get("year"): literature.year = metadata_dict["year"]
         
         literature.status = 'completed'
+        if new_records:
+            _archive_completed_literature_pdf(literature, resolved_file_path)
         await db.commit()
         
         return {
@@ -4079,6 +4993,26 @@ def _try_resolve_evidence_coords(db_record, item: dict, file_path: Optional[str]
         source_page_int = None
     if source_page_int and not getattr(db_record, "source_page", None):
         db_record.source_page = source_page_int
+
+    provided_field_evidence = _parse_json_object(item.get("field_evidence_json")) or _parse_json_object(item.get("field_evidence"))
+    if isinstance(provided_field_evidence, dict):
+        primary_key = _resolve_primary_metric_key(item) or "cof"
+        provided_entry = provided_field_evidence.get(primary_key)
+        provided_evidence = provided_entry.get("evidence") if isinstance(provided_entry, dict) else None
+        provided_bbox = _parse_json_bbox(provided_evidence.get("bbox")) if isinstance(provided_evidence, dict) else None
+        provided_page = provided_evidence.get("page") if isinstance(provided_evidence, dict) else None
+        try:
+            provided_page_int = int(provided_page) if provided_page is not None else None
+        except Exception:
+            provided_page_int = None
+        if provided_page_int and provided_bbox:
+            db_record.evidence_page = provided_page_int
+            db_record.evidence_bbox = json.dumps(provided_bbox)
+            db_record.source_page = provided_page_int
+            provided_label = _filled_text(provided_evidence.get("source_label")) if isinstance(provided_evidence, dict) else None
+            if provided_label:
+                db_record.source = provided_label
+            return
 
     page, bbox = None, None
 
@@ -4152,8 +5086,9 @@ def _try_resolve_evidence_coords(db_record, item: dict, file_path: Optional[str]
     if page and bbox:
         db_record.evidence_page = page
         db_record.evidence_bbox = json.dumps(bbox)
-        if not getattr(db_record, "source_page", None):
-            db_record.source_page = int(page)
+        # Store the actual PDF page for downstream highlighting. Extractors may
+        # provide article-page numbers, which are often offset by cover pages.
+        db_record.source_page = int(page)
         print(f"[EvidenceCoords] Resolved: page={page}, bbox={bbox}")
     else:
         print(f"[EvidenceCoords] No match for record material={item.get('material_name', '?')}")

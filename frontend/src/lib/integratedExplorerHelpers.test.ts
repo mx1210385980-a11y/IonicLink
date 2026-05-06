@@ -282,4 +282,18 @@ describe('integratedExplorerHelpers', () => {
     ])
     expect(lubricantTooltip(mixture)).toContain('[P6,6,6,14][BTA]: 80 wt%')
   })
+
+  it('keeps ionic-liquid additive/base-oil ratios in the display label', () => {
+    const additiveBlend = createRecord({
+      lubricant: '[P6,6,6,14][BScB]',
+      lubricantComponents: [
+        { compound: '[P6,6,6,14][BScB]', fraction: 1.4085, unit: 'mol%', role: 'additive' },
+        { compound: 'DEGDBE oil', fraction: 98.5915, unit: 'mol%', role: 'base_oil' },
+      ],
+    })
+
+    expect(lubricantDisplay(additiveBlend)).toBe('[P6,6,6,14][BScB] / DEGDBE oil (1:70 mol)')
+    expect(lubricantDisplayLines(additiveBlend)).toEqual(['[P6,6,6,14][BScB] / DEGDBE oil (1:70 mol)'])
+    expect(lubricantTooltip(additiveBlend)).toContain('DEGDBE oil: 98.5915 mol%')
+  })
 })

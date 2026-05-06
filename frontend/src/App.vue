@@ -51,11 +51,13 @@ const chatPanelRef = ref<ChatPanelBridge>()
 // 从异常诊断面板跳转过来时高亮的目标记录 id（一次性，用户切走后清掉）
 const focusedRecordId = ref<number | null>(null)
 const reviewTargetRecordId = ref<string | null>(null)
+const reviewTargetMode = ref<'training-blockers' | null>(null)
 const { isChinese, t } = useI18n()
 
 type ReviewTarget = {
   literatureId?: number | null
   recordId?: number | null
+  mode?: 'training-blockers' | null
 }
 
 const {
@@ -197,6 +199,7 @@ function validationStatusFromReviewStatus(reviewStatus: unknown): ValidationStat
 
 function normalizeReviewRecord(record: any): TribologyData {
   const cofValue = record.cof ?? record.cofRaw ?? record.cof_raw ?? record.cofValue
+  const confidence = Number(record.confidence ?? record.confidence_details?.score ?? record.confidenceDetails?.score)
   return {
     id: String(record.id || ''),
     extractor_type: record.extractor_type || 'tribology',
@@ -249,6 +252,9 @@ function normalizeReviewRecord(record: any): TribologyData {
     record_origin: record.record_origin ?? record.recordOrigin ?? 'knowledge_record',
     review_entity_type: record.review_entity_type ?? record.reviewEntityType ?? 'record',
     assembly_notes: record.assembly_notes ?? record.assemblyNotes ?? '',
+    confidence: Number.isFinite(confidence) ? confidence : null,
+    confidence_details: record.confidence_details ?? record.confidenceDetails ?? null,
+    confidenceDetails: record.confidenceDetails ?? record.confidence_details ?? null,
     validationStatus: validationStatusFromReviewStatus(record.review_status ?? record.reviewStatus),
   }
 }
@@ -303,6 +309,7 @@ async function ensureReviewFileForTarget(target: ReviewTarget) {
 
 async function openReviewTarget(target?: ReviewTarget) {
   reviewTargetRecordId.value = target?.recordId ? String(target.recordId) : null
+  reviewTargetMode.value = target?.mode ?? null
 
   if (target?.literatureId) {
     await ensureReviewFileForTarget(target)
@@ -509,6 +516,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
             :selected-file-name="selectedFileName"
             :selected-file="selectedFile"
             :initial-record-id="reviewTargetRecordId"
+            :initial-mode="reviewTargetMode"
             :files="batchFiles"
             :highlight-count="groundingHighlightData.length"
             :pdf-url="groundingPdfUrl"
@@ -519,6 +527,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
             @select-file="setSelectedFile"
             @open-pipeline="navigateTo('pipeline', 'upload')"
             @open-knowledge="navigateTo('knowledge', 'explorer')"
+            @open-dataset-workflow="navigateTo('knowledge', 'datasets')"
           />
 
           <KnowledgePage

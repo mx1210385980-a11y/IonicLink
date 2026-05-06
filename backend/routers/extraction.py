@@ -39,6 +39,7 @@ from security import (
 from services.file_service import (
     _count_cached_record_artifacts,
     _is_default_temperature_value,
+    _locate_field_evidence_for_value,
     _normalize_legacy_no_data_state,
     _refine_potential_evidence_from_metric_context_with_pdf,
     _temperature_default_evidence_entry,
@@ -50,6 +51,7 @@ from services.extraction_trace_service import get_extraction_run, list_extractio
 from services.extraction_trace_service import get_latest_extraction_run_by_literature
 from services.agent_runtime_service import get_agent_runtime
 from services.activity_logging_service import log_activity
+from services.score_service import calculate_confidence_details
 from services.pdf_service import (
     build_term_query_variants as _build_term_query_variants,
     build_visual_focus_queries as _build_visual_focus_queries,
@@ -430,6 +432,24 @@ def _sanitize_field_evidence_locations(
         bbox = evidence.get("bbox")
         page_num = int(evidence.get("page") or 0)
         if not page_num or not isinstance(bbox, list) or len(bbox) < 4:
+            if source_type == "table" and evidence.get("page") and evidence.get("source_label") and entry.get("value") not in (None, ""):
+                located = _locate_field_evidence_for_value(
+                    file_path=pdf_path,
+                    field_key=str(key),
+                    field_value=entry.get("value"),
+                    source_label=evidence.get("source_label"),
+                    page_hint=int(evidence.get("page")),
+                    anchor_bbox=None,
+                    source_type="table",
+                )
+                if located:
+                    cleaned = dict(entry or {})
+                    cleaned["evidence"] = {
+                        **(evidence or {}),
+                        **located,
+                    }
+                    sanitized[key] = cleaned
+                    continue
             sanitized[key] = entry
             continue
 
@@ -531,6 +551,40 @@ def _build_record_field_evidence_payload(record: Any) -> dict[str, Any]:
         if isinstance(entry, dict):
             entry["status"] = _field_grounding_status(entry)
 
+    confidence_details = calculate_confidence_details(
+        {
+            "material_name": getattr(record, "material_name", None),
+            "lubricant": getattr(record, "lubricant", None),
+            "cof_raw": getattr(record, "cof_raw", None),
+            "cof_value": getattr(record, "cof_value", None),
+            "cof_operator": getattr(record, "cof_operator", None),
+            "friction_force": getattr(record, "friction_force", None),
+            "wear_rate": getattr(record, "wear_rate", None),
+            "film_thickness": getattr(record, "film_thickness", None),
+            "residual_film_thickness_d": getattr(record, "residual_film_thickness_d", None),
+            "layer_spacing_delta": getattr(record, "layer_spacing_delta", None),
+            "surface_roughness": getattr(record, "surface_roughness", None),
+            "load": getattr(record, "load_raw", None) or getattr(record, "load_value", None),
+            "speed": getattr(record, "speed_value", None),
+            "shear_rate": getattr(record, "shear_rate", None),
+            "temperature": getattr(record, "temperature", None),
+            "potential": getattr(record, "potential", None),
+            "water_content": getattr(record, "water_content", None),
+            "probe_material": getattr(record, "probe_material", None),
+            "substrate_material": getattr(record, "substrate_material", None),
+            "substrate_coating": getattr(record, "substrate_coating", None),
+            "probe_roughness": getattr(record, "probe_roughness", None),
+            "substrate_roughness": getattr(record, "substrate_roughness", None),
+            "source": getattr(record, "source", None),
+            "source_page": getattr(record, "source_page", None),
+            "source_figure": getattr(record, "source_figure", None),
+            "evidence": getattr(record, "evidence", None),
+            "field_evidence_json": normalized_fields,
+            "review_status": getattr(record, "review_status", None),
+            "model_confidence": getattr(record, "confidence", None),
+        }
+    )
+
     return {
         "record_id": record.id,
         "literature_id": record.literature_id,
@@ -541,6 +595,8 @@ def _build_record_field_evidence_payload(record: Any) -> dict[str, Any]:
         "assembly_notes": record.assembly_notes,
         "required_fields": _required_field_keys(field_map),
         "fields": normalized_fields,
+        "confidence": float(confidence_details.get("score") or 0.0),
+        "confidence_details": confidence_details,
     }
 
 
@@ -704,6 +760,18 @@ def _target_field_keys_for_action(field_key: str, field_map: dict[str, Any]) -> 
     return [field_key]
 
 
+def _clear_flagged_field_entries(field_map: dict[str, Any], target_keys: list[str], note: str | None = None) -> None:
+    for key in target_keys:
+        entry = field_map.get(key)
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("review_state") or "").strip().lower() != "flagged":
+            continue
+        entry["review_state"] = None
+        entry["review_note"] = note
+        field_map[key] = entry
+
+
 def _recompute_review_status(record: Any, field_map: dict[str, Any], *, approved: bool = False) -> None:
     missing_required = _required_field_missing(field_map)
     flagged_required = [
@@ -772,7 +840,11 @@ def _copy_candidate_to_final_record(candidate: RecordCandidate, record: Tribolog
     target.series_id = candidate.series_id
     target.field_evidence_json = candidate.field_evidence_json
     target.review_status = candidate.review_status
-    target.record_origin = "review_promoted_candidate"
+    target.record_origin = (
+        "review_secondary_promoted"
+        if str(candidate.record_origin or "").strip().lower() == "review_secondary"
+        else "review_promoted_candidate"
+    )
     target.assembly_notes = candidate.assembly_notes
     target.evidence = candidate.evidence
     target.evidence_page = candidate.evidence_page
@@ -893,6 +965,22 @@ def _build_diffusion_field_evidence_payload(record: Any) -> dict[str, Any]:
         }
 
     normalized_fields["conditions"] = _build_diffusion_conditions_entry(field_map, record)
+    confidence_details = calculate_confidence_details(
+        {
+            "extractor_type": "diffusion",
+            "system_name": getattr(record, "system_name", None),
+            "ionic_liquid": getattr(record, "ionic_liquid", None),
+            "d_total": getattr(record, "d_total", None) or getattr(record, "D_total", None),
+            "d_cation": getattr(record, "d_cation", None) or getattr(record, "D_cation", None),
+            "d_anion": getattr(record, "d_anion", None) or getattr(record, "D_anion", None),
+            "d_unit": getattr(record, "d_unit", None) or getattr(record, "D_unit", None),
+            "temperature_value": getattr(record, "temperature_value", None),
+            "confinement_scale_value": getattr(record, "confinement_scale_value", None),
+            "field_evidence_json": normalized_fields,
+            "review_status": getattr(record, "review_status", None),
+            "model_confidence": getattr(record, "confidence", None),
+        }
+    )
 
     return {
         "record_id": record.id,
@@ -905,6 +993,8 @@ def _build_diffusion_field_evidence_payload(record: Any) -> dict[str, Any]:
         "assembly_notes": getattr(record, "assembly_notes", None),
         "required_fields": ["system_name", "ionic_liquid", "diffusion_coefficient"],
         "fields": normalized_fields,
+        "confidence": float(confidence_details.get("score") or 0.0),
+        "confidence_details": confidence_details,
     }
 
 
@@ -2326,6 +2416,42 @@ async def flag_record_field_evidence(
     return _build_record_field_evidence_payload(record)
 
 
+@router.post("/review/records/{record_id}/fields/{field_key}/unflag")
+async def unflag_record_field_evidence(
+    record_id: int,
+    field_key: str,
+    payload: ReviewFieldActionPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    record = await require_record_access(db, principal, record_id, write=True)
+    normalized_key = _normalize_field_key(field_key)
+    field_map = _parse_field_evidence_map(record.field_evidence_json)
+    target_keys = _target_field_keys_for_action(normalized_key, field_map)
+    _clear_flagged_field_entries(field_map, target_keys, payload.note)
+    _persist_field_map(record, field_map)
+    _recompute_review_status(record, field_map)
+    await db.commit()
+    await db.refresh(record)
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="edit_record",
+        action_detail={
+            "record_id": record.id,
+            "literature_id": record.literature_id,
+            "review_action": "unflag_field",
+            "field_key": normalized_key,
+        },
+        resource_type="record",
+        resource_id=record.id,
+        request=request,
+    )
+    return _build_record_field_evidence_payload(record)
+
+
 @router.post("/review/records/{record_id}/approve")
 async def approve_record_review(
     record_id: int,
@@ -2602,6 +2728,42 @@ async def flag_candidate_field_evidence(
     return _build_record_field_evidence_payload(candidate)
 
 
+@router.post("/review/candidates/{candidate_id}/fields/{field_key}/unflag")
+async def unflag_candidate_field_evidence(
+    candidate_id: int,
+    field_key: str,
+    payload: ReviewFieldActionPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    candidate = await require_candidate_access(db, principal, candidate_id, write=True)
+    normalized_key = _normalize_field_key(field_key)
+    field_map = _parse_field_evidence_map(candidate.field_evidence_json)
+    target_keys = _target_field_keys_for_action(normalized_key, field_map)
+    _clear_flagged_field_entries(field_map, target_keys, payload.note)
+    _persist_field_map(candidate, field_map)
+    _recompute_review_status(candidate, field_map)
+    await db.commit()
+    await db.refresh(candidate)
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="edit_record",
+        action_detail={
+            "candidate_id": candidate.id,
+            "literature_id": candidate.literature_id,
+            "review_action": "unflag_candidate_field",
+            "field_key": normalized_key,
+        },
+        resource_type="candidate",
+        resource_id=candidate.id,
+        request=request,
+    )
+    return _build_record_field_evidence_payload(candidate)
+
+
 @router.post("/review/candidates/{candidate_id}/approve")
 async def approve_candidate_review(
     candidate_id: int,
@@ -2787,6 +2949,42 @@ async def flag_diffusion_record_field_evidence(
     return _build_diffusion_field_evidence_payload(record)
 
 
+@router.post("/review/diffusion-records/{record_id}/fields/{field_key}/unflag")
+async def unflag_diffusion_record_field_evidence(
+    record_id: int,
+    field_key: str,
+    payload: ReviewFieldActionPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    record = await require_diffusion_record_access(db, principal, record_id, write=True)
+    normalized_key = _normalize_field_key(field_key)
+    field_map = _parse_field_evidence_map(record.field_evidence_json)
+    target_keys = _target_field_keys_for_action(normalized_key, field_map)
+    _clear_flagged_field_entries(field_map, target_keys, payload.note)
+    _persist_field_map(record, field_map)
+    _recompute_diffusion_review_status(record, field_map)
+    await db.commit()
+    await db.refresh(record)
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="edit_record",
+        action_detail={
+            "record_id": record.id,
+            "literature_id": record.literature_id,
+            "review_action": "unflag_diffusion_field",
+            "field_key": normalized_key,
+        },
+        resource_type="diffusion_record",
+        resource_id=record.id,
+        request=request,
+    )
+    return _build_diffusion_field_evidence_payload(record)
+
+
 @router.post("/review/diffusion-records/{record_id}/approve")
 async def approve_diffusion_record_review(
     record_id: int,
@@ -2947,6 +3145,42 @@ async def flag_diffusion_candidate_field_evidence(
             "candidate_id": candidate.id,
             "literature_id": candidate.literature_id,
             "review_action": "flag_diffusion_candidate_field",
+            "field_key": normalized_key,
+        },
+        resource_type="diffusion_candidate",
+        resource_id=candidate.id,
+        request=request,
+    )
+    return _build_diffusion_field_evidence_payload(candidate)
+
+
+@router.post("/review/diffusion-candidates/{candidate_id}/fields/{field_key}/unflag")
+async def unflag_diffusion_candidate_field_evidence(
+    candidate_id: int,
+    field_key: str,
+    payload: ReviewFieldActionPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    candidate = await require_diffusion_candidate_access(db, principal, candidate_id, write=True)
+    normalized_key = _normalize_field_key(field_key)
+    field_map = _parse_field_evidence_map(candidate.field_evidence_json)
+    target_keys = _target_field_keys_for_action(normalized_key, field_map)
+    _clear_flagged_field_entries(field_map, target_keys, payload.note)
+    _persist_field_map(candidate, field_map)
+    _recompute_diffusion_review_status(candidate, field_map)
+    await db.commit()
+    await db.refresh(candidate)
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="edit_record",
+        action_detail={
+            "candidate_id": candidate.id,
+            "literature_id": candidate.literature_id,
+            "review_action": "unflag_diffusion_candidate_field",
             "field_key": normalized_key,
         },
         resource_type="diffusion_candidate",
@@ -3146,6 +3380,12 @@ async def extract_data(
                 "message": "Extraction is still running in the background. Please retry shortly."
             }
 
+        no_data_message = (
+            (extraction_summary or {}).get("no_data_reason")
+            or (extraction_summary or {}).get("current_message")
+            or "No extractable records found."
+        )
+
         # 3. Construct Response
         if data_list or metadata:
             from models.tribology import LiteratureMetadata
@@ -3169,7 +3409,7 @@ async def extract_data(
                 "extraction_summary": extraction_summary,
                 "agent_workflow": agent_workflow,
                 "extractor_type": extractor_type,
-                "message": "No extractable records found." if not data_list else f"Successfully extracted {len(data_list)} records."
+                "message": no_data_message if not data_list else f"Successfully extracted {len(data_list)} records."
             }
         else:
             return {
@@ -3180,7 +3420,7 @@ async def extract_data(
                 "extraction_summary": extraction_summary,
                 "agent_workflow": agent_workflow,
                 "extractor_type": extractor_type,
-                "message": "No extractable records found."
+                "message": no_data_message
             }
 
     except HTTPException:
@@ -3344,19 +3584,27 @@ async def get_latest_extraction_run_detail(
     response_error = run.error_message
     if literature and str(literature.status or "").strip().lower() == "no_data" and not (candidate_count or final_count):
         response_status = "no_data"
-        response_error = "No extractable records found"
+        no_data_message = (
+            literature.error_message
+            or run.error_message
+            or summary.get("no_data_reason")
+            or summary.get("current_message")
+            or "No extractable records found"
+        )
+        response_error = no_data_message
         progress_log = summary.get("progress_log")
         if not isinstance(progress_log, list):
             progress_log = []
         if not any(
             isinstance(item, dict)
             and str(item.get("stage") or "").strip() == "stage_e.finalize"
-            and str(item.get("message") or "").strip() == "No extractable records found"
+            and str(item.get("message") or "").strip() == no_data_message
             for item in progress_log
         ):
-            progress_log = [*progress_log, {"stage": "stage_e.finalize", "message": "No extractable records found"}]
+            progress_log = [*progress_log, {"stage": "stage_e.finalize", "message": no_data_message}]
         summary["current_stage"] = "stage_e.finalize"
-        summary["current_message"] = "No extractable records found"
+        summary["current_message"] = no_data_message
+        summary["no_data_reason"] = no_data_message
         summary["progress_log"] = progress_log
 
     return {

@@ -242,6 +242,12 @@ export function useAppShell(
   }
 
   function hasWarnings(records: TribologyData[], extractorType: ExtractorType = 'tribology'): boolean {
+    const hasLowConfidence = records.some((record) => {
+      const confidence = Number(record.confidence ?? record.confidence_details?.score ?? record.confidenceDetails?.score)
+      return Number.isFinite(confidence) && confidence < 0.8
+    })
+    if (hasLowConfidence) return true
+
     if (extractorType === 'diffusion') {
       return records.some((record) => {
         const hasCoefficient = [record.D_total, record.D_cation, record.D_anion].some((value) => value !== null && value !== undefined)
@@ -492,6 +498,11 @@ export function useAppShell(
       review_entity_type: record.review_entity_type || record.reviewEntityType || 'candidate',
       field_evidence_json: parseFieldEvidenceMap(record.field_evidence_json),
       source_bbox: parseSourceBbox(record.source_bbox),
+      confidence: Number.isFinite(Number(record.confidence ?? record.confidence_details?.score ?? record.confidenceDetails?.score))
+        ? Number(record.confidence ?? record.confidence_details?.score ?? record.confidenceDetails?.score)
+        : null,
+      confidence_details: record.confidence_details || record.confidenceDetails || null,
+      confidenceDetails: record.confidenceDetails || record.confidence_details || null,
       validationStatus: record.validationStatus || deriveValidationStatus(record.review_status),
     }))
 
@@ -534,9 +545,16 @@ export function useAppShell(
           : 'failed')
 
     const progressLog = [...((summary.progress_log as ExtractionRunDetail['progress_log']) || existing?.progress_log || [])]
+    const noDataMessage = String(
+      summary.no_data_reason
+      || summary.current_message
+      || response.message
+      || existing?.error_message
+      || 'No extractable records found.',
+    )
     if (inferredStatus === 'completed' || inferredStatus === 'no_data') {
       const finalMessage = inferredStatus === 'no_data'
-        ? 'No extractable records found.'
+        ? noDataMessage
         : finalRecordCount
           ? t('progress.saved_records', { count: finalRecordCount })
           : t('progress.finished_without_records')
@@ -567,12 +585,12 @@ export function useAppShell(
         current_message:
           inferredStatus === 'completed' || inferredStatus === 'no_data'
             ? (inferredStatus === 'no_data'
-              ? 'No extractable records found.'
+              ? noDataMessage
               : (finalRecordCount ? t('progress.saved_records', { count: finalRecordCount }) : t('progress.finished_without_records')))
             : summary.current_message || existing?.summary?.current_message,
       },
       error_message: inferredStatus === 'failed' || inferredStatus === 'no_data'
-        ? response.message || existing?.error_message || null
+        ? (inferredStatus === 'no_data' ? noDataMessage : response.message || existing?.error_message || null)
         : null,
       created_at: existing?.created_at,
       updated_at: new Date().toISOString(),

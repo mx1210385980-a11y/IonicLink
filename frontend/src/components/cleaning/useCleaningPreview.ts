@@ -1,12 +1,16 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import {
+  deleteCleanedDataset,
   downloadCleanedDataset,
+  getCleanedDataset,
   importCleanedDatasetCsv,
   listCleanedDatasets,
   previewModelCleaning,
+  updateCleanedDataset,
   type ModelCleaningMatrixRow,
   type ModelCleaningOptions,
   type ModelCleaningPreview,
+  type SavedCleanedDatasetDetail,
   type SavedCleanedDatasetSummary,
 } from '@/lib/api'
 import type { BuilderSubsetSummary, SubsetCard, SubsetKey } from '../dataset-builder/types'
@@ -99,10 +103,17 @@ export function useCleaningPreview() {
   const errorMessage = ref('')
   const statusMessage = ref('')
   const exportLoadingId = ref<number | null>(null)
+  const detailLoadingId = ref<number | null>(null)
+  const savingDatasetId = ref<number | null>(null)
+  const deletingDatasetId = ref<number | null>(null)
   const subsetSavingKey = ref<SubsetKey | null>(null)
   const bundleName = ref('')
   const lastSavedDatasetId = ref<number | null>(null)
   const autoPreviewReady = ref(false)
+  const selectedDatasetDetail = ref<SavedCleanedDatasetDetail | null>(null)
+  const editingDatasetId = ref<number | null>(null)
+  const editDatasetName = ref('')
+  const editDatasetDescription = ref('')
 
   let autoPreviewTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -187,7 +198,28 @@ export function useCleaningPreview() {
 
   watch(autoPreviewSignature, () => { scheduleAutoPreview() })
 
-  onBeforeUnmount(() => { if (autoPreviewTimer) clearTimeout(autoPreviewTimer) })
+  let lastFocusRefreshAt = 0
+  function refreshOnFocus() {
+    if (!autoPreviewReady.value) return
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+    const now = Date.now()
+    if (now - lastFocusRefreshAt < 1500) return
+    lastFocusRefreshAt = now
+    void runPreview(true)
+  }
+
+  if (typeof window !== 'undefined') {
+    window.addEventListener('focus', refreshOnFocus)
+    document.addEventListener('visibilitychange', refreshOnFocus)
+  }
+
+  onBeforeUnmount(() => {
+    if (autoPreviewTimer) clearTimeout(autoPreviewTimer)
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('focus', refreshOnFocus)
+      document.removeEventListener('visibilitychange', refreshOnFocus)
+    }
+  })
 
   function buildSubsetCsv(subset: BuilderSubsetSummary | null) {
     if (!subset) return null
@@ -240,6 +272,83 @@ export function useCleaningPreview() {
     }
   }
 
+  async function viewSavedDataset(dataset: SavedCleanedDatasetSummary) {
+    if (selectedDatasetDetail.value?.id === dataset.id) {
+      selectedDatasetDetail.value = null
+      if (editingDatasetId.value === dataset.id) cancelDatasetEdit()
+      return
+    }
+    detailLoadingId.value = dataset.id
+    errorMessage.value = ''
+    try {
+      const response = await getCleanedDataset(dataset.id)
+      selectedDatasetDetail.value = response.dataset
+    } catch (error: any) {
+      errorMessage.value = error?.response?.data?.detail || error?.message || '读取已保存数据集失败。'
+    } finally {
+      detailLoadingId.value = null
+    }
+  }
+
+  function startDatasetEdit(dataset: SavedCleanedDatasetSummary) {
+    editingDatasetId.value = dataset.id
+    editDatasetName.value = dataset.name || ''
+    editDatasetDescription.value = dataset.description || ''
+  }
+
+  function cancelDatasetEdit() {
+    editingDatasetId.value = null
+    editDatasetName.value = ''
+    editDatasetDescription.value = ''
+  }
+
+  async function saveDatasetEdit(dataset: SavedCleanedDatasetSummary) {
+    const nextName = editDatasetName.value.trim()
+    if (!nextName) {
+      errorMessage.value = '数据集名称不能为空。'
+      return
+    }
+    savingDatasetId.value = dataset.id
+    errorMessage.value = ''
+    statusMessage.value = ''
+    try {
+      const response = await updateCleanedDataset(dataset.id, {
+        name: nextName,
+        description: editDatasetDescription.value.trim() || null,
+      })
+      savedDatasets.value = savedDatasets.value.map((item) => item.id === dataset.id ? response.dataset : item)
+      if (selectedDatasetDetail.value?.id === dataset.id) {
+        selectedDatasetDetail.value = response.dataset
+      }
+      statusMessage.value = `数据集 #${dataset.id} 已更新。`
+      cancelDatasetEdit()
+    } catch (error: any) {
+      errorMessage.value = error?.response?.data?.detail || error?.message || '更新数据集失败。'
+    } finally {
+      savingDatasetId.value = null
+    }
+  }
+
+  async function deleteSavedDataset(dataset: SavedCleanedDatasetSummary) {
+    const confirmed = window.confirm(`确定删除数据集「${dataset.name}」吗？相关历史训练记录会保留，但不再关联这个数据集。`)
+    if (!confirmed) return
+    deletingDatasetId.value = dataset.id
+    errorMessage.value = ''
+    statusMessage.value = ''
+    try {
+      await deleteCleanedDataset(dataset.id)
+      savedDatasets.value = savedDatasets.value.filter((item) => item.id !== dataset.id)
+      if (selectedDatasetDetail.value?.id === dataset.id) selectedDatasetDetail.value = null
+      if (editingDatasetId.value === dataset.id) cancelDatasetEdit()
+      if (lastSavedDatasetId.value === dataset.id) lastSavedDatasetId.value = savedDatasets.value[0]?.id || null
+      statusMessage.value = `数据集 #${dataset.id} 已删除。`
+    } catch (error: any) {
+      errorMessage.value = error?.response?.data?.detail || error?.message || '删除数据集失败。'
+    } finally {
+      deletingDatasetId.value = null
+    }
+  }
+
   return {
     form,
     preview,
@@ -249,9 +358,16 @@ export function useCleaningPreview() {
     errorMessage,
     statusMessage,
     exportLoadingId,
+    detailLoadingId,
+    savingDatasetId,
+    deletingDatasetId,
     subsetSavingKey,
     bundleName,
     lastSavedDatasetId,
+    selectedDatasetDetail,
+    editingDatasetId,
+    editDatasetName,
+    editDatasetDescription,
     builder,
     descriptorSummary,
     screeningSummary,
@@ -270,5 +386,10 @@ export function useCleaningPreview() {
     downloadSubsetFromCard,
     saveSubsetCardToWorkspace,
     exportSavedDataset,
+    viewSavedDataset,
+    startDatasetEdit,
+    cancelDatasetEdit,
+    saveDatasetEdit,
+    deleteSavedDataset,
   }
 }

@@ -195,28 +195,14 @@ def build_confidence_input(record: TribologyData) -> dict[str, Any]:
         "source_figure": getattr(record, "source_figure", None),
         "evidence_bbox": getattr(record, "evidence_bbox", None),
         "value_origin": getattr(record, "value_origin", None),
+        "field_evidence_json": getattr(record, "field_evidence_json", None),
+        "review_status": getattr(record, "review_status", None),
+        "model_confidence": getattr(record, "confidence", None),
     }
 
 
 def effective_confidence_details(record: TribologyData) -> dict[str, Any]:
-    runtime_details = calculate_confidence_details(build_confidence_input(record))
-    runtime_confidence = float(runtime_details.get("score") or 0.0)
-    stored_confidence = float(getattr(record, "confidence", 0.0) or 0.0)
-    effective_confidence = max(runtime_confidence, stored_confidence)
-    if effective_confidence <= runtime_confidence:
-        return runtime_details
-
-    details = dict(runtime_details)
-    boosts = [dict(item) for item in runtime_details.get("boosts", [])]
-    uplift = round(effective_confidence - runtime_confidence, 4)
-    if uplift > 0:
-        boosts.append({"reason": "stored_promotion", "value": uplift})
-    details["boosts"] = boosts
-    details["boost_total"] = round(sum(float(item.get("value") or 0.0) for item in boosts), 4)
-    details["boost_percent"] = round(details["boost_total"] * 100.0, 1)
-    details["score"] = round(effective_confidence, 4)
-    details["percent"] = round(effective_confidence * 100.0, 1)
-    return details
+    return calculate_confidence_details(build_confidence_input(record))
 
 
 def _grounding_bucket_from_record(record: TribologyData) -> str:
@@ -634,10 +620,7 @@ async def summarize_confidence_buckets(
         "inferred": [],
     }
     for record in conf_records:
-        score = max(
-            float(getattr(record, "confidence", 0.0) or 0.0),
-            calculate_confidence(build_confidence_input(record)),
-        )
+        score = calculate_confidence(build_confidence_input(record))
         runtime_conf.append(score)
         bucket_scores[_grounding_bucket_from_record(record)].append(score)
 

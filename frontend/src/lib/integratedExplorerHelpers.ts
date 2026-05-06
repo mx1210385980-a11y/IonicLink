@@ -745,18 +745,54 @@ function recordLubricantComponents(record: RecordResponse): LubricantComponent[]
 function componentRatioLabel(components: LubricantComponent[]): string {
   const fractions = components.map((component) => Number(component.fraction))
   if (!fractions.length || fractions.some((value) => !Number.isFinite(value))) return ''
-  const scaled = fractions.map((value) => Math.round(value * 1000))
+  const ratioParts = approximateRatioParts(fractions)
+  if (!ratioParts.length) return ''
   const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : Math.abs(a))
-  const common = scaled.reduce((acc, value) => gcd(acc, value), scaled[0] || 1) || 1
-  const ratio = scaled.map((value) => String(value / common)).join(':')
+  const common = ratioParts.reduce((acc, value) => gcd(acc, value), ratioParts[0] || 1) || 1
+  const ratio = ratioParts.map((value) => String(value / common)).join(':')
   const units = Array.from(new Set(components.map((component) => String(component.unit || '').trim()).filter(Boolean)))
   if (units.length !== 1) return ratio
-  const unit = units[0] === 'wt%' ? 'wt' : units[0]
+  const unit = units[0] === 'wt%' ? 'wt' : units[0] === 'mol%' ? 'mol' : units[0]
   return `${ratio} ${unit}`.trim()
+}
+
+function approximateRatioParts(values: number[]): number[] {
+  const total = values.reduce((sum, value) => sum + value, 0)
+  if (!Number.isFinite(total) || total <= 0) return []
+  let bestParts: number[] = []
+  let bestError = Number.POSITIVE_INFINITY
+  for (let totalParts = values.length; totalParts <= 200; totalParts += 1) {
+    const parts = values.map((value) => Math.max(1, Math.round(value / total * totalParts)))
+    if (parts.reduce((sum, value) => sum + value, 0) !== totalParts) continue
+    const error = parts.reduce((sum, part, index) => sum + Math.abs(part / totalParts - (values[index] ?? 0) / total), 0)
+    if (error < bestError) {
+      bestError = error
+      bestParts = parts
+      if (error < 1e-6) break
+    }
+  }
+  if (bestParts.length && bestError <= 0.002) return bestParts
+  return values.map((value) => Math.round(value * 1000))
+}
+
+function isBaseOilComponent(component: LubricantComponent): boolean {
+  const role = String(component.role || '').trim().toLowerCase()
+  const compound = String(component.compound || '').trim().toLowerCase()
+  return ['base_oil', 'oil', 'solvent'].includes(role) || compound.includes('oil') || ['degdbe', 'peg', 'pao'].includes(compound)
 }
 
 function compactMixtureLabel(components: LubricantComponent[]): string {
   if (components.length < 2) return ''
+  const baseOilComponents = components.filter(isBaseOilComponent)
+  const ionicComponents = components.filter((component) => !isBaseOilComponent(component))
+  if (ionicComponents.length === 1 && baseOilComponents.length) {
+    const ratio = componentRatioLabel(components)
+    const ionicComponent = ionicComponents[0]
+    const oilComponent = baseOilComponents[0]
+    const label = `${canonicalIonicLiquidLabel(ionicComponent?.compound || '')} / ${oilComponent?.compound || 'base oil'}`
+    return ratio ? `${label} (${ratio})` : label
+  }
+
   const parsed = components.map((component) => component.compound.match(/^\[([^\]]+)\]\[([^\]]+)\]$/))
   if (!parsed.every(Boolean)) return ''
   const cations = parsed.map((match) => canonicalIonToken(match?.[1] || ''))
@@ -802,6 +838,7 @@ export function lubricantAliasDisplay(record: RecordResponse): string {
 export function lubricantDisplayLines(record: RecordResponse): string[] {
   const components = recordLubricantComponents(record)
   if (components.length <= 1) return [lubricantDisplay(record)]
+  if (components.some(isBaseOilComponent)) return [lubricantDisplay(record)]
 
   const lines = components.map((component) => canonicalIonicLiquidLabel(component.compound))
   const ratio = componentRatioLabel(components)

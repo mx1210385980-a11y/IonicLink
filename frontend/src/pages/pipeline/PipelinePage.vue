@@ -330,7 +330,7 @@ function progressForFile(file: BatchFile) {
 
 function detailLabel(file: BatchFile) {
   if (file.status === 'success') return `${file.records?.length || 0} records extracted`
-  if (file.status === 'no_data') return 'No extractable records found'
+  if (file.status === 'no_data') return file.errorMessage || 'No extractable records found'
   if (file.status === 'error') return 'Needs retry'
   return 'Ready to launch'
 }

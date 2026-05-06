@@ -6,11 +6,16 @@ import {
   BookOpen,
   CheckCircle2,
   ChevronRight,
+  Eye,
   Loader2,
   Package,
+  Pencil,
   RotateCcw,
+  Save,
   Sparkles,
   Target,
+  Trash2,
+  X,
   XCircle,
 } from 'lucide-vue-next'
 import type { ModelCleaningMatrixRow } from '@/lib/api'
@@ -26,7 +31,7 @@ defineProps<{
 const emit = defineEmits<{
   (e: 'open-training', datasetId: number | null): void
   (e: 'change-section', section: string): void
-  (e: 'open-review'): void
+  (e: 'open-review', payload?: { mode?: 'training-blockers' | null }): void
 }>()
 
 const {
@@ -38,7 +43,14 @@ const {
   errorMessage,
   statusMessage,
   exportLoadingId,
+  detailLoadingId,
+  savingDatasetId,
+  deletingDatasetId,
   lastSavedDatasetId,
+  selectedDatasetDetail,
+  editingDatasetId,
+  editDatasetName,
+  editDatasetDescription,
   builder,
   descriptorSummary,
   screeningSummary,
@@ -49,6 +61,11 @@ const {
   initialize,
   saveSubsetCardToWorkspace,
   exportSavedDataset,
+  viewSavedDataset,
+  startDatasetEdit,
+  cancelDatasetEdit,
+  saveDatasetEdit,
+  deleteSavedDataset,
 } = useCleaningPreview()
 
 const {
@@ -225,7 +242,7 @@ async function autoBuild() {
 }
 
 function goReview() {
-  emit('open-review')
+  emit('open-review', { mode: 'training-blockers' })
 }
 
 function goExplorer() {
@@ -234,6 +251,20 @@ function goExplorer() {
 
 function goTraining(datasetId: number | null = lastSavedDatasetId.value) {
   emit('open-training', datasetId)
+}
+
+function previewColumns(dataset: typeof selectedDatasetDetail.value) {
+  return (dataset?.matrix_columns || []).slice(0, 8)
+}
+
+function previewRows(dataset: typeof selectedDatasetDetail.value) {
+  return (dataset?.rows || []).slice(0, 6)
+}
+
+function formatCell(value: unknown) {
+  if (value == null || value === '') return '--'
+  if (typeof value === 'number') return Number.isInteger(value) ? String(value) : value.toFixed(4)
+  return String(value)
 }
 
 const verdictTone = computed(() => {
@@ -500,31 +531,142 @@ onMounted(() => {
             <li
               v-for="dataset in savedDatasets"
               :key="dataset.id"
-              class="flex flex-col gap-2 rounded-xl bg-slate-50 px-4 py-3 lg:flex-row lg:items-center lg:justify-between"
+              class="rounded-xl bg-slate-50 px-4 py-3"
             >
-              <div class="min-w-0 flex-1">
-                <p class="truncate text-sm font-semibold text-slate-950">{{ dataset.name }}</p>
-                <p class="mt-1 text-xs text-slate-500">
-                  {{ dataset.row_count }} 行 · {{ dataset.feature_columns.length }} 个特征 · {{ formatDateTime(dataset.created_at) }}
-                </p>
+              <div class="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm font-semibold text-slate-950">{{ dataset.name }}</p>
+                  <p class="mt-1 text-xs text-slate-500">
+                    {{ dataset.row_count }} 行 · {{ dataset.feature_columns.length }} 个特征 · {{ formatDateTime(dataset.created_at) }}
+                  </p>
+                  <p v-if="dataset.description" class="mt-1 line-clamp-1 text-xs text-slate-500">{{ dataset.description }}</p>
+                </div>
+                <div class="flex shrink-0 flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-60"
+                    :disabled="detailLoadingId === dataset.id"
+                    @click="viewSavedDataset(dataset)"
+                  >
+                    <Loader2 v-if="detailLoadingId === dataset.id" class="h-3 w-3 animate-spin" />
+                    <Eye v-else class="h-3 w-3" />
+                    {{ selectedDatasetDetail?.id === dataset.id ? '收起' : '查看' }}
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+                    @click="startDatasetEdit(dataset)"
+                  >
+                    <Pencil class="h-3 w-3" />
+                    编辑
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
+                    @click="goTraining(dataset.id)"
+                  >
+                    去 Modeling
+                    <ChevronRight class="h-3 w-3" />
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-60"
+                    :disabled="exportLoadingId === dataset.id"
+                    @click="exportSavedDataset(dataset)"
+                  >
+                    {{ exportLoadingId === dataset.id ? '导出中...' : '导出 CSV' }}
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-rose-600 transition hover:bg-rose-50 disabled:opacity-60"
+                    :disabled="deletingDatasetId === dataset.id"
+                    @click="deleteSavedDataset(dataset)"
+                  >
+                    <Loader2 v-if="deletingDatasetId === dataset.id" class="h-3 w-3 animate-spin" />
+                    <Trash2 v-else class="h-3 w-3" />
+                    删除
+                  </button>
+                </div>
               </div>
-              <div class="flex shrink-0 items-center gap-2">
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100"
-                  @click="goTraining(dataset.id)"
-                >
-                  去 Modeling
-                  <ChevronRight class="h-3 w-3" />
-                </button>
-                <button
-                  type="button"
-                  class="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-60"
-                  :disabled="exportLoadingId === dataset.id"
-                  @click="exportSavedDataset(dataset)"
-                >
-                  {{ exportLoadingId === dataset.id ? '导出中...' : '导出 CSV' }}
-                </button>
+
+              <div v-if="editingDatasetId === dataset.id" class="mt-3 rounded-xl border border-slate-200 bg-white p-3">
+                <div class="grid gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+                  <label class="text-xs font-semibold text-slate-600">
+                    名称
+                    <input
+                      v-model="editDatasetName"
+                      class="mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-900 outline-none focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100"
+                    >
+                  </label>
+                  <label class="text-xs font-semibold text-slate-600">
+                    备注
+                    <input
+                      v-model="editDatasetDescription"
+                      class="mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm font-medium text-slate-900 outline-none focus:border-emerald-300 focus:ring-2 focus:ring-emerald-100"
+                    >
+                  </label>
+                </div>
+                <div class="mt-3 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+                    @click="cancelDatasetEdit"
+                  >
+                    <X class="h-3 w-3" />
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-60"
+                    :disabled="savingDatasetId === dataset.id"
+                    @click="saveDatasetEdit(dataset)"
+                  >
+                    <Loader2 v-if="savingDatasetId === dataset.id" class="h-3 w-3 animate-spin" />
+                    <Save v-else class="h-3 w-3" />
+                    保存
+                  </button>
+                </div>
+              </div>
+
+              <div v-if="selectedDatasetDetail?.id === dataset.id" class="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
+                  <div>
+                    <p class="text-xs font-semibold text-slate-900">数据集预览</p>
+                    <p class="mt-0.5 text-[11px] text-slate-500">
+                      目标列 {{ selectedDatasetDetail.target_column }} · {{ selectedDatasetDetail.matrix_columns.length }} 列
+                    </p>
+                  </div>
+                  <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                    前 {{ previewRows(selectedDatasetDetail).length }} 行
+                  </span>
+                </div>
+                <div class="max-h-64 overflow-auto custom-scrollbar">
+                  <table class="min-w-full text-left text-[11px]">
+                    <thead class="sticky top-0 bg-slate-50 text-slate-500">
+                      <tr>
+                        <th
+                          v-for="column in previewColumns(selectedDatasetDetail)"
+                          :key="column"
+                          class="whitespace-nowrap border-b border-slate-100 px-3 py-2 font-semibold"
+                        >
+                          {{ column }}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="(row, rowIndex) in previewRows(selectedDatasetDetail)" :key="rowIndex" class="border-b border-slate-50">
+                        <td
+                          v-for="column in previewColumns(selectedDatasetDetail)"
+                          :key="column"
+                          class="max-w-[12rem] truncate px-3 py-2 text-slate-700"
+                          :title="formatCell(row[column])"
+                        >
+                          {{ formatCell(row[column]) }}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </li>
           </ul>

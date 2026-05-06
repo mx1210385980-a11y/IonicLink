@@ -12,6 +12,7 @@ import {
   ExternalLink,
   Flag,
   FileText,
+  Gauge,
   Layers,
   Loader2,
   RefreshCw,
@@ -40,11 +41,15 @@ import {
   updateReviewCandidateLoadConditions,
   updateReviewCandidateSpeedConditions,
   updateReviewCandidateTribologicalSystem,
+  unflagDiffusionCandidateFieldEvidence,
+  unflagCandidateFieldEvidence,
+  unflagRecordFieldEvidence,
   updateReviewRecordCofExtracted,
   updateReviewRecordLoadConditions,
   updateReviewRecordSpeedConditions,
   updateReviewRecordTribologicalSystem,
   type BatchFile,
+  type ConfidenceDetails,
   type CofExtracted,
   type EvidenceResult,
   type ExtractorType,
@@ -72,6 +77,7 @@ const props = defineProps<{
   selectedFileName: string
   selectedFile: BatchFile | null
   initialRecordId?: string | null
+  initialMode?: 'training-blockers' | null
   files: BatchFile[]
   highlightCount: number
   pdfUrl: string
@@ -84,6 +90,7 @@ const emit = defineEmits<{
   'change-section': [section: string]
   'open-pipeline': []
   'open-knowledge': []
+  'open-dataset-workflow': []
   'select-file': [fileId: string]
 }>()
 
@@ -111,12 +118,28 @@ type RecordItem = {
   substrate?: string
   metricLabel: string
   metricValue: string
-  metricTags: { label: string, value: string }[]
+  metricTags: StructuredTag[]
+  confidence: RecordConfidenceView
   status: 'review' | 'confirmed' | 'warning'
   lowConfidence: boolean
   missingEvidence: boolean
+  trainingBlocker: boolean
   selected: boolean
   record: TribologyData
+}
+
+type StructuredTag = {
+  label: string
+  value: string
+}
+
+type RecordConfidenceView = {
+  score: number
+  percent: number
+  band: 'high' | 'medium' | 'low'
+  label: string
+  className: string
+  title: string
 }
 
 type ReviewField = {
@@ -131,6 +154,8 @@ type ReviewField = {
   sourceType: 'text' | 'figure' | 'table' | 'calculation' | 'inferred'
   location: string
   locationMode?: 'precise' | 'source' | 'record' | 'inferred' | 'missing'
+  reviewState?: string | null
+  reviewNote?: string
   canConfirm: boolean
   issue?: string
   tooltip?: string
@@ -167,6 +192,7 @@ const query = ref('')
 const prioritizeLowConfidence = ref(true)
 const onlyPendingRecords = ref(false)
 const onlyLowConfidenceRecords = ref(false)
+const onlyTrainingBlockers = ref(props.initialMode === 'training-blockers')
 const activeFieldId = ref('material')
 const activeRecordId = ref('')
 const collapsedRecordIds = ref<Set<string>>(new Set())
@@ -199,6 +225,10 @@ const systemEditFrictionRegime = ref('unstated')
 const systemEditContactGeometry = ref('')
 const systemEditScale = ref('')
 const systemEditError = ref('')
+const pdfViewerRef = ref<InstanceType<typeof PdfViewerWithHighlight> | null>(null)
+const pdfPageInput = ref('')
+const pdfPageCount = ref(0)
+const pdfPageError = ref('')
 
 const reviewFiles = computed<BatchFile[]>(() => Array.isArray(props.files) ? props.files.filter(Boolean) : [])
 const selectedReviewFile = computed<BatchFile | null>(() => props.selectedFile || reviewFiles.value[0] || null)
@@ -265,8 +295,10 @@ const recordItems = computed<RecordItem[]>(() => {
     const substrateRaw = extractorType === 'tribology' ? trim(record.substrate_material) : ''
     const subtitle = extractorType === 'diffusion' ? reviewIonicLiquidDisplay(record) : ''
     const dedupedSubtitle = trim(subtitle) === trim(title) ? '' : subtitle
+    const confidence = recordConfidenceView(record)
     const lowConfidence = recordLowConfidence(record)
     const missingEvidence = recordNeedsEvidence(record)
+    const trainingBlocker = recordIsTrainingBlocker(record)
     const isApproved = String(record.review_status || '').trim().toLowerCase() === 'approved' || record.validationStatus === 'verified'
     const status: RecordItem['status'] = isApproved && !lowConfidence && !missingEvidence
       ? 'confirmed'
@@ -287,9 +319,11 @@ const recordItems = computed<RecordItem[]>(() => {
       metricLabel: metric.label,
       metricValue: metric.value,
       metricTags: extractorType === 'diffusion' ? [] : cofStructuredTags(record),
+      confidence,
       status,
       lowConfidence,
       missingEvidence,
+      trainingBlocker,
       selected: id === activeRecordId.value,
       record,
     }
@@ -298,6 +332,10 @@ const recordItems = computed<RecordItem[]>(() => {
 
 const visibleRecordItems = computed(() => {
   let rows = recordItems.value
+
+  if (onlyTrainingBlockers.value) {
+    rows = rows.filter((item) => item.trainingBlocker)
+  }
 
   if (onlyPendingRecords.value) {
     rows = rows.filter((item) => item.status !== 'confirmed')
@@ -309,6 +347,8 @@ const visibleRecordItems = computed(() => {
 
   return rows
 })
+
+const trainingBlockerCount = computed(() => recordItems.value.filter((item) => item.trainingBlocker).length)
 
 watch(
   visibleRecordItems,
@@ -340,6 +380,15 @@ watch(
   { immediate: true },
 )
 
+watch(
+  () => props.initialMode,
+  (mode) => {
+    if (mode === 'training-blockers') {
+      onlyTrainingBlockers.value = true
+    }
+  },
+)
+
 const activeRecordItem = computed(() => {
   return visibleRecordItems.value.find((item) => item.id === activeRecordId.value)
     || recordItems.value.find((item) => item.id === activeRecordId.value)
@@ -363,6 +412,30 @@ const activeLiteratureId = computed<number | null>(() => {
   const parsed = Number(match?.[1] || '')
   return Number.isFinite(parsed) ? parsed : null
 })
+
+watch(() => props.pdfUrl, () => {
+  pdfPageInput.value = ''
+  pdfPageCount.value = 0
+  pdfPageError.value = ''
+})
+
+function handlePdfLoaded(pageCount: number) {
+  pdfPageCount.value = pageCount
+  pdfPageError.value = ''
+}
+
+function jumpToPdfPage() {
+  const parsed = Number.parseInt(pdfPageInput.value, 10)
+  if (!Number.isFinite(parsed)) {
+    pdfPageError.value = '请输入页码'
+    return
+  }
+  const maxPage = Math.max(1, pdfPageCount.value || parsed)
+  const targetPage = Math.min(maxPage, Math.max(1, parsed))
+  pdfPageInput.value = String(targetPage)
+  pdfPageError.value = ''
+  pdfViewerRef.value?.scrollToPage(targetPage)
+}
 
 const activeExtractorType = computed<ExtractorType>(() => {
   const fromFile = selectedReviewFile.value?.extractor_type
@@ -603,7 +676,7 @@ const activeFieldResolvedEvidence = computed(() => {
   const entryBbox = normalizeResolvedBBox(fieldEntry?.evidence?.bbox)
   const entryPage = Number(fieldEntry?.evidence?.page || 0)
   const directQuote = trim(fieldEntry?.evidence?.quote)
-  const directMatchedText = trim(fieldEntry?.evidence?.matched_text)
+  const directMatchedText = trim(fieldEntry?.evidence?.matched_text ?? (fieldEntry?.evidence as Record<string, unknown> | undefined)?.matchedText)
   const sourceType = trim(fieldEntry?.evidence?.source_type).toLowerCase()
   const isExplicitField = trim(fieldEntry?.grounding_mode).toLowerCase() === 'explicit'
   const isDerivedField = trim(fieldEntry?.grounding_mode).toLowerCase() === 'derived'
@@ -735,6 +808,126 @@ function present(value: unknown) {
   return trim(value) || 'Not captured yet'
 }
 
+function normalizeConfidenceValue(value: unknown): number | null {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return null
+  if (numeric > 1 && numeric <= 100) return numeric / 100
+  return Math.max(0, Math.min(1, numeric))
+}
+
+function recordConfidenceDetails(record: TribologyData | null | undefined): ConfidenceDetails | null {
+  const details = record?.confidence_details || record?.confidenceDetails || null
+  return details && typeof details === 'object' ? details : null
+}
+
+function recordConfidenceScore(record: TribologyData | null | undefined): number {
+  const details = recordConfidenceDetails(record)
+  const detailScore = normalizeConfidenceValue(details?.score)
+  if (detailScore != null) return detailScore
+  const storedScore = normalizeConfidenceValue(record?.confidence)
+  if (storedScore != null) return storedScore
+  return fallbackReviewConfidenceScore(record)
+}
+
+function fallbackReviewConfidenceScore(record: TribologyData | null | undefined): number {
+  if (!record) return 0
+  const extractorType = recordExtractorType(record)
+  const fieldMap = resolveRecordFieldEvidenceMap(record)
+  const slotScores: number[] = extractorType === 'diffusion'
+    ? [
+        hasRecordValue(record, 'system_name', extractorType) ? 1 : 0,
+        hasRecordValue(record, 'ionic_liquid', extractorType) ? 1 : 0,
+        hasAnyDiffusionCoefficient(record) ? 1 : 0,
+      ]
+    : requiredTribologyFieldKeys(record).map((key) => hasRecordValue(record, key, extractorType) ? 1 : 0)
+  const groundingKeys = extractorType === 'diffusion'
+    ? ['system_name', 'ionic_liquid', 'd_total', 'd_cation', 'd_anion']
+    : requiredTribologyFieldKeys(record)
+  const groundingScores: number[] = groundingKeys.map((key) => {
+    const status = resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, extractorType))
+    if (status === 'Grounded') return 1
+    if (status === 'Partial') return 0.5
+    return 0
+  })
+  const completeness = slotScores.reduce((sum, value) => sum + value, 0) / Math.max(1, slotScores.length)
+  const grounding = groundingScores.reduce((sum, value) => sum + value, 0) / Math.max(1, groundingScores.length)
+  const contextKeys = ['load', 'speed', 'shear_rate', 'temperature', 'potential', 'water_content', 'surface_roughness']
+  const context = Math.min(1, contextKeys.filter((key) => hasRecordValue(record, key, extractorType)).length / 4)
+  const valueQuality = record.validationStatus === 'warning' ? 0.45 : 0.78
+  return Math.max(0.05, Math.min(1, 0.35 * completeness + 0.35 * grounding + 0.2 * valueQuality + 0.1 * context))
+}
+
+function confidenceComponentLabel(key: string) {
+  if (key === 'completeness') return '完整度'
+  if (key === 'grounding') return '证据'
+  if (key === 'value_quality') return '数值'
+  if (key === 'context') return '上下文'
+  return key.replace(/_/g, ' ')
+}
+
+function confidenceReasonLabel(reason: string) {
+  const labels: Record<string, string> = {
+    missing_material: '缺材料',
+    weak_material: '材料弱匹配',
+    missing_lubricant: '缺离子液体',
+    weak_lubricant: '离子液体弱匹配',
+    missing_primary_metric: '缺主指标',
+    missing_diffusion_coefficient: '缺扩散系数',
+    sparse_conditions: '条件稀疏',
+    value_quality_gap: '数值质量不足',
+    pending_review_ceiling: '待审上限',
+    unreviewed_ceiling: '未审上限',
+    partial_review_ceiling: '部分确认上限',
+    field_review_ceiling: '字段确认上限',
+    review_flagged_ceiling: '标记上限',
+    review_rejected_ceiling: '驳回上限',
+    review_pending: '待人工确认',
+    review_flagged: '人工标记',
+    model_inferred: '模型推断',
+    panel_mismatch: '图版不一致',
+    cof_uncertain: 'COF 不确定',
+    cof_out_of_range: 'COF 超范围',
+    unresolved_ionic_liquid: '离子液体未解析',
+  }
+  if (labels[reason]) return labels[reason]
+  return reason.replace(/^missing_/, '缺 ').replace(/^partial_/, '部分 ').replace(/^weak_/, '弱 ').replace(/_/g, ' ')
+}
+
+function recordConfidenceView(record: TribologyData | null | undefined): RecordConfidenceView {
+  const score = recordConfidenceScore(record)
+  const percent = Math.round(score * 100)
+  const band: RecordConfidenceView['band'] = percent >= 80 ? 'high' : percent >= 55 ? 'medium' : 'low'
+  const className = band === 'high'
+    ? 'border-[#bbf7d0] bg-[#ecfdf5] text-[#047857]'
+    : band === 'medium'
+      ? 'border-[#fed7aa] bg-[#fff7ed] text-[#c2410c]'
+      : 'border-[#fecdd3] bg-[#fff1f2] text-[#be123c]'
+  const details = recordConfidenceDetails(record)
+  const components = details?.components || {}
+  const componentText = Object.entries(components)
+    .filter(([, value]) => Number.isFinite(Number(value)))
+    .map(([key, value]) => `${confidenceComponentLabel(key)} ${Math.round(Number(value) * 100)}%`)
+    .join(' · ')
+  const penaltyText = (details?.penalties || [])
+    .slice(0, 3)
+    .map((item) => confidenceReasonLabel(item.reason))
+    .join(' · ')
+  const titleParts = [
+    `自研置信度 ${percent}%`,
+    componentText,
+    penaltyText ? `主要扣分：${penaltyText}` : '',
+  ].filter(Boolean)
+
+  return {
+    score,
+    percent,
+    band,
+    label: band === 'high' ? '高' : band === 'medium' ? '中' : '低',
+    className,
+    title: titleParts.join('\n'),
+  }
+}
+
 function normalizeCofExtracted(value: unknown): CofExtracted | null {
   if (!value) return null
   if (typeof value === 'string') {
@@ -863,6 +1056,68 @@ function forceToNewton(value: string, unit: string): number | null {
   return Number((parsed * multiplier).toPrecision(12))
 }
 
+function forceDisplayUnits() {
+  return [
+    { unit: 'N', factor: 1 },
+    { unit: 'mN', factor: 1e-3 },
+    { unit: 'µN', factor: 1e-6 },
+    { unit: 'nN', factor: 1e-9 },
+    { unit: 'pN', factor: 1e-12 },
+  ] as const
+}
+
+function pickForceDisplayUnit(...values: Array<number | null | undefined>) {
+  const units = forceDisplayUnits()
+  const maxAbs = Math.max(...values.map((value) => Math.abs(Number(value || 0))))
+  if (!Number.isFinite(maxAbs) || maxAbs <= 0) return units[0]!
+  return units.find((unit) => maxAbs >= unit.factor) || units[units.length - 1]!
+}
+
+function formatPlainMagnitude(value: number) {
+  if (!Number.isFinite(value)) return ''
+  const abs = Math.abs(value)
+  const decimals = abs >= 100 ? 0 : abs >= 10 ? 1 : abs >= 1 ? 2 : abs >= 0.1 ? 3 : 4
+  return Number(value.toFixed(decimals)).toLocaleString('en-US', {
+    maximumFractionDigits: decimals,
+  })
+}
+
+function formatForceValue(valueN: unknown, preferredUnit?: ReturnType<typeof pickForceDisplayUnit>) {
+  const value = asNumberOrNull(valueN)
+  if (value == null) return ''
+  const unit = preferredUnit || pickForceDisplayUnit(value)
+  return `${formatPlainMagnitude(value / unit.factor)} ${unit.unit}`
+}
+
+function forceStructuredTag(label: string, valueN: unknown): StructuredTag | null {
+  const value = asNumberOrNull(valueN)
+  if (value == null) return null
+  const unit = pickForceDisplayUnit(value)
+  return {
+    label,
+    value: formatForceValue(value, unit),
+  }
+}
+
+function forceRangeStructuredTag(label: string, minN: unknown, maxN: unknown): StructuredTag | null {
+  const min = asNumberOrNull(minN)
+  const max = asNumberOrNull(maxN)
+  if (min == null || max == null) return null
+  const unit = pickForceDisplayUnit(min, max)
+  const minLabel = formatPlainMagnitude(min / unit.factor)
+  const maxLabel = formatPlainMagnitude(max / unit.factor)
+  if (min === max) {
+    return {
+      label: '载荷',
+      value: `${minLabel} ${unit.unit}`,
+    }
+  }
+  return {
+    label,
+    value: `${minLabel}–${maxLabel} ${unit.unit}`,
+  }
+}
+
 function normalizeLoadConditions(value: unknown): LoadConditions | null {
   if (!value) return null
   if (typeof value === 'string') {
@@ -931,7 +1186,7 @@ function loadConditionsForRecord(record: TribologyData | null | undefined): Load
     || deriveLoadConditionsFromText(record.load)
 }
 
-function loadStructuredTags(record: TribologyData | null | undefined): { label: string, value: string }[] {
+function loadStructuredTags(record: TribologyData | null | undefined): StructuredTag[] {
   const load = loadConditionsForRecord(record)
   if (!load) return []
   const valueType = trim(load.value_type ?? load.valueType).toLowerCase()
@@ -941,17 +1196,20 @@ function loadStructuredTags(record: TribologyData | null | undefined): { label: 
     && !(trim(load.contact_unit_type ?? load.contactUnitType))
   if (isSimple) return []
 
-  const tags: { label: string, value: string }[] = []
+  const tags: StructuredTag[] = []
   const system = load.system_total_load_N ?? load.systemTotalLoadN
   const contact = load.contact_load_per_unit_N ?? load.contactLoadPerUnitN
   const min = load.load_min_N ?? load.loadMinN
   const max = load.load_max_N ?? load.loadMaxN
-  if (system != null) tags.push({ label: '系统载荷', value: `${system} N` })
-  if (contact != null) tags.push({ label: '单点载荷', value: `${contact} N` })
+  const systemTag = forceStructuredTag('系统载荷', system)
+  const contactTag = forceStructuredTag('单点载荷', contact)
+  if (systemTag) tags.push(systemTag)
+  if (contactTag) tags.push(contactTag)
   const unit = trim(load.contact_unit_type ?? load.contactUnitType)
   if (unit) tags.push({ label: '作用对象', value: unit })
   if (system == null && contact == null && min != null && max != null) {
-    tags.push({ label: min === max ? '载荷' : '载荷范围', value: min === max ? `${min} N` : `${min}-${max} N` })
+    const rangeTag = forceRangeStructuredTag(min === max ? '载荷' : '载荷范围', min, max)
+    if (rangeTag) tags.push(rangeTag)
   }
   return tags
 }
@@ -1120,11 +1378,15 @@ function regimeStructuredTags(record: TribologyData | null | undefined): { label
   return tags
 }
 
-function structuredTagsForField(field: ReviewField, record: TribologyData | null | undefined) {
-  if (field.id === 'cof') return cofStructuredTags(record)
-  if (field.id === 'load') return loadStructuredTags(record)
-  if (field.id === 'speed') return speedStructuredTags(record)
-  if (field.id === 'regime') return regimeStructuredTags(record)
+function structuredTagsForField(field: ReviewField, record: TribologyData | null | undefined): StructuredTag[] {
+  return structuredTagsForFieldId(field.id, record)
+}
+
+function structuredTagsForFieldId(fieldId: string, record: TribologyData | null | undefined): StructuredTag[] {
+  if (fieldId === 'cof') return cofStructuredTags(record)
+  if (fieldId === 'load') return loadStructuredTags(record)
+  if (fieldId === 'speed') return speedStructuredTags(record)
+  if (fieldId === 'regime') return regimeStructuredTags(record)
   return []
 }
 
@@ -1226,7 +1488,17 @@ function normalizeStoredFieldEvidenceMap(
   }
 
   return Object.entries(source).reduce<Record<string, FieldEvidenceEntry>>((acc, [key, value]) => {
-    acc[normalizeFieldKey(key)] = value || {}
+    const entry = { ...(value || {}) } as FieldEvidenceEntry
+    const evidence = entry.evidence && typeof entry.evidence === 'object'
+      ? { ...(entry.evidence as Record<string, unknown>) }
+      : null
+    if (evidence && !evidence.matched_text && evidence.matchedText) {
+      evidence.matched_text = evidence.matchedText
+    }
+    if (evidence) {
+      entry.evidence = evidence as FieldEvidenceEntry['evidence']
+    }
+    acc[normalizeFieldKey(key)] = entry
     return acc
   }, {})
 }
@@ -1334,17 +1606,21 @@ function resolveRecordFieldEvidenceMap(
 function fieldEntryHasEvidence(entry: FieldEvidenceEntry | null | undefined) {
   const evidence = entry?.evidence
   const sourceType = trim(evidence?.source_type).toLowerCase()
-  if (sourceType === 'table' && !trim(evidence?.matched_text)) return false
-  return Boolean(evidence?.page && Array.isArray(evidence.bbox) && evidence.bbox.length === 4)
+  const groundingMode = trim(entry?.grounding_mode).toLowerCase()
+  const matchedText = trim(evidence?.matched_text ?? (evidence as Record<string, unknown> | undefined)?.matchedText)
+  const bbox = normalizeResolvedBBox(evidence?.bbox)
+  if (sourceType === 'table' && !matchedText && groundingMode !== 'explicit') return false
+  return Boolean(evidence?.page && bbox)
 }
 
 function fieldEntryHasSourceAnchor(entry: FieldEvidenceEntry | null | undefined) {
   const evidence = entry?.evidence
+  const matchedText = trim(evidence?.matched_text ?? (evidence as Record<string, unknown> | undefined)?.matchedText)
   return Boolean(
     evidence?.page
     || trim(evidence?.source_label)
     || trim(evidence?.quote)
-    || trim(evidence?.matched_text),
+    || matchedText,
   )
 }
 
@@ -1353,8 +1629,12 @@ function recordHasSourceAnchor(record: TribologyData | null | undefined) {
   return Boolean(record.source_page || trim(record.source_figure) || trim(record.source) || trim(record.evidence))
 }
 
-function resolveFieldEvidenceStatus(entry: FieldEvidenceEntry | null | undefined, value: string): ReviewField['evidenceStatus'] {
-  if (!trim(value) || value === 'Not captured yet') return 'Missing'
+function resolveFieldEvidenceStatus(
+  entry: FieldEvidenceEntry | null | undefined,
+  value: string,
+  hasStructuredValue = false,
+): ReviewField['evidenceStatus'] {
+  if ((!trim(value) || value === 'Not captured yet') && !hasStructuredValue) return 'Missing'
   if (!entry) return 'Missing'
   if (trim(entry.grounding_mode).toLowerCase() === 'inferred') return 'Grounded'
   if (fieldEntryHasEvidence(entry)) {
@@ -1405,6 +1685,13 @@ function syncRecordReviewState(recordId: string, payload: RecordFieldEvidenceRes
     record.assembly_notes = payload.assembly_notes || undefined
     record.sample_id = payload.sample_id || record.sample_id
     record.series_id = payload.series_id || record.series_id
+    if (payload.confidence != null) {
+      record.confidence = payload.confidence
+    }
+    if (payload.confidence_details || payload.confidenceDetails) {
+      record.confidence_details = payload.confidence_details || payload.confidenceDetails || null
+      record.confidenceDetails = payload.confidenceDetails || payload.confidence_details || null
+    }
     record.validationStatus = deriveValidationStatusFromReviewStatus(payload.review_status)
     record.validationMessage = payload.assembly_notes || undefined
   }
@@ -1485,7 +1772,7 @@ function hasRecordValue(record: TribologyData | null | undefined, key: string, e
 function hasFieldEntry(fieldMap: Record<string, FieldEvidenceEntry>, key: string) {
   const entry = fieldMap[key]
   if (!entry) return false
-  return Boolean(trim(entry.value) || fieldEntryHasEvidence(entry))
+  return Boolean(trim(entry.value))
 }
 
 function shouldShowOptionalField(
@@ -1494,7 +1781,9 @@ function shouldShowOptionalField(
   key: string,
   extractorType: ExtractorType = 'tribology',
 ) {
-  return hasRecordValue(record, key, extractorType) || hasFieldEntry(fieldMap, key)
+  return hasRecordValue(record, key, extractorType)
+    || hasFieldEntry(fieldMap, key)
+    || structuredTagsForFieldId(key, record).length > 0
 }
 
 function tribologyFieldLabel(key: string) {
@@ -1553,6 +1842,7 @@ function recordNeedsReview(record: TribologyData) {
 }
 
 function recordLowConfidence(record: TribologyData) {
+  if (recordConfidenceScore(record) < 0.8) return true
   const extractorType = recordExtractorType(record)
   const missingCore = extractorType === 'diffusion'
     ? (!trim(record.system_name) || !trim(record.ionic_liquid) || !hasAnyDiffusionCoefficient(record))
@@ -1560,6 +1850,29 @@ function recordLowConfidence(record: TribologyData) {
       .some((key) => !trim(fieldValueForKey(record, key, extractorType)))
   const reviewStatus = String(record.review_status || '').trim().toLowerCase()
   return record.validationStatus === 'warning' || reviewStatus === 'flagged' || reviewStatus === 'needs_evidence' || missingCore
+}
+
+function recordIsTrainingBlocker(record: TribologyData) {
+  if (recordExtractorType(record) !== 'tribology') return false
+
+  const reviewStatus = String(record.review_status || '').trim().toLowerCase()
+  if (reviewStatus === 'flagged' || reviewStatus === 'needs_evidence') return true
+
+  const cofRaw = (record as Record<string, unknown>).cof
+  const cofValueRaw = (record as Record<string, unknown>).cof_value
+  const cofExtracted = (record as Record<string, unknown>).cof_extracted
+  const cofText = trim(cofRaw as string)
+    || trim(cofValueRaw as string)
+    || (Array.isArray(cofExtracted) && cofExtracted.length > 0
+      ? trim(((cofExtracted as Array<Record<string, unknown>>)[0]?.value) as string)
+      : '')
+  if (!cofText) return true
+
+  if (!trim(record.cation_smiles) || !trim(record.anion_smiles)) return true
+
+  if (record.confidence != null && Number(record.confidence) < 0.8) return true
+
+  return recordNeedsEvidence(record)
 }
 
 function flaggedRequiredFieldKeys(
@@ -2106,16 +2419,22 @@ function numericTokensConsistent(term: string, matched: string): boolean {
   })
 }
 
-function confidenceLabel(status: ValidationStatus | undefined, value: string): ReviewField['confidence'] {
-  if (!trim(value) || status === 'warning') return 'Low'
+function confidenceLabel(status: ValidationStatus | undefined, value: string, hasStructuredValue = false): ReviewField['confidence'] {
+  if ((!trim(value) && !hasStructuredValue) || status === 'warning') return 'Low'
   if (status === 'verified') return 'High'
   return 'Medium'
 }
 
-function fieldStatusFromEntry(record: TribologyData, value: string, evidence: ReviewField['evidenceStatus'], entry: FieldEvidenceEntry | null | undefined): ReviewField['status'] {
+function fieldStatusFromEntry(
+  record: TribologyData,
+  value: string,
+  evidence: ReviewField['evidenceStatus'],
+  entry: FieldEvidenceEntry | null | undefined,
+  hasStructuredValue = false,
+): ReviewField['status'] {
   const reviewState = String(entry?.review_state || '').trim().toLowerCase()
   const groundingMode = trim(entry?.grounding_mode).toLowerCase()
-  if (!trim(value)) return 'low_conf'
+  if (!trim(value) && !hasStructuredValue) return 'low_conf'
   if (reviewState === 'flagged') return 'low_conf'
   if (groundingMode === 'inferred') return 'confirmed'
   if (reviewState === 'confirmed' && evidence === 'Grounded') return 'confirmed'
@@ -2133,25 +2452,31 @@ function buildField(
   issueMessage?: string,
 ): ReviewField {
   const value = rawValue
-  const evidence = resolveFieldEvidenceStatus(entry, value)
+  const hasStructuredValue = structuredTagsForFieldId(id, record).length > 0
+  const evidence = resolveFieldEvidenceStatus(entry, value, hasStructuredValue)
   const groundingMode = resolveFieldGroundingMode(entry, value)
   const locationMode = resolveFieldLocationMode(entry, record, groundingMode)
   const reviewExempt = groundingMode === 'inferred'
-  const status = reviewExempt ? 'confirmed' : fieldStatusFromEntry(record, value, evidence, entry)
-  const canConfirm = !reviewExempt && trim(value) !== '' && value !== 'Not captured yet' && evidence === 'Grounded'
+  const reviewState = String(entry?.review_state || '').trim().toLowerCase()
+  const reviewNote = trim(entry?.review_note)
+  const status = reviewExempt ? 'confirmed' : fieldStatusFromEntry(record, value, evidence, entry, hasStructuredValue)
+  const hasCapturedValue = (trim(value) !== '' && value !== 'Not captured yet') || hasStructuredValue
+  const canConfirm = !reviewExempt && hasCapturedValue && evidence === 'Grounded'
 
   return {
     id,
     label,
     value,
     status,
-    confidence: reviewExempt ? 'High' : confidenceLabel(record.validationStatus, value),
+    confidence: reviewExempt ? 'High' : confidenceLabel(record.validationStatus, value, hasStructuredValue),
     evidenceStatus: evidence,
     groundingMode,
     groundingNote: resolveFieldGroundingNote(entry),
     sourceType: resolveFieldSourceType(entry, record),
     location: resolveFieldLocation(entry, record),
     locationMode,
+    reviewState: reviewState || null,
+    reviewNote,
     canConfirm,
     tooltip: id === 'ionic_liquid'
       ? reviewIonicLiquidTooltip(record)
@@ -2160,8 +2485,8 @@ function buildField(
         : undefined,
     issue: reviewExempt
       ? undefined
-      : entry?.review_state === 'flagged'
-      ? (trim(entry.review_note) || issueMessage)
+      : reviewState === 'flagged'
+      ? (reviewNote || issueMessage || '该字段已标记为存疑，请编辑处理或解除存疑。')
       : (!canConfirm ? issueMessage : undefined),
   }
 }
@@ -2528,6 +2853,16 @@ async function flagReviewFieldPayload(record: TribologyData, fieldId: string, no
     : flagCandidateFieldEvidence(recordId, fieldId, note)
 }
 
+async function unflagReviewFieldPayload(record: TribologyData, fieldId: string, note?: string | null) {
+  const recordId = Number(record.id || '')
+  if (recordExtractorType(record) === 'diffusion') {
+    return unflagDiffusionCandidateFieldEvidence(recordId, fieldId, note)
+  }
+  return usesRecordReviewEndpoint(record)
+    ? unflagRecordFieldEvidence(recordId, fieldId, note)
+    : unflagCandidateFieldEvidence(recordId, fieldId, note)
+}
+
 async function approveReviewRecordPayload(record: TribologyData) {
   const recordId = Number(record.id || '')
   if (recordExtractorType(record) === 'diffusion') {
@@ -2639,6 +2974,34 @@ function closeSystemEditor() {
   systemEditContactGeometry.value = ''
   systemEditScale.value = ''
   systemEditError.value = ''
+}
+
+function isFieldFlagged(field: ReviewField | null | undefined) {
+  return String(field?.reviewState || '').trim().toLowerCase() === 'flagged'
+}
+
+function fieldSupportsFlaggedEditor(fieldId: string, record: TribologyData | null | undefined) {
+  if (recordExtractorType(record) !== 'tribology') return false
+  return ['cof', 'load', 'speed', 'regime'].includes(fieldId)
+}
+
+function openFlaggedFieldEditor(fieldId: string, record: TribologyData) {
+  activeFieldId.value = fieldId
+  if (fieldId === 'cof') {
+    openCofEditor(record)
+    return
+  }
+  if (fieldId === 'load') {
+    openLoadEditor(record)
+    return
+  }
+  if (fieldId === 'speed') {
+    openSpeedEditor(record)
+    return
+  }
+  if (fieldId === 'regime') {
+    openSystemEditor(record)
+  }
 }
 
 async function saveCofEditor() {
@@ -2799,11 +3162,12 @@ async function saveSystemEditor() {
   }
 }
 
-async function handleConfirmField(field: ReviewField) {
-  const record = activeRecord.value
+async function handleConfirmField(field: ReviewField, recordOverride?: TribologyData | null) {
+  const record = recordOverride || activeRecord.value
   const recordId = Number(record?.id || '')
   if (!record || !field.canConfirm || !Number.isFinite(recordId)) return
 
+  activeFieldId.value = field.id
   reviewActionPending.value = `confirm:${recordId}:${field.id}`
   reviewActionError.value = ''
   try {
@@ -2816,12 +3180,13 @@ async function handleConfirmField(field: ReviewField) {
   }
 }
 
-async function handleFlagActiveField(fieldId?: string) {
-  const record = activeRecord.value
+async function handleFlagActiveField(fieldId?: string, recordOverride?: TribologyData | null) {
+  const record = recordOverride || activeRecord.value
   const recordId = Number(record?.id || '')
   const targetFieldId = fieldId || activeField.value?.id
   if (!record || !targetFieldId || !Number.isFinite(recordId)) return
 
+  activeFieldId.value = targetFieldId
   reviewActionPending.value = `flag:${recordId}:${targetFieldId}`
   reviewActionError.value = ''
   try {
@@ -2829,6 +3194,25 @@ async function handleFlagActiveField(fieldId?: string) {
     applyReviewResponse(payload)
   } catch (error: any) {
     reviewActionError.value = String(error?.response?.data?.detail || error?.message || 'Failed to flag field')
+  } finally {
+    reviewActionPending.value = null
+  }
+}
+
+async function handleUnflagActiveField(fieldId?: string, recordOverride?: TribologyData | null) {
+  const record = recordOverride || activeRecord.value
+  const recordId = Number(record?.id || '')
+  const targetFieldId = fieldId || activeField.value?.id
+  if (!record || !targetFieldId || !Number.isFinite(recordId)) return
+
+  activeFieldId.value = targetFieldId
+  reviewActionPending.value = `unflag:${recordId}:${targetFieldId}`
+  reviewActionError.value = ''
+  try {
+    const payload = await unflagReviewFieldPayload(record, targetFieldId)
+    applyReviewResponse(payload)
+  } catch (error: any) {
+    reviewActionError.value = String(error?.response?.data?.detail || error?.message || 'Failed to clear field flag')
   } finally {
     reviewActionPending.value = null
   }
@@ -2920,6 +3304,29 @@ function sourceTypeLabel(sourceType: ReviewField['sourceType']) {
 
 function presentZh(value: string) {
   return value === 'Not captured yet' ? '尚未提取' : value
+}
+
+function isRoughnessFieldId(fieldId: string) {
+  return ['surface_roughness', 'probe_roughness', 'substrate_roughness'].includes(fieldId)
+}
+
+function roughnessTextParts(value: string) {
+  const text = presentZh(value)
+  const parts: Array<{ type: 'text' | 'rq', text: string }> = []
+  const pattern = /\bR\s*[_-]?\s*[Qq]\b/g
+  let cursor = 0
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(text))) {
+    if (match.index > cursor) {
+      parts.push({ type: 'text', text: text.slice(cursor, match.index) })
+    }
+    parts.push({ type: 'rq', text: 'Rq' })
+    cursor = match.index + match[0].length
+  }
+  if (cursor < text.length) {
+    parts.push({ type: 'text', text: text.slice(cursor) })
+  }
+  return parts.length ? parts : [{ type: 'text', text }]
 }
 </script>
 
@@ -3147,8 +3554,8 @@ function presentZh(value: string) {
 
       <!-- ── 中：PDF 内联预览 ──────────────────────── -->
       <section class="flex min-h-0 flex-col overflow-hidden rounded-[1.25rem] border border-[#e2e8f0] bg-white">
-        <div class="flex items-center justify-between border-b border-[#eef2f6] px-4 py-2.5">
-          <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[#eef2f6] px-4 py-2.5">
+          <div class="flex min-w-0 items-center gap-2">
             <FileText class="h-4 w-4 text-[#7d8eaa]" />
             <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">原文预览</p>
             <span
@@ -3158,25 +3565,50 @@ function presentZh(value: string) {
               当前字段：{{ activeField.label }}
             </span>
           </div>
-          <a
-            v-if="pdfUrl"
-            :href="pdfUrl"
-            target="_blank"
-            rel="noreferrer"
-            class="inline-flex items-center gap-1 text-[11px] font-medium text-[#5b56ea] transition hover:text-[#403bcb]"
-          >
-            新窗口打开
-            <ExternalLink class="h-3 w-3" />
-          </a>
+          <div class="flex items-center gap-2">
+            <form
+              v-if="pdfUrl"
+              class="flex items-center gap-1 rounded-md bg-transparent px-0 py-1"
+              title="输入页码后按 Enter 跳转"
+              @submit.prevent="jumpToPdfPage"
+            >
+              <label for="review-pdf-page-jump" class="text-[11px] font-semibold text-[#64748b]">Page</label>
+              <input
+                id="review-pdf-page-jump"
+                v-model="pdfPageInput"
+                type="number"
+                min="1"
+                :max="pdfPageCount || undefined"
+                inputmode="numeric"
+                placeholder="8"
+                class="h-6 w-14 rounded border border-[#dbe4f0] bg-white px-2 text-center text-[12px] font-semibold text-[#1e293b] outline-none transition focus:border-[#5b56ea] focus:ring-2 focus:ring-[#5b56ea]/15"
+                :aria-invalid="Boolean(pdfPageError)"
+                @change="jumpToPdfPage"
+              >
+              <span v-if="pdfPageCount" class="text-[11px] font-medium text-[#94a3b8]">/ {{ pdfPageCount }}</span>
+            </form>
+            <a
+              v-if="pdfUrl"
+              :href="pdfUrl"
+              target="_blank"
+              rel="noreferrer"
+              class="inline-flex items-center gap-1 text-[11px] font-medium text-[#5b56ea] transition hover:text-[#403bcb]"
+            >
+              新窗口打开
+              <ExternalLink class="h-3 w-3" />
+            </a>
+          </div>
         </div>
 
         <div class="min-h-0 flex-1 overflow-hidden bg-[#f8fafc]">
           <PdfViewerWithHighlight
             v-if="pdfUrl"
+            ref="pdfViewerRef"
             :key="pdfUrl"
             :src="pdfUrl"
             :highlights="recordHighlights"
             :active-id="activeHighlightId"
+            @loaded="handlePdfLoaded"
             @highlight-click="handleHighlightClick"
           />
           <div v-else class="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
@@ -3197,6 +3629,14 @@ function presentZh(value: string) {
           <div class="mt-2 flex flex-wrap items-center gap-1">
             <button
               type="button"
+              class="inline-flex items-center gap-1 rounded-[0.5rem] px-2 py-1 text-[11px] font-semibold transition"
+              :class="onlyTrainingBlockers ? 'bg-rose-600 text-white' : 'bg-rose-50 text-rose-700 hover:bg-rose-100'"
+              @click="onlyTrainingBlockers = !onlyTrainingBlockers"
+            >
+              卡住训练 <span class="ml-0.5 tabular-nums opacity-90">{{ trainingBlockerCount }}</span>
+            </button>
+            <button
+              type="button"
               class="rounded-[0.5rem] px-2 py-1 text-[11px] font-semibold transition"
               :class="onlyPendingRecords ? 'bg-[#101b29] text-white' : 'bg-[#f1f5f9] text-slate-600 hover:bg-[#e2e8f0]'"
               @click="onlyPendingRecords = !onlyPendingRecords"
@@ -3211,6 +3651,32 @@ function presentZh(value: string) {
             >
               只看低置信度
             </button>
+          </div>
+
+          <div
+            v-if="onlyTrainingBlockers"
+            class="mt-2 rounded-[0.7rem] border px-3 py-2 text-[11px] leading-4"
+            :class="trainingBlockerCount > 0
+              ? 'border-rose-200 bg-rose-50 text-rose-800'
+              : 'border-emerald-200 bg-emerald-50 text-emerald-800'"
+          >
+            <div v-if="trainingBlockerCount > 0">
+              <p class="font-semibold">{{ trainingBlockerCount }} 条记录正卡住你的训练集</p>
+              <p class="mt-0.5 font-normal text-rose-700/90">修完后回到 Dataset Workflow 即可继续生成数据集。</p>
+            </div>
+            <div v-else>
+              <div class="flex items-center justify-between gap-2">
+                <p class="font-semibold">全部解决了 ✓</p>
+                <button
+                  type="button"
+                  class="rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-emerald-500"
+                  @click="emit('open-dataset-workflow')"
+                >
+                  返回 Dataset Workflow →
+                </button>
+              </div>
+              <p class="mt-0.5 font-normal text-emerald-700/90">回去生成训练数据集吧。</p>
+            </div>
           </div>
         </div>
 
@@ -3306,25 +3772,36 @@ function presentZh(value: string) {
                   </span>
                 </div>
               </div>
-              <div class="flex shrink-0 items-start gap-1.5">
-                <button
-                  type="button"
-                  class="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-[#5b56ea] px-2.5 text-[10px] font-bold normal-case tracking-normal text-white transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3]"
-                  :disabled="!recordCanApprove(item.record, activeRecordFieldEvidence?.fields) || reviewActionPending === `approve:${Number(item.record.id || '')}`"
-                  :title="recordApprovalBlockedReason(item.record, activeRecordFieldEvidence?.fields) || '确认这条 Record 下所有字段'"
-                  @click.stop="handleApproveRecord(item.record)"
+              <div class="flex shrink-0 flex-col items-end gap-1.5">
+                <div
+                  class="inline-flex h-7 min-w-[4.75rem] items-center justify-center gap-1 rounded-md border px-2 text-[10px] font-black tabular-nums shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+                  :class="item.confidence.className"
+                  :title="item.confidence.title"
                 >
-                  <Loader2
-                    v-if="reviewActionPending === `approve:${Number(item.record.id || '')}`"
-                    class="h-3 w-3 animate-spin"
+                  <Gauge class="h-3 w-3" />
+                  <span>{{ item.confidence.percent }}%</span>
+                  <span class="opacity-75">{{ item.confidence.label }}</span>
+                </div>
+                <div class="flex items-start gap-1.5">
+                  <button
+                    type="button"
+                    class="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-[#5b56ea] px-2.5 text-[10px] font-bold normal-case tracking-normal text-white transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3]"
+                    :disabled="!recordCanApprove(item.record, activeRecordFieldEvidence?.fields) || reviewActionPending === `approve:${Number(item.record.id || '')}`"
+                    :title="recordApprovalBlockedReason(item.record, activeRecordFieldEvidence?.fields) || '确认这条 Record 下所有字段'"
+                    @click.stop="handleApproveRecord(item.record)"
+                  >
+                    <Loader2
+                      v-if="reviewActionPending === `approve:${Number(item.record.id || '')}`"
+                      class="h-3 w-3 animate-spin"
+                    />
+                    <CheckCheck v-else class="h-3 w-3" />
+                    确认本条
+                  </button>
+                  <ChevronDown
+                    class="mt-1.5 h-4 w-4 shrink-0 text-slate-400 transition"
+                    :class="isRecordExpanded(item.id) ? 'rotate-180 text-[#5b56ea]' : ''"
                   />
-                  <CheckCheck v-else class="h-3 w-3" />
-                  确认本条
-                </button>
-                <ChevronDown
-                  class="mt-1.5 h-4 w-4 shrink-0 text-slate-400 transition"
-                  :class="isRecordExpanded(item.id) ? 'rotate-180 text-[#5b56ea]' : ''"
-                />
+                </div>
               </div>
             </button>
 
@@ -3375,7 +3852,16 @@ function presentZh(value: string) {
                             part.highlight ? 'text-[14px] text-[#92400e]' : 'text-xs'
                           ]"
                         >
-                          {{ part.value }}
+                          <template v-if="part.id === 'roughness'">
+                            <template
+                              v-for="(segment, segmentIndex) in roughnessTextParts(part.value)"
+                              :key="`roughness-value-${part.id}-${segmentIndex}`"
+                            >
+                              <template v-if="segment.type === 'rq'">R<sub class="align-sub text-[0.68em] leading-none">q</sub></template>
+                              <template v-else>{{ segment.text }}</template>
+                            </template>
+                          </template>
+                          <template v-else>{{ part.value }}</template>
                         </span>
                         
                         <span
@@ -3389,7 +3875,15 @@ function presentZh(value: string) {
                           @keydown.enter.stop.prevent="activeFieldId = part.roughnessFieldId || part.fieldId"
                           @keydown.space.stop.prevent="activeFieldId = part.roughnessFieldId || part.fieldId"
                         >
-                          <span>{{ part.roughness }}</span>
+                          <span>
+                            <template
+                              v-for="(segment, segmentIndex) in roughnessTextParts(part.roughness)"
+                              :key="`roughness-pill-${part.id}-${segmentIndex}`"
+                            >
+                              <template v-if="segment.type === 'rq'">R<sub class="align-sub text-[0.68em] leading-none">q</sub></template>
+                              <template v-else>{{ segment.text }}</template>
+                            </template>
+                          </span>
                           <span v-if="part.roughnessStatusLabel" class="opacity-80">· {{ part.roughnessStatusLabel }}</span>
                         </span>
 
@@ -3446,6 +3940,10 @@ function presentZh(value: string) {
                           置信度{{ confidenceText(field.confidence) }}
                         </span>
                         <span
+                          v-if="isFieldFlagged(field)"
+                          class="rounded bg-[#fff5f6] px-1 py-0.5 text-[9px] font-semibold text-[#cf334f]"
+                        >存疑</span>
+                        <span
                           v-if="structuredTagsForField(field, item.record).length && field.locationMode === 'inferred'"
                           class="rounded bg-[#f3f0ff] px-1 py-0.5 text-[9px] font-semibold text-[#6d28d9]"
                         >推断</span>
@@ -3468,7 +3966,7 @@ function presentZh(value: string) {
                           title="编辑结构化 COF"
                           @click.stop="openCofEditor(item.record)"
                         >
-                          结构化编辑
+                          {{ isFieldFlagged(field) ? '处理存疑' : '结构化编辑' }}
                         </button>
                         <button
                           v-if="field.id === 'load' && loadStructuredTags(item.record).length"
@@ -3477,7 +3975,7 @@ function presentZh(value: string) {
                           title="编辑结构化载荷"
                           @click.stop="openLoadEditor(item.record)"
                         >
-                          结构化编辑
+                          {{ isFieldFlagged(field) ? '处理存疑' : '结构化编辑' }}
                         </button>
                         <button
                           v-if="field.id === 'speed' && speedStructuredTags(item.record).length"
@@ -3486,7 +3984,7 @@ function presentZh(value: string) {
                           title="编辑结构化速度"
                           @click.stop="openSpeedEditor(item.record)"
                         >
-                          结构化编辑
+                          {{ isFieldFlagged(field) ? '处理存疑' : '结构化编辑' }}
                         </button>
                         <button
                           v-if="field.id === 'regime' && regimeStructuredTags(item.record).length"
@@ -3495,7 +3993,26 @@ function presentZh(value: string) {
                           title="编辑结构化测试机制"
                           @click.stop="openSystemEditor(item.record)"
                         >
-                          结构化编辑
+                          {{ isFieldFlagged(field) ? '处理存疑' : '结构化编辑' }}
+                        </button>
+                        <button
+                          v-if="isFieldFlagged(field) && fieldSupportsFlaggedEditor(field.id, item.record) && !structuredTagsForField(field, item.record).length"
+                          type="button"
+                          class="inline-flex h-5 shrink-0 items-center rounded-md border border-[#fecdd3] bg-white px-1.5 text-[9px] font-bold text-[#cf334f] transition hover:bg-[#fff5f6]"
+                          title="打开结构化编辑处理这个存疑字段"
+                          @click.stop="openFlaggedFieldEditor(field.id, item.record)"
+                        >
+                          处理存疑
+                        </button>
+                        <button
+                          v-if="isFieldFlagged(field)"
+                          type="button"
+                          class="inline-flex h-5 shrink-0 items-center rounded-md border border-[#dbe4f2] bg-white px-1.5 text-[9px] font-bold text-slate-600 transition hover:bg-[#f8fafc] disabled:cursor-not-allowed disabled:text-slate-300"
+                          :disabled="reviewActionPending === `unflag:${Number(item.record.id || '')}:${field.id}`"
+                          title="解除存疑状态，回到普通待审核"
+                          @click.stop="handleUnflagActiveField(field.id, item.record)"
+                        >
+                          解除存疑
                         </button>
                       </div>
                       <div v-if="!structuredTagsForField(field, item.record).length">
@@ -3504,6 +4021,15 @@ function presentZh(value: string) {
                           :title="field.tooltip || presentZh(field.value)"
                         >
                           <span v-if="field.id === 'ionic_liquid'" v-html="formatIonicLiquidHtml(presentZh(field.value))" />
+                          <span v-else-if="isRoughnessFieldId(field.id)">
+                            <template
+                              v-for="(segment, segmentIndex) in roughnessTextParts(field.value)"
+                              :key="`roughness-field-${field.id}-${segmentIndex}`"
+                            >
+                              <template v-if="segment.type === 'rq'">R<sub class="align-sub text-[0.68em] leading-none">q</sub></template>
+                              <template v-else>{{ segment.text }}</template>
+                            </template>
+                          </span>
                           <span v-else>{{ presentZh(field.value) }}</span>
                         </p>
                         <div
@@ -3529,8 +4055,10 @@ function presentZh(value: string) {
                           @keydown.space.stop.prevent="activeFieldId = field.id"
                         >
                           <div class="flex min-w-0 flex-wrap items-center gap-1.5 text-[10px]">
-                            <span class="rounded-[0.35rem] bg-[#f4f7fb] px-1.5 py-[2px] font-bold text-[#667793]">{{ tag.label }}</span>
-                            <span class="min-w-0 break-words font-bold text-[#334155]">{{ tag.value }}</span>
+                            <span
+                              class="rounded-[0.35rem] bg-[#f4f7fb] px-1.5 py-[2px] font-bold text-[#667793]"
+                            >{{ tag.label }}</span>
+                            <span class="min-w-0 break-words font-bold tabular-nums text-[#334155]">{{ tag.value }}</span>
                           </div>
                           <p
                             v-if="shouldShowStructuredSubfieldLocation(field)"
@@ -3566,12 +4094,32 @@ function presentZh(value: string) {
                       :class="field.id === activeFieldId ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'"
                     >
                       <button
+                        v-if="!isFieldFlagged(field)"
                         type="button"
-                        class="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-[#fff5f6] hover:text-[#cf334f]"
+                        class="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition hover:bg-[#fff5f6] hover:text-[#cf334f] disabled:cursor-not-allowed disabled:text-slate-300"
+                        :disabled="reviewActionPending === `flag:${Number(item.record.id || '')}:${field.id}`"
                         title="标记存疑"
-                        @click.stop="handleFlagActiveField(field.id)"
+                        @click.stop="handleFlagActiveField(field.id, item.record)"
                       >
-                        <Flag class="h-3.5 w-3.5" />
+                        <Loader2
+                          v-if="reviewActionPending === `flag:${Number(item.record.id || '')}:${field.id}`"
+                          class="h-3.5 w-3.5 animate-spin"
+                        />
+                        <Flag v-else class="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        v-else
+                        type="button"
+                        class="inline-flex h-7 w-7 items-center justify-center rounded-md text-[#cf334f] transition hover:bg-[#fff5f6] disabled:cursor-not-allowed disabled:text-slate-300"
+                        :disabled="reviewActionPending === `unflag:${Number(item.record.id || '')}:${field.id}`"
+                        title="解除存疑"
+                        @click.stop="handleUnflagActiveField(field.id, item.record)"
+                      >
+                        <Loader2
+                          v-if="reviewActionPending === `unflag:${Number(item.record.id || '')}:${field.id}`"
+                          class="h-3.5 w-3.5 animate-spin"
+                        />
+                        <RefreshCw v-else class="h-3.5 w-3.5" />
                       </button>
                       <button
                         type="button"
@@ -3579,12 +4127,12 @@ function presentZh(value: string) {
                         :class="field.canConfirm
                           ? 'text-[#5b56ea] hover:bg-[#eef2ff]'
                           : ''"
-                        :disabled="!field.canConfirm || reviewActionPending === `confirm:${Number(activeRecord?.id || '')}:${field.id}`"
+                        :disabled="!field.canConfirm || reviewActionPending === `confirm:${Number(item.record.id || '')}:${field.id}`"
                         title="确认本字段"
-                        @click.stop="handleConfirmField(field)"
+                        @click.stop="handleConfirmField(field, item.record)"
                       >
                         <Loader2
-                          v-if="reviewActionPending === `confirm:${Number(activeRecord?.id || '')}:${field.id}`"
+                          v-if="reviewActionPending === `confirm:${Number(item.record.id || '')}:${field.id}`"
                           class="h-3.5 w-3.5 animate-spin"
                         />
                         <Check v-else class="h-3.5 w-3.5" />

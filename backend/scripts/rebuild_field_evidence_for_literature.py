@@ -116,6 +116,8 @@ def _build_item_payload(row: sqlite3.Row) -> dict[str, Any]:
         "temperature": temperature,
         "potential": row["potential"] if "potential" in row.keys() else None,
         "water_content": row["water_content"] if "water_content" in row.keys() else None,
+        "probe_roughness": row["probe_roughness"] if "probe_roughness" in row.keys() else None,
+        "substrate_roughness": row["substrate_roughness"] if "substrate_roughness" in row.keys() else None,
         "surface_roughness": row["surface_roughness"] if "surface_roughness" in row.keys() else None,
         "film_thickness": row["film_thickness"] if "film_thickness" in row.keys() else None,
         "residual_film_thickness_d": row["residual_film_thickness_d"] if "residual_film_thickness_d" in row.keys() else None,

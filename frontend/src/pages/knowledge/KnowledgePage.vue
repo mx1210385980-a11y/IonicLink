@@ -24,7 +24,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'change-section': [section: string]
   'open-training': [datasetId: number | null]
-  'open-review': [payload?: { literatureId?: number | null, recordId?: number | null }]
+  'open-review': [payload?: { literatureId?: number | null, recordId?: number | null, mode?: 'training-blockers' | null }]
   'select-source': [fileId: string | null]
   'clear-doi': []
   'clear-source': []
@@ -127,6 +127,19 @@ function isTemporaryIdentifier(value: unknown) {
   return Boolean(text && (text.startsWith('temp-') || text.startsWith('temporary-')))
 }
 
+function isNoDataLiterature(item: Literature) {
+  return String(item.status || '').trim().toLowerCase() === 'no_data'
+}
+
+function sortLiteratureForList(items: Literature[]) {
+  return [...items].sort((a, b) => {
+    const aNoData = isNoDataLiterature(a) ? 1 : 0
+    const bNoData = isNoDataLiterature(b) ? 1 : 0
+    if (aNoData !== bNoData) return aNoData - bNoData
+    return Number(b.id || 0) - Number(a.id || 0)
+  })
+}
+
 function needsMetadataBackfill(item: Literature) {
   const hasExtractedData = Number(item.recordCount || item.candidateCount || 0) > 0
   if (!hasExtractedData) return false
@@ -162,7 +175,7 @@ async function autoBackfillMissingMetadata(items: Literature[]) {
 
   if (updatedAny) {
     try {
-      scopeLiterature.value = await listLiterature(0, 200)
+      scopeLiterature.value = sortLiteratureForList(await listLiterature(0, 200))
     } catch (error) {
       console.warn('[Knowledge] Failed to refresh literature after metadata backfill:', error)
     }
@@ -174,7 +187,7 @@ async function loadScopeLiterature() {
   literatureError.value = ''
   try {
     const items = await listLiterature(0, 200)
-    scopeLiterature.value = items
+    scopeLiterature.value = sortLiteratureForList(items)
     void autoBackfillMissingMetadata(items)
   } catch (error: any) {
     literatureError.value = error?.message || '加载文献库失败'
@@ -263,7 +276,7 @@ watch(
               :current-section="currentSection"
               @change-section="emit('change-section', $event)"
               @open-training="emit('open-training', $event)"
-              @open-review="emit('open-review')"
+              @open-review="(payload?: { mode?: 'training-blockers' | null }) => emit('open-review', payload)"
             />
           </div>
 

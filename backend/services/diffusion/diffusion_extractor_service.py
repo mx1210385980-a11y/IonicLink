@@ -37,8 +37,9 @@ from services.llm.runtime_service import llm_service
 from services.pdf_service import resolve_existing_path
 from services.doi_service import DOIService
 from services.fallback_extraction_service import extract_metadata_fallback
-from services.file_service import _read_file_content, _safe_update_doi
+from services.file_service import _archive_completed_literature_pdf, _read_file_content, _safe_update_doi
 from services.llm.utils import clean_and_parse_json
+from utils.no_data_reason import build_no_data_reason
 
 logger = logging.getLogger(__name__)
 
@@ -514,8 +515,19 @@ async def process_diffusion_file_safe(
             literature.pages = metadata.get("pages") or literature.pages
             literature.issn = metadata.get("issn") or literature.issn
 
+        no_data_message = None
+        if not response_rows:
+            no_data_message = build_no_data_reason(
+                literature=literature,
+                metadata=metadata,
+                content=content or getattr(literature, "content", None),
+                summary=payload,
+                fallback="No extractable diffusion records found",
+            )
         literature.status = "completed" if response_rows else "no_data"
-        literature.error_message = None if response_rows else "No extractable diffusion records found"
+        literature.error_message = None if response_rows else no_data_message
+        if response_rows:
+            _archive_completed_literature_pdf(literature, resolved_file_path)
 
         await add_extraction_candidates(
             db,
@@ -553,6 +565,14 @@ async def process_diffusion_file_safe(
             "new_feature_alerts": payload.get("new_feature_alerts") or [],
             "document_profile": payload.get("_document_profile") or {},
         }
+        if no_data_message:
+            extraction_summary["current_stage"] = "stage_e.finalize"
+            extraction_summary["current_message"] = no_data_message
+            extraction_summary["no_data_reason"] = no_data_message
+            extraction_summary["progress_log"] = [
+                *extraction_summary["progress_log"],
+                {"stage": "stage_e.finalize", "message": no_data_message},
+            ]
         await finalize_extraction_run(
             db,
             run_id=run_id,
@@ -561,7 +581,7 @@ async def process_diffusion_file_safe(
             final_count=extraction_summary["final_count"],
             dropped_by_reason=extraction_summary["dropped_by_reason"],
             summary=extraction_summary,
-            error_message=None if response_rows else "No extractable diffusion records found",
+            error_message=None if response_rows else no_data_message,
         )
         await db.commit()
         return metadata, response_rows, extraction_summary

@@ -312,6 +312,17 @@ async function scrollToHighlightWhenReady(id: string, retries = 12) {
   }
 }
 
+async function scrollToPage(pageNum: number, behavior: ScrollBehavior = 'smooth') {
+  if (!Number.isFinite(pageNum) || pageCount.value < 1) return
+  const targetPage = Math.min(pageCount.value, Math.max(1, Math.trunc(pageNum)))
+  await nextTick()
+  const pageEl = pagesRef.value?.[targetPage - 1]
+    || containerRef.value?.querySelector(`[data-page="${targetPage}"]`) as HTMLElement | null
+  if (pageEl) {
+    pageEl.scrollIntoView({ behavior, block: 'start' })
+  }
+}
+
 watch(
   () => [props.activeId, highlightSignature.value, isLoading.value, pageCount.value] as const,
   async ([id, _signature, loading]) => {
@@ -335,7 +346,7 @@ function onOverlayClick(id: string) {
 }
 
 // ─── Expose for parent usage ─────────────────────────────────────────────────
-defineExpose({ scrollToHighlight })
+defineExpose({ scrollToHighlight, scrollToPage })
 </script>
 
 <template>

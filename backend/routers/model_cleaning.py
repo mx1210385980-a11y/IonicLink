@@ -204,6 +204,11 @@ class SaveCleanedDatasetPayload(BaseModel):
     cleaning_options: CleaningOptionPayload = Field(default_factory=CleaningOptionPayload)
 
 
+class UpdateCleanedDatasetPayload(BaseModel):
+    name: str = Field(..., min_length=1, max_length=160)
+    description: str | None = Field(None, max_length=500)
+
+
 @router.get("/defaults", response_model=dict)
 async def get_cleaning_defaults():
     return {
@@ -377,6 +382,79 @@ async def get_cleaned_dataset(
         raise
     except Exception as exc:
         _raise_internal_error("Get cleaned dataset", exc)
+
+
+@router.patch("/datasets/{dataset_id}", response_model=dict)
+async def update_cleaned_dataset(
+    dataset_id: int,
+    payload: UpdateCleanedDatasetPayload,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    try:
+        dataset = await require_cleaned_dataset_access(session, principal, dataset_id, write=True)
+        dataset = await get_model_cleaning_service().update_dataset_metadata(
+            session,
+            dataset,
+            name=payload.name,
+            description=payload.description,
+        )
+        await log_activity(
+            db=session,
+            user_id=principal.user.id,
+            group_id=principal.group.id,
+            action_type="edit_dataset",
+            action_detail={
+                "dataset_id": dataset.id,
+                "dataset_name": dataset.name,
+            },
+            resource_type="cleaned_dataset",
+            resource_id=dataset.id,
+            request=request,
+        )
+        return {"dataset": get_model_cleaning_service().dataset_payload(dataset)}
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        await session.rollback()
+        _raise_internal_error("Update cleaned dataset", exc)
+
+
+@router.delete("/datasets/{dataset_id}", response_model=dict)
+async def delete_cleaned_dataset(
+    dataset_id: int,
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    try:
+        dataset = await require_cleaned_dataset_access(session, principal, dataset_id, write=True)
+        dataset_name = dataset.name
+        row_count = dataset.row_count
+        await get_model_cleaning_service().delete_dataset(session, dataset)
+        await log_activity(
+            db=session,
+            user_id=principal.user.id,
+            group_id=principal.group.id,
+            action_type="delete_dataset",
+            action_detail={
+                "dataset_id": dataset_id,
+                "dataset_name": dataset_name,
+                "row_count": row_count,
+            },
+            resource_type="cleaned_dataset",
+            resource_id=dataset_id,
+            request=request,
+        )
+        return {"success": True, "dataset_id": dataset_id}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await session.rollback()
+        _raise_internal_error("Delete cleaned dataset", exc)
 
 
 @router.get("/datasets/{dataset_id}/export")

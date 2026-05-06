@@ -9,7 +9,16 @@ from utils.experiment_profile import build_experiment_profile, canonical_scale
 
 
 LOAD_VALUE_TYPES = {"single", "range", "composite", "unstated"}
-FRICTION_REGIMES = {"static", "kinetic", "boundary", "mixed", "hydrodynamic", "elastohydrodynamic", "unstated"}
+FRICTION_REGIMES = {
+    "static",
+    "kinetic",
+    "boundary",
+    "superlubric",
+    "mixed",
+    "hydrodynamic",
+    "elastohydrodynamic",
+    "unstated",
+}
 
 FORCE_UNITS_TO_N = {
     "kn": 1e3,
@@ -220,11 +229,13 @@ def derive_tribological_system(raw_text: Any) -> dict[str, Any]:
     lower = text.lower()
 
     friction_regime = "unstated"
-    if "static" in lower:
+    if "superlubric" in lower:
+        friction_regime = "superlubric"
+    elif "static" in lower:
         friction_regime = "static"
     elif any(token in lower for token in ("kinetic", "sliding", "dynamic")):
         friction_regime = "kinetic"
-    if "boundary" in lower:
+    if friction_regime == "unstated" and "boundary" in lower:
         friction_regime = "boundary"
     elif "mixed" in lower:
         friction_regime = "mixed"

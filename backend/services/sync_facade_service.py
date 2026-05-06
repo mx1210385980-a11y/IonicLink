@@ -28,6 +28,7 @@ from services.fallback_extraction_service import extract_metadata_fallback
 from services.file_service import _read_file_content, _resolve_existing_path, _safe_update_doi
 from services.il_resolver_service import resolve_il
 from services.llm_service import llm_service
+from services.score_service import calculate_confidence_details
 from utils.tribopair import compose_tribopair_label, composite_roughness_label
 from utils.cof_extraction import derive_cof_extracted, normalize_cof_extracted
 from utils.experiment_profile import build_experiment_profile
@@ -43,6 +44,7 @@ from utils.structured_conditions import (
     normalize_tribological_system,
 )
 from utils.speed_conditions import derive_speed_conditions, normalize_speed_conditions
+from utils.no_data_reason import build_no_data_reason
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +120,14 @@ def _literature_to_payload(
     record_count: int | None = None,
     candidate_count: int | None = None,
 ) -> dict[str, Any]:
+    status = getattr(literature, "status", None)
+    error_message = getattr(literature, "error_message", None)
+    if str(status or "").strip().lower() == "no_data":
+        error_message = build_no_data_reason(
+            literature=literature,
+            content=getattr(literature, "content", None),
+            fallback=error_message,
+        )
     return {
         "id": literature.id,
         "doi": literature.doi or "",
@@ -134,8 +144,8 @@ def _literature_to_payload(
         "workspaceId": getattr(literature, "workspace_id", None),
         "createdByUserId": getattr(literature, "created_by_user_id", None),
         "scopeType": getattr(literature, "scope_type", None),
-        "status": getattr(literature, "status", None),
-        "errorMessage": getattr(literature, "error_message", None),
+        "status": status,
+        "errorMessage": error_message,
         "recordCount": record_count,
         "candidateCount": candidate_count,
         "hasPdf": bool(getattr(literature, "file_path", None)),
@@ -173,7 +183,7 @@ def _record_to_payload(record) -> dict[str, Any]:
     )
     if tribological_system:
         tribological_system = {**tribological_system, **experiment_profile}
-    return {
+    payload = {
         "id": record.id,
         "literatureId": record.literature_id,
         "materialName": record.material_name,
@@ -245,6 +255,15 @@ def _record_to_payload(record) -> dict[str, Any]:
         "confidence": record.confidence,
         "extractedAt": record.extracted_at,
     }
+    confidence_details = calculate_confidence_details(
+        {
+            **payload,
+            "model_confidence": getattr(record, "confidence", None),
+        }
+    )
+    payload["confidence"] = float(confidence_details.get("score") or 0.0)
+    payload["confidenceDetails"] = confidence_details
+    return payload
 
 
 async def sync_payload(
