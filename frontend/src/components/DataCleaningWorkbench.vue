@@ -136,15 +136,91 @@ const SURFACE_FEATURE_COLUMNS = [
   'Substrate_Roughness',
 ] as const
 
-const FEATURE_LABELS: Record<string, string> = {
-  gamma_s: 'γ_s 表面自由能',
-  sigma_s: 'σ_s 表面电荷密度',
-  Surface_Roughness: 'Rq 表面粗糙度',
-  theta_s: 'θ_s 接触角',
-  I_ss: 'I_ss 不锈钢指示',
-  Probe_Roughness: '探针粗糙度',
-  Substrate_Roughness: '基底粗糙度',
-  Film_Thickness: 'h 膜厚',
+type FeatureMeta = {
+  symbol: string
+  meaning: string
+}
+
+const FEATURE_META: Record<string, FeatureMeta> = {
+  gamma_s: { symbol: 'γ_s', meaning: '固体表面自由能' },
+  sigma_s: { symbol: 'σ_s', meaning: '固体表面电荷密度' },
+  Surface_Roughness: { symbol: 'Rq', meaning: '表面均方根粗糙度' },
+  theta_s: { symbol: 'θ_s', meaning: '静态接触角' },
+  I_ss: { symbol: 'I_ss', meaning: '不锈钢基底指示变量' },
+  Probe_Roughness: { symbol: 'Rq_probe', meaning: '探针粗糙度' },
+  Substrate_Roughness: { symbol: 'Rq_sub', meaning: '基底粗糙度' },
+  Temperature: { symbol: 'T', meaning: '温度' },
+  Speed: { symbol: 'velocity', meaning: '滑动速度' },
+  Load: { symbol: 'Load', meaning: '法向载荷中点' },
+  System_Total_Load: { symbol: 'Load_total', meaning: '系统总载荷' },
+  Contact_Load_Per_Unit: { symbol: 'Load_contact', meaning: '单接触点载荷' },
+  Load_Min: { symbol: 'Load_min', meaning: '载荷范围下限' },
+  Load_Max: { symbol: 'Load_max', meaning: '载荷范围上限' },
+  Load_Span: { symbol: 'Load_span', meaning: '载荷范围跨度' },
+  Load_Is_Range: { symbol: 'Load_range', meaning: '载荷是否为范围值' },
+  Potential: { symbol: 'Potential', meaning: '外加电势' },
+  Water_Content: { symbol: 'I_H2O', meaning: '含水量' },
+  IL_Additive_Mol_Fraction: { symbol: 'x_IL', meaning: '离子液体摩尔分数' },
+  Base_Oil_Mol_Fraction: { symbol: 'x_oil', meaning: '基础油摩尔分数' },
+  Film_Thickness: { symbol: 'h', meaning: '界面膜厚' },
+  Alkyl_Chain_Length: { symbol: 'n_alkyl', meaning: '烷基链长' },
+}
+
+const ION_DESCRIPTOR_MEANINGS: Record<string, string> = {
+  MolWt: '分子量',
+  HeavyAtomMolWt: '重原子分子量',
+  ExactMolWt: '精确分子量',
+  MolLogP: '亲疏水性',
+  MolMR: '摩尔折射率',
+  TPSA: '拓扑极性表面积',
+  LabuteASA: '近似溶剂可及表面积',
+  FractionCSP3: '饱和碳比例',
+  HeavyAtomCount: '重原子数',
+  NHOHCount: '羟基和胺氢数量',
+  NOCount: '氮氧原子数',
+  NumHAcceptors: '氢键受体数',
+  NumHDonors: '氢键供体数',
+  NumHeteroatoms: '杂原子数',
+  NumRotatableBonds: '可旋转键数',
+  RingCount: '环数量',
+  NumAromaticRings: '芳香环数量',
+  NumSaturatedRings: '饱和环数量',
+  NumAliphaticRings: '脂肪环数量',
+  NumAromaticHeterocycles: '芳香杂环数量',
+  NumSaturatedHeterocycles: '饱和杂环数量',
+  NumAliphaticHeterocycles: '脂肪杂环数量',
+  NumAromaticCarbocycles: '芳香碳环数量',
+  NumSaturatedCarbocycles: '饱和碳环数量',
+  NumAliphaticCarbocycles: '脂肪碳环数量',
+  HallKierAlpha: '霍尔-基尔校正项',
+  BalabanJ: '拓扑连接指数',
+  BertzCT: '拓扑复杂度',
+  Kappa1: '形状指数一阶',
+  Kappa2: '形状指数二阶',
+  Kappa3: '形状指数三阶',
+  Chi0: '价连接指数零阶',
+  Chi0n: '归一化连接指数零阶',
+  Chi0v: '价态连接指数零阶',
+  Chi1: '价连接指数一阶',
+  Chi1n: '归一化连接指数一阶',
+  Chi1v: '价态连接指数一阶',
+  Chi2n: '归一化连接指数二阶',
+  Chi2v: '价态连接指数二阶',
+  Chi3n: '归一化连接指数三阶',
+  Chi3v: '价态连接指数三阶',
+  Chi4n: '归一化连接指数四阶',
+  Chi4v: '价态连接指数四阶',
+  MaxAbsPartialCharge: '最大绝对部分电荷',
+  MaxPartialCharge: '最大部分电荷',
+  MinAbsPartialCharge: '最小绝对部分电荷',
+  MinPartialCharge: '最小部分电荷',
+  NumValenceElectrons: '价电子数',
+  NumRadicalElectrons: '自由基电子数',
+  FpDensityMorgan1: '摩根指纹密度一阶',
+  FpDensityMorgan2: '摩根指纹密度二阶',
+  FpDensityMorgan3: '摩根指纹密度三阶',
+  NumBridgeheadAtoms: '桥头原子数',
+  NumSpiroAtoms: '螺原子数',
 }
 
 type DescriptorDecision = 'keep' | 'drop' | 'reserve'
@@ -247,11 +323,33 @@ function formatPercent(value: number) {
 
 function formatCorrelation(value: number | null) {
   if (value == null) return '--'
-  return value.toFixed(3)
+  return Math.abs(value).toFixed(3)
 }
 
-function formatFeatureName(feature: string) {
-  return FEATURE_LABELS[feature] || feature
+function featureMeta(feature: string): FeatureMeta {
+  if (FEATURE_META[feature]) return FEATURE_META[feature]
+  const ionMatch = /^(Cation|Anion)_(.+)$/.exec(feature)
+  if (ionMatch) {
+    const ionSuffix = ionMatch[1] === 'Cation' ? 'cat' : 'an'
+    const ionMeaning = ionMatch[1] === 'Cation' ? '阳离子' : '阴离子'
+    const descriptor = ionMatch[2] || feature
+    return {
+      symbol: `${descriptor}_${ionSuffix}`,
+      meaning: `${ionMeaning}${ION_DESCRIPTOR_MEANINGS[descriptor] || '结构描述符'}`,
+    }
+  }
+  return {
+    symbol: feature,
+    meaning: '训练矩阵字段',
+  }
+}
+
+function formatFeatureSymbol(feature: string) {
+  return featureMeta(feature).symbol
+}
+
+function formatFeatureMeaning(feature: string) {
+  return featureMeta(feature).meaning
 }
 
 function decisionLabel(decision: DescriptorDecision) {
@@ -362,10 +460,10 @@ const descriptorScreeningRows = computed<DescriptorScreeningRow[]>(() => {
         reason = '覆盖率不足'
       } else if (isIonDescriptor(row.feature) && row.absCorrelation < descriptorCorrelationThreshold.value && row.importance <= 0) {
         decision = 'reserve'
-        reason = '目标相关性偏弱'
+        reason = '与目标的线性相关偏弱'
       } else if (representative && representative !== row.feature) {
         decision = 'drop'
-        reason = `与 ${representative} 高共线`
+        reason = `与 ${formatFeatureSymbol(representative)} 高共线`
       }
       return {
         ...row,
@@ -1101,7 +1199,7 @@ onMounted(() => {
                   <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Descriptor Screening</p>
                   <h3 class="mt-0.5 text-base font-semibold tracking-tight text-slate-950">描述符筛选</h3>
                   <p class="mt-1 text-xs leading-5 text-slate-500">
-                    按覆盖率、Pearson 相关性、随机森林重要性和共线性合并推荐训练特征。
+                    按覆盖率、Pearson |r|、随机森林重要性和共线性合并推荐训练特征；符号与含义分列展示。
                   </p>
                   <p v-if="surfaceDescriptorSource" class="mt-1 text-xs leading-5 text-slate-500">
                     表面描述符已按论文码表回填 {{ surfaceDescriptorSource.matched_rows }}/{{ surfaceDescriptorSource.input_rows }} 条:
@@ -1170,10 +1268,11 @@ onMounted(() => {
                     <table class="min-w-full text-left text-[11px]">
                       <thead class="sticky top-0 bg-white text-slate-500 shadow-sm">
                         <tr>
-                          <th class="px-3 py-2 font-semibold">特征</th>
+                          <th class="px-3 py-2 font-semibold">符号</th>
+                          <th class="px-3 py-2 font-semibold">含义</th>
                           <th class="px-3 py-2 font-semibold">类型</th>
                           <th class="px-3 py-2 font-semibold">覆盖</th>
-                          <th class="px-3 py-2 font-semibold">Pearson</th>
+                          <th class="px-3 py-2 font-semibold">|r|</th>
                           <th class="px-3 py-2 font-semibold">重要性</th>
                           <th class="px-3 py-2 font-semibold">结果</th>
                         </tr>
@@ -1184,8 +1283,11 @@ onMounted(() => {
                           :key="row.feature"
                           class="border-b border-slate-50"
                         >
-                          <td class="max-w-[13rem] truncate px-3 py-2 font-semibold text-slate-800" :title="row.feature">
-                            {{ formatFeatureName(row.feature) }}
+                          <td class="max-w-[9rem] truncate px-3 py-2 font-semibold text-slate-800" :title="row.feature">
+                            {{ formatFeatureSymbol(row.feature) }}
+                          </td>
+                          <td class="max-w-[13rem] truncate px-3 py-2 text-slate-500" :title="formatFeatureMeaning(row.feature)">
+                            {{ formatFeatureMeaning(row.feature) }}
                           </td>
                           <td class="px-3 py-2 text-slate-500">{{ row.role }}</td>
                           <td class="px-3 py-2 tabular-nums text-slate-700">{{ formatPercent(row.coverage) }}</td>
@@ -1215,8 +1317,11 @@ onMounted(() => {
                         :key="row.feature"
                         class="grid grid-cols-[minmax(0,1fr)_5rem] items-center gap-2"
                       >
-                        <span class="truncate text-[11px] font-semibold text-slate-700" :title="row.feature">{{ formatFeatureName(row.feature) }}</span>
+                        <span class="truncate text-[11px] font-semibold text-slate-700" :title="row.feature">{{ formatFeatureSymbol(row.feature) }}</span>
                         <span class="text-right text-[11px] tabular-nums text-slate-500">{{ row.importance.toFixed(4) }}</span>
+                        <p class="col-span-2 -mt-1 truncate text-[10px] text-slate-500" :title="formatFeatureMeaning(row.feature)">
+                          {{ formatFeatureMeaning(row.feature) }}
+                        </p>
                         <div class="col-span-2 h-1.5 overflow-hidden rounded-full bg-slate-200">
                           <div
                             class="h-full rounded-full bg-indigo-500"
@@ -1242,10 +1347,10 @@ onMounted(() => {
                         class="rounded-lg border border-slate-200 bg-white px-2.5 py-2"
                       >
                         <p class="truncate text-[11px] font-semibold text-slate-800" :title="group.representative">
-                          保留 {{ formatFeatureName(group.representative) }}
+                          保留 {{ formatFeatureSymbol(group.representative) }}
                         </p>
                         <p class="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-500">
-                          合并 {{ group.members.length }} 个高相关特征
+                          {{ formatFeatureMeaning(group.representative) }}；合并 {{ group.members.length }} 个高相关特征
                         </p>
                       </div>
                     </div>
