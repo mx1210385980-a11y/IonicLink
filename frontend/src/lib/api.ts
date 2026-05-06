@@ -1550,6 +1550,57 @@ export interface ModelTrainingExternalMetrics {
     sample_count: number
 }
 
+export interface ModelTrainingSplitSubsetSummary {
+    key?: string
+    label?: string
+    count: number
+    cation_count: number
+    strata_count: number
+    bin_count: number
+    target_min?: number | null
+    target_max?: number | null
+}
+
+export interface ModelTrainingSplitBinSummary {
+    bin: number
+    label: string
+    total?: number
+    train_pool?: number
+    test?: number
+    external?: number
+    count?: number
+}
+
+export interface ModelTrainingSplitStratumSummary {
+    stratum: string
+    cation: string
+    friction_bin: number
+    bin_label: string
+    total?: number
+    train_pool?: number
+    test?: number
+    external?: number
+    count?: number
+}
+
+export interface ModelTrainingSplitFoldDetail {
+    index: number
+    label: string
+    train: ModelTrainingSplitSubsetSummary
+    validation: ModelTrainingSplitSubsetSummary
+    validation_bins: ModelTrainingSplitBinSummary[]
+    validation_strata: ModelTrainingSplitStratumSummary[]
+}
+
+export interface ModelTrainingSplitDetails {
+    subsets: ModelTrainingSplitSubsetSummary[]
+    target_bins: ModelTrainingSplitBinSummary[]
+    strata: ModelTrainingSplitStratumSummary[]
+    strata_total: number
+    strata_truncated: boolean
+    folds: ModelTrainingSplitFoldDetail[]
+}
+
 export interface ModelTrainingSourceScope {
     requested_mode: string
     resolved_scope_key: string
@@ -1660,11 +1711,13 @@ export interface ModelTrainingDatasetSummary {
         train_pool_size?: number
         test_size?: number
         external_size?: number
+        target_bin_edges?: number[]
         target_bin_count?: number
         strata_count?: number
         singleton_strata?: number
         cation_count?: number
         missing_cation_count?: number
+        details?: ModelTrainingSplitDetails | null
     }
 }
 
@@ -1709,11 +1762,13 @@ export interface ModelTrainingTaskSnapshot {
             train_pool_size?: number
             test_size?: number
             external_size?: number
+            target_bin_edges?: number[]
             target_bin_count?: number
             strata_count?: number
             singleton_strata?: number
             cation_count?: number
             missing_cation_count?: number
+            details?: ModelTrainingSplitDetails | null
         }
         source_scope?: ModelTrainingSourceScope
         target_column?: string

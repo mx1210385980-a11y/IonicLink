@@ -80,6 +80,13 @@ const socketRef = ref<WebSocket | null>(null)
 const completedTaskIds = new Set<string>()
 const showAdvanced = ref(false)
 const HIDDEN_ALGORITHMS = new Set(['mlp'])
+const splitDetailTab = ref<'subsets' | 'bins' | 'folds'>('subsets')
+const activeFoldIndex = ref(0)
+const splitDetailTabs: Array<{ key: 'subsets' | 'bins' | 'folds'; label: string }> = [
+  { key: 'subsets', label: '总体' },
+  { key: 'bins', label: 'μ 分箱' },
+  { key: 'folds', label: '折次' },
+]
 
 // 全算法对比模式
 const compareMode = ref(false)
@@ -230,6 +237,17 @@ const externalMetrics = computed(() => insights.value?.external_metrics || null)
 const featureImportances = computed(() => (insights.value?.feature_importance || []).slice(0, 10))
 const testMetrics = computed(() => activeTask.value?.test_metrics || null)
 const datasetSplit = computed(() => activeTask.value?.dataset?.split || summary.value?.dataset?.split || null)
+const splitDetails = computed(() => datasetSplit.value?.details || null)
+const splitSubsets = computed(() => splitDetails.value?.subsets || [])
+const splitBins = computed(() => splitDetails.value?.target_bins || [])
+const splitStrataPreview = computed(() => splitDetails.value?.strata?.slice(0, 8) || [])
+const splitFolds = computed(() => splitDetails.value?.folds || [])
+const selectedFold = computed(() => {
+  const folds = splitFolds.value
+  if (!folds.length) return null
+  return folds[Math.min(activeFoldIndex.value, folds.length - 1)]
+})
+const maxSplitBinTotal = computed(() => Math.max(1, ...splitBins.value.map((bin) => Number(bin.total || bin.count || 0))))
 
 const allScatterSamples = computed(() => [
   ...predictionSamples.value,
@@ -661,6 +679,34 @@ function formatDateTime(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString() : '--'
 }
 
+function sampleSourceLabel(source: DiagSample['source']) {
+  if (source === 'test') return '测试'
+  if (source === 'external') return '外部'
+  return '验证'
+}
+
+function sampleSourceBadgeClass(source: DiagSample['source']) {
+  if (source === 'test') return 'bg-[#fff5f6] text-[#cf334f]'
+  if (source === 'external') return 'bg-[#fff7ed] text-[#c2410c]'
+  return 'bg-[#f5f7ff] text-[#5b56ea]'
+}
+
+function formatTargetRange(minValue: number | null | undefined, maxValue: number | null | undefined) {
+  if (minValue == null || maxValue == null) return 'μ --'
+  return `μ ${formatMetric(minValue, 3)}-${formatMetric(maxValue, 3)}`
+}
+
+function splitSubsetTone(key: string | null | undefined) {
+  if (key === 'test') return 'text-[#cf334f]'
+  if (key === 'external') return 'text-[#c2410c]'
+  return 'text-[#5b56ea]'
+}
+
+function splitBinWidth(count: number | null | undefined) {
+  const value = Math.max(0, Number(count || 0))
+  return `${Math.max(3, (value / maxSplitBinTotal.value) * 100)}%`
+}
+
 function targetDisplayLabel(value: string | null | undefined) {
   const normalized = String(value || '').trim().toLowerCase().replace(/[μµ]/g, 'mu').replace(/[^a-z0-9]+/g, '')
   if (['mu', 'cof', 'targetcof', 'targetmu', 'frictioncoefficient', 'coefficientoffriction'].includes(normalized)) {
@@ -937,6 +983,13 @@ watch(
     }
   },
   { immediate: true },
+)
+
+watch(
+  () => splitFolds.value.length,
+  (length) => {
+    if (!length || activeFoldIndex.value >= length) activeFoldIndex.value = 0
+  },
 )
 </script>
 
@@ -1380,6 +1433,146 @@ watch(
             >
               外部文献验证 RMSE {{ formatMetric(externalMetrics.external_rmse, 3) }} · MAE {{ formatMetric(externalMetrics.external_mae, 3) }} · {{ externalMetrics.sample_count }} 行
             </p>
+
+            <div v-if="splitDetails" class="mt-3 border-t border-[#e2e8f0] pt-3">
+              <div class="mb-3 inline-flex rounded-[0.65rem] bg-white p-1 ring-1 ring-[#e2e8f0]">
+                <button
+                  v-for="tab in splitDetailTabs"
+                  :key="tab.key"
+                  type="button"
+                  class="rounded-[0.5rem] px-3 py-1.5 text-[11px] font-semibold transition"
+                  :class="splitDetailTab === tab.key ? 'bg-[#5b56ea] text-white shadow-sm' : 'text-slate-500 hover:text-slate-900'"
+                  @click="splitDetailTab = tab.key"
+                >
+                  {{ tab.label }}
+                </button>
+              </div>
+
+              <div v-if="splitDetailTab === 'subsets'" class="space-y-3">
+                <div class="grid gap-3 sm:grid-cols-3">
+                  <div
+                    v-for="subset in splitSubsets"
+                    :key="subset.key || subset.label"
+                    class="min-w-0 border-l-2 pl-3"
+                    :class="subset.key === 'test' ? 'border-[#cf334f]' : subset.key === 'external' ? 'border-[#f97316]' : 'border-[#5b56ea]'"
+                  >
+                    <p class="text-[10px] font-bold uppercase tracking-[0.14em]" :class="splitSubsetTone(subset.key)">
+                      {{ subset.label }}
+                    </p>
+                    <p class="mt-0.5 text-lg font-semibold text-slate-950 tabular-nums">{{ formatNumber(subset.count) }}</p>
+                    <p class="mt-0.5 text-[11px] leading-4 text-slate-500">
+                      {{ subset.cation_count }} 类阳离子 · {{ subset.strata_count }} 个联合标签
+                    </p>
+                    <p class="text-[11px] text-slate-400 tabular-nums">
+                      {{ formatTargetRange(subset.target_min, subset.target_max) }}
+                    </p>
+                  </div>
+                </div>
+
+                <div v-if="splitStrataPreview.length" class="border-t border-[#eef2f6] pt-2">
+                  <div class="mb-1.5 flex items-center justify-between gap-2 text-[11px] font-semibold text-slate-500">
+                    <span>联合标签预览</span>
+                    <span>{{ splitDetails.strata_total }} 组<template v-if="splitDetails.strata_truncated">，仅显示前 120 组</template></span>
+                  </div>
+                  <div class="grid gap-x-3 gap-y-1.5 text-[11px] sm:grid-cols-2">
+                    <div
+                      v-for="stratum in splitStrataPreview"
+                      :key="stratum.stratum"
+                      class="flex min-w-0 items-center gap-2"
+                    >
+                      <span class="min-w-0 flex-1 truncate font-medium text-slate-700">{{ stratum.cation }}</span>
+                      <span class="shrink-0 text-slate-400">{{ stratum.bin_label }}</span>
+                      <span class="shrink-0 tabular-nums text-slate-500">
+                        训 {{ stratum.train_pool || 0 }} / 测 {{ stratum.test || 0 }} / 外 {{ stratum.external || 0 }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div v-else-if="splitDetailTab === 'bins'" class="space-y-2">
+                <div
+                  v-for="bin in splitBins"
+                  :key="bin.bin"
+                  class="grid gap-2 border-b border-[#eef2f6] pb-2 text-xs last:border-b-0 last:pb-0 sm:grid-cols-[8rem_minmax(0,1fr)_10rem]"
+                >
+                  <div>
+                    <p class="font-semibold text-slate-900">{{ bin.label }}</p>
+                    <p class="text-[11px] text-slate-400">bin {{ bin.bin }}</p>
+                  </div>
+                  <div class="min-w-0">
+                    <div class="mt-1 h-2 overflow-hidden rounded-full bg-[#e2e8f0]">
+                      <div class="h-full rounded-full bg-[#5b56ea]" :style="{ width: splitBinWidth(bin.total || bin.count) }" />
+                    </div>
+                    <p class="mt-1 text-[11px] text-slate-500">
+                      训练池 {{ bin.train_pool || 0 }} · 测试 {{ bin.test || 0 }} · 外部 {{ bin.external || 0 }}
+                    </p>
+                  </div>
+                  <p class="self-center text-right text-sm font-semibold text-slate-950 tabular-nums">
+                    {{ formatNumber(bin.total || bin.count) }} 行
+                  </p>
+                </div>
+              </div>
+
+              <div v-else class="space-y-3">
+                <div class="flex flex-wrap gap-1.5">
+                  <button
+                    v-for="(fold, idx) in splitFolds"
+                    :key="fold.label"
+                    type="button"
+                    class="rounded-full px-2.5 py-1 text-[11px] font-semibold transition"
+                    :class="activeFoldIndex === idx ? 'bg-[#5b56ea] text-white' : 'bg-white text-slate-500 ring-1 ring-[#e2e8f0] hover:text-slate-900'"
+                    @click="activeFoldIndex = idx"
+                  >
+                    {{ fold.label }}
+                  </button>
+                </div>
+
+                <div v-if="selectedFold" class="grid gap-3 md:grid-cols-[13rem_minmax(0,1fr)]">
+                  <div class="space-y-2 text-xs">
+                    <div>
+                      <p class="text-[10px] font-bold uppercase tracking-[0.14em] text-[#5b56ea]">训练折</p>
+                      <p class="mt-0.5 text-base font-semibold text-slate-950">{{ formatNumber(selectedFold.train.count) }} 行</p>
+                      <p class="text-[11px] text-slate-500">{{ selectedFold.train.cation_count }} 类阳离子 · {{ selectedFold.train.strata_count }} 标签</p>
+                    </div>
+                    <div class="border-t border-[#eef2f6] pt-2">
+                      <p class="text-[10px] font-bold uppercase tracking-[0.14em] text-[#0f766e]">验证折</p>
+                      <p class="mt-0.5 text-base font-semibold text-slate-950">{{ formatNumber(selectedFold.validation.count) }} 行</p>
+                      <p class="text-[11px] text-slate-500">{{ selectedFold.validation.cation_count }} 类阳离子 · {{ selectedFold.validation.strata_count }} 标签</p>
+                    </div>
+                  </div>
+
+                  <div class="min-w-0 space-y-2">
+                    <div>
+                      <p class="mb-1 text-[11px] font-semibold text-slate-500">验证折 μ 覆盖</p>
+                      <div class="flex flex-wrap gap-1.5">
+                        <span
+                          v-for="bin in selectedFold.validation_bins"
+                          :key="`${selectedFold.label}-${bin.bin}`"
+                          class="rounded-full bg-white px-2 py-1 text-[11px] font-medium text-slate-600 ring-1 ring-[#e2e8f0]"
+                        >
+                          {{ bin.label }} · {{ bin.count }} 行
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <p class="mb-1 text-[11px] font-semibold text-slate-500">验证折联合标签</p>
+                      <div class="grid gap-x-3 gap-y-1 text-[11px] sm:grid-cols-2">
+                        <div
+                          v-for="stratum in selectedFold.validation_strata"
+                          :key="`${selectedFold.label}-${stratum.stratum}`"
+                          class="flex min-w-0 items-center gap-2"
+                        >
+                          <span class="min-w-0 flex-1 truncate font-medium text-slate-700">{{ stratum.cation }}</span>
+                          <span class="shrink-0 text-slate-400">{{ stratum.bin_label }}</span>
+                          <span class="shrink-0 font-semibold text-slate-900 tabular-nums">{{ stratum.count }} 行</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </section>
 
           <!-- 运行警告 -->
@@ -1609,16 +1802,19 @@ watch(
                   <span class="inline-flex items-center gap-1 ml-1">
                     <span class="inline-block h-2 w-2 rotate-45 bg-[#ef4444]" />红色=测试集（隔离）
                   </span>
+                  <span class="inline-flex items-center gap-1 ml-1">
+                    <span class="inline-block h-0 w-0 border-x-[5px] border-b-[8px] border-x-transparent border-b-[#f59e0b]" />橙色=外部验证
+                  </span>
                 </p>
               </div>
               <span v-if="allScatterSamples.length" class="text-[10px] text-slate-400 tabular-nums">
-                验证 {{ predictionSamples.length }} · 测试 {{ testSamples.length }}
+                验证 {{ predictionSamples.length }} · 测试 {{ testSamples.length }} · 外部 {{ externalSamples.length }}
               </span>
             </div>
             <div class="h-[300px]">
               <div v-if="!allScatterSamples.length" class="flex h-full flex-col items-center justify-center gap-1 rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] text-center text-xs text-slate-500">
                 <p>训练完成后在此显示散点图</p>
-                <p class="text-slate-400">紫色 = 验证集 K 折预测，红色 = 测试集真实考卷</p>
+                <p class="text-slate-400">紫色 = 验证集 K 折预测，红色 = 测试集，橙色 = 外部验证</p>
               </div>
               <Line v-else :data="predictionScatterData" :options="predictionScatterOptions" />
             </div>
@@ -1656,9 +1852,9 @@ watch(
                 </span>
                 <span
                   class="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
-                  :class="sample.source === 'test' ? 'bg-[#fff5f6] text-[#cf334f]' : 'bg-[#f5f7ff] text-[#5b56ea]'"
+                  :class="sampleSourceBadgeClass(sample.source)"
                 >
-                  {{ sample.source === 'test' ? '测试' : '验证' }}
+                  {{ sampleSourceLabel(sample.source) }}
                 </span>
                 <span class="shrink-0 text-[10px] text-slate-400">
                   <template v-if="sample.literatureId != null">文献#{{ sample.literatureId }}</template>

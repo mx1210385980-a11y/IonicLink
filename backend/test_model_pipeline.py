@@ -235,13 +235,15 @@ def test_prediction_insights_skip_none_predictions() -> None:
     insights = service._build_prediction_insights(
         [
             {"row_index": 0, "record_id": 11, "literature_id": 3, "confidence": 0.9, "actual": 0.12},
-            {"row_index": 1, "record_id": 12, "literature_id": 3, "confidence": 0.8, "actual": 0.18},
+            {"row_index": 1, "record_id": 12, "literature_id": 3, "confidence": 0.8, "actual": 0.18, "cation": "emi", "friction_bin": 2, "joint_stratum": "emi|mu_bin_2"},
         ],
         np.array([None, 0.21], dtype=object),
     )
 
     assert len(insights["prediction_samples"]) == 1
     assert insights["prediction_samples"][0]["record_id"] == 12
+    assert insights["prediction_samples"][0]["cation"] == "emi"
+    assert insights["prediction_samples"][0]["friction_bin"] == 2
     assert insights["largest_residuals"][0]["predicted"] == 0.21
 
 
@@ -449,6 +451,7 @@ def test_training_service_prepares_joint_stratified_thesis_split() -> None:
         metadata,
     )
     split_plan = service._build_split_plan(prepared)
+    split_details = service._build_split_details(prepared, split_plan)
 
     assert prepared["dataset"]["split"]["strategy"] == "joint_stratified"
     assert prepared["dataset"]["split"]["strata_count"] >= 8
@@ -456,8 +459,75 @@ def test_training_service_prepares_joint_stratified_thesis_split() -> None:
     assert prepared["dataset"]["test_size"] > 0
     assert prepared["dataset"]["pool_size"] > 0
     assert len(split_plan) >= 2
+    assert split_details is not None
+    assert split_details["subsets"][0]["key"] == "train_pool"
+    assert split_details["target_bins"]
+    assert split_details["folds"][0]["validation"]["count"] > 0
+    assert split_details["folds"][0]["validation_strata"]
     assert set(prepared["external_idx"].tolist()).isdisjoint(set(prepared["train_pool_idx"].tolist()))
     assert set(prepared["external_idx"].tolist()).isdisjoint(set(prepared["test_idx"].tolist()))
+
+
+@pytest.mark.anyio
+async def test_training_service_returns_heldout_prediction_samples(monkeypatch) -> None:
+    rows = []
+    for index in range(40):
+        rows.append({
+            "Target_COF": 0.08 + index * 0.003,
+            "Temperature": 25.0 + index,
+            "Speed": 0.11 + index * 0.01,
+            "PCA_1": 1.5 + index * 0.05,
+            "__literature_id": 1 + (index % 5),
+            "__record_id": index + 1,
+            "__confidence": 0.9,
+        })
+
+    metadata = {
+        "summary": {
+            "rules": {
+                "drop_missing_target": True,
+                "require_dual_smiles": True,
+            },
+        },
+        "source_scope": {
+            "requested_mode": "workspace",
+            "resolved_scope_key": "workspace:1",
+            "resolved_scope_type": "workspace",
+            "label": "Current workspace",
+            "used_fallback": False,
+        },
+        "target": {"key": "cof", "label": "Coefficient of Friction (COF)"},
+        "target_column": "Target_COF",
+        "feature_columns": ["Temperature", "Speed", "PCA_1"],
+        "matrix_columns": ["Target_COF", "Temperature", "Speed", "PCA_1"],
+        "pca_info": None,
+    }
+
+    service = ModelTrainingService()
+    task = model_training_service_module.TrainingTaskState(
+        run_record_id=None,
+        task_id="heldout-samples-task",
+        owner_user_id=1,
+        group_id=1,
+        scope_key="workspace:1",
+        config={
+            "algorithm": "linear_regression",
+            "hyperparameters": {"n_estimators": 20, "learning_rate": 0.06, "max_depth": 3},
+            "data_options": {"validation_split": 0.2, "random_seed": 42, "max_records": None, "split_strategy": "random_holdout", "cv_folds": 5},
+        },
+    )
+
+    async def fake_sleep(_seconds: float):
+        return None
+
+    monkeypatch.setattr(model_training_service_module.asyncio, "sleep", fake_sleep)
+
+    await service._run_training(task, rows, metadata["source_scope"], metadata)
+
+    assert task.status == "completed"
+    assert task.test_metrics is not None
+    assert len(task.insights["test_samples"]) == task.test_metrics["sample_count"]
+    assert all(sample["record_id"] for sample in task.insights["test_samples"])
 
 
 def test_parse_water_content_ppm_treats_il_prefix_as_label_not_negative_sign() -> None:

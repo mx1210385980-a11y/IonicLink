@@ -1805,6 +1805,18 @@ class ModelTrainingService:
             "singleton_strata": singleton_strata,
         }
 
+    def _format_target_bin_label(self, bin_index: int | None, edges: list[float]) -> str:
+        if bin_index is None:
+            return "未分箱"
+        if not edges:
+            return "全部 μ"
+        index = int(bin_index)
+        if index <= 0:
+            return f"μ ≤ {edges[0]:.3f}"
+        if index >= len(edges):
+            return f"μ > {edges[-1]:.3f}"
+        return f"{edges[index - 1]:.3f} < μ ≤ {edges[index]:.3f}"
+
     def _joint_stratified_holdout_indices(
         self,
         labels: np.ndarray,
@@ -2151,6 +2163,187 @@ class ModelTrainingService:
             for fold_index, (train_rel, val_rel) in enumerate(splitter.split(X[pool_idx], y[pool_idx], pool_groups), start=1)
         ]
 
+    def _split_distribution_summary(
+        self,
+        row_metadata: list[dict[str, Any]],
+        indices: np.ndarray,
+        *,
+        label: str | None = None,
+        key: str | None = None,
+    ) -> dict[str, Any]:
+        entries = [row_metadata[int(index)] for index in indices.tolist() if int(index) < len(row_metadata)]
+        actuals = [
+            float(entry["actual"])
+            for entry in entries
+            if _safe_float(entry.get("actual")) is not None
+        ]
+        cations = {
+            str(entry.get("cation") or "unknown")
+            for entry in entries
+        }
+        strata = {
+            str(entry.get("joint_stratum") or "")
+            for entry in entries
+            if entry.get("joint_stratum")
+        }
+        bins = {
+            int(entry["friction_bin"])
+            for entry in entries
+            if entry.get("friction_bin") is not None
+        }
+        summary: dict[str, Any] = {
+            "count": int(len(entries)),
+            "cation_count": int(len(cations)),
+            "strata_count": int(len(strata)),
+            "bin_count": int(len(bins)),
+            "target_min": round(min(actuals), 6) if actuals else None,
+            "target_max": round(max(actuals), 6) if actuals else None,
+        }
+        if key is not None:
+            summary["key"] = key
+        if label is not None:
+            summary["label"] = label
+        return summary
+
+    def _build_split_details(self, prepared: dict[str, Any], split_plan: list[dict[str, Any]]) -> dict[str, Any] | None:
+        if prepared.get("split_strategy") != "joint_stratified":
+            return None
+
+        row_metadata: list[dict[str, Any]] = prepared.get("row_metadata") or []
+        if not row_metadata:
+            return None
+
+        split_payload = (prepared.get("dataset") or {}).get("split") or {}
+        target_edges = [float(edge) for edge in split_payload.get("target_bin_edges") or []]
+        def prepared_indices(key: str) -> np.ndarray:
+            value = prepared.get(key)
+            if value is None:
+                return np.array([], dtype=int)
+            return np.asarray(value, dtype=int)
+
+        subset_defs = [
+            ("train_pool", "训练池", prepared_indices("train_pool_idx")),
+            ("test", "测试集", prepared_indices("test_idx")),
+            ("external", "外部验证", prepared_indices("external_idx")),
+        ]
+
+        subset_lookup: dict[int, str] = {}
+        for subset_key, _label, indices in subset_defs:
+            for index in indices.tolist():
+                subset_lookup[int(index)] = subset_key
+
+        def zero_counts() -> dict[str, int]:
+            return {"total": 0, "train_pool": 0, "test": 0, "external": 0}
+
+        bin_map: dict[int, dict[str, Any]] = {}
+        stratum_map: dict[str, dict[str, Any]] = {}
+        for absolute_index, meta in enumerate(row_metadata):
+            subset_key = subset_lookup.get(absolute_index)
+            if subset_key is None:
+                continue
+            bin_index = int(meta.get("friction_bin") or 0)
+            bin_entry = bin_map.setdefault(
+                bin_index,
+                {
+                    "bin": bin_index,
+                    "label": self._format_target_bin_label(bin_index, target_edges),
+                    **zero_counts(),
+                },
+            )
+            bin_entry["total"] += 1
+            bin_entry[subset_key] += 1
+
+            cation = str(meta.get("cation") or "unknown")
+            stratum = str(meta.get("joint_stratum") or f"{cation}|mu_bin_{bin_index}")
+            stratum_entry = stratum_map.setdefault(
+                stratum,
+                {
+                    "stratum": stratum,
+                    "cation": cation,
+                    "friction_bin": bin_index,
+                    "bin_label": self._format_target_bin_label(bin_index, target_edges),
+                    **zero_counts(),
+                },
+            )
+            stratum_entry["total"] += 1
+            stratum_entry[subset_key] += 1
+
+        def validation_strata(indices: np.ndarray, limit: int = 12) -> list[dict[str, Any]]:
+            counts: dict[str, dict[str, Any]] = {}
+            for absolute_index in indices.tolist():
+                if int(absolute_index) >= len(row_metadata):
+                    continue
+                meta = row_metadata[int(absolute_index)]
+                bin_index = int(meta.get("friction_bin") or 0)
+                cation = str(meta.get("cation") or "unknown")
+                stratum = str(meta.get("joint_stratum") or f"{cation}|mu_bin_{bin_index}")
+                entry = counts.setdefault(
+                    stratum,
+                    {
+                        "stratum": stratum,
+                        "cation": cation,
+                        "friction_bin": bin_index,
+                        "bin_label": self._format_target_bin_label(bin_index, target_edges),
+                        "count": 0,
+                    },
+                )
+                entry["count"] += 1
+            return sorted(
+                counts.values(),
+                key=lambda item: (-int(item["count"]), int(item["friction_bin"]), str(item["cation"])),
+            )[:limit]
+
+        def validation_bins(indices: np.ndarray) -> list[dict[str, Any]]:
+            counts: dict[int, int] = {}
+            for absolute_index in indices.tolist():
+                if int(absolute_index) >= len(row_metadata):
+                    continue
+                meta = row_metadata[int(absolute_index)]
+                bin_index = int(meta.get("friction_bin") or 0)
+                counts[bin_index] = counts.get(bin_index, 0) + 1
+            return [
+                {
+                    "bin": bin_index,
+                    "label": self._format_target_bin_label(bin_index, target_edges),
+                    "count": count,
+                }
+                for bin_index, count in sorted(counts.items(), key=lambda item: item[0])
+            ]
+
+        folds = []
+        for index, split in enumerate(split_plan, start=1):
+            train_idx = np.asarray(split.get("train_idx") if split.get("train_idx") is not None else np.array([], dtype=int), dtype=int)
+            val_idx = np.asarray(split.get("val_idx") if split.get("val_idx") is not None else np.array([], dtype=int), dtype=int)
+            folds.append(
+                {
+                    "index": index,
+                    "label": split.get("label") or f"Fold {index}",
+                    "train": self._split_distribution_summary(row_metadata, train_idx),
+                    "validation": self._split_distribution_summary(row_metadata, val_idx),
+                    "validation_bins": validation_bins(val_idx),
+                    "validation_strata": validation_strata(val_idx),
+                }
+            )
+
+        strata = sorted(
+            stratum_map.values(),
+            key=lambda item: (int(item["friction_bin"]), str(item["cation"])),
+        )
+        return {
+            "subsets": [
+                self._split_distribution_summary(row_metadata, indices, key=key, label=label)
+                for key, label, indices in subset_defs
+            ],
+            "target_bins": [
+                bin_map[bin_index]
+                for bin_index in sorted(bin_map)
+            ],
+            "strata": strata[:120],
+            "strata_total": len(strata),
+            "strata_truncated": len(strata) > 120,
+            "folds": folds,
+        }
+
     def _build_feature_importance(self, model: Any, feature_columns: list[str]) -> list[dict[str, Any]]:
         raw_values: list[float] | None = None
         importance_attr = getattr(model, "feature_importances_", None)
@@ -2197,6 +2390,9 @@ class ModelTrainingService:
                     "record_id": meta.get("record_id"),
                     "literature_id": meta.get("literature_id"),
                     "confidence": meta.get("confidence"),
+                    "cation": meta.get("cation"),
+                    "friction_bin": meta.get("friction_bin"),
+                    "joint_stratum": meta.get("joint_stratum"),
                     "experiment_scale": meta.get("experiment_scale"),
                     "experiment_method": meta.get("experiment_method"),
                     "measurement_type": meta.get("measurement_type"),
@@ -2438,6 +2634,9 @@ class ModelTrainingService:
             split_plan = self._build_split_plan(prepared)
             if not split_plan:
                 raise ValueError("The selected training configuration did not produce any validation splits.")
+            split_details = self._build_split_details(prepared, split_plan)
+            if split_details:
+                prepared["dataset"].setdefault("split", {})["details"] = split_details
 
             task.dataset = {**prepared["dataset"], "source_scope": source_scope}
             task.feature_blocks = prepared["feature_blocks"]
@@ -2599,7 +2798,7 @@ class ModelTrainingService:
                         if actual is None or pred is None:
                             continue
                         residual = pred - actual
-                        test_samples.append(
+                        samples.append(
                             {
                                 "row_index": meta.get("row_index", absolute_index),
                                 "record_id": meta.get("record_id"),
