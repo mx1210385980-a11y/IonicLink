@@ -243,6 +243,26 @@ const externalSamples = computed(() => insights.value?.external_samples || [])
 const externalMetrics = computed(() => insights.value?.external_metrics || null)
 const featureImportances = computed(() => (insights.value?.feature_importance || []).slice(0, 10))
 const testMetrics = computed(() => activeTask.value?.test_metrics || null)
+const experimentReport = computed(() => insights.value?.experiment_report || null)
+const reportMetrics = computed(() => {
+  const metrics = experimentReport.value?.metrics
+  if (!metrics) return []
+  return [
+    { key: 'training', label: '训练集', tone: 'text-[#7c3aed]', metric: metrics.training },
+    { key: 'validation', label: '验证集', tone: 'text-[#0f766e]', metric: metrics.validation },
+    { key: 'test', label: '测试集', tone: 'text-[#cf334f]', metric: metrics.test || null },
+    { key: 'external', label: '外部验证', tone: 'text-[#c2410c]', metric: metrics.external || null },
+  ]
+})
+const reportRisks = computed(() => experimentReport.value?.risks || [])
+const reportFeatureTop = computed(() => experimentReport.value?.feature_importance_top?.slice(0, 6) || [])
+const reportResidualTop = computed(() => experimentReport.value?.residual_top?.slice(0, 6) || [])
+const reportFoldPreview = computed(() => experimentReport.value?.split?.folds?.slice(0, 5) || [])
+const reportHyperparameterEntries = computed(() => Object.entries(experimentReport.value?.hyperparameters || {}).slice(0, 6).map(([key, value]) => ({
+  key,
+  value: Array.isArray(value) ? `[${value.join(', ')}]` : String(value),
+})))
+const maxReportFeatureImportance = computed(() => Math.max(1e-9, ...reportFeatureTop.value.map((entry) => Number(entry.importance || 0))))
 const datasetSplit = computed(() => activeTask.value?.dataset?.split || summary.value?.dataset?.split || null)
 const splitDetails = computed(() => datasetSplit.value?.details || null)
 const splitSubsets = computed(() => splitDetails.value?.subsets || [])
@@ -744,6 +764,23 @@ function splitSubsetTone(key: string | null | undefined) {
 function splitBinWidth(count: number | null | undefined) {
   const value = Math.max(0, Number(count || 0))
   return `${Math.max(3, (value / maxSplitBinTotal.value) * 100)}%`
+}
+
+function reportFeatureWidth(value: number | null | undefined) {
+  const numeric = Math.max(0, Number(value || 0))
+  return `${Math.max(4, (numeric / maxReportFeatureImportance.value) * 100)}%`
+}
+
+function riskSeverityLabel(severity: string | null | undefined) {
+  if (severity === 'high') return '高风险'
+  if (severity === 'medium') return '需关注'
+  return '提示'
+}
+
+function riskSeverityClass(severity: string | null | undefined) {
+  if (severity === 'high') return 'border-[#ffd4da] bg-[#fff5f6] text-[#cf334f]'
+  if (severity === 'medium') return 'border-[#ffe4b5] bg-[#fffaf0] text-[#a16207]'
+  return 'border-[#dbeafe] bg-[#f0f7ff] text-[#2563eb]'
 }
 
 function targetDisplayLabel(value: string | null | undefined) {
@@ -1693,6 +1730,170 @@ watch(
             <p class="mt-1.5 text-xs leading-5 text-[#9f1239]">
               {{ negativeR2Diagnostic.message }}
             </p>
+          </section>
+
+          <section
+            v-if="experimentReport && activeTask?.status === 'completed'"
+            class="rounded-[1rem] border border-[#dbe4f2] bg-white p-4 shadow-[0_16px_40px_-32px_rgba(15,23,42,0.28)]"
+          >
+            <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#5b56ea]">
+                  <ClipboardCheck class="h-3.5 w-3.5" />
+                  训练后实验报告
+                </p>
+                <h3 class="mt-1 text-lg font-semibold tracking-[-0.03em] text-slate-950">
+                  {{ algorithmLabelZh(experimentReport.algorithm) }} · {{ targetDisplayLabel(experimentReport.target?.label || experimentReport.target?.column) }}
+                </h3>
+                <p class="mt-1 text-xs leading-5 text-slate-500">
+                  生成时间 {{ formatDateTime(experimentReport.generated_at) }} · seed {{ experimentReport.split.random_seed }} · {{ experimentReport.split.label || datasetSplit?.label || '数据划分' }}
+                </p>
+              </div>
+              <div class="flex flex-wrap gap-1.5 text-[11px] font-semibold text-slate-600">
+                <span class="rounded-full bg-[#fbfcff] px-2.5 py-1 ring-1 ring-[#e2e8f0]">
+                  训练池 {{ formatNumber(experimentReport.split.train_pool_size) }}
+                </span>
+                <span class="rounded-full bg-[#fbfcff] px-2.5 py-1 ring-1 ring-[#e2e8f0]">
+                  测试 {{ formatNumber(experimentReport.split.test_size) }}
+                </span>
+                <span class="rounded-full bg-[#fbfcff] px-2.5 py-1 ring-1 ring-[#e2e8f0]">
+                  外部 {{ formatNumber(experimentReport.split.external_size) }}
+                </span>
+                <span v-if="experimentReport.split.cv_folds" class="rounded-full bg-[#fbfcff] px-2.5 py-1 ring-1 ring-[#e2e8f0]">
+                  {{ experimentReport.split.cv_folds }} 折 CV
+                </span>
+              </div>
+            </div>
+
+            <div class="grid gap-2.5 md:grid-cols-4">
+              <div
+                v-for="item in reportMetrics"
+                :key="item.key"
+                class="rounded-[0.85rem] border border-[#eef2f6] bg-[#fbfcff] px-3 py-3"
+              >
+                <p class="text-[10px] font-bold uppercase tracking-[0.16em]" :class="item.tone">{{ item.label }}</p>
+                <p class="mt-1 text-xl font-semibold tracking-[-0.04em] text-slate-950 tabular-nums">
+                  R² {{ item.metric ? formatMetric(item.metric.r2, 3) : '--' }}
+                </p>
+                <p class="mt-1 text-[11px] leading-5 text-slate-500 tabular-nums">
+                  RMSE {{ item.metric ? formatMetric(item.metric.rmse, 3) : '--' }} · MAE {{ item.metric ? formatMetric(item.metric.mae, 3) : '--' }}
+                </p>
+                <p class="text-[11px] text-slate-400 tabular-nums">
+                  {{ item.metric ? formatNumber(item.metric.sample_count) : '--' }} 行
+                </p>
+              </div>
+            </div>
+
+            <div
+              v-if="reportRisks.length"
+              class="mt-3 grid gap-2 lg:grid-cols-2"
+            >
+              <div
+                v-for="risk in reportRisks"
+                :key="`${risk.severity}-${risk.title}`"
+                class="rounded-[0.75rem] border px-3 py-2"
+                :class="riskSeverityClass(risk.severity)"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <p class="text-xs font-semibold">{{ risk.title }}</p>
+                  <span class="shrink-0 rounded-full bg-white/70 px-2 py-0.5 text-[10px] font-semibold">{{ riskSeverityLabel(risk.severity) }}</span>
+                </div>
+                <p class="mt-1 text-[11px] leading-5 opacity-85">{{ risk.message }}</p>
+              </div>
+            </div>
+
+            <div class="mt-4 grid gap-3 xl:grid-cols-3">
+              <div class="rounded-[0.9rem] border border-[#eef2f6] bg-white p-3">
+                <div class="mb-2 flex items-center justify-between gap-2">
+                  <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">特征重要性 Top</p>
+                  <span class="text-[10px] text-slate-400">{{ reportFeatureTop.length }} 个</span>
+                </div>
+                <div v-if="!reportFeatureTop.length" class="rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] px-3 py-5 text-center text-xs text-slate-500">
+                  当前算法未提供特征重要性。
+                </div>
+                <div v-else class="space-y-2">
+                  <div v-for="entry in reportFeatureTop" :key="entry.feature">
+                    <div class="mb-1 flex items-center justify-between gap-2 text-[11px]">
+                      <span class="min-w-0 truncate font-semibold text-slate-700">{{ formatColumnLabel(entry.feature) }}</span>
+                      <span class="shrink-0 text-slate-400 tabular-nums">{{ formatMetric(entry.importance, 4) }}</span>
+                    </div>
+                    <div class="h-1.5 overflow-hidden rounded-full bg-[#e2e8f0]">
+                      <div class="h-full rounded-full bg-[#5b56ea]" :style="{ width: reportFeatureWidth(entry.importance) }" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="rounded-[0.9rem] border border-[#eef2f6] bg-white p-3">
+                <div class="mb-2 flex items-center justify-between gap-2">
+                  <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">残差最大样本</p>
+                  <span class="text-[10px] text-slate-400">{{ reportResidualTop.length }} 条</span>
+                </div>
+                <div v-if="!reportResidualTop.length" class="rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] px-3 py-5 text-center text-xs text-slate-500">
+                  暂无残差样本。
+                </div>
+                <div v-else class="space-y-1.5">
+                  <button
+                    v-for="(sample, idx) in reportResidualTop"
+                    :key="`${sample.source}-${sample.row_index}-${idx}`"
+                    type="button"
+                    class="flex w-full items-center gap-2 rounded-[0.6rem] border border-[#eef2f6] bg-[#fbfcff] px-2.5 py-2 text-left text-[11px] transition hover:border-[#aebdfc] hover:bg-[#f8faff]"
+                    @click="handleInspectRecord({
+                      source: sample.source,
+                      recordId: nullableNumber(sample.record_id),
+                      literatureId: nullableNumber(sample.literature_id),
+                      rowIndex: nullableNumber(sample.row_index),
+                      actual: Number(sample.actual),
+                      predicted: Number(sample.predicted),
+                      residual: Number(sample.residual),
+                      absResidual: Number(sample.abs_residual),
+                    })"
+                  >
+                    <span class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white text-[10px] font-bold text-slate-500 ring-1 ring-[#e2e8f0]">{{ idx + 1 }}</span>
+                    <span class="rounded-md px-1.5 py-0.5 text-[10px] font-semibold" :class="sampleSourceBadgeClass(sample.source)">
+                      {{ sampleSourceLabel(sample.source) }}
+                    </span>
+                    <span class="min-w-0 flex-1 truncate text-slate-600 tabular-nums">
+                      {{ formatMetric(sample.actual, 3) }} -> {{ formatMetric(sample.predicted, 3) }}
+                    </span>
+                    <span class="shrink-0 font-semibold text-[#cf334f] tabular-nums">
+                      {{ formatMetric(sample.abs_residual, 3) }}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="rounded-[0.9rem] border border-[#eef2f6] bg-white p-3">
+                <div class="mb-2 flex items-center justify-between gap-2">
+                  <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">划分与参数</p>
+                  <span class="text-[10px] text-slate-400">seed {{ experimentReport.split.random_seed }}</span>
+                </div>
+                <div class="space-y-2 text-[11px]">
+                  <div v-if="experimentReport.split.strata_count" class="rounded-[0.6rem] bg-[#fbfcff] px-3 py-2 ring-1 ring-[#eef2f6]">
+                    联合标签 {{ experimentReport.split.strata_count }} 组 · μ 分箱 {{ experimentReport.split.target_bin_count || '--' }} 档
+                  </div>
+                  <div v-if="reportFoldPreview.length" class="space-y-1">
+                    <div
+                      v-for="fold in reportFoldPreview"
+                      :key="fold.label"
+                      class="flex items-center justify-between gap-2 rounded-[0.55rem] bg-[#fbfcff] px-2.5 py-1.5 ring-1 ring-[#eef2f6]"
+                    >
+                      <span class="truncate font-medium text-slate-700">{{ fold.label }}</span>
+                      <span class="shrink-0 text-slate-500 tabular-nums">R² {{ formatMetric(fold.metrics?.val_r2, 3) }}</span>
+                    </div>
+                  </div>
+                  <div v-if="reportHyperparameterEntries.length" class="flex flex-wrap gap-1.5 pt-1">
+                    <span
+                      v-for="entry in reportHyperparameterEntries"
+                      :key="entry.key"
+                      class="rounded-full bg-[#f5f7ff] px-2 py-1 text-[10px] font-semibold text-[#3d56d2]"
+                    >
+                      {{ entry.key }}={{ entry.value }}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </section>
 
           <!-- 自动调参进度 / 结果 -->

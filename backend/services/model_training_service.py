@@ -2434,6 +2434,134 @@ class ModelTrainingService:
             "largest_residuals": ranked_residuals[:12],
         }
 
+    def _build_experiment_report(
+        self,
+        task: TrainingTaskState,
+        *,
+        prediction_insights: dict[str, Any],
+        feature_importance: list[dict[str, Any]],
+        test_metrics: dict[str, Any] | None,
+        test_samples: list[dict[str, Any]],
+        external_metrics: dict[str, Any] | None,
+        external_samples: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        current = task.current or {}
+        dataset = task.dataset or {}
+        split = dataset.get("split") or {}
+        config = task.config or {}
+        data_options = config.get("data_options") or {}
+
+        def metric_payload(label: str, sample_count: Any, r2: Any, rmse: Any, mae: Any) -> dict[str, Any]:
+            return {
+                "label": label,
+                "sample_count": _int_or_default(sample_count, 0),
+                "r2": _safe_float(r2),
+                "rmse": _safe_float(rmse),
+                "mae": _safe_float(mae),
+            }
+
+        residual_candidates: list[dict[str, Any]] = []
+        for sample in prediction_insights.get("largest_residuals") or []:
+            residual_candidates.append({**sample, "source": "val"})
+        for sample in test_samples:
+            residual_candidates.append({**sample, "source": "test"})
+        for sample in external_samples:
+            residual_candidates.append({**sample, "source": "external"})
+        residual_candidates = [
+            sample
+            for sample in residual_candidates
+            if _safe_float(sample.get("abs_residual")) is not None
+        ]
+        residual_candidates.sort(key=lambda sample: float(sample.get("abs_residual") or 0.0), reverse=True)
+
+        risks: list[dict[str, Any]] = []
+
+        def add_risk(severity: str, title: str, message: str) -> None:
+            risks.append({"severity": severity, "title": title, "message": message})
+
+        usable_records = _int_or_default(dataset.get("usable_records"), 0)
+        feature_dimensions = _int_or_default(dataset.get("feature_dimensions"), 0)
+        test_count = _int_or_default((test_metrics or {}).get("sample_count"), _int_or_default(dataset.get("test_size"), 0))
+        external_count = _int_or_default((external_metrics or {}).get("sample_count"), _int_or_default(dataset.get("external_size"), 0))
+        val_r2 = _safe_float(current.get("val_r2"))
+        test_r2 = _safe_float((test_metrics or {}).get("test_r2"))
+        external_r2 = _safe_float((external_metrics or {}).get("external_r2"))
+
+        if usable_records and usable_records < 50:
+            add_risk("medium", "样本量偏小", f"当前只有 {usable_records} 条可训练样本，模型指标可能对单个样本非常敏感。")
+        if feature_dimensions and feature_dimensions < 8:
+            add_risk("medium", "特征数偏少", f"当前只有 {feature_dimensions} 个特征，建议确认离子描述符和关键工况字段是否已进入训练集。")
+        if val_r2 is not None and val_r2 < 0:
+            add_risk("high", "验证集 R² 为负", "模型在交叉验证中低于均值基线，优先检查数据质量、特征覆盖和样本划分。")
+        if test_count == 0:
+            add_risk("medium", "没有隔离测试集", "本次训练没有形成最终测试集，模型泛化只能参考交叉验证。")
+        elif test_count < 10:
+            add_risk("medium", "测试集过小", f"隔离测试集只有 {test_count} 条，测试指标只能作为方向性参考。")
+        if test_r2 is not None and test_r2 < 0:
+            add_risk("high", "测试集 R² 为负", "模型在从未参与训练的数据上低于均值基线，暂不建议作为推荐模型。")
+        if external_count == 0:
+            add_risk("low", "未形成外部验证集", "当前划分没有单样本联合标签或外部保留样本，暂时无法观察跨文献外推表现。")
+        elif external_count < 10:
+            add_risk("medium", "外部验证过小", f"外部验证只有 {external_count} 条，跨文献泛化结论需要更多样本支撑。")
+        if external_r2 is not None and external_r2 < 0:
+            add_risk("medium", "外部验证 R² 为负", "模型对外部保留样本表现弱，建议继续扩充离子和工况覆盖。")
+        if task.warnings:
+            add_risk("low", "训练过程有提示", "请查看运行提示中的缺失值补齐、折数下调或联合标签回退信息。")
+
+        return {
+            "generated_at": task.finished_at or _utc_now_iso(),
+            "task_id": task.task_id,
+            "algorithm": config.get("algorithm"),
+            "target": dataset.get("target") or {},
+            "metrics": {
+                "training": metric_payload(
+                    "训练折平均",
+                    dataset.get("train_size"),
+                    current.get("train_r2"),
+                    current.get("train_rmse"),
+                    current.get("train_mae"),
+                ),
+                "validation": metric_payload(
+                    "验证折平均",
+                    dataset.get("validation_size"),
+                    current.get("val_r2"),
+                    current.get("val_rmse"),
+                    current.get("val_mae"),
+                ),
+                "test": metric_payload(
+                    "隔离测试集",
+                    (test_metrics or {}).get("sample_count"),
+                    (test_metrics or {}).get("test_r2"),
+                    (test_metrics or {}).get("test_rmse"),
+                    (test_metrics or {}).get("test_mae"),
+                ) if test_metrics else None,
+                "external": metric_payload(
+                    "外部验证",
+                    (external_metrics or {}).get("sample_count"),
+                    (external_metrics or {}).get("external_r2"),
+                    (external_metrics or {}).get("external_rmse"),
+                    (external_metrics or {}).get("external_mae"),
+                ) if external_metrics else None,
+            },
+            "split": {
+                "strategy": split.get("strategy"),
+                "label": split.get("label"),
+                "random_seed": _int_or_default(data_options.get("random_seed"), DEFAULT_DATA_OPTIONS["random_seed"]),
+                "cv_folds": split.get("cv_folds"),
+                "train_pool_size": split.get("train_pool_size") or dataset.get("pool_size"),
+                "test_size": split.get("test_size") or dataset.get("test_size"),
+                "external_size": split.get("external_size") or dataset.get("external_size"),
+                "target_bin_count": split.get("target_bin_count"),
+                "strata_count": split.get("strata_count"),
+                "folds": task.fold_summaries,
+            },
+            "hyperparameters": config.get("hyperparameters") or {},
+            "feature_importance_top": feature_importance[:10],
+            "residual_top": residual_candidates[:10],
+            "risks": risks,
+            "warnings": task.warnings,
+        }
+
     def _fit_with_param_overrides(
         self,
         algorithm: str,
@@ -2845,13 +2973,25 @@ class ModelTrainingService:
             external_metrics, external_samples = evaluate_index_set(external_idx, metric_prefix="external")
 
             task.test_metrics = test_metrics
+            feature_importance = self._build_feature_importance(final_model, task.dataset.get("feature_columns", []))
+            prediction_insights = self._build_prediction_insights(row_metadata, oof_predictions)
+            experiment_report = self._build_experiment_report(
+                task,
+                prediction_insights=prediction_insights,
+                feature_importance=feature_importance,
+                test_metrics=test_metrics,
+                test_samples=test_samples,
+                external_metrics=external_metrics,
+                external_samples=external_samples,
+            )
 
             task.insights = {
-                "feature_importance": self._build_feature_importance(final_model, task.dataset.get("feature_columns", [])),
-                **self._build_prediction_insights(row_metadata, oof_predictions),
+                "feature_importance": feature_importance,
+                **prediction_insights,
                 "test_samples": test_samples,
                 "external_samples": external_samples,
                 "external_metrics": external_metrics,
+                "experiment_report": experiment_report,
             }
 
             task.status = "completed"

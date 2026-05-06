@@ -1534,6 +1534,7 @@ export interface ModelTrainingInsights {
     test_samples?: ModelTrainingPredictionPoint[]
     external_samples?: ModelTrainingPredictionPoint[]
     external_metrics?: ModelTrainingExternalMetrics | null
+    experiment_report?: ModelTrainingExperimentReport | null
 }
 
 export interface ModelTrainingTestMetrics {
@@ -1548,6 +1549,66 @@ export interface ModelTrainingExternalMetrics {
     external_rmse: number
     external_mae: number
     sample_count: number
+}
+
+export interface ModelTrainingExperimentMetric {
+    label: string
+    sample_count: number
+    r2: number | null
+    rmse: number | null
+    mae: number | null
+}
+
+export interface ModelTrainingExperimentRisk {
+    severity: 'low' | 'medium' | 'high'
+    title: string
+    message: string
+}
+
+export interface ModelTrainingExperimentReport {
+    generated_at: string
+    task_id: string
+    algorithm: string
+    target: {
+        key?: string
+        label?: string
+        column?: string
+    }
+    metrics: {
+        training: ModelTrainingExperimentMetric
+        validation: ModelTrainingExperimentMetric
+        test?: ModelTrainingExperimentMetric | null
+        external?: ModelTrainingExperimentMetric | null
+    }
+    split: {
+        strategy?: string | null
+        label?: string | null
+        random_seed: number
+        cv_folds?: number | null
+        train_pool_size?: number | null
+        test_size?: number | null
+        external_size?: number | null
+        target_bin_count?: number | null
+        strata_count?: number | null
+        folds?: Array<{
+            label: string
+            train_size: number
+            validation_size: number
+            metrics?: {
+                train_r2?: number
+                val_r2?: number
+                train_rmse?: number
+                val_rmse?: number
+                train_mae?: number
+                val_mae?: number
+            }
+        }>
+    }
+    hyperparameters: Record<string, unknown>
+    feature_importance_top: ModelTrainingFeatureImportance[]
+    residual_top: Array<ModelTrainingPredictionPoint & { source: 'val' | 'test' | 'external' }>
+    risks: ModelTrainingExperimentRisk[]
+    warnings: string[]
 }
 
 export interface ModelTrainingSplitSubsetSummary {

@@ -548,6 +548,11 @@ async def test_training_service_returns_heldout_prediction_samples(monkeypatch) 
     assert task.test_metrics is not None
     assert len(task.insights["test_samples"]) == task.test_metrics["sample_count"]
     assert all(sample["record_id"] for sample in task.insights["test_samples"])
+    report = task.insights["experiment_report"]
+    assert report["metrics"]["test"]["sample_count"] == task.test_metrics["sample_count"]
+    assert report["split"]["random_seed"] == 42
+    assert report["residual_top"]
+    assert any(risk["title"] == "外部验证过小" or risk["title"] == "未形成外部验证集" for risk in report["risks"])
 
 
 def test_parse_water_content_ppm_treats_il_prefix_as_label_not_negative_sign() -> None:
