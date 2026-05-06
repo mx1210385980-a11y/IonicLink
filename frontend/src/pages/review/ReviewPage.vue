@@ -1858,9 +1858,10 @@ function recordIsTrainingBlocker(record: TribologyData) {
   const reviewStatus = String(record.review_status || '').trim().toLowerCase()
   if (reviewStatus === 'flagged' || reviewStatus === 'needs_evidence') return true
 
-  const cofRaw = (record as Record<string, unknown>).cof
-  const cofValueRaw = (record as Record<string, unknown>).cof_value
-  const cofExtracted = (record as Record<string, unknown>).cof_extracted
+  const recordMap = record as unknown as Record<string, unknown>
+  const cofRaw = recordMap.cof
+  const cofValueRaw = recordMap.cof_value
+  const cofExtracted = recordMap.cof_extracted
   const cofText = trim(cofRaw as string)
     || trim(cofValueRaw as string)
     || (Array.isArray(cofExtracted) && cofExtracted.length > 0

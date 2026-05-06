@@ -67,8 +67,12 @@ export function useQualityIssues(opts: {
   const missingTargetCount = computed(() => cleaningSummary.value?.dropped_by_reason.missing_target || 0)
   const missingCationCount = computed(() => cleaningSummary.value?.dropped_by_reason.missing_cation_smiles || 0)
   const missingAnionCount = computed(() => cleaningSummary.value?.dropped_by_reason.missing_anion_smiles || 0)
+  const invalidCationCount = computed(() => cleaningSummary.value?.dropped_by_reason.invalid_cation_smiles || 0)
+  const invalidAnionCount = computed(() => cleaningSummary.value?.dropped_by_reason.invalid_anion_smiles || 0)
   const outsideTrainingViewCount = computed(() => cleaningSummary.value?.dropped_by_reason.outside_training_view || 0)
-  const missingChemistryFieldCount = computed(() => missingCationCount.value + missingAnionCount.value)
+  const invalidSmilesCount = computed(() => invalidCationCount.value + invalidAnionCount.value)
+  const missingChemistryFieldCount = computed(() => missingCationCount.value + missingAnionCount.value + invalidSmilesCount.value)
+  const smilesScreening = computed(() => cleaningSummary.value?.smiles_screening || null)
   const repairCount = computed(() => {
     const repairs = cleaningSummary.value?.missing_value_repairs || {}
     return Object.values(repairs).reduce((sum, value) => sum + Number(value || 0), 0)
@@ -171,17 +175,21 @@ export function useQualityIssues(opts: {
     },
     {
       key: 'chemistry',
-      title: '离子结构可用性',
+      title: 'SMILES 结构可用性',
       value: missingChemistryFieldCount.value,
-      unit: '个 SMILES 缺口',
-      severity: missingChemistryFieldCount.value > 0 ? (form.require_dual_smiles ? 'action' : 'watch') : 'ok',
-      status: `${chemistryReadyCount.value} 条记录可生成分子描述符`,
-      explanation: '材料性能预测的主模型需要离子结构信息;工况字段只是协变量,不能替代阴/阳离子描述符。',
-      studentAction: '补齐阳离子和阴离子 SMILES;缺结构的记录继续留在 Knowledge,但不进入正式训练集。',
-      trainingTreatment: form.require_dual_smiles
-        ? '结构训练集会排除无双离子 SMILES 的记录。'
-        : '当前未要求双离子 SMILES,但正式结构模型仍建议重新开启该要求。',
-      knowledgeTreatment: 'Knowledge 继续保留缺 SMILES 的离子液体和文献别名,后续可补结构。',
+      unit: invalidSmilesCount.value > 0 ? '个缺失/无效 SMILES' : '个 SMILES 缺口',
+      severity: missingChemistryFieldCount.value > 0 ? (form.require_dual_smiles || form.require_valid_smiles ? 'action' : 'watch') : 'ok',
+      status: `${smilesScreening.value?.descriptor_ready_records ?? chemistryReadyCount.value} 条记录可生成 RDKit 描述符`,
+      explanation: '论文流程先用阴/阳离子 SMILES 生成 RDKit 描述符;非空但无法解析的 SMILES 不能进入结构模型。',
+      studentAction: invalidSmilesCount.value > 0
+        ? '先修正无效 SMILES,再确认别名是否映射到正确阴/阳离子结构。'
+        : '补齐阳离子和阴离子 SMILES;缺结构的记录继续留在 Knowledge,但不进入正式训练集。',
+      trainingTreatment: form.require_valid_smiles
+        ? '结构训练集会排除缺失或 RDKit 无法解析的双离子 SMILES。'
+        : form.require_dual_smiles
+          ? '当前只要求 SMILES 非空;正式复现论文流程建议重新开启 RDKit 校验。'
+          : '当前未要求双离子 SMILES,但正式结构模型仍建议重新开启该要求。',
+      knowledgeTreatment: 'Knowledge 继续保留缺失或无效 SMILES 的离子液体和文献别名,后续可补结构。',
       blockingScope: 'modeling',
       icon: Database,
     },

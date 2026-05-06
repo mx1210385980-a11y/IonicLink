@@ -86,6 +86,7 @@ export function useCleaningPreview() {
     training_view: 'all',
     drop_missing_target: true,
     require_dual_smiles: true,
+    require_valid_smiles: true,
     missing_value_strategy: 'median',
     remove_target_outliers: false,
     iqr_multiplier: 1.5,
@@ -132,8 +133,8 @@ export function useCleaningPreview() {
   const outlierLabel = computed(() => form.remove_target_outliers ? `开启 · IQR ${form.iqr_multiplier.toFixed(1)}` : '关闭')
 
   const activePresetKey = computed<CleaningPresetKey | null>(() => {
-    if (form.source_mode === 'current_scope' && form.drop_missing_target && form.require_dual_smiles && form.remove_target_outliers) return 'strict'
-    if (form.source_mode === 'group_library_fallback' && form.drop_missing_target && form.require_dual_smiles && !form.remove_target_outliers) return 'balanced'
+    if (form.source_mode === 'current_scope' && form.drop_missing_target && form.require_dual_smiles && form.require_valid_smiles && form.remove_target_outliers) return 'strict'
+    if (form.source_mode === 'group_library_fallback' && form.drop_missing_target && form.require_dual_smiles && form.require_valid_smiles && !form.remove_target_outliers) return 'balanced'
     return null
   })
 
@@ -142,6 +143,7 @@ export function useCleaningPreview() {
       form.source_mode = 'current_scope'
       form.drop_missing_target = true
       form.require_dual_smiles = true
+      form.require_valid_smiles = true
       form.remove_target_outliers = true
       form.iqr_multiplier = 1.5
       return
@@ -149,6 +151,7 @@ export function useCleaningPreview() {
     form.source_mode = 'group_library_fallback'
     form.drop_missing_target = true
     form.require_dual_smiles = true
+    form.require_valid_smiles = true
     form.remove_target_outliers = false
     form.iqr_multiplier = 1.5
   }

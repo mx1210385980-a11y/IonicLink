@@ -1572,10 +1572,29 @@ export interface ModelTrainingCleaningSummary {
     outliers_removed?: number
     final_feature_count?: number
     final_feature_columns?: string[]
+    smiles_screening?: {
+        rdkit_available: boolean
+        require_dual_smiles: boolean
+        require_valid_smiles: boolean
+        input_records: number
+        dual_smiles_records: number
+        descriptor_ready_records: number
+        missing_cation_smiles: number
+        missing_anion_smiles: number
+        invalid_cation_smiles: number
+        invalid_anion_smiles: number
+        invalid_smiles_records: number
+        unique_cations: number
+        unique_anions: number
+        canonicalized_cations: number
+        canonicalized_anions: number
+    }
     dropped_by_reason: {
         missing_target: number
         missing_cation_smiles: number
         missing_anion_smiles: number
+        invalid_cation_smiles?: number
+        invalid_anion_smiles?: number
         outside_training_view?: number
     }
     quality_gates?: {
@@ -1593,6 +1612,7 @@ export interface ModelTrainingCleaningSummary {
         training_view?: string
         drop_missing_target: boolean
         require_dual_smiles: boolean
+        require_valid_smiles?: boolean
         missing_value_strategy?: string
         remove_target_outliers?: boolean
         iqr_multiplier?: number
@@ -1763,6 +1783,7 @@ export interface ModelCleaningOptions {
     training_view: 'all' | 'macro_performance' | 'afm_surface_response' | 'cross_scale'
     drop_missing_target: boolean
     require_dual_smiles: boolean
+    require_valid_smiles: boolean
     missing_value_strategy: 'keep' | 'median' | 'zero'
     remove_target_outliers: boolean
     iqr_multiplier: number
@@ -1818,6 +1839,19 @@ export interface ModelCleaningPreview {
                 available_count: number
                 coverage: number
             }>
+            surface_descriptor_source?: {
+                source: string
+                note?: string
+                input_rows: number
+                matched_rows: number
+                coverage: number
+                matched_surfaces: Array<{
+                    key: string
+                    label: string
+                    count: number
+                }>
+                unmatched_examples: string[]
+            }
             rdkit_enabled: boolean
         }
         screening: {
@@ -1838,6 +1872,16 @@ export interface ModelCleaningPreview {
                 correlation: number
                 abs_correlation: number
             }>
+            feature_importance?: {
+                available: boolean
+                method: string
+                reason?: string | null
+                features: Array<{
+                    feature: string
+                    importance: number
+                    rank: number
+                }>
+            }
             ionic_collinearity_groups: Array<{
                 label: string
                 features: string[]

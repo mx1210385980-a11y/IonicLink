@@ -191,6 +191,7 @@ class CleaningOptionPayload(BaseModel):
     training_view: str = DEFAULT_CLEANING_WORKBENCH_OPTIONS["training_view"]
     drop_missing_target: bool = DEFAULT_CLEANING_WORKBENCH_OPTIONS["drop_missing_target"]
     require_dual_smiles: bool = DEFAULT_CLEANING_WORKBENCH_OPTIONS["require_dual_smiles"]
+    require_valid_smiles: bool = DEFAULT_CLEANING_WORKBENCH_OPTIONS["require_valid_smiles"]
     missing_value_strategy: str = DEFAULT_CLEANING_WORKBENCH_OPTIONS["missing_value_strategy"]
     remove_target_outliers: bool = DEFAULT_CLEANING_WORKBENCH_OPTIONS["remove_target_outliers"]
     iqr_multiplier: float = Field(DEFAULT_CLEANING_WORKBENCH_OPTIONS["iqr_multiplier"], ge=0.5, le=5.0)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   AlertTriangle,
   ArrowRight,
@@ -12,6 +12,7 @@ import {
   Pencil,
   RotateCcw,
   Save,
+  SlidersHorizontal,
   Sparkles,
   Target,
   Trash2,
@@ -21,7 +22,12 @@ import {
 import type { ModelCleaningMatrixRow } from '@/lib/api'
 import type { BuilderSubsetSummary, SubsetCard } from './dataset-builder/types'
 import { formatDateTime } from './dataset-builder/formatters'
-import { useCleaningPreview } from './cleaning/useCleaningPreview'
+import {
+  SOURCE_MODE_OPTIONS,
+  STARTER_PRESETS,
+  TRAINING_VIEW_OPTIONS,
+  useCleaningPreview,
+} from './cleaning/useCleaningPreview'
 import { useQualityIssues } from './cleaning/useQualityIssues'
 
 defineProps<{
@@ -58,7 +64,10 @@ const {
   datasetBSummary,
   selectedSourceMode,
   selectedTrainingView,
+  activePresetKey,
   initialize,
+  runPreview,
+  applyStarterPreset,
   saveSubsetCardToWorkspace,
   exportSavedDataset,
   viewSavedDataset,
@@ -87,12 +96,95 @@ const {
 const buildingState = ref<'idle' | 'building' | 'done' | 'error'>('idle')
 const buildErrorMessage = ref('')
 const showDetails = ref(false)
+const showAdvancedBuilder = ref(false)
 const trainingPlanTitle = '离子结构 + 工况协变量模型'
 const trainingPlanTreatment = '正式训练要求阴/阳离子 SMILES,自动加入离子描述符;载荷、速度、温度、基底等只作为协变量。'
 const FEATURE_BUDGET = 64
-const MIN_DESCRIPTOR_FEATURES_PER_ION = 20
+const MIN_DESCRIPTOR_FEATURES_PER_ION = 12
+
+const MISSING_VALUE_OPTIONS = [
+  { value: 'median', label: '中位数填补', detail: '适合保留样本量。' },
+  { value: 'keep', label: '保留缺失', detail: '适合后续手动处理。' },
+  { value: 'zero', label: '0 填补', detail: '只在字段含义允许时使用。' },
+] as const
+
+const PROCESS_FEATURE_OPTIONS = [
+  { key: 'temperature', label: '温度', column: 'Temperature' },
+  { key: 'speed', label: '速度', column: 'Speed' },
+  { key: 'load', label: '载荷', column: 'Load' },
+  { key: 'system_total_load', label: '系统总载荷', column: 'System_Total_Load' },
+  { key: 'contact_load_per_unit', label: '单接触载荷', column: 'Contact_Load_Per_Unit' },
+  { key: 'load_min', label: '载荷下限', column: 'Load_Min' },
+  { key: 'load_max', label: '载荷上限', column: 'Load_Max' },
+  { key: 'load_span', label: '载荷跨度', column: 'Load_Span' },
+  { key: 'load_is_range', label: '载荷范围标记', column: 'Load_Is_Range' },
+  { key: 'potential', label: '电位', column: 'Potential' },
+  { key: 'water_content', label: '含水量', column: 'Water_Content' },
+  { key: 'il_additive_mol_fraction', label: 'IL 摩尔分数', column: 'IL_Additive_Mol_Fraction' },
+  { key: 'base_oil_mol_fraction', label: '基础油摩尔分数', column: 'Base_Oil_Mol_Fraction' },
+  { key: 'film_thickness', label: '膜厚', column: 'Film_Thickness' },
+  { key: 'alkyl_chain_length', label: '烷基链长', column: 'Alkyl_Chain_Length' },
+] as const
+
+const SURFACE_FEATURE_COLUMNS = [
+  'gamma_s',
+  'sigma_s',
+  'Surface_Roughness',
+  'theta_s',
+  'I_ss',
+  'Probe_Roughness',
+  'Substrate_Roughness',
+] as const
+
+const FEATURE_LABELS: Record<string, string> = {
+  gamma_s: 'γ_s 表面自由能',
+  sigma_s: 'σ_s 表面电荷密度',
+  Surface_Roughness: 'Rq 表面粗糙度',
+  theta_s: 'θ_s 接触角',
+  I_ss: 'I_ss 不锈钢指示',
+  Probe_Roughness: '探针粗糙度',
+  Substrate_Roughness: '基底粗糙度',
+  Film_Thickness: 'h 膜厚',
+}
+
+type DescriptorDecision = 'keep' | 'drop' | 'reserve'
+type DescriptorScreeningRow = {
+  feature: string
+  role: string
+  coverage: number
+  availableCount: number
+  correlation: number | null
+  absCorrelation: number
+  importance: number
+  score: number
+  decision: DescriptorDecision
+  reason: string
+  representative?: string
+  collinearGroupSize?: number
+}
 
 const availableFeatures = computed(() => datasetASummary.value?.columns.filter((c) => c !== datasetASummary.value?.target_column) || [])
+const selectedProcessFeatureSet = computed<Set<string>>(() => new Set(form.feature_config.keep_features))
+const selectedProcessFeatureColumns = computed<Set<string>>(() => new Set(
+  PROCESS_FEATURE_OPTIONS
+    .filter((option) => selectedProcessFeatureSet.value.has(option.key))
+    .map((option) => option.column),
+))
+const smilesScreeningSummary = computed(() => preview.value?.summary.smiles_screening || null)
+const smilesDescriptorReadyCount = computed(() => smilesScreeningSummary.value?.descriptor_ready_records ?? 0)
+const smilesInvalidCount = computed(() =>
+  (smilesScreeningSummary.value?.invalid_cation_smiles || 0)
+  + (smilesScreeningSummary.value?.invalid_anion_smiles || 0),
+)
+const surfaceDescriptorSource = computed(() => descriptorSummary.value?.surface_descriptor_source || null)
+const descriptorCoverageThreshold = ref(0.6)
+const descriptorCorrelationThreshold = ref(0.03)
+const descriptorCollinearityThreshold = ref(0.88)
+const advancedSummary = computed(() => {
+  const source = SOURCE_MODE_OPTIONS.find((option) => option.value === form.source_mode)?.label || selectedSourceMode.value
+  const view = selectedTrainingView.value.label
+  return `${view} · ${source} · ${smilesDescriptorReadyCount.value} 条结构可解析`
+})
 
 function isCationDescriptor(column: string) {
   return column.startsWith('Cation_')
@@ -106,67 +198,236 @@ function isIonDescriptor(column: string) {
   return isCationDescriptor(column) || isAnionDescriptor(column)
 }
 
-const recommendedFeatures = computed<string[]>(() => {
-  const strongest = screeningSummary.value?.strongest_to_target || []
-  const ionicGroups = screeningSummary.value?.ionic_collinearity_groups || []
-  const surfaceAlerts = screeningSummary.value?.surface_bias_alerts || []
-  const correlationMap = new Map(strongest.map((item) => [item.feature, item.abs_correlation]))
+function isSurfaceFeature(column: string) {
+  return (SURFACE_FEATURE_COLUMNS as readonly string[]).includes(column)
+}
 
-  const availableFeaturesList = availableFeatures.value
-  const available = new Set(availableFeaturesList)
+function featureRole(column: string) {
+  if (isCationDescriptor(column)) return '阳离子'
+  if (isAnionDescriptor(column)) return '阴离子'
+  if (isSurfaceFeature(column)) return '表面'
+  if (column === 'Film_Thickness') return '膜厚'
+  return '工况'
+}
+
+function numericCell(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function pearsonForColumns(rows: ModelCleaningMatrixRow[], left: string, right: string) {
+  const pairs = rows
+    .map((row) => [numericCell(row[left]), numericCell(row[right])] as const)
+    .filter((pair): pair is readonly [number, number] => pair[0] != null && pair[1] != null)
+  if (pairs.length < 3) return null
+  const leftMean = pairs.reduce((sum, pair) => sum + pair[0], 0) / pairs.length
+  const rightMean = pairs.reduce((sum, pair) => sum + pair[1], 0) / pairs.length
+  let numerator = 0
+  let leftSq = 0
+  let rightSq = 0
+  for (const [leftValue, rightValue] of pairs) {
+    const leftDelta = leftValue - leftMean
+    const rightDelta = rightValue - rightMean
+    numerator += leftDelta * rightDelta
+    leftSq += leftDelta ** 2
+    rightSq += rightDelta ** 2
+  }
+  if (leftSq <= 0 || rightSq <= 0) return null
+  const value = numerator / Math.sqrt(leftSq * rightSq)
+  return Number.isFinite(value) ? value : null
+}
+
+function formatPercent(value: number) {
+  return `${Math.round(value * 100)}%`
+}
+
+function formatCorrelation(value: number | null) {
+  if (value == null) return '--'
+  return value.toFixed(3)
+}
+
+function formatFeatureName(feature: string) {
+  return FEATURE_LABELS[feature] || feature
+}
+
+function decisionLabel(decision: DescriptorDecision) {
+  if (decision === 'keep') return '保留'
+  if (decision === 'reserve') return '候补'
+  return '排除'
+}
+
+function decisionPillClass(decision: DescriptorDecision) {
+  if (decision === 'keep') return 'bg-emerald-100 text-emerald-700'
+  if (decision === 'reserve') return 'bg-amber-100 text-amber-700'
+  return 'bg-slate-100 text-slate-500'
+}
+
+const descriptorScreeningRows = computed<DescriptorScreeningRow[]>(() => {
+  const summary = datasetASummary.value
+  if (!summary) return []
+  const rows = summary.rows || []
+  const targetColumn = summary.target_column
+  const featureColumns = availableFeatures.value
+  const importanceMap = new Map(
+    (screeningSummary.value?.feature_importance?.features || [])
+      .map((item) => [item.feature, Number(item.importance || 0)]),
+  )
+  const maxImportance = Math.max(...Array.from(importanceMap.values()), 0)
+  const baseRows = featureColumns.map((feature) => {
+    const availableCount = rows.reduce((count, row) => count + (numericCell(row[feature]) != null ? 1 : 0), 0)
+    const coverage = rows.length ? availableCount / rows.length : 0
+    const correlation = pearsonForColumns(rows, feature, targetColumn)
+    const importance = importanceMap.get(feature) || 0
+    const normalizedImportance = maxImportance > 0 ? importance / maxImportance : 0
+    const absCorrelation = Math.abs(correlation || 0)
+    return {
+      feature,
+      role: featureRole(feature),
+      coverage,
+      availableCount,
+      correlation,
+      absCorrelation,
+      importance,
+      score: normalizedImportance * 0.65 + absCorrelation * 0.35,
+      decision: 'keep' as DescriptorDecision,
+      reason: '进入候选特征',
+    }
+  })
+
+  const candidates = baseRows.filter((row) => {
+    if (!selectedProcessFeatureColumns.value.has(row.feature) && !isIonDescriptor(row.feature) && !isSurfaceFeature(row.feature)) return false
+    return row.coverage >= descriptorCoverageThreshold.value
+  })
+  const parent = new Map<string, string>()
+  const find = (feature: string): string => {
+    const current = parent.get(feature) || feature
+    if (current === feature) return current
+    const root = find(current)
+    parent.set(feature, root)
+    return root
+  }
+  const union = (left: string, right: string) => {
+    const leftRoot = find(left)
+    const rightRoot = find(right)
+    if (leftRoot !== rightRoot) parent.set(rightRoot, leftRoot)
+  }
+  candidates.forEach((row) => parent.set(row.feature, row.feature))
+  for (let leftIndex = 0; leftIndex < candidates.length; leftIndex += 1) {
+    const left = candidates[leftIndex]
+    if (!left || (!isIonDescriptor(left.feature) && !isSurfaceFeature(left.feature))) continue
+    for (let rightIndex = leftIndex + 1; rightIndex < candidates.length; rightIndex += 1) {
+      const right = candidates[rightIndex]
+      if (!right || (!isIonDescriptor(right.feature) && !isSurfaceFeature(right.feature))) continue
+      if (left.role !== right.role) continue
+      const correlation = pearsonForColumns(rows, left.feature, right.feature)
+      if (correlation != null && Math.abs(correlation) >= descriptorCollinearityThreshold.value) {
+        union(left.feature, right.feature)
+      }
+    }
+  }
+  const groups = new Map<string, DescriptorScreeningRow[]>()
+  for (const row of candidates) {
+    const root = find(row.feature)
+    const members = groups.get(root) || []
+    members.push(row)
+    groups.set(root, members)
+  }
+  const representativeMap = new Map<string, string>()
+  for (const members of groups.values()) {
+    if (members.length < 2) continue
+    const representative = [...members].sort((left, right) =>
+      right.score - left.score
+      || right.absCorrelation - left.absCorrelation
+      || right.coverage - left.coverage
+      || left.feature.localeCompare(right.feature),
+    )[0]
+    if (!representative) continue
+    members.forEach((member) => representativeMap.set(member.feature, representative.feature))
+  }
+
+  return baseRows
+    .map((row) => {
+      const representative = representativeMap.get(row.feature)
+      let decision: DescriptorDecision = 'keep'
+      let reason = '覆盖率和排序通过'
+      if (!selectedProcessFeatureColumns.value.has(row.feature) && !isIonDescriptor(row.feature) && !isSurfaceFeature(row.feature)) {
+        decision = 'drop'
+        reason = '工况字段未开启'
+      } else if (row.coverage < descriptorCoverageThreshold.value) {
+        decision = 'drop'
+        reason = '覆盖率不足'
+      } else if (isIonDescriptor(row.feature) && row.absCorrelation < descriptorCorrelationThreshold.value && row.importance <= 0) {
+        decision = 'reserve'
+        reason = '目标相关性偏弱'
+      } else if (representative && representative !== row.feature) {
+        decision = 'drop'
+        reason = `与 ${representative} 高共线`
+      }
+      return {
+        ...row,
+        decision,
+        reason,
+        representative,
+        collinearGroupSize: representative ? groups.get(find(row.feature))?.length : undefined,
+      }
+    })
+    .sort((left, right) =>
+      (left.decision === 'keep' ? 0 : left.decision === 'reserve' ? 1 : 2)
+      - (right.decision === 'keep' ? 0 : right.decision === 'reserve' ? 1 : 2)
+      || right.score - left.score
+      || right.absCorrelation - left.absCorrelation,
+    )
+})
+
+const descriptorKeptRows = computed(() => descriptorScreeningRows.value.filter((row) => row.decision === 'keep'))
+const descriptorReservedRows = computed(() => descriptorScreeningRows.value.filter((row) => row.decision === 'reserve'))
+const descriptorDroppedRows = computed(() => descriptorScreeningRows.value.filter((row) => row.decision === 'drop'))
+const descriptorTopRows = computed(() => descriptorScreeningRows.value.slice(0, 12))
+const descriptorImportanceTopRows = computed(() =>
+  [...descriptorScreeningRows.value]
+    .filter((row) => row.importance > 0)
+    .sort((left, right) => right.importance - left.importance)
+    .slice(0, 8),
+)
+const descriptorCollinearityPreview = computed(() => {
+  const groups = new Map<string, DescriptorScreeningRow[]>()
+  for (const row of descriptorScreeningRows.value) {
+    if (!row.representative) continue
+    const members = groups.get(row.representative) || []
+    members.push(row)
+    groups.set(row.representative, members)
+  }
+  return Array.from(groups.entries())
+    .map(([representative, members]) => ({ representative, members }))
+    .filter((group) => group.members.length > 1)
+    .slice(0, 5)
+})
+
+const recommendedFeatures = computed<string[]>(() => {
   const picked: string[] = []
   const pickedSet = new Set<string>()
-  const groupedSet = new Set<string>()
-
   const add = (feature: string) => {
-    if (picked.length >= FEATURE_BUDGET) return
-    if (!available.has(feature) || pickedSet.has(feature)) return
+    if (picked.length >= FEATURE_BUDGET || pickedSet.has(feature)) return
     picked.push(feature)
     pickedSet.add(feature)
   }
 
-  const rank = (features: string[]) => [...features].sort((a, b) =>
-    (correlationMap.get(b) || 0) - (correlationMap.get(a) || 0) || a.localeCompare(b),
-  )
+  descriptorKeptRows.value
+    .filter((row) => !isIonDescriptor(row.feature))
+    .forEach((row) => add(row.feature))
 
-  const addRanked = (features: string[], limit: number) => {
-    let added = 0
-    for (const feature of rank(features)) {
-      if (pickedSet.has(feature)) continue
-      add(feature)
-      added += 1
-      if (added >= limit || picked.length >= FEATURE_BUDGET) break
-    }
+  for (const predicate of [isCationDescriptor, isAnionDescriptor]) {
+    const rows = descriptorKeptRows.value.filter((row) => predicate(row.feature))
+    rows.slice(0, Math.max(MIN_DESCRIPTOR_FEATURES_PER_ION, Math.ceil(rows.length / 3))).forEach((row) => add(row.feature))
   }
 
-  const macroFeatures = availableFeaturesList.filter((feature) => !isIonDescriptor(feature))
-  const cationFeatures = availableFeaturesList.filter(isCationDescriptor)
-  const anionFeatures = availableFeaturesList.filter(isAnionDescriptor)
-
-  macroFeatures.forEach(add)
-
-  for (const group of ionicGroups) {
-    const features = group.features.filter((f) => available.has(f))
-    features.forEach((f) => groupedSet.add(f))
-    const rep = [...features].sort((a, b) => (correlationMap.get(b) || 0) - (correlationMap.get(a) || 0))[0]
-    if (rep) add(rep)
-  }
-  for (const alert of surfaceAlerts) {
-    const features = alert.features.filter((f) => available.has(f))
-    features.forEach((f) => groupedSet.add(f))
-    const rep = [...features].sort((a, b) => (correlationMap.get(b) || 0) - (correlationMap.get(a) || 0))[0]
-    if (rep) add(rep)
-  }
-
-  addRanked(cationFeatures, MIN_DESCRIPTOR_FEATURES_PER_ION)
-  addRanked(anionFeatures, MIN_DESCRIPTOR_FEATURES_PER_ION)
-
-  for (const item of strongest) {
-    if (!available.has(item.feature) || groupedSet.has(item.feature)) continue
-    add(item.feature)
-  }
-  addRanked([...cationFeatures, ...anionFeatures], FEATURE_BUDGET)
-  return picked.length ? picked : availableFeaturesList.slice(0, FEATURE_BUDGET)
+  descriptorKeptRows.value.forEach((row) => add(row.feature))
+  descriptorReservedRows.value.forEach((row) => add(row.feature))
+  return picked.length ? picked : availableFeatures.value.slice(0, FEATURE_BUDGET)
 })
 
 const retainedFeatureColumns = computed(() => recommendedFeatures.value)
@@ -267,6 +528,15 @@ function formatCell(value: unknown) {
   return String(value)
 }
 
+function toggleProcessFeature(featureKey: string) {
+  const current = new Set(form.feature_config.keep_features)
+  if (current.has(featureKey)) current.delete(featureKey)
+  else current.add(featureKey)
+  form.feature_config.keep_features = PROCESS_FEATURE_OPTIONS
+    .map((option) => option.key)
+    .filter((key) => current.has(key))
+}
+
 const verdictTone = computed(() => {
   if (loading.value || previewLoading.value) return 'loading'
   if (rawRecordCount.value === 0) return 'empty'
@@ -345,6 +615,16 @@ function handlePrimaryAction() {
   }
   void autoBuild()
 }
+
+watch(
+  () => JSON.stringify(form),
+  () => {
+    if (buildingState.value === 'done' || buildingState.value === 'error') {
+      buildingState.value = 'idle'
+      buildErrorMessage.value = ''
+    }
+  },
+)
 
 onMounted(() => {
   void initialize()
@@ -439,6 +719,28 @@ onMounted(() => {
                     <p class="mt-1 text-sm font-medium text-slate-800">保存后跳转 Modeling</p>
                   </div>
                 </div>
+
+                <section class="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-3">
+                  <button
+                    type="button"
+                    class="flex w-full items-center justify-between gap-3 text-left"
+                    @click="showAdvancedBuilder = true"
+                  >
+                    <span class="flex min-w-0 items-center gap-2">
+                      <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-indigo-600 shadow-sm">
+                        <SlidersHorizontal class="h-4 w-4" />
+                      </span>
+                      <span class="min-w-0">
+                        <span class="block text-sm font-semibold text-slate-950">高级构建参数</span>
+                        <span class="mt-0.5 block truncate text-xs text-slate-500">{{ advancedSummary }}</span>
+                      </span>
+                    </span>
+                    <span class="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50">
+                      打开设置
+                      <ChevronRight class="h-3.5 w-3.5" />
+                    </span>
+                  </button>
+                </section>
 
               </div>
 
@@ -696,6 +998,7 @@ onMounted(() => {
           <div class="mt-3 space-y-2 border-t border-slate-200 pt-3 text-xs leading-6 text-slate-600">
             <p>· 当前训练路径:{{ trainingPlanTitle }}。{{ trainingPlanTreatment }}</p>
             <p>· 样本来源:{{ selectedSourceMode }}。</p>
+            <p>· SMILES 筛选:{{ smilesDescriptorReadyCount }} 条记录可由 RDKit 解析并生成阴/阳离子描述符。</p>
             <p>· 自动选择了 {{ retainedFeatureColumns.length }} 个对预测最有帮助的特征(去掉了重复或共线的字段)。</p>
             <p>· 已检查 {{ qualityIssueCards.length }} 类质量问题,仅在训练视图中排除了 {{ droppedCount }} 条不适合结构训练的记录。</p>
             <p>· Review/证据定位继续服务 Knowledge 追溯,不是训练集生成的唯一入口。</p>
@@ -740,5 +1043,475 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="showAdvancedBuilder"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-3 backdrop-blur-sm sm:p-6"
+        role="dialog"
+        aria-modal="true"
+        @click.self="showAdvancedBuilder = false"
+      >
+        <section class="flex max-h-[88vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+          <header class="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+                  <SlidersHorizontal class="h-4 w-4" />
+                </span>
+                <div class="min-w-0">
+                  <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Advanced Dataset Builder</p>
+                  <h2 class="truncate text-lg font-semibold tracking-tight text-slate-950">高级构建参数</h2>
+                </div>
+              </div>
+              <p class="mt-2 text-sm leading-5 text-slate-500">{{ advancedSummary }}</p>
+            </div>
+            <button
+              type="button"
+              class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-900"
+              @click="showAdvancedBuilder = false"
+            >
+              <X class="h-4 w-4" />
+            </button>
+          </header>
+
+          <div class="min-h-0 flex-1 overflow-y-auto bg-slate-50 px-5 py-4 custom-scrollbar">
+            <div class="grid gap-3 sm:grid-cols-4">
+              <div class="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                <p class="text-xs font-semibold text-slate-500">当前样本</p>
+                <p class="mt-1 text-2xl font-semibold tabular-nums text-slate-950">{{ trainingDatasetSummary?.row_count ?? 0 }}</p>
+              </div>
+              <div class="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                <p class="text-xs font-semibold text-slate-500">SMILES 可解析</p>
+                <p class="mt-1 text-2xl font-semibold tabular-nums text-slate-950">{{ smilesDescriptorReadyCount }}</p>
+              </div>
+              <div class="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                <p class="text-xs font-semibold text-slate-500">当前特征</p>
+                <p class="mt-1 text-2xl font-semibold tabular-nums text-slate-950">{{ trainingDatasetSummary?.feature_count ?? 0 }}</p>
+              </div>
+              <div class="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                <p class="text-xs font-semibold text-slate-500">处理项</p>
+                <p class="mt-1 text-2xl font-semibold tabular-nums text-slate-950">{{ issueTotalCount }}</p>
+              </div>
+            </div>
+
+            <section class="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+              <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <p class="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Descriptor Screening</p>
+                  <h3 class="mt-0.5 text-base font-semibold tracking-tight text-slate-950">描述符筛选</h3>
+                  <p class="mt-1 text-xs leading-5 text-slate-500">
+                    按覆盖率、Pearson 相关性、随机森林重要性和共线性合并推荐训练特征。
+                  </p>
+                  <p v-if="surfaceDescriptorSource" class="mt-1 text-xs leading-5 text-slate-500">
+                    表面描述符已按论文码表回填 {{ surfaceDescriptorSource.matched_rows }}/{{ surfaceDescriptorSource.input_rows }} 条:
+                    {{ surfaceDescriptorSource.matched_surfaces.map((item) => item.label).join('、') || '暂无命中' }}
+                  </p>
+                </div>
+                <div class="grid grid-cols-3 gap-2 text-center">
+                  <div class="rounded-xl bg-emerald-50 px-3 py-2">
+                    <p class="text-[11px] font-semibold text-emerald-700">保留</p>
+                    <p class="text-lg font-semibold tabular-nums text-emerald-700">{{ descriptorKeptRows.length }}</p>
+                  </div>
+                  <div class="rounded-xl bg-amber-50 px-3 py-2">
+                    <p class="text-[11px] font-semibold text-amber-700">候补</p>
+                    <p class="text-lg font-semibold tabular-nums text-amber-700">{{ descriptorReservedRows.length }}</p>
+                  </div>
+                  <div class="rounded-xl bg-slate-100 px-3 py-2">
+                    <p class="text-[11px] font-semibold text-slate-500">排除</p>
+                    <p class="text-lg font-semibold tabular-nums text-slate-700">{{ descriptorDroppedRows.length }}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mt-4 grid gap-3 lg:grid-cols-3">
+                <label class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+                  最低覆盖率 {{ formatPercent(descriptorCoverageThreshold) }}
+                  <input
+                    v-model.number="descriptorCoverageThreshold"
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    class="mt-2 w-full accent-indigo-600"
+                  >
+                </label>
+                <label class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+                  目标 Pearson |r| ≥ {{ descriptorCorrelationThreshold.toFixed(2) }}
+                  <input
+                    v-model.number="descriptorCorrelationThreshold"
+                    type="range"
+                    min="0"
+                    max="0.5"
+                    step="0.01"
+                    class="mt-2 w-full accent-indigo-600"
+                  >
+                </label>
+                <label class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+                  共线性 |r| ≥ {{ descriptorCollinearityThreshold.toFixed(2) }}
+                  <input
+                    v-model.number="descriptorCollinearityThreshold"
+                    type="range"
+                    min="0.7"
+                    max="0.99"
+                    step="0.01"
+                    class="mt-2 w-full accent-indigo-600"
+                  >
+                </label>
+              </div>
+
+              <div class="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(18rem,0.8fr)]">
+                <div class="overflow-hidden rounded-xl border border-slate-200">
+                  <div class="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-3 py-2">
+                    <p class="text-xs font-semibold text-slate-900">筛选排序</p>
+                    <span class="text-[11px] text-slate-500">按综合分排序</span>
+                  </div>
+                  <div class="max-h-72 overflow-auto custom-scrollbar">
+                    <table class="min-w-full text-left text-[11px]">
+                      <thead class="sticky top-0 bg-white text-slate-500 shadow-sm">
+                        <tr>
+                          <th class="px-3 py-2 font-semibold">特征</th>
+                          <th class="px-3 py-2 font-semibold">类型</th>
+                          <th class="px-3 py-2 font-semibold">覆盖</th>
+                          <th class="px-3 py-2 font-semibold">Pearson</th>
+                          <th class="px-3 py-2 font-semibold">重要性</th>
+                          <th class="px-3 py-2 font-semibold">结果</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr
+                          v-for="row in descriptorTopRows"
+                          :key="row.feature"
+                          class="border-b border-slate-50"
+                        >
+                          <td class="max-w-[13rem] truncate px-3 py-2 font-semibold text-slate-800" :title="row.feature">
+                            {{ formatFeatureName(row.feature) }}
+                          </td>
+                          <td class="px-3 py-2 text-slate-500">{{ row.role }}</td>
+                          <td class="px-3 py-2 tabular-nums text-slate-700">{{ formatPercent(row.coverage) }}</td>
+                          <td class="px-3 py-2 tabular-nums text-slate-700">{{ formatCorrelation(row.correlation) }}</td>
+                          <td class="px-3 py-2 tabular-nums text-slate-700">{{ row.importance.toFixed(4) }}</td>
+                          <td class="px-3 py-2">
+                            <span class="rounded-full px-2 py-0.5 font-semibold" :class="decisionPillClass(row.decision)">
+                              {{ decisionLabel(row.decision) }}
+                            </span>
+                            <p class="mt-1 max-w-[10rem] truncate text-[10px] text-slate-400" :title="row.reason">{{ row.reason }}</p>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div class="space-y-3">
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div class="flex items-center justify-between gap-2">
+                      <p class="text-xs font-semibold text-slate-900">特征重要性 Top</p>
+                      <span class="text-[11px] text-slate-500">{{ screeningSummary?.feature_importance?.method || 'Random Forest' }}</span>
+                    </div>
+                    <div v-if="descriptorImportanceTopRows.length" class="mt-2 space-y-2">
+                      <div
+                        v-for="row in descriptorImportanceTopRows"
+                        :key="row.feature"
+                        class="grid grid-cols-[minmax(0,1fr)_5rem] items-center gap-2"
+                      >
+                        <span class="truncate text-[11px] font-semibold text-slate-700" :title="row.feature">{{ formatFeatureName(row.feature) }}</span>
+                        <span class="text-right text-[11px] tabular-nums text-slate-500">{{ row.importance.toFixed(4) }}</span>
+                        <div class="col-span-2 h-1.5 overflow-hidden rounded-full bg-slate-200">
+                          <div
+                            class="h-full rounded-full bg-indigo-500"
+                            :style="{ width: `${Math.min(100, row.importance * 100)}%` }"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <p v-else class="mt-2 text-xs leading-5 text-slate-500">
+                      {{ screeningSummary?.feature_importance?.reason || '当前样本不足,暂不显示重要性。' }}
+                    </p>
+                  </div>
+
+                  <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div class="flex items-center justify-between gap-2">
+                      <p class="text-xs font-semibold text-slate-900">共线性合并</p>
+                      <span class="text-[11px] text-slate-500">{{ descriptorCollinearityPreview.length }} 组</span>
+                    </div>
+                    <div v-if="descriptorCollinearityPreview.length" class="mt-2 space-y-2">
+                      <div
+                        v-for="group in descriptorCollinearityPreview"
+                        :key="group.representative"
+                        class="rounded-lg border border-slate-200 bg-white px-2.5 py-2"
+                      >
+                        <p class="truncate text-[11px] font-semibold text-slate-800" :title="group.representative">
+                          保留 {{ formatFeatureName(group.representative) }}
+                        </p>
+                        <p class="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-500">
+                          合并 {{ group.members.length }} 个高相关特征
+                        </p>
+                      </div>
+                    </div>
+                    <p v-else class="mt-2 text-xs leading-5 text-slate-500">当前阈值下未发现需要合并的高共线性簇。</p>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <div class="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(22rem,0.85fr)]">
+              <div class="space-y-4">
+                <section class="rounded-xl border border-slate-200 bg-white p-4">
+                  <div class="flex items-center justify-between gap-3">
+                    <h3 class="text-sm font-semibold text-slate-950">预设</h3>
+                    <span class="text-xs text-slate-500">可随时改成自定义</span>
+                  </div>
+                  <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                    <button
+                      v-for="preset in STARTER_PRESETS"
+                      :key="preset.key"
+                      type="button"
+                      class="rounded-xl border px-4 py-3 text-left transition"
+                      :class="activePresetKey === preset.key ? 'border-indigo-300 bg-indigo-50 text-indigo-700 shadow-sm' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'"
+                      @click="applyStarterPreset(preset.key)"
+                    >
+                      <span class="flex items-center justify-between gap-2">
+                        <span class="text-base font-semibold">{{ preset.label }}</span>
+                        <span class="rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold shadow-sm">{{ preset.badge }}</span>
+                      </span>
+                      <span class="mt-2 block text-sm leading-5 text-slate-500">{{ preset.summary }}</span>
+                    </button>
+                  </div>
+                </section>
+
+                <section class="rounded-xl border border-slate-200 bg-white p-4">
+                  <h3 class="text-sm font-semibold text-slate-950">训练视图</h3>
+                  <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                    <button
+                      v-for="option in TRAINING_VIEW_OPTIONS"
+                      :key="option.value"
+                      type="button"
+                      class="rounded-xl border px-4 py-3 text-left transition"
+                      :class="form.training_view === option.value ? 'border-indigo-300 bg-indigo-50 text-indigo-700 shadow-sm' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'"
+                      @click="form.training_view = option.value"
+                    >
+                      <span class="text-sm font-semibold">{{ option.label }}</span>
+                      <span class="mt-1 block text-xs leading-5 text-slate-500">{{ option.detail }}</span>
+                    </button>
+                  </div>
+                </section>
+
+                <section class="rounded-xl border border-slate-200 bg-white p-4">
+                  <h3 class="text-sm font-semibold text-slate-950">样本来源</h3>
+                  <div class="mt-3 grid gap-3">
+                    <button
+                      v-for="option in SOURCE_MODE_OPTIONS"
+                      :key="option.value"
+                      type="button"
+                      class="rounded-xl border px-4 py-3 text-left transition"
+                      :class="form.source_mode === option.value ? 'border-indigo-300 bg-indigo-50 text-indigo-700 shadow-sm' : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50'"
+                      @click="form.source_mode = option.value"
+                    >
+                      <span class="text-sm font-semibold">{{ option.label }}</span>
+                      <span class="mt-1 block text-xs leading-5 text-slate-500">{{ option.detail }}</span>
+                    </button>
+                  </div>
+                </section>
+              </div>
+
+              <div class="space-y-4">
+                <section class="rounded-xl border border-slate-200 bg-white p-4">
+                  <div class="flex items-center justify-between gap-3">
+                    <h3 class="text-sm font-semibold text-slate-950">SMILES 筛选</h3>
+                    <span
+                      class="rounded-full px-2.5 py-1 text-xs font-semibold"
+                      :class="smilesInvalidCount > 0 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'"
+                    >
+                      {{ smilesInvalidCount > 0 ? `${smilesInvalidCount} 个无效` : '已通过' }}
+                    </span>
+                  </div>
+
+                  <div class="mt-3 grid gap-2 sm:grid-cols-3">
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                      <p class="text-[11px] font-semibold text-slate-500">双离子 SMILES</p>
+                      <p class="mt-1 text-lg font-semibold tabular-nums text-slate-950">
+                        {{ smilesScreeningSummary?.dual_smiles_records ?? 0 }}
+                      </p>
+                    </div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                      <p class="text-[11px] font-semibold text-slate-500">RDKit 可解析</p>
+                      <p class="mt-1 text-lg font-semibold tabular-nums text-slate-950">
+                        {{ smilesDescriptorReadyCount }}
+                      </p>
+                    </div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                      <p class="text-[11px] font-semibold text-slate-500">阴/阳离子种类</p>
+                      <p class="mt-1 text-lg font-semibold tabular-nums text-slate-950">
+                        {{ smilesScreeningSummary?.unique_cations ?? 0 }}/{{ smilesScreeningSummary?.unique_anions ?? 0 }}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div class="mt-3 space-y-3">
+                    <label class="flex items-start gap-3 rounded-xl border border-slate-200 px-3 py-3 text-sm font-medium text-slate-800">
+                      <input
+                        v-model="form.require_dual_smiles"
+                        type="checkbox"
+                        class="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      >
+                      <span>
+                        要求阴/阳离子 SMILES
+                        <span class="mt-0.5 block text-xs font-normal leading-5 text-slate-500">缺任一离子结构时不进入结构训练集。</span>
+                      </span>
+                    </label>
+                    <label class="flex items-start gap-3 rounded-xl border border-slate-200 px-3 py-3 text-sm font-medium text-slate-800">
+                      <input
+                        v-model="form.require_valid_smiles"
+                        type="checkbox"
+                        class="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      >
+                      <span>
+                        要求 RDKit 可解析
+                        <span class="mt-0.5 block text-xs font-normal leading-5 text-slate-500">复现论文描述符流程时建议开启。</span>
+                      </span>
+                    </label>
+                  </div>
+
+                  <p
+                    v-if="smilesScreeningSummary && !smilesScreeningSummary.rdkit_available"
+                    class="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700"
+                  >
+                    后端 RDKit 未启用,当前只能检查 SMILES 是否存在。
+                  </p>
+                </section>
+
+                <section class="rounded-xl border border-slate-200 bg-white p-4">
+                  <h3 class="text-sm font-semibold text-slate-950">样本筛选</h3>
+                  <div class="mt-3 space-y-3">
+                    <label class="flex items-start gap-3 rounded-xl border border-slate-200 px-3 py-3 text-sm font-medium text-slate-800">
+                      <input
+                        v-model="form.drop_missing_target"
+                        type="checkbox"
+                        class="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      >
+                      <span>
+                        排除缺少目标值的记录
+                        <span class="mt-0.5 block text-xs font-normal leading-5 text-slate-500">摩擦系数为空时不进入训练。</span>
+                      </span>
+                    </label>
+                    <label class="flex items-start gap-3 rounded-xl border border-slate-200 px-3 py-3 text-sm font-medium text-slate-800">
+                      <input
+                        v-model="form.remove_target_outliers"
+                        type="checkbox"
+                        class="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      >
+                      <span>
+                        移除目标离群值
+                        <span class="mt-0.5 block text-xs font-normal leading-5 text-slate-500">按 IQR 规则筛掉极端 COF。</span>
+                      </span>
+                    </label>
+                  </div>
+
+                  <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                    <label class="text-xs font-semibold text-slate-600">
+                      缺失值策略
+                      <select
+                        v-model="form.missing_value_strategy"
+                        class="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                      >
+                        <option
+                          v-for="option in MISSING_VALUE_OPTIONS"
+                          :key="option.value"
+                          :value="option.value"
+                        >
+                          {{ option.label }}
+                        </option>
+                      </select>
+                    </label>
+                    <label class="text-xs font-semibold text-slate-600">
+                      IQR 倍数
+                      <input
+                        v-model.number="form.iqr_multiplier"
+                        type="number"
+                        min="1"
+                        max="5"
+                        step="0.1"
+                        :disabled="!form.remove_target_outliers"
+                        class="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100 disabled:text-slate-400"
+                      >
+                    </label>
+                  </div>
+                </section>
+
+                <section class="rounded-xl border border-slate-200 bg-white p-4">
+                  <div class="flex items-center justify-between gap-3">
+                    <h3 class="text-sm font-semibold text-slate-950">工况字段</h3>
+                    <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">{{ form.feature_config.keep_features.length }} 项</span>
+                  </div>
+                  <div class="mt-3 flex flex-wrap gap-2">
+                    <button
+                      v-for="option in PROCESS_FEATURE_OPTIONS"
+                      :key="option.key"
+                      type="button"
+                      class="rounded-full border px-3 py-1.5 text-xs font-semibold transition"
+                      :class="selectedProcessFeatureSet.has(option.key) ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'border-slate-200 bg-slate-50 text-slate-500 hover:border-slate-300'"
+                      @click="toggleProcessFeature(option.key)"
+                    >
+                      {{ option.label }}
+                    </button>
+                  </div>
+                </section>
+
+                <section class="rounded-xl border border-slate-200 bg-white p-4">
+                  <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
+                    <label class="flex flex-1 items-start gap-3 rounded-xl border border-slate-200 px-3 py-3 text-sm font-medium text-slate-800">
+                      <input
+                        v-model="form.feature_config.use_pca"
+                        type="checkbox"
+                        class="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                      >
+                      <span>
+                        启用 PCA 降维
+                        <span class="mt-0.5 block text-xs font-normal leading-5 text-slate-500">高维描述符过多时再开启。</span>
+                      </span>
+                    </label>
+                    <label class="w-full text-xs font-semibold text-slate-600 sm:w-32">
+                      主成分
+                      <input
+                        v-model.number="form.feature_config.n_components"
+                        type="number"
+                        min="2"
+                        max="30"
+                        :disabled="!form.feature_config.use_pca"
+                        class="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 disabled:bg-slate-100 disabled:text-slate-400"
+                      >
+                    </label>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </div>
+
+          <footer class="flex shrink-0 flex-col-reverse gap-2 border-t border-slate-200 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <p class="text-xs text-slate-500">参数变更后会自动更新预览,也可以手动刷新。</p>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="inline-flex h-10 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                @click="showAdvancedBuilder = false"
+              >
+                完成
+              </button>
+              <button
+                type="button"
+                class="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:opacity-60"
+                :disabled="previewLoading"
+                @click="runPreview()"
+              >
+                <Loader2 v-if="previewLoading" class="h-4 w-4 animate-spin" />
+                <RotateCcw v-else class="h-4 w-4" />
+                刷新预览
+              </button>
+            </div>
+          </footer>
+        </section>
+      </div>
+    </Teleport>
   </div>
 </template>

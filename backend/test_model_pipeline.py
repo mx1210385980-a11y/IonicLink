@@ -11,6 +11,7 @@ from models.db_models import CleanedDataset
 from security import RequestScope
 from routers import model_training as model_training_router
 from services.model_cleaning_service import DEFAULT_CLEANING_WORKBENCH_OPTIONS, ModelCleaningService
+from services import model_cleaning_service as model_cleaning_service_module
 from services import model_training_service as model_training_service_module
 from services.model_training_service import ModelTrainingService, _feature_value, _parse_water_content_ppm
 from services.query_service import _load_matches_filter
@@ -30,6 +31,9 @@ def _cleaning_row(
         "record_id": int(cof_value * 1000),
         "literature_id": 1,
         "material_name": "Steel",
+        "probe_material": None,
+        "substrate_material": None,
+        "substrate_coating": None,
         "lubricant": "Synthetic IL",
         "confidence": 0.95,
         "cof_value": cof_value,
@@ -95,6 +99,35 @@ def test_cleaning_service_builds_pca_matrix_payload() -> None:
         isinstance(payload["rows"][0][column], float) or payload["rows"][0][column] is None
         for column in payload["matrix_columns"]
     )
+
+
+def test_cleaning_service_filters_invalid_smiles_before_descriptor_training() -> None:
+    if not model_cleaning_service_module.RDKIT_DESCRIPTOR_AVAILABLE:
+        pytest.skip("RDKit is required for SMILES validity screening.")
+
+    service = ModelCleaningService()
+    rows = [
+        _cleaning_row(0.10, "C[N+](C)(C)C", "F[B-](F)(F)F", 25.0, 0.12, 4.5, 0.1),
+        _cleaning_row(0.12, "not_a_smiles", "F[B-](F)(F)F", 35.0, 0.14, 4.8, 0.2),
+        _cleaning_row(0.14, "CC[N+](C)(C)C", "not_a_smiles", 45.0, 0.18, 5.0, 0.3),
+        _cleaning_row(0.16, "CCC[N+](C)(C)C", "", 55.0, 0.22, 5.4, 0.4),
+    ]
+    options = copy.deepcopy(DEFAULT_CLEANING_WORKBENCH_OPTIONS)
+
+    cleaned_rows, summary = service._clean_rows(rows, target_key="cof", options=options)
+
+    assert len(cleaned_rows) == 1
+    assert summary["chemistry_ready_records"] == 1
+    assert summary["smiles_screening"]["dual_smiles_records"] == 3
+    assert summary["smiles_screening"]["descriptor_ready_records"] == 1
+    assert summary["dropped_by_reason"]["invalid_cation_smiles"] == 1
+    assert summary["dropped_by_reason"]["invalid_anion_smiles"] == 1
+
+    options["require_valid_smiles"] = False
+    relaxed_rows, relaxed_summary = service._clean_rows(rows, target_key="cof", options=options)
+
+    assert len(relaxed_rows) == 3
+    assert relaxed_summary["chemistry_ready_records"] == 1
 
 
 def test_training_service_uses_saved_matrix_columns_automatically() -> None:
@@ -393,6 +426,36 @@ def test_feature_value_expands_load_range_into_range_features() -> None:
     assert _feature_value(record, "load_max") == 2.5e-07
     assert _feature_value(record, "load_span") == 2.5e-07
     assert _feature_value(record, "load_is_range") == 1.0
+
+
+def test_dataset_builder_backfills_surface_descriptors_from_thesis_codebook() -> None:
+    service = ModelCleaningService()
+    rows = [
+        _cleaning_row(0.10, "C[N+](C)(C)C", "F[B-](F)(F)F", 25.0, 0.12, 4.5, 0.1),
+        _cleaning_row(0.12, "CC[N+](C)(C)C", "O=S(=O)([O-])C(F)(F)F", 35.0, 0.14, 4.8, 0.2),
+        _cleaning_row(0.14, "CCC[N+](C)(C)C", "F[P-](F)(F)(F)(F)F", 45.0, 0.18, 5.0, 0.3),
+    ]
+    rows[0].update({"material_name": "Au(111)", "substrate_material": "Au(111)"})
+    rows[1].update({"material_name": "Stainless steel", "substrate_material": "Stainless steel"})
+    rows[2].update({"material_name": "Steel / Silicon", "substrate_material": "Silicon"})
+
+    payload = service._build_dataset_builder_payload(rows, target_key="cof")
+    builder_rows = payload["subsets"]["dataset_a"]["rows"]
+
+    assert {"gamma_s", "sigma_s", "theta_s", "I_ss"}.issubset(set(payload["macro_columns"]))
+    assert builder_rows[0]["gamma_s"] == pytest.approx(0.7)
+    assert builder_rows[0]["sigma_s"] == pytest.approx(-0.02)
+    assert builder_rows[0]["Surface_Roughness"] == pytest.approx(0.835)
+    assert builder_rows[0]["theta_s"] == pytest.approx(60.0)
+    assert builder_rows[0]["I_ss"] == pytest.approx(0.0)
+    assert builder_rows[1]["I_ss"] == pytest.approx(1.0)
+    assert builder_rows[2]["gamma_s"] is None
+    assert builder_rows[2]["I_ss"] is None
+
+    source = payload["descriptor_generation"]["surface_descriptor_source"]
+    assert source["matched_rows"] == 2
+    assert source["coverage"] == pytest.approx(2 / 3)
+    assert [item["label"] for item in source["matched_surfaces"]] == ["Au(111)", "Stainless steel"]
 
 
 def test_load_filter_uses_range_overlap_instead_of_first_numeric_token() -> None:

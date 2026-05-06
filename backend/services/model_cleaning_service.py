@@ -11,6 +11,8 @@ from typing import Any, Callable
 
 import numpy as np
 from sklearn.decomposition import PCA
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.impute import SimpleImputer
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -54,6 +56,7 @@ DEFAULT_CLEANING_WORKBENCH_OPTIONS = {
     "training_view": "all",
     "missing_value_strategy": "median",
     "remove_target_outliers": False,
+    "require_valid_smiles": True,
     "iqr_multiplier": 1.5,
     "feature_config": DEFAULT_FEATURE_CONFIG,
 }
@@ -80,13 +83,110 @@ NUMERIC_PREVIEW_FIELDS = [
 DATASET_BUILDER_TARGET_COLUMN = "COF"
 DATASET_BUILDER_FILM_THICKNESS_COLUMN = "Film_Thickness"
 
+SURFACE_DESCRIPTOR_LOOKUP = {
+    "au_111": {
+        "label": "Au(111)",
+        "gamma_s": 0.7,
+        "sigma_s": -0.02,
+        "rq_nm": 0.835,
+        "theta_s": 60.0,
+        "i_ss": 0.0,
+    },
+    "mica": {
+        "label": "Mica",
+        "gamma_s": 1.77,
+        "sigma_s": -0.16,
+        "rq_nm": 0.0569,
+        "theta_s": 0.0,
+        "i_ss": 0.0,
+    },
+    "stainless_steel": {
+        "label": "Stainless steel",
+        "gamma_s": 0.07,
+        "sigma_s": 0.01,
+        "rq_nm": 0.9,
+        "theta_s": 72.0,
+        "i_ss": 1.0,
+    },
+    "hopg": {
+        "label": "HOPG",
+        "gamma_s": 0.05,
+        "sigma_s": -0.0002,
+        "rq_nm": 0.89,
+        "theta_s": 85.0,
+        "i_ss": 0.0,
+    },
+    "ptfe": {
+        "label": "PTFE",
+        "gamma_s": 0.019,
+        "sigma_s": -0.00005,
+        "rq_nm": 7.0,
+        "theta_s": 110.0,
+        "i_ss": 0.0,
+    },
+    "silica": {
+        "label": "Silica",
+        "gamma_s": 0.2,
+        "sigma_s": -0.07,
+        "rq_nm": 0.5,
+        "theta_s": 20.7,
+        "i_ss": 0.0,
+    },
+    "titanium": {
+        "label": "Titanium",
+        "gamma_s": 0.5,
+        "sigma_s": 0.005,
+        "rq_nm": 61.15,
+        "theta_s": 60.0,
+        "i_ss": 0.0,
+    },
+}
+
+SURFACE_DESCRIPTOR_ALIASES = [
+    ("au_111", ("au(111)", "au 111", "au-111", "gold(111)", "gold 111")),
+    ("mica", ("mica", "muscovite", "云母")),
+    ("stainless_steel", ("stainless steel", "stainless-steel", "stainlesssteel", "不锈钢")),
+    ("hopg", ("hopg", "highly ordered pyrolytic graphite", "pyrolytic graphite")),
+    ("ptfe", ("ptfe", "polytetrafluoroethylene", "聚四氟乙烯")),
+    ("silica", ("silica", "sio2", "silicon dioxide", "quartz", "二氧化硅")),
+    ("titanium", ("titanium", "ti substrate", "钛")),
+]
+
 DATASET_BUILDER_MACRO_FEATURES = [
+    {
+        "key": "surface_free_energy",
+        "label": "Surface Free Energy (gamma_s)",
+        "column_name": "gamma_s",
+        "group": "Surface",
+        "getter": lambda row: ModelCleaningService._builder_surface_descriptor_value(row, "gamma_s"),
+    },
+    {
+        "key": "surface_charge_density",
+        "label": "Surface Charge Density (sigma_s)",
+        "column_name": "sigma_s",
+        "group": "Surface",
+        "getter": lambda row: ModelCleaningService._builder_surface_descriptor_value(row, "sigma_s"),
+    },
     {
         "key": "surface_roughness",
         "label": "Surface Roughness (Rq)",
         "column_name": "Surface_Roughness",
         "group": "Surface",
         "getter": lambda row: ModelCleaningService._builder_surface_roughness_value(row),
+    },
+    {
+        "key": "surface_contact_angle",
+        "label": "Static Contact Angle (theta_s)",
+        "column_name": "theta_s",
+        "group": "Surface",
+        "getter": lambda row: ModelCleaningService._builder_surface_descriptor_value(row, "theta_s"),
+    },
+    {
+        "key": "stainless_steel_indicator",
+        "label": "Stainless Steel Indicator (I_ss)",
+        "column_name": "I_ss",
+        "group": "Surface",
+        "getter": lambda row: ModelCleaningService._builder_surface_descriptor_value(row, "i_ss"),
     },
     {
         "key": "probe_roughness",
@@ -520,8 +620,9 @@ class ModelCleaningService:
                     dataset.target_key = target_payload["key"]
                     summary_payload["target"] = target_payload
                     dataset.summary_json = json.dumps(summary_payload, ensure_ascii=False)
-                    await session.commit()
-                    await session.refresh(dataset)
+                    if session is not None:
+                        await session.commit()
+                        await session.refresh(dataset)
             return dataset
         rows = json.loads(dataset.rows_json or "[]")
         raw_keep_features = ((config_payload.get("feature_config") or {}).get("keep_features")) or []
@@ -638,6 +739,7 @@ class ModelCleaningService:
         merged["missing_value_strategy"] = strategy
         merged["drop_missing_target"] = bool(merged.get("drop_missing_target", True))
         merged["require_dual_smiles"] = bool(merged.get("require_dual_smiles", True))
+        merged["require_valid_smiles"] = bool(merged.get("require_valid_smiles", True))
         merged["remove_target_outliers"] = bool(merged.get("remove_target_outliers", False))
         merged["iqr_multiplier"] = max(0.5, min(5.0, float(merged.get("iqr_multiplier", 1.5) or 1.5)))
         merged["feature_config"] = feature_config
@@ -960,6 +1062,9 @@ class ModelCleaningService:
             "source_page": record.source_page,
             "source_figure": record.source_figure,
             "evidence": record.evidence,
+            "probe_material": record.probe_material,
+            "substrate_material": record.substrate_material,
+            "substrate_coating": record.substrate_coating,
             "probe_roughness": record.probe_roughness,
             "substrate_roughness": record.substrate_roughness,
             "surface_roughness": record.surface_roughness,
@@ -1180,6 +1285,129 @@ class ModelCleaningService:
             "condition_collision_records": collision_records,
         }
 
+    def _smiles_validation(
+        self,
+        smiles: Any,
+        cache: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        text = str(smiles or "").strip()
+        if not text:
+            return {"status": "missing", "canonical": None}
+        if text in cache:
+            return cache[text]
+
+        if not RDKIT_DESCRIPTOR_AVAILABLE or Chem is None:
+            result = {"status": "unchecked", "canonical": text}
+            cache[text] = result
+            return result
+
+        try:
+            mol = Chem.MolFromSmiles(text)
+        except Exception:
+            mol = None
+
+        if mol is None:
+            result = {"status": "invalid", "canonical": None}
+        else:
+            try:
+                canonical = Chem.MolToSmiles(mol, canonical=True)
+            except Exception:
+                canonical = text
+            result = {"status": "valid", "canonical": canonical}
+        cache[text] = result
+        return result
+
+    def _row_has_valid_dual_smiles(
+        self,
+        row: dict[str, Any],
+        cache: dict[str, dict[str, Any]],
+    ) -> bool:
+        if not RDKIT_DESCRIPTOR_AVAILABLE or Chem is None:
+            return bool(str(row.get("cation_smiles") or "").strip() and str(row.get("anion_smiles") or "").strip())
+        cation = self._smiles_validation(row.get("cation_smiles"), cache)
+        anion = self._smiles_validation(row.get("anion_smiles"), cache)
+        return cation["status"] == "valid" and anion["status"] == "valid"
+
+    def _build_smiles_screening_summary(
+        self,
+        rows: list[dict[str, Any]],
+        cache: dict[str, dict[str, Any]],
+        *,
+        require_dual_smiles: bool,
+        require_valid_smiles: bool,
+    ) -> dict[str, Any]:
+        missing_cation = 0
+        missing_anion = 0
+        invalid_cation = 0
+        invalid_anion = 0
+        dual_smiles_records = 0
+        descriptor_ready_records = 0
+        canonicalized_cations = 0
+        canonicalized_anions = 0
+        unique_cations: set[str] = set()
+        unique_anions: set[str] = set()
+
+        for row in rows:
+            cation_text = str(row.get("cation_smiles") or "").strip()
+            anion_text = str(row.get("anion_smiles") or "").strip()
+            if not cation_text:
+                missing_cation += 1
+            if not anion_text:
+                missing_anion += 1
+            if cation_text and anion_text:
+                dual_smiles_records += 1
+
+            cation_status = self._smiles_validation(cation_text, cache)
+            anion_status = self._smiles_validation(anion_text, cache)
+            if cation_status["status"] == "invalid":
+                invalid_cation += 1
+            if anion_status["status"] == "invalid":
+                invalid_anion += 1
+            if cation_status["status"] == "valid":
+                canonical = str(cation_status.get("canonical") or cation_text)
+                unique_cations.add(canonical)
+                if canonical and canonical != cation_text:
+                    canonicalized_cations += 1
+            elif cation_text:
+                unique_cations.add(cation_text)
+            if anion_status["status"] == "valid":
+                canonical = str(anion_status.get("canonical") or anion_text)
+                unique_anions.add(canonical)
+                if canonical and canonical != anion_text:
+                    canonicalized_anions += 1
+            elif anion_text:
+                unique_anions.add(anion_text)
+
+            if self._row_has_valid_dual_smiles(row, cache):
+                descriptor_ready_records += 1
+
+        invalid_records = sum(
+            1
+            for row in rows
+            if (
+                self._smiles_validation(row.get("cation_smiles"), cache)["status"] == "invalid"
+                or self._smiles_validation(row.get("anion_smiles"), cache)["status"] == "invalid"
+            )
+        )
+
+        return {
+            "rdkit_available": bool(RDKIT_DESCRIPTOR_AVAILABLE and Chem is not None),
+            "require_dual_smiles": require_dual_smiles,
+            "require_valid_smiles": require_valid_smiles,
+            "input_records": len(rows),
+            "dual_smiles_records": dual_smiles_records,
+            "descriptor_ready_records": descriptor_ready_records,
+            "missing_cation_smiles": missing_cation,
+            "missing_anion_smiles": missing_anion,
+            "invalid_cation_smiles": invalid_cation,
+            "invalid_anion_smiles": invalid_anion,
+            "invalid_smiles_records": invalid_records,
+            "unique_cations": len(unique_cations),
+            "unique_anions": len(unique_anions),
+            "canonicalized_cations": canonicalized_cations,
+            "canonicalized_anions": canonicalized_anions,
+        }
+
     def _quality_gate_summary(
         self,
         rows: list[dict[str, Any]],
@@ -1219,8 +1447,15 @@ class ModelCleaningService:
         view_ready_rows = [row for row in rows if record_matches_training_view(row, training_view)]
         scoped_rows = view_ready_rows if training_view != "all" else rows
         target_ready_rows = [row for row in scoped_rows if _safe_float(row.get(target_def["field"])) is not None]
+        smiles_cache: dict[str, dict[str, Any]] = {}
+        smiles_screening = self._build_smiles_screening_summary(
+            scoped_rows,
+            smiles_cache,
+            require_dual_smiles=bool(options["require_dual_smiles"]),
+            require_valid_smiles=bool(options["require_valid_smiles"]),
+        )
         smiles_ready_rows = [
-            row for row in scoped_rows if str(row.get("cation_smiles") or "").strip() and str(row.get("anion_smiles") or "").strip()
+            row for row in scoped_rows if self._row_has_valid_dual_smiles(row, smiles_cache)
         ]
 
         working_rows = [dict(row) for row in scoped_rows]
@@ -1230,6 +1465,11 @@ class ModelCleaningService:
             working_rows = [
                 row for row in working_rows
                 if str(row.get("cation_smiles") or "").strip() and str(row.get("anion_smiles") or "").strip()
+            ]
+        if options["require_valid_smiles"]:
+            working_rows = [
+                row for row in working_rows
+                if self._row_has_valid_dual_smiles(row, smiles_cache)
             ]
 
         repair_counts = self._apply_missing_value_strategy(
@@ -1251,10 +1491,13 @@ class ModelCleaningService:
             "missing_value_repairs": repair_counts,
             "outliers_detected": outlier_count,
             "outliers_removed": outlier_count if options["remove_target_outliers"] else 0,
+            "smiles_screening": smiles_screening,
             "dropped_by_reason": {
                 "missing_target": sum(1 for row in scoped_rows if _safe_float(row.get(target_def["field"])) is None),
                 "missing_cation_smiles": sum(1 for row in scoped_rows if not str(row.get("cation_smiles") or "").strip()),
                 "missing_anion_smiles": sum(1 for row in scoped_rows if not str(row.get("anion_smiles") or "").strip()),
+                "invalid_cation_smiles": smiles_screening["invalid_cation_smiles"],
+                "invalid_anion_smiles": smiles_screening["invalid_anion_smiles"],
                 "outside_training_view": 0 if training_view == "all" else max(0, raw_count - len(view_ready_rows)),
             },
             "quality_gates": quality_gates,
@@ -1262,6 +1505,7 @@ class ModelCleaningService:
                 "training_view": training_view,
                 "drop_missing_target": options["drop_missing_target"],
                 "require_dual_smiles": options["require_dual_smiles"],
+                "require_valid_smiles": options["require_valid_smiles"],
                 "missing_value_strategy": options["missing_value_strategy"],
                 "remove_target_outliers": options["remove_target_outliers"],
                 "iqr_multiplier": options["iqr_multiplier"],
@@ -1332,13 +1576,62 @@ class ModelCleaningService:
         return parse_roughness_nm(raw)
 
     @staticmethod
+    def _normalize_surface_text(value: Any) -> str:
+        text = str(value or "").strip().lower()
+        text = text.replace("（", "(").replace("）", ")")
+        text = re.sub(r"\s+", " ", text)
+        return text
+
+    @classmethod
+    def _surface_descriptor_key(cls, row: dict[str, Any]) -> str | None:
+        preferred_fields = (
+            "substrate_material",
+            "substrate_coating",
+            "material_name",
+            "surface",
+            "surface_material",
+        )
+        fallback_fields = ("probe_material",)
+        for field in (*preferred_fields, *fallback_fields):
+            text = cls._normalize_surface_text(row.get(field))
+            if not text:
+                continue
+            compact = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", text)
+            for key, aliases in SURFACE_DESCRIPTOR_ALIASES:
+                for alias in aliases:
+                    alias_text = cls._normalize_surface_text(alias)
+                    alias_compact = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", alias_text)
+                    if alias_text and alias_text in text:
+                        return key
+                    if alias_compact and alias_compact in compact:
+                        return key
+        return None
+
+    @classmethod
+    def _surface_descriptor_entry(cls, row: dict[str, Any]) -> dict[str, Any] | None:
+        key = cls._surface_descriptor_key(row)
+        if key is None:
+            return None
+        return SURFACE_DESCRIPTOR_LOOKUP.get(key)
+
+    @staticmethod
+    def _builder_surface_descriptor_value(row: dict[str, Any], descriptor_key: str) -> float | None:
+        entry = ModelCleaningService._surface_descriptor_entry(row)
+        if entry is None:
+            return None
+        return _safe_float(entry.get(descriptor_key))
+
+    @staticmethod
     def _builder_surface_roughness_value(row: dict[str, Any]) -> float | None:
-        return composite_roughness_nm(
+        value = composite_roughness_nm(
             row.get("probe_roughness"),
             row.get("substrate_roughness"),
             method="rms",
             legacy_surface_roughness=row.get("surface_roughness"),
         )
+        if value is not None:
+            return value
+        return ModelCleaningService._builder_surface_descriptor_value(row, "rq_nm")
 
     @staticmethod
     def _builder_probe_roughness_value(row: dict[str, Any]) -> float | None:
@@ -1413,6 +1706,8 @@ class ModelCleaningService:
                 "coverage": available_count / total if total else 0.0,
             })
 
+        surface_descriptor_source = self._build_surface_descriptor_source_summary(source_rows)
+
         return {
             "input_rows": len(source_rows),
             "usable_rows": total,
@@ -1425,7 +1720,53 @@ class ModelCleaningService:
                 {"label": "Anion descriptors", "count": len(ION_DESCRIPTOR_SPECS)},
             ],
             "macro_features": macro_features,
+            "surface_descriptor_source": surface_descriptor_source,
             "rdkit_enabled": RDKIT_DESCRIPTOR_AVAILABLE,
+        }
+
+    def _build_surface_descriptor_source_summary(self, source_rows: list[dict[str, Any]]) -> dict[str, Any]:
+        surface_counts: dict[str, int] = defaultdict(int)
+        unmatched_examples: list[str] = []
+        unmatched_seen: set[str] = set()
+
+        for row in source_rows:
+            key = self._surface_descriptor_key(row)
+            if key is not None:
+                surface_counts[key] += 1
+                continue
+            candidate = next(
+                (
+                    str(row.get(field) or "").strip()
+                    for field in ("substrate_material", "substrate_coating", "material_name", "surface", "probe_material")
+                    if str(row.get(field) or "").strip()
+                ),
+                "",
+            )
+            if candidate and candidate not in unmatched_seen and len(unmatched_examples) < 8:
+                unmatched_seen.add(candidate)
+                unmatched_examples.append(candidate)
+
+        matched_rows = sum(surface_counts.values())
+        matched_surfaces = [
+            {
+                "key": key,
+                "label": SURFACE_DESCRIPTOR_LOOKUP[key]["label"],
+                "count": count,
+            }
+            for key, count in sorted(
+                surface_counts.items(),
+                key=lambda item: (-item[1], SURFACE_DESCRIPTOR_LOOKUP[item[0]]["label"]),
+            )
+        ]
+
+        return {
+            "source": "WFF thesis surface descriptor codebook, seeded from local paper backup datasets.",
+            "note": "Legacy backup columns appear gamma/sigma-swapped; generated fields follow Table 2.1 meanings.",
+            "input_rows": len(source_rows),
+            "matched_rows": matched_rows,
+            "coverage": matched_rows / len(source_rows) if source_rows else 0.0,
+            "matched_surfaces": matched_surfaces,
+            "unmatched_examples": unmatched_examples,
         }
 
     def _build_builder_screening(
@@ -1504,6 +1845,7 @@ class ModelCleaningService:
             ),
             "algorithms": ["CatBoost", "Random Forest", "Gradient Boosting"],
         }
+        feature_importance = self._build_feature_importance_ranking(builder_rows, feature_columns, target_column)
 
         return {
             "feature_count": len(feature_columns),
@@ -1514,11 +1856,95 @@ class ModelCleaningService:
                 "matrix": heatmap_matrix,
                 "cells": heatmap_cells,
             },
+            "feature_importance": feature_importance,
             "strongest_to_target": target_correlations[:12],
             "ionic_collinearity_groups": ionic_collinearity_groups,
             "surface_bias_alerts": surface_bias_alerts,
             "nonlinear_recommendation": nonlinear_recommendation,
             "requires_surface_stratified_split": bool(surface_bias_alerts),
+        }
+
+    def _build_feature_importance_ranking(
+        self,
+        builder_rows: list[dict[str, float | None]],
+        feature_columns: list[str],
+        target_column: str,
+    ) -> dict[str, Any]:
+        paired_rows = [
+            row
+            for row in builder_rows
+            if _safe_float(row.get(target_column)) is not None
+        ]
+        if len(paired_rows) < 8:
+            return {
+                "available": False,
+                "method": "RandomForestRegressor",
+                "reason": "At least 8 target-ready rows are required for a stable feature-importance preview.",
+                "features": [],
+            }
+
+        usable_features = [
+            feature
+            for feature in feature_columns
+            if any(_safe_float(row.get(feature)) is not None for row in paired_rows)
+        ]
+        if len(usable_features) < 2:
+            return {
+                "available": False,
+                "method": "RandomForestRegressor",
+                "reason": "Not enough numeric descriptor columns are available for feature-importance preview.",
+                "features": [],
+            }
+
+        matrix = np.array(
+            [
+                [
+                    np.nan if _safe_float(row.get(feature)) is None else float(_safe_float(row.get(feature)))
+                    for feature in usable_features
+                ]
+                for row in paired_rows
+            ],
+            dtype=float,
+        )
+        target = np.array([float(_safe_float(row.get(target_column))) for row in paired_rows], dtype=float)
+
+        try:
+            matrix = SimpleImputer(strategy="median").fit_transform(matrix)
+            model = RandomForestRegressor(
+                n_estimators=80,
+                max_depth=6,
+                min_samples_leaf=2,
+                random_state=42,
+                n_jobs=1,
+            )
+            model.fit(matrix, target)
+        except Exception as exc:
+            return {
+                "available": False,
+                "method": "RandomForestRegressor",
+                "reason": f"Feature-importance preview failed: {exc}",
+                "features": [],
+            }
+
+        ranked = sorted(
+            [
+                {
+                    "feature": feature,
+                    "importance": round(float(importance), 6),
+                }
+                for feature, importance in zip(usable_features, model.feature_importances_)
+            ],
+            key=lambda item: item["importance"],
+            reverse=True,
+        )
+        for index, item in enumerate(ranked, start=1):
+            item["rank"] = index
+
+        return {
+            "available": True,
+            "method": "RandomForestRegressor",
+            "reason": None,
+            "features": ranked[:40],
         }
 
     def _build_builder_subsets(
