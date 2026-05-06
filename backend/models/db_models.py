@@ -185,6 +185,7 @@ class RegisteredModel(Base):
 
     config_json: Mapped[str] = mapped_column(Text, nullable=False)
     summary_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_recommended: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(default=func.now())
 
     training_run: Mapped["ModelTrainingRun"] = relationship("ModelTrainingRun", back_populates="registered_models")

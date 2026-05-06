@@ -1868,6 +1868,57 @@ export interface ModelTrainingPlanPreview {
     }>
 }
 
+export interface ModelTrainingRunListItem {
+    task_id: string
+    run_id?: number
+    status: 'completed' | 'failed' | 'cancelled' | string
+    algorithm: string
+    split_strategy?: string | null
+    created_at?: string | null
+    started_at?: string | null
+    finished_at?: string | null
+    usable_records: number
+    cleaned_dataset_id?: number | null
+    cleaned_dataset_name?: string | null
+    target_column?: string | null
+    val_r2?: number | null
+    val_rmse?: number | null
+    val_mae?: number | null
+    test_r2?: number | null
+    test_rmse?: number | null
+    test_mae?: number | null
+    feature_dimensions?: number | null
+    is_registered?: boolean
+    registered_model_id?: number | null
+    registered_model_name?: string | null
+    is_recommended?: boolean
+}
+
+export interface RegisteredModelListItem {
+    id: number
+    name: string
+    description?: string | null
+    is_recommended: boolean
+    created_at?: string | null
+    algorithm: string
+    split_strategy?: string | null
+    task_id: string
+    source_dataset_id?: number | null
+    source_dataset_name?: string | null
+    val_r2?: number | null
+    val_rmse?: number | null
+    val_mae?: number | null
+    test_r2?: number | null
+    test_rmse?: number | null
+    test_mae?: number | null
+    external_r2?: number | null
+    external_rmse?: number | null
+    external_mae?: number | null
+    feature_dimensions?: number | null
+    usable_records?: number | null
+    risk_count?: number
+}
+
 export interface ModelTrainingSummary {
     dataset: ModelTrainingDatasetSummary
     cleaning: ModelTrainingCleaningSummary
@@ -1948,6 +1999,36 @@ export async function getModelTrainingCleaningSummary(payload: ModelTrainingClea
 export async function previewModelTrainingPlan(payload: ModelTrainingStartPayload) {
     const response = await api.post('/api/model-training/preview', payload)
     return response.data as ModelTrainingPlanPreview
+}
+
+export async function listModelTrainingRuns(limit: number = 20) {
+    const response = await api.get(`/api/model-training/runs?limit=${encodeURIComponent(String(limit))}`)
+    return response.data as { items: ModelTrainingRunListItem[] }
+}
+
+export async function getModelTrainingRun(taskId: string) {
+    const response = await api.get(`/api/model-training/runs/${taskId}`)
+    return response.data as { task: ModelTrainingTaskSnapshot }
+}
+
+export async function registerModelTrainingRun(taskId: string, payload: { name?: string | null; description?: string | null; is_recommended?: boolean }) {
+    const response = await api.post(`/api/model-training/runs/${taskId}/register`, payload)
+    return response.data as { model: RegisteredModelListItem }
+}
+
+export async function listRegisteredModels() {
+    const response = await api.get('/api/model-training/registry')
+    return response.data as { items: RegisteredModelListItem[] }
+}
+
+export async function deleteRegisteredModel(registryId: number) {
+    const response = await api.delete(`/api/model-training/registry/${registryId}`)
+    return response.data as { ok: boolean }
+}
+
+export async function setRecommendedRegisteredModel(registryId: number, recommended: boolean = true) {
+    const response = await api.post(`/api/model-training/registry/${registryId}/recommend?recommended=${encodeURIComponent(String(recommended))}`)
+    return response.data as { model: RegisteredModelListItem }
 }
 
 export interface ModelCleaningOptions {

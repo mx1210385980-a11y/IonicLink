@@ -6,13 +6,16 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Database,
+  Eye,
   ExternalLink,
   Layers,
   Loader2,
   Play,
   Search,
   Sparkles,
+  Star,
   Square,
+  Trash2,
   Trophy,
   X,
 } from 'lucide-vue-next'
@@ -32,15 +35,23 @@ import { Bar, Line } from 'vue-chartjs'
 import {
   buildModelTrainingWebSocketUrl,
   cancelModelTraining,
+  deleteRegisteredModel,
+  getModelTrainingRun,
   getModelTrainingSummary,
   listCleanedDatasets,
+  listModelTrainingRuns,
+  listRegisteredModels,
   previewModelTrainingPlan,
+  registerModelTrainingRun,
+  setRecommendedRegisteredModel,
   startModelTraining,
   type ModelTrainingMetricPoint,
   type ModelTrainingPlanPreview,
+  type ModelTrainingRunListItem,
   type ModelTrainingStartPayload,
   type ModelTrainingSummary,
   type ModelTrainingTaskSnapshot,
+  type RegisteredModelListItem,
   type SavedCleanedDatasetSummary,
 } from '@/lib/api'
 
@@ -75,12 +86,16 @@ const props = defineProps<{
 const summary = ref<ModelTrainingSummary | null>(null)
 const activeTask = ref<ModelTrainingTaskSnapshot | null>(null)
 const savedDatasets = ref<SavedCleanedDatasetSummary[]>([])
+const trainingRuns = ref<ModelTrainingRunListItem[]>([])
+const registeredModels = ref<RegisteredModelListItem[]>([])
 const selectedCleanedDatasetId = ref<number | null>(null)
 const leaderboard = ref<LeaderboardRow[]>([])
 const loading = ref(true)
 const loadError = ref('')
 const starting = ref(false)
 const cancelling = ref(false)
+const versionActionLoading = ref('')
+const versionError = ref('')
 const socketRef = ref<WebSocket | null>(null)
 const completedTaskIds = new Set<string>()
 const showAdvanced = ref(false)
@@ -92,6 +107,10 @@ const experimentPreview = ref<ModelTrainingPlanPreview | null>(null)
 const experimentPreviewLoading = ref(false)
 const experimentPreviewError = ref('')
 const pendingExperimentAction = ref<'start' | 'tune' | 'compare' | null>(null)
+const showSaveVersionModal = ref(false)
+const saveVersionName = ref('')
+const saveVersionDescription = ref('')
+const saveVersionRecommended = ref(false)
 const splitDetailTabs: Array<{ key: 'subsets' | 'bins' | 'folds'; label: string }> = [
   { key: 'subsets', label: '总体' },
   { key: 'bins', label: 'μ 分箱' },
@@ -150,6 +169,21 @@ const targetLabel = computed(() => targetDisplayLabel(
   || form.target,
 ))
 const datasetTitle = computed(() => selectedDataset.value?.name || summary.value?.dataset.name || '训练工作台')
+const recommendedModel = computed(() => registeredModels.value.find((model) => model.is_recommended) || null)
+const activeRegisteredModel = computed(() => {
+  const taskId = activeTask.value?.task_id
+  if (!taskId) return null
+  return registeredModels.value.find((model) => model.task_id === taskId) || null
+})
+const activeRunVersion = computed(() => {
+  const taskId = activeTask.value?.task_id
+  if (!taskId) return null
+  return trainingRuns.value.find((run) => run.task_id === taskId) || null
+})
+const versionRuns = computed(() => trainingRuns.value.slice(0, 12))
+const canSaveActiveVersion = computed(() => Boolean(activeTask.value?.status === 'completed'))
+const versionModalTitle = computed(() => activeRegisteredModel.value ? '编辑模型版本' : '保存模型版本')
+const versionModalConfirmLabel = computed(() => activeRegisteredModel.value ? '保存修改' : '保存模型版本')
 
 const chartOptions = computed(() => ({
   responsive: true,
@@ -738,6 +772,24 @@ function trainingViewLabel(value: string | null | undefined) {
   }
 }
 
+function splitStrategyLabel(value: string | null | undefined) {
+  switch (value) {
+    case 'joint_stratified': return '阳离子 × μ 分层'
+    case 'k_fold': return 'K 折交叉验证'
+    case 'literature_group_kfold': return '文献分组 K 折'
+    case 'random_holdout': return '随机留出'
+    default: return value ? formatTitleLabel(value) : '未记录'
+  }
+}
+
+function versionScoreLabel(value: { test_r2?: number | null; val_r2?: number | null }) {
+  return value.test_r2 != null ? '测试 R²' : '验证 R²'
+}
+
+function versionScoreValue(value: { test_r2?: number | null; val_r2?: number | null }) {
+  return value.test_r2 != null ? value.test_r2 : value.val_r2
+}
+
 function sampleSourceLabel(source: DiagSample['source']) {
   if (source === 'test') return '测试'
   if (source === 'external') return '外部'
@@ -814,6 +866,121 @@ async function refreshSavedDatasets() {
   savedDatasets.value = response.items
 }
 
+async function refreshModelVersions() {
+  const [runsResponse, registryResponse] = await Promise.all([
+    listModelTrainingRuns(30),
+    listRegisteredModels(),
+  ])
+  trainingRuns.value = runsResponse.items
+  registeredModels.value = registryResponse.items
+}
+
+function defaultVersionNameForActiveTask() {
+  const task = activeTask.value
+  if (!task) return datasetTitle.value
+  const datasetName = activeRunVersion.value?.cleaned_dataset_name || selectedDataset.value?.name || datasetTitle.value
+  const stamp = formatDateTime(task.finished_at || task.created_at)
+  return `${algorithmLabelZh(task.config.algorithm)} / ${datasetName} / ${stamp}`
+}
+
+function openSaveVersionModal() {
+  if (!canSaveActiveVersion.value || !activeTask.value) return
+  const existing = activeRegisteredModel.value
+  versionError.value = ''
+  saveVersionName.value = existing?.name || defaultVersionNameForActiveTask()
+  saveVersionDescription.value = existing?.description || ''
+  saveVersionRecommended.value = existing?.is_recommended ?? !recommendedModel.value
+  showSaveVersionModal.value = true
+}
+
+function closeSaveVersionModal() {
+  if (versionActionLoading.value === 'save-version') return
+  showSaveVersionModal.value = false
+}
+
+async function refreshModelVersionsQuietly() {
+  try {
+    await refreshModelVersions()
+  } catch (error: any) {
+    versionError.value = error?.response?.data?.detail || error?.message || 'Failed to load model versions.'
+  }
+}
+
+async function handleSaveVersion() {
+  if (!activeTask.value || activeTask.value.status !== 'completed') return
+  versionActionLoading.value = 'save-version'
+  versionError.value = ''
+  try {
+    await registerModelTrainingRun(activeTask.value.task_id, {
+      name: saveVersionName.value.trim() || null,
+      description: saveVersionDescription.value.trim() || null,
+      is_recommended: saveVersionRecommended.value,
+    })
+    showSaveVersionModal.value = false
+    await refreshModelVersions()
+  } catch (error: any) {
+    versionError.value = error?.response?.data?.detail || error?.message || 'Failed to save model version.'
+  } finally {
+    versionActionLoading.value = ''
+  }
+}
+
+async function handleViewRun(taskId: string) {
+  versionActionLoading.value = `view-${taskId}`
+  versionError.value = ''
+  try {
+    const response = await getModelTrainingRun(taskId)
+    activeTask.value = response.task
+    form.algorithm = response.task.config.algorithm
+    if (response.task.config.cleaned_dataset_id != null) {
+      selectedCleanedDatasetId.value = response.task.config.cleaned_dataset_id
+      form.cleaned_dataset_id = response.task.config.cleaned_dataset_id
+    }
+  } catch (error: any) {
+    versionError.value = error?.response?.data?.detail || error?.message || 'Failed to load training run.'
+  } finally {
+    versionActionLoading.value = ''
+  }
+}
+
+async function handleSaveRunAsVersion(row: ModelTrainingRunListItem) {
+  if (row.status !== 'completed') return
+  await handleViewRun(row.task_id)
+  if (activeTask.value?.task_id === row.task_id) openSaveVersionModal()
+}
+
+async function handleEditVersion(model: RegisteredModelListItem) {
+  await handleViewRun(model.task_id)
+  if (activeTask.value?.task_id === model.task_id) openSaveVersionModal()
+}
+
+async function handleDeleteVersion(model: RegisteredModelListItem) {
+  if (!window.confirm(`删除模型版本“${model.name}”？训练 run 会保留，之后仍可从训练回看重新保存。`)) return
+  versionActionLoading.value = `delete-${model.id}`
+  versionError.value = ''
+  try {
+    await deleteRegisteredModel(model.id)
+    await refreshModelVersions()
+  } catch (error: any) {
+    versionError.value = error?.response?.data?.detail || error?.message || 'Failed to delete model version.'
+  } finally {
+    versionActionLoading.value = ''
+  }
+}
+
+async function handleRecommendVersion(model: RegisteredModelListItem, recommended = true) {
+  versionActionLoading.value = `recommend-${model.id}`
+  versionError.value = ''
+  try {
+    await setRecommendedRegisteredModel(model.id, recommended)
+    await refreshModelVersions()
+  } catch (error: any) {
+    versionError.value = error?.response?.data?.detail || error?.message || 'Failed to update recommended model.'
+  } finally {
+    versionActionLoading.value = ''
+  }
+}
+
 async function refreshTrainingSummary(datasetId: number | null, applyDefaults: boolean = false) {
   const nextSummary = await getModelTrainingSummary(datasetId)
   summary.value = nextSummary
@@ -829,6 +996,7 @@ async function initialize() {
   loadError.value = ''
   try {
     await refreshSavedDatasets()
+    await refreshModelVersions()
     const preferredId = props.preselectedCleanedDatasetId // savedDatasets.value[0]?.id // null
     selectedCleanedDatasetId.value = preferredId ?? null
     await refreshTrainingSummary(selectedCleanedDatasetId.value, true)
@@ -918,6 +1086,7 @@ function viewCompareResult(row: ComparisonRow) {
 }
 
 async function onTaskTerminal(snapshot: ModelTrainingTaskSnapshot) {
+  void refreshModelVersionsQuietly()
   if (!compareMode.value) return
   recordCompareResult(snapshot)
   if (snapshot.status === 'cancelled') {
@@ -2208,34 +2377,267 @@ watch(
             </div>
           </section>
 
-          <!-- 历史训练 -->
+          <!-- 模型版本与训练回看 -->
           <section class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
-            <div class="mb-3 flex items-center justify-between gap-2">
-              <div class="flex items-center gap-1.5">
-                <Trophy class="h-3.5 w-3.5 text-[#5b56ea]" />
-                <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">历史训练</p>
+            <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#5b56ea]">
+                  <Trophy class="h-3.5 w-3.5" />
+                  模型版本与回看
+                </p>
+                <p class="mt-1 text-xs leading-5 text-slate-500">
+                  训练 run 保留完整过程；保存为模型版本后可推荐、删除，并随时回看配置、特征、split/fold 和实验报告。
+                </p>
               </div>
-              <span class="text-[10px] text-slate-400">{{ leaderboard.length }} 条</span>
-            </div>
-            <div v-if="!leaderboard.length" class="rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] px-3 py-3 text-center text-xs text-slate-500">
-              本次会话尚无完成的训练记录。
-            </div>
-            <div v-else class="space-y-1.5">
-              <div
-                v-for="(row, idx) in leaderboard"
-                :key="row.taskId"
-                class="flex items-center gap-3 rounded-[0.6rem] border px-3 py-2 text-xs"
-                :class="idx === 0 ? 'border-[#aebdfc] bg-[#f5f7ff]' : 'border-[#eef2f6] bg-white'"
+              <button
+                type="button"
+                class="inline-flex items-center gap-1.5 rounded-[0.65rem] bg-[#5b56ea] px-3.5 py-2 text-xs font-semibold text-white shadow-[0_12px_28px_-18px_rgba(91,86,234,0.85)] transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3] disabled:shadow-none"
+                :disabled="!canSaveActiveVersion || versionActionLoading === 'save-version'"
+                :title="activeTask?.status === 'completed' ? '保存或编辑当前训练结果对应的模型版本' : '训练完成后才能保存模型版本'"
+                @click="openSaveVersionModal"
               >
-                <span class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-600">
-                  {{ leaderboard.length - idx }}
-                </span>
-                <span class="min-w-0 flex-1 truncate font-medium text-slate-700">
-                  {{ algorithmLabelZh(row.algorithm) }} · {{ formatNumber(row.usableRecords) }} 条
-                </span>
-                <span class="shrink-0 font-semibold text-slate-900 tabular-nums">R²={{ formatMetric(row.valR2, 3) }}</span>
-                <span class="shrink-0 text-slate-500 tabular-nums">RMSE={{ formatMetric(row.valRmse, 3) }}</span>
-                <span class="hidden shrink-0 text-slate-400 sm:inline">{{ formatDateTime(row.finishedAt) }}</span>
+                <ClipboardCheck class="h-3.5 w-3.5" />
+                {{ activeRegisteredModel ? '编辑当前版本' : '保存当前模型' }}
+              </button>
+            </div>
+
+            <div
+              v-if="activeTask?.status === 'completed'"
+              class="mb-3 flex flex-wrap items-center gap-2 rounded-[0.7rem] border border-[#eef2f6] bg-[#fbfcff] px-3 py-2 text-xs text-slate-600"
+            >
+              <span class="font-semibold text-slate-900">当前回看：</span>
+              <span>{{ algorithmLabelZh(activeTask.config.algorithm) }}</span>
+              <span class="text-slate-300">·</span>
+              <span>{{ splitStrategyLabel(activeTask.config.data_options?.split_strategy) }}</span>
+              <span class="text-slate-300">·</span>
+              <span>{{ formatNumber(activeTask.dataset.feature_dimensions) }} 个特征</span>
+              <span
+                v-if="activeRegisteredModel"
+                class="rounded-full bg-[#e8fff2] px-2 py-0.5 text-[10px] font-semibold text-[#0b9d63]"
+              >
+                已保存：{{ activeRegisteredModel.name }}
+              </span>
+              <span
+                v-else
+                class="rounded-full bg-[#fff4da] px-2 py-0.5 text-[10px] font-semibold text-[#b97113]"
+              >
+                尚未保存为版本
+              </span>
+            </div>
+
+            <p
+              v-if="versionError"
+              class="mb-3 rounded-[0.7rem] border border-[#ffd4da] bg-[#fff5f6] px-3 py-2 text-xs text-[#cf334f]"
+            >
+              {{ versionError }}
+            </p>
+
+            <div class="grid gap-3 xl:grid-cols-[1.1fr_0.9fr]">
+              <div class="min-w-0 rounded-[0.85rem] border border-[#eef2f6] bg-[#fbfcff] p-3">
+                <div class="mb-2 flex items-center justify-between gap-2">
+                  <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">已保存模型版本</p>
+                  <span class="text-[10px] text-slate-400">{{ registeredModels.length }} 个</span>
+                </div>
+
+                <div
+                  v-if="recommendedModel"
+                  class="mb-2 rounded-[0.7rem] border border-[#cdd7ff] bg-white px-3 py-2"
+                >
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                      <p class="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.16em] text-[#5b56ea]">
+                        <Star class="h-3.5 w-3.5 fill-[#5b56ea]" />
+                        推荐模型
+                      </p>
+                      <p class="mt-1 truncate text-sm font-semibold text-slate-950">{{ recommendedModel.name }}</p>
+                      <p class="mt-0.5 text-[11px] text-slate-500">
+                        {{ versionScoreLabel(recommendedModel) }} {{ formatMetric(versionScoreValue(recommendedModel), 3) }}
+                        · {{ algorithmLabelZh(recommendedModel.algorithm) }}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      class="inline-flex shrink-0 items-center gap-1 rounded-[0.55rem] border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 transition hover:bg-[#f8fbff] hover:text-[#5b56ea]"
+                      :disabled="versionActionLoading === `view-${recommendedModel.task_id}`"
+                      @click="handleViewRun(recommendedModel.task_id)"
+                    >
+                      <Eye class="h-3 w-3" />
+                      回看
+                    </button>
+                  </div>
+                </div>
+
+                <div v-if="!registeredModels.length" class="rounded-[0.7rem] border border-dashed border-[#dbe4f2] bg-white px-3 py-8 text-center text-xs text-slate-500">
+                  还没有保存的模型版本。训练完成后点击“保存当前模型”即可固定一个可复用版本。
+                </div>
+
+                <div v-else class="space-y-2">
+                  <div
+                    v-for="model in registeredModels"
+                    :key="model.id"
+                    class="rounded-[0.75rem] border bg-white px-3 py-3"
+                    :class="model.is_recommended ? 'border-[#aebdfc] ring-1 ring-[#aebdfc]/50' : 'border-[#eef2f6]'"
+                  >
+                    <div class="flex flex-wrap items-start justify-between gap-2">
+                      <div class="min-w-0 flex-1">
+                        <div class="flex min-w-0 items-center gap-2">
+                          <p class="min-w-0 truncate text-sm font-semibold text-slate-950">{{ model.name }}</p>
+                          <span
+                            v-if="model.is_recommended"
+                            class="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#edf2ff] px-2 py-0.5 text-[10px] font-semibold text-[#5b56ea]"
+                          >
+                            <Star class="h-3 w-3 fill-[#5b56ea]" />
+                            推荐
+                          </span>
+                        </div>
+                        <p class="mt-1 text-[11px] leading-5 text-slate-500">
+                          {{ algorithmLabelZh(model.algorithm) }} · {{ splitStrategyLabel(model.split_strategy) }} ·
+                          {{ formatNumber(model.usable_records) }} 行 · {{ formatNumber(model.feature_dimensions) }} 特征
+                        </p>
+                        <p v-if="model.description" class="mt-1 line-clamp-2 text-[11px] leading-5 text-slate-500">
+                          {{ model.description }}
+                        </p>
+                      </div>
+                      <div class="flex shrink-0 flex-wrap justify-end gap-1.5">
+                        <button
+                          type="button"
+                          class="inline-flex items-center gap-1 rounded-[0.55rem] border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 transition hover:bg-[#f8fbff] hover:text-[#5b56ea]"
+                          :disabled="versionActionLoading === `view-${model.task_id}`"
+                          title="回看该版本的训练配置、特征和划分"
+                          @click="handleViewRun(model.task_id)"
+                        >
+                          <Eye class="h-3 w-3" />
+                          回看
+                        </button>
+                        <button
+                          type="button"
+                          class="inline-flex items-center gap-1 rounded-[0.55rem] border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 transition hover:bg-[#f8fbff] hover:text-[#5b56ea]"
+                          :disabled="versionActionLoading === `view-${model.task_id}`"
+                          title="编辑版本名称、备注和推荐状态"
+                          @click="handleEditVersion(model)"
+                        >
+                          <ClipboardCheck class="h-3 w-3" />
+                          编辑
+                        </button>
+                        <button
+                          type="button"
+                          class="inline-flex items-center gap-1 rounded-[0.55rem] border px-2.5 py-1.5 text-[11px] font-semibold transition"
+                          :class="model.is_recommended ? 'border-[#cdd7ff] bg-[#f5f7ff] text-[#5b56ea]' : 'border-[#e2e8f0] bg-white text-slate-600 hover:bg-[#f8fbff] hover:text-[#5b56ea]'"
+                          :disabled="versionActionLoading === `recommend-${model.id}`"
+                          :title="model.is_recommended ? '取消推荐模型' : '标记为推荐模型'"
+                          @click="handleRecommendVersion(model, !model.is_recommended)"
+                        >
+                          <Star class="h-3 w-3" :class="model.is_recommended ? 'fill-[#5b56ea]' : ''" />
+                          {{ model.is_recommended ? '取消推荐' : '推荐' }}
+                        </button>
+                        <button
+                          type="button"
+                          class="inline-flex items-center gap-1 rounded-[0.55rem] border border-[#ffd4da] bg-white px-2.5 py-1.5 text-[11px] font-semibold text-[#cf334f] transition hover:bg-[#fff5f6]"
+                          :disabled="versionActionLoading === `delete-${model.id}`"
+                          title="删除该模型版本"
+                          @click="handleDeleteVersion(model)"
+                        >
+                          <Trash2 class="h-3 w-3" />
+                          删除
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="mt-2 grid gap-1.5 text-[11px] sm:grid-cols-3">
+                      <div class="rounded-[0.55rem] bg-[#fbfcff] px-2.5 py-1.5 ring-1 ring-[#eef2f6]">
+                        <span class="text-slate-400">验证 R²</span>
+                        <span class="ml-1 font-semibold text-slate-900 tabular-nums">{{ formatMetric(model.val_r2, 3) }}</span>
+                      </div>
+                      <div class="rounded-[0.55rem] bg-[#fbfcff] px-2.5 py-1.5 ring-1 ring-[#eef2f6]">
+                        <span class="text-slate-400">测试 R²</span>
+                        <span class="ml-1 font-semibold text-slate-900 tabular-nums">{{ formatMetric(model.test_r2, 3) }}</span>
+                      </div>
+                      <div class="rounded-[0.55rem] bg-[#fbfcff] px-2.5 py-1.5 ring-1 ring-[#eef2f6]">
+                        <span class="text-slate-400">外部 R²</span>
+                        <span class="ml-1 font-semibold text-slate-900 tabular-nums">{{ formatMetric(model.external_r2, 3) }}</span>
+                        <span v-if="model.risk_count" class="ml-1 text-[#b97113]">· {{ model.risk_count }} 风险</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="min-w-0 rounded-[0.85rem] border border-[#eef2f6] bg-white p-3">
+                <div class="mb-2 flex items-center justify-between gap-2">
+                  <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">训练 run 回看</p>
+                  <span class="text-[10px] text-slate-400">{{ versionRuns.length }} 条</span>
+                </div>
+                <p class="mb-2 text-[11px] leading-5 text-slate-500">
+                  这里按后端持久化记录列出最近训练。点“回看”后，上方报告区会切到当时冻结的配置、特征、split/fold。
+                </p>
+
+                <div v-if="!versionRuns.length" class="rounded-[0.7rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] px-3 py-8 text-center text-xs text-slate-500">
+                  暂无训练 run。完成一次训练后会自动出现在这里。
+                </div>
+                <div v-else class="space-y-1.5">
+                  <div
+                    v-for="row in versionRuns"
+                    :key="row.task_id"
+                    class="rounded-[0.65rem] border px-3 py-2 text-xs"
+                    :class="activeTask?.task_id === row.task_id ? 'border-[#aebdfc] bg-[#f5f7ff] ring-1 ring-[#aebdfc]/40' : 'border-[#eef2f6] bg-[#fbfcff]'"
+                  >
+                    <div class="flex items-start justify-between gap-2">
+                      <div class="min-w-0">
+                        <p class="truncate font-semibold text-slate-900">
+                          {{ algorithmLabelZh(row.algorithm) }}
+                        </p>
+                        <p class="mt-0.5 text-[11px] text-slate-500">
+                          {{ formatDateTime(row.finished_at || row.created_at) }} · {{ formatNumber(row.usable_records) }} 行 · {{ splitStrategyLabel(row.split_strategy) }}
+                        </p>
+                      </div>
+                      <span
+                        class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                        :class="statusBadgeClass(row.status)"
+                      >
+                        {{ statusLabelZh(row.status) }}
+                      </span>
+                    </div>
+                    <div class="mt-2 flex flex-wrap items-center gap-2">
+                      <span class="font-semibold text-slate-900 tabular-nums">
+                        {{ versionScoreLabel(row) }}={{ formatMetric(versionScoreValue(row), 3) }}
+                      </span>
+                      <span class="text-slate-400 tabular-nums">RMSE={{ formatMetric(row.test_rmse ?? row.val_rmse, 3) }}</span>
+                      <span
+                        v-if="row.is_registered"
+                        class="rounded-full bg-[#e8fff2] px-2 py-0.5 text-[10px] font-semibold text-[#0b9d63]"
+                      >
+                        已保存
+                      </span>
+                      <span
+                        v-if="row.is_recommended"
+                        class="rounded-full bg-[#edf2ff] px-2 py-0.5 text-[10px] font-semibold text-[#5b56ea]"
+                      >
+                        推荐
+                      </span>
+                      <div class="ml-auto flex shrink-0 gap-1.5">
+                        <button
+                          type="button"
+                          class="inline-flex items-center gap-1 rounded-[0.5rem] border border-[#e2e8f0] bg-white px-2 py-1 text-[10px] font-semibold text-slate-600 transition hover:bg-[#f8fbff] hover:text-[#5b56ea]"
+                          :disabled="versionActionLoading === `view-${row.task_id}`"
+                          @click="handleViewRun(row.task_id)"
+                        >
+                          <Eye class="h-3 w-3" />
+                          回看
+                        </button>
+                        <button
+                          v-if="row.status === 'completed' && !row.is_registered"
+                          type="button"
+                          class="inline-flex items-center gap-1 rounded-[0.5rem] border border-[#aebdfc] bg-white px-2 py-1 text-[10px] font-semibold text-[#5b56ea] transition hover:bg-[#f5f7ff]"
+                          :disabled="versionActionLoading === `view-${row.task_id}` || versionActionLoading === 'save-version'"
+                          @click="handleSaveRunAsVersion(row)"
+                        >
+                          <ClipboardCheck class="h-3 w-3" />
+                          保存
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </section>
@@ -2488,6 +2890,128 @@ watch(
               <Loader2 v-if="starting" class="h-3.5 w-3.5 animate-spin" />
               <Play v-else class="h-3.5 w-3.5" />
               {{ starting ? '启动中' : experimentConfirmLabel }}
+            </button>
+          </div>
+        </footer>
+      </section>
+    </div>
+
+    <div
+      v-if="showSaveVersionModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 py-6"
+      @click.self="closeSaveVersionModal"
+    >
+      <section class="w-full max-w-2xl overflow-hidden rounded-[1.1rem] border border-[#dbe4f2] bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+        <header class="flex items-start justify-between gap-4 border-b border-[#eef2f6] px-5 py-4">
+          <div class="min-w-0">
+            <p class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#5b56ea]">
+              <ClipboardCheck class="h-3.5 w-3.5" />
+              模型版本
+            </p>
+            <h2 class="mt-1 text-xl font-semibold tracking-[-0.03em] text-slate-950">{{ versionModalTitle }}</h2>
+            <p class="mt-1 text-sm leading-6 text-slate-500">
+              保存后会固定本次训练的配置、保留特征、划分方案、指标和实验报告；后续数据集变化不会改写这个版本。
+            </p>
+          </div>
+          <button
+            type="button"
+            class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[0.65rem] border border-[#e2e8f0] bg-white text-slate-500 transition hover:bg-[#f8fbff] hover:text-slate-900"
+            :disabled="versionActionLoading === 'save-version'"
+            title="关闭"
+            @click="closeSaveVersionModal"
+          >
+            <X class="h-4 w-4" />
+          </button>
+        </header>
+
+        <div class="space-y-4 px-5 py-4">
+          <div class="grid gap-2 text-xs sm:grid-cols-4">
+            <div class="rounded-[0.65rem] bg-[#fbfcff] px-3 py-2 ring-1 ring-[#eef2f6]">
+              <p class="text-[10px] font-semibold text-slate-400">算法</p>
+              <p class="mt-1 truncate font-semibold text-slate-900">{{ algorithmLabelZh(activeTask?.config.algorithm) }}</p>
+            </div>
+            <div class="rounded-[0.65rem] bg-[#fbfcff] px-3 py-2 ring-1 ring-[#eef2f6]">
+              <p class="text-[10px] font-semibold text-slate-400">划分</p>
+              <p class="mt-1 truncate font-semibold text-slate-900">{{ splitStrategyLabel(activeTask?.config.data_options?.split_strategy) }}</p>
+            </div>
+            <div class="rounded-[0.65rem] bg-[#fbfcff] px-3 py-2 ring-1 ring-[#eef2f6]">
+              <p class="text-[10px] font-semibold text-slate-400">样本</p>
+              <p class="mt-1 font-semibold text-slate-900 tabular-nums">{{ formatNumber(activeTask?.dataset.usable_records) }}</p>
+            </div>
+            <div class="rounded-[0.65rem] bg-[#fbfcff] px-3 py-2 ring-1 ring-[#eef2f6]">
+              <p class="text-[10px] font-semibold text-slate-400">特征</p>
+              <p class="mt-1 font-semibold text-slate-900 tabular-nums">{{ formatNumber(activeTask?.dataset.feature_dimensions) }}</p>
+            </div>
+          </div>
+
+          <label class="block">
+            <span class="mb-1.5 block text-xs font-semibold text-slate-700">版本名称</span>
+            <input
+              v-model="saveVersionName"
+              type="text"
+              class="h-11 w-full rounded-[0.7rem] border border-[#dbe4f2] bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-[#aebdfc] focus:ring-2 focus:ring-[#aebdfc]/25"
+              placeholder="例如：Gradient Boosting / 116 samples / paper split"
+            >
+          </label>
+
+          <label class="block">
+            <span class="mb-1.5 block text-xs font-semibold text-slate-700">备注</span>
+            <textarea
+              v-model="saveVersionDescription"
+              rows="3"
+              class="w-full resize-none rounded-[0.7rem] border border-[#dbe4f2] bg-white px-3 py-2 text-sm leading-6 text-slate-900 outline-none transition focus:border-[#aebdfc] focus:ring-2 focus:ring-[#aebdfc]/25"
+              placeholder="记录本版本适用场景、数据处理选择或需要注意的风险。"
+            />
+          </label>
+
+          <label class="flex cursor-pointer items-start gap-3 rounded-[0.75rem] border border-[#eef2f6] bg-[#fbfcff] px-3 py-3">
+            <input
+              v-model="saveVersionRecommended"
+              type="checkbox"
+              class="mt-1 h-4 w-4 rounded border-slate-300 text-[#5b56ea] focus:ring-[#5b56ea]"
+            >
+            <span>
+              <span class="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+                <Star class="h-3.5 w-3.5" :class="saveVersionRecommended ? 'fill-[#5b56ea] text-[#5b56ea]' : 'text-slate-400'" />
+                标记为推荐模型
+              </span>
+              <span class="mt-1 block text-xs leading-5 text-slate-500">
+                同一工作区只保留一个推荐模型；勾选后会自动取消其他版本的推荐状态。
+              </span>
+            </span>
+          </label>
+
+          <p
+            v-if="versionError"
+            class="rounded-[0.7rem] border border-[#ffd4da] bg-[#fff5f6] px-3 py-2 text-xs text-[#cf334f]"
+          >
+            {{ versionError }}
+          </p>
+        </div>
+
+        <footer class="flex flex-wrap items-center justify-between gap-3 border-t border-[#eef2f6] px-5 py-4">
+          <p class="text-xs text-slate-500">
+            保存的是模型版本索引；训练 run 本身会继续保留，便于课程回放和结果追踪。
+          </p>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-[0.65rem] border border-[#e2e8f0] bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 transition hover:bg-[#f8fbff] hover:text-slate-900"
+              :disabled="versionActionLoading === 'save-version'"
+              @click="closeSaveVersionModal"
+            >
+              <X class="h-3.5 w-3.5" />
+              取消
+            </button>
+            <button
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-[0.65rem] bg-[#5b56ea] px-4 py-2 text-xs font-semibold text-white shadow-[0_12px_28px_-18px_rgba(91,86,234,0.85)] transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3] disabled:shadow-none"
+              :disabled="versionActionLoading === 'save-version' || !saveVersionName.trim()"
+              @click="handleSaveVersion"
+            >
+              <Loader2 v-if="versionActionLoading === 'save-version'" class="h-3.5 w-3.5 animate-spin" />
+              <ClipboardCheck v-else class="h-3.5 w-3.5" />
+              {{ versionActionLoading === 'save-version' ? '保存中' : versionModalConfirmLabel }}
             </button>
           </div>
         </footer>

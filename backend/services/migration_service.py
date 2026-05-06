@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 from sqlalchemy.schema import CreateColumn, CreateIndex
 from sqlalchemy.sql.schema import MetaData
 
-CURRENT_SCHEMA_REVISION = "20260502_0013"
+CURRENT_SCHEMA_REVISION = "20260506_0014"
 
 
 def _inspect_schema(sync_conn, metadata: MetaData) -> dict[str, Any]:

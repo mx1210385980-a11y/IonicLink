@@ -19,7 +19,7 @@ from sklearn.model_selection import GroupKFold, KFold, StratifiedKFold, train_te
 from sklearn.neural_network import MLPRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVR
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -1192,6 +1192,7 @@ class ModelTrainingService:
     ) -> list[dict[str, Any]]:
         stmt = (
             select(ModelTrainingRun)
+            .options(selectinload(ModelTrainingRun.cleaned_dataset), selectinload(ModelTrainingRun.registered_models))
             .where(
                 ModelTrainingRun.group_id == group_id,
                 ModelTrainingRun.scope_key == scope_key,
@@ -1234,6 +1235,7 @@ class ModelTrainingService:
         scope_type: str,
         name: str | None,
         description: str | None,
+        is_recommended: bool = False,
     ) -> dict[str, Any]:
         stmt = (
             select(ModelTrainingRun)
@@ -1263,6 +1265,9 @@ class ModelTrainingService:
             existing.name = model_name
             existing.description = model_description
             existing.summary_json = json.dumps(snapshot, ensure_ascii=False)
+            existing.is_recommended = bool(is_recommended)
+            if is_recommended:
+                await self._clear_other_recommended_models(session, existing, group_id=group_id, scope_key=scope_key)
             await session.commit()
             existing = await session.get(
                 RegisteredModel,
@@ -1285,8 +1290,12 @@ class ModelTrainingService:
             scope_key=scope_key,
             config_json=run.config_json,
             summary_json=json.dumps(snapshot, ensure_ascii=False),
+            is_recommended=bool(is_recommended),
         )
         session.add(registered)
+        if is_recommended:
+            await session.flush()
+            await self._clear_other_recommended_models(session, registered, group_id=group_id, scope_key=scope_key)
         await session.commit()
         await session.refresh(registered)
         registered = await session.get(
@@ -1312,10 +1321,62 @@ class ModelTrainingService:
                 RegisteredModel.group_id == group_id,
                 RegisteredModel.scope_key == scope_key,
             )
-            .order_by(desc(RegisteredModel.created_at), desc(RegisteredModel.id))
+            .order_by(desc(RegisteredModel.is_recommended), desc(RegisteredModel.created_at), desc(RegisteredModel.id))
         )
         result = await session.execute(stmt)
         return [self._registered_model_list_item(item) for item in result.scalars().all()]
+
+    async def _clear_other_recommended_models(
+        self,
+        session: AsyncSession,
+        selected: RegisteredModel,
+        *,
+        group_id: int,
+        scope_key: str,
+    ) -> None:
+        await session.execute(
+            update(RegisteredModel)
+            .where(
+                RegisteredModel.group_id == group_id,
+                RegisteredModel.scope_key == scope_key,
+                RegisteredModel.id != selected.id,
+            )
+            .values(is_recommended=False)
+        )
+
+    async def set_recommended_registered_model(
+        self,
+        session: AsyncSession,
+        *,
+        registry_id: int,
+        group_id: int,
+        scope_key: str,
+        recommended: bool = True,
+    ) -> dict[str, Any]:
+        stmt = (
+            select(RegisteredModel)
+            .options(selectinload(RegisteredModel.training_run), selectinload(RegisteredModel.source_dataset))
+            .where(
+                RegisteredModel.id == registry_id,
+                RegisteredModel.group_id == group_id,
+                RegisteredModel.scope_key == scope_key,
+            )
+        )
+        model = (await session.execute(stmt)).scalar_one_or_none()
+        if model is None:
+            raise KeyError(registry_id)
+        model.is_recommended = bool(recommended)
+        if recommended:
+            await self._clear_other_recommended_models(session, model, group_id=group_id, scope_key=scope_key)
+        await session.commit()
+        model = await session.get(
+            RegisteredModel,
+            registry_id,
+            options=[selectinload(RegisteredModel.training_run), selectinload(RegisteredModel.source_dataset)],
+        )
+        if model is None:
+            raise KeyError(registry_id)
+        return self._registered_model_list_item(model)
 
     async def delete_registered_model(
         self,
@@ -1489,8 +1550,14 @@ class ModelTrainingService:
         snapshot = payload.get("snapshot") or {}
         current = snapshot.get("current") or {}
         dataset = snapshot.get("dataset") or {}
+        registered = None
+        try:
+            registered = next(iter(run.registered_models or []), None)
+        except Exception:
+            registered = None
         return {
             "task_id": run.task_id,
+            "run_id": run.id,
             "status": run.status,
             "algorithm": run.algorithm,
             "split_strategy": run.split_strategy,
@@ -1499,11 +1566,19 @@ class ModelTrainingService:
             "finished_at": run.finished_at.isoformat() if run.finished_at else None,
             "usable_records": int(run.usable_records or 0),
             "cleaned_dataset_id": run.cleaned_dataset_id,
+            "cleaned_dataset_name": run.cleaned_dataset.name if run.cleaned_dataset else None,
             "target_column": run.target_column,
             "val_r2": current.get("val_r2"),
             "val_rmse": current.get("val_rmse"),
             "val_mae": current.get("val_mae"),
+            "test_r2": (snapshot.get("test_metrics") or {}).get("test_r2"),
+            "test_rmse": (snapshot.get("test_metrics") or {}).get("test_rmse"),
+            "test_mae": (snapshot.get("test_metrics") or {}).get("test_mae"),
             "feature_dimensions": dataset.get("feature_dimensions"),
+            "is_registered": registered is not None,
+            "registered_model_id": registered.id if registered else None,
+            "registered_model_name": registered.name if registered else None,
+            "is_recommended": bool(registered.is_recommended) if registered else False,
         }
 
     def _registered_model_list_item(self, model: RegisteredModel) -> dict[str, Any]:
@@ -1511,10 +1586,14 @@ class ModelTrainingService:
         snapshot = run_payload.get("snapshot") or {}
         current = snapshot.get("current") or {}
         dataset = snapshot.get("dataset") or {}
+        report = ((snapshot.get("insights") or {}).get("experiment_report") or {})
+        test_metrics = snapshot.get("test_metrics") or {}
+        external_metrics = (snapshot.get("insights") or {}).get("external_metrics") or {}
         return {
             "id": model.id,
             "name": model.name,
             "description": model.description,
+            "is_recommended": bool(model.is_recommended),
             "created_at": model.created_at.isoformat() if model.created_at else None,
             "algorithm": model.training_run.algorithm,
             "split_strategy": model.training_run.split_strategy,
@@ -1524,7 +1603,15 @@ class ModelTrainingService:
             "val_r2": current.get("val_r2"),
             "val_rmse": current.get("val_rmse"),
             "val_mae": current.get("val_mae"),
+            "test_r2": test_metrics.get("test_r2"),
+            "test_rmse": test_metrics.get("test_rmse"),
+            "test_mae": test_metrics.get("test_mae"),
+            "external_r2": external_metrics.get("external_r2"),
+            "external_rmse": external_metrics.get("external_rmse"),
+            "external_mae": external_metrics.get("external_mae"),
             "feature_dimensions": dataset.get("feature_dimensions"),
+            "usable_records": dataset.get("usable_records"),
+            "risk_count": len(report.get("risks") or []),
         }
 
     def _default_registry_name(self, run: ModelTrainingRun, snapshot: dict[str, Any]) -> str:

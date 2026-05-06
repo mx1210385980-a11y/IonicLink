@@ -68,6 +68,7 @@ class TrainingStartPayload(BaseModel):
 class RegisterModelPayload(BaseModel):
     name: str | None = None
     description: str | None = None
+    is_recommended: bool = False
 
 
 class ModelPredictionPayload(BaseModel):
@@ -280,6 +281,7 @@ async def register_training_run(
             scope_type=scope.scope_type,
             name=payload.name,
             description=payload.description,
+            is_recommended=payload.is_recommended,
         )
         return {"model": item}
     except KeyError as exc:
@@ -326,6 +328,29 @@ async def delete_registered_model(
         raise HTTPException(status_code=404, detail="Registered model not found.") from exc
     except Exception as exc:
         _raise_internal_error("Delete registered model", exc)
+
+
+@router.post("/registry/{registry_id}/recommend", response_model=dict)
+async def set_recommended_registered_model(
+    registry_id: int,
+    recommended: bool = Query(True),
+    session: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    try:
+        item = await get_model_training_service().set_recommended_registered_model(
+            session,
+            registry_id=registry_id,
+            group_id=principal.group.id,
+            scope_key=scope.scope_key,
+            recommended=recommended,
+        )
+        return {"model": item}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Registered model not found.") from exc
+    except Exception as exc:
+        _raise_internal_error("Set recommended registered model", exc)
 
 
 @router.post("/registry/{registry_id}/predict", response_model=dict)
