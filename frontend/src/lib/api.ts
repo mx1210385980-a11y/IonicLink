@@ -1796,6 +1796,17 @@ export interface ModelTrainingTaskSnapshot {
     test_metrics?: ModelTrainingTestMetrics | null
 }
 
+export interface ModelTrainingPlanPreview {
+    dataset: ModelTrainingTaskSnapshot['dataset']
+    feature_blocks: ModelTrainingTaskSnapshot['feature_blocks']
+    warnings: string[]
+    split_plan: Array<{
+        label: string
+        train_size: number
+        validation_size: number
+    }>
+}
+
 export interface ModelTrainingSummary {
     dataset: ModelTrainingDatasetSummary
     cleaning: ModelTrainingCleaningSummary
@@ -1871,6 +1882,11 @@ export async function getModelTrainingSummary(cleanedDatasetId?: number | null) 
 export async function getModelTrainingCleaningSummary(payload: ModelTrainingCleaningOptions) {
     const response = await api.post('/api/model-training/cleaning/summary', payload)
     return response.data as ModelTrainingSummary
+}
+
+export async function previewModelTrainingPlan(payload: ModelTrainingStartPayload) {
+    const response = await api.post('/api/model-training/preview', payload)
+    return response.data as ModelTrainingPlanPreview
 }
 
 export interface ModelCleaningOptions {

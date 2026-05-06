@@ -3,6 +3,8 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   AlertTriangle,
   ChevronDown,
+  CheckCircle2,
+  ClipboardCheck,
   Database,
   ExternalLink,
   Layers,
@@ -12,6 +14,7 @@ import {
   Sparkles,
   Square,
   Trophy,
+  X,
 } from 'lucide-vue-next'
 import {
   BarElement,
@@ -31,8 +34,10 @@ import {
   cancelModelTraining,
   getModelTrainingSummary,
   listCleanedDatasets,
+  previewModelTrainingPlan,
   startModelTraining,
   type ModelTrainingMetricPoint,
+  type ModelTrainingPlanPreview,
   type ModelTrainingStartPayload,
   type ModelTrainingSummary,
   type ModelTrainingTaskSnapshot,
@@ -82,6 +87,11 @@ const showAdvanced = ref(false)
 const HIDDEN_ALGORITHMS = new Set(['mlp'])
 const splitDetailTab = ref<'subsets' | 'bins' | 'folds'>('subsets')
 const activeFoldIndex = ref(0)
+const showExperimentModal = ref(false)
+const experimentPreview = ref<ModelTrainingPlanPreview | null>(null)
+const experimentPreviewLoading = ref(false)
+const experimentPreviewError = ref('')
+const pendingExperimentAction = ref<'start' | 'tune' | 'compare' | null>(null)
 const splitDetailTabs: Array<{ key: 'subsets' | 'bins' | 'folds'; label: string }> = [
   { key: 'subsets', label: '总体' },
   { key: 'bins', label: 'μ 分箱' },
@@ -94,9 +104,6 @@ const compareQueue = ref<string[]>([])
 const compareResults = ref<ComparisonRow[]>([])
 const compareTotal = ref(0)
 const compareCurrentAlgorithm = ref<string | null>(null)
-
-// 自动调参模式（仅作用于"开始训练"那一次任务，对比模式各算法走默认参数）
-const tuneRequested = ref(false)
 
 const emit = defineEmits<{
   'open-knowledge': []
@@ -469,6 +476,28 @@ const splitOptions = computed(() => summary.value?.split_options || [])
 const activeSplitOption = computed(() =>
   splitOptions.value.find((opt) => opt.key === form.data_options.split_strategy) || null,
 )
+const experimentDataset = computed(() => experimentPreview.value?.dataset || summary.value?.dataset || null)
+const experimentSplit = computed(() => experimentPreview.value?.dataset?.split || null)
+const experimentSplitDetails = computed(() => experimentSplit.value?.details || null)
+const experimentSplitSubsets = computed(() => experimentSplitDetails.value?.subsets || [])
+const experimentFeatureColumns = computed(() => experimentDataset.value?.feature_columns || summary.value?.dataset.feature_columns || [])
+const experimentFeaturePreview = computed(() => experimentFeatureColumns.value.slice(0, 14))
+const experimentFeatureHiddenCount = computed(() => Math.max(0, experimentFeatureColumns.value.length - experimentFeaturePreview.value.length))
+const experimentWarnings = computed(() => experimentPreview.value?.warnings || [])
+const experimentSplitPlanPreview = computed(() => experimentPreview.value?.split_plan?.slice(0, 4) || [])
+const experimentCleaning = computed(() => summary.value?.cleaning || selectedDataset.value?.summary || null)
+const experimentSmiles = computed(() => experimentCleaning.value?.smiles_screening || null)
+const experimentRules = computed(() => experimentCleaning.value?.rules || null)
+const experimentActionLabel = computed(() => {
+  if (pendingExperimentAction.value === 'compare') return '全部算法对比'
+  if (pendingExperimentAction.value === 'tune') return '自动调参后训练'
+  return '单模型训练'
+})
+const experimentConfirmLabel = computed(() => {
+  if (pendingExperimentAction.value === 'compare') return '确认并开始对比'
+  if (pendingExperimentAction.value === 'tune') return '确认并自动调参'
+  return '确认并开始训练'
+})
 
 // 自动调参 ─────────────────────────────────────────────────────
 const tuneProgress = computed(() => activeTask.value?.tune_progress || null)
@@ -679,6 +708,16 @@ function formatDateTime(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString() : '--'
 }
 
+function trainingViewLabel(value: string | null | undefined) {
+  switch (value) {
+    case 'macro_performance': return '宏观性能预测'
+    case 'afm_surface_response': return 'AFM 表面响应'
+    case 'cross_scale': return '跨尺度数据池'
+    case 'all': return '统一知识库全部样本'
+    default: return value || '未记录'
+  }
+}
+
 function sampleSourceLabel(source: DiagSample['source']) {
   if (source === 'test') return '测试'
   if (source === 'external') return '外部'
@@ -869,7 +908,7 @@ async function runNextCompareItem() {
   compareCurrentAlgorithm.value = next
   form.algorithm = next
   loadError.value = ''
-  await handleStartTraining()
+  await startTrainingRun({ tune: false })
   // 启动失败时（loadError 被设置），WebSocket 不会触发完成事件，需手动推进队列
   if (loadError.value) {
     compareResults.value.push({
@@ -891,7 +930,7 @@ async function runNextCompareItem() {
   }
 }
 
-async function handleCompareAll() {
+async function startCompareAllConfirmed() {
   if (!summary.value || selectedCleanedDatasetId.value == null) return
   if (compareMode.value || activeTask.value?.status === 'running') return
   const algorithms = availableAlgorithms.value.map((alg) => alg.key)
@@ -901,6 +940,12 @@ async function handleCompareAll() {
   compareTotal.value = algorithms.length
   compareMode.value = true
   await runNextCompareItem()
+}
+
+async function handleCompareAll() {
+  if (!summary.value || selectedCleanedDatasetId.value == null) return
+  if (compareMode.value || activeTask.value?.status === 'running') return
+  await openExperimentPreview('compare')
 }
 
 async function handleStopCompare() {
@@ -923,19 +968,51 @@ async function handleDatasetChange() {
   }
 }
 
-async function handleStartTraining() {
-  if (!summary.value || selectedCleanedDatasetId.value == null) return
+function buildTrainingPayload(options: { tune?: boolean } = {}): ModelTrainingStartPayload | null {
+  if (!summary.value || selectedCleanedDatasetId.value == null) return null
+  return {
+    target: summary.value.dataset.target_column || form.target,
+    algorithm: form.algorithm,
+    hyperparameters: { ...form.hyperparameters },
+    data_options: { ...form.data_options },
+    cleaned_dataset_id: selectedCleanedDatasetId.value,
+    tune: Boolean(options.tune) && !compareMode.value,
+  }
+}
+
+async function loadExperimentPreview(action: 'start' | 'tune' | 'compare') {
+  const payload = buildTrainingPayload({ tune: action === 'tune' })
+  if (!payload) return
+  experimentPreviewLoading.value = true
+  experimentPreviewError.value = ''
+  experimentPreview.value = null
+  try {
+    experimentPreview.value = await previewModelTrainingPlan(payload)
+  } catch (error: any) {
+    experimentPreviewError.value = error?.response?.data?.detail || error?.message || 'Failed to preview training plan.'
+  } finally {
+    experimentPreviewLoading.value = false
+  }
+}
+
+async function openExperimentPreview(action: 'start' | 'tune' | 'compare') {
+  pendingExperimentAction.value = action
+  showExperimentModal.value = true
+  await loadExperimentPreview(action)
+}
+
+function closeExperimentPreview() {
+  if (starting.value || experimentPreviewLoading.value) return
+  showExperimentModal.value = false
+  pendingExperimentAction.value = null
+}
+
+async function startTrainingRun(options: { tune?: boolean } = {}) {
+  const payload = buildTrainingPayload({ tune: options.tune })
+  if (!payload) return
   starting.value = true
   loadError.value = ''
   try {
-    const payload: ModelTrainingStartPayload = {
-      target: summary.value.dataset.target_column || form.target,
-      algorithm: form.algorithm,
-      hyperparameters: { ...form.hyperparameters },
-      data_options: { ...form.data_options },
-      cleaned_dataset_id: selectedCleanedDatasetId.value,
-      tune: tuneRequested.value && !compareMode.value,
-    }
     const response = await startModelTraining(payload)
     applyTaskSnapshot(response.task)
     openSocket(response.task.task_id)
@@ -943,15 +1020,31 @@ async function handleStartTraining() {
     loadError.value = error?.response?.data?.detail || error?.message || 'Failed to start training.'
   } finally {
     starting.value = false
-    tuneRequested.value = false  // 一次性标志，下次"开始训练"恢复默认
   }
+}
+
+async function confirmExperimentStart() {
+  const action = pendingExperimentAction.value
+  if (!action || experimentPreviewLoading.value || experimentPreviewError.value) return
+  showExperimentModal.value = false
+  pendingExperimentAction.value = null
+  if (action === 'compare') {
+    await startCompareAllConfirmed()
+    return
+  }
+  await startTrainingRun({ tune: action === 'tune' })
+}
+
+async function handleStartTraining() {
+  if (!summary.value || selectedCleanedDatasetId.value == null) return
+  if (compareMode.value || activeTask.value?.status === 'running') return
+  await openExperimentPreview('start')
 }
 
 async function handleAutoTune() {
   if (!summary.value || selectedCleanedDatasetId.value == null) return
   if (compareMode.value || activeTask.value?.status === 'running') return
-  tuneRequested.value = true
-  await handleStartTraining()
+  await openExperimentPreview('tune')
 }
 
 async function handleCancelTraining() {
@@ -1947,6 +2040,257 @@ watch(
           </section>
         </div>
       </main>
+    </div>
+
+    <div
+      v-if="showExperimentModal"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4 py-6"
+      @click.self="closeExperimentPreview"
+    >
+      <section class="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-[1.1rem] border border-[#dbe4f2] bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.45)]">
+        <header class="flex shrink-0 items-start justify-between gap-4 border-b border-[#eef2f6] px-5 py-4">
+          <div class="min-w-0">
+            <p class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#5b56ea]">
+              <ClipboardCheck class="h-3.5 w-3.5" />
+              训练前实验摘要
+            </p>
+            <h2 class="mt-1 text-xl font-semibold tracking-[-0.03em] text-slate-950">
+              确认 {{ experimentActionLabel }}
+            </h2>
+            <p class="mt-1 text-sm leading-6 text-slate-500">
+              这里会冻结本次训练的样本筛选、特征、划分策略和超参数；确认后才会启动训练任务。
+            </p>
+          </div>
+          <button
+            type="button"
+            class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[0.65rem] border border-[#e2e8f0] bg-white text-slate-500 transition hover:bg-[#f8fbff] hover:text-slate-900"
+            :disabled="starting || experimentPreviewLoading"
+            title="关闭"
+            @click="closeExperimentPreview"
+          >
+            <X class="h-4 w-4" />
+          </button>
+        </header>
+
+        <div class="min-h-0 flex-1 overflow-y-auto custom-scrollbar px-5 py-4">
+          <div
+            v-if="experimentPreviewLoading"
+            class="flex min-h-[22rem] flex-col items-center justify-center gap-2 rounded-[0.9rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] text-sm text-slate-500"
+          >
+            <Loader2 class="h-5 w-5 animate-spin text-[#5b56ea]" />
+            正在生成实验摘要...
+          </div>
+
+          <div
+            v-else-if="experimentPreviewError"
+            class="rounded-[0.9rem] border border-[#ffd4da] bg-[#fff5f6] px-4 py-3 text-sm text-[#cf334f]"
+          >
+            <p class="flex items-center gap-1.5 font-semibold">
+              <AlertTriangle class="h-4 w-4" />
+              无法生成训练预览
+            </p>
+            <p class="mt-1.5 leading-6">{{ experimentPreviewError }}</p>
+          </div>
+
+          <div v-else class="space-y-4">
+            <section class="grid gap-3 lg:grid-cols-[1.15fr_0.85fr]">
+              <div class="rounded-[0.9rem] border border-[#eef2f6] bg-[#fbfcff] p-4">
+                <p class="text-[10px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">数据集版本</p>
+                <h3 class="mt-1 truncate text-lg font-semibold text-slate-950">
+                  {{ selectedDataset?.name || summary?.dataset?.name || datasetTitle }}
+                </h3>
+                <div class="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                  <div class="rounded-[0.6rem] bg-white px-3 py-2 ring-1 ring-[#e2e8f0]">
+                    <p class="text-[10px] font-semibold text-slate-400">可用样本</p>
+                    <p class="mt-0.5 text-lg font-semibold text-slate-950 tabular-nums">{{ formatNumber(experimentDataset?.usable_records) }}</p>
+                  </div>
+                  <div class="rounded-[0.6rem] bg-white px-3 py-2 ring-1 ring-[#e2e8f0]">
+                    <p class="text-[10px] font-semibold text-slate-400">目标</p>
+                    <p class="mt-1 truncate font-semibold text-slate-900">{{ targetLabel }}</p>
+                  </div>
+                  <div class="rounded-[0.6rem] bg-white px-3 py-2 ring-1 ring-[#e2e8f0]">
+                    <p class="text-[10px] font-semibold text-slate-400">特征</p>
+                    <p class="mt-0.5 text-lg font-semibold text-slate-950 tabular-nums">{{ formatNumber(experimentFeatureColumns.length) }}</p>
+                  </div>
+                  <div class="rounded-[0.6rem] bg-white px-3 py-2 ring-1 ring-[#e2e8f0]">
+                    <p class="text-[10px] font-semibold text-slate-400">训练视图</p>
+                    <p class="mt-1 truncate font-semibold text-slate-900">{{ trainingViewLabel(experimentRules?.training_view) }}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="rounded-[0.9rem] border border-[#eef2f6] bg-white p-4">
+                <p class="text-[10px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">SMILES 筛选</p>
+                <template v-if="experimentSmiles">
+                  <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
+                    <div class="rounded-[0.6rem] bg-[#f8fafc] px-3 py-2">
+                      <p class="text-[10px] text-slate-400">双离子 SMILES</p>
+                      <p class="mt-0.5 font-semibold text-slate-900 tabular-nums">
+                        {{ formatNumber(experimentSmiles.dual_smiles_records) }} / {{ formatNumber(experimentSmiles.input_records) }}
+                      </p>
+                    </div>
+                    <div class="rounded-[0.6rem] bg-[#f8fafc] px-3 py-2">
+                      <p class="text-[10px] text-slate-400">描述符可用</p>
+                      <p class="mt-0.5 font-semibold text-slate-900 tabular-nums">{{ formatNumber(experimentSmiles.descriptor_ready_records) }}</p>
+                    </div>
+                    <div class="rounded-[0.6rem] bg-[#f8fafc] px-3 py-2">
+                      <p class="text-[10px] text-slate-400">阳/阴离子种类</p>
+                      <p class="mt-0.5 font-semibold text-slate-900 tabular-nums">
+                        {{ experimentSmiles.unique_cations }} / {{ experimentSmiles.unique_anions }}
+                      </p>
+                    </div>
+                    <div class="rounded-[0.6rem] bg-[#f8fafc] px-3 py-2">
+                      <p class="text-[10px] text-slate-400">无效 SMILES</p>
+                      <p class="mt-0.5 font-semibold text-slate-900 tabular-nums">{{ formatNumber(experimentSmiles.invalid_smiles_records) }}</p>
+                    </div>
+                  </div>
+                  <p class="mt-2 text-[11px] leading-5 text-slate-500">
+                    规则：{{ experimentRules?.require_dual_smiles ? '要求阴/阳离子 SMILES' : '允许缺少 SMILES' }} ·
+                    {{ experimentRules?.require_valid_smiles ? '要求 RDKit 可解析' : '不强制 RDKit 解析' }}
+                  </p>
+                </template>
+                <p v-else class="mt-3 rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] px-3 py-3 text-xs text-slate-500">
+                  该数据集未记录 SMILES 筛选摘要，可能来自 CSV 导入或旧版本数据集。
+                </p>
+              </div>
+            </section>
+
+            <section class="grid gap-3 lg:grid-cols-[0.9fr_1.1fr]">
+              <div class="rounded-[0.9rem] border border-[#eef2f6] bg-white p-4">
+                <p class="text-[10px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">数据划分</p>
+                <p class="mt-1 text-sm font-semibold text-slate-950">{{ experimentSplit?.label || activeSplitOption?.label || '未选择' }}</p>
+                <p class="mt-1 text-xs leading-5 text-slate-500">
+                  随机种子 {{ form.data_options.random_seed }} · 测试占比 {{ validationSplitPercent }}% · {{ form.data_options.cv_folds || 5 }} 折 CV
+                </p>
+                <div v-if="experimentSplitSubsets.length" class="mt-3 grid gap-2 sm:grid-cols-3">
+                  <div
+                    v-for="subset in experimentSplitSubsets"
+                    :key="subset.key || subset.label"
+                    class="rounded-[0.65rem] bg-[#fbfcff] px-3 py-2 ring-1 ring-[#e2e8f0]"
+                  >
+                    <p class="text-[10px] font-bold uppercase tracking-[0.14em]" :class="splitSubsetTone(subset.key)">
+                      {{ subset.label }}
+                    </p>
+                    <p class="mt-0.5 text-lg font-semibold text-slate-950 tabular-nums">{{ formatNumber(subset.count) }}</p>
+                    <p class="text-[11px] text-slate-500">{{ subset.cation_count }} 类阳离子 · {{ subset.strata_count }} 标签</p>
+                  </div>
+                </div>
+                <div v-if="experimentSplitPlanPreview.length" class="mt-3 border-t border-[#eef2f6] pt-2">
+                  <p class="mb-1.5 text-[11px] font-semibold text-slate-500">CV 折次预览</p>
+                  <div class="space-y-1">
+                    <div
+                      v-for="fold in experimentSplitPlanPreview"
+                      :key="fold.label"
+                      class="flex items-center justify-between gap-3 text-[11px] text-slate-600"
+                    >
+                      <span class="truncate font-medium">{{ fold.label }}</span>
+                      <span class="shrink-0 tabular-nums">训练 {{ fold.train_size }} · 验证 {{ fold.validation_size }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="rounded-[0.9rem] border border-[#eef2f6] bg-white p-4">
+                <div class="flex items-center justify-between gap-3">
+                  <p class="text-[10px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">特征快照</p>
+                  <span class="text-[11px] font-semibold text-slate-500">{{ formatNumber(experimentFeatureColumns.length) }} 个特征</span>
+                </div>
+                <div class="mt-3 flex flex-wrap gap-1.5">
+                  <span
+                    v-for="feature in experimentFeaturePreview"
+                    :key="feature"
+                    class="rounded-full bg-[#f5f7ff] px-2.5 py-1 text-[11px] font-semibold text-[#3d56d2] ring-1 ring-[#cdd7ff]"
+                  >
+                    {{ formatColumnLabel(feature) }}
+                  </span>
+                  <span
+                    v-if="experimentFeatureHiddenCount"
+                    class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-500"
+                  >
+                    还有 {{ experimentFeatureHiddenCount }} 个
+                  </span>
+                </div>
+                <div class="mt-3 rounded-[0.65rem] bg-[#fbfcff] px-3 py-2 text-xs leading-5 text-slate-500 ring-1 ring-[#eef2f6]">
+                  <p>
+                    特征来源：{{ experimentPreview?.feature_blocks?.[0]?.label || 'Saved cleaned feature matrix' }}
+                    <template v-if="summary?.pca_info?.enabled"> · PCA {{ summary.pca_info.actual_components }} 个主成分</template>
+                  </p>
+                  <p>
+                    缺失值策略：{{ experimentRules?.missing_value_strategy || '训练时中位数补齐' }} ·
+                    目标异常值：{{ experimentRules?.remove_target_outliers ? `IQR ${experimentRules.iqr_multiplier || 1.5}` : '未移除' }}
+                  </p>
+                </div>
+              </div>
+            </section>
+
+            <section class="rounded-[0.9rem] border border-[#eef2f6] bg-white p-4">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p class="text-[10px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">算法与超参数</p>
+                  <p class="mt-1 text-base font-semibold text-slate-950">
+                    <template v-if="pendingExperimentAction === 'compare'">
+                      {{ availableAlgorithms.length }} 个算法依次对比
+                    </template>
+                    <template v-else>
+                      {{ algorithmLabelZh(form.algorithm) }}
+                    </template>
+                  </p>
+                </div>
+                <div class="flex flex-wrap gap-1.5 text-[11px] font-semibold text-slate-600">
+                  <span class="rounded-full bg-[#fbfcff] px-2.5 py-1 ring-1 ring-[#e2e8f0]">轮次 {{ form.hyperparameters.n_estimators }}</span>
+                  <span class="rounded-full bg-[#fbfcff] px-2.5 py-1 ring-1 ring-[#e2e8f0]">学习率 {{ form.hyperparameters.learning_rate.toFixed(2) }}</span>
+                  <span class="rounded-full bg-[#fbfcff] px-2.5 py-1 ring-1 ring-[#e2e8f0]">深度 {{ form.hyperparameters.max_depth }}</span>
+                  <span v-if="pendingExperimentAction === 'tune'" class="rounded-full bg-[#fff4da] px-2.5 py-1 text-[#b97113] ring-1 ring-[#f6d99a]">先自动调参</span>
+                </div>
+              </div>
+              <p v-if="pendingExperimentAction === 'compare'" class="mt-2 text-xs leading-5 text-slate-500">
+                对比算法：{{ availableAlgorithms.map((alg) => algorithmLabelZh(alg.key)).join('、') }}。每个算法会使用同一份数据划分预览规则，便于横向比较。
+              </p>
+            </section>
+
+            <section
+              v-if="experimentWarnings.length"
+              class="rounded-[0.9rem] border border-[#ffe4b5] bg-[#fffaf0] px-4 py-3"
+            >
+              <p class="flex items-center gap-1.5 text-xs font-semibold text-[#a16207]">
+                <AlertTriangle class="h-3.5 w-3.5" />
+                启动前提示
+              </p>
+              <ul class="mt-1.5 space-y-1 text-xs leading-5 text-[#854d0e]">
+                <li v-for="warning in experimentWarnings" :key="warning">· {{ warning }}</li>
+              </ul>
+            </section>
+          </div>
+        </div>
+
+        <footer class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-[#eef2f6] px-5 py-4">
+          <p class="flex items-center gap-1.5 text-xs text-slate-500">
+            <CheckCircle2 class="h-3.5 w-3.5 text-[#0b9d63]" />
+            确认后会保存为一次可追溯训练任务。
+          </p>
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-[0.65rem] border border-[#e2e8f0] bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 transition hover:bg-[#f8fbff] hover:text-slate-900"
+              :disabled="starting || experimentPreviewLoading"
+              @click="closeExperimentPreview"
+            >
+              <X class="h-3.5 w-3.5" />
+              返回调整
+            </button>
+            <button
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-[0.65rem] bg-[#5b56ea] px-4 py-2 text-xs font-semibold text-white shadow-[0_12px_28px_-18px_rgba(91,86,234,0.85)] transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3] disabled:shadow-none"
+              :disabled="starting || experimentPreviewLoading || Boolean(experimentPreviewError)"
+              @click="confirmExperimentStart"
+            >
+              <Loader2 v-if="starting" class="h-3.5 w-3.5 animate-spin" />
+              <Play v-else class="h-3.5 w-3.5" />
+              {{ starting ? '启动中' : experimentConfirmLabel }}
+            </button>
+          </div>
+        </footer>
+      </section>
     </div>
   </div>
 </template>

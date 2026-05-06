@@ -922,6 +922,30 @@ class ModelTrainingService:
             },
         }
 
+    def preview_saved_training_plan(self, dataset: CleanedDataset, config: dict[str, Any]) -> dict[str, Any]:
+        logger.debug("Previewing training plan dataset_id=%s", dataset.id)
+        rows, metadata = self._load_saved_dataset_rows(dataset)
+        prepared = self._prepare_saved_dataset(rows, config, metadata)
+        split_plan = self._build_split_plan(prepared)
+        split_details = self._build_split_details(prepared, split_plan)
+        if split_details:
+            prepared["dataset"].setdefault("split", {})["details"] = split_details
+        def index_count(value: Any) -> int:
+            return int(len(value)) if value is not None else 0
+        return {
+            "dataset": prepared["dataset"],
+            "feature_blocks": prepared["feature_blocks"],
+            "warnings": prepared["warnings"],
+            "split_plan": [
+                {
+                    "label": split.get("label"),
+                    "train_size": index_count(split.get("train_idx")),
+                    "validation_size": index_count(split.get("val_idx")),
+                }
+                for split in split_plan
+            ],
+        }
+
     def _build_scope_summary_payload(
         self,
         *,

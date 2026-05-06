@@ -434,24 +434,42 @@ def test_training_service_prepares_joint_stratified_thesis_split() -> None:
     }
 
     service = ModelTrainingService()
+    config = {
+        "algorithm": "gradient_boosting",
+        "hyperparameters": {"n_estimators": 20, "learning_rate": 0.06, "max_depth": 3},
+        "data_options": {
+            "validation_split": 0.2,
+            "random_seed": 42,
+            "max_records": None,
+            "split_strategy": "joint_stratified",
+            "cv_folds": 5,
+            "min_confidence": 0.0,
+        },
+    }
     prepared = service._prepare_saved_dataset(
         rows,
-        {
-            "algorithm": "gradient_boosting",
-            "hyperparameters": {"n_estimators": 20, "learning_rate": 0.06, "max_depth": 3},
-            "data_options": {
-                "validation_split": 0.2,
-                "random_seed": 42,
-                "max_records": None,
-                "split_strategy": "joint_stratified",
-                "cv_folds": 5,
-                "min_confidence": 0.0,
-            },
-        },
+        config,
         metadata,
     )
     split_plan = service._build_split_plan(prepared)
     split_details = service._build_split_details(prepared, split_plan)
+    dataset = CleanedDataset(
+        name="Joint preview dataset",
+        description=None,
+        target_key="cof",
+        source_scope_type="workspace",
+        source_scope_key="workspace:1",
+        group_id=1,
+        workspace_id=None,
+        created_by_user_id=1,
+        scope_type="workspace",
+        scope_key="workspace:1",
+        row_count=len(rows),
+        config_json=json.dumps({}),
+        summary_json=json.dumps(metadata),
+        rows_json=json.dumps(rows),
+    )
+    preview = service.preview_saved_training_plan(dataset, config)
 
     assert prepared["dataset"]["split"]["strategy"] == "joint_stratified"
     assert prepared["dataset"]["split"]["strata_count"] >= 8
@@ -464,6 +482,8 @@ def test_training_service_prepares_joint_stratified_thesis_split() -> None:
     assert split_details["target_bins"]
     assert split_details["folds"][0]["validation"]["count"] > 0
     assert split_details["folds"][0]["validation_strata"]
+    assert preview["dataset"]["split"]["details"]["subsets"][0]["key"] == "train_pool"
+    assert preview["split_plan"][0]["train_size"] > 0
     assert set(prepared["external_idx"].tolist()).isdisjoint(set(prepared["train_pool_idx"].tolist()))
     assert set(prepared["external_idx"].tolist()).isdisjoint(set(prepared["test_idx"].tolist()))
 

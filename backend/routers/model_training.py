@@ -131,6 +131,26 @@ async def get_cleaning_summary(
         _raise_internal_error("Get cleaning summary", exc)
 
 
+@router.post("/preview", response_model=dict)
+async def preview_training_plan(
+    payload: TrainingStartPayload,
+    session: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    try:
+        if payload.cleaned_dataset_id is None:
+            raise HTTPException(status_code=400, detail="Select a saved cleaned dataset before previewing training.")
+        saved_dataset = await require_cleaned_dataset_access(session, principal, payload.cleaned_dataset_id)
+        saved_dataset = await get_model_cleaning_service().upgrade_dataset_if_needed(session, saved_dataset)
+        return get_model_training_service().preview_saved_training_plan(saved_dataset, payload.dict())
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        _raise_internal_error("Preview training plan", exc)
+
+
 @router.post("/start", response_model=dict)
 async def start_training(
     payload: TrainingStartPayload,
