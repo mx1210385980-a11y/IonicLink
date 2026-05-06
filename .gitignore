@@ -45,6 +45,7 @@ backend/data/*.db
 backend/data/*.db-*
 backend/data/*.sqlite
 backend/data/*.sqlite3
+backend/data/backups/*.db
 backend/temp_uploads/
 
 # Frontend local outputs
