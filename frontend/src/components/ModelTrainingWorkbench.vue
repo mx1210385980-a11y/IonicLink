@@ -112,6 +112,7 @@ const showSaveVersionModal = ref(false)
 const saveVersionName = ref('')
 const saveVersionDescription = ref('')
 const saveVersionRecommended = ref(false)
+const NON_ITERATIVE_ALGORITHMS = new Set(['svr', 'linear_regression'])
 const splitDetailTabs: Array<{ key: 'subsets' | 'bins' | 'folds'; label: string }> = [
   { key: 'subsets', label: '总体' },
   { key: 'bins', label: 'μ 分箱' },
@@ -170,6 +171,20 @@ const targetLabel = computed(() => targetDisplayLabel(
   || form.target,
 ))
 const datasetTitle = computed(() => selectedDataset.value?.name || summary.value?.dataset.name || '训练工作台')
+const activeAlgorithm = computed(() => activeTask.value?.config.algorithm || form.algorithm)
+const isActiveNonIterativeModel = computed(() => NON_ITERATIVE_ALGORITHMS.has(activeAlgorithm.value))
+const fitProgressLabel = computed(() => {
+  if (activeTask.value?.status !== 'running') return ''
+  if (isActiveNonIterativeModel.value) return activeAlgorithm.value === 'svr' ? 'SVR 单次拟合中' : '线性回归拟合中'
+  return `${activeTask.value?.current_round || 0} / ${activeTask.value?.total_rounds || form.hyperparameters.n_estimators} 轮`
+})
+const fitModeTitle = computed(() => activeAlgorithm.value === 'svr' ? 'SVR 单次拟合结果' : '线性回归单次拟合结果')
+const fitModeDescription = computed(() => {
+  if (activeAlgorithm.value === 'svr') {
+    return 'SVR 一次性求解支持向量回归目标，没有逐轮加树或 epoch；这里固定展示最终交叉验证、测试和外推表现。'
+  }
+  return '线性回归一次性求解系数，没有逐轮训练轨迹；这里固定展示最终交叉验证、测试和外推表现。'
+})
 const recommendedModel = computed(() => registeredModels.value.find((model) => model.is_recommended) || null)
 const activeRegisteredModel = computed(() => {
   const taskId = activeTask.value?.task_id
@@ -1414,7 +1429,7 @@ watch(
           v-if="activeTask?.status === 'running' && !compareMode"
           class="shrink-0 text-xs font-medium text-slate-500 tabular-nums"
         >
-          {{ activeTask?.current_round || 0 }} / {{ activeTask?.total_rounds || form.hyperparameters.n_estimators }} 轮
+          {{ fitProgressLabel }}
         </span>
         <span
           v-if="compareMode"
@@ -2335,8 +2350,71 @@ watch(
             </div>
           </section>
 
-          <!-- 学习曲线 + 误差曲线 -->
-          <section class="grid gap-3 xl:grid-cols-2">
+          <!-- 学习曲线 / 单次拟合摘要 -->
+          <section v-if="isActiveNonIterativeModel" class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
+            <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#5b56ea]">
+                  {{ fitModeTitle }}
+                </p>
+                <p class="mt-1 text-xs leading-5 text-slate-500">
+                  {{ fitModeDescription }}
+                </p>
+              </div>
+              <span class="rounded-full bg-[#f5f7ff] px-2.5 py-1 text-[11px] font-semibold text-[#5b56ea] ring-1 ring-[#cdd7ff]">
+                非迭代模型
+              </span>
+            </div>
+
+            <div class="grid gap-2.5 md:grid-cols-4">
+              <div class="rounded-[0.75rem] border border-[#eef2f6] bg-[#fbfcff] px-3 py-3">
+                <p class="text-[10px] font-bold uppercase tracking-[0.16em] text-[#7c3aed]">训练集</p>
+                <p class="mt-1 text-lg font-semibold text-slate-950 tabular-nums">R² {{ formatMetric(currentPoint?.train_r2, 3) }}</p>
+                <p class="mt-1 text-[11px] text-slate-500 tabular-nums">
+                  RMSE {{ formatMetric(currentPoint?.train_rmse, 3) }} · MAE {{ formatMetric(currentPoint?.train_mae, 3) }}
+                </p>
+              </div>
+              <div class="rounded-[0.75rem] border border-[#eef2f6] bg-[#fbfcff] px-3 py-3">
+                <p class="text-[10px] font-bold uppercase tracking-[0.16em] text-[#0f766e]">验证集</p>
+                <p class="mt-1 text-lg font-semibold text-slate-950 tabular-nums">R² {{ formatMetric(currentPoint?.val_r2, 3) }}</p>
+                <p class="mt-1 text-[11px] text-slate-500 tabular-nums">
+                  RMSE {{ formatMetric(currentPoint?.val_rmse, 3) }} · MAE {{ formatMetric(currentPoint?.val_mae, 3) }}
+                </p>
+              </div>
+              <div class="rounded-[0.75rem] border border-[#eef2f6] bg-[#fbfcff] px-3 py-3">
+                <p class="text-[10px] font-bold uppercase tracking-[0.16em] text-[#cf334f]">测试集</p>
+                <p class="mt-1 text-lg font-semibold text-slate-950 tabular-nums">R² {{ formatMetric(testMetrics?.test_r2, 3) }}</p>
+                <p class="mt-1 text-[11px] text-slate-500 tabular-nums">
+                  RMSE {{ formatMetric(testMetrics?.test_rmse, 3) }} · MAE {{ formatMetric(testMetrics?.test_mae, 3) }}
+                </p>
+              </div>
+              <div class="rounded-[0.75rem] border border-[#eef2f6] bg-[#fbfcff] px-3 py-3">
+                <p class="text-[10px] font-bold uppercase tracking-[0.16em] text-[#c2410c]">外推验证</p>
+                <p class="mt-1 text-lg font-semibold text-slate-950 tabular-nums">R² {{ formatMetric(externalMetrics?.external_r2, 3) }}</p>
+                <p class="mt-1 text-[11px] text-slate-500 tabular-nums">
+                  RMSE {{ formatMetric(externalMetrics?.external_rmse, 3) }} · MAE {{ formatMetric(externalMetrics?.external_mae, 3) }}
+                </p>
+              </div>
+            </div>
+
+            <div
+              v-if="tuneProgress?.all_results?.length"
+              class="mt-3 rounded-[0.75rem] border border-[#eef2f6] bg-[#fbfcff] px-3 py-2"
+            >
+              <p class="text-[11px] font-semibold text-slate-700">调参轨迹</p>
+              <div class="mt-2 flex flex-wrap gap-1.5">
+                <span
+                  v-for="(result, idx) in tuneProgress.all_results.slice(0, 8)"
+                  :key="`tune-result-${idx}`"
+                  class="rounded-full bg-white px-2 py-1 text-[10px] font-semibold text-slate-600 ring-1 ring-[#e2e8f0]"
+                >
+                  R² {{ formatMetric(result.score, 3) }}
+                </span>
+              </div>
+            </div>
+          </section>
+
+          <section v-else class="grid gap-3 xl:grid-cols-2">
             <div class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
               <div class="mb-2 flex items-center justify-between gap-2">
                 <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">

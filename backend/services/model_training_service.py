@@ -1090,8 +1090,7 @@ class ModelTrainingService:
             return model
 
         if algorithm == "svr":
-            # SVR 是一次性拟合（没有"轮次"概念）；为保留与梯度提升同样的进度条，我们
-            # 在第一轮就训练完整模型，后续轮次直接复用即可（loop 仍然会调用，但开销可忽略）。
+            # SVR 是一次性拟合（没有"轮次"概念）；total_rounds 会被压到 1。
             if model is not None:
                 return model
             scaler = StandardScaler()
@@ -1634,7 +1633,7 @@ class ModelTrainingService:
         random_strength = _float_or_default(hyperparameters.get("random_strength"), DEFAULT_HYPERPARAMETERS["random_strength"])
         random_seed = _int_or_default((config.get("data_options") or {}).get("random_seed"), DEFAULT_DATA_OPTIONS["random_seed"])
 
-        if algorithm == "linear_regression":
+        if algorithm in {"linear_regression", "svr"}:
             total_rounds = 1
         else:
             n_estimators = _int_or_default(hyperparameters.get("n_estimators"), DEFAULT_HYPERPARAMETERS["n_estimators"])
@@ -2079,7 +2078,7 @@ class ModelTrainingService:
             validation_size = int(round(pool_size / effective_cv_folds))
 
         algorithm = str(config.get("algorithm") or "gradient_boosting")
-        if algorithm == "linear_regression":
+        if algorithm in {"linear_regression", "svr"}:
             total_rounds = 1
         else:
             n_estimators = _int_or_default(
