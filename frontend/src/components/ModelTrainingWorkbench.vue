@@ -285,7 +285,7 @@ const reportMetrics = computed(() => {
     { key: 'training', label: '训练集', tone: 'text-[#7c3aed]', metric: metrics.training },
     { key: 'validation', label: '验证集', tone: 'text-[#0f766e]', metric: metrics.validation },
     { key: 'test', label: '测试集', tone: 'text-[#cf334f]', metric: metrics.test || null },
-    { key: 'external', label: '外部验证', tone: 'text-[#c2410c]', metric: metrics.external || null },
+    { key: 'external', label: '外推验证', tone: 'text-[#c2410c]', metric: metrics.external || null },
   ]
 })
 const reportRisks = computed(() => experimentReport.value?.risks || [])
@@ -309,6 +309,20 @@ const selectedFold = computed(() => {
   return folds[Math.min(activeFoldIndex.value, folds.length - 1)]
 })
 const maxSplitBinTotal = computed(() => Math.max(1, ...splitBins.value.map((bin) => Number(bin.total || bin.count || 0))))
+const externalValidationNote = computed(() => {
+  const count = Number(externalMetrics.value?.sample_count ?? datasetSplit.value?.external_size ?? activeTask.value?.dataset?.external_size ?? 0)
+  if (!count) return null
+  const singleton = Number(datasetSplit.value?.singleton_strata ?? experimentReport.value?.split?.singleton_strata ?? 0)
+  const externalR2 = externalMetrics.value?.external_r2 ?? experimentReport.value?.metrics?.external?.r2 ?? null
+  const isSmall = count < 30
+  const isNegative = typeof externalR2 === 'number' && externalR2 < 0
+  if (!isSmall && !isNegative) return null
+  return {
+    severity: isNegative ? 'medium' : 'low',
+    title: isNegative ? '外推验证 R² 为负' : '外推验证样本偏少',
+    message: `这里不是普通测试集，而是 ${count} 条训练中未见过的稀有阳离子 × μ 分箱组合${singleton ? `（其中 ${singleton} 组为单样本组合）` : ''}。${isNegative ? 'R² 为负说明模型外推这些稀有组合时低于均值基线。' : '样本少时 R² 对单个极端点非常敏感。'}主泛化表现优先看测试集 R²，外推验证用于提示需要补哪些离子和工况。`,
+  }
+})
 
 const allScatterSamples = computed(() => [
   ...predictionSamples.value,
@@ -332,6 +346,21 @@ function nullableNumber(value: unknown) {
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : null
 }
+
+const topExternalResiduals = computed<DiagSample[]>(() => externalSamples.value
+  .map((sample) => ({
+    source: 'external' as const,
+    recordId: nullableNumber(sample.record_id),
+    literatureId: nullableNumber(sample.literature_id),
+    actual: Number(sample.actual),
+    predicted: Number(sample.predicted),
+    residual: Number(sample.residual ?? (Number(sample.predicted) - Number(sample.actual))),
+    absResidual: Number(sample.abs_residual ?? Math.abs(Number(sample.predicted) - Number(sample.actual))),
+    rowIndex: nullableNumber(sample.row_index),
+  }))
+  .filter((sample) => Number.isFinite(sample.absResidual))
+  .sort((a, b) => b.absResidual - a.absResidual)
+  .slice(0, 5))
 
 const topResiduals = computed<DiagSample[]>(() => {
   const merged: DiagSample[] = []
@@ -459,7 +488,7 @@ const predictionScatterData = computed(() => {
       },
       {
         type: 'line' as const,
-        label: `外部文献验证 · ${externalSamplesData.length}`,
+        label: `外推验证 · ${externalSamplesData.length}`,
         data: externalSamplesData.map((sample) => ({ x: sample.actual, y: sample.predicted })),
         backgroundColor: 'rgba(245, 158, 11, 0.82)',
         borderColor: 'rgba(255,255,255,0.9)',
@@ -792,7 +821,7 @@ function versionScoreValue(value: { test_r2?: number | null; val_r2?: number | n
 
 function sampleSourceLabel(source: DiagSample['source']) {
   if (source === 'test') return '测试'
-  if (source === 'external') return '外部'
+  if (source === 'external') return '外推'
   return '验证'
 }
 
@@ -1716,7 +1745,7 @@ watch(
               <div class="flex flex-wrap gap-1.5 text-[11px] font-semibold text-slate-600">
                 <span class="rounded-full bg-white px-2.5 py-1 ring-1 ring-[#e2e8f0]">训练池 {{ datasetSplit.train_pool_size ?? activeTask?.dataset?.pool_size ?? 0 }}</span>
                 <span class="rounded-full bg-white px-2.5 py-1 ring-1 ring-[#e2e8f0]">测试集 {{ datasetSplit.test_size ?? activeTask?.dataset?.test_size ?? 0 }}</span>
-                <span class="rounded-full bg-white px-2.5 py-1 ring-1 ring-[#e2e8f0]">外部验证 {{ datasetSplit.external_size ?? activeTask?.dataset?.external_size ?? 0 }}</span>
+                <span class="rounded-full bg-white px-2.5 py-1 ring-1 ring-[#e2e8f0]">外推验证 {{ datasetSplit.external_size ?? activeTask?.dataset?.external_size ?? 0 }}</span>
                 <span v-if="datasetSplit.cv_folds" class="rounded-full bg-white px-2.5 py-1 ring-1 ring-[#e2e8f0]">{{ datasetSplit.cv_folds }} 折 CV</span>
               </div>
             </div>
@@ -1724,14 +1753,40 @@ watch(
               v-if="datasetSplit.strategy === 'joint_stratified'"
               class="mt-2 text-xs leading-5 text-slate-500"
             >
-              联合标签 {{ datasetSplit.strata_count ?? 0 }} 组 · 单样本外部层 {{ datasetSplit.singleton_strata ?? 0 }} 组 · μ 分箱 {{ datasetSplit.target_bin_count ?? 0 }} 档 · 阳离子 {{ datasetSplit.cation_count ?? 0 }} 类
+              联合标签 {{ datasetSplit.strata_count ?? 0 }} 组 · 稀有单样本组合 {{ datasetSplit.singleton_strata ?? 0 }} 组 · μ 分箱 {{ datasetSplit.target_bin_count ?? 0 }} 档 · 阳离子 {{ datasetSplit.cation_count ?? 0 }} 类
             </p>
             <p
               v-if="externalMetrics"
               class="mt-1 text-xs leading-5 text-slate-500"
             >
-              外部文献验证 RMSE {{ formatMetric(externalMetrics.external_rmse, 3) }} · MAE {{ formatMetric(externalMetrics.external_mae, 3) }} · {{ externalMetrics.sample_count }} 行
+              外推验证 R² {{ formatMetric(externalMetrics.external_r2, 3) }} · RMSE {{ formatMetric(externalMetrics.external_rmse, 3) }} · MAE {{ formatMetric(externalMetrics.external_mae, 3) }} · {{ externalMetrics.sample_count }} 行
             </p>
+
+            <div
+              v-if="externalValidationNote"
+              class="mt-2 rounded-[0.7rem] border px-3 py-2 text-xs leading-5"
+              :class="externalValidationNote.severity === 'medium' ? 'border-[#ffe4b5] bg-[#fffaf0] text-[#854d0e]' : 'border-[#dbeafe] bg-[#f0f7ff] text-[#1d4ed8]'"
+            >
+              <p class="font-semibold">{{ externalValidationNote.title }}</p>
+              <p class="mt-0.5 opacity-90">{{ externalValidationNote.message }}</p>
+              <div v-if="topExternalResiduals.length" class="mt-2 grid gap-1.5 md:grid-cols-2">
+                <button
+                  v-for="(sample, idx) in topExternalResiduals.slice(0, 4)"
+                  :key="`external-note-${sample.rowIndex}-${idx}`"
+                  type="button"
+                  class="flex min-w-0 items-center gap-2 rounded-[0.55rem] border border-white/70 bg-white/75 px-2.5 py-1.5 text-left text-[11px] transition hover:bg-white"
+                  :disabled="sample.recordId == null"
+                  title="回 Knowledge 定位这条外推残差样本"
+                  @click="handleInspectRecord(sample)"
+                >
+                  <span class="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#f59e0b]/15 text-[9px] font-bold text-[#c2410c]">{{ idx + 1 }}</span>
+                  <span class="min-w-0 flex-1 truncate tabular-nums">
+                    真实 {{ formatMetric(sample.actual, 3) }} -> 预测 {{ formatMetric(sample.predicted, 3) }}
+                  </span>
+                  <span class="shrink-0 font-semibold tabular-nums">|残差| {{ formatMetric(sample.absResidual, 3) }}</span>
+                </button>
+              </div>
+            </div>
 
             <div v-if="splitDetails" class="mt-3 border-t border-[#e2e8f0] pt-3">
               <div class="mb-3 inline-flex rounded-[0.65rem] bg-white p-1 ring-1 ring-[#e2e8f0]">
@@ -1782,7 +1837,7 @@ watch(
                       <span class="min-w-0 flex-1 truncate font-medium text-slate-700">{{ stratum.cation }}</span>
                       <span class="shrink-0 text-slate-400">{{ stratum.bin_label }}</span>
                       <span class="shrink-0 tabular-nums text-slate-500">
-                        训 {{ stratum.train_pool || 0 }} / 测 {{ stratum.test || 0 }} / 外 {{ stratum.external || 0 }}
+                        训 {{ stratum.train_pool || 0 }} / 测 {{ stratum.test || 0 }} / 外推 {{ stratum.external || 0 }}
                       </span>
                     </div>
                   </div>
@@ -1804,7 +1859,7 @@ watch(
                       <div class="h-full rounded-full bg-[#5b56ea]" :style="{ width: splitBinWidth(bin.total || bin.count) }" />
                     </div>
                     <p class="mt-1 text-[11px] text-slate-500">
-                      训练池 {{ bin.train_pool || 0 }} · 测试 {{ bin.test || 0 }} · 外部 {{ bin.external || 0 }}
+                      训练池 {{ bin.train_pool || 0 }} · 测试 {{ bin.test || 0 }} · 外推 {{ bin.external || 0 }}
                     </p>
                   </div>
                   <p class="self-center text-right text-sm font-semibold text-slate-950 tabular-nums">
@@ -1926,7 +1981,7 @@ watch(
                   测试 {{ formatNumber(experimentReport.split.test_size) }}
                 </span>
                 <span class="rounded-full bg-[#fbfcff] px-2.5 py-1 ring-1 ring-[#e2e8f0]">
-                  外部 {{ formatNumber(experimentReport.split.external_size) }}
+                  外推 {{ formatNumber(experimentReport.split.external_size) }}
                 </span>
                 <span v-if="experimentReport.split.cv_folds" class="rounded-full bg-[#fbfcff] px-2.5 py-1 ring-1 ring-[#e2e8f0]">
                   {{ experimentReport.split.cv_folds }} 折 CV
@@ -2266,18 +2321,18 @@ watch(
                     <span class="inline-block h-2 w-2 rotate-45 bg-[#ef4444]" />红色=测试集（隔离）
                   </span>
                   <span class="inline-flex items-center gap-1 ml-1">
-                    <span class="inline-block h-0 w-0 border-x-[5px] border-b-[8px] border-x-transparent border-b-[#f59e0b]" />橙色=外部验证
+                    <span class="inline-block h-0 w-0 border-x-[5px] border-b-[8px] border-x-transparent border-b-[#f59e0b]" />橙色=外推验证
                   </span>
                 </p>
               </div>
               <span v-if="allScatterSamples.length" class="text-[10px] text-slate-400 tabular-nums">
-                验证 {{ predictionSamples.length }} · 测试 {{ testSamples.length }} · 外部 {{ externalSamples.length }}
+                验证 {{ predictionSamples.length }} · 测试 {{ testSamples.length }} · 外推 {{ externalSamples.length }}
               </span>
             </div>
             <div class="h-[300px]">
               <div v-if="!allScatterSamples.length" class="flex h-full flex-col items-center justify-center gap-1 rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] text-center text-xs text-slate-500">
                 <p>训练完成后在此显示散点图</p>
-                <p class="text-slate-400">紫色 = 验证集 K 折预测，红色 = 测试集，橙色 = 外部验证</p>
+                <p class="text-slate-400">紫色 = 验证集 K 折预测，红色 = 测试集，橙色 = 外推验证</p>
               </div>
               <Line v-else :data="predictionScatterData" :options="predictionScatterOptions" />
             </div>
@@ -2553,7 +2608,7 @@ watch(
                         <span class="ml-1 font-semibold text-slate-900 tabular-nums">{{ formatMetric(model.test_r2, 3) }}</span>
                       </div>
                       <div class="rounded-[0.55rem] bg-[#fbfcff] px-2.5 py-1.5 ring-1 ring-[#eef2f6]">
-                        <span class="text-slate-400">外部 R²</span>
+                        <span class="text-slate-400">外推 R²</span>
                         <span class="ml-1 font-semibold text-slate-900 tabular-nums">{{ formatMetric(model.external_r2, 3) }}</span>
                         <span v-if="model.risk_count" class="ml-1 text-[#b97113]">· {{ model.risk_count }} 风险</span>
                       </div>

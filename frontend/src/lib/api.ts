@@ -1590,6 +1590,7 @@ export interface ModelTrainingExperimentReport {
         external_size?: number | null
         target_bin_count?: number | null
         strata_count?: number | null
+        singleton_strata?: number | null
         folds?: Array<{
             label: string
             train_size: number

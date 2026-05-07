@@ -365,7 +365,7 @@ TUNE_PARAM_GRIDS: dict[str, list[dict[str, Any]]] = {
 SPLIT_STRATEGY_DEFINITIONS: dict[str, dict[str, str]] = {
     "joint_stratified": {
         "label": "论文复现：阳离子 × μ 分箱",
-        "description": "按阳离子类型和摩擦系数分箱构建联合标签；单样本标签进入外部文献验证集，多样本标签再按 8:2 分层切训练/测试。",
+        "description": "按阳离子类型和摩擦系数分箱构建联合标签；单样本标签进入稀有组合外推验证集，多样本标签再按 8:2 分层切训练/测试。",
     },
     "k_fold": {
         "label": "5 折交叉验证（K-Fold CV）",
@@ -2335,7 +2335,7 @@ class ModelTrainingService:
         subset_defs = [
             ("train_pool", "训练池", prepared_indices("train_pool_idx")),
             ("test", "测试集", prepared_indices("test_idx")),
-            ("external", "外部验证", prepared_indices("external_idx")),
+            ("external", "稀有组合外推", prepared_indices("external_idx")),
         ]
 
         subset_lookup: dict[int, str] = {}
@@ -2587,11 +2587,19 @@ class ModelTrainingService:
         if test_r2 is not None and test_r2 < 0:
             add_risk("high", "测试集 R² 为负", "模型在从未参与训练的数据上低于均值基线，暂不建议作为推荐模型。")
         if external_count == 0:
-            add_risk("low", "未形成外部验证集", "当前划分没有单样本联合标签或外部保留样本，暂时无法观察跨文献外推表现。")
-        elif external_count < 10:
-            add_risk("medium", "外部验证过小", f"外部验证只有 {external_count} 条，跨文献泛化结论需要更多样本支撑。")
+            add_risk("low", "未形成外推验证集", "当前划分没有单样本联合标签或外推保留样本，暂时无法观察稀有组合外推表现。")
+        elif external_count < 30:
+            add_risk(
+                "medium",
+                "外推验证样本偏少",
+                f"稀有组合外推验证只有 {external_count} 条，R² 对单个极端样本很敏感，应作为外推风险提示而非主泛化指标。",
+            )
         if external_r2 is not None and external_r2 < 0:
-            add_risk("medium", "外部验证 R² 为负", "模型对外部保留样本表现弱，建议继续扩充离子和工况覆盖。")
+            add_risk(
+                "medium",
+                "外推验证 R² 为负",
+                "模型对训练中未见过的稀有阳离子 × μ 分箱组合低于均值基线，建议优先扩充这些离子和工况覆盖。",
+            )
         if task.warnings:
             add_risk("low", "训练过程有提示", "请查看运行提示中的缺失值补齐、折数下调或联合标签回退信息。")
 
@@ -2623,7 +2631,7 @@ class ModelTrainingService:
                     (test_metrics or {}).get("test_mae"),
                 ) if test_metrics else None,
                 "external": metric_payload(
-                    "外部验证",
+                    "稀有组合外推",
                     (external_metrics or {}).get("sample_count"),
                     (external_metrics or {}).get("external_r2"),
                     (external_metrics or {}).get("external_rmse"),
@@ -2640,6 +2648,7 @@ class ModelTrainingService:
                 "external_size": split.get("external_size") or dataset.get("external_size"),
                 "target_bin_count": split.get("target_bin_count"),
                 "strata_count": split.get("strata_count"),
+                "singleton_strata": split.get("singleton_strata"),
                 "folds": task.fold_summaries,
             },
             "hyperparameters": config.get("hyperparameters") or {},
