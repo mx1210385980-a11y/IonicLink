@@ -147,6 +147,18 @@ const socketRef = ref<WebSocket | null>(null)
 const completedTaskIds = new Set<string>()
 const showAdvanced = ref(false)
 const HIDDEN_ALGORITHMS = new Set(['mlp'])
+type WorkbenchTabKey = 'overview' | 'data' | 'experiments' | 'reports' | 'diagnostics' | 'versions'
+const activeWorkbenchTab = ref<WorkbenchTabKey>('overview')
+const defaultWorkbenchTab = { key: 'overview', label: '总览', description: '核心指标、运行提示和拟合状态。' } as const
+const workbenchTabs: Array<{ key: WorkbenchTabKey; label: string; description: string }> = [
+  defaultWorkbenchTab,
+  { key: 'data', label: '数据', description: '划分策略、外推集合和重复工况噪声。' },
+  { key: 'experiments', label: '实验', description: '特征组增益、自动调参和算法对比。' },
+  { key: 'reports', label: '报告', description: '训练报告、曲线、散点图和特征重要性。' },
+  { key: 'diagnostics', label: '诊断', description: '外推失败归因和高残差样本回看。' },
+  { key: 'versions', label: '版本', description: '保存、推荐、编辑和回看模型版本。' },
+]
+const activeWorkbenchTabMeta = computed(() => workbenchTabs.find((tab) => tab.key === activeWorkbenchTab.value) || defaultWorkbenchTab)
 const splitDetailTab = ref<'subsets' | 'bins' | 'folds'>('subsets')
 const activeFoldIndex = ref(0)
 const showExperimentModal = ref(false)
@@ -2388,9 +2400,33 @@ watch(
 
       <!-- ── 右：训练监控 ─────────────────────────────── -->
       <main class="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-[1.25rem] border border-[#e2e8f0] bg-white">
+        <header class="shrink-0 border-b border-[#eef2f6] bg-white px-4 py-3">
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">训练工作台</p>
+              <p class="mt-1 truncate text-xs text-slate-500">
+                {{ activeWorkbenchTabMeta.description }}
+              </p>
+            </div>
+            <div class="flex max-w-full gap-1 overflow-x-auto rounded-[0.75rem] bg-[#f8fafc] p-1 ring-1 ring-[#e2e8f0]">
+              <button
+                v-for="tab in workbenchTabs"
+                :key="tab.key"
+                type="button"
+                class="shrink-0 rounded-[0.58rem] px-3 py-1.5 text-xs font-semibold transition"
+                :class="activeWorkbenchTab === tab.key
+                  ? 'bg-[#5b56ea] text-white shadow-[0_10px_22px_-18px_rgba(91,86,234,0.95)]'
+                  : 'text-slate-500 hover:bg-white hover:text-slate-900'"
+                @click="activeWorkbenchTab = tab.key"
+              >
+                {{ tab.label }}
+              </button>
+            </div>
+          </div>
+        </header>
         <div class="min-h-0 flex-1 space-y-3 overflow-y-auto custom-scrollbar p-4">
           <!-- 4 个核心指标：训练 / 验证 / 测试 / 进度 -->
-          <section class="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+          <section v-if="activeWorkbenchTab === 'overview'" class="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
             <div class="rounded-[0.85rem] border border-[#eef2f6] bg-white px-4 py-3">
               <p
                 class="text-[10px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]"
@@ -2459,8 +2495,35 @@ watch(
             </div>
           </section>
 
+          <section v-if="activeWorkbenchTab === 'overview'" class="grid gap-2.5 md:grid-cols-3">
+            <button
+              type="button"
+              class="rounded-[0.85rem] border border-[#e2e8f0] bg-[#fbfcff] px-4 py-3 text-left transition hover:border-[#aebdfc] hover:bg-[#f8faff]"
+              @click="activeWorkbenchTab = 'data'"
+            >
+              <p class="text-[11px] font-bold uppercase tracking-[0.16em] text-[#64748b]">先看数据</p>
+              <p class="mt-1 text-sm font-semibold text-slate-950">划分、外推与重复噪声</p>
+            </button>
+            <button
+              type="button"
+              class="rounded-[0.85rem] border border-[#e2e8f0] bg-[#fbfcff] px-4 py-3 text-left transition hover:border-[#aebdfc] hover:bg-[#f8faff]"
+              @click="activeWorkbenchTab = 'experiments'"
+            >
+              <p class="text-[11px] font-bold uppercase tracking-[0.16em] text-[#64748b]">再做实验</p>
+              <p class="mt-1 text-sm font-semibold text-slate-950">特征增益、调参、算法对比</p>
+            </button>
+            <button
+              type="button"
+              class="rounded-[0.85rem] border border-[#e2e8f0] bg-[#fbfcff] px-4 py-3 text-left transition hover:border-[#aebdfc] hover:bg-[#f8faff]"
+              @click="activeWorkbenchTab = 'reports'"
+            >
+              <p class="text-[11px] font-bold uppercase tracking-[0.16em] text-[#64748b]">最后读报告</p>
+              <p class="mt-1 text-sm font-semibold text-slate-950">曲线、散点和特征重要性</p>
+            </button>
+          </section>
+
           <section
-            v-if="datasetSplit"
+            v-if="activeWorkbenchTab === 'data' && datasetSplit"
             class="rounded-[0.85rem] border border-[#eef2f6] bg-[#fbfcff] px-4 py-3"
           >
             <div class="flex flex-wrap items-center justify-between gap-2">
@@ -2656,7 +2719,7 @@ watch(
           </section>
 
           <section
-            v-if="targetNoise"
+            v-if="activeWorkbenchTab === 'data' && targetNoise"
             class="rounded-[0.95rem] border p-4"
             :class="targetNoiseToneClass()"
           >
@@ -2752,7 +2815,7 @@ watch(
 
           <!-- 运行警告 -->
           <section
-            v-if="runWarnings.length"
+            v-if="activeWorkbenchTab === 'overview' && runWarnings.length"
             class="rounded-[0.85rem] border border-[#ffe4b5] bg-[#fffaf0] px-4 py-3"
           >
             <p class="flex items-center gap-1.5 text-xs font-semibold text-[#a16207]">
@@ -2765,7 +2828,7 @@ watch(
           </section>
 
           <section
-            v-if="negativeR2Diagnostic"
+            v-if="activeWorkbenchTab === 'overview' && negativeR2Diagnostic"
             class="rounded-[0.85rem] border border-[#ffd4da] bg-[#fff5f6] px-4 py-3"
           >
             <p class="flex items-center gap-1.5 text-xs font-semibold text-[#cf334f]">
@@ -2778,7 +2841,7 @@ watch(
           </section>
 
           <section
-            v-if="fitDiagnostic"
+            v-if="activeWorkbenchTab === 'overview' && fitDiagnostic"
             class="rounded-[0.95rem] border p-4"
             :class="fitDiagnosticClass(fitDiagnostic.tone)"
           >
@@ -2825,7 +2888,7 @@ watch(
           </section>
 
           <section
-            v-if="activeFeatureGroupSummaries.length"
+            v-if="activeWorkbenchTab === 'experiments' && activeFeatureGroupSummaries.length"
             class="rounded-[0.95rem] border border-[#dbe4f2] bg-white p-4"
           >
             <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
@@ -2981,7 +3044,7 @@ watch(
           </section>
 
           <section
-            v-if="experimentReport && activeTask?.status === 'completed'"
+            v-if="activeWorkbenchTab === 'reports' && experimentReport && activeTask?.status === 'completed'"
             class="rounded-[1rem] border border-[#dbe4f2] bg-white p-4 shadow-[0_16px_40px_-32px_rgba(15,23,42,0.28)]"
           >
             <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
@@ -3146,7 +3209,7 @@ watch(
 
           <!-- 自动调参进度 / 结果 -->
           <section
-            v-if="tuneProgress"
+            v-if="activeWorkbenchTab === 'experiments' && tuneProgress"
             class="rounded-[0.95rem] border bg-white p-4"
             :class="tuneActive ? 'border-[#fbbf24] ring-1 ring-[#fbbf24]/40' : 'border-[#eef2f6]'"
           >
@@ -3203,7 +3266,7 @@ watch(
 
           <!-- ⭐ 算法对比结果 -->
           <section
-            v-if="compareMode || visibleCompareResults.length"
+            v-if="activeWorkbenchTab === 'experiments' && (compareMode || visibleCompareResults.length)"
             class="rounded-[0.95rem] border bg-white p-4"
             :class="compareMode ? 'border-[#aebdfc] ring-1 ring-[#aebdfc]/40' : 'border-[#eef2f6]'"
           >
@@ -3297,7 +3360,7 @@ watch(
           </section>
 
           <!-- 学习曲线 / 单次拟合摘要 -->
-          <section v-if="isActiveNonIterativeModel" class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
+          <section v-if="activeWorkbenchTab === 'reports' && isActiveNonIterativeModel" class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
             <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#5b56ea]">
@@ -3360,7 +3423,7 @@ watch(
             </div>
           </section>
 
-          <section v-else class="grid gap-3 xl:grid-cols-2">
+          <section v-else-if="activeWorkbenchTab === 'reports'" class="grid gap-3 xl:grid-cols-2">
             <div class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
               <div class="mb-2 flex items-center justify-between gap-2">
                 <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">
@@ -3393,7 +3456,7 @@ watch(
           </section>
 
           <!-- ⭐ 预测 vs 真实（核心可视化，对应论文图 3.2） -->
-          <section class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
+          <section v-if="activeWorkbenchTab === 'reports'" class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
             <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
               <div>
                 <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#5b56ea]">
@@ -3427,7 +3490,7 @@ watch(
 
           <!-- 外推失败样本归因 -->
           <section
-            v-if="externalDiagnosticItems.length"
+            v-if="activeWorkbenchTab === 'diagnostics' && externalDiagnosticItems.length"
             class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4"
           >
             <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
@@ -3549,7 +3612,7 @@ watch(
 
           <!-- ⭐ 异常样本诊断（残差 Top10） -->
           <section
-            v-if="topResiduals.length"
+            v-if="activeWorkbenchTab === 'diagnostics' && topResiduals.length"
             class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4"
           >
             <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -3622,7 +3685,7 @@ watch(
           </section>
 
           <!-- ⭐ 特征重要性 -->
-          <section class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
+          <section v-if="activeWorkbenchTab === 'reports'" class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
             <div class="mb-2 flex items-center justify-between gap-2">
               <div>
                 <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#5b56ea]">
@@ -3642,7 +3705,7 @@ watch(
           </section>
 
           <!-- 模型版本与训练回看 -->
-          <section class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
+          <section v-if="activeWorkbenchTab === 'versions'" class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
             <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#5b56ea]">
@@ -3904,6 +3967,36 @@ watch(
                 </div>
               </div>
             </div>
+          </section>
+
+          <section
+            v-if="activeWorkbenchTab === 'data' && !datasetSplit && !targetNoise"
+            class="rounded-[0.95rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] px-4 py-10 text-center"
+          >
+            <p class="text-sm font-semibold text-slate-900">还没有数据划分结果</p>
+            <p class="mt-1 text-xs leading-5 text-slate-500">
+              开始一次训练后，这里会显示训练池、测试集、外推验证和重复工况噪声。
+            </p>
+          </section>
+
+          <section
+            v-if="activeWorkbenchTab === 'experiments' && !activeFeatureGroupSummaries.length && !tuneProgress && !compareMode && !visibleCompareResults.length"
+            class="rounded-[0.95rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] px-4 py-10 text-center"
+          >
+            <p class="text-sm font-semibold text-slate-900">暂无可展示的实验</p>
+            <p class="mt-1 text-xs leading-5 text-slate-500">
+              生成包含结构描述符的训练集后，可以在这里跑特征组增益、自动调参和全部算法对比。
+            </p>
+          </section>
+
+          <section
+            v-if="activeWorkbenchTab === 'diagnostics' && !externalDiagnosticItems.length && !topResiduals.length"
+            class="rounded-[0.95rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] px-4 py-10 text-center"
+          >
+            <p class="text-sm font-semibold text-slate-900">暂无诊断样本</p>
+            <p class="mt-1 text-xs leading-5 text-slate-500">
+              训练完成后，这里会聚合外推失败归因和残差最大的样本，并支持回 Knowledge 定位。
+            </p>
           </section>
         </div>
       </main>
