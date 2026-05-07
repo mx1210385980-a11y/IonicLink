@@ -2480,6 +2480,215 @@ class ModelTrainingService:
         ranked.sort(key=lambda item: item["importance"], reverse=True)
         return ranked[:12]
 
+    def _is_context_feature(self, feature: str) -> bool:
+        normalized = re.sub(r"[^a-z0-9]+", "_", str(feature).lower()).strip("_")
+        tokens = (
+            "temperature",
+            "speed",
+            "load",
+            "roughness",
+            "potential",
+            "gamma_s",
+            "sigma_s",
+            "rq",
+            "theta_s",
+            "i_ss",
+            "film",
+            "water",
+            "voltage",
+        )
+        return any(token in normalized for token in tokens)
+
+    def _feature_display_label(self, feature: str) -> str:
+        labels = {
+            "temperature": "温度",
+            "speed": "速度",
+            "load": "载荷",
+            "system_total_load": "系统总载荷",
+            "contact_load_per_unit": "单接触载荷",
+            "load_min": "载荷下限",
+            "load_max": "载荷上限",
+            "load_span": "载荷跨度",
+            "roughness": "粗糙度",
+            "probe_roughness": "探针粗糙度",
+            "potential": "外加电势",
+            "gamma_s": "固体表面自由能",
+            "sigma_s": "固体表面电荷密度",
+            "rq_sub": "基底粗糙度",
+            "theta_s": "静态接触角",
+            "i_ss": "不锈钢基底指示变量",
+        }
+        normalized = re.sub(r"[^a-z0-9]+", "_", str(feature).lower()).strip("_")
+        return labels.get(normalized) or str(feature).replace("_", " ")
+
+    def _build_external_diagnostics(
+        self,
+        *,
+        external_samples: list[dict[str, Any]],
+        row_metadata: list[dict[str, Any]],
+        X: np.ndarray,
+        feature_columns: list[str],
+        train_pool_idx: np.ndarray,
+        target_edges: list[float],
+    ) -> dict[str, Any] | None:
+        if not external_samples:
+            return None
+
+        pool_indices = [int(index) for index in np.asarray(train_pool_idx, dtype=int).tolist() if int(index) < len(row_metadata)]
+        if not pool_indices:
+            return None
+
+        pool_meta = [row_metadata[index] for index in pool_indices]
+        cation_counts: dict[str, int] = {}
+        bin_counts: dict[int, int] = {}
+        stratum_counts: dict[str, int] = {}
+        for meta in pool_meta:
+            cation = str(meta.get("cation") or "unknown")
+            friction_bin = int(meta.get("friction_bin") or 0)
+            stratum = str(meta.get("joint_stratum") or f"{cation}|mu_bin_{friction_bin}")
+            cation_counts[cation] = cation_counts.get(cation, 0) + 1
+            bin_counts[friction_bin] = bin_counts.get(friction_bin, 0) + 1
+            stratum_counts[stratum] = stratum_counts.get(stratum, 0) + 1
+
+        context_feature_indices = [
+            index
+            for index, feature in enumerate(feature_columns)
+            if self._is_context_feature(feature)
+        ]
+        pool_X = X[np.asarray(pool_indices, dtype=int)] if len(pool_indices) else np.empty((0, len(feature_columns)))
+        feature_ranges: dict[int, tuple[float, float]] = {}
+        for feature_index in context_feature_indices:
+            values = pool_X[:, feature_index] if pool_X.size else np.asarray([], dtype=float)
+            finite_values = values[np.isfinite(values)]
+            if finite_values.size:
+                feature_ranges[feature_index] = (float(np.min(finite_values)), float(np.max(finite_values)))
+
+        items: list[dict[str, Any]] = []
+        high_residual_count = 0
+        unseen_strata_count = 0
+        out_of_range_count = 0
+        sparse_cation_count = 0
+        for sample in external_samples:
+            matrix_index = _int_or_default(sample.get("matrix_index"), -1)
+            if matrix_index < 0 or matrix_index >= len(row_metadata):
+                continue
+            meta = row_metadata[matrix_index]
+            cation = str(sample.get("cation") or meta.get("cation") or "unknown")
+            friction_bin = _int_or_default(sample.get("friction_bin"), _int_or_default(meta.get("friction_bin"), 0))
+            stratum = str(sample.get("joint_stratum") or meta.get("joint_stratum") or f"{cation}|mu_bin_{friction_bin}")
+            abs_residual = abs(float(sample.get("abs_residual") or 0.0))
+            cation_train_count = int(cation_counts.get(cation, 0))
+            bin_train_count = int(bin_counts.get(friction_bin, 0))
+            stratum_train_count = int(stratum_counts.get(stratum, 0))
+
+            reasons: list[dict[str, str]] = []
+            suggestions: list[str] = []
+            if stratum_train_count == 0:
+                reasons.append({
+                    "kind": "unseen_stratum",
+                    "label": "稀有组合未见",
+                    "detail": f"训练池没有 {cation} / {self._format_target_bin_label(friction_bin, target_edges)} 的联合标签样本。",
+                })
+                suggestions.append(f"优先补 {cation} 在 {self._format_target_bin_label(friction_bin, target_edges)} 区间的实验。")
+                unseen_strata_count += 1
+            if cation_train_count < 3:
+                reasons.append({
+                    "kind": "sparse_cation",
+                    "label": "阳离子覆盖不足",
+                    "detail": f"训练池中 {cation} 只有 {cation_train_count} 条样本。",
+                })
+                suggestions.append(f"补充 {cation} 在多个 μ 区间和工况下的样本。")
+                sparse_cation_count += 1
+            if bin_train_count < 5:
+                reasons.append({
+                    "kind": "sparse_bin",
+                    "label": "μ 区间覆盖不足",
+                    "detail": f"训练池中该 μ 分箱只有 {bin_train_count} 条样本。",
+                })
+                suggestions.append("补充同一摩擦系数区间的不同离子/工况样本。")
+            if abs_residual >= 0.15:
+                reasons.append({
+                    "kind": "large_residual",
+                    "label": "残差较大",
+                    "detail": f"绝对残差 {abs_residual:.3f}，建议回原文核对 COF、载荷、速度和单位。",
+                })
+                suggestions.append("回 Knowledge 定位原始记录，核对 COF 是否为 μ/COF 且单位未错。")
+                high_residual_count += 1
+
+            out_of_range_features: list[dict[str, Any]] = []
+            if matrix_index < X.shape[0]:
+                for feature_index, (train_min, train_max) in feature_ranges.items():
+                    value = _safe_float(X[matrix_index, feature_index])
+                    if value is None:
+                        continue
+                    tolerance = max(1e-9, (train_max - train_min) * 0.03)
+                    if value < train_min - tolerance or value > train_max + tolerance:
+                        direction = "below" if value < train_min else "above"
+                        feature = feature_columns[feature_index]
+                        out_of_range_features.append({
+                            "feature": feature,
+                            "label": self._feature_display_label(feature),
+                            "value": value,
+                            "train_min": train_min,
+                            "train_max": train_max,
+                            "direction": direction,
+                        })
+                if out_of_range_features:
+                    out_of_range_count += 1
+                    display = "、".join(item["label"] for item in out_of_range_features[:3])
+                    reasons.append({
+                        "kind": "out_of_range",
+                        "label": "工况超出训练范围",
+                        "detail": f"{display} 超出训练池范围，属于外推输入。",
+                    })
+                    suggestions.append("补充相近载荷、速度、温度或表面参数下的训练样本，或降低该点对推荐模型的权重。")
+
+            if not reasons:
+                reasons.append({
+                    "kind": "model_limit",
+                    "label": "结构相似但仍预测偏差",
+                    "detail": "训练池有相近标签覆盖，偏差更可能来自描述符不足、噪声或非线性机制。",
+                })
+                suggestions.append("检查是否需要加入表面能、粗糙度、电势或膜厚等机制特征。")
+
+            severity = "high" if abs_residual >= 0.25 or out_of_range_features else "medium" if abs_residual >= 0.12 or stratum_train_count == 0 else "low"
+            items.append({
+                **{key: sample.get(key) for key in (
+                    "row_index",
+                    "record_id",
+                    "literature_id",
+                    "cation",
+                    "friction_bin",
+                    "joint_stratum",
+                    "actual",
+                    "predicted",
+                    "residual",
+                    "abs_residual",
+                )},
+                "severity": severity,
+                "bin_label": self._format_target_bin_label(friction_bin, target_edges),
+                "training_context": {
+                    "cation_train_count": cation_train_count,
+                    "bin_train_count": bin_train_count,
+                    "stratum_train_count": stratum_train_count,
+                },
+                "reasons": reasons,
+                "out_of_range_features": out_of_range_features[:5],
+                "suggestions": list(dict.fromkeys(suggestions))[:4],
+            })
+
+        items.sort(key=lambda item: float(item.get("abs_residual") or 0.0), reverse=True)
+        return {
+            "summary": {
+                "sample_count": len(external_samples),
+                "high_residual_count": high_residual_count,
+                "unseen_strata_count": unseen_strata_count,
+                "out_of_range_count": out_of_range_count,
+                "sparse_cation_count": sparse_cation_count,
+            },
+            "items": items,
+        }
+
     def _build_prediction_insights(
         self,
         row_metadata: list[dict[str, Any]],
@@ -2531,6 +2740,7 @@ class ModelTrainingService:
         test_samples: list[dict[str, Any]],
         external_metrics: dict[str, Any] | None,
         external_samples: list[dict[str, Any]],
+        external_diagnostics: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         current = task.current or {}
         dataset = task.dataset or {}
@@ -2654,6 +2864,7 @@ class ModelTrainingService:
             "hyperparameters": config.get("hyperparameters") or {},
             "feature_importance_top": feature_importance[:10],
             "residual_top": residual_candidates[:10],
+            "external_diagnostics": external_diagnostics,
             "risks": risks,
             "warnings": task.warnings,
         }
@@ -3048,6 +3259,7 @@ class ModelTrainingService:
                         residual = pred - actual
                         samples.append(
                             {
+                                "matrix_index": int(absolute_index),
                                 "row_index": meta.get("row_index", absolute_index),
                                 "record_id": meta.get("record_id"),
                                 "literature_id": meta.get("literature_id"),
@@ -3067,6 +3279,18 @@ class ModelTrainingService:
 
             test_metrics, test_samples = evaluate_index_set(test_idx, metric_prefix="test")
             external_metrics, external_samples = evaluate_index_set(external_idx, metric_prefix="external")
+            target_edges = [
+                float(edge)
+                for edge in ((task.dataset.get("split") or {}).get("target_bin_edges") or [])
+            ]
+            external_diagnostics = self._build_external_diagnostics(
+                external_samples=external_samples,
+                row_metadata=row_metadata,
+                X=X,
+                feature_columns=task.dataset.get("feature_columns", []),
+                train_pool_idx=train_pool_idx,
+                target_edges=target_edges,
+            )
 
             task.test_metrics = test_metrics
             feature_importance = self._build_feature_importance(final_model, task.dataset.get("feature_columns", []))
@@ -3079,6 +3303,7 @@ class ModelTrainingService:
                 test_samples=test_samples,
                 external_metrics=external_metrics,
                 external_samples=external_samples,
+                external_diagnostics=external_diagnostics,
             )
 
             task.insights = {
@@ -3087,6 +3312,7 @@ class ModelTrainingService:
                 "test_samples": test_samples,
                 "external_samples": external_samples,
                 "external_metrics": external_metrics,
+                "external_diagnostics": external_diagnostics,
                 "experiment_report": experiment_report,
             }
 

@@ -1514,6 +1514,7 @@ export interface ModelTrainingFeatureImportance {
 }
 
 export interface ModelTrainingPredictionPoint {
+    matrix_index?: number
     row_index: number
     record_id?: number | null
     literature_id?: number | null
@@ -1527,6 +1528,45 @@ export interface ModelTrainingPredictionPoint {
     abs_residual: number
 }
 
+export interface ModelTrainingExternalDiagnosticReason {
+    kind: string
+    label: string
+    detail: string
+}
+
+export interface ModelTrainingExternalDiagnosticFeature {
+    feature: string
+    label: string
+    value: number
+    train_min: number
+    train_max: number
+    direction: 'below' | 'above' | string
+}
+
+export interface ModelTrainingExternalDiagnosticItem extends ModelTrainingPredictionPoint {
+    severity: 'low' | 'medium' | 'high' | string
+    bin_label?: string | null
+    training_context?: {
+        cation_train_count?: number
+        bin_train_count?: number
+        stratum_train_count?: number
+    }
+    reasons: ModelTrainingExternalDiagnosticReason[]
+    out_of_range_features?: ModelTrainingExternalDiagnosticFeature[]
+    suggestions?: string[]
+}
+
+export interface ModelTrainingExternalDiagnostics {
+    summary: {
+        sample_count: number
+        high_residual_count?: number
+        unseen_strata_count?: number
+        out_of_range_count?: number
+        sparse_cation_count?: number
+    }
+    items: ModelTrainingExternalDiagnosticItem[]
+}
+
 export interface ModelTrainingInsights {
     feature_importance?: ModelTrainingFeatureImportance[]
     prediction_samples?: ModelTrainingPredictionPoint[]
@@ -1534,6 +1574,7 @@ export interface ModelTrainingInsights {
     test_samples?: ModelTrainingPredictionPoint[]
     external_samples?: ModelTrainingPredictionPoint[]
     external_metrics?: ModelTrainingExternalMetrics | null
+    external_diagnostics?: ModelTrainingExternalDiagnostics | null
     experiment_report?: ModelTrainingExperimentReport | null
 }
 
@@ -1608,6 +1649,7 @@ export interface ModelTrainingExperimentReport {
     hyperparameters: Record<string, unknown>
     feature_importance_top: ModelTrainingFeatureImportance[]
     residual_top: Array<ModelTrainingPredictionPoint & { source: 'val' | 'test' | 'external' }>
+    external_diagnostics?: ModelTrainingExternalDiagnostics | null
     risks: ModelTrainingExperimentRisk[]
     warnings: string[]
 }

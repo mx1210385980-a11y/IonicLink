@@ -45,6 +45,7 @@ import {
   registerModelTrainingRun,
   setRecommendedRegisteredModel,
   startModelTraining,
+  type ModelTrainingExternalDiagnosticItem,
   type ModelTrainingMetricPoint,
   type ModelTrainingPlanPreview,
   type ModelTrainingRunListItem,
@@ -361,6 +362,41 @@ const topExternalResiduals = computed<DiagSample[]>(() => externalSamples.value
   .filter((sample) => Number.isFinite(sample.absResidual))
   .sort((a, b) => b.absResidual - a.absResidual)
   .slice(0, 5))
+
+const externalDiagnostics = computed(() => insights.value?.external_diagnostics || experimentReport.value?.external_diagnostics || null)
+const externalDiagnosticItems = computed<ModelTrainingExternalDiagnosticItem[]>(() => {
+  const diagnosticItems = externalDiagnostics.value?.items || []
+  if (diagnosticItems.length) {
+    return [...diagnosticItems]
+      .sort((a, b) => Number(b.abs_residual || 0) - Number(a.abs_residual || 0))
+      .slice(0, 8)
+  }
+  return topExternalResiduals.value.map((sample) => ({
+    matrix_index: undefined,
+    row_index: sample.rowIndex ?? -1,
+    record_id: sample.recordId,
+    literature_id: sample.literatureId,
+    cation: null,
+    friction_bin: null,
+    joint_stratum: null,
+    actual: sample.actual,
+    predicted: sample.predicted,
+    residual: sample.residual,
+    abs_residual: sample.absResidual,
+    severity: sample.absResidual >= 0.25 ? 'high' : sample.absResidual >= 0.12 ? 'medium' : 'low',
+    bin_label: null,
+    training_context: {},
+    reasons: [
+      {
+        kind: 'large_residual',
+        label: sample.absResidual >= 0.12 ? '外推残差偏大' : '外推样本',
+        detail: '该旧训练版本尚未保存完整覆盖归因，只能根据外推残差提示优先核对。',
+      },
+    ],
+    out_of_range_features: [],
+    suggestions: ['回 Knowledge 定位原始记录，核对 COF、载荷、速度和单位。'],
+  }))
+})
 
 const topResiduals = computed<DiagSample[]>(() => {
   const merged: DiagSample[] = []
@@ -862,6 +898,33 @@ function riskSeverityClass(severity: string | null | undefined) {
   if (severity === 'high') return 'border-[#ffd4da] bg-[#fff5f6] text-[#cf334f]'
   if (severity === 'medium') return 'border-[#ffe4b5] bg-[#fffaf0] text-[#a16207]'
   return 'border-[#dbeafe] bg-[#f0f7ff] text-[#2563eb]'
+}
+
+function diagnosticSeverityClass(severity: string | null | undefined) {
+  if (severity === 'high') return 'border-[#ffd4da] bg-[#fff5f6]'
+  if (severity === 'medium') return 'border-[#ffe4b5] bg-[#fffaf0]'
+  return 'border-[#dbe4f2] bg-white'
+}
+
+function diagnosticBadgeClass(kind: string | null | undefined) {
+  if (kind === 'out_of_range') return 'bg-[#fff5f6] text-[#cf334f] ring-[#ffd4da]'
+  if (kind === 'unseen_stratum') return 'bg-[#fff4da] text-[#b97113] ring-[#f6d99a]'
+  if (kind === 'sparse_cation' || kind === 'sparse_bin') return 'bg-[#f5f7ff] text-[#5b56ea] ring-[#cdd7ff]'
+  if (kind === 'large_residual') return 'bg-[#fff5f6] text-[#cf334f] ring-[#ffd4da]'
+  return 'bg-slate-100 text-slate-600 ring-[#e2e8f0]'
+}
+
+function diagnosticSampleForInspect(item: ModelTrainingExternalDiagnosticItem): DiagSample {
+  return {
+    source: 'external',
+    recordId: nullableNumber(item.record_id),
+    literatureId: nullableNumber(item.literature_id),
+    rowIndex: nullableNumber(item.row_index),
+    actual: Number(item.actual),
+    predicted: Number(item.predicted),
+    residual: Number(item.residual),
+    absResidual: Number(item.abs_residual),
+  }
 }
 
 function targetDisplayLabel(value: string | null | undefined) {
@@ -2335,6 +2398,128 @@ watch(
                 <p class="text-slate-400">紫色 = 验证集 K 折预测，红色 = 测试集，橙色 = 外推验证</p>
               </div>
               <Line v-else :data="predictionScatterData" :options="predictionScatterOptions" />
+            </div>
+          </section>
+
+          <!-- 外推失败样本归因 -->
+          <section
+            v-if="externalDiagnosticItems.length"
+            class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4"
+          >
+            <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#c2410c]">
+                  <AlertTriangle class="h-3.5 w-3.5" />
+                  外推失败样本归因
+                </p>
+                <p class="mt-0.5 text-xs leading-5 text-slate-500">
+                  按外推残差排序，解释哪些点是稀有组合、覆盖不足、工况越界或需要回原文核对。
+                </p>
+              </div>
+              <div class="flex flex-wrap gap-1.5 text-[11px] font-semibold text-slate-600">
+                <span class="rounded-full bg-[#fbfcff] px-2.5 py-1 ring-1 ring-[#e2e8f0]">
+                  外推样本 {{ externalDiagnostics?.summary?.sample_count ?? externalSamples.length }}
+                </span>
+                <span
+                  v-if="externalDiagnostics?.summary?.unseen_strata_count"
+                  class="rounded-full bg-[#fff4da] px-2.5 py-1 text-[#b97113] ring-1 ring-[#f6d99a]"
+                >
+                  未见组合 {{ externalDiagnostics.summary.unseen_strata_count }}
+                </span>
+                <span
+                  v-if="externalDiagnostics?.summary?.out_of_range_count"
+                  class="rounded-full bg-[#fff5f6] px-2.5 py-1 text-[#cf334f] ring-1 ring-[#ffd4da]"
+                >
+                  工况越界 {{ externalDiagnostics.summary.out_of_range_count }}
+                </span>
+                <span
+                  v-if="externalDiagnostics?.summary?.high_residual_count"
+                  class="rounded-full bg-[#fff5f6] px-2.5 py-1 text-[#cf334f] ring-1 ring-[#ffd4da]"
+                >
+                  高残差 {{ externalDiagnostics.summary.high_residual_count }}
+                </span>
+              </div>
+            </div>
+
+            <div class="grid gap-2 xl:grid-cols-2">
+              <article
+                v-for="(item, idx) in externalDiagnosticItems"
+                :key="`external-diagnostic-${item.record_id ?? item.row_index}-${idx}`"
+                class="rounded-[0.8rem] border px-3 py-3"
+                :class="diagnosticSeverityClass(item.severity)"
+              >
+                <div class="flex flex-wrap items-start justify-between gap-2">
+                  <div class="min-w-0">
+                    <p class="flex flex-wrap items-center gap-1.5 text-sm font-semibold text-slate-950">
+                      <span class="inline-flex h-5 w-5 items-center justify-center rounded-full bg-white text-[10px] font-bold text-[#c2410c] ring-1 ring-[#f6d99a]">{{ idx + 1 }}</span>
+                      <span class="truncate">{{ item.cation || '未知阳离子' }}</span>
+                      <span class="text-xs font-medium text-slate-400">{{ item.bin_label || 'μ 分箱未记录' }}</span>
+                    </p>
+                    <p class="mt-1 text-[11px] leading-5 text-slate-500">
+                      训练覆盖：
+                      阳离子 {{ item.training_context?.cation_train_count ?? '--' }} 条 ·
+                      μ 分箱 {{ item.training_context?.bin_train_count ?? '--' }} 条 ·
+                      联合标签 {{ item.training_context?.stratum_train_count ?? '--' }} 条
+                    </p>
+                  </div>
+                  <div class="shrink-0 text-right text-[11px] tabular-nums">
+                    <p class="font-semibold text-slate-950">
+                      {{ formatMetric(item.actual, 3) }} -> {{ formatMetric(item.predicted, 3) }}
+                    </p>
+                    <p class="mt-0.5 font-semibold" :class="Number(item.residual) > 0 ? 'text-[#cf334f]' : 'text-[#3d56d2]'">
+                      残差 {{ Number(item.residual) >= 0 ? '+' : '' }}{{ formatMetric(item.residual, 3) }}
+                    </p>
+                  </div>
+                </div>
+
+                <div class="mt-2 flex flex-wrap gap-1.5">
+                  <span
+                    v-for="reason in item.reasons"
+                    :key="`${item.row_index}-${reason.kind}-${reason.label}`"
+                    class="rounded-full px-2 py-1 text-[10px] font-semibold ring-1"
+                    :class="diagnosticBadgeClass(reason.kind)"
+                    :title="reason.detail"
+                  >
+                    {{ reason.label }}
+                  </span>
+                </div>
+
+                <div v-if="item.reasons?.length" class="mt-2 space-y-1 text-[11px] leading-5 text-slate-600">
+                  <p v-for="reason in item.reasons.slice(0, 2)" :key="`${item.row_index}-${reason.kind}-detail`">
+                    {{ reason.detail }}
+                  </p>
+                </div>
+
+                <div v-if="item.out_of_range_features?.length" class="mt-2 rounded-[0.6rem] bg-white/70 px-2.5 py-2 ring-1 ring-white/80">
+                  <p class="mb-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#cf334f]">越界工况</p>
+                  <div class="flex flex-wrap gap-1.5">
+                    <span
+                      v-for="feature in item.out_of_range_features.slice(0, 4)"
+                      :key="`${item.row_index}-${feature.feature}`"
+                      class="rounded-full bg-[#fff5f6] px-2 py-1 text-[10px] font-semibold text-[#cf334f] ring-1 ring-[#ffd4da]"
+                      :title="`训练范围 ${formatMetric(feature.train_min, 3)}-${formatMetric(feature.train_max, 3)}`"
+                    >
+                      {{ feature.label }} {{ formatMetric(feature.value, 3) }}
+                    </span>
+                  </div>
+                </div>
+
+                <div class="mt-2 flex flex-wrap items-center gap-2">
+                  <p class="min-w-0 flex-1 text-[11px] leading-5 text-slate-500">
+                    {{ item.suggestions?.[0] || '建议补充相似离子、相似 μ 区间和相近工况样本。' }}
+                  </p>
+                  <button
+                    type="button"
+                    class="inline-flex shrink-0 items-center gap-1 rounded-md border border-[#e2e8f0] bg-white px-2 py-1 text-[10px] font-medium text-slate-600 transition disabled:cursor-not-allowed disabled:opacity-40 hover:bg-[#f8fbff] hover:text-[#5b56ea]"
+                    :disabled="item.record_id == null"
+                    title="跳到 Knowledge 数据库定位这条外推样本"
+                    @click="handleInspectRecord(diagnosticSampleForInspect(item))"
+                  >
+                    <ExternalLink class="h-3 w-3" />
+                    定位数据
+                  </button>
+                </div>
+              </article>
             </div>
           </section>
 
