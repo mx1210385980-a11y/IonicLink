@@ -164,6 +164,23 @@ const splitDetailTabs: Array<{ key: 'subsets' | 'bins' | 'folds'; label: string 
   { key: 'bins', label: 'μ 分箱' },
   { key: 'folds', label: '折次' },
 ]
+const targetAggregationOptions = [
+  {
+    key: 'raw',
+    label: '保留原始',
+    description: '不改变样本，适合重复工况一致或需要保留每次实验差异。',
+  },
+  {
+    key: 'mean_by_condition',
+    label: '按工况均值聚合',
+    description: '同一离子/工况的重复实验合成一条均值样本，优先降低目标噪声。',
+  },
+  {
+    key: 'drop_conflicts',
+    label: '排除冲突组',
+    description: '移除同工况下 COF 差异过大的组，适合先做干净基线。',
+  },
+]
 const FEATURE_GROUP_DEFINITIONS: FeatureGroupDefinition[] = [
   {
     key: 'cation_descriptor',
@@ -286,7 +303,7 @@ const form = reactive<ModelTrainingStartPayload>({
   target: 'Target_COF',
   algorithm: 'gradient_boosting',
   hyperparameters: { n_estimators: 120, learning_rate: 0.06, max_depth: 3, l2_leaf_reg: 3, random_strength: 1 },
-  data_options: { validation_split: 0.2, min_confidence: 0, max_records: null, random_seed: 42, split_strategy: 'joint_stratified', cv_folds: 5 },
+  data_options: { validation_split: 0.2, min_confidence: 0, max_records: null, random_seed: 42, split_strategy: 'joint_stratified', cv_folds: 5, target_aggregation_strategy: 'raw' },
   cleaned_dataset_id: null,
 })
 
@@ -456,6 +473,19 @@ const reportHyperparameterEntries = computed(() => Object.entries(experimentRepo
 })))
 const maxReportFeatureImportance = computed(() => Math.max(1e-9, ...reportFeatureTop.value.map((entry) => Number(entry.importance || 0))))
 const datasetSplit = computed(() => activeTask.value?.dataset?.split || summary.value?.dataset?.split || null)
+const targetNoise = computed(() =>
+  activeTask.value?.dataset?.target_noise
+  || experimentReport.value?.target_noise
+  || experimentPreview.value?.dataset?.target_noise
+  || summary.value?.dataset?.target_noise
+  || null,
+)
+const targetNoiseTopGroups = computed(() => (targetNoise.value?.top_groups || []).slice(0, 5))
+const selectedAggregationOption = computed(() =>
+  targetAggregationOptions.find((option) => option.key === (form.data_options.target_aggregation_strategy || 'raw')) ?? targetAggregationOptions[0],
+)
+const targetNoiseAppliedLabel = computed(() => targetAggregationLabel(targetNoise.value?.strategy_applied || 'raw'))
+const targetNoiseRecommendationLabel = computed(() => targetAggregationLabel(targetNoise.value?.recommended_strategy || 'raw'))
 const splitDetails = computed(() => datasetSplit.value?.details || null)
 const splitSubsets = computed(() => splitDetails.value?.subsets || [])
 const splitBins = computed(() => splitDetails.value?.target_bins || [])
@@ -1167,6 +1197,38 @@ function splitStrategyLabel(value: string | null | undefined) {
     case 'random_holdout': return '随机留出'
     default: return value ? formatTitleLabel(value) : '未记录'
   }
+}
+
+function targetAggregationLabel(value: string | null | undefined) {
+  switch (value) {
+    case 'mean_by_condition': return '按工况均值聚合'
+    case 'drop_conflicts': return '排除冲突组'
+    case 'raw':
+    default: return '保留原始'
+  }
+}
+
+function targetNoiseToneClass() {
+  const conflicts = Number(targetNoise.value?.conflict_groups || 0)
+  const ceiling = nullableNumber(targetNoise.value?.estimated_r2_ceiling)
+  if (conflicts > 0 || (ceiling != null && ceiling < 0.75)) return 'border-[#ffe4b5] bg-[#fffaf0]'
+  if (Number(targetNoise.value?.duplicate_condition_groups || 0) > 0) return 'border-[#cdd7ff] bg-[#f5f7ff]'
+  return 'border-[#dbe4f2] bg-white'
+}
+
+function targetNoiseBadgeClass() {
+  const conflicts = Number(targetNoise.value?.conflict_groups || 0)
+  const ceiling = nullableNumber(targetNoise.value?.estimated_r2_ceiling)
+  if (conflicts > 0 || (ceiling != null && ceiling < 0.75)) return 'bg-[#fff4da] text-[#b97113]'
+  if (Number(targetNoise.value?.duplicate_condition_groups || 0) > 0) return 'bg-[#edf2ff] text-[#3d56d2]'
+  return 'bg-[#e8fff2] text-[#0b9d63]'
+}
+
+function targetNoiseBadgeLabel() {
+  const conflicts = Number(targetNoise.value?.conflict_groups || 0)
+  if (conflicts > 0) return `${conflicts} 组冲突`
+  if (Number(targetNoise.value?.duplicate_condition_groups || 0) > 0) return '存在重复工况'
+  return '未见明显重复噪声'
 }
 
 function versionScoreLabel(value: { test_r2?: number | null; val_r2?: number | null }) {
@@ -2287,8 +2349,29 @@ watch(
                   </label>
                 </div>
 
+                <div class="border-t border-[#eef2f6] pt-3">
+                  <label class="block text-xs">
+                    <span
+                      class="mb-1 block font-semibold text-slate-700"
+                      title="处理同一离子液体、同一实验工况下 COF 不一致的重复实验。均值聚合通常能降低目标噪声，排除冲突组适合先做干净基线。"
+                    >重复工况处理</span>
+                    <select
+                      v-model="form.data_options.target_aggregation_strategy"
+                      class="h-8 w-full rounded-[0.55rem] border border-[#e2e8f0] bg-white px-2 text-xs text-slate-900 outline-none transition focus:border-[#aebdfc] focus:ring-2 focus:ring-[#aebdfc]/20"
+                    >
+                      <option v-for="option in targetAggregationOptions" :key="option.key" :value="option.key">
+                        {{ option.label }}
+                      </option>
+                    </select>
+                    <p class="mt-1.5 text-[11px] leading-snug text-slate-500">
+                      {{ selectedAggregationOption?.description || '选择训练前如何处理重复工况目标噪声。' }}
+                    </p>
+                  </label>
+                </div>
+
                 <p class="text-[11px] leading-5 text-slate-500">
                   随机种子 {{ form.data_options.random_seed }}<template v-if="form.data_options.split_strategy === 'random_holdout'"> · 验证集占比 {{ validationSplitPercent }}%</template><template v-else-if="form.data_options.split_strategy === 'joint_stratified'"> · 测试集约 {{ validationSplitPercent }}% · {{ form.data_options.cv_folds || 5 }} 折 CV</template><template v-else> · 折数 {{ form.data_options.cv_folds || 5 }}</template>
+                  · {{ targetAggregationLabel(form.data_options.target_aggregation_strategy) }}
                 </p>
               </div>
             </section>
@@ -2568,6 +2651,101 @@ watch(
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+          </section>
+
+          <section
+            v-if="targetNoise"
+            class="rounded-[0.95rem] border p-4"
+            :class="targetNoiseToneClass()"
+          >
+            <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#c2410c]">
+                  <AlertTriangle class="h-3.5 w-3.5" />
+                  重复工况与目标噪声
+                </p>
+                <p class="mt-1 text-xs leading-5 text-slate-600">
+                  同一离子液体、相近载荷/速度/温度/电位下，如果 COF 波动很大，验证集和测试集会天然被压低。
+                  当前策略：<span class="font-semibold text-slate-900">{{ targetNoiseAppliedLabel }}</span>
+                  <template v-if="targetNoise.recommended_strategy && targetNoise.recommended_strategy !== targetNoise.strategy_applied">
+                    · 建议尝试 <span class="font-semibold text-[#5b56ea]">{{ targetNoiseRecommendationLabel }}</span>
+                  </template>
+                </p>
+              </div>
+              <span class="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="targetNoiseBadgeClass()">
+                {{ targetNoiseBadgeLabel() }}
+              </span>
+            </div>
+
+            <div class="grid gap-2 sm:grid-cols-4">
+              <div class="rounded-[0.7rem] border border-white/70 bg-white/75 px-3 py-2">
+                <p class="text-[10px] font-bold uppercase tracking-[0.14em] text-[#8fa0ba]">重复工况</p>
+                <p class="mt-0.5 text-lg font-semibold text-slate-950 tabular-nums">
+                  {{ formatNumber(targetNoise.duplicate_condition_groups) }}
+                </p>
+                <p class="text-[10px] text-slate-400">{{ formatNumber(targetNoise.duplicate_condition_records) }} 条记录</p>
+              </div>
+              <div class="rounded-[0.7rem] border border-white/70 bg-white/75 px-3 py-2">
+                <p class="text-[10px] font-bold uppercase tracking-[0.14em] text-[#8fa0ba]">冲突组</p>
+                <p class="mt-0.5 text-lg font-semibold text-slate-950 tabular-nums">
+                  {{ formatNumber(targetNoise.conflict_groups) }}
+                </p>
+                <p class="text-[10px] text-slate-400">阈值 Δμ ≥ {{ formatMetric(targetNoise.conflict_threshold?.absolute_range, 2) }}</p>
+              </div>
+              <div class="rounded-[0.7rem] border border-white/70 bg-white/75 px-3 py-2">
+                <p class="text-[10px] font-bold uppercase tracking-[0.14em] text-[#8fa0ba]">噪声 RMSE</p>
+                <p class="mt-0.5 text-lg font-semibold text-slate-950 tabular-nums">
+                  {{ formatMetric(targetNoise.within_condition_rmse, 3) }}
+                </p>
+                <p class="text-[10px] text-slate-400">同工况内部波动</p>
+              </div>
+              <div class="rounded-[0.7rem] border border-white/70 bg-white/75 px-3 py-2">
+                <p class="text-[10px] font-bold uppercase tracking-[0.14em] text-[#8fa0ba]">估计 R² 上限</p>
+                <p class="mt-0.5 text-lg font-semibold text-slate-950 tabular-nums">
+                  {{ formatMetric(targetNoise.estimated_r2_ceiling, 3) }}
+                </p>
+                <p class="text-[10px] text-slate-400">重复噪声粗估</p>
+              </div>
+            </div>
+
+            <div
+              v-if="targetNoise.rows_before_aggregation != null && targetNoise.rows_after_aggregation != null && targetNoise.strategy_applied !== 'raw'"
+              class="mt-3 rounded-[0.7rem] border border-white/70 bg-white/70 px-3 py-2 text-xs leading-5 text-slate-600"
+            >
+              {{ targetNoiseAppliedLabel }} 已将 {{ formatNumber(targetNoise.rows_before_aggregation) }} 条候选样本处理为
+              {{ formatNumber(targetNoise.rows_after_aggregation) }} 条训练样本。
+              <template v-if="targetNoise.groups_merged_by_strategy">
+                合并 {{ formatNumber(targetNoise.groups_merged_by_strategy) }} 组重复工况。
+              </template>
+              <template v-if="targetNoise.rows_removed_by_strategy">
+                排除 {{ formatNumber(targetNoise.rows_removed_by_strategy) }} 条冲突记录。
+              </template>
+            </div>
+
+            <div v-if="targetNoiseTopGroups.length" class="mt-3 space-y-1.5">
+              <p class="text-[11px] font-bold uppercase tracking-[0.16em] text-[#8fa0ba]">
+                波动最大的重复组
+              </p>
+              <div
+                v-for="group in targetNoiseTopGroups"
+                :key="group.key"
+                class="grid gap-2 rounded-[0.7rem] border bg-white/75 px-3 py-2 text-xs md:grid-cols-[minmax(0,1fr)_7rem_7rem]"
+                :class="group.is_conflict ? 'border-[#ffe4b5]' : 'border-white/80'"
+              >
+                <div class="min-w-0">
+                  <p class="truncate font-semibold text-slate-900" :title="group.label">{{ group.label }}</p>
+                  <p class="mt-0.5 truncate text-[11px] text-slate-500">
+                    μ: {{ group.values.map((value) => formatMetric(value, 3)).join(' / ') }}
+                  </p>
+                </div>
+                <p class="self-center text-slate-600 tabular-nums">
+                  {{ group.count }} 条 · Δ {{ formatMetric(group.range, 3) }}
+                </p>
+                <p class="self-center text-right font-semibold tabular-nums" :class="group.is_conflict ? 'text-[#b97113]' : 'text-slate-700'">
+                  σ {{ formatMetric(group.std, 3) }}
+                </p>
               </div>
             </div>
           </section>

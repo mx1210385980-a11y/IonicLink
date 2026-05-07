@@ -6,6 +6,7 @@ import logging
 import math
 import re
 import uuid
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -308,9 +309,13 @@ DEFAULT_DATA_OPTIONS = {
     "random_seed": 42,
     "split_strategy": "joint_stratified",
     "cv_folds": 5,
+    "target_aggregation_strategy": "raw",
 }
 
 JOINT_STRATIFICATION_BINS = 8
+TARGET_NOISE_CONFLICT_RANGE = 0.03
+TARGET_NOISE_CONFLICT_RELATIVE_RANGE = 0.25
+TARGET_AGGREGATION_STRATEGIES = {"raw", "mean_by_condition", "drop_conflicts"}
 
 DEFAULT_CLEANING_OPTIONS = {
     "source_mode": "group_library_fallback",
@@ -888,6 +893,28 @@ class ModelTrainingService:
         feature_columns = self._feature_columns_from_dataset_metadata(rows, metadata)
         target_column = self._target_column_from_metadata(metadata)
         usable_records = self._usable_saved_rows(rows, target_column, feature_columns)
+        target_ready_rows = []
+        for row_index, row in enumerate(rows):
+            target_value = _safe_float(row.get(target_column))
+            if target_value is None:
+                continue
+            target_ready_rows.append({
+                **row,
+                "_target_value": target_value,
+                "_row_index": row_index,
+                "_record_id": row.get("__record_id"),
+                "_literature_id": row.get("__literature_id"),
+                "_confidence": _safe_float(row.get("__confidence")),
+            })
+        target_noise = self._target_noise_diagnostics(target_ready_rows, target_column)
+        target_noise.pop("_conflict_group_keys", None)
+        target_noise.update({
+            "strategy_applied": "raw",
+            "rows_before_aggregation": len(target_ready_rows),
+            "rows_after_aggregation": len(target_ready_rows),
+            "rows_removed_by_strategy": 0,
+            "groups_merged_by_strategy": 0,
+        })
 
         return {
             "dataset": {
@@ -908,6 +935,7 @@ class ModelTrainingService:
                 "columns": [target_column, *feature_columns],
                 "rdkit_enabled": RDKit_AVAILABLE,
                 "source_scope": metadata.get("source_scope", {}),
+                "target_noise": target_noise,
             },
             "algorithms": self._algorithm_options(),
             "split_options": self._split_options(),
@@ -1886,6 +1914,255 @@ class ModelTrainingService:
             count += 1
         return count
 
+    def _normalize_target_aggregation_strategy(self, value: Any) -> str:
+        strategy = str(value or DEFAULT_DATA_OPTIONS["target_aggregation_strategy"]).strip().lower()
+        if strategy not in TARGET_AGGREGATION_STRATEGIES:
+            return DEFAULT_DATA_OPTIONS["target_aggregation_strategy"]
+        return strategy
+
+    def _condition_text_value(self, row: dict[str, Any], fields: tuple[str, ...], fallback: str = "unknown") -> str:
+        for field in fields:
+            text = str(row.get(field) or "").strip()
+            if text:
+                return re.sub(r"\s+", "", text).lower()[:96] or fallback
+        return fallback
+
+    def _condition_numeric_value(self, row: dict[str, Any], fields: tuple[str, ...], digits: int = 4) -> float | None:
+        for field in fields:
+            value = _safe_float(row.get(field))
+            if value is not None and math.isfinite(value):
+                return round(float(value), digits)
+        return None
+
+    def _condition_group_key(self, row: dict[str, Any]) -> tuple[Any, ...]:
+        cation = self._normalize_joint_cation_label(row)
+        anion = self._condition_text_value(
+            row,
+            ("__anion", "anion", "Anion", "anion_label", "__anion_smiles", "anion_smiles", "Anion_SMILES"),
+        )
+        material = self._condition_text_value(
+            row,
+            ("__material", "material", "Material", "material_name", "substrate", "Substrate", "surface", "Surface"),
+            fallback="any_surface",
+        )
+        method = self._condition_text_value(
+            row,
+            ("__experiment_method", "experiment_method", "method", "Method", "instrument", "Instrument"),
+            fallback="any_method",
+        )
+        numeric_fields = (
+            ("temperature", ("Temperature", "temperature", "temp", "Temp")),
+            ("speed", ("Speed", "speed", "Sliding_Speed", "sliding_speed")),
+            ("load", ("Load", "load", "System_Total_Load", "system_total_load", "Contact_Load_Per_Unit", "contact_load_per_unit")),
+            ("load_min", ("Load_Min", "load_min")),
+            ("load_max", ("Load_Max", "load_max")),
+            ("potential", ("Potential", "potential", "Voltage", "voltage")),
+            ("water", ("Water_Content", "water_content", "Water", "water")),
+            ("film", ("Film_Thickness", "film_thickness")),
+            ("roughness", ("Rq_sub", "Surface_Roughness", "surface_roughness", "Roughness", "roughness", "Rq", "rq")),
+        )
+        numeric_key = tuple(
+            (label, self._condition_numeric_value(row, fields))
+            for label, fields in numeric_fields
+        )
+        return (cation, anion, material, method, *numeric_key)
+
+    def _condition_group_label(self, key: tuple[Any, ...]) -> str:
+        cation, anion, material, method, *numeric_items = key
+        parts = [str(cation), str(anion)]
+        if material != "any_surface":
+            parts.append(str(material))
+        if method != "any_method":
+            parts.append(str(method))
+        for label, value in numeric_items:
+            if value is None:
+                continue
+            parts.append(f"{label}={value:g}")
+        return " / ".join(parts[:9])
+
+    def _target_noise_diagnostics(
+        self,
+        rows: list[dict[str, Any]],
+        target_column: str,
+    ) -> dict[str, Any]:
+        groups: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
+        target_values: list[float] = []
+        for row in rows:
+            target_value = _safe_float(row.get("_target_value", row.get(target_column)))
+            if target_value is None:
+                continue
+            groups[self._condition_group_key(row)].append(row)
+            target_values.append(float(target_value))
+
+        duplicate_groups: list[dict[str, Any]] = []
+        conflict_group_keys: set[tuple[Any, ...]] = set()
+        within_ss = 0.0
+        for key, members in groups.items():
+            if len(members) < 2:
+                continue
+            values = [
+                float(value)
+                for value in (_safe_float(member.get("_target_value", member.get(target_column))) for member in members)
+                if value is not None
+            ]
+            if len(values) < 2:
+                continue
+            mean_value = float(np.mean(values))
+            std_value = float(np.std(values, ddof=0))
+            range_value = float(max(values) - min(values))
+            relative_range = range_value / max(abs(mean_value), 1e-6)
+            is_conflict = (
+                range_value >= TARGET_NOISE_CONFLICT_RANGE
+                or relative_range >= TARGET_NOISE_CONFLICT_RELATIVE_RANGE
+            )
+            if is_conflict:
+                conflict_group_keys.add(key)
+            within_ss += float(sum((value - mean_value) ** 2 for value in values))
+            duplicate_groups.append(
+                {
+                    "key": "|".join(map(str, key)),
+                    "label": self._condition_group_label(key),
+                    "count": len(values),
+                    "mean": mean_value,
+                    "std": std_value,
+                    "range": range_value,
+                    "relative_range": relative_range,
+                    "is_conflict": is_conflict,
+                    "values": [round(value, 6) for value in sorted(values)],
+                    "row_indices": [int(member.get("_row_index", idx)) for idx, member in enumerate(members[:12])],
+                    "record_ids": [member.get("_record_id") for member in members[:12] if member.get("_record_id") is not None],
+                }
+            )
+
+        duplicate_groups.sort(key=lambda item: (not item["is_conflict"], -float(item["range"]), -int(item["count"])))
+        total_ss = 0.0
+        if target_values:
+            global_mean = float(np.mean(target_values))
+            total_ss = float(sum((value - global_mean) ** 2 for value in target_values))
+        estimated_r2_ceiling = None
+        if total_ss > 1e-12:
+            estimated_r2_ceiling = max(0.0, min(1.0, 1.0 - within_ss / total_ss))
+
+        conflict_groups = [group for group in duplicate_groups if group["is_conflict"]]
+        duplicate_row_count = sum(int(group["count"]) for group in duplicate_groups)
+        conflict_row_count = sum(int(group["count"]) for group in conflict_groups)
+        max_range = max((float(group["range"]) for group in duplicate_groups), default=0.0)
+        max_std = max((float(group["std"]) for group in duplicate_groups), default=0.0)
+        if conflict_groups:
+            recommended_strategy = "mean_by_condition" if len(conflict_groups) <= max(3, len(duplicate_groups) // 2) else "drop_conflicts"
+        elif duplicate_groups:
+            recommended_strategy = "mean_by_condition"
+        else:
+            recommended_strategy = "raw"
+
+        return {
+            "sample_count": len(target_values),
+            "unique_condition_groups": len(groups),
+            "duplicate_condition_groups": len(duplicate_groups),
+            "duplicate_condition_records": duplicate_row_count,
+            "conflict_groups": len(conflict_groups),
+            "conflict_records": conflict_row_count,
+            "max_target_range": max_range,
+            "max_target_std": max_std,
+            "within_condition_rmse": math.sqrt(within_ss / max(1, duplicate_row_count)) if duplicate_row_count else 0.0,
+            "estimated_r2_ceiling": estimated_r2_ceiling,
+            "recommended_strategy": recommended_strategy,
+            "conflict_threshold": {
+                "absolute_range": TARGET_NOISE_CONFLICT_RANGE,
+                "relative_range": TARGET_NOISE_CONFLICT_RELATIVE_RANGE,
+            },
+            "top_groups": duplicate_groups[:8],
+            "_conflict_group_keys": conflict_group_keys,
+        }
+
+    def _apply_target_aggregation_strategy(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        target_column: str,
+        feature_columns: list[str],
+        strategy: str,
+        diagnostics: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        if strategy == "raw" or not rows:
+            return rows, {
+                "strategy": "raw",
+                "rows_before": len(rows),
+                "rows_after": len(rows),
+                "groups_merged": 0,
+                "rows_removed": 0,
+            }
+
+        groups: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            groups[self._condition_group_key(row)].append(row)
+
+        conflict_keys = diagnostics.get("_conflict_group_keys") or set()
+        if strategy == "drop_conflicts":
+            filtered_rows: list[dict[str, Any]] = []
+            removed = 0
+            for key, members in groups.items():
+                if key in conflict_keys:
+                    removed += len(members)
+                    continue
+                filtered_rows.extend(members)
+            return filtered_rows, {
+                "strategy": strategy,
+                "rows_before": len(rows),
+                "rows_after": len(filtered_rows),
+                "groups_merged": 0,
+                "rows_removed": removed,
+            }
+
+        aggregated_rows: list[dict[str, Any]] = []
+        groups_merged = 0
+        for members in groups.values():
+            if len(members) == 1:
+                aggregated_rows.append(members[0])
+                continue
+            groups_merged += 1
+            base = dict(members[0])
+            target_values = [
+                float(value)
+                for value in (_safe_float(member.get("_target_value", member.get(target_column))) for member in members)
+                if value is not None
+            ]
+            if target_values:
+                target_mean = float(np.mean(target_values))
+                base["_target_value"] = target_mean
+                base[target_column] = target_mean
+            for column in feature_columns:
+                values = [
+                    float(value)
+                    for value in (_safe_float(member.get(column)) for member in members)
+                    if value is not None
+                ]
+                if values:
+                    base[column] = float(np.mean(values))
+            confidence_values = [
+                float(value)
+                for value in (_safe_float(member.get("_confidence")) for member in members)
+                if value is not None
+            ]
+            if confidence_values:
+                base["_confidence"] = float(np.mean(confidence_values))
+                base["__confidence"] = float(np.mean(confidence_values))
+            base["_aggregated_count"] = len(members)
+            base["_aggregation_record_ids"] = [
+                member.get("_record_id")
+                for member in members
+                if member.get("_record_id") is not None
+            ][:20]
+            aggregated_rows.append(base)
+
+        return aggregated_rows, {
+            "strategy": strategy,
+            "rows_before": len(rows),
+            "rows_after": len(aggregated_rows),
+            "groups_merged": groups_merged,
+            "rows_removed": 0,
+        }
+
     def _normalize_joint_cation_label(self, row: dict[str, Any]) -> str:
         for field in ("__cation", "cation", "Cation", "cation_label", "__cation_smiles", "cation_smiles", "Cation_SMILES"):
             value = str(row.get(field) or "").strip()
@@ -2030,6 +2307,25 @@ class ModelTrainingService:
         if max_records:
             eligible_rows = eligible_rows[:max_records]
 
+        target_noise = self._target_noise_diagnostics(eligible_rows, target_column)
+        aggregation_strategy = self._normalize_target_aggregation_strategy(data_options.get("target_aggregation_strategy"))
+        eligible_rows, aggregation_summary = self._apply_target_aggregation_strategy(
+            eligible_rows,
+            target_column=target_column,
+            feature_columns=feature_columns,
+            strategy=aggregation_strategy,
+            diagnostics=target_noise,
+        )
+        serializable_target_noise = dict(target_noise)
+        serializable_target_noise.pop("_conflict_group_keys", None)
+        serializable_target_noise.update({
+            "strategy_applied": aggregation_strategy,
+            "rows_before_aggregation": int(aggregation_summary["rows_before"]),
+            "rows_after_aggregation": int(aggregation_summary["rows_after"]),
+            "rows_removed_by_strategy": int(aggregation_summary["rows_removed"]),
+            "groups_merged_by_strategy": int(aggregation_summary["groups_merged"]),
+        })
+
         usable_records = len(eligible_rows)
         if usable_records < 10:
             raise ValueError(f"Only {usable_records} rows are usable. At least 10 rows are required for training.")
@@ -2120,6 +2416,20 @@ class ModelTrainingService:
             warnings.append("Missing numeric values in the saved matrix were median-imputed during training.")
         if dropped_low_confidence:
             warnings.append(f"{dropped_low_confidence} rows were excluded because their confidence was below the selected threshold.")
+        if aggregation_strategy == "mean_by_condition" and aggregation_summary["groups_merged"]:
+            warnings.append(
+                f"Target aggregation merged {aggregation_summary['groups_merged']} duplicate-condition groups "
+                f"from {aggregation_summary['rows_before']} rows to {aggregation_summary['rows_after']} rows."
+            )
+        if aggregation_strategy == "drop_conflicts" and aggregation_summary["rows_removed"]:
+            warnings.append(
+                f"Target aggregation removed {aggregation_summary['rows_removed']} rows from conflicting duplicate-condition groups."
+            )
+        if serializable_target_noise["conflict_groups"] and aggregation_strategy == "raw":
+            warnings.append(
+                f"{serializable_target_noise['conflict_groups']} duplicate-condition groups have conflicting target values; "
+                "consider mean aggregation or excluding conflict groups."
+            )
         if effective_cv_folds != cv_folds and split_strategy != "random_holdout":
             warnings.append(f"Cross-validation folds were reduced from {cv_folds} to {effective_cv_folds} to keep each validation fold large enough to evaluate.")
         if split_strategy == "joint_stratified":
@@ -2173,6 +2483,8 @@ class ModelTrainingService:
                     "experiment_method": row.get("__experiment_method"),
                     "measurement_type": row.get("__measurement_type"),
                     "training_view": row.get("__training_view"),
+                    "aggregated_count": row.get("_aggregated_count"),
+                    "aggregation_record_ids": row.get("_aggregation_record_ids"),
                     "actual": float(row["_target_value"]),
                 }
                 for row in eligible_rows
@@ -2211,8 +2523,10 @@ class ModelTrainingService:
                     "cv_folds": effective_cv_folds,
                     "training_view": training_view,
                     "feature_subset": feature_subset,
+                    "target_aggregation_strategy": aggregation_strategy,
                 },
                 "feature_subset": feature_subset,
+                "target_noise": serializable_target_noise,
                 "split": {
                     "strategy": split_strategy,
                     "label": split_label,
@@ -2824,6 +3138,9 @@ class ModelTrainingService:
         val_r2 = _safe_float(current.get("val_r2"))
         test_r2 = _safe_float((test_metrics or {}).get("test_r2"))
         external_r2 = _safe_float((external_metrics or {}).get("external_r2"))
+        target_noise = dataset.get("target_noise") or {}
+        conflict_groups = _int_or_default(target_noise.get("conflict_groups"), 0) if isinstance(target_noise, dict) else 0
+        estimated_ceiling = _safe_float(target_noise.get("estimated_r2_ceiling")) if isinstance(target_noise, dict) else None
 
         if usable_records and usable_records < 50:
             add_risk("medium", "样本量偏小", f"当前只有 {usable_records} 条可训练样本，模型指标可能对单个样本非常敏感。")
@@ -2850,6 +3167,18 @@ class ModelTrainingService:
                 "medium",
                 "外推验证 R² 为负",
                 "模型对训练中未见过的稀有阳离子 × μ 分箱组合低于均值基线，建议优先扩充这些离子和工况覆盖。",
+            )
+        if conflict_groups:
+            add_risk(
+                "medium",
+                "重复工况目标冲突",
+                f"{conflict_groups} 组近似相同工况下 COF 不一致，会压低验证/测试上限；建议比较原始、均值聚合和排除冲突组。"
+            )
+        if estimated_ceiling is not None and estimated_ceiling < 0.75:
+            add_risk(
+                "medium",
+                "目标噪声上限偏低",
+                f"重复工况估计的可达 R² 上限约为 {estimated_ceiling:.2f}，继续调算法前应先处理重复条件噪声。"
             )
         if task.warnings:
             add_risk("low", "训练过程有提示", "请查看运行提示中的缺失值补齐、折数下调或联合标签回退信息。")
@@ -2903,6 +3232,7 @@ class ModelTrainingService:
                 "folds": task.fold_summaries,
             },
             "hyperparameters": config.get("hyperparameters") or {},
+            "target_noise": dataset.get("target_noise"),
             "feature_importance_top": feature_importance[:10],
             "residual_top": residual_candidates[:10],
             "external_diagnostics": external_diagnostics,

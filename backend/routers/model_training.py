@@ -50,6 +50,7 @@ class DataOptionPayload(BaseModel):
     feature_columns: list[str] | None = None
     feature_subset_key: str | None = None
     feature_subset_label: str | None = None
+    target_aggregation_strategy: str = "raw"
 
 
 class CleaningOptionPayload(BaseModel):

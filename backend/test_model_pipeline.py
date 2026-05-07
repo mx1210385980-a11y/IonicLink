@@ -274,6 +274,90 @@ def test_algorithm_options_include_catboost_when_dependency_is_available(monkeyp
     assert any(option["key"] == "catboost" for option in options)
 
 
+def test_training_service_target_noise_diagnostics_and_aggregation() -> None:
+    rows = []
+    for index in range(12):
+        rows.append({
+            "Target_COF": 0.10 + index * 0.002,
+            "Temperature": 25.0,
+            "Speed": 0.10,
+            "Load": 1.0,
+            "__cation": f"cat-{index}",
+            "__anion": "anion-a",
+            "__record_id": index + 1,
+        })
+    rows.extend([
+        {
+            "Target_COF": 0.10,
+            "Temperature": 25.0,
+            "Speed": 0.10,
+            "Load": 1.0,
+            "__cation": "repeat-cat",
+            "__anion": "anion-a",
+            "__record_id": 101,
+        },
+        {
+            "Target_COF": 0.18,
+            "Temperature": 25.0,
+            "Speed": 0.10,
+            "Load": 1.0,
+            "__cation": "repeat-cat",
+            "__anion": "anion-a",
+            "__record_id": 102,
+        },
+    ])
+    metadata = {
+        "target": {"key": "cof", "label": "Coefficient of Friction (COF)"},
+        "target_column": "Target_COF",
+        "feature_columns": ["Temperature", "Speed", "Load"],
+        "matrix_columns": ["__record_id", "__cation", "__anion", "Target_COF", "Temperature", "Speed", "Load"],
+        "summary": {"rules": {"training_view": "all"}},
+    }
+    service = ModelTrainingService()
+    raw_prepared = service._prepare_saved_dataset(
+        rows,
+        {
+            "algorithm": "gradient_boosting",
+            "hyperparameters": {"n_estimators": 20, "learning_rate": 0.06, "max_depth": 3},
+            "data_options": {
+                "validation_split": 0.2,
+                "random_seed": 42,
+                "max_records": None,
+                "split_strategy": "random_holdout",
+                "cv_folds": 5,
+                "min_confidence": 0.0,
+                "target_aggregation_strategy": "raw",
+            },
+        },
+        metadata,
+    )
+    mean_prepared = service._prepare_saved_dataset(
+        rows,
+        {
+            "algorithm": "gradient_boosting",
+            "hyperparameters": {"n_estimators": 20, "learning_rate": 0.06, "max_depth": 3},
+            "data_options": {
+                "validation_split": 0.2,
+                "random_seed": 42,
+                "max_records": None,
+                "split_strategy": "random_holdout",
+                "cv_folds": 5,
+                "min_confidence": 0.0,
+                "target_aggregation_strategy": "mean_by_condition",
+            },
+        },
+        metadata,
+    )
+
+    assert raw_prepared["dataset"]["target_noise"]["conflict_groups"] == 1
+    assert raw_prepared["dataset"]["target_noise"]["top_groups"][0]["is_conflict"] is True
+    assert raw_prepared["dataset"]["target_noise"]["strategy_applied"] == "raw"
+    assert mean_prepared["dataset"]["usable_records"] == 13
+    assert mean_prepared["dataset"]["target_noise"]["strategy_applied"] == "mean_by_condition"
+    assert mean_prepared["dataset"]["target_noise"]["groups_merged_by_strategy"] == 1
+    assert any("Target aggregation merged" in warning for warning in mean_prepared["warnings"])
+
+
 def test_prediction_insights_skip_none_predictions() -> None:
     service = ModelTrainingService()
 

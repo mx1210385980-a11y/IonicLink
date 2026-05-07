@@ -1647,6 +1647,7 @@ export interface ModelTrainingExperimentReport {
         }>
     }
     hyperparameters: Record<string, unknown>
+    target_noise?: ModelTrainingTargetNoiseDiagnostics | null
     feature_importance_top: ModelTrainingFeatureImportance[]
     residual_top: Array<ModelTrainingPredictionPoint & { source: 'val' | 'test' | 'external' }>
     external_diagnostics?: ModelTrainingExternalDiagnostics | null
@@ -1803,6 +1804,7 @@ export interface ModelTrainingDatasetSummary {
     columns: string[]
     rdkit_enabled: boolean
     source_scope: ModelTrainingSourceScope
+    target_noise?: ModelTrainingTargetNoiseDiagnostics | null
     target?: {
         key: string
         label: string
@@ -1823,6 +1825,44 @@ export interface ModelTrainingDatasetSummary {
         missing_cation_count?: number
         details?: ModelTrainingSplitDetails | null
     }
+}
+
+export interface ModelTrainingTargetNoiseGroup {
+    key: string
+    label: string
+    count: number
+    mean: number
+    std: number
+    range: number
+    relative_range: number
+    is_conflict: boolean
+    values: number[]
+    row_indices?: number[]
+    record_ids?: Array<number | string>
+}
+
+export interface ModelTrainingTargetNoiseDiagnostics {
+    sample_count: number
+    unique_condition_groups: number
+    duplicate_condition_groups: number
+    duplicate_condition_records: number
+    conflict_groups: number
+    conflict_records: number
+    max_target_range: number
+    max_target_std: number
+    within_condition_rmse: number
+    estimated_r2_ceiling?: number | null
+    recommended_strategy: 'raw' | 'mean_by_condition' | 'drop_conflicts' | string
+    strategy_applied?: 'raw' | 'mean_by_condition' | 'drop_conflicts' | string
+    rows_before_aggregation?: number
+    rows_after_aggregation?: number
+    rows_removed_by_strategy?: number
+    groups_merged_by_strategy?: number
+    conflict_threshold?: {
+        absolute_range: number
+        relative_range: number
+    }
+    top_groups: ModelTrainingTargetNoiseGroup[]
 }
 
 export interface ModelTrainingTaskSnapshot {
@@ -1879,6 +1919,7 @@ export interface ModelTrainingTaskSnapshot {
         feature_columns?: string[]
         columns?: string[]
         pca_info?: ModelCleaningPcaInfo | null
+        target_noise?: ModelTrainingTargetNoiseDiagnostics | null
     }
     warnings: string[]
     feature_blocks: Array<{
@@ -1995,6 +2036,7 @@ export interface ModelTrainingDataOptions {
     feature_columns?: string[] | null
     feature_subset_key?: string | null
     feature_subset_label?: string | null
+    target_aggregation_strategy?: 'raw' | 'mean_by_condition' | 'drop_conflicts' | string
 }
 
 export interface ModelTrainingSplitStrategyOption {
