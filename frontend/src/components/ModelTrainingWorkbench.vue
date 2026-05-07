@@ -80,6 +80,31 @@ type ComparisonRow = {
   error?: string | null
 }
 
+type FeatureGroupKey =
+  | 'cation_descriptor'
+  | 'anion_descriptor'
+  | 'process_condition'
+  | 'surface_feature'
+  | 'mechanism_feature'
+  | 'fingerprint'
+  | 'pca'
+  | 'other'
+
+type FeatureGroupDefinition = {
+  key: FeatureGroupKey
+  label: string
+  shortLabel: string
+  description: string
+  toneClass: string
+}
+
+type FeatureGainRecipe = {
+  key: string
+  label: string
+  groups: FeatureGroupKey[]
+  purpose: string
+}
+
 const props = defineProps<{
   preselectedCleanedDatasetId?: number | null
 }>()
@@ -117,6 +142,96 @@ const splitDetailTabs: Array<{ key: 'subsets' | 'bins' | 'folds'; label: string 
   { key: 'subsets', label: '总体' },
   { key: 'bins', label: 'μ 分箱' },
   { key: 'folds', label: '折次' },
+]
+const FEATURE_GROUP_DEFINITIONS: FeatureGroupDefinition[] = [
+  {
+    key: 'cation_descriptor',
+    label: '阳离子结构描述符',
+    shortLabel: '阳离子',
+    description: '阳离子的拓扑、极性、杂原子和形状等结构表达。',
+    toneClass: 'border-[#cdd7ff] bg-[#f5f7ff] text-[#3d56d2]',
+  },
+  {
+    key: 'anion_descriptor',
+    label: '阴离子结构描述符',
+    shortLabel: '阴离子',
+    description: '阴离子的电荷分布、极性表面积、连接指数等结构表达。',
+    toneClass: 'border-[#d9f99d] bg-[#f7fee7] text-[#4d7c0f]',
+  },
+  {
+    key: 'process_condition',
+    label: '工况协变量',
+    shortLabel: '工况',
+    description: '载荷、速度、温度、电位、含水量等实验条件。',
+    toneClass: 'border-[#fed7aa] bg-[#fff7ed] text-[#c2410c]',
+  },
+  {
+    key: 'surface_feature',
+    label: '表面特征',
+    shortLabel: '表面',
+    description: 'γ_s、σ_s、Rq、θ_s、I_ss 等基底/探针表面状态。',
+    toneClass: 'border-[#bae6fd] bg-[#f0f9ff] text-[#0369a1]',
+  },
+  {
+    key: 'mechanism_feature',
+    label: '膜层与链长机制量',
+    shortLabel: '机制',
+    description: '膜厚、烷基链长、吸附层和润滑膜相关变量。',
+    toneClass: 'border-[#e9d5ff] bg-[#faf5ff] text-[#7e22ce]',
+  },
+  {
+    key: 'fingerprint',
+    label: '指纹/高阶拓扑描述符',
+    shortLabel: '指纹',
+    description: 'Morgan、FpDensity、Kappa、Chi 等高阶结构描述。',
+    toneClass: 'border-[#ddd6fe] bg-[#f5f3ff] text-[#5b21b6]',
+  },
+  {
+    key: 'pca',
+    label: 'PCA 压缩特征',
+    shortLabel: 'PCA',
+    description: '高维描述符经过主成分压缩后的低维表达。',
+    toneClass: 'border-[#ccfbf1] bg-[#f0fdfa] text-[#0f766e]',
+  },
+  {
+    key: 'other',
+    label: '其他数值特征',
+    shortLabel: '其他',
+    description: '尚未归类但进入训练矩阵的数值列。',
+    toneClass: 'border-[#e2e8f0] bg-[#fbfcff] text-slate-600',
+  },
+]
+const FEATURE_GAIN_RECIPES: FeatureGainRecipe[] = [
+  {
+    key: 'structure_core',
+    label: '结构核心',
+    groups: ['cation_descriptor', 'anion_descriptor'],
+    purpose: '先确认阴/阳离子描述符本身能否解释摩擦系数。',
+  },
+  {
+    key: 'condition_gain',
+    label: '+ 工况协变量',
+    groups: ['process_condition'],
+    purpose: '衡量载荷、速度、温度和电位等实验条件带来的增益。',
+  },
+  {
+    key: 'surface_gain',
+    label: '+ 表面特征',
+    groups: ['surface_feature'],
+    purpose: '回测 γ_s、σ_s、Rq、θ_s、I_ss 等论文式表面变量是否改善泛化。',
+  },
+  {
+    key: 'mechanism_gain',
+    label: '+ 膜层/链长',
+    groups: ['mechanism_feature'],
+    purpose: '检查膜厚、烷基链长和吸附层变量能否补足低 R²。',
+  },
+  {
+    key: 'descriptor_guard',
+    label: '+ 高阶描述符',
+    groups: ['fingerprint', 'pca', 'other'],
+    purpose: '最后加入指纹或 PCA 特征，观察是否增益或引入噪声。',
+  },
 ]
 
 // 全算法对比模式
@@ -632,6 +747,141 @@ const experimentConfirmLabel = computed(() => {
   if (pendingExperimentAction.value === 'tune') return '确认并自动调参'
   return '确认并开始训练'
 })
+const trainingFeatureColumns = computed(() => {
+  const taskColumns = activeTask.value?.dataset?.feature_columns
+  if (Array.isArray(taskColumns) && taskColumns.length) return taskColumns
+  if (experimentFeatureColumns.value.length) return experimentFeatureColumns.value
+  return summary.value?.dataset.feature_columns || []
+})
+const featureGroupSummaries = computed(() => {
+  const buckets = new Map<FeatureGroupKey, string[]>()
+  for (const definition of FEATURE_GROUP_DEFINITIONS) {
+    buckets.set(definition.key, [])
+  }
+  for (const column of trainingFeatureColumns.value) {
+    buckets.get(classifyFeatureGroup(column))?.push(column)
+  }
+  return FEATURE_GROUP_DEFINITIONS.map((definition) => {
+    const columns = buckets.get(definition.key) || []
+    return {
+      ...definition,
+      count: columns.length,
+      columns,
+      examples: columns.slice(0, 3),
+    }
+  })
+})
+const activeFeatureGroupSummaries = computed(() => featureGroupSummaries.value.filter((group) => group.count > 0))
+const featureGainPlan = computed(() => {
+  const groups = new Map(featureGroupSummaries.value.map((group) => [group.key, group]))
+  let cumulativeCount = 0
+  return FEATURE_GAIN_RECIPES.map((recipe, index) => {
+    const recipeGroups = recipe.groups.map((key) => groups.get(key)).filter(Boolean) as Array<(typeof featureGroupSummaries.value)[number]>
+    const count = recipeGroups.reduce((total, group) => total + group.count, 0)
+    cumulativeCount += count
+    return {
+      ...recipe,
+      step: index + 1,
+      count,
+      cumulativeCount,
+      groupLabels: recipeGroups.map((group) => ({
+        key: group.key,
+        label: group.shortLabel,
+        count: group.count,
+      })),
+      statusLabel: count > 0 ? '可回测' : '待补字段',
+      statusClass: count > 0 ? 'bg-[#e8fff2] text-[#0b9d63]' : 'bg-[#fff4da] text-[#b97113]',
+    }
+  })
+})
+const fitDiagnostic = computed(() => {
+  if (activeTask.value?.status !== 'completed' || !currentPoint.value) return null
+  const trainR2 = nullableNumber(currentPoint.value.train_r2)
+  const valR2 = nullableNumber(currentPoint.value.val_r2)
+  const testR2 = nullableNumber(testMetrics.value?.test_r2)
+  const externalR2 = nullableNumber(externalMetrics.value?.external_r2)
+  const holdoutScores = [valR2, testR2].filter((value): value is number => value != null)
+  const featureCount = trainingFeatureColumns.value.length || activeTask.value?.dataset?.feature_dimensions || summary.value?.dataset.feature_dimensions || 0
+  const sampleCount = activeTask.value?.dataset?.usable_records || summary.value?.dataset.usable_records || 0
+  const lowTrain = trainR2 != null && trainR2 < 0.65
+  const lowHoldout = holdoutScores.length > 0 && Math.max(...holdoutScores) < 0.5
+  const negativeHoldout = holdoutScores.some((value) => value < 0)
+  const trainHigh = trainR2 != null && trainR2 >= 0.82
+  const trainValGap = trainR2 != null && valR2 != null ? trainR2 - valR2 : null
+
+  if (lowTrain && lowHoldout) {
+    return {
+      tone: 'underfit',
+      title: '疑似欠拟合：训练集也没有学起来',
+      message: `训练 R² 仍偏低，说明当前 ${formatNumber(featureCount)} 个特征不足以表达 μ/COF 的主要变化。优先做特征组增益实验，确认是缺表面/膜层变量，还是离子描述符本身覆盖不够。`,
+      metrics: [
+        { label: '训练 R²', value: trainR2 },
+        { label: '验证 R²', value: valR2 },
+        { label: '测试 R²', value: testR2 },
+        { label: '样本', value: sampleCount, integer: true },
+      ],
+      actions: [
+        '按下方顺序跑结构核心、+工况、+表面特征、+膜层/链长的对照。',
+        '补齐 γ_s、σ_s、Rq、θ_s、I_ss、膜厚和烷基链长后再回测。',
+        '如果结构核心仍很低，优先检查 SMILES 标准化和阴/阳离子别名映射。',
+      ],
+    }
+  }
+
+  if (trainHigh && (lowHoldout || negativeHoldout)) {
+    return {
+      tone: 'overfit',
+      title: '更像过拟合或划分外推过难',
+      message: `训练 R² 已经较高，但验证/测试没有跟上${trainValGap != null ? `（训练-验证差 ${formatMetric(trainValGap, 3)}）` : ''}。先固定 seed 和 split，看减少高维描述符或补稀有分箱样本是否改善。`,
+      metrics: [
+        { label: '训练 R²', value: trainR2 },
+        { label: '验证 R²', value: valR2 },
+        { label: '测试 R²', value: testR2 },
+        { label: '外推 R²', value: externalR2 },
+      ],
+      actions: [
+        '先比较“结构核心”和“结构核心 + 工况”，不要直接堆高维特征。',
+        '查看外推失败样本归因，补阳离子 × μ 分箱覆盖不足的区域。',
+        '尝试随机森林或梯度提升的更强正则化版本，再比较测试集表现。',
+      ],
+    }
+  }
+
+  if (negativeHoldout) {
+    return {
+      tone: 'data',
+      title: '验证/测试低于均值基线',
+      message: 'R² 为负说明模型不如直接预测训练均值。此时先别追算法，应该回看目标值、单位、重复条件冲突和特征缺失。',
+      metrics: [
+        { label: '训练 R²', value: trainR2 },
+        { label: '验证 R²', value: valR2 },
+        { label: '测试 R²', value: testR2 },
+        { label: '特征', value: featureCount, integer: true },
+      ],
+      actions: [
+        '优先处理残差最大的样本，确认 COF、载荷、速度和温度没有单位错位。',
+        '排查同一配方同一工况下目标值差异过大的冲突组。',
+        '保留当前 split，再跑特征组增益，避免换划分后误判。',
+      ],
+    }
+  }
+
+  return {
+    tone: 'stable',
+    title: '当前不像典型欠拟合',
+    message: '训练、验证和测试之间没有出现明显的共同低平台。下一步适合用特征组增益实验确认哪些变量真正带来提升。',
+    metrics: [
+      { label: '训练 R²', value: trainR2 },
+      { label: '验证 R²', value: valR2 },
+      { label: '测试 R²', value: testR2 },
+      { label: '外推 R²', value: externalR2 },
+    ],
+    actions: [
+      '用同一 seed/split 做阶梯式特征加入，避免把划分波动误认为特征增益。',
+      '优先关注测试集提升，外推集用于定位需要补样本的稀有组合。',
+    ],
+  }
+})
 
 // 自动调参 ─────────────────────────────────────────────────────
 const tuneProgress = computed(() => activeTask.value?.tune_progress || null)
@@ -927,6 +1177,47 @@ function diagnosticBadgeClass(kind: string | null | undefined) {
   if (kind === 'sparse_cation' || kind === 'sparse_bin') return 'bg-[#f5f7ff] text-[#5b56ea] ring-[#cdd7ff]'
   if (kind === 'large_residual') return 'bg-[#fff5f6] text-[#cf334f] ring-[#ffd4da]'
   return 'bg-slate-100 text-slate-600 ring-[#e2e8f0]'
+}
+
+function classifyFeatureGroup(column: string | null | undefined): FeatureGroupKey {
+  const normalized = String(column || '').trim().toLowerCase()
+  const compact = normalized.replace(/[^\wμµγθσ]+/g, '_')
+  if (!compact) return 'other'
+  if (/(^|_)pca(_|$)|(^|_)pc\d+(_|$)|principal_component/.test(compact)) return 'pca'
+  if (/(^|_)cation(_|$)|(^|_)cat(_|$)|_cat$|cation|阳离子/.test(compact)) return 'cation_descriptor'
+  if (/(^|_)anion(_|$)|(^|_)an(_|$)|_an$|anion|阴离子/.test(compact)) return 'anion_descriptor'
+  if (/(gamma_s|γ_s|sigma_s|σ_s|surface|substrate|(^|_)sub(_|$)|rough|(^|_)rq(_|$)|theta_s|θ_s|contact_angle|wetting|i_ss|(^|_)iss(_|$))/.test(compact)) {
+    return 'surface_feature'
+  }
+  if (/(load|force|speed|velocity|temperature|(^|_)temp(_|$)|potential|voltage|water|humidity|(^|_)ph(_|$)|pressure|sliding|frequency|stroke|cycle)/.test(compact)) {
+    return 'process_condition'
+  }
+  if (/(film|thickness|chain|alkyl|adsorption|layer|viscosity|density|molecular_weight|(^|_)mw(_|$))/.test(compact)) {
+    return 'mechanism_feature'
+  }
+  if (/(morgan|fingerprint|fpdensity|balaban|bertz|kappa|chi|tpsa|labute|logp|molmr|descriptor|(^|_)fp(_|$)|bit)/.test(compact)) {
+    return 'fingerprint'
+  }
+  return 'other'
+}
+
+function fitDiagnosticClass(tone: string | null | undefined) {
+  if (tone === 'underfit') return 'border-[#fed7aa] bg-[#fff7ed]'
+  if (tone === 'overfit') return 'border-[#cdd7ff] bg-[#f5f7ff]'
+  if (tone === 'data') return 'border-[#ffd4da] bg-[#fff5f6]'
+  return 'border-[#dbe4f2] bg-white'
+}
+
+function fitDiagnosticBadgeClass(tone: string | null | undefined) {
+  if (tone === 'underfit') return 'bg-[#fff4da] text-[#b97113]'
+  if (tone === 'overfit') return 'bg-[#edf2ff] text-[#3d56d2]'
+  if (tone === 'data') return 'bg-[#fff5f6] text-[#cf334f]'
+  return 'bg-[#e8fff2] text-[#0b9d63]'
+}
+
+function diagnosticMetricValue(item: { value: number | null | undefined; integer?: boolean }) {
+  if (item.value == null) return '--'
+  return item.integer ? formatNumber(item.value) : formatMetric(item.value, 3)
 }
 
 function diagnosticSampleForInspect(item: ModelTrainingExternalDiagnosticItem): DiagSample {
@@ -2032,6 +2323,147 @@ watch(
             <p class="mt-1.5 text-xs leading-5 text-[#9f1239]">
               {{ negativeR2Diagnostic.message }}
             </p>
+          </section>
+
+          <section
+            v-if="fitDiagnostic"
+            class="rounded-[0.95rem] border p-4"
+            :class="fitDiagnosticClass(fitDiagnostic.tone)"
+          >
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div class="min-w-0">
+                <p class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#5b56ea]">
+                  <AlertTriangle class="h-3.5 w-3.5" />
+                  拟合状态诊断
+                </p>
+                <h3 class="mt-1 text-base font-semibold tracking-[-0.03em] text-slate-950">
+                  {{ fitDiagnostic.title }}
+                </h3>
+                <p class="mt-1 text-xs leading-5 text-slate-600">
+                  {{ fitDiagnostic.message }}
+                </p>
+              </div>
+              <span class="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold" :class="fitDiagnosticBadgeClass(fitDiagnostic.tone)">
+                {{ fitDiagnostic.tone === 'underfit' ? '优先补特征表达' : fitDiagnostic.tone === 'overfit' ? '优先看泛化' : fitDiagnostic.tone === 'data' ? '优先核数据' : '继续做增益实验' }}
+              </span>
+            </div>
+
+            <div class="mt-3 grid gap-2 sm:grid-cols-4">
+              <div
+                v-for="metric in fitDiagnostic.metrics"
+                :key="metric.label"
+                class="rounded-[0.7rem] border border-white/70 bg-white/75 px-3 py-2"
+              >
+                <p class="text-[10px] font-bold uppercase tracking-[0.14em] text-[#8fa0ba]">{{ metric.label }}</p>
+                <p class="mt-0.5 text-lg font-semibold text-slate-950 tabular-nums">
+                  {{ diagnosticMetricValue(metric) }}
+                </p>
+              </div>
+            </div>
+
+            <div class="mt-3 grid gap-2 lg:grid-cols-3">
+              <div
+                v-for="action in fitDiagnostic.actions"
+                :key="action"
+                class="rounded-[0.7rem] border border-white/80 bg-white/70 px-3 py-2 text-xs leading-5 text-slate-600"
+              >
+                {{ action }}
+              </div>
+            </div>
+          </section>
+
+          <section
+            v-if="activeFeatureGroupSummaries.length"
+            class="rounded-[0.95rem] border border-[#dbe4f2] bg-white p-4"
+          >
+            <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#5b56ea]">
+                  <Layers class="h-3.5 w-3.5" />
+                  特征组增益实验入口
+                </p>
+                <p class="mt-1 text-xs leading-5 text-slate-500">
+                  建议固定同一 seed、同一 split、同一算法，逐步加入特征组。这样可以判断低 R² 是离子结构表达不足、工况缺失，还是表面/膜层变量缺口。
+                </p>
+              </div>
+              <div class="flex flex-wrap gap-1.5 text-[11px] font-semibold text-slate-600">
+                <span class="rounded-full bg-[#fbfcff] px-2.5 py-1 ring-1 ring-[#e2e8f0]">
+                  {{ formatNumber(trainingFeatureColumns.length) }} 个特征
+                </span>
+                <span class="rounded-full bg-[#fbfcff] px-2.5 py-1 ring-1 ring-[#e2e8f0]">
+                  {{ activeFeatureGroupSummaries.length }} 组已识别
+                </span>
+              </div>
+            </div>
+
+            <div class="grid gap-3 xl:grid-cols-[1fr_1.1fr]">
+              <div class="rounded-[0.85rem] border border-[#eef2f6] bg-[#fbfcff] p-3">
+                <div class="mb-2 flex items-center justify-between gap-2">
+                  <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">当前特征池</p>
+                  <span class="text-[10px] text-slate-400">按列名自动归组</span>
+                </div>
+                <div class="grid gap-2 sm:grid-cols-2">
+                  <article
+                    v-for="group in activeFeatureGroupSummaries"
+                    :key="group.key"
+                    class="rounded-[0.7rem] border px-3 py-2"
+                    :class="group.toneClass"
+                  >
+                    <div class="flex items-center justify-between gap-2">
+                      <p class="truncate text-sm font-semibold">{{ group.label }}</p>
+                      <span class="shrink-0 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold tabular-nums">
+                        {{ group.count }}
+                      </span>
+                    </div>
+                    <p class="mt-1 text-[11px] leading-4 opacity-80">{{ group.description }}</p>
+                    <p v-if="group.examples.length" class="mt-1 truncate text-[10px] opacity-70" :title="group.columns.join(', ')">
+                      {{ group.examples.map(formatColumnLabel).join(' / ') }}
+                    </p>
+                  </article>
+                </div>
+              </div>
+
+              <div class="rounded-[0.85rem] border border-[#eef2f6] bg-[#fbfcff] p-3">
+                <div class="mb-2 flex items-center justify-between gap-2">
+                  <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">建议回测顺序</p>
+                  <span class="text-[10px] text-slate-400">后续接训练队列</span>
+                </div>
+                <div class="space-y-2">
+                  <article
+                    v-for="recipe in featureGainPlan"
+                    :key="recipe.key"
+                    class="rounded-[0.7rem] border border-[#e2e8f0] bg-white px-3 py-2"
+                  >
+                    <div class="flex flex-wrap items-start justify-between gap-2">
+                      <div class="min-w-0">
+                        <p class="flex items-center gap-2 text-sm font-semibold text-slate-950">
+                          <span class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#f5f7ff] text-[10px] font-bold text-[#5b56ea] ring-1 ring-[#cdd7ff]">
+                            {{ recipe.step }}
+                          </span>
+                          {{ recipe.label }}
+                        </p>
+                        <p class="mt-1 text-[11px] leading-5 text-slate-500">{{ recipe.purpose }}</p>
+                      </div>
+                      <span class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold" :class="recipe.statusClass">
+                        {{ recipe.statusLabel }}
+                      </span>
+                    </div>
+                    <div class="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] font-semibold">
+                      <span
+                        v-for="group in recipe.groupLabels"
+                        :key="`${recipe.key}-${group.key}`"
+                        class="rounded-full bg-[#f8fafc] px-2 py-1 text-slate-600 ring-1 ring-[#e2e8f0]"
+                      >
+                        {{ group.label }} {{ group.count }}
+                      </span>
+                      <span class="ml-auto text-slate-400 tabular-nums">
+                        累计 {{ formatNumber(recipe.cumulativeCount) }} 个特征
+                      </span>
+                    </div>
+                  </article>
+                </div>
+              </div>
+            </div>
           </section>
 
           <section
