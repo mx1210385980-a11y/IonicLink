@@ -1992,6 +1992,9 @@ export interface ModelTrainingDataOptions {
     random_seed: number
     split_strategy?: string
     cv_folds?: number
+    feature_columns?: string[] | null
+    feature_subset_key?: string | null
+    feature_subset_label?: string | null
 }
 
 export interface ModelTrainingSplitStrategyOption {

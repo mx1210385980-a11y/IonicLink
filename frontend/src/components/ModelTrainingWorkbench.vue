@@ -105,6 +105,27 @@ type FeatureGainRecipe = {
   purpose: string
 }
 
+type FeatureGainRunStep = {
+  key: string
+  label: string
+  step: number
+  purpose: string
+  featureColumns: string[]
+  featureCount: number
+  cumulativeCount: number
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+  taskId?: string | null
+  valR2?: number | null
+  valRmse?: number | null
+  valMae?: number | null
+  testR2?: number | null
+  testRmse?: number | null
+  testMae?: number | null
+  finishedAt?: string | null
+  snapshot?: ModelTrainingTaskSnapshot | null
+  error?: string | null
+}
+
 const props = defineProps<{
   preselectedCleanedDatasetId?: number | null
 }>()
@@ -240,6 +261,12 @@ const compareQueue = ref<string[]>([])
 const compareResults = ref<ComparisonRow[]>([])
 const compareTotal = ref(0)
 const compareCurrentAlgorithm = ref<string | null>(null)
+const featureGainMode = ref(false)
+const featureGainQueue = ref<FeatureGainRunStep[]>([])
+const featureGainResults = ref<FeatureGainRunStep[]>([])
+const featureGainTotal = ref(0)
+const featureGainCurrent = ref<FeatureGainRunStep | null>(null)
+const featureGainBaseAlgorithm = ref<string | null>(null)
 
 const emit = defineEmits<{
   'open-knowledge': []
@@ -747,18 +774,22 @@ const experimentConfirmLabel = computed(() => {
   if (pendingExperimentAction.value === 'tune') return '确认并自动调参'
   return '确认并开始训练'
 })
+const fullDatasetFeatureColumns = computed(() => {
+  const columns = summary.value?.dataset.feature_columns
+  if (Array.isArray(columns) && columns.length) return columns
+  return experimentFeatureColumns.value
+})
 const trainingFeatureColumns = computed(() => {
   const taskColumns = activeTask.value?.dataset?.feature_columns
   if (Array.isArray(taskColumns) && taskColumns.length) return taskColumns
-  if (experimentFeatureColumns.value.length) return experimentFeatureColumns.value
-  return summary.value?.dataset.feature_columns || []
+  return fullDatasetFeatureColumns.value
 })
 const featureGroupSummaries = computed(() => {
   const buckets = new Map<FeatureGroupKey, string[]>()
   for (const definition of FEATURE_GROUP_DEFINITIONS) {
     buckets.set(definition.key, [])
   }
-  for (const column of trainingFeatureColumns.value) {
+  for (const column of fullDatasetFeatureColumns.value) {
     buckets.get(classifyFeatureGroup(column))?.push(column)
   }
   return FEATURE_GROUP_DEFINITIONS.map((definition) => {
@@ -774,26 +805,52 @@ const featureGroupSummaries = computed(() => {
 const activeFeatureGroupSummaries = computed(() => featureGroupSummaries.value.filter((group) => group.count > 0))
 const featureGainPlan = computed(() => {
   const groups = new Map(featureGroupSummaries.value.map((group) => [group.key, group]))
-  let cumulativeCount = 0
+  const cumulativeColumns: string[] = []
+  const cumulativeSet = new Set<string>()
   return FEATURE_GAIN_RECIPES.map((recipe, index) => {
     const recipeGroups = recipe.groups.map((key) => groups.get(key)).filter(Boolean) as Array<(typeof featureGroupSummaries.value)[number]>
-    const count = recipeGroups.reduce((total, group) => total + group.count, 0)
-    cumulativeCount += count
+    const recipeColumns = recipeGroups.flatMap((group) => group.columns)
+    for (const column of recipeColumns) {
+      if (cumulativeSet.has(column)) continue
+      cumulativeSet.add(column)
+      cumulativeColumns.push(column)
+    }
+    const count = recipeColumns.length
+    const cumulativeCount = cumulativeColumns.length
     return {
       ...recipe,
       step: index + 1,
       count,
       cumulativeCount,
+      featureColumns: [...cumulativeColumns],
       groupLabels: recipeGroups.map((group) => ({
         key: group.key,
         label: group.shortLabel,
         count: group.count,
       })),
-      statusLabel: count > 0 ? '可回测' : '待补字段',
-      statusClass: count > 0 ? 'bg-[#e8fff2] text-[#0b9d63]' : 'bg-[#fff4da] text-[#b97113]',
+      statusLabel: cumulativeCount > 0 ? (count > 0 ? '可回测' : '沿用前一步') : '待补字段',
+      statusClass: cumulativeCount > 0 ? 'bg-[#e8fff2] text-[#0b9d63]' : 'bg-[#fff4da] text-[#b97113]',
     }
   })
 })
+const featureGainRunnablePlan = computed(() => {
+  const seen = new Set<string>()
+  return featureGainPlan.value.filter((recipe) => {
+    if (!recipe.featureColumns.length) return false
+    const signature = recipe.featureColumns.join('\u0000')
+    if (seen.has(signature)) return false
+    seen.add(signature)
+    return true
+  })
+})
+const featureGainCompleted = computed(() => featureGainResults.value.filter((row) => row.status === 'completed'))
+const featureGainProgressLabel = computed(() => {
+  const done = featureGainResults.value.filter((row) => row.status !== 'queued' && row.status !== 'running').length
+  const total = featureGainTotal.value || featureGainResults.value.length
+  return `${done} / ${total}`
+})
+const featureGainCurrentLabel = computed(() => featureGainCurrent.value?.label || '')
+const featureGainBestResult = computed(() => [...featureGainCompleted.value].sort((a, b) => featureGainScore(b) - featureGainScore(a))[0] || null)
 const fitDiagnostic = computed(() => {
   if (activeTask.value?.status !== 'completed' || !currentPoint.value) return null
   const trainR2 = nullableNumber(currentPoint.value.train_r2)
@@ -1220,6 +1277,53 @@ function diagnosticMetricValue(item: { value: number | null | undefined; integer
   return item.integer ? formatNumber(item.value) : formatMetric(item.value, 3)
 }
 
+function featureGainScore(row: FeatureGainRunStep | null | undefined) {
+  const testScore = nullableNumber(row?.testR2)
+  if (testScore != null) return testScore
+  const valScore = nullableNumber(row?.valR2)
+  return valScore ?? Number.NEGATIVE_INFINITY
+}
+
+function featureGainResultFor(key: string) {
+  return featureGainResults.value.find((row) => row.key === key) || null
+}
+
+function featureGainStatusLabel(status: FeatureGainRunStep['status'] | null | undefined) {
+  if (status === 'completed') return '完成'
+  if (status === 'running') return '训练中'
+  if (status === 'failed') return '失败'
+  if (status === 'cancelled') return '已中止'
+  return '排队'
+}
+
+function featureGainStatusClass(status: FeatureGainRunStep['status'] | null | undefined) {
+  if (status === 'completed') return 'bg-[#e8fff2] text-[#0b9d63]'
+  if (status === 'running') return 'bg-[#edf2ff] text-[#3d56d2]'
+  if (status === 'failed') return 'bg-[#fff5f6] text-[#cf334f]'
+  if (status === 'cancelled') return 'bg-[#fff4da] text-[#b97113]'
+  return 'bg-slate-100 text-slate-500'
+}
+
+function featureGainDelta(row: FeatureGainRunStep | null | undefined) {
+  if (!row || row.status !== 'completed') return null
+  const currentIndex = featureGainResults.value.findIndex((item) => item.key === row.key)
+  if (currentIndex <= 0) return null
+  const previous = [...featureGainResults.value.slice(0, currentIndex)]
+    .reverse()
+    .find((item) => item.status === 'completed')
+  if (!previous) return null
+  const currentScore = featureGainScore(row)
+  const previousScore = featureGainScore(previous)
+  if (!Number.isFinite(currentScore) || !Number.isFinite(previousScore)) return null
+  return currentScore - previousScore
+}
+
+function featureGainDeltaLabel(row: FeatureGainRunStep | null | undefined) {
+  const delta = featureGainDelta(row)
+  if (delta == null) return ''
+  return `${delta >= 0 ? '+' : ''}${formatMetric(delta, 3)}`
+}
+
 function diagnosticSampleForInspect(item: ModelTrainingExternalDiagnosticItem): DiagSample {
   return {
     source: 'external',
@@ -1485,6 +1589,23 @@ function viewCompareResult(row: ComparisonRow) {
 
 async function onTaskTerminal(snapshot: ModelTrainingTaskSnapshot) {
   void refreshModelVersionsQuietly()
+  if (featureGainMode.value) {
+    recordFeatureGainResult(snapshot)
+    if (snapshot.status === 'cancelled') {
+      featureGainMode.value = false
+      featureGainQueue.value = []
+      featureGainCurrent.value = null
+      return
+    }
+    if (featureGainQueue.value.length) {
+      await runNextFeatureGainItem()
+    } else {
+      featureGainMode.value = false
+      featureGainCurrent.value = null
+      featureGainBaseAlgorithm.value = null
+    }
+    return
+  }
   if (!compareMode.value) return
   recordCompareResult(snapshot)
   if (snapshot.status === 'cancelled') {
@@ -1500,6 +1621,126 @@ async function onTaskTerminal(snapshot: ModelTrainingTaskSnapshot) {
     compareMode.value = false
     compareCurrentAlgorithm.value = null
   }
+}
+
+function recordFeatureGainResult(snapshot: ModelTrainingTaskSnapshot) {
+  const current = featureGainCurrent.value
+  if (!current) return
+  const row: FeatureGainRunStep = {
+    ...current,
+    status: (snapshot.status as FeatureGainRunStep['status']) || 'cancelled',
+    taskId: snapshot.task_id,
+    valR2: snapshot.current?.val_r2 ?? null,
+    valRmse: snapshot.current?.val_rmse ?? null,
+    valMae: snapshot.current?.val_mae ?? null,
+    testR2: snapshot.test_metrics?.test_r2 ?? null,
+    testRmse: snapshot.test_metrics?.test_rmse ?? null,
+    testMae: snapshot.test_metrics?.test_mae ?? null,
+    finishedAt: snapshot.finished_at || snapshot.created_at,
+    snapshot,
+    error: snapshot.error,
+  }
+  upsertFeatureGainResult(row)
+}
+
+function upsertFeatureGainResult(row: FeatureGainRunStep) {
+  const existing = featureGainResults.value.find((item) => item.key === row.key)
+  if (existing) Object.assign(existing, row)
+  else featureGainResults.value.push(row)
+}
+
+function buildFeatureGainSteps(): FeatureGainRunStep[] {
+  return featureGainRunnablePlan.value.map((recipe) => ({
+    key: recipe.key,
+    label: recipe.label,
+    step: recipe.step,
+    purpose: recipe.purpose,
+    featureColumns: recipe.featureColumns,
+    featureCount: recipe.count,
+    cumulativeCount: recipe.cumulativeCount,
+    status: 'queued',
+    taskId: null,
+    valR2: null,
+    valRmse: null,
+    valMae: null,
+    testR2: null,
+    testRmse: null,
+    testMae: null,
+    finishedAt: null,
+    snapshot: null,
+    error: null,
+  }))
+}
+
+async function runNextFeatureGainItem() {
+  const next = featureGainQueue.value.shift()
+  if (!next) {
+    featureGainMode.value = false
+    featureGainCurrent.value = null
+    featureGainBaseAlgorithm.value = null
+    return
+  }
+  const runningStep = { ...next, status: 'running' as const }
+  featureGainCurrent.value = runningStep
+  upsertFeatureGainResult(runningStep)
+  loadError.value = ''
+  await startTrainingRun({
+    tune: false,
+    algorithm: featureGainBaseAlgorithm.value || form.algorithm,
+    featureSubset: {
+      key: next.key,
+      label: next.label,
+      columns: next.featureColumns,
+    },
+  })
+  if (loadError.value) {
+    upsertFeatureGainResult({
+      ...runningStep,
+      status: 'failed',
+      taskId: `error-${Date.now()}`,
+      finishedAt: new Date().toISOString(),
+      error: loadError.value,
+    })
+    if (featureGainQueue.value.length) {
+      await runNextFeatureGainItem()
+    } else {
+      featureGainMode.value = false
+      featureGainCurrent.value = null
+      featureGainBaseAlgorithm.value = null
+    }
+  }
+}
+
+async function handleStartFeatureGainExperiment() {
+  if (!summary.value || selectedCleanedDatasetId.value == null) return
+  if (compareMode.value || featureGainMode.value || activeTask.value?.status === 'running') return
+  const steps = buildFeatureGainSteps()
+  if (!steps.length) return
+  featureGainResults.value = steps.map((step) => ({ ...step }))
+  featureGainQueue.value = steps.map((step) => ({ ...step }))
+  featureGainTotal.value = steps.length
+  featureGainBaseAlgorithm.value = form.algorithm
+  featureGainMode.value = true
+  await runNextFeatureGainItem()
+}
+
+async function handleStopFeatureGainExperiment() {
+  if (!featureGainMode.value) return
+  featureGainQueue.value = []
+  if (activeTask.value && activeTask.value.status === 'running') {
+    await handleCancelTraining()
+  } else {
+    featureGainMode.value = false
+    featureGainCurrent.value = null
+    featureGainBaseAlgorithm.value = null
+  }
+}
+
+function viewFeatureGainResult(key: string) {
+  const row = featureGainResultFor(key)
+  if (!row?.snapshot || featureGainMode.value || activeTask.value?.status === 'running') return
+  activeTask.value = row.snapshot
+  form.algorithm = row.snapshot.config.algorithm
 }
 
 async function runNextCompareItem() {
@@ -1572,15 +1813,29 @@ async function handleDatasetChange() {
   }
 }
 
-function buildTrainingPayload(options: { tune?: boolean } = {}): ModelTrainingStartPayload | null {
+function buildTrainingPayload(options: {
+  tune?: boolean
+  algorithm?: string
+  featureSubset?: { key: string; label: string; columns: string[] }
+} = {}): ModelTrainingStartPayload | null {
   if (!summary.value || selectedCleanedDatasetId.value == null) return null
+  const dataOptions = { ...form.data_options }
+  if (options.featureSubset) {
+    dataOptions.feature_columns = options.featureSubset.columns
+    dataOptions.feature_subset_key = options.featureSubset.key
+    dataOptions.feature_subset_label = options.featureSubset.label
+  } else {
+    delete dataOptions.feature_columns
+    delete dataOptions.feature_subset_key
+    delete dataOptions.feature_subset_label
+  }
   return {
     target: summary.value.dataset.target_column || form.target,
-    algorithm: form.algorithm,
+    algorithm: options.algorithm || form.algorithm,
     hyperparameters: { ...form.hyperparameters },
-    data_options: { ...form.data_options },
+    data_options: dataOptions,
     cleaned_dataset_id: selectedCleanedDatasetId.value,
-    tune: Boolean(options.tune) && !compareMode.value,
+    tune: Boolean(options.tune) && !compareMode.value && !featureGainMode.value,
   }
 }
 
@@ -1611,8 +1866,12 @@ function closeExperimentPreview() {
   pendingExperimentAction.value = null
 }
 
-async function startTrainingRun(options: { tune?: boolean } = {}) {
-  const payload = buildTrainingPayload({ tune: options.tune })
+async function startTrainingRun(options: {
+  tune?: boolean
+  algorithm?: string
+  featureSubset?: { key: string; label: string; columns: string[] }
+} = {}) {
+  const payload = buildTrainingPayload(options)
   if (!payload) return
   starting.value = true
   loadError.value = ''
@@ -1729,6 +1988,12 @@ watch(
           对比中 {{ compareProgressLabel }} · {{ compareCurrentLabel }}
         </span>
         <span
+          v-if="featureGainMode"
+          class="shrink-0 rounded-full bg-[#5b56ea]/10 px-2.5 py-0.5 text-xs font-semibold text-[#5b56ea]"
+        >
+          特征增益 {{ featureGainProgressLabel }} · {{ featureGainCurrentLabel }}
+        </span>
+        <span
           v-if="tuneActive"
           class="shrink-0 rounded-full bg-[#fff4da] px-2.5 py-0.5 text-xs font-semibold text-[#c97a00]"
         >
@@ -1738,7 +2003,7 @@ watch(
 
       <div class="flex shrink-0 items-center gap-1.5">
         <button
-          v-if="!compareMode"
+          v-if="!compareMode && !featureGainMode"
           type="button"
           class="inline-flex items-center gap-1.5 rounded-[0.6rem] bg-[#5b56ea] px-3.5 py-1.5 text-xs font-semibold text-white shadow-[0_10px_24px_-18px_rgba(91,86,234,0.85)] transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3] disabled:shadow-none"
           :disabled="starting || selectedCleanedDatasetId == null || usableRecords < 10 || activeTask?.status === 'running'"
@@ -1749,7 +2014,7 @@ watch(
           {{ starting ? '启动中' : '开始训练' }}
         </button>
         <button
-          v-if="!compareMode"
+          v-if="!compareMode && !featureGainMode"
           type="button"
           class="inline-flex items-center gap-1.5 rounded-[0.6rem] border border-[#5b56ea] bg-white px-3 py-1.5 text-xs font-semibold text-[#5b56ea] transition hover:bg-[#f5f7ff] disabled:cursor-not-allowed disabled:border-[#cfd2f3] disabled:text-[#cfd2f3]"
           :disabled="starting || selectedCleanedDatasetId == null || usableRecords < 10 || activeTask?.status === 'running' || !summary"
@@ -1760,7 +2025,7 @@ watch(
           自动调参
         </button>
         <button
-          v-if="!compareMode"
+          v-if="!compareMode && !featureGainMode"
           type="button"
           class="inline-flex items-center gap-1.5 rounded-[0.6rem] border border-[#5b56ea] bg-white px-3 py-1.5 text-xs font-semibold text-[#5b56ea] transition hover:bg-[#f5f7ff] disabled:cursor-not-allowed disabled:border-[#cfd2f3] disabled:text-[#cfd2f3]"
           :disabled="starting || selectedCleanedDatasetId == null || usableRecords < 10 || activeTask?.status === 'running' || !summary || !availableAlgorithms.length"
@@ -1780,7 +2045,16 @@ watch(
           停止对比
         </button>
         <button
-          v-if="!compareMode"
+          v-if="featureGainMode"
+          type="button"
+          class="inline-flex items-center gap-1 rounded-[0.6rem] border border-[#ffd4da] bg-white px-2.5 py-1.5 text-xs font-medium text-[#cf334f] transition hover:bg-[#fff5f6]"
+          @click="handleStopFeatureGainExperiment"
+        >
+          <Square class="h-3.5 w-3.5" />
+          停止特征实验
+        </button>
+        <button
+          v-if="!compareMode && !featureGainMode"
           type="button"
           class="inline-flex items-center gap-1 rounded-[0.6rem] border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[#f8fbff] hover:text-slate-900"
           :disabled="!activeTask || activeTask.status !== 'running' || cancelling"
@@ -2388,11 +2662,31 @@ watch(
               </div>
               <div class="flex flex-wrap gap-1.5 text-[11px] font-semibold text-slate-600">
                 <span class="rounded-full bg-[#fbfcff] px-2.5 py-1 ring-1 ring-[#e2e8f0]">
-                  {{ formatNumber(trainingFeatureColumns.length) }} 个特征
+                  {{ formatNumber(fullDatasetFeatureColumns.length) }} 个特征
                 </span>
                 <span class="rounded-full bg-[#fbfcff] px-2.5 py-1 ring-1 ring-[#e2e8f0]">
                   {{ activeFeatureGroupSummaries.length }} 组已识别
                 </span>
+                <button
+                  v-if="!featureGainMode"
+                  type="button"
+                  class="inline-flex items-center gap-1 rounded-full bg-[#5b56ea] px-3 py-1 text-[11px] font-semibold text-white shadow-[0_10px_24px_-18px_rgba(91,86,234,0.85)] transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3] disabled:shadow-none"
+                  :disabled="starting || compareMode || activeTask?.status === 'running' || selectedCleanedDatasetId == null || !featureGainRunnablePlan.length"
+                  title="按同一算法、同一 seed 和同一 split 依次训练累计特征组"
+                  @click="handleStartFeatureGainExperiment"
+                >
+                  <Play class="h-3 w-3" />
+                  开始增益实验
+                </button>
+                <button
+                  v-else
+                  type="button"
+                  class="inline-flex items-center gap-1 rounded-full border border-[#ffd4da] bg-white px-3 py-1 text-[11px] font-semibold text-[#cf334f] transition hover:bg-[#fff5f6]"
+                  @click="handleStopFeatureGainExperiment"
+                >
+                  <Square class="h-3 w-3" />
+                  停止
+                </button>
               </div>
             </div>
 
@@ -2426,7 +2720,20 @@ watch(
               <div class="rounded-[0.85rem] border border-[#eef2f6] bg-[#fbfcff] p-3">
                 <div class="mb-2 flex items-center justify-between gap-2">
                   <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">建议回测顺序</p>
-                  <span class="text-[10px] text-slate-400">后续接训练队列</span>
+                  <span class="text-[10px] text-slate-400">
+                    <template v-if="featureGainMode">运行中 {{ featureGainProgressLabel }}</template>
+                    <template v-else-if="featureGainResults.length">已完成 {{ featureGainCompleted.length }} / {{ featureGainResults.length }}</template>
+                    <template v-else>同一 split / seed</template>
+                  </span>
+                </div>
+                <div
+                  v-if="featureGainBestResult"
+                  class="mb-2 rounded-[0.7rem] border border-[#cdd7ff] bg-[#f5f7ff] px-3 py-2 text-xs text-slate-700"
+                >
+                  当前最佳：
+                  <span class="font-semibold text-[#5b56ea]">{{ featureGainBestResult.label }}</span>
+                  · 测试 R² {{ formatMetric(featureGainBestResult.testR2, 3) }}
+                  · 验证 R² {{ formatMetric(featureGainBestResult.valR2, 3) }}
                 </div>
                 <div class="space-y-2">
                   <article
@@ -2459,6 +2766,35 @@ watch(
                       <span class="ml-auto text-slate-400 tabular-nums">
                         累计 {{ formatNumber(recipe.cumulativeCount) }} 个特征
                       </span>
+                    </div>
+                    <div
+                      v-if="featureGainResultFor(recipe.key)"
+                      class="mt-2 grid gap-2 rounded-[0.6rem] border border-[#eef2f6] bg-[#fbfcff] px-2.5 py-2 text-[11px] sm:grid-cols-[6rem_minmax(0,1fr)_minmax(0,1fr)_auto]"
+                    >
+                      <span
+                        class="inline-flex w-fit items-center rounded-full px-2 py-0.5 font-semibold"
+                        :class="featureGainStatusClass(featureGainResultFor(recipe.key)?.status)"
+                      >
+                        {{ featureGainStatusLabel(featureGainResultFor(recipe.key)?.status) }}
+                      </span>
+                      <span class="tabular-nums text-slate-600">
+                        验证 R² <span class="font-semibold text-slate-950">{{ formatMetric(featureGainResultFor(recipe.key)?.valR2, 3) }}</span>
+                        · RMSE {{ formatMetric(featureGainResultFor(recipe.key)?.valRmse, 3) }}
+                      </span>
+                      <span class="tabular-nums text-slate-600">
+                        测试 R² <span class="font-semibold text-slate-950">{{ formatMetric(featureGainResultFor(recipe.key)?.testR2, 3) }}</span>
+                        <template v-if="featureGainDelta(featureGainResultFor(recipe.key)) != null">
+                          · Δ {{ featureGainDeltaLabel(featureGainResultFor(recipe.key)) }}
+                        </template>
+                      </span>
+                      <button
+                        type="button"
+                        class="inline-flex justify-self-start rounded-md border border-[#e2e8f0] bg-white px-2 py-1 text-[10px] font-semibold text-slate-600 transition disabled:cursor-not-allowed disabled:opacity-40 hover:bg-[#f8fbff] hover:text-[#5b56ea] sm:justify-self-end"
+                        :disabled="!featureGainResultFor(recipe.key)?.snapshot || featureGainMode || activeTask?.status === 'running'"
+                        @click="viewFeatureGainResult(recipe.key)"
+                      >
+                        查看
+                      </button>
                     </div>
                   </article>
                 </div>

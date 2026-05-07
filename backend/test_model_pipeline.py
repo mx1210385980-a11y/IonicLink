@@ -219,6 +219,51 @@ def test_training_service_uses_saved_matrix_columns_automatically() -> None:
     assert prepared["dataset"]["filters"]["split_strategy"] == "random_holdout"
     assert prepared["dataset"]["filters"]["cv_folds"] == 5
 
+    subset_prepared = service._prepare_saved_dataset(
+        rows,
+        {
+            "algorithm": "gradient_boosting",
+            "hyperparameters": {"n_estimators": 50, "learning_rate": 0.06, "max_depth": 3},
+            "data_options": {
+                "validation_split": 0.2,
+                "random_seed": 42,
+                "max_records": None,
+                "split_strategy": "random_holdout",
+                "cv_folds": 5,
+                "feature_columns": ["Temperature", "PCA_1"],
+                "feature_subset_key": "structure_core",
+                "feature_subset_label": "Structure core",
+            },
+        },
+        metadata,
+    )
+
+    assert subset_prepared["X"].shape[1] == 2
+    assert subset_prepared["dataset"]["feature_dimensions"] == 2
+    assert subset_prepared["dataset"]["available_feature_count"] == 3
+    assert subset_prepared["dataset"]["feature_columns"] == ["Temperature", "PCA_1"]
+    assert subset_prepared["dataset"]["feature_subset"]["label"] == "Structure core"
+    assert subset_prepared["feature_blocks"][0]["key"] == "structure_core"
+    assert subset_prepared["feature_blocks"][0]["features"] == ["Temperature", "PCA_1"]
+
+    with pytest.raises(ValueError, match="not in the saved dataset"):
+        service._prepare_saved_dataset(
+            rows,
+            {
+                "algorithm": "gradient_boosting",
+                "hyperparameters": {"n_estimators": 50, "learning_rate": 0.06, "max_depth": 3},
+                "data_options": {
+                    "validation_split": 0.2,
+                    "random_seed": 42,
+                    "max_records": None,
+                    "split_strategy": "random_holdout",
+                    "cv_folds": 5,
+                    "feature_columns": ["NotAFeature"],
+                },
+            },
+            metadata,
+        )
+
 
 def test_algorithm_options_include_catboost_when_dependency_is_available(monkeypatch) -> None:
     monkeypatch.setattr(model_training_service_module, "CATBOOST_AVAILABLE", True)

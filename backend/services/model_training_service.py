@@ -1007,6 +1007,33 @@ class ModelTrainingService:
     def _split_options(self) -> list[dict[str, Any]]:
         return [{"key": key, **value} for key, value in SPLIT_STRATEGY_DEFINITIONS.items()]
 
+    def _feature_columns_for_config(self, available_columns: list[str], data_options: dict[str, Any]) -> list[str]:
+        requested_columns = data_options.get("feature_columns")
+        if requested_columns in (None, "", []):
+            return list(available_columns)
+        if not isinstance(requested_columns, list):
+            raise ValueError("Feature subset must be a list of saved dataset feature columns.")
+
+        selected: list[str] = []
+        seen: set[str] = set()
+        for value in requested_columns:
+            column = str(value).strip()
+            if not column or column in seen:
+                continue
+            selected.append(column)
+            seen.add(column)
+
+        if not selected:
+            raise ValueError("Feature subset did not contain any usable feature columns.")
+
+        available_set = set(available_columns)
+        missing = [column for column in selected if column not in available_set]
+        if missing:
+            preview = ", ".join(missing[:5])
+            suffix = "..." if len(missing) > 5 else ""
+            raise ValueError(f"Feature subset contains columns that are not in the saved dataset: {preview}{suffix}")
+        return selected
+
     def _fit_round_model(
         self,
         *,
@@ -1964,11 +1991,12 @@ class ModelTrainingService:
 
     def _prepare_saved_dataset(self, rows: list[dict[str, Any]], config: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
         target_column = self._target_column_from_metadata(metadata)
-        feature_columns = self._feature_columns_from_dataset_metadata(rows, metadata)
-        if not feature_columns:
+        available_feature_columns = self._feature_columns_from_dataset_metadata(rows, metadata)
+        if not available_feature_columns:
             raise ValueError("The saved dataset does not contain any feature columns.")
 
         data_options = config.get("data_options") or {}
+        feature_columns = self._feature_columns_for_config(available_feature_columns, data_options)
         max_records = data_options.get("max_records")
         max_records = _int_or_default(max_records, 0) if max_records not in (None, "", 0) else None
         min_confidence = _float_or_default(data_options.get("min_confidence"), DEFAULT_DATA_OPTIONS["min_confidence"])
@@ -2111,6 +2139,17 @@ class ModelTrainingService:
         split_label = SPLIT_STRATEGY_DEFINITIONS[split_strategy]["label"]
         cleaning_rules = (metadata.get("summary") or {}).get("rules") or {}
         training_view = normalize_training_view(cleaning_rules.get("training_view"))
+        feature_subset_label = str(data_options.get("feature_subset_label") or "").strip()
+        feature_subset_key = str(data_options.get("feature_subset_key") or "").strip()
+        feature_subset = None
+        if len(feature_columns) != len(available_feature_columns) or feature_subset_label or feature_subset_key:
+            feature_subset = {
+                "key": feature_subset_key or None,
+                "label": feature_subset_label or "Custom feature subset",
+                "selected_feature_count": int(len(feature_columns)),
+                "available_feature_count": int(len(available_feature_columns)),
+                "feature_columns": feature_columns,
+            }
 
         return {
             "matrix_raw": matrix,
@@ -2154,6 +2193,7 @@ class ModelTrainingService:
                 "external_size": external_size,
                 "pool_size": pool_size,
                 "feature_dimensions": int(X.shape[1]),
+                "available_feature_count": int(len(available_feature_columns)),
                 "selected_feature_count": int(len(feature_columns)),
                 "target": {
                     "key": target_payload["key"],
@@ -2170,7 +2210,9 @@ class ModelTrainingService:
                     "split_strategy": split_strategy,
                     "cv_folds": effective_cv_folds,
                     "training_view": training_view,
+                    "feature_subset": feature_subset,
                 },
+                "feature_subset": feature_subset,
                 "split": {
                     "strategy": split_strategy,
                     "label": split_label,
@@ -2185,8 +2227,8 @@ class ModelTrainingService:
             },
             "feature_blocks": [
                 {
-                    "key": "saved_matrix",
-                    "label": "Saved cleaned feature matrix",
+                    "key": feature_subset_key or "saved_matrix",
+                    "label": feature_subset_label or "Saved cleaned feature matrix",
                     "dimensions": int(X.shape[1]),
                     "features": feature_columns,
                 }

@@ -47,6 +47,9 @@ class DataOptionPayload(BaseModel):
     random_seed: int = Field(DEFAULT_DATA_OPTIONS["random_seed"], ge=1, le=9999)
     split_strategy: str = DEFAULT_DATA_OPTIONS["split_strategy"]
     cv_folds: int = Field(DEFAULT_DATA_OPTIONS["cv_folds"], ge=3, le=8)
+    feature_columns: list[str] | None = None
+    feature_subset_key: str | None = None
+    feature_subset_label: str | None = None
 
 
 class CleaningOptionPayload(BaseModel):
