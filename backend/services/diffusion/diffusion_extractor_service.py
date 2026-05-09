@@ -23,9 +23,12 @@ from services.diffusion.diffusion_postprocess_service import (
 )
 from services.diffusion.pdf_ingest_service import build_diffusion_ingest_payload
 from services.extraction_trace_service import (
+    CANCELLED_EXTRACTION_MESSAGE,
+    ExtractionCancelledError,
     add_extraction_candidates,
     create_extraction_run,
     finalize_extraction_run,
+    is_extraction_cancelled,
     update_extraction_run_progress,
 )
 from services.llm.prompts_diffusion import (
@@ -89,6 +92,23 @@ def _build_in_progress_summary(run: ExtractionRun | None) -> dict[str, Any]:
         "page_candidate_counts": summary_payload.get("page_candidate_counts") or {},
         "progress_log": summary_payload.get("progress_log") or [],
         "extractor_type": EXTRACTOR_TYPE,
+    }
+
+
+def _build_cancelled_summary(run_id: str | None, *, profile: str) -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "extractor_type": EXTRACTOR_TYPE,
+        "candidate_count": 0,
+        "final_count": 0,
+        "dropped_by_reason": {"cancelled": 1},
+        "page_coverage": {},
+        "page_candidate_counts": {},
+        "progress_log": [{"stage": "cancelled", "message": CANCELLED_EXTRACTION_MESSAGE}],
+        "current_stage": "cancelled",
+        "current_message": CANCELLED_EXTRACTION_MESSAGE,
+        "status": "cancelled",
+        "profile": profile,
     }
 
 
@@ -357,8 +377,33 @@ async def process_diffusion_file_safe(
 
         last_progress_flush = 0.0
 
+        async def _finish_cancelled() -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
+            summary = _build_cancelled_summary(run_id, profile=profile)
+            literature.status = "cancelled"
+            literature.error_message = CANCELLED_EXTRACTION_MESSAGE
+            await finalize_extraction_run(
+                db,
+                run_id=run_id,
+                status="cancelled",
+                candidate_count=0,
+                final_count=0,
+                dropped_by_reason=summary["dropped_by_reason"],
+                summary=summary,
+                error_message=CANCELLED_EXTRACTION_MESSAGE,
+            )
+            await db.commit()
+            return {}, [], summary
+
+        async def _raise_if_cancelled() -> None:
+            if await is_extraction_cancelled(db, run_id=run_id, literature_id=literature.id):
+                raise ExtractionCancelledError(CANCELLED_EXTRACTION_MESSAGE)
+
         async def _persist_run_progress(progress_event: dict[str, Any]) -> None:
             nonlocal last_progress_flush
+            async with async_session_maker() as cancel_db:
+                if await is_extraction_cancelled(cancel_db, run_id=run_id, literature_id=file_id):
+                    raise ExtractionCancelledError(CANCELLED_EXTRACTION_MESSAGE)
+
             now_mono = time.monotonic()
             if not progress_event.get("force") and (now_mono - last_progress_flush) < 3.0:
                 return
@@ -404,6 +449,15 @@ async def process_diffusion_file_safe(
                 "_page_coverage": {},
                 "_document_profile": {},
             }
+        except ExtractionCancelledError:
+            logger.info("Diffusion extraction cancelled for literature_id=%s", file_id)
+            return await _finish_cancelled()
+
+        try:
+            await _raise_if_cancelled()
+        except ExtractionCancelledError:
+            logger.info("Diffusion extraction cancelled before persistence literature_id=%s", file_id)
+            return await _finish_cancelled()
 
         raw_rows = payload.get("data") if isinstance(payload.get("data"), list) else []
         trace_candidates: list[dict[str, Any]] = []
@@ -432,6 +486,12 @@ async def process_diffusion_file_safe(
         dropped_by_reason: dict[str, int] = {}
         if raw_rows and not normalized_rows:
             dropped_by_reason["no_diffusion_value"] = len(raw_rows)
+
+        try:
+            await _raise_if_cancelled()
+        except ExtractionCancelledError:
+            logger.info("Diffusion extraction cancelled before database write literature_id=%s", file_id)
+            return await _finish_cancelled()
 
         await db.execute(delete(DiffusionFeatureSet).where(DiffusionFeatureSet.literature_id == literature.id))
         await db.execute(delete(DiffusionCandidate).where(DiffusionCandidate.literature_id == literature.id))
@@ -514,6 +574,12 @@ async def process_diffusion_file_safe(
             literature.issue = metadata.get("issue") or literature.issue
             literature.pages = metadata.get("pages") or literature.pages
             literature.issn = metadata.get("issn") or literature.issn
+
+        try:
+            await _raise_if_cancelled()
+        except ExtractionCancelledError:
+            logger.info("Diffusion extraction cancelled before finalize literature_id=%s", file_id)
+            return await _finish_cancelled()
 
         no_data_message = None
         if not response_rows:

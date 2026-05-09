@@ -38,6 +38,23 @@ class ModeratorAgent(BaseAgent):
                     },
                 )
 
+            if (
+                (extraction_summary.get("dropped_by_reason") or {}).get("cancelled")
+                or str(extraction_summary.get("status") or "").lower() == "cancelled"
+                or str(extraction_summary.get("current_stage") or "").lower() == "cancelled"
+            ):
+                return AgentExecutionResult(
+                    agent=self.name,
+                    task_id=task.task_id,
+                    status="cancelled",
+                    data={
+                        **media_payload,
+                        "agent_workflow": {
+                            "messages": self._bus.get_history(task.task_id),
+                        },
+                    },
+                )
+
             validation_result = await self._bus.request(
                 sender=self.name,
                 receiver="query",

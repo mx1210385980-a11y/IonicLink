@@ -78,7 +78,8 @@ const {
   loading,
   result,
   filterOptions,
-  selectedLubricant,
+  selectedCation,
+  selectedAnion,
   selectedProbeMaterial,
   selectedSubstrateMaterial,
   selectedSubstrateCoating,
@@ -119,14 +120,15 @@ const {
 const advancedSearchSummary = computed(() => {
   if (!hasManualFilters.value) {
     return props.selectedFileId
-      ? '当前文献内浏览全部记录，可用高级筛选缩小到特定摩擦副、条件或区间。'
-      : '可按 DOI 搜索，或点"高级筛选"按摩擦副 / 条件 / 区间精确筛选。'
+      ? '当前文献内浏览全部记录，可固定阳离子或阴离子，再缩小到特定摩擦副、条件或区间。'
+      : '可按 DOI 搜索，或点"高级筛选"按离子组成 / 摩擦副 / 条件精确筛选。'
   }
   return `已启用 ${activeManualFilterCount.value} 个筛选条件，结果在下表中实时更新。`
 })
 
 type AdvancedFilterState = {
-  lubricant: string
+  cation: string
+  anion: string
   probe: string
   substrate: string
   coating: string
@@ -145,7 +147,7 @@ const showAdvancedFilters = ref(false)
 const appliedAdvancedFilterState = ref<AdvancedFilterState>(captureAdvancedFilterState())
 
 type AdvancedOptionKey =
-  | 'lubricant'
+  | 'ions'
   | 'probe'
   | 'substrate'
   | 'coating'
@@ -163,21 +165,55 @@ type AdvancedFilterField = {
   options: string[]
   selected: string
   accentClass: string
+  optionCount?: number
 }
 
 const ADVANCED_OPTION_LIMIT = 36
-const activeAdvancedOptionKey = ref<AdvancedOptionKey>('lubricant')
+const activeAdvancedOptionKey = ref<AdvancedOptionKey>('ions')
+type IonFilterRole = 'cation' | 'anion'
+const activeIonRole = ref<IonFilterRole>('cation')
 const advancedOptionSearch = ref('')
+
+const ionFilterRoles = computed(() => [
+  {
+    key: 'cation' as const,
+    label: '阳离子',
+    description: '固定阳离子',
+    options: filterOptions.value.cations,
+    selected: selectedCation.value,
+    accentClass: 'bg-sky-500',
+  },
+  {
+    key: 'anion' as const,
+    label: '阴离子',
+    description: '固定阴离子',
+    options: filterOptions.value.anions,
+    selected: selectedAnion.value,
+    accentClass: 'bg-teal-500',
+  },
+])
+
+const activeIonFilterRole = computed(() => {
+  return ionFilterRoles.value.find((role) => role.key === activeIonRole.value) || ionFilterRoles.value[0]
+})
+
+const ionSelectionSummary = computed(() => {
+  const parts = []
+  if (selectedCation.value) parts.push(`阳 ${selectedCation.value}`)
+  if (selectedAnion.value) parts.push(`阴 ${selectedAnion.value}`)
+  return parts.join(' · ')
+})
 
 const advancedFilterFields = computed<AdvancedFilterField[]>(() => [
   {
-    key: 'lubricant',
-    label: '离子液体',
+    key: 'ions',
+    label: '离子组成',
     group: '材料层',
-    description: '阳离子 / 阴离子体系',
-    options: filterOptions.value.lubricants,
-    selected: selectedLubricant.value,
+    description: '阳离子 / 阴离子',
+    options: [],
+    selected: ionSelectionSummary.value,
     accentClass: 'bg-sky-500',
+    optionCount: filterOptions.value.cations.length + filterOptions.value.anions.length,
   },
   {
     key: 'probe',
@@ -254,10 +290,10 @@ const advancedFilterFields = computed<AdvancedFilterField[]>(() => [
 ])
 
 const emptyAdvancedFilterField: AdvancedFilterField = {
-  key: 'lubricant',
-  label: '离子液体',
+  key: 'ions',
+  label: '离子组成',
   group: '材料层',
-  description: '阳离子 / 阴离子体系',
+  description: '阳离子 / 阴离子',
   options: [],
   selected: '',
   accentClass: 'bg-sky-500',
@@ -271,15 +307,29 @@ const activeAdvancedFilterField = computed<AdvancedFilterField>(() => {
 
 const advancedTypedCandidate = computed(() => advancedOptionSearch.value.trim())
 
+const activeAdvancedOptions = computed(() => {
+  if (activeAdvancedOptionKey.value === 'ions') return activeIonFilterRole.value?.options || []
+  return activeAdvancedFilterField.value.options
+})
+
+const activeAdvancedSelectedValue = computed(() => {
+  if (activeAdvancedOptionKey.value === 'ions') return activeIonFilterRole.value?.selected || ''
+  return activeAdvancedFilterField.value.selected
+})
+
+const activeAdvancedCandidateLabel = computed(() => {
+  if (activeAdvancedOptionKey.value === 'ions') return activeIonFilterRole.value?.label || '离子'
+  return activeAdvancedFilterField.value.label
+})
+
 const matchingAdvancedOptions = computed(() => {
-  const activeField = activeAdvancedFilterField.value
   const query = normalizeAdvancedOptionText(advancedOptionSearch.value)
-  if (!query) return activeField.options
-  return activeField.options.filter((option) => normalizeAdvancedOptionText(option).includes(query))
+  if (!query) return activeAdvancedOptions.value
+  return activeAdvancedOptions.value.filter((option) => normalizeAdvancedOptionText(option).includes(query))
 })
 
 const visibleAdvancedOptions = computed(() => {
-  const selectedValue = activeAdvancedFilterField.value.selected
+  const selectedValue = activeAdvancedSelectedValue.value
   return [...matchingAdvancedOptions.value]
     .sort((a, b) => {
       if (a === selectedValue) return -1
@@ -302,8 +352,21 @@ function selectAdvancedFilterField(key: AdvancedOptionKey) {
   advancedOptionSearch.value = ''
 }
 
+function selectIonFilterRole(role: IonFilterRole) {
+  activeIonRole.value = role
+  advancedOptionSearch.value = ''
+}
+
+function commitAdvancedDiscreteFilterChange() {
+  handleSearch()
+  appliedAdvancedFilterState.value = captureAdvancedFilterState()
+}
+
 function setAdvancedFilterValue(key: AdvancedOptionKey, value: string) {
-  if (key === 'lubricant') selectedLubricant.value = value
+  if (key === 'ions') {
+    if (activeIonRole.value === 'cation') selectedCation.value = value
+    if (activeIonRole.value === 'anion') selectedAnion.value = value
+  }
   if (key === 'probe') selectedProbeMaterial.value = value
   if (key === 'substrate') selectedSubstrateMaterial.value = value
   if (key === 'coating') selectedSubstrateCoating.value = value
@@ -313,10 +376,23 @@ function setAdvancedFilterValue(key: AdvancedOptionKey, value: string) {
   if (key === 'potential') selectedPotentialValue.value = value
   if (key === 'water') selectedWaterContentValue.value = value
   advancedOptionSearch.value = ''
+  commitAdvancedDiscreteFilterChange()
 }
 
 function clearAdvancedFilterValue(key: AdvancedOptionKey) {
+  if (key === 'ions') {
+    if (activeIonRole.value === 'cation') selectedCation.value = ''
+    if (activeIonRole.value === 'anion') selectedAnion.value = ''
+    commitAdvancedDiscreteFilterChange()
+    return
+  }
   setAdvancedFilterValue(key, '')
+}
+
+function clearIonFilterRole(role: IonFilterRole) {
+  if (role === 'cation') selectedCation.value = ''
+  if (role === 'anion') selectedAnion.value = ''
+  commitAdvancedDiscreteFilterChange()
 }
 
 function applyAdvancedTypedValue() {
@@ -326,7 +402,8 @@ function applyAdvancedTypedValue() {
 
 function captureAdvancedFilterState(): AdvancedFilterState {
   return {
-    lubricant: selectedLubricant.value,
+    cation: selectedCation.value,
+    anion: selectedAnion.value,
     probe: selectedProbeMaterial.value,
     substrate: selectedSubstrateMaterial.value,
     coating: selectedSubstrateCoating.value,
@@ -343,7 +420,8 @@ function captureAdvancedFilterState(): AdvancedFilterState {
 }
 
 function restoreAdvancedFilterState(state: AdvancedFilterState) {
-  selectedLubricant.value = state.lubricant
+  selectedCation.value = state.cation
+  selectedAnion.value = state.anion
   selectedProbeMaterial.value = state.probe
   selectedSubstrateMaterial.value = state.substrate
   selectedSubstrateCoating.value = state.coating
@@ -368,6 +446,10 @@ function cancelAdvancedFilters() {
   showAdvancedFilters.value = false
 }
 
+function collapseAdvancedFilters() {
+  showAdvancedFilters.value = false
+}
+
 function toggleAdvancedFilters() {
   showAdvancedFilters.value = !showAdvancedFilters.value
 }
@@ -378,7 +460,8 @@ function clearAllAdvancedFilters() {
 }
 
 function removeAdvancedSearchChip(id: string) {
-  if (id === 'manual-lubricant') selectedLubricant.value = ''
+  if (id === 'manual-cation') selectedCation.value = ''
+  if (id === 'manual-anion') selectedAnion.value = ''
   if (id === 'manual-probe') selectedProbeMaterial.value = ''
   if (id === 'manual-substrate') selectedSubstrateMaterial.value = ''
   if (id === 'manual-coating') selectedSubstrateCoating.value = ''
@@ -1496,12 +1579,12 @@ onBeforeUnmount(() => {
           </p>
         </div>
 
-        <div
-          v-if="showAdvancedFilters"
-          class="mt-3 overflow-hidden rounded-[1.6rem] border border-slate-200 bg-white shadow-xl shadow-slate-200/40 dark:border-slate-800 dark:bg-slate-900/90 dark:shadow-none"
-        >
+	        <div
+	          v-if="showAdvancedFilters"
+	          class="mx-auto mt-3 max-h-[72vh] w-[calc(100vw-2rem)] max-w-[860px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-200/40 dark:border-slate-800 dark:bg-slate-900/90 dark:shadow-none"
+	        >
           <!-- Header -->
-          <div class="flex flex-col gap-4 border-b border-slate-100 px-5 py-4 dark:border-slate-800/60 lg:flex-row lg:items-center lg:justify-between">
+	          <div class="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800/60 lg:flex-row lg:items-center lg:justify-between">
             <div class="flex min-w-0 items-center gap-3">
               <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
                 <SlidersHorizontal class="h-5 w-5" />
@@ -1514,7 +1597,7 @@ onBeforeUnmount(() => {
                   </span>
                 </div>
                 <p class="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
-                  先选字段，再搜索候选；候选列表只渲染前 {{ ADVANCED_OPTION_LIMIT }} 条，数据量大时也保持轻、快、干净。
+                  可只固定阳离子或阴离子，也可组合固定；候选列表只渲染前 {{ ADVANCED_OPTION_LIMIT }} 条。
                 </p>
               </div>
             </div>
@@ -1527,21 +1610,21 @@ onBeforeUnmount(() => {
               >
                 清空全部
               </button>
-              <button
-                type="button"
-                class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-                @click="cancelAdvancedFilters"
-              >
-                收起
-              </button>
+	              <button
+	                type="button"
+	                class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+	                @click="collapseAdvancedFilters"
+	              >
+	                收起
+	              </button>
             </div>
           </div>
 
           <!-- Body -->
-          <div class="grid divide-y divide-slate-100 dark:divide-slate-800/60 xl:grid-cols-[240px_minmax(0,1fr)_320px] xl:divide-x xl:divide-y-0">
+	          <div class="grid max-h-[520px] divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800/60 xl:grid-cols-[180px_minmax(0,1fr)_210px] xl:divide-x xl:divide-y-0">
             <!-- Col 1: Fields Nav -->
-            <nav class="flex flex-col bg-slate-50/30 p-4 dark:bg-slate-950/20">
-              <div class="mb-4 px-1">
+	            <nav class="flex flex-col bg-slate-50/30 p-3 dark:bg-slate-950/20">
+	              <div class="mb-3 px-1">
                 <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">字段导航</p>
               </div>
               <div class="space-y-1">
@@ -1557,10 +1640,10 @@ onBeforeUnmount(() => {
                 >
                   <span class="h-2 w-2 shrink-0 rounded-full" :class="field.accentClass" />
                   <span class="min-w-0 flex-1">
-                    <span class="flex items-center justify-between gap-2">
-                      <span class="truncate text-sm font-semibold" :class="field.key === activeAdvancedOptionKey ? 'text-slate-900 dark:text-white' : ''">{{ field.label }}</span>
-                      <span class="text-[10px] font-medium text-slate-400">{{ field.options.length }}</span>
-                    </span>
+	                    <span class="flex items-center justify-between gap-2">
+	                      <span class="truncate text-sm font-semibold" :class="field.key === activeAdvancedOptionKey ? 'text-slate-900 dark:text-white' : ''">{{ field.label }}</span>
+	                      <span class="text-[10px] font-medium text-slate-400">{{ field.optionCount ?? field.options.length }}</span>
+	                    </span>
                     <span
                       class="mt-0.5 block truncate text-[11px]"
                       :class="field.key === activeAdvancedOptionKey ? 'text-slate-500 dark:text-slate-400' : 'text-slate-400/80 dark:text-slate-500/80'"
@@ -1573,28 +1656,77 @@ onBeforeUnmount(() => {
             </nav>
 
             <!-- Col 2: Candidates -->
-            <section class="flex flex-col p-5">
-              <div class="mb-5 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-                <div>
+	            <section class="flex min-w-0 flex-col p-3">
+	              <div class="mb-3 flex items-start justify-between gap-3">
+                <div class="min-w-0">
                   <div class="flex items-center gap-2">
                     <span class="h-2 w-2 rounded-full" :class="activeAdvancedFilterField.accentClass" />
                     <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
                       {{ activeAdvancedFilterField.group }}
                     </p>
                   </div>
-                  <h3 class="mt-1 text-lg font-bold text-slate-900 dark:text-white">{{ activeAdvancedFilterField.label }}</h3>
+                  <h3 class="mt-1 truncate text-lg font-bold text-slate-900 dark:text-white">
+                    {{ activeAdvancedFilterField.label }}
+                  </h3>
                 </div>
-                <p class="text-xs font-medium text-slate-500 dark:text-slate-400">
-                  {{ matchingAdvancedOptions.length }} / {{ activeAdvancedFilterField.options.length }}
+                <p class="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                  {{ matchingAdvancedOptions.length }} / {{ activeAdvancedOptions.length }}
                 </p>
               </div>
 
-              <div class="relative mb-4">
+              <div
+                v-if="activeAdvancedOptionKey === 'ions'"
+	                class="mb-3 rounded-xl border border-slate-200 bg-slate-50/70 p-2 dark:border-slate-800 dark:bg-slate-950/30"
+              >
+                <div
+                  v-for="role in ionFilterRoles"
+                  :key="role.key"
+                  class="group flex w-full items-center overflow-hidden rounded-lg transition"
+                  :class="role.key === activeIonRole
+                    ? 'bg-white shadow-sm ring-1 ring-blue-200 dark:bg-slate-900 dark:ring-blue-500/40'
+                    : 'hover:bg-white/80 dark:hover:bg-slate-900/70'"
+                >
+                  <button
+                    type="button"
+                    class="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left"
+                    @click="selectIonFilterRole(role.key)"
+                  >
+                    <span class="h-2.5 w-2.5 shrink-0 rounded-full" :class="role.accentClass" />
+                    <span class="min-w-0 flex-1">
+                      <span class="flex min-w-0 items-center gap-2">
+                        <span class="shrink-0 whitespace-nowrap text-sm font-bold text-slate-900 dark:text-white">
+                          {{ role.label }}
+                        </span>
+                        <span class="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 dark:bg-slate-800">
+                          {{ role.options.length }} 候选
+                        </span>
+                      </span>
+                      <span
+                        class="mt-0.5 block truncate text-xs"
+                        :class="role.selected ? 'font-semibold text-blue-700 dark:text-blue-300' : 'text-slate-400 dark:text-slate-500'"
+                      >
+                        {{ role.selected || '不固定' }}
+                      </span>
+                    </span>
+                    <Check v-if="!role.selected && role.key === activeIonRole" class="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                  </button>
+                  <button
+                    v-if="role.selected"
+                    type="button"
+                    class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                    @click.stop="clearIonFilterRole(role.key)"
+                  >
+                    <X class="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+
+	              <div class="relative mb-3">
                 <Search class="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                 <input
                   v-model="advancedOptionSearch"
                   type="search"
-                  :placeholder="`搜索 ${activeAdvancedFilterField.label} 候选…`"
+                  :placeholder="`搜索 ${activeAdvancedCandidateLabel} 候选…`"
                   class="h-10 w-full rounded-xl border-0 bg-slate-100 pl-10 pr-10 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 transition placeholder:text-slate-500 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-blue-500 dark:bg-slate-800 dark:text-white dark:ring-slate-700 dark:focus:bg-slate-900"
                   @keydown.enter.prevent="advancedTypedCandidate ? applyAdvancedTypedValue() : applyAdvancedFilters()"
                 >
@@ -1611,20 +1743,20 @@ onBeforeUnmount(() => {
               <button
                 v-if="advancedTypedCandidate"
                 type="button"
-                class="mb-4 flex w-full items-center justify-between rounded-xl border border-dashed border-blue-200 bg-blue-50/50 px-4 py-2.5 text-left text-sm font-medium text-blue-700 transition hover:bg-blue-50 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20"
-                @click="applyAdvancedTypedValue"
-              >
-                <span class="truncate">使用 “{{ advancedTypedCandidate }}”</span>
-                <span class="ml-3 shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] uppercase text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">Enter</span>
-              </button>
+	                class="mb-3 flex w-full items-center justify-between rounded-xl border border-dashed border-blue-200 bg-blue-50/50 px-4 py-2.5 text-left text-sm font-medium text-blue-700 transition hover:bg-blue-50 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20"
+	                @click="applyAdvancedTypedValue"
+	              >
+	                <span class="truncate">使用 “{{ advancedTypedCandidate }}” 作为 {{ activeAdvancedCandidateLabel }}</span>
+	                <span class="ml-3 shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] uppercase text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">Enter</span>
+	              </button>
 
-              <div
-                v-if="activeAdvancedFilterField.selected"
-                class="mb-4 flex items-center justify-between gap-3 rounded-xl bg-blue-50 px-4 py-3 dark:bg-blue-500/10"
-              >
-                <div class="min-w-0">
-                  <p class="text-[10px] font-bold uppercase tracking-wider text-blue-500/80 dark:text-blue-400/80">已选择</p>
-                  <p class="mt-0.5 truncate text-sm font-semibold text-blue-900 dark:text-blue-100">{{ activeAdvancedFilterField.selected }}</p>
+	              <div
+	                v-if="activeAdvancedOptionKey !== 'ions' && activeAdvancedSelectedValue"
+		                class="mb-3 flex items-center justify-between gap-3 rounded-xl bg-blue-50 px-4 py-3 dark:bg-blue-500/10"
+	              >
+	                <div class="min-w-0">
+	                  <p class="text-[10px] font-bold uppercase tracking-wider text-blue-500/80 dark:text-blue-400/80">已选择</p>
+	                  <p class="mt-0.5 truncate text-sm font-semibold text-blue-900 dark:text-blue-100">{{ activeAdvancedSelectedValue }}</p>
                 </div>
                 <button
                   type="button"
@@ -1635,23 +1767,21 @@ onBeforeUnmount(() => {
                 </button>
               </div>
 
-              <div class="flex-1 min-h-0 relative">
-                <div class="absolute inset-0 overflow-auto rounded-xl border border-slate-100 bg-white dark:border-slate-800 dark:bg-slate-950/50">
-                  <button
-                    v-for="option in visibleAdvancedOptions"
-                    :key="`${activeAdvancedFilterField.key}-${option}`"
-                    type="button"
-                    class="flex w-full items-center gap-3 border-b border-slate-50 px-4 py-2.5 text-left text-sm transition last:border-b-0 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/50"
-                    :class="option === activeAdvancedFilterField.selected ? 'bg-blue-50/50 dark:bg-blue-500/10' : ''"
-                    @click="setAdvancedFilterValue(activeAdvancedFilterField.key, option)"
-                  >
-                    <span class="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-300" :class="option === activeAdvancedFilterField.selected ? 'font-semibold text-blue-700 dark:text-blue-300' : ''">{{ option }}</span>
-                    <Check v-if="option === activeAdvancedFilterField.selected" class="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                  </button>
+	              <div class="max-h-56 overflow-auto rounded-xl border border-slate-100 bg-white dark:border-slate-800 dark:bg-slate-950/50">
+	                  <button
+	                    v-for="option in visibleAdvancedOptions"
+	                    :key="`${activeAdvancedFilterField.key}-${activeIonRole}-${option}`"
+	                    type="button"
+	                    class="flex w-full items-center gap-3 border-b border-slate-50 px-4 py-2.5 text-left text-sm transition last:border-b-0 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/50"
+	                    :class="option === activeAdvancedSelectedValue ? 'bg-blue-50/50 dark:bg-blue-500/10' : ''"
+	                    @click="setAdvancedFilterValue(activeAdvancedFilterField.key, option)"
+	                  >
+	                    <span class="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-300" :class="option === activeAdvancedSelectedValue ? 'font-semibold text-blue-700 dark:text-blue-300' : ''">{{ option }}</span>
+	                    <Check v-if="option === activeAdvancedSelectedValue" class="h-4 w-4 text-blue-600 dark:text-blue-400" />
+	                  </button>
                   <div v-if="!visibleAdvancedOptions.length" class="px-4 py-8 text-center text-sm text-slate-400">
                     没有匹配候选。可以直接使用当前输入作为筛选值。
-                  </div>
-                </div>
+	              </div>
               </div>
               <p v-if="hiddenAdvancedOptionCount" class="mt-3 text-center text-xs text-slate-400">
                 还有 {{ hiddenAdvancedOptionCount }} 个候选未展示，继续输入可缩小范围。
@@ -1659,9 +1789,9 @@ onBeforeUnmount(() => {
             </section>
 
             <!-- Col 3: Values & Active -->
-            <aside class="flex flex-col bg-slate-50/30 p-5 dark:bg-slate-950/20">
-              <div class="mb-6">
-                <div class="mb-4 flex items-center justify-between">
+	            <aside class="flex flex-col bg-slate-50/30 p-3 dark:bg-slate-950/20">
+	              <div class="mb-4">
+	                <div class="mb-3 flex items-center justify-between">
                   <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Active Slice</p>
                   <span v-if="activeManualFilterCount" class="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-400">{{ activeManualFilterCount }}</span>
                 </div>
@@ -1685,8 +1815,8 @@ onBeforeUnmount(() => {
               </div>
 
               <div>
-                <p class="mb-4 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">数值窗口</p>
-                <div class="space-y-4">
+	                <p class="mb-3 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">数值窗口</p>
+	                <div class="space-y-3">
                   <div>
                     <label class="mb-2 block text-xs font-medium text-slate-700 dark:text-slate-300">载荷窗口 (Load)</label>
                     <div class="flex items-center gap-2">
@@ -1745,8 +1875,8 @@ onBeforeUnmount(() => {
 
           <!-- Footer -->
           <div class="flex items-center justify-between border-t border-slate-100 bg-slate-50/50 px-5 py-3 dark:border-slate-800/60 dark:bg-slate-900/50">
-            <p class="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">
-              应用后刷新下方记录；取消会回到上一次已应用的筛选状态。
+	            <p class="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">
+	              候选选择会即时刷新；取消会回到上一次已应用的数值窗口。
             </p>
             <div class="flex w-full justify-end gap-3 sm:w-auto">
               <button

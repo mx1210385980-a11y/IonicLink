@@ -92,6 +92,7 @@ const routes: RouteRecordRaw[] = [
   createViewRoute('pipeline'),
   createViewRoute('review'),
   createViewRoute('knowledge'),
+  createViewRoute('quality'),
   createViewRoute('modeling'),
   createViewRoute('admin'),
   createViewRoute('help'),

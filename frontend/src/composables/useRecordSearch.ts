@@ -31,6 +31,8 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
   const filterOptions = ref<RecordFilterOptions>({
     materials: [],
     lubricants: [],
+    cations: [],
+    anions: [],
     probeMaterials: [],
     substrateMaterials: [],
     substrateCoatings: [],
@@ -41,7 +43,8 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
     waterContentValues: [],
   })
 
-  const selectedLubricant = ref('')
+  const selectedCation = ref('')
+  const selectedAnion = ref('')
   const selectedProbeMaterial = ref('')
   const selectedSubstrateMaterial = ref('')
   const selectedSubstrateCoating = ref('')
@@ -74,8 +77,11 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
   const hasInvalidManualRange = computed(() => isLoadRangeInvalid.value || isCofRangeInvalid.value)
   const manualFilterChips = computed(() => {
     const chips: Array<{ id: string; label: string; value: string }> = []
-    if (selectedLubricant.value) {
-      chips.push({ id: 'manual-lubricant', label: 'Ionic Liquid', value: selectedLubricant.value })
+    if (selectedCation.value) {
+      chips.push({ id: 'manual-cation', label: '阳离子', value: selectedCation.value })
+    }
+    if (selectedAnion.value) {
+      chips.push({ id: 'manual-anion', label: '阴离子', value: selectedAnion.value })
     }
     if (selectedProbeMaterial.value) {
       chips.push({ id: 'manual-probe', label: 'Probe', value: selectedProbeMaterial.value })
@@ -161,7 +167,9 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
       probe_materials: selectedProbeMaterial.value ? [selectedProbeMaterial.value] : undefined,
       substrate_materials: selectedSubstrateMaterial.value ? [selectedSubstrateMaterial.value] : undefined,
       substrate_coatings: selectedSubstrateCoating.value ? [selectedSubstrateCoating.value] : undefined,
-      lubricants: selectedLubricant.value ? [selectedLubricant.value] : dashboardLubricants,
+      lubricants: dashboardLubricants,
+      cations: selectedCation.value ? [selectedCation.value] : undefined,
+      anions: selectedAnion.value ? [selectedAnion.value] : undefined,
       speed_values: selectedSpeedValue.value ? [selectedSpeedValue.value] : undefined,
       shear_rate_values: selectedShearRateValue.value ? [selectedShearRateValue.value] : undefined,
       temperature_values: selectedTemperatureValue.value ? [selectedTemperatureValue.value] : undefined,
@@ -208,7 +216,8 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
   }
 
   function clearAdvancedSearch() {
-    selectedLubricant.value = ''
+    selectedCation.value = ''
+    selectedAnion.value = ''
     selectedProbeMaterial.value = ''
     selectedSubstrateMaterial.value = ''
     selectedSubstrateCoating.value = ''
@@ -278,7 +287,8 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
     loading,
     result,
     filterOptions,
-    selectedLubricant,
+    selectedCation,
+    selectedAnion,
     selectedProbeMaterial,
     selectedSubstrateMaterial,
     selectedSubstrateCoating,

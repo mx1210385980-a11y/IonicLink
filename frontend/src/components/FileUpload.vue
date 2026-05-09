@@ -251,6 +251,9 @@ function statusLabel(file: BatchFile): string {
   if (file.status === 'error') {
     return t('progress.needs_review')
   }
+  if (file.status === 'cancelled') {
+    return isChinese.value ? '已停止' : 'Stopped'
+  }
   return t('progress.ready')
 }
 
@@ -258,6 +261,7 @@ function statusTone(file: BatchFile): string {
   if (file.status === 'success') return 'text-green-500'
   if (file.status === 'processing') return 'text-blue-500'
   if (file.status === 'error') return 'text-rose-500'
+  if (file.status === 'cancelled') return 'text-amber-500'
   return 'text-slate-400'
 }
 

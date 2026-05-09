@@ -26,7 +26,8 @@ from services.activity_logging_service import log_activity
 from services.score_service import calculate_confidence, calculate_confidence_details
 from services.agent_runtime_service import get_agent_runtime
 from services.file_service import _normalize_record_chemistry
-from services.il_resolver_service import resolve_il
+from services.il_resolver_service import ANION_DB, CATION_DB, resolve_il
+from services.query_service import _ion_component_filter_terms
 from services.relationship_graph_service import (
     build_relationship_graph,
     drilldown_relationship_graph,
@@ -86,6 +87,8 @@ class SearchFilter(BaseModel):
     substrate_materials: List[str] = Field(default_factory=list, alias="substrateMaterials", description="Substrate material terms")
     substrate_coatings: List[str] = Field(default_factory=list, alias="substrateCoatings", description="Substrate coating terms")
     lubricants: List[str] = Field(default_factory=list, description="List of lubricants")
+    cations: List[str] = Field(default_factory=list, description="List of cation terms")
+    anions: List[str] = Field(default_factory=list, description="List of anion terms")
     speed_values: List[str] = Field(default_factory=list, alias="speedValues", description="Speed condition terms")
     shear_rate_values: List[str] = Field(default_factory=list, alias="shearRateValues", description="Shear-rate condition terms")
     temperature_values: List[str] = Field(default_factory=list, alias="temperatureValues", description="Temperature condition terms")
@@ -404,6 +407,14 @@ def _build_conditions(filter_params: SearchFilter):
 
         if lubricant_terms:
             conditions.append(TribologyData.lubricant.in_(sorted(lubricant_terms)))
+    if filter_params.cations:
+        cation_terms = _ion_component_filter_terms(filter_params.cations, CATION_DB, charge_suffix="+")
+        if cation_terms:
+            conditions.append(TribologyData.cation.in_(cation_terms))
+    if filter_params.anions:
+        anion_terms = _ion_component_filter_terms(filter_params.anions, ANION_DB, charge_suffix="-")
+        if anion_terms:
+            conditions.append(TribologyData.anion.in_(anion_terms))
     if filter_params.speed_values:
         conditions.append(TribologyData.speed_value.in_(filter_params.speed_values))
     if filter_params.shear_rate_values:

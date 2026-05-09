@@ -3,6 +3,7 @@ export type AppView =
   | 'pipeline'
   | 'review'
   | 'knowledge'
+  | 'quality'
   | 'modeling'
   | 'admin'
   | 'help'
@@ -32,9 +33,11 @@ export type AppSection =
   | 'grounding'
   | 'queue'
   | 'explorer'
+  | 'sources'
   | 'graph'
   | 'cleaning'
   | 'datasets'
+  | 'overview'
   | 'training'
   | 'evaluation'
   | 'registry'
@@ -56,6 +59,7 @@ export const DEFAULT_SECTION_BY_VIEW: Record<AppView, AppSection> = {
   pipeline: 'upload',
   review: 'inbox',
   knowledge: 'explorer',
+  quality: 'overview',
   modeling: 'training',
   admin: 'runtime',
   help: 'quick-start',
@@ -66,7 +70,8 @@ export const SECTION_OPTIONS_BY_VIEW: Record<AppView, AppSection[]> = {
   home: ['today', 'alerts', 'actions'],
   pipeline: ['upload', 'runs', 'batch'],
   review: ['inbox', 'record-review', 'grounding', 'queue'],
-  knowledge: ['explorer', 'graph', 'cleaning', 'datasets'],
+  knowledge: ['explorer', 'sources', 'graph', 'cleaning', 'datasets'],
+  quality: ['overview'],
   modeling: ['training', 'evaluation', 'registry'],
   admin: ['runtime', 'users', 'metrics'],
   help: ['quick-start', 'workflow', 'content'],

@@ -47,7 +47,12 @@ from services.file_service import (
     process_file_background,
     save_upload_entry,
 )
-from services.extraction_trace_service import get_extraction_run, list_extraction_candidates
+from services.extraction_trace_service import (
+    CANCELLED_EXTRACTION_MESSAGE,
+    cancel_latest_extraction_run,
+    get_extraction_run,
+    list_extraction_candidates,
+)
 from services.extraction_trace_service import get_latest_extraction_run_by_literature
 from services.agent_runtime_service import get_agent_runtime
 from services.activity_logging_service import log_activity
@@ -3304,6 +3309,68 @@ async def upload_file(
         _raise_internal_error("Upload file", exc)
 
 
+@router.post("/extract/{file_id}/cancel")
+async def cancel_extraction(
+    file_id: str,
+    request: Request,
+    extractor_type: str = Query("tribology", pattern="^(tribology|diffusion)$"),
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    try:
+        try:
+            lit_id = int(file_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid File ID format (expected integer)")
+
+        literature = await require_literature_access(db, principal, lit_id, write=True)
+        run = await cancel_latest_extraction_run(
+            db,
+            literature_id=lit_id,
+            extractor_type=extractor_type,
+            message=CANCELLED_EXTRACTION_MESSAGE,
+        )
+
+        active_statuses = {"processing", "extracting", "running"}
+        run_status = str(getattr(run, "status", "") or "").strip().lower()
+        literature_status = str(literature.status or "").strip().lower()
+        cancelled = run_status == "cancelled" or literature_status in active_statuses
+        if cancelled:
+            literature.status = "cancelled"
+            literature.error_message = CANCELLED_EXTRACTION_MESSAGE
+
+        await log_activity(
+            db=db,
+            user_id=principal.user.id,
+            group_id=principal.group.id,
+            action_type="cancel_extraction",
+            action_detail={
+                "literature_id": lit_id,
+                "extractor_type": extractor_type,
+                "run_id": getattr(run, "run_id", None),
+                "cancelled": cancelled,
+            },
+            resource_type="literature",
+            resource_id=lit_id,
+            request=request,
+        )
+        await db.commit()
+
+        return {
+            "success": bool(cancelled),
+            "status": "cancelled" if cancelled else literature.status,
+            "message": CANCELLED_EXTRACTION_MESSAGE if cancelled else "No running extraction found.",
+            "run_id": getattr(run, "run_id", None),
+            "literature_id": lit_id,
+            "extractor_type": extractor_type,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await db.rollback()
+        _raise_internal_error("Cancel extraction", exc)
+
+
 @router.post("/extract/{file_id}")
 async def extract_data(
     file_id: str,
@@ -3367,6 +3434,22 @@ async def extract_data(
         data_list = workflow_result.get("data") or []
         extraction_summary = workflow_result.get("extraction_summary") or {}
         agent_workflow = workflow_result.get("agent_workflow") or {}
+
+        if (
+            str((extraction_summary or {}).get("status") or "").lower() == "cancelled"
+            or (extraction_summary or {}).get("dropped_by_reason", {}).get("cancelled")
+            or str((extraction_summary or {}).get("current_stage") or "").lower() == "cancelled"
+        ):
+            return {
+                "success": False,
+                "status": "cancelled",
+                "metadata": {},
+                "data": [],
+                "extraction_summary": extraction_summary,
+                "agent_workflow": agent_workflow,
+                "extractor_type": extractor_type,
+                "message": (extraction_summary or {}).get("current_message") or CANCELLED_EXTRACTION_MESSAGE,
+            }
 
         if (extraction_summary or {}).get("dropped_by_reason", {}).get("in_progress"):
             return {

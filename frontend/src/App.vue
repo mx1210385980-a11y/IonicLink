@@ -18,6 +18,7 @@ import HomePage from '@/pages/home/HomePage.vue'
 import KnowledgePage from '@/pages/knowledge/KnowledgePage.vue'
 import ModelingPage from '@/pages/modeling/ModelingPage.vue'
 import PipelinePage from '@/pages/pipeline/PipelinePage.vue'
+import QualityMetricsPage from '@/pages/quality/QualityMetricsPage.vue'
 import ReviewPage from '@/pages/review/ReviewPage.vue'
 
 type FileUploadBridge = InstanceType<typeof FileUpload>
@@ -74,6 +75,7 @@ const {
   groundingPdfUrl,
   handleBatchExtract,
   handleBatchUpload,
+  handleCancelExtraction,
   handleChat,
   handleClearFiles,
   handleExtract,
@@ -500,6 +502,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
             @batch-upload="handleBatchUpload"
             @extract="handleExtract"
             @batch-extract="handleBatchExtract"
+            @cancel-extraction="handleCancelExtraction"
             @send-chat="handleChat"
             @update-sidebar-tab="setSidebarTab"
             @open-review="navigateTo('review', 'inbox')"
@@ -564,6 +567,13 @@ function handleHomeAction(action: HomeSuggestedAction) {
               focusedRecordId = payload.recordId ?? null
               navigateTo('knowledge', 'explorer')
             }"
+          />
+
+          <QualityMetricsPage
+            v-else-if="currentView === 'quality'"
+            :files="batchFiles"
+            :active-scope-label="activeScopeLabel"
+            :operator-name="operatorName"
           />
 
           <AdminPage

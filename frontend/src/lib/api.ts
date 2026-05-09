@@ -122,6 +122,14 @@ export async function extractData(
     return response.data
 }
 
+export async function cancelExtraction(
+    fileId: string,
+    extractorType: ExtractorType = 'tribology',
+): Promise<ExtractionResponse> {
+    const response = await api.post(`/api/extract/${fileId}/cancel?extractor_type=${extractorType}`)
+    return response.data
+}
+
 // Get Extracted Data
 export async function getData(fileId?: string) {
     const url = fileId ? `/api/data/${fileId}` : '/api/data'
@@ -1127,7 +1135,7 @@ export async function syncBatchData(metadata: LiteratureMetadata, records: Tribo
 }
 
 // Batch processing related types
-export type FileExtractionStatus = 'uploaded' | 'processing' | 'success' | 'error' | 'no_data'
+export type FileExtractionStatus = 'uploaded' | 'processing' | 'success' | 'error' | 'no_data' | 'cancelled'
 
 export interface BatchFile {
     id: string
@@ -1151,6 +1159,8 @@ export type SearchFilter = {
     substrate_materials?: string[]
     substrate_coatings?: string[]
     lubricants?: string[]
+    cations?: string[]
+    anions?: string[]
     speed_values?: string[]
     shear_rate_values?: string[]
     temperature_values?: string[]
@@ -1171,6 +1181,8 @@ export type SearchFilter = {
 export interface RecordFilterOptions {
     materials: string[]
     lubricants: string[]
+    cations: string[]
+    anions: string[]
     probeMaterials: string[]
     substrateMaterials: string[]
     substrateCoatings: string[]
@@ -1351,12 +1363,43 @@ export interface LiteratureMetadataBackfillResult {
     metadata?: Literature
 }
 
+export interface LiteratureDoiImportRequest {
+    dois: string[]
+    batchName?: string
+    extractorType?: ExtractorType
+}
+
+export interface LiteratureDoiImportItem {
+    input: string
+    doi?: string | null
+    status: 'imported' | 'existing' | 'duplicate' | 'failed' | string
+    message: string
+    literature?: Literature | null
+    metadataSource?: string | null
+}
+
+export interface LiteratureDoiImportResponse {
+    batchId: string
+    batchName: string
+    extractorType: ExtractorType | string
+    total: number
+    created: number
+    existing: number
+    failed: number
+    items: LiteratureDoiImportItem[]
+}
+
 // Get all literature list
 export async function listLiterature(skip: number = 0, limit: number = 100) {
     const response = await api.get('/api/sync/literature', {
         params: { skip, limit }
     })
     return response.data as Literature[]
+}
+
+export async function importLiteratureByDoi(payload: LiteratureDoiImportRequest) {
+    const response = await api.post('/api/sync/literature/doi-import', payload)
+    return response.data as LiteratureDoiImportResponse
 }
 
 // Get literature details (including historical extraction records)

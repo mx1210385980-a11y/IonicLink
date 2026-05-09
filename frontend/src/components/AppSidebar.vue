@@ -13,6 +13,7 @@ import {
   Moon,
   PieChart,
   Search,
+  ShieldCheck,
   Server,
   Sun,
   UserCircle2,
@@ -63,6 +64,7 @@ const primaryNav: NavItem[] = [
   { key: 'pipeline',  label: 'Pipeline',  icon: Search      },
   { key: 'review',    label: 'Review',    icon: Library     },
   { key: 'knowledge', label: 'Knowledge', icon: Database    },
+  { key: 'quality',   label: 'Quality',   icon: ShieldCheck },
   { key: 'modeling',  label: 'Modeling',  icon: FlaskConical },
 ]
 
@@ -109,6 +111,7 @@ function statusDotClass(file: BatchFile): string {
   if (file.status === 'success') return 'bg-emerald-400'
   if (file.status === 'error') return 'bg-red-400'
   if (file.status === 'no_data') return 'bg-slate-500'
+  if (file.status === 'cancelled') return 'bg-amber-500'
   return 'bg-slate-600'
 }
 
@@ -118,6 +121,7 @@ function statusLabel(file: BatchFile): string {
   if (file.status === 'success') return props.isChinese ? '完成' : 'Done'
   if (file.status === 'error') return props.isChinese ? '失败' : 'Error'
   if (file.status === 'no_data') return props.isChinese ? '无数据' : 'No data'
+  if (file.status === 'cancelled') return props.isChinese ? '已停止' : 'Stopped'
   return props.isChinese ? '已上传' : 'Uploaded'
 }
 
@@ -129,7 +133,7 @@ function handlePaperClick(file: BatchFile) {
     emit('navigate', 'review', 'inbox')
   } else if (file.status === 'success') {
     emit('navigate', 'knowledge', 'explorer')
-  } else if (file.status === 'error') {
+  } else if (file.status === 'error' || file.status === 'cancelled') {
     emit('navigate', 'pipeline', 'runs')
   } else {
     emit('navigate', 'pipeline', 'upload')

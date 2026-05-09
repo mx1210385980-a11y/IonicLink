@@ -4,18 +4,23 @@ API endpoints for Literature and TribologyData synchronization.
 """
 
 import logging
+from datetime import datetime
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db_session
 from schemas import (
+    LiteratureCreate,
     LiteratureSchema,
     LiteratureWithRecords,
     TribologyDataSchema,
     SyncPayload,
     SyncResult
 )
+from services.data_sync_service import get_or_create_literature
+from services.doi_service import DOIService
 from services.sync_facade_service import (
     backfill_literature_metadata_payload,
     delete_literature_payload,
@@ -42,6 +47,41 @@ from services.activity_logging_service import log_activity
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
 logger = logging.getLogger(__name__)
+
+
+class LiteratureDoiImportRequest(BaseModel):
+    dois: List[str] = Field(default_factory=list)
+    batch_name: str | None = Field(None, alias="batchName")
+    extractor_type: str | None = Field("tribology", alias="extractorType")
+
+    class Config:
+        populate_by_name = True
+
+
+class LiteratureDoiImportItem(BaseModel):
+    input: str
+    doi: str | None = None
+    status: str
+    message: str
+    literature: LiteratureSchema | None = None
+    metadata_source: str | None = Field(None, alias="metadataSource")
+
+    class Config:
+        populate_by_name = True
+
+
+class LiteratureDoiImportResponse(BaseModel):
+    batch_id: str = Field(..., alias="batchId")
+    batch_name: str = Field(..., alias="batchName")
+    extractor_type: str = Field(..., alias="extractorType")
+    total: int
+    created: int
+    existing: int
+    failed: int
+    items: List[LiteratureDoiImportItem]
+
+    class Config:
+        populate_by_name = True
 
 
 def _raise_internal_error(action: str, exc: Exception) -> None:
@@ -152,6 +192,144 @@ async def list_literature(
         raise
     except Exception as exc:
         _raise_internal_error("List literature", exc)
+
+
+@router.post("/literature/doi-import", response_model=LiteratureDoiImportResponse)
+async def import_literature_by_doi(
+    payload: LiteratureDoiImportRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """Import DOI metadata into the current scoped literature library."""
+    try:
+        ensure_scope_writable(principal, scope)
+        doi_service = DOIService()
+        seen: set[str] = set()
+        items: list[LiteratureDoiImportItem] = []
+        created = 0
+        existing = 0
+        failed = 0
+        extractor_type = payload.extractor_type or "tribology"
+
+        for raw_input in payload.dois:
+            raw = str(raw_input or "").strip()
+            if not raw:
+                continue
+
+            normalized = doi_service._normalize_doi(raw)
+            if not normalized or not normalized.startswith("10."):
+                failed += 1
+                items.append(LiteratureDoiImportItem(
+                    input=raw,
+                    doi=normalized or None,
+                    status="failed",
+                    message="不是有效 DOI",
+                ))
+                continue
+
+            if normalized in seen:
+                items.append(LiteratureDoiImportItem(
+                    input=raw,
+                    doi=normalized,
+                    status="duplicate",
+                    message="本批次中已包含该 DOI",
+                ))
+                continue
+            seen.add(normalized)
+
+            try:
+                metadata = await doi_service.resolve_doi(normalized)
+                if not metadata:
+                    failed += 1
+                    items.append(LiteratureDoiImportItem(
+                        input=raw,
+                        doi=normalized,
+                        status="failed",
+                        message="Crossref 未找到元数据",
+                    ))
+                    continue
+
+                literature, is_new = await get_or_create_literature(
+                    db,
+                    LiteratureCreate(
+                        doi=metadata.doi or normalized,
+                        title=metadata.title or normalized,
+                        authors=metadata.authors or "",
+                        journal=metadata.journal or "Unknown Journal",
+                        issn=metadata.issn,
+                        year=metadata.year or datetime.now().year,
+                        volume=metadata.volume,
+                        issue=metadata.issue,
+                        pages=metadata.pages,
+                    ),
+                    principal=principal,
+                    scope=scope,
+                )
+
+                if is_new:
+                    literature.status = "pending"
+                    literature.error_message = None
+                    created += 1
+                else:
+                    existing += 1
+
+                await db.commit()
+                await db.refresh(literature)
+                items.append(LiteratureDoiImportItem(
+                    input=raw,
+                    doi=literature.doi,
+                    status="imported" if is_new else "existing",
+                    message="已加入文献库，等待 PDF / 提取" if is_new else "文献库中已存在",
+                    literature=LiteratureSchema.model_validate(literature),
+                    metadataSource="crossref",
+                ))
+            except Exception as exc:
+                await db.rollback()
+                failed += 1
+                logger.warning("DOI import failed doi=%s error=%s", normalized, exc)
+                items.append(LiteratureDoiImportItem(
+                    input=raw,
+                    doi=normalized,
+                    status="failed",
+                    message=str(exc) or "导入失败",
+                ))
+
+        batch_name = (payload.batch_name or "").strip() or f"DOI Batch {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+
+        await log_activity(
+            db=db,
+            user_id=principal.user.id,
+            group_id=principal.group.id,
+            action_type="doi_import",
+            action_detail={
+                "batch_name": batch_name,
+                "extractor_type": extractor_type,
+                "total": len(items),
+                "created": created,
+                "existing": existing,
+                "failed": failed,
+            },
+            resource_type="literature",
+            resource_id=None,
+            request=request,
+        )
+
+        return LiteratureDoiImportResponse(
+            batchId=f"doi-{int(datetime.now().timestamp() * 1000)}",
+            batchName=batch_name,
+            extractorType=extractor_type,
+            total=len(items),
+            created=created,
+            existing=existing,
+            failed=failed,
+            items=items,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_internal_error("DOI import", exc)
 
 
 @router.get("/literature/{literature_id}", response_model=LiteratureWithRecords)

@@ -48,6 +48,7 @@ const emit = defineEmits([
   'batch-upload',
   'extract',
   'batch-extract',
+  'cancel-extraction',
   'send-chat',
   'update-sidebar-tab',
   'open-review',
@@ -140,11 +141,20 @@ const canExtractSelected = computed(() => {
   return !['processing'].includes(String(file.status || '').toLowerCase())
 })
 
+const canCancelSelected = computed(() => {
+  const file = selectedQueueFile.value
+  const run = activeInspectorRun.value
+  const fileStatus = String(file?.status || '').toLowerCase()
+  const runStatus = String(run?.status || '').toLowerCase()
+  return fileStatus === 'processing' || ['running', 'processing'].includes(runStatus)
+})
+
 const selectedExtractLabel = computed(() => {
   const status = String(selectedQueueFile.value?.status || '').toLowerCase()
   if (status === 'error') return 'Retry Extract'
   if (status === 'no_data') return 'Re-run Extract'
   if (status === 'success') return 'Re-run Extract'
+  if (status === 'cancelled') return 'Restart Extract'
   return 'Start Extract'
 })
 
@@ -268,9 +278,15 @@ function triggerUpload() {
 function triggerSelectedExtract() {
   const file = selectedQueueFile.value
   if (!file || !canExtractSelected.value) return
-  const force = ['error', 'success'].includes(String(file.status || '').toLowerCase())
+  const force = ['error', 'success', 'cancelled'].includes(String(file.status || '').toLowerCase())
     || String(file.status || '').toLowerCase() === 'no_data'
   emit('extract', file.id, force)
+}
+
+function triggerCancelSelected() {
+  const file = selectedQueueFile.value
+  if (!file || !canCancelSelected.value) return
+  emit('cancel-extraction', file.id)
 }
 
 function setActiveExtractor(extractorType: ExtractorType) {
@@ -323,6 +339,7 @@ function queueWeight(file: BatchFile) {
 function progressForFile(file: BatchFile) {
   if (file.status === 'success') return 100
   if (file.status === 'no_data') return 100
+  if (file.status === 'cancelled') return Math.max(8, Math.round(file.progress || 18))
   if (file.status === 'error') return Math.max(18, Math.round(file.progress || 35))
   if (file.status === 'processing') return Math.max(12, Math.round(file.progress || 18))
   return 8
@@ -331,6 +348,7 @@ function progressForFile(file: BatchFile) {
 function detailLabel(file: BatchFile) {
   if (file.status === 'success') return `${file.records?.length || 0} records extracted`
   if (file.status === 'no_data') return file.errorMessage || 'No extractable records found'
+  if (file.status === 'cancelled') return 'Stopped by user'
   if (file.status === 'error') return 'Needs retry'
   return 'Ready to launch'
 }
@@ -341,6 +359,7 @@ function stageLabelFromFile(file: BatchFile) {
   if (file.status === 'processing') return 'Agent extraction in progress'
   if (file.status === 'success') return 'Completed'
   if (file.status === 'no_data') return 'No extractable records found'
+  if (file.status === 'cancelled') return 'Extraction stopped'
   if (file.status === 'error') return 'Execution failed'
   return 'Queued for extraction'
 }
@@ -349,6 +368,7 @@ function statusBadge(status: string) {
   if (status === 'processing') return 'RUNNING'
   if (status === 'success') return 'SUCCESS'
   if (status === 'no_data') return 'NO DATA'
+  if (status === 'cancelled') return 'STOPPED'
   if (status === 'error') return 'FAILED'
   return 'QUEUED'
 }
@@ -357,6 +377,7 @@ function statusBadgeClass(status: string) {
   if (status === 'processing') return 'border-blue-200 bg-blue-50 text-blue-700'
   if (status === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
   if (status === 'no_data') return 'border-amber-200 bg-amber-50 text-amber-700'
+  if (status === 'cancelled') return 'border-amber-200 bg-amber-50 text-amber-700'
   if (status === 'error') return 'border-rose-200 bg-rose-50 text-rose-700'
   return 'border-slate-200 bg-slate-50 text-slate-500'
 }
@@ -365,6 +386,7 @@ function progressTone(status: string) {
   if (status === 'processing') return 'bg-blue-600'
   if (status === 'success') return 'bg-emerald-500'
   if (status === 'no_data') return 'bg-amber-500'
+  if (status === 'cancelled') return 'bg-amber-500'
   if (status === 'error') return 'bg-rose-500'
   return 'bg-slate-200'
 }
@@ -427,6 +449,7 @@ function formatRunStatus(status?: string | null) {
   if (normalized === 'no_data') return 'NO DATA'
   if (normalized === 'completed') return 'SUCCESS'
   if (normalized === 'processing') return 'RUNNING'
+  if (normalized === 'cancelled') return 'STOPPED'
   return normalized.toUpperCase()
 }
 
@@ -620,7 +643,7 @@ function logToneClass(tone: InspectorLog['tone']) {
               <div class="mt-3 flex items-center justify-between gap-3 text-sm">
                 <p class="min-w-0 truncate text-slate-500">{{ item.sublabel }}</p>
                 <div class="inline-flex shrink-0 items-center gap-1 text-slate-500">
-                  <span>{{ item.status === 'processing' ? 'Agent: Extraction' : item.status === 'error' ? 'Needs retry' : item.status === 'no_data' ? 'No related data' : item.status === 'success' ? 'Completed' : 'Queued' }}</span>
+                  <span>{{ item.status === 'processing' ? 'Agent: Extraction' : item.status === 'error' ? 'Needs retry' : item.status === 'cancelled' ? 'Stopped' : item.status === 'no_data' ? 'No related data' : item.status === 'success' ? 'Completed' : 'Queued' }}</span>
                   <ChevronRight class="h-4 w-4" />
                 </div>
               </div>
@@ -730,6 +753,14 @@ function logToneClass(tone: InspectorLog['tone']) {
               @click="triggerSelectedExtract"
             >
               {{ selectedExtractLabel }}
+            </button>
+            <button
+              v-if="canCancelSelected"
+              type="button"
+              class="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-medium text-rose-700 shadow-sm transition hover:bg-rose-100"
+              @click="triggerCancelSelected"
+            >
+              停止提取
             </button>
             <button
               type="button"

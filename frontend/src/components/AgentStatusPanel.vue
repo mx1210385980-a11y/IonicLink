@@ -102,7 +102,7 @@ const activeAgentName = computed(() => {
 
 const extractionSteps = computed(() => {
   const progress = runSnapshot.value.progress
-  const failed = runSnapshot.value.status === 'failed' || runSnapshot.value.status === 'error'
+  const failed = ['failed', 'error', 'cancelled'].includes(runSnapshot.value.status)
 
   return [
     buildStepState('Coordinator', 'Route document and assign agents', progress, 0, 24, failed),
@@ -114,7 +114,7 @@ const extractionSteps = computed(() => {
 
 const agentCards = computed(() => {
   const progress = runSnapshot.value.progress
-  const failed = runSnapshot.value.status === 'failed' || runSnapshot.value.status === 'error'
+  const failed = ['failed', 'error', 'cancelled'].includes(runSnapshot.value.status)
 
   return statusItems.value.map((agent) => ({
     ...agent,
@@ -233,12 +233,14 @@ function stateTone(state: string): string {
 function progressTone(status: string): string {
   if (status === 'completed') return 'from-emerald-500 to-teal-400'
   if (status === 'failed' || status === 'error') return 'from-rose-500 to-orange-400'
+  if (status === 'cancelled') return 'from-amber-500 to-orange-400'
   return 'from-blue-500 to-cyan-400'
 }
 
 function formatRunStatus(status?: string | null): string {
   const normalized = String(status || '').trim().toLowerCase()
   if (!normalized) return 'Idle'
+  if (normalized === 'cancelled') return 'Stopped'
   return normalized.charAt(0).toUpperCase() + normalized.slice(1)
 }
 
@@ -382,7 +384,7 @@ onBeforeUnmount(() => {
             </div>
             <div
               class="shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold"
-              :class="stateTone(runSnapshot.status === 'completed' ? 'complete' : runSnapshot.status === 'failed' || runSnapshot.status === 'error' ? 'error' : 'active')"
+              :class="stateTone(runSnapshot.status === 'completed' ? 'complete' : ['failed', 'error', 'cancelled'].includes(runSnapshot.status) ? 'error' : 'active')"
             >
               {{ formatRunStatus(runSnapshot.status) }}
             </div>

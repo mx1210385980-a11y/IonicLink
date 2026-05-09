@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowUpRight, BookOpen, Database, FolderKanban, GitBranch, Sparkles } from 'lucide-vue-next'
+import { ArrowUpRight, BookOpen, Database, FolderKanban, GitBranch, LibraryBig, Sparkles } from 'lucide-vue-next'
 
 type KnowledgeMode = {
   key: string
@@ -26,6 +26,7 @@ function isModeActive(mode: KnowledgeMode) {
 }
 
 function iconFor(section: string) {
+  if (section === 'sources') return LibraryBig
   if (section === 'graph') return GitBranch
   if (section === 'cleaning') return Sparkles
   if (section === 'datasets') return FolderKanban
@@ -39,11 +40,13 @@ function labelZh(label: string) {
     case 'Data Cleaning': return '数据清洗'
     case 'Dataset Builder': return '训练数据集'
     case 'Dataset Workflow': return '数据准备'
+    case 'Source Atlas': return '来源图谱'
     default: return label
   }
 }
 
 function descriptionFor(section: string) {
+  if (section === 'sources') return '期刊封面 / 来源分布'
   if (section === 'graph') return '阳/阴离子对热图'
   if (section === 'cleaning') return '清洗缺失 / 异常'
   if (section === 'datasets') return '质量检查 / 训练版本'
@@ -52,6 +55,7 @@ function descriptionFor(section: string) {
 
 function statusFor(mode: KnowledgeMode) {
   if (mode.key === 'explorer') return props.selectedRecordCount > 0 ? `${props.selectedRecordCount} 条` : '待选择'
+  if (mode.key === 'sources') return mode.count ? `${mode.count} 篇` : '待入库'
   if (mode.key === 'cleaning') return mode.count ? `待处理 ${mode.count}` : '可继续'
   if (mode.key === 'datasets') {
     if (mode.count) return `待清洗 ${mode.count}`
@@ -63,6 +67,7 @@ function statusFor(mode: KnowledgeMode) {
 
 function statusClass(mode: KnowledgeMode) {
   if (isModeActive(mode)) return 'bg-[#eef0ff] text-[#4c4fdc]'
+  if (mode.key === 'sources' && mode.count) return 'bg-[#e0f2fe] text-[#0369a1]'
   if (mode.key === 'cleaning' && mode.count) return 'bg-[#fff0d9] text-[#a05a00]'
   if (mode.key === 'datasets' && mode.count) return 'bg-[#fff0d9] text-[#a05a00]'
   if (mode.key === 'datasets' && props.selectedRecordCount > 0) return 'bg-[#e8f8f1] text-[#047857]'

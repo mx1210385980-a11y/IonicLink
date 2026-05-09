@@ -2,6 +2,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, type Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import {
+  cancelExtraction,
   chat,
   extractData,
   getLatestExtractionRun,
@@ -426,6 +427,14 @@ export function useAppShell(
     batchFile.errorMessage = message
   }
 
+  function setFileCancelled(batchFile: BatchFile | undefined, message: string = 'Extraction stopped.') {
+    if (!batchFile) return
+    batchFile.status = 'cancelled'
+    batchFile.progress = Math.max(0, Math.round(batchFile.progress || 0))
+    batchFile.progressMessage = message
+    batchFile.errorMessage = message
+  }
+
   function normalizeExtractionPayload(fileId: string, response: ExtractionResponse) {
     const normalizeMetadata = (value: unknown): BatchFile['metadata'] | undefined => {
       if (!value || typeof value !== 'object') return undefined
@@ -521,6 +530,7 @@ export function useAppShell(
 
   function isNoDataRun(run: ExtractionRunDetail) {
     const status = String(run.status || '').toLowerCase()
+    if (status === 'cancelled') return false
     if (status === 'no_data') return true
     if (!['completed', 'success', 'failed', 'error', 'cancelled'].includes(status)) return false
     return Number(run.final_count || 0) === 0
@@ -530,13 +540,15 @@ export function useAppShell(
     fileId: string,
     response: ExtractionResponse,
     finalRecordCount: number,
-    forcedStatus?: 'running' | 'completed' | 'failed' | 'no_data',
+    forcedStatus?: 'running' | 'completed' | 'failed' | 'no_data' | 'cancelled',
   ) {
     const summary: any = response.extraction_summary || {}
     const existing = activeExtractionRun.value
     const inferredStatus =
       forcedStatus ||
-      (response.status === 'processing'
+      (response.status === 'cancelled'
+        ? 'cancelled'
+        : response.status === 'processing'
         ? 'running'
         : isNoDataResponse(response, finalRecordCount)
           ? 'no_data'
@@ -589,7 +601,7 @@ export function useAppShell(
               : (finalRecordCount ? t('progress.saved_records', { count: finalRecordCount }) : t('progress.finished_without_records')))
             : summary.current_message || existing?.summary?.current_message,
       },
-      error_message: inferredStatus === 'failed' || inferredStatus === 'no_data'
+      error_message: inferredStatus === 'failed' || inferredStatus === 'no_data' || inferredStatus === 'cancelled'
         ? (inferredStatus === 'no_data' ? noDataMessage : response.message || existing?.error_message || null)
         : null,
       created_at: existing?.created_at,
@@ -618,6 +630,8 @@ export function useAppShell(
 
     if (run.status === 'running' || run.status === 'processing') {
       setFileProcessing(batchFile, snapshot.progress, snapshot.message)
+    } else if (String(run.status || '').toLowerCase() === 'cancelled') {
+      setFileCancelled(batchFile, run.error_message || snapshot.message || 'Extraction stopped.')
     } else if (isNoDataRun(run)) {
       setFileNoData(batchFile, snapshot.message || 'No extractable records found.')
     }
@@ -811,6 +825,20 @@ export function useAppShell(
         syncActiveRunFromResponse(fileId, response, 0, response.status === 'processing' ? 'running' : undefined)
       }
 
+      if (response.status === 'cancelled') {
+        const message = response.message || 'Extraction stopped.'
+        if (trackActiveRun) {
+          syncActiveRunFromResponse(fileId, response, 0, 'cancelled')
+        }
+        setFileCancelled(batchFile, message)
+        return {
+          success: false,
+          message,
+          recordCount: 0,
+          cancelled: true,
+        }
+      }
+
       if (response.status === 'processing') {
         setFileProcessing(batchFile, 16, response.message || t('progress.agent_running'))
         const terminalRun = await waitForExtractionCompletion(fileId, 180000, (run) => {
@@ -820,6 +848,19 @@ export function useAppShell(
 
         if (!terminalRun) {
           throw new Error(t('progress.extraction_still_running'))
+        }
+        if (String(terminalRun.status || '').toLowerCase() === 'cancelled') {
+          const message = terminalRun.error_message || 'Extraction stopped.'
+          setFileCancelled(batchFile, message)
+          if (trackActiveRun) {
+            activeExtractionRun.value = terminalRun
+          }
+          return {
+            success: false,
+            message,
+            recordCount: 0,
+            cancelled: true,
+          }
         }
         if (!['completed', 'no_data'].includes(String(terminalRun.status || '').toLowerCase())) {
           throw new Error(terminalRun.error_message || t('progress.background_failed'))
@@ -1022,7 +1063,9 @@ export function useAppShell(
 
       const result = await executeExtraction(fileId, force, options)
 
-      if (result.success && result.recordCount > 0) {
+      if ((result as any).cancelled) {
+        chatPanelRef.value?.addMessage('assistant', result.message || 'Extraction stopped.')
+      } else if (result.success && result.recordCount > 0) {
         chatPanelRef.value?.addMessage(
           'assistant',
           t('chat.extraction_results_panel', { message: result.message }),
@@ -1043,6 +1086,54 @@ export function useAppShell(
       chatPanelRef.value?.addMessage('assistant', t('chat.extraction_failed', { message: error.message || 'Unknown error' }))
     } finally {
       clearExtractionPolling()
+    }
+  }
+
+  async function handleCancelExtraction(fileId: string) {
+    const batchFile = findBatchFile(fileId)
+    if (!batchFile) return
+
+    const message = 'Extraction stopped.'
+    try {
+      batchFile.progressMessage = 'Stopping extraction...'
+      const extractorType = batchFile.extractor_type || 'tribology'
+      const response = await cancelExtraction(fileId, extractorType)
+      const resolvedMessage = response.message || message
+      setFileCancelled(batchFile, resolvedMessage)
+      syncActiveRunFromResponse(
+        fileId,
+        {
+          ...response,
+          success: false,
+          status: 'cancelled',
+          data: [],
+          extraction_summary: {
+            ...(response.extraction_summary || {}),
+            run_id: response.extraction_summary?.run_id || activeExtractionRun.value?.run_id || null,
+            candidate_count: response.extraction_summary?.candidate_count || 0,
+            final_count: 0,
+            dropped_by_reason: {
+              ...(response.extraction_summary?.dropped_by_reason || {}),
+              cancelled: 1,
+            },
+            page_coverage: response.extraction_summary?.page_coverage || {},
+            current_stage: 'cancelled',
+            current_message: resolvedMessage,
+            progress_log: [
+              ...((response.extraction_summary?.progress_log as any[]) || activeExtractionRun.value?.progress_log || []),
+              { stage: 'cancelled', message: resolvedMessage },
+            ],
+          },
+        },
+        0,
+        'cancelled',
+      )
+      clearExtractionPolling()
+      chatPanelRef.value?.addMessage('assistant', resolvedMessage)
+    } catch (error: any) {
+      const failureMessage = error?.response?.data?.detail || error?.message || 'Failed to stop extraction.'
+      batchFile.progressMessage = failureMessage
+      chatPanelRef.value?.addMessage('assistant', failureMessage)
     }
   }
 
@@ -1142,7 +1233,7 @@ export function useAppShell(
   function setDefaultExtractorType(extractorType: ExtractorType) {
     defaultExtractorType.value = extractorType
     const selected = selectedFileId.value ? findBatchFile(selectedFileId.value) : null
-    if (selected && ['uploaded', 'error', 'no_data', 'success'].includes(String(selected.status || '').toLowerCase())) {
+    if (selected && ['uploaded', 'error', 'no_data', 'success', 'cancelled'].includes(String(selected.status || '').toLowerCase())) {
       selected.extractor_type = extractorType
     }
   }
@@ -1217,6 +1308,7 @@ export function useAppShell(
     handleBatchUpload,
     handleChat,
     handleClearFiles,
+    handleCancelExtraction,
     handleExploreData,
     handleExtract,
     handleLiteratureView,

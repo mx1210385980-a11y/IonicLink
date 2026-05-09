@@ -42,9 +42,12 @@ from services.il_resolver_service import (
     resolve_ionic_liquid_alias,
 )
 from services.extraction_trace_service import (
+    CANCELLED_EXTRACTION_MESSAGE,
+    ExtractionCancelledError,
     add_extraction_candidates,
     create_extraction_run,
     finalize_extraction_run,
+    is_extraction_cancelled,
     update_extraction_run_progress,
 )
 from utils.cof_extraction import derive_cof_extracted, normalize_cof_extracted, serialize_cof_extracted
@@ -78,6 +81,7 @@ from utils.tribopair import composite_roughness_label
 
 TEMP_UPLOAD_DIR = "temp_uploads"
 EXTRACTED_REFERENCE_DIR = os.path.join("Reference", "Extracted")
+ENABLE_CACHED_PDF_EVIDENCE_RELOCATION = os.getenv("ENABLE_CACHED_PDF_EVIDENCE_RELOCATION", "false").lower() == "true"
 DEFAULT_TEMPERATURE_VALUE = "298.15 K"
 logger = logging.getLogger(__name__)
 _SOURCE_ANCHOR_CACHE: dict[tuple[str, str, int, str], Optional[dict[str, Any]]] = {}
@@ -477,6 +481,22 @@ def _build_in_progress_summary(run: Optional[ExtractionRun]) -> dict:
         "page_coverage": summary_payload.get("page_coverage") or {},
         "page_candidate_counts": summary_payload.get("page_candidate_counts") or {},
         "progress_log": summary_payload.get("progress_log") or [],
+    }
+
+
+def _build_cancelled_extraction_summary(run_id: Optional[str], *, profile: str = "high_accuracy") -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "candidate_count": 0,
+        "final_count": 0,
+        "dropped_by_reason": {"cancelled": 1},
+        "page_coverage": {},
+        "page_candidate_counts": {},
+        "current_stage": "cancelled",
+        "current_message": CANCELLED_EXTRACTION_MESSAGE,
+        "progress_log": [{"stage": "cancelled", "message": CANCELLED_EXTRACTION_MESSAGE}],
+        "profile": profile,
+        "status": "cancelled",
     }
 
 
@@ -3071,8 +3091,12 @@ async def _load_cached_extraction_result(
         }
         parsed_field_evidence = _parse_json_object(r.field_evidence_json)
         if not parsed_field_evidence or _field_evidence_map_looks_generic(parsed_field_evidence):
+            # Cached extraction is often loaded on app entry. Avoid doing synchronous
+            # PDF coordinate relocation here because PyMuPDF word extraction can hang
+            # on some already-processed PDFs and block the whole API worker.
+            evidence_file_path = literature.file_path if ENABLE_CACHED_PDF_EVIDENCE_RELOCATION else None
             parsed_field_evidence = _merge_field_review_metadata(
-                _build_field_evidence_map(cached_item, r, confidence=r.confidence, file_path=literature.file_path),
+                _build_field_evidence_map(cached_item, r, confidence=r.confidence, file_path=evidence_file_path),
                 parsed_field_evidence,
             )
             review_status, assembly_notes = _resolve_review_status(parsed_field_evidence)
@@ -4306,10 +4330,23 @@ async def process_file_safe(
 
             last_progress_flush = 0.0
 
+            async def _raise_if_cancelled(stage: str = "cancelled") -> None:
+                if await is_extraction_cancelled(
+                    db,
+                    run_id=run_id if run_created else None,
+                    literature_id=literature.id,
+                ):
+                    logger.info("Extraction cancelled literature_id=%s stage=%s", literature.id, stage)
+                    raise ExtractionCancelledError(CANCELLED_EXTRACTION_MESSAGE)
+
             async def _persist_run_progress(progress_event: dict) -> None:
                 nonlocal last_progress_flush
                 if not run_created:
                     return
+
+                async with async_session_maker() as cancel_db:
+                    if await is_extraction_cancelled(cancel_db, run_id=run_id, literature_id=file_id):
+                        raise ExtractionCancelledError(CANCELLED_EXTRACTION_MESSAGE)
 
                 now_mono = time.monotonic()
                 force_flush = bool(progress_event.get("force"))
@@ -4393,6 +4430,8 @@ async def process_file_safe(
             llm_summary = result.get("extraction_summary", {}) or {}
             trace_candidates = result.get("trace_candidates", []) or []
 
+            await _raise_if_cancelled("stage_d.post_model")
+
             fallback_metadata = extract_metadata_fallback(content)
             if fallback_metadata:
                 metadata = {
@@ -4450,6 +4489,8 @@ async def process_file_safe(
                 _annotate_records_with_identity(records)
                 if dropped_non_il:
                     logger.info("Dropped %s non-ionic-liquid records before persistence", len(dropped_non_il))
+
+            await _raise_if_cancelled("stage_e.before_persistence")
             
             # 5. Save Results
             if records:
@@ -4539,6 +4580,8 @@ async def process_file_safe(
                     if metadata.get("issue"): literature.issue = metadata["issue"]
                     if metadata.get("pages"): literature.pages = metadata["pages"]
                     if metadata.get("issn"): literature.issn = metadata["issn"]
+
+                await _raise_if_cancelled("stage_e.before_finalize")
                 
                 literature.status = "completed"
                 literature.error_message = None
@@ -4589,6 +4632,7 @@ async def process_file_safe(
                 await db.commit()
                 return metadata, response_data_list, extraction_summary
             else:
+                await _raise_if_cancelled("stage_e.before_no_data_finalize")
                 no_data_message = build_no_data_reason(
                     literature=literature,
                     metadata=metadata,
@@ -4656,6 +4700,25 @@ async def process_file_safe(
                 await db.commit()
                 return metadata, [], extraction_summary
                 
+        except ExtractionCancelledError:
+            logger.info("Processing cancelled for literature_id=%s", file_id)
+            literature.status = "cancelled"
+            literature.error_message = CANCELLED_EXTRACTION_MESSAGE
+            extraction_summary = _build_cancelled_extraction_summary(run_id if run_created else None, profile=profile)
+            if run_created:
+                await finalize_extraction_run(
+                    db,
+                    run_id=run_id,
+                    status="cancelled",
+                    candidate_count=0,
+                    final_count=0,
+                    dropped_by_reason=extraction_summary["dropped_by_reason"],
+                    summary=extraction_summary,
+                    error_message=CANCELLED_EXTRACTION_MESSAGE,
+                )
+            await db.commit()
+            return {}, [], extraction_summary
+
         except Exception as e:
             logger.exception("Processing failed for literature_id=%s", file_id)
             literature.status = "failed"
@@ -4696,6 +4759,9 @@ async def process_file_background(file_id: int, extractor_type: str = "tribology
             
             if not literature:
                 logger.warning("Background processing skipped because literature_id=%s was not found", file_id)
+                return
+            if str(literature.status or "").strip().lower() == "cancelled":
+                logger.info("Background processing skipped because literature_id=%s is cancelled", file_id)
                 return
 
             # --- 鉁?ULTIMATE GUARD: DATA EXISTENCE CHECK ---

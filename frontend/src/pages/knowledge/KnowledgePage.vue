@@ -6,6 +6,7 @@ import IntegratedExplorer from '@/components/IntegratedExplorer.vue'
 import DiffusionExplorerWorkspace from '@/components/knowledge/DiffusionExplorerWorkspace.vue'
 import KnowledgeContextPanel from '@/components/knowledge/KnowledgeContextPanel.vue'
 import KnowledgeSidebar from '@/components/knowledge/KnowledgeSidebar.vue'
+import LiteratureSourceAtlas from '@/components/knowledge/LiteratureSourceAtlas.vue'
 import RelationshipGraphPanel from '@/components/RelationshipGraphPanel.vue'
 import { backfillLiteratureMetadata, listLiterature, type Literature, type SearchFilter } from '@/lib/api'
 
@@ -32,6 +33,7 @@ const emit = defineEmits<{
 }>()
 
 const emptyFilter: SearchFilter = {}
+const LITERATURE_LIST_LIMIT = 1000
 const exportRequestId = ref(0)
 const externalExportRequest = ref<{ id: number, format: 'json' | 'csv' | 'ndjson' } | null>(null)
 const scopeLiterature = ref<Literature[]>([])
@@ -89,6 +91,7 @@ const qualityIssueCount = computed(() => {
 
 const sidebarModes = computed(() => [
   { key: 'explorer', label: 'Data Grid', count: selectedRecordCount.value || undefined },
+  { key: 'sources', label: 'Source Atlas', count: scopeLiterature.value.length || undefined },
   { key: 'graph', label: 'Graph View' },
   { key: 'datasets', label: 'Dataset Workflow', count: qualityIssueCount.value || undefined },
 ])
@@ -102,6 +105,7 @@ const sourceLabel = computed(() => {
 const modeMeta = computed<{ label: string }>(() => {
   const modes: Record<string, { label: string }> = {
     explorer: { label: 'Data Grid' },
+    sources: { label: 'Source Atlas' },
     graph: { label: isDiffusionScope.value ? 'Evidence View' : 'Graph View' },
     cleaning: { label: 'Dataset Workflow' },
     datasets: { label: 'Dataset Workflow' },
@@ -175,7 +179,7 @@ async function autoBackfillMissingMetadata(items: Literature[]) {
 
   if (updatedAny) {
     try {
-      scopeLiterature.value = sortLiteratureForList(await listLiterature(0, 200))
+      scopeLiterature.value = sortLiteratureForList(await listLiterature(0, LITERATURE_LIST_LIMIT))
     } catch (error) {
       console.warn('[Knowledge] Failed to refresh literature after metadata backfill:', error)
     }
@@ -186,7 +190,7 @@ async function loadScopeLiterature() {
   literatureLoading.value = true
   literatureError.value = ''
   try {
-    const items = await listLiterature(0, 200)
+    const items = await listLiterature(0, LITERATURE_LIST_LIMIT)
     scopeLiterature.value = sortLiteratureForList(items)
     void autoBackfillMissingMetadata(items)
   } catch (error: any) {
@@ -236,7 +240,23 @@ watch(
       <main class="flex min-h-0 flex-col gap-3 overflow-hidden">
         <section class="min-h-0 flex-1 overflow-hidden rounded-[1.8rem] border border-[#dbe5f0] bg-white shadow-[0_28px_64px_-46px_rgba(15,23,42,0.34)]">
           <div
-            v-if="isDiffusionScope && currentSection !== 'graph'"
+            v-if="currentSection === 'sources'"
+            class="h-full min-h-0 overflow-hidden"
+          >
+            <LiteratureSourceAtlas
+              :literature-items="scopeLiterature"
+              :loading="literatureLoading"
+              :error="literatureError"
+              :active-source-id="selectedFileId"
+              :active-scope-label="activeScopeLabel"
+              @select-source="selectLiteratureSource"
+              @refresh-literature="loadScopeLiterature"
+              @open-review-source="openSelectedLiteratureReview"
+            />
+          </div>
+
+          <div
+            v-else-if="isDiffusionScope && currentSection !== 'graph'"
             class="h-full min-h-0 overflow-hidden"
           >
             <DiffusionExplorerWorkspace

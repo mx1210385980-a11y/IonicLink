@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from models.db_models import Literature, TribologyData
 from security import literature_scope_conditions
 from services.file_service import _normalize_record_chemistry
-from services.il_resolver_service import resolve_il
+from services.il_resolver_service import ANION_DB, CATION_DB, resolve_il
 from services.score_service import calculate_confidence, calculate_confidence_details
 from services.unit_converter import parse_force_range_to_newtons, parse_force_to_newtons
 from services.usage_metrics_service import get_usage_metrics_service
@@ -38,6 +38,82 @@ logger = logging.getLogger(__name__)
 async def _execute_counted(session: AsyncSession, stmt: Any, *, operation: str):
     get_usage_metrics_service().record_db_query(operation=operation)
     return await session.execute(stmt)
+
+
+def _strip_ion_component_markup(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"^\[", "", text)
+    text = re.sub(r"\]\s*(?:\d+)?\s*[+-]?$", "", text)
+    text = text.rstrip("+-").strip()
+    return text
+
+
+def _ion_component_key(value: object) -> str:
+    return re.sub(r"[^a-z0-9]+", "", _strip_ion_component_markup(value).lower())
+
+
+def _resolve_ion_component(value: object, db: dict[str, dict[str, Any]]) -> str | None:
+    key = _ion_component_key(value)
+    if not key:
+        return None
+
+    for canonical, info in db.items():
+        candidates = [
+            canonical,
+            info.get("display_name"),
+            info.get("full_name"),
+            *(info.get("aliases") or []),
+        ]
+        if any(_ion_component_key(candidate) == key for candidate in candidates if candidate):
+            return canonical
+    return None
+
+
+def _display_ion_component(value: object, db: dict[str, dict[str, Any]]) -> str:
+    canonical = _resolve_ion_component(value, db)
+    if canonical:
+        info = db.get(canonical) or {}
+        return str(info.get("display_name") or canonical).strip()
+    return _strip_ion_component_markup(value)
+
+
+def _ion_component_filter_terms(
+    values: list[str] | tuple[str, ...] | set[str],
+    db: dict[str, dict[str, Any]],
+    *,
+    charge_suffix: str,
+) -> list[str]:
+    terms: set[str] = set()
+
+    def add_variant(candidate: object) -> None:
+        text = str(candidate or "").strip()
+        if not text:
+            return
+        terms.add(text)
+        stripped = _strip_ion_component_markup(text)
+        if stripped:
+            terms.add(stripped)
+            terms.add(f"[{stripped}]")
+            terms.add(f"{stripped}{charge_suffix}")
+            terms.add(f"[{stripped}]{charge_suffix}")
+
+    for value in values or []:
+        add_variant(value)
+        canonical = _resolve_ion_component(value, db)
+        if not canonical:
+            continue
+        info = db.get(canonical) or {}
+        for candidate in [
+            canonical,
+            info.get("display_name"),
+            info.get("full_name"),
+            *(info.get("aliases") or []),
+        ]:
+            add_variant(candidate)
+
+    return sorted(terms)
 
 
 def _build_conditions(filter_params: Any):
@@ -77,6 +153,22 @@ def _build_conditions(filter_params: Any):
 
         if lubricant_terms:
             conditions.append(TribologyData.lubricant.in_(sorted(lubricant_terms)))
+    if getattr(filter_params, "cations", None):
+        cation_terms = _ion_component_filter_terms(
+            getattr(filter_params, "cations", None) or [],
+            CATION_DB,
+            charge_suffix="+",
+        )
+        if cation_terms:
+            conditions.append(TribologyData.cation.in_(cation_terms))
+    if getattr(filter_params, "anions", None):
+        anion_terms = _ion_component_filter_terms(
+            getattr(filter_params, "anions", None) or [],
+            ANION_DB,
+            charge_suffix="-",
+        )
+        if anion_terms:
+            conditions.append(TribologyData.anion.in_(anion_terms))
     if getattr(filter_params, "cof_min", None) is not None:
         conditions.append(TribologyData.cof_value >= filter_params.cof_min)
     if getattr(filter_params, "cof_max", None) is not None:
@@ -414,6 +506,8 @@ async def get_filter_options(
     logger.debug("Loading record filter options scope=%s", scope_filter_values)
     lubricants_stmt = select(TribologyData.lubricant).distinct()
     option_fields = [
+        ("filter_options.ions.cation", TribologyData.cation),
+        ("filter_options.ions.anion", TribologyData.anion),
         ("filter_options.materials.probe", TribologyData.probe_material),
         ("filter_options.materials.substrate", TribologyData.substrate_material),
         ("filter_options.materials.coating", TribologyData.substrate_coating),
@@ -426,6 +520,8 @@ async def get_filter_options(
     ]
     option_values: dict[str, set[str]] = {
         "materials": set(),
+        "cations": set(),
+        "anions": set(),
         "probeMaterials": set(),
         "substrateMaterials": set(),
         "substrateCoatings": set(),
@@ -444,7 +540,11 @@ async def get_filter_options(
             stmt = stmt.join(TribologyData.literature).where(*conditions)
         result_values = await _execute_counted(session, stmt, operation=operation)
         cleaned = {str(item).strip() for item in result_values.scalars().all() if str(item or "").strip()}
-        if column is TribologyData.probe_material:
+        if column is TribologyData.cation:
+            option_values["cations"].update(_display_ion_component(item, CATION_DB) for item in cleaned)
+        elif column is TribologyData.anion:
+            option_values["anions"].update(_display_ion_component(item, ANION_DB) for item in cleaned)
+        elif column is TribologyData.probe_material:
             option_values["probeMaterials"].update(cleaned)
             option_values["materials"].update(cleaned)
         elif column is TribologyData.substrate_material:
@@ -484,6 +584,8 @@ async def get_filter_options(
     return {
         "materials": sorted(option_values["materials"]),
         "lubricants": sorted(set(normalized_lubricants)),
+        "cations": sorted(option_values["cations"]),
+        "anions": sorted(option_values["anions"]),
         "probeMaterials": sorted(option_values["probeMaterials"]),
         "substrateMaterials": sorted(option_values["substrateMaterials"]),
         "substrateCoatings": sorted(option_values["substrateCoatings"]),

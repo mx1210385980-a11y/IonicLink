@@ -9,7 +9,15 @@ from typing import Any, Iterable, Optional
 from sqlalchemy import Select, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.db_models import ExtractionCandidate, ExtractionRun
+from models.db_models import ExtractionCandidate, ExtractionRun, Literature
+
+
+CANCELLED_EXTRACTION_MESSAGE = "Extraction cancelled by user."
+TERMINAL_EXTRACTION_STATUSES = {"completed", "failed", "error", "cancelled", "no_data"}
+
+
+class ExtractionCancelledError(Exception):
+    """Raised inside extraction workers when a persisted cancel request is observed."""
 
 
 def _json_dumps(value: Any) -> Optional[str]:
@@ -90,6 +98,8 @@ async def finalize_extraction_run(
     run = row.scalar_one_or_none()
     if not run:
         return
+    if run.status == "cancelled" and status != "cancelled":
+        return
 
     run.status = status
     run.candidate_count = int(candidate_count)
@@ -122,7 +132,10 @@ async def update_extraction_run_progress(
     if not run:
         return
 
-    if run.status not in {"completed", "failed"}:
+    if run.status == "cancelled":
+        return
+
+    if run.status not in TERMINAL_EXTRACTION_STATUSES:
         run.status = "running"
 
     if candidate_count is not None:
@@ -172,6 +185,83 @@ async def get_latest_extraction_run_by_literature(
     stmt = stmt.order_by(ExtractionRun.id.desc()).limit(1)
     row = await db.execute(stmt)
     return row.scalar_one_or_none()
+
+
+async def is_extraction_cancelled(
+    db: AsyncSession,
+    *,
+    run_id: str | None = None,
+    literature_id: int | None = None,
+) -> bool:
+    if run_id:
+        run = (
+            await db.execute(select(ExtractionRun).where(ExtractionRun.run_id == run_id))
+        ).scalar_one_or_none()
+        if run and str(run.status or "").strip().lower() == "cancelled":
+            return True
+
+    if literature_id:
+        literature = await db.get(Literature, literature_id)
+        if literature and str(literature.status or "").strip().lower() == "cancelled":
+            return True
+
+    return False
+
+
+async def cancel_latest_extraction_run(
+    db: AsyncSession,
+    *,
+    literature_id: int,
+    extractor_type: str | None = None,
+    message: str = CANCELLED_EXTRACTION_MESSAGE,
+) -> ExtractionRun | None:
+    run = await get_latest_extraction_run_by_literature(db, literature_id, extractor_type=extractor_type)
+    if not run:
+        return None
+
+    if str(run.status or "").strip().lower() in {"completed", "no_data"}:
+        return run
+
+    summary: dict[str, Any] = {}
+    if run.summary_json:
+        try:
+            loaded = json.loads(run.summary_json)
+            if isinstance(loaded, dict):
+                summary = loaded
+        except Exception:
+            summary = {}
+
+    progress_log = summary.get("progress_log")
+    if not isinstance(progress_log, list):
+        progress_log = []
+    progress_log = [
+        *progress_log,
+        {"stage": "cancelled", "message": message},
+    ]
+
+    dropped_by_reason: dict[str, Any] = {}
+    if run.dropped_by_reason:
+        try:
+            loaded = json.loads(run.dropped_by_reason)
+            if isinstance(loaded, dict):
+                dropped_by_reason = loaded
+        except Exception:
+            dropped_by_reason = {}
+    dropped_by_reason["cancelled"] = int(dropped_by_reason.get("cancelled") or 0) + 1
+
+    summary = {
+        **summary,
+        "current_stage": "cancelled",
+        "current_message": message,
+        "progress_log": progress_log,
+        "dropped_by_reason": dropped_by_reason,
+    }
+
+    run.status = "cancelled"
+    run.error_message = message
+    run.dropped_by_reason = _json_dumps(dropped_by_reason)
+    run.summary_json = _json_dumps(summary)
+    return run
 
 
 async def list_extraction_candidates(
