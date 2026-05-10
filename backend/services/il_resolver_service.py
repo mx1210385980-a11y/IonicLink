@@ -335,10 +335,10 @@ ANION_DB: Dict[str, Dict[str, Any]] = {
         "full_name": "bis(salicylato)borate",
         "aliases": ["bscb", "BScB-", "bis(salicylato)borate"],
     },
-    "(iC8)2PO2": {
-        "smiles": "",
+    "i(C8)2PO2": {
+        "smiles": "O=P([O-])(CC(C)CC(C)(C)C)CC(C)CC(C)(C)C",
         "full_name": "bis(2,4,4-trimethylpentyl)phosphinate",
-        "aliases": ["(iC8)2PO2", "(C8)2PO2", "iC8 2PO2", "2PO2", "PO2", "bis(2,4,4-trimethylpentyl)phosphinate"],
+        "aliases": ["i(C8)2PO2", "(iC8)2PO2", "(C8)2PO2", "iC8 2PO2", "2PO2", "PO2", "bis(2,4,4-trimethylpentyl)phosphinate"],
     },
     "AOT": {
         "smiles": "CCCCC(CC)COC(=O)CC(C(=O)OCC(CCCC)CC)S([O-])(=O)=O",

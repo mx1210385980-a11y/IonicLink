@@ -132,7 +132,65 @@ def _parse_field_evidence_map(raw: Any) -> dict[str, Any]:
     return {}
 
 
+def _component_field_key(component: dict[str, Any], index: int) -> str:
+    compound = str(component.get("compound") or "").strip()
+    slug = re.sub(r"[^a-z0-9]+", "_", compound.lower()).strip("_")
+    return f"compound_{slug}" if slug else f"lubricant_component_{index}"
+
+
+def _is_ionic_lubricant_component(component: dict[str, Any]) -> bool:
+    role = str(component.get("role") or "").strip().lower()
+    compound = str(component.get("compound") or "").strip()
+    if "ionic" in role:
+        return True
+    if role in {"base_oil", "oil", "solvent", "compound"}:
+        return False
+    return bool(re.search(r"\[[^\]]+\]\s*\[[^\]]+\]", compound))
+
+
+def _is_separate_lubricant_compound(component: dict[str, Any]) -> bool:
+    role = str(component.get("role") or "").strip().lower()
+    compound = str(component.get("compound") or "").strip().lower()
+    if role in {"base_oil", "oil", "solvent", "compound"}:
+        return True
+    if compound in {"hexadecane", "degdbe", "pao", "peg"}:
+        return True
+    return not _is_ionic_lubricant_component(component)
+
+
+def _component_field_value_from_record(record: Any, field_key: str) -> str | None:
+    normalized_key = _normalize_field_key(field_key)
+    for index, component in enumerate(components_for_record(record)):
+        if normalized_key in {_component_field_key(component, index), f"lubricant_component_{index}"}:
+            return str(component.get("compound") or "").strip() or None
+    return None
+
+
+def _component_field_entry_from_source(field_map: dict[str, Any], record: Any, field_key: str) -> dict[str, Any]:
+    value = _component_field_value_from_record(record, field_key)
+    if not value:
+        return {}
+    source_entry = next(
+        (
+            field_map.get(key)
+            for key in ("mol_ratio", "ionic_liquid", "source")
+            if isinstance(field_map.get(key), dict) and field_map.get(key)
+        ),
+        {},
+    )
+    if not isinstance(source_entry, dict) or not source_entry:
+        return {"value": value, "confidence": getattr(record, "confidence", None)}
+    entry = dict(source_entry)
+    entry["value"] = value
+    entry["confidence"] = entry.get("confidence", getattr(record, "confidence", None))
+    entry.pop("review_state", None)
+    entry.pop("review_note", None)
+    return entry
+
+
 def _field_value_from_record(record: Any, field_key: str) -> Any:
+    if field_key.startswith("compound_") or field_key.startswith("lubricant_component_"):
+        return _component_field_value_from_record(record, field_key)
     if field_key == "material":
         return record.material_name
     if field_key == "ionic_liquid":
@@ -350,6 +408,8 @@ def _text_matches_field_or_alias(field_key: str, value: Any, entry: dict[str, An
         entry.get("original_value"),
         (entry.get("evidence") or {}).get("matched_text") if isinstance(entry.get("evidence"), dict) else None,
     ]
+    if "[" in str(value or "") and re.search(r"(?<![A-Za-z0-9])IL(?![A-Za-z0-9])", str(text or "")):
+        alias_candidates.append("IL")
     for candidate in alias_candidates:
         alias = str(candidate or "").strip()
         if not alias:
@@ -365,6 +425,8 @@ def _refresh_visual_source_evidence(entry: dict[str, Any], *, pdf_path: str | No
     source_type = str((evidence or {}).get("source_type") or "").strip().lower()
     source_label = str((evidence or {}).get("source_label") or "").strip()
     page_num = int((evidence or {}).get("page") or 0)
+    if source_type in {"text", "table"} or "caption" in source_label.lower():
+        return entry
     if (
         not pdf_path
         or not page_num
@@ -495,9 +557,12 @@ def _sanitize_field_evidence_locations(
 
 
 def _build_record_field_evidence_payload(record: Any) -> dict[str, Any]:
-    field_map = _parse_field_evidence_map(record.field_evidence_json)
+    field_map = {
+        _normalize_field_key(str(key)): value
+        for key, value in _parse_field_evidence_map(record.field_evidence_json).items()
+    }
     normalized_fields: dict[str, Any] = {}
-    for key in (
+    field_keys = [
         "material",
         "ionic_liquid",
         "cof",
@@ -515,8 +580,20 @@ def _build_record_field_evidence_payload(record: Any) -> dict[str, Any]:
         "water_content",
         "potential",
         "source_page",
-    ):
+    ]
+    for key in field_map:
+        if key.startswith("compound_") or key.startswith("lubricant_component_"):
+            field_keys.append(key)
+    components = components_for_record(record)
+    if len(components) > 1:
+        for index, component in enumerate(components):
+            if _is_separate_lubricant_compound(component):
+                field_keys.append(_component_field_key(component, index))
+
+    for key in dict.fromkeys(field_keys):
         raw_entry = field_map.get(key) if isinstance(field_map.get(key), dict) else {}
+        if not raw_entry and (key.startswith("compound_") or key.startswith("lubricant_component_")):
+            raw_entry = _component_field_entry_from_source(field_map, record, key)
         evidence = raw_entry.get("evidence") if isinstance(raw_entry.get("evidence"), dict) else None
         if evidence:
             evidence_source_type = str(evidence.get("source_type") or "").strip().lower()

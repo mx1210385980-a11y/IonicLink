@@ -6,9 +6,11 @@ import {
   cofDisplay,
   confidenceDisplay,
   confidenceValueFor,
-  formatIonicLiquidHtml,
+  formatIonicLiquidPartHtml,
+  ionicLiquidParts,
   lubricantAliasDisplay,
-  lubricantDisplay,
+  type LubricantDisplayLine,
+  lubricantDisplayRows,
   tribopairDisplay,
 } from '@/lib/integratedExplorerHelpers'
 
@@ -22,6 +24,13 @@ const props = withDefaults(defineProps<{
 })
 
 const confidenceValue = computed(() => confidenceValueFor(props.record, props.evidence))
+
+function lubricantLineClass(line: LubricantDisplayLine): string {
+  if (line.kind === 'ratio') return 'mt-1'
+  return line.emphasis === 'secondary'
+    ? 'text-sm font-semibold text-slate-500 dark:text-slate-400'
+    : 'text-base font-bold text-slate-900 dark:text-slate-100'
+}
 </script>
 
 <template>
@@ -29,7 +38,29 @@ const confidenceValue = computed(() => confidenceValueFor(props.record, props.ev
     <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">
       {{ eyebrow }}
     </div>
-    <div class="mt-2 text-base font-semibold text-slate-900 dark:text-slate-100" v-html="formatIonicLiquidHtml(lubricantDisplay(record))"></div>
+    <div class="mt-2 leading-tight">
+      <span
+        v-for="(line, lineIndex) in lubricantDisplayRows(record)"
+        :key="`${record.id}-card-il-${lineIndex}-${line.text}`"
+        class="block"
+        :class="lubricantLineClass(line)"
+      >
+        <template v-if="line.kind === 'ratio'">
+          <span class="inline-flex items-center gap-1.5 rounded-[0.25rem] bg-[#f8fafc] px-1.5 py-[2px] text-[9.5px] font-bold text-[#475569] shadow-[inset_0_0_0_1px_rgba(226,232,240,1)] dark:bg-slate-800 dark:text-slate-300 dark:shadow-[inset_0_0_0_1px_rgba(51,65,85,1)]">
+            <span class="text-[8.5px] font-black uppercase tracking-wider text-[#94a3b8] dark:text-slate-500">Ratio</span>
+            {{ line.text.slice(1, -1) }}
+          </span>
+        </template>
+        <template v-else>
+          <span
+            v-for="(part, partIndex) in ionicLiquidParts(line.text)"
+            :key="`${record.id}-card-il-${lineIndex}-${partIndex}-${part}`"
+            class="inline whitespace-normal break-words"
+            v-html="formatIonicLiquidPartHtml(part)"
+          />
+        </template>
+      </span>
+    </div>
     <div
       v-if="lubricantAliasDisplay(record)"
       class="mt-1 inline-flex max-w-full items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"

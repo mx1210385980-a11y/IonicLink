@@ -14,6 +14,7 @@ import {
   lubricantAliasDisplay,
   lubricantDisplay,
   lubricantDisplayLines,
+  lubricantDisplayRows,
   lubricantStructureItems,
   lubricantStructureLayout,
   lubricantTooltip,
@@ -174,6 +175,17 @@ describe('integratedExplorerHelpers', () => {
     })
   })
 
+  it('does not display bare legacy numeric molRatio values as concentration chips', () => {
+    const legacy = detailedConditionChips(createRecord({ molRatio: '17.4' }))
+    expect(legacy.some((chip) => chip.key === 'mol_ratio')).toBe(false)
+
+    const molar = detailedConditionChips(createRecord({ molRatio: '1.6 M' }))
+    expect(molar.find((chip) => chip.key === 'mol_ratio')?.full).toBe('1.6 M')
+
+    const ratio = detailedConditionChips(createRecord({ molRatio: '1:70' }))
+    expect(ratio.find((chip) => chip.key === 'mol_ratio')?.full).toBe('1:70')
+  })
+
   it('keeps high-load squeeze-out conditions compact instead of inferring nN', () => {
     const chips = detailedConditionChips(createRecord({
       loadValue: 'high load after n = 3 squeeze-out',
@@ -223,6 +235,15 @@ describe('integratedExplorerHelpers', () => {
     expect(formatIonicLiquidPartHtml('[P66614]')).toBe('[P<sub>6,6,6,14</sub>]')
     expect(formatIonicLiquidPartHtml('[P4,4,4,1]')).toBe('[P<sub>4,4,4,1</sub>]')
     expect(formatIonicLiquidPartHtml('[P6,6,6,14]')).toBe('[P<sub>6,6,6,14</sub>]')
+    expect(formatIonicLiquidPartHtml('[i(C8)2PO2]')).toBe('[<sup>i</sup>(C<sub>8</sub>)<sub>2</sub>PO<sub>2</sub>]')
+    expect(formatIonicLiquidPartHtml('[(iC8)2PO2]')).toBe('[<sup>i</sup>(C<sub>8</sub>)<sub>2</sub>PO<sub>2</sub>]')
+    const ic8Layout = lubricantStructureLayout(createRecord({
+      lubricant: '[P6,6,6,14][i(C8)2PO2]',
+      cation: 'P6,6,6,14',
+      anion: 'i(C8)2PO2',
+    }))
+    expect(ic8Layout?.pairs[0]?.anion.smiles).toContain('O=P([O-])')
+    expect(ic8Layout?.pairs[0]?.anion.smiles).toContain('CC(C)CC(C)(C)C')
     const ratioHtml = formatIonicLiquidHtml('[P66614][BTA] (80 wt%)')
     expect(ratioHtml).toContain('[P<sub>6,6,6,14</sub>][BTA]')
     expect(ratioHtml).toContain('Ratio')
@@ -263,11 +284,16 @@ describe('integratedExplorerHelpers', () => {
       ],
     })
 
-    expect(lubricantDisplay(mixture)).toBe('[P6,6,6,14] [BTA]/[Doc] (4:1 wt)')
+    expect(lubricantDisplay(mixture)).toBe('[P6,6,6,14][BTA] / [P6,6,6,14][Doc] (4:1 wt)')
     expect(lubricantDisplayLines(mixture)).toEqual([
       '[P6,6,6,14][BTA]',
       '[P6,6,6,14][Doc]',
       '(4:1 wt)',
+    ])
+    expect(lubricantDisplayRows(mixture).map((line) => [line.text, line.emphasis])).toEqual([
+      ['[P6,6,6,14][BTA]', 'primary'],
+      ['[P6,6,6,14][Doc]', 'secondary'],
+      ['(4:1 wt)', 'secondary'],
     ])
     const layout = lubricantStructureLayout(mixture)
     expect(layout?.kind).toBe('shared-cation')
@@ -283,7 +309,25 @@ describe('integratedExplorerHelpers', () => {
     expect(lubricantTooltip(mixture)).toContain('[P6,6,6,14][BTA]: 80 wt%')
   })
 
-  it('keeps ionic-liquid additive/base-oil ratios in the display label', () => {
+  it('renders pyridinium cations used by pure and hydroxylated alkyl pyridinium ILs', () => {
+    const c5py = lubricantStructureLayout(createRecord({
+      lubricant: '[C5Py][BF4]',
+      cation: 'C5Py',
+      anion: 'BF4',
+    }))
+    expect(c5py?.pairs[0]?.cation.smiles).toBe('CCCCC[n+]1ccccc1')
+    expect(c5py?.pairs[0]?.anion.smiles).toBe('F[B-](F)(F)F')
+
+    const hoc4py = lubricantStructureLayout(createRecord({
+      lubricant: '[HOC4Py][TFSI]',
+      cation: 'HOC4Py',
+      anion: 'TFSI',
+    }))
+    expect(hoc4py?.pairs[0]?.cation.smiles).toBe('OCCCC[n+]1ccccc1')
+    expect(hoc4py?.pairs[0]?.anion.smiles).toContain('S(=O)(=O)')
+  })
+
+  it('shows base oils as secondary compound lines while keeping the ionic liquid primary', () => {
     const additiveBlend = createRecord({
       lubricant: '[P6,6,6,14][BScB]',
       lubricantComponents: [
@@ -293,7 +337,75 @@ describe('integratedExplorerHelpers', () => {
     })
 
     expect(lubricantDisplay(additiveBlend)).toBe('[P6,6,6,14][BScB] / DEGDBE oil (1:70 mol)')
-    expect(lubricantDisplayLines(additiveBlend)).toEqual(['[P6,6,6,14][BScB] / DEGDBE oil (1:70 mol)'])
+    expect(lubricantDisplayLines(additiveBlend)).toEqual(['[P6,6,6,14][BScB]', 'DEGDBE oil', '(1:70 mol)'])
+    expect(lubricantDisplayRows(additiveBlend).map((line) => [line.text, line.emphasis])).toEqual([
+      ['[P6,6,6,14][BScB]', 'primary'],
+      ['DEGDBE oil', 'secondary'],
+      ['(1:70 mol)', 'secondary'],
+    ])
     expect(lubricantTooltip(additiveBlend)).toContain('DEGDBE oil: 98.5915 mol%')
+
+    const hexadecaneBlend = createRecord({
+      lubricant: '[P6,6,6,14][i(C8)2PO2]',
+      lubricantComponents: [
+        { compound: '[P6,6,6,14][i(C8)2PO2]', fraction: 0.001, unit: 'mol%', role: 'ionic_liquid' },
+        { compound: 'hexadecane', fraction: 99.999, unit: 'mol%', role: 'base_oil' },
+      ],
+    })
+    expect(lubricantDisplayRows(hexadecaneBlend).map((line) => [line.text, line.emphasis])).toEqual([
+      ['[P6,6,6,14][i(C8)2PO2]', 'primary'],
+      ['hexadecane', 'secondary'],
+      ['(1:99999 mol)', 'secondary'],
+    ])
+  })
+
+  it('does not render internal x_IL dataset fractions as mixture ratios', () => {
+    const legacyXil = createRecord({
+      lubricant: '[P6,6,6,14][AOT]',
+      cation: 'P6,6,6,14',
+      anion: 'AOT',
+      lubricantComponents: [
+        { compound: '[P6,6,6,14][AOT]', fraction: 1.002, unit: 'dataset x_IL', role: 'ionic_liquid' },
+        { compound: '(CH2CO2Et)2', role: 'solvent' },
+      ],
+    })
+
+    expect(lubricantDisplayLines(legacyXil)).toEqual([
+      '[P6,6,6,14][AOT]',
+      '(CH2CO2Et)2',
+    ])
+    expect(lubricantDisplay(legacyXil)).toBe('[P6,6,6,14][AOT] / (CH2CO2Et)2')
+  })
+
+  it('renders normalized x_IL mol% mixtures and pure-solvent controls cleanly', () => {
+    const normalizedXil = createRecord({
+      lubricant: '[P6,6,6,14][AOT]',
+      lubricantComponents: [
+        { compound: '[P6,6,6,14][AOT]', fraction: 1.002, unit: 'mol%', role: 'ionic_liquid' },
+        { compound: '(CH2CO2Et)2', fraction: 98.998, unit: 'mol%', role: 'solvent' },
+      ],
+    })
+    expect(lubricantDisplayLines(normalizedXil)).toEqual([
+      '[P6,6,6,14][AOT]',
+      '(CH2CO2Et)2',
+      '(1:99 mol)',
+    ])
+
+    const pureSolvent = createRecord({
+      lubricant: '[P6,6,6,14][AOT]',
+      cation: 'P6,6,6,14',
+      anion: 'AOT',
+      lubricantComponents: [
+        { compound: '(CH2CO2Et)2', fraction: 100, unit: 'mol%', role: 'solvent' },
+      ],
+    })
+    expect(lubricantDisplayLines(pureSolvent)).toEqual(['(CH2CO2Et)2'])
+    expect(lubricantStructureItems(pureSolvent).map((item) => item.label)).toEqual(['(CH2CO2Et)2'])
+
+    const pureBaseOil = createRecord({
+      lubricant: 'hexadecane',
+      lubricantComponents: [],
+    })
+    expect(lubricantStructureItems(pureBaseOil).map((item) => item.label)).toEqual(['hexadecane'])
   })
 })

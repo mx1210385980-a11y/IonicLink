@@ -111,6 +111,7 @@ const journalMetaRules: Array<{
       accentSoft: '#dffafa',
       gradient: 'linear-gradient(145deg, #042f2e 0%, #0f766e 48%, #67e8f9 100%)',
       initials: 'NS',
+      coverImage: '/journal-covers/nanoscale.webp',
     },
   },
   {
@@ -150,6 +151,7 @@ const journalMetaRules: Array<{
       accentSoft: '#dbeafe',
       gradient: 'linear-gradient(145deg, #172554 0%, #2563eb 52%, #22d3ee 100%)',
       initials: 'JPC',
+      coverImage: '/journal-covers/jpccck.2026.130.issue-18.xlargecover.jpg',
     },
   },
   {
@@ -218,6 +220,7 @@ const journalMetaRules: Array<{
       accentSoft: '#e0f2fe',
       gradient: 'linear-gradient(145deg, #082f49 0%, #0284c7 50%, #f59e0b 100%)',
       initials: 'TI',
+      coverImage: '/journal-covers/tribology-international.jpg',
     },
   },
   {
@@ -231,6 +234,7 @@ const journalMetaRules: Array<{
       accentSoft: '#f1f5f9',
       gradient: 'linear-gradient(145deg, #020617 0%, #334155 54%, #f97316 100%)',
       initials: 'WR',
+      coverImage: '/journal-covers/wear.jpg',
     },
   },
   {
@@ -244,6 +248,7 @@ const journalMetaRules: Array<{
       accentSoft: '#ede9fe',
       gradient: 'linear-gradient(145deg, #2e1065 0%, #7c3aed 52%, #22d3ee 100%)',
       initials: 'JML',
+      coverImage: '/journal-covers/journal-of-molecular-liquids.jpg',
     },
   },
   {
@@ -257,6 +262,7 @@ const journalMetaRules: Array<{
       accentSoft: '#e0f2fe',
       gradient: 'linear-gradient(145deg, #0c4a6e 0%, #0ea5e9 55%, #bae6fd 100%)',
       initials: 'CSA',
+      coverImage: '/journal-covers/colloids-surfaces-a.jpg',
     },
   },
   {
@@ -270,6 +276,7 @@ const journalMetaRules: Array<{
       accentSoft: '#e2e8f0',
       gradient: 'linear-gradient(145deg, #020617 0%, #475569 58%, #cbd5e1 100%)',
       initials: 'CB',
+      coverImage: '/journal-covers/carbon.jpg',
     },
   },
 ]
@@ -331,6 +338,17 @@ function journalMetaFor(journal: string, doi?: string): JournalMeta {
   if (matched) return { ...matched.meta, known: true }
   const publisherHint = publisherFromDoi(doi)?.publisher
   return fallbackMeta(journal, publisherHint)
+}
+
+function sourceGroupIdentity(source: SourceItem) {
+  const meta = journalMetaFor(source.journal, source.item.doi)
+  const canonicalName = meta.known ? meta.displayName : (source.journal || source.publisher || 'unknown')
+  return {
+    key: normalizeKey(`${meta.known ? 'journal' : 'source'}-${canonicalName}`),
+    journal: canonicalName,
+    publisher: meta.publisher || source.publisher,
+    meta,
+  }
 }
 
 function recordTotal(item: Literature) {
@@ -415,14 +433,14 @@ const sourceItems = computed<SourceItem[]>(() => {
 const sourceGroups = computed<SourceGroup[]>(() => {
   const grouped = new Map<string, SourceGroup>()
   sourceItems.value.forEach((source) => {
-    const key = normalizeKey(source.journal || source.publisher || 'unknown')
+    const identity = sourceGroupIdentity(source)
+    const key = identity.key
     if (!grouped.has(key)) {
-      const meta = journalMetaFor(source.journal, source.item.doi)
       grouped.set(key, {
         key,
-        journal: source.journal,
-        publisher: meta.publisher || source.publisher,
-        meta,
+        journal: identity.journal,
+        publisher: identity.publisher,
+        meta: identity.meta,
         count: 0,
         records: 0,
         candidates: 0,

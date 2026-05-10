@@ -149,13 +149,13 @@ const showAdvanced = ref(false)
 const HIDDEN_ALGORITHMS = new Set(['mlp'])
 type WorkbenchTabKey = 'overview' | 'data' | 'experiments' | 'reports' | 'diagnostics' | 'versions'
 const activeWorkbenchTab = ref<WorkbenchTabKey>('overview')
-const defaultWorkbenchTab = { key: 'overview', label: '总览', description: '核心指标、运行提示和拟合状态。' } as const
+const defaultWorkbenchTab = { key: 'overview', label: '总览', description: '核心指标、拟合曲线和预测诊断。' } as const
 const workbenchTabs: Array<{ key: WorkbenchTabKey; label: string; description: string }> = [
   defaultWorkbenchTab,
-  { key: 'data', label: '数据', description: '划分策略、外推集合和重复工况噪声。' },
+  { key: 'data', label: '数据', description: '划分策略、测试集合和重复工况噪声。' },
   { key: 'experiments', label: '实验', description: '特征组增益、自动调参和算法对比。' },
-  { key: 'reports', label: '报告', description: '训练报告、曲线、散点图和特征重要性。' },
-  { key: 'diagnostics', label: '诊断', description: '外推失败归因和高残差样本回看。' },
+  { key: 'reports', label: '报告', description: '训练报告、特征重要性和可解释摘要。' },
+  { key: 'diagnostics', label: '诊断', description: '高残差样本归因和数据回看。' },
   { key: 'versions', label: '版本', description: '保存、推荐、编辑和回看模型版本。' },
 ]
 const activeWorkbenchTabMeta = computed(() => workbenchTabs.find((tab) => tab.key === activeWorkbenchTab.value) || defaultWorkbenchTab)
@@ -170,7 +170,7 @@ const showSaveVersionModal = ref(false)
 const saveVersionName = ref('')
 const saveVersionDescription = ref('')
 const saveVersionRecommended = ref(false)
-const NON_ITERATIVE_ALGORITHMS = new Set(['svr', 'linear_regression'])
+const NON_ITERATIVE_ALGORITHMS = new Set(['svr', 'linear_regression', 'high_cof_segmented'])
 const splitDetailTabs: Array<{ key: 'subsets' | 'bins' | 'folds'; label: string }> = [
   { key: 'subsets', label: '总体' },
   { key: 'bins', label: 'μ 分箱' },
@@ -179,18 +179,35 @@ const splitDetailTabs: Array<{ key: 'subsets' | 'bins' | 'folds'; label: string 
 const targetAggregationOptions = [
   {
     key: 'raw',
-    label: '保留原始',
-    description: '不改变样本，适合重复工况一致或需要保留每次实验差异。',
+    label: '保留原始（验证稳健）',
+    description: '默认推荐：保留完整样本，只剔除极端目标点；验证 R² 更可信，但同工况冲突会让预测略向均值收缩。',
+  },
+  {
+    key: 'drop_conflicts',
+    label: '剔除冲突组（拟合优先）',
+    description: '移除同工况下 COF 差异过大的记录，只影响训练矩阵，不删除知识库原始数据；曲线更贴近 Y=X，但 #8 样本会变少，CV R² 容易偏低。',
   },
   {
     key: 'mean_by_condition',
     label: '按工况均值聚合',
     description: '同一离子/工况的重复实验合成一条均值样本，优先降低目标噪声。',
   },
+]
+const targetOutlierOptions = [
   {
-    key: 'drop_conflicts',
-    label: '排除冲突组',
-    description: '移除同工况下 COF 差异过大的组，适合先做干净基线。',
+    key: 'robust_iqr',
+    label: '稳健剔除（推荐）',
+    description: '按训练集 COF 的 3×IQR 稳健边界剔除极端目标值，并保留 0-2 的物理安全范围；#8 会排除 3 条高端异常样本。',
+  },
+  {
+    key: 'physical',
+    label: '只剔除物理越界',
+    description: '只剔除 COF < 0 或 COF > 2 的明显越界值，保留高摩擦长尾。',
+  },
+  {
+    key: 'off',
+    label: '不剔除',
+    description: '完整保留所有样本；适合做审计对照，但容易被少数极端点拉低 R²。',
   },
 ]
 const FEATURE_GROUP_DEFINITIONS: FeatureGroupDefinition[] = [
@@ -313,9 +330,22 @@ const emit = defineEmits<{
 
 const form = reactive<ModelTrainingStartPayload>({
   target: 'Target_COF',
-  algorithm: 'gradient_boosting',
-  hyperparameters: { n_estimators: 120, learning_rate: 0.06, max_depth: 3, l2_leaf_reg: 3, random_strength: 1 },
-  data_options: { validation_split: 0.2, min_confidence: 0, max_records: null, random_seed: 42, split_strategy: 'joint_stratified', cv_folds: 5, target_aggregation_strategy: 'raw' },
+  algorithm: 'catboost',
+  hyperparameters: { n_estimators: 300, learning_rate: 0.08, max_depth: 3, l2_leaf_reg: 2, random_strength: 1 },
+  data_options: {
+    validation_split: 0.2,
+    min_confidence: 0,
+    max_records: null,
+    random_seed: 42,
+    split_strategy: 'joint_stratified',
+    cv_folds: 5,
+    reserve_external_validation: false,
+    target_aggregation_strategy: 'raw',
+    target_outlier_strategy: 'robust_iqr',
+    target_outlier_iqr_multiplier: 3,
+    target_outlier_min: 0,
+    target_outlier_max: 2,
+  },
   cleaned_dataset_id: null,
 })
 
@@ -331,7 +361,6 @@ const currentPoint = computed(() => activeTask.value?.current || null)
 const hasSavedDatasets = computed(() => savedDatasets.value.length > 0)
 const selectedDataset = computed(() => savedDatasets.value.find((dataset) => dataset.id === selectedCleanedDatasetId.value) || null)
 const availableAlgorithms = computed(() => (summary.value?.algorithms || []).filter((algorithm) => !HIDDEN_ALGORITHMS.has(algorithm.key)))
-const runWarnings = computed(() => activeTask.value?.warnings || [])
 const isRandomForest = computed(() => form.algorithm === 'random_forest')
 const usableRecords = computed(() => activeTask.value?.dataset.usable_records || summary.value?.dataset.usable_records || 0)
 const progressPercent = computed(() => Math.round((currentPoint.value?.progress || 0) * 100))
@@ -346,15 +375,26 @@ const activeAlgorithm = computed(() => activeTask.value?.config.algorithm || for
 const isActiveNonIterativeModel = computed(() => NON_ITERATIVE_ALGORITHMS.has(activeAlgorithm.value))
 const fitProgressLabel = computed(() => {
   if (activeTask.value?.status !== 'running') return ''
-  if (isActiveNonIterativeModel.value) return activeAlgorithm.value === 'svr' ? 'SVR 单次拟合中' : '线性回归拟合中'
+  if (isActiveNonIterativeModel.value) {
+    if (activeAlgorithm.value === 'svr') return 'SVR 单次拟合中'
+    if (activeAlgorithm.value === 'high_cof_segmented') return '门控分段堆叠中'
+    return '线性回归拟合中'
+  }
   return `${activeTask.value?.current_round || 0} / ${activeTask.value?.total_rounds || form.hyperparameters.n_estimators} 轮`
 })
-const fitModeTitle = computed(() => activeAlgorithm.value === 'svr' ? 'SVR 单次拟合结果' : '线性回归单次拟合结果')
+const fitModeTitle = computed(() => {
+  if (activeAlgorithm.value === 'svr') return 'SVR 单次拟合结果'
+  if (activeAlgorithm.value === 'high_cof_segmented') return '高 COF 分段模型结果'
+  return '线性回归单次拟合结果'
+})
 const fitModeDescription = computed(() => {
   if (activeAlgorithm.value === 'svr') {
-    return 'SVR 一次性求解支持向量回归目标，没有逐轮加树或 epoch；这里固定展示最终交叉验证、测试和外推表现。'
+    return 'SVR 一次性求解支持向量回归目标，没有逐轮加树或 epoch；这里固定展示最终交叉验证和测试集表现。'
   }
-  return '线性回归一次性求解系数，没有逐轮训练轨迹；这里固定展示最终交叉验证、测试和外推表现。'
+  if (activeAlgorithm.value === 'high_cof_segmented') {
+    return '先用 CatBoost 识别高摩擦尾部，再用高 COF 局部模型校准；它没有逐轮曲线，重点观察最终 CV、测试和高 COF 残差。'
+  }
+  return '线性回归一次性求解系数，没有逐轮训练轨迹；这里固定展示最终交叉验证和测试集表现。'
 })
 const recommendedModel = computed(() => registeredModels.value.find((model) => model.is_recommended) || null)
 const activeRegisteredModel = computed(() => {
@@ -473,7 +513,7 @@ const reportMetrics = computed(() => {
     { key: 'validation', label: '验证集', tone: 'text-[#0f766e]', metric: metrics.validation },
     { key: 'test', label: '测试集', tone: 'text-[#cf334f]', metric: metrics.test || null },
     { key: 'external', label: '外推验证', tone: 'text-[#c2410c]', metric: metrics.external || null },
-  ]
+  ].filter((row) => row.metric)
 })
 const reportRisks = computed(() => experimentReport.value?.risks || [])
 const reportFeatureTop = computed(() => experimentReport.value?.feature_importance_top?.slice(0, 6) || [])
@@ -492,9 +532,18 @@ const targetNoise = computed(() =>
   || summary.value?.dataset?.target_noise
   || null,
 )
+const targetOutliers = computed(() =>
+  activeTask.value?.dataset?.target_outliers
+  || experimentPreview.value?.dataset?.target_outliers
+  || summary.value?.dataset?.target_outliers
+  || null,
+)
 const targetNoiseTopGroups = computed(() => (targetNoise.value?.top_groups || []).slice(0, 5))
 const selectedAggregationOption = computed(() =>
   targetAggregationOptions.find((option) => option.key === (form.data_options.target_aggregation_strategy || 'raw')) ?? targetAggregationOptions[0],
+)
+const selectedOutlierOption = computed(() =>
+  targetOutlierOptions.find((option) => option.key === (form.data_options.target_outlier_strategy || 'robust_iqr')) ?? targetOutlierOptions[0],
 )
 const targetNoiseAppliedLabel = computed(() => targetAggregationLabel(targetNoise.value?.strategy_applied || 'raw'))
 const targetNoiseRecommendationLabel = computed(() => targetAggregationLabel(targetNoise.value?.recommended_strategy || 'raw'))
@@ -682,59 +731,60 @@ const predictionScatterData = computed(() => {
   const testSamplesData = testSamples.value
   const externalSamplesData = externalSamples.value
   const { min, max } = predictionRange.value
-  return {
-    datasets: [
-      {
-        type: 'line' as const,
-        label: 'Y = X 参考线',
-        data: [
-          { x: min, y: min },
-          { x: max, y: max },
-        ],
-        borderColor: 'rgba(148,163,184,0.7)',
-        borderDash: [6, 4],
-        borderWidth: 1.5,
-        pointRadius: 0,
-        showLine: true,
-        fill: false,
-      },
-      {
-        type: 'line' as const,
-        label: `验证集 (CV) · ${valSamples.length}`,
-        data: valSamples.map((sample) => ({ x: sample.actual, y: sample.predicted })),
-        backgroundColor: 'rgba(91, 86, 234, 0.55)',
-        borderColor: 'rgba(255,255,255,0.7)',
-        borderWidth: 0.8,
-        pointRadius: 4,
-        pointHoverRadius: 6,
-        showLine: false,
-      },
-      {
-        type: 'line' as const,
-        label: `测试集（隔离）· ${testSamplesData.length}`,
-        data: testSamplesData.map((sample) => ({ x: sample.actual, y: sample.predicted })),
-        backgroundColor: 'rgba(239, 68, 68, 0.78)',
-        borderColor: 'rgba(255,255,255,0.85)',
-        borderWidth: 1,
-        pointRadius: 5.5,
-        pointHoverRadius: 8,
-        pointStyle: 'rectRot' as const,
-        showLine: false,
-      },
-      {
-        type: 'line' as const,
-        label: `外推验证 · ${externalSamplesData.length}`,
-        data: externalSamplesData.map((sample) => ({ x: sample.actual, y: sample.predicted })),
-        backgroundColor: 'rgba(245, 158, 11, 0.82)',
-        borderColor: 'rgba(255,255,255,0.9)',
-        borderWidth: 1,
-        pointRadius: 5.5,
-        pointHoverRadius: 8,
-        pointStyle: 'triangle' as const,
-        showLine: false,
-      },
-    ],
+  const datasets: any[] = [
+    {
+      type: 'line' as const,
+      label: 'Y = X 参考线',
+      data: [
+        { x: min, y: min },
+        { x: max, y: max },
+      ],
+      borderColor: 'rgba(148,163,184,0.7)',
+      borderDash: [6, 4],
+      borderWidth: 1.5,
+      pointRadius: 0,
+      showLine: true,
+      fill: false,
+    },
+    {
+      type: 'line' as const,
+      label: `验证集 (CV) · ${valSamples.length}`,
+      data: valSamples.map((sample) => ({ x: sample.actual, y: sample.predicted })),
+      backgroundColor: 'rgba(91, 86, 234, 0.55)',
+      borderColor: 'rgba(255,255,255,0.7)',
+      borderWidth: 0.8,
+      pointRadius: 4,
+      pointHoverRadius: 6,
+      showLine: false,
+    },
+    {
+      type: 'line' as const,
+      label: `测试集（隔离）· ${testSamplesData.length}`,
+      data: testSamplesData.map((sample) => ({ x: sample.actual, y: sample.predicted })),
+      backgroundColor: 'rgba(239, 68, 68, 0.78)',
+      borderColor: 'rgba(255,255,255,0.85)',
+      borderWidth: 1,
+      pointRadius: 5.5,
+      pointHoverRadius: 8,
+      pointStyle: 'rectRot' as const,
+      showLine: false,
+    },
+  ]
+  if (externalSamplesData.length) {
+    datasets.push({
+      type: 'line' as const,
+      label: `外推验证 · ${externalSamplesData.length}`,
+      data: externalSamplesData.map((sample) => ({ x: sample.actual, y: sample.predicted })),
+      backgroundColor: 'rgba(245, 158, 11, 0.82)',
+      borderColor: 'rgba(255,255,255,0.9)',
+      borderWidth: 1,
+      pointRadius: 5.5,
+      pointHoverRadius: 8,
+      pointStyle: 'triangle' as const,
+      showLine: false,
+    })
   }
+  return { datasets }
 })
 
 const predictionScatterOptions = computed(() => ({
@@ -795,6 +845,7 @@ const activeSplitOption = computed(() =>
   splitOptions.value.find((opt) => opt.key === form.data_options.split_strategy) || null,
 )
 const experimentDataset = computed(() => experimentPreview.value?.dataset || summary.value?.dataset || null)
+const experimentTargetOutliers = computed(() => experimentPreview.value?.dataset?.target_outliers || null)
 const experimentSplit = computed(() => experimentPreview.value?.dataset?.split || null)
 const experimentSplitDetails = computed(() => experimentSplit.value?.details || null)
 const experimentSplitSubsets = computed(() => experimentSplitDetails.value?.subsets || [])
@@ -898,7 +949,6 @@ const fitDiagnostic = computed(() => {
   const trainR2 = nullableNumber(currentPoint.value.train_r2)
   const valR2 = nullableNumber(currentPoint.value.val_r2)
   const testR2 = nullableNumber(testMetrics.value?.test_r2)
-  const externalR2 = nullableNumber(externalMetrics.value?.external_r2)
   const holdoutScores = [valR2, testR2].filter((value): value is number => value != null)
   const featureCount = trainingFeatureColumns.value.length || activeTask.value?.dataset?.feature_dimensions || summary.value?.dataset.feature_dimensions || 0
   const sampleCount = activeTask.value?.dataset?.usable_records || summary.value?.dataset.usable_records || 0
@@ -936,11 +986,10 @@ const fitDiagnostic = computed(() => {
         { label: '训练 R²', value: trainR2 },
         { label: '验证 R²', value: valR2 },
         { label: '测试 R²', value: testR2 },
-        { label: '外推 R²', value: externalR2 },
       ],
       actions: [
         '先比较“结构核心”和“结构核心 + 工况”，不要直接堆高维特征。',
-        '查看外推失败样本归因，补阳离子 × μ 分箱覆盖不足的区域。',
+        '查看测试集高残差样本，补阳离子 × μ 分箱覆盖不足的区域。',
         '尝试随机森林或梯度提升的更强正则化版本，再比较测试集表现。',
       ],
     }
@@ -973,11 +1022,10 @@ const fitDiagnostic = computed(() => {
       { label: '训练 R²', value: trainR2 },
       { label: '验证 R²', value: valR2 },
       { label: '测试 R²', value: testR2 },
-      { label: '外推 R²', value: externalR2 },
     ],
     actions: [
       '用同一 seed/split 做阶梯式特征加入，避免把划分波动误认为特征增益。',
-      '优先关注测试集提升，外推集用于定位需要补样本的稀有组合。',
+      '优先关注测试集提升，并用高残差样本定位需要补数据的稀有组合。',
     ],
   }
 })
@@ -1146,6 +1194,7 @@ function algorithmLabelZh(key: string | null | undefined) {
     case 'gradient_boosting': return '梯度提升（Gradient Boosting）'
     case 'random_forest': return '随机森林（Random Forest）'
     case 'catboost': return 'CatBoost'
+    case 'high_cof_segmented': return '高 COF 分段模型'
     case 'xgboost': return '极端梯度提升（XGBoost）'
     case 'svr': return '支持向量回归（SVR）'
     case 'mlp': return '多层感知机（MLP）'
@@ -1214,9 +1263,18 @@ function splitStrategyLabel(value: string | null | undefined) {
 function targetAggregationLabel(value: string | null | undefined) {
   switch (value) {
     case 'mean_by_condition': return '按工况均值聚合'
-    case 'drop_conflicts': return '排除冲突组'
+    case 'drop_conflicts': return '剔除冲突组'
     case 'raw':
     default: return '保留原始'
+  }
+}
+
+function targetOutlierLabel(value: string | null | undefined) {
+  switch (value) {
+    case 'robust_iqr': return '稳健剔除'
+    case 'physical': return '物理越界'
+    case 'off': return '不剔除'
+    default: return value ? formatTitleLabel(value) : '稳健剔除'
   }
 }
 
@@ -2378,12 +2436,72 @@ watch(
                     <p class="mt-1.5 text-[11px] leading-snug text-slate-500">
                       {{ selectedAggregationOption?.description || '选择训练前如何处理重复工况目标噪声。' }}
                     </p>
+                    <p
+                      v-if="form.data_options.target_aggregation_strategy === 'drop_conflicts'"
+                      class="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] leading-snug text-amber-700"
+                    >
+                      拟合优先会显著减少训练样本：隔离测试曲线通常更好看，但交叉验证 R² 可能因每折样本太少而偏低。
+                    </p>
                   </label>
+                </div>
+
+                <div class="border-t border-[#eef2f6] pt-3">
+                  <label class="block text-xs">
+                    <span
+                      class="mb-1 block font-semibold text-slate-700"
+                      title="仅从训练矩阵中排除极端目标值，不会删除 Knowledge 原始记录。适合 COF=3.4 这类少数点把模型整体拉歪的情况。"
+                    >目标异常点处理</span>
+                    <select
+                      v-model="form.data_options.target_outlier_strategy"
+                      class="h-8 w-full rounded-[0.55rem] border border-[#e2e8f0] bg-white px-2 text-xs text-slate-900 outline-none transition focus:border-[#aebdfc] focus:ring-2 focus:ring-[#aebdfc]/20"
+                    >
+                      <option v-for="option in targetOutlierOptions" :key="option.key" :value="option.key">
+                        {{ option.label }}
+                      </option>
+                    </select>
+                    <p class="mt-1.5 text-[11px] leading-snug text-slate-500">
+                      {{ selectedOutlierOption?.description || '选择训练前如何处理极端目标值。' }}
+                    </p>
+                  </label>
+                  <div
+                    v-if="form.data_options.target_outlier_strategy === 'robust_iqr'"
+                    class="mt-2 grid grid-cols-2 gap-2 text-[11px]"
+                  >
+                    <label>
+                      <span class="mb-1 block font-semibold text-slate-500">IQR 倍数</span>
+                      <input
+                        v-model.number="form.data_options.target_outlier_iqr_multiplier"
+                        type="number"
+                        min="1"
+                        max="6"
+                        step="0.5"
+                        class="h-8 w-full rounded-[0.5rem] border border-[#e2e8f0] bg-white px-2 text-xs outline-none focus:border-[#aebdfc] focus:ring-2 focus:ring-[#aebdfc]/20"
+                      >
+                    </label>
+                    <label>
+                      <span class="mb-1 block font-semibold text-slate-500">COF 上限</span>
+                      <input
+                        v-model.number="form.data_options.target_outlier_max"
+                        type="number"
+                        min="0.5"
+                        max="5"
+                        step="0.1"
+                        class="h-8 w-full rounded-[0.5rem] border border-[#e2e8f0] bg-white px-2 text-xs outline-none focus:border-[#aebdfc] focus:ring-2 focus:ring-[#aebdfc]/20"
+                      >
+                    </label>
+                  </div>
+                  <p
+                    v-if="targetOutliers?.rows_removed"
+                    class="mt-2 rounded-md border border-[#d8f3df] bg-[#f2fbf5] px-2 py-1.5 text-[11px] leading-snug text-[#28784d]"
+                  >
+                    当前预览会从训练矩阵排除 {{ targetOutliers.rows_removed }} 条目标异常点；原始数据库不受影响。
+                  </p>
                 </div>
 
                 <p class="text-[11px] leading-5 text-slate-500">
                   随机种子 {{ form.data_options.random_seed }}<template v-if="form.data_options.split_strategy === 'random_holdout'"> · 验证集占比 {{ validationSplitPercent }}%</template><template v-else-if="form.data_options.split_strategy === 'joint_stratified'"> · 测试集约 {{ validationSplitPercent }}% · {{ form.data_options.cv_folds || 5 }} 折 CV</template><template v-else> · 折数 {{ form.data_options.cv_folds || 5 }}</template>
                   · {{ targetAggregationLabel(form.data_options.target_aggregation_strategy) }}
+                  · {{ targetOutlierLabel(form.data_options.target_outlier_strategy) }}
                 </p>
               </div>
             </section>
@@ -2518,7 +2636,7 @@ watch(
               @click="activeWorkbenchTab = 'reports'"
             >
               <p class="text-[11px] font-bold uppercase tracking-[0.16em] text-[#64748b]">最后读报告</p>
-              <p class="mt-1 text-sm font-semibold text-slate-950">曲线、散点和特征重要性</p>
+              <p class="mt-1 text-sm font-semibold text-slate-950">训练摘要、特征重要性</p>
             </button>
           </section>
 
@@ -2534,7 +2652,10 @@ watch(
               <div class="flex flex-wrap gap-1.5 text-[11px] font-semibold text-slate-600">
                 <span class="rounded-full bg-white px-2.5 py-1 ring-1 ring-[#e2e8f0]">训练池 {{ datasetSplit.train_pool_size ?? activeTask?.dataset?.pool_size ?? 0 }}</span>
                 <span class="rounded-full bg-white px-2.5 py-1 ring-1 ring-[#e2e8f0]">测试集 {{ datasetSplit.test_size ?? activeTask?.dataset?.test_size ?? 0 }}</span>
-                <span class="rounded-full bg-white px-2.5 py-1 ring-1 ring-[#e2e8f0]">外推验证 {{ datasetSplit.external_size ?? activeTask?.dataset?.external_size ?? 0 }}</span>
+                <span
+                  v-if="Number(datasetSplit.external_size ?? activeTask?.dataset?.external_size ?? 0) > 0"
+                  class="rounded-full bg-white px-2.5 py-1 ring-1 ring-[#e2e8f0]"
+                >外推验证 {{ datasetSplit.external_size ?? activeTask?.dataset?.external_size ?? 0 }}</span>
                 <span v-if="datasetSplit.cv_folds" class="rounded-full bg-white px-2.5 py-1 ring-1 ring-[#e2e8f0]">{{ datasetSplit.cv_folds }} 折 CV</span>
               </div>
             </div>
@@ -2811,20 +2932,6 @@ watch(
                 </p>
               </div>
             </div>
-          </section>
-
-          <!-- 运行警告 -->
-          <section
-            v-if="activeWorkbenchTab === 'overview' && runWarnings.length"
-            class="rounded-[0.85rem] border border-[#ffe4b5] bg-[#fffaf0] px-4 py-3"
-          >
-            <p class="flex items-center gap-1.5 text-xs font-semibold text-[#a16207]">
-              <AlertTriangle class="h-3.5 w-3.5" />
-              运行提示
-            </p>
-            <ul class="mt-1.5 space-y-1 text-xs leading-5 text-[#854d0e]">
-              <li v-for="warning in runWarnings" :key="warning">· {{ warning }}</li>
-            </ul>
           </section>
 
           <section
@@ -3360,7 +3467,7 @@ watch(
           </section>
 
           <!-- 学习曲线 / 单次拟合摘要 -->
-          <section v-if="activeWorkbenchTab === 'reports' && isActiveNonIterativeModel" class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
+          <section v-if="activeWorkbenchTab === 'overview' && isActiveNonIterativeModel" class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
             <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#5b56ea]">
@@ -3397,7 +3504,10 @@ watch(
                   RMSE {{ formatMetric(testMetrics?.test_rmse, 3) }} · MAE {{ formatMetric(testMetrics?.test_mae, 3) }}
                 </p>
               </div>
-              <div class="rounded-[0.75rem] border border-[#eef2f6] bg-[#fbfcff] px-3 py-3">
+              <div
+                v-if="externalMetrics?.sample_count"
+                class="rounded-[0.75rem] border border-[#eef2f6] bg-[#fbfcff] px-3 py-3"
+              >
                 <p class="text-[10px] font-bold uppercase tracking-[0.16em] text-[#c2410c]">外推验证</p>
                 <p class="mt-1 text-lg font-semibold text-slate-950 tabular-nums">R² {{ formatMetric(externalMetrics?.external_r2, 3) }}</p>
                 <p class="mt-1 text-[11px] text-slate-500 tabular-nums">
@@ -3423,7 +3533,7 @@ watch(
             </div>
           </section>
 
-          <section v-else-if="activeWorkbenchTab === 'reports'" class="grid gap-3 xl:grid-cols-2">
+          <section v-else-if="activeWorkbenchTab === 'overview'" class="grid gap-3 xl:grid-cols-2">
             <div class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
               <div class="mb-2 flex items-center justify-between gap-2">
                 <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">
@@ -3456,7 +3566,7 @@ watch(
           </section>
 
           <!-- ⭐ 预测 vs 真实（核心可视化，对应论文图 3.2） -->
-          <section v-if="activeWorkbenchTab === 'reports'" class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
+          <section v-if="activeWorkbenchTab === 'overview'" class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
             <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
               <div>
                 <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#5b56ea]">
@@ -3470,19 +3580,19 @@ watch(
                   <span class="inline-flex items-center gap-1 ml-1">
                     <span class="inline-block h-2 w-2 rotate-45 bg-[#ef4444]" />红色=测试集（隔离）
                   </span>
-                  <span class="inline-flex items-center gap-1 ml-1">
+                  <span v-if="externalSamples.length" class="inline-flex items-center gap-1 ml-1">
                     <span class="inline-block h-0 w-0 border-x-[5px] border-b-[8px] border-x-transparent border-b-[#f59e0b]" />橙色=外推验证
                   </span>
                 </p>
               </div>
               <span v-if="allScatterSamples.length" class="text-[10px] text-slate-400 tabular-nums">
-                验证 {{ predictionSamples.length }} · 测试 {{ testSamples.length }} · 外推 {{ externalSamples.length }}
+                验证 {{ predictionSamples.length }} · 测试 {{ testSamples.length }}<template v-if="externalSamples.length"> · 外推 {{ externalSamples.length }}</template>
               </span>
             </div>
             <div class="h-[300px]">
               <div v-if="!allScatterSamples.length" class="flex h-full flex-col items-center justify-center gap-1 rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] text-center text-xs text-slate-500">
                 <p>训练完成后在此显示散点图</p>
-                <p class="text-slate-400">紫色 = 验证集 K 折预测，红色 = 测试集，橙色 = 外推验证</p>
+                <p class="text-slate-400">紫色 = 验证集 K 折预测，红色 = 测试集</p>
               </div>
               <Line v-else :data="predictionScatterData" :options="predictionScatterOptions" />
             </div>
@@ -4076,6 +4186,31 @@ watch(
                     <p class="text-[10px] font-semibold text-slate-400">训练视图</p>
                     <p class="mt-1 truncate font-semibold text-slate-900">{{ trainingViewLabel(experimentRules?.training_view) }}</p>
                   </div>
+                </div>
+              </div>
+
+              <div class="rounded-[0.9rem] border border-[#d8f3df] bg-[#f2fbf5] p-4">
+                <p class="text-[10px] font-bold uppercase tracking-[0.18em] text-[#28784d]">目标异常点过滤</p>
+                <p class="mt-1 text-sm font-semibold text-slate-950">
+                  {{ targetOutlierLabel(form.data_options.target_outlier_strategy) }}
+                  <template v-if="experimentTargetOutliers?.rows_removed">
+                    · 排除 {{ experimentTargetOutliers.rows_removed }} 条
+                  </template>
+                </p>
+                <p class="mt-1 text-xs leading-5 text-slate-600">
+                  只从本次训练矩阵中排除，不删除 Knowledge 原始数据。
+                  <template v-if="experimentTargetOutliers?.bounds?.upper != null">
+                    当前 COF 上界约 {{ formatMetric(experimentTargetOutliers.bounds.upper, 3) }}。
+                  </template>
+                </p>
+                <div v-if="experimentTargetOutliers?.removed_records?.length" class="mt-2 flex flex-wrap gap-1.5">
+                  <span
+                    v-for="record in experimentTargetOutliers.removed_records.slice(0, 6)"
+                    :key="`${record.record_id}-${record.row_index}`"
+                    class="rounded-md bg-white px-2 py-1 text-[11px] font-semibold text-[#28784d] ring-1 ring-[#bee8ca]"
+                  >
+                    #{{ record.record_id || record.row_index }} · COF {{ formatMetric(record.target, 3) }}
+                  </span>
                 </div>
               </div>
 

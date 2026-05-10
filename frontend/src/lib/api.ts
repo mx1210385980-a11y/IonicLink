@@ -1846,6 +1846,7 @@ export interface ModelTrainingDatasetSummary {
     feature_columns: string[]
     columns: string[]
     rdkit_enabled: boolean
+    target_outliers?: ModelTrainingTargetOutlierSummary | null
     source_scope: ModelTrainingSourceScope
     target_noise?: ModelTrainingTargetNoiseDiagnostics | null
     target?: {
@@ -1908,6 +1909,31 @@ export interface ModelTrainingTargetNoiseDiagnostics {
     top_groups: ModelTrainingTargetNoiseGroup[]
 }
 
+export interface ModelTrainingTargetOutlierSummary {
+    strategy: 'off' | 'physical' | 'robust_iqr' | string
+    enabled: boolean
+    rows_before: number
+    rows_after: number
+    rows_removed: number
+    bounds: {
+        lower?: number | null
+        upper?: number | null
+    }
+    iqr?: {
+        q1: number
+        q3: number
+        iqr: number
+        multiplier: number
+    } | null
+    removed_records?: Array<{
+        row_index?: number | null
+        record_id?: number | string | null
+        literature_id?: number | string | null
+        target: number
+        reasons: string[]
+    }>
+}
+
 export interface ModelTrainingTaskSnapshot {
     task_id: string
     status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
@@ -1963,6 +1989,7 @@ export interface ModelTrainingTaskSnapshot {
         columns?: string[]
         pca_info?: ModelCleaningPcaInfo | null
         target_noise?: ModelTrainingTargetNoiseDiagnostics | null
+        target_outliers?: ModelTrainingTargetOutlierSummary | null
     }
     warnings: string[]
     feature_blocks: Array<{
@@ -2076,10 +2103,15 @@ export interface ModelTrainingDataOptions {
     random_seed: number
     split_strategy?: string
     cv_folds?: number
+    reserve_external_validation?: boolean
     feature_columns?: string[] | null
     feature_subset_key?: string | null
     feature_subset_label?: string | null
     target_aggregation_strategy?: 'raw' | 'mean_by_condition' | 'drop_conflicts' | string
+    target_outlier_strategy?: 'off' | 'physical' | 'robust_iqr' | string
+    target_outlier_iqr_multiplier?: number
+    target_outlier_min?: number | null
+    target_outlier_max?: number | null
 }
 
 export interface ModelTrainingSplitStrategyOption {

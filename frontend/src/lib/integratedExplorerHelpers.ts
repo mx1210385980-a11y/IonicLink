@@ -1,4 +1,4 @@
-import { formatTribopairLabel, type EvidenceResult, type LubricantComponent, type RecordResponse } from '@/lib/api'
+import { formatTribopairLabel, type EvidenceResult, type LubricantComponent, type RecordResponse, type RecordLiteratureDTO } from '@/lib/api'
 import { normalizePotentialDisplayText } from '@/lib/potential'
 
 export type ConfidenceLineItem = {
@@ -33,6 +33,12 @@ export type SurfaceRoughnessBadgeTone = 'specified' | 'estimated'
 export type SurfaceRoughnessBadge = {
   label: string
   tone: SurfaceRoughnessBadgeTone
+}
+
+export type LubricantDisplayLine = {
+  text: string
+  kind: 'compound' | 'ratio'
+  emphasis: 'primary' | 'secondary'
 }
 
 export function cofDisplay(record: RecordResponse): string {
@@ -434,6 +440,11 @@ export function detailedConditionChips(record: RecordResponse): DetailedConditio
     chips.push({ key: 'water', label: '含水', full, shortcut: waterShortcut(full), tone: 'env', title: '含水量' })
   }
 
+  const molRatio = String(record.molRatio || '').trim()
+  if (isMeaningfulRatioOrConcentration(molRatio)) {
+    chips.push({ key: 'mol_ratio', label: '浓度', full: normalizeTraceDisplayText(molRatio), tone: 'env', title: '混合比例 / 浓度' })
+  }
+
   const speed = String(record.speedValue || '').trim()
   if (speed) {
     chips.push({ key: 'speed', label: '速度', full: normalizeTraceDisplayText(speed), tone: 'dyn', title: '滑动速度' })
@@ -453,6 +464,19 @@ export function detailedConditionChips(record: RecordResponse): DetailedConditio
   // 它们逻辑上属于探针/基底物理属性，由 RecordTable 的"摩擦副"列负责渲染。
 
   return chips
+}
+
+function isMeaningfulRatioOrConcentration(value: string) {
+  const text = String(value || '').trim()
+  if (!text) return false
+  if (/^\d+(?:\.\d+)?$/.test(text)) return false
+  return (
+    /\d\s*:\s*\d/.test(text)
+    || /\d\s*\/\s*\d/.test(text)
+    || /%/.test(text)
+    || /\d(?:\.\d+)?\s*[mM]\b/.test(text)
+    || /\b(?:mol|molar|wt|mass|weight|vol|ppm|neat|pure|ratio)\b/i.test(text)
+  )
 }
 
 export type TribopairExtras = {
@@ -540,7 +564,9 @@ function canonicalIonToken(token: string): string {
 }
 
 function canonicalIonicLiquidLabel(input: string): string {
-  return String(input || '').replace(/\[([PNpn]\d+)\]/g, (_match, token) => `[${canonicalIonToken(token)}]`)
+  return String(input || '')
+    .replace(/\(\s*iC8\s*\)2PO2/g, 'i(C8)2PO2')
+    .replace(/\[([PNpn]\d+)\]/g, (_match, token) => `[${canonicalIonToken(token)}]`)
 }
 
 const CATION_STRUCTURE_SMILES: Record<string, string> = {
@@ -562,6 +588,8 @@ const CATION_STRUCTURE_SMILES: Record<string, string> = {
   pa: 'CCC[NH3+]',
   dmea: 'CC[NH+](C)C',
   mor11: 'C[N+]1(C)CCOCC1',
+  c5py: 'CCCCC[n+]1ccccc1',
+  hoc4py: 'OCCCC[n+]1ccccc1',
 }
 
 const ANION_STRUCTURE_SMILES: Record<string, string> = {
@@ -580,6 +608,7 @@ const ANION_STRUCTURE_SMILES: Record<string, string> = {
   scn: '[S-]C#N',
   no3: '[O-][N+](=O)[O-]',
   bscb: '[B-]1(OC2=CC=CC=C2C(=O)O1)OC3=CC=CC=C3C(=O)O',
+  ic82po2: 'O=P([O-])(CC(C)CC(C)(C)C)CC(C)CC(C)(C)C',
   aot: 'CCCCC(CC)COC(=O)CC(C(=O)OCC(CCCC)CC)S([O-])(=O)=O',
   doc: 'CCCCC(CC)COC(=O)CC(C(=O)OCC(CCCC)CC)S([O-])(=O)=O',
   ds: 'CCCCCCCCCCCCOS([O-])(=O)=O',
@@ -588,11 +617,38 @@ const ANION_STRUCTURE_SMILES: Record<string, string> = {
   f: '[F-]',
 }
 
+const COMPOUND_STRUCTURE_SMILES: Record<string, string> = {
+  hexadecane: 'CCCCCCCCCCCCCCCC',
+  cetane: 'CCCCCCCCCCCCCCCC',
+  diethylsuccinate: 'CCOC(=O)CCC(=O)OCC',
+  ch2co2et2: 'CCOC(=O)CCC(=O)OCC',
+  degdbe: 'CCCCOCCOCCOCCCC',
+  diethyleneglycoldibutylether: 'CCCCOCCOCCOCCCC',
+}
+
+const COMPOUND_STRUCTURE_ALIASES: Record<string, string> = {
+  'ch2co2et2': 'diethylsuccinate',
+  'ch2cooet2': 'diethylsuccinate',
+  'co2etch22': 'diethylsuccinate',
+  diethylbutanedioate: 'diethylsuccinate',
+  ethylsuccinate: 'diethylsuccinate',
+  degdbeoil: 'degdbe',
+  dibutyldiglycol: 'degdbe',
+  diethyleneglycoldibutylether: 'degdbe',
+}
+
 const CATION_STRUCTURE_ALIASES: Record<string, string> = {
   c2mim: 'emim',
   c4mim: 'bmim',
   c6mim: 'hmim',
   c8mim: 'omim',
+  pentylpyridinium: 'c5py',
+  'n-pentylpyridinium': 'c5py',
+  npentylpyridinium: 'c5py',
+  hydroxybutylpyridinium: 'hoc4py',
+  n4hydroxybutylpyridinium: 'hoc4py',
+  '4hydroxybutylpyridinium': 'hoc4py',
+  hoc4pyridinium: 'hoc4py',
   p66614: 'p66614',
   p66614plus: 'p66614',
 }
@@ -610,11 +666,16 @@ const ANION_STRUCTURE_ALIASES: Record<string, string> = {
   etso4: 'etso4',
   ethylsulfate: 'etso4',
   c2h5so4: 'etso4',
+  ic82po2: 'ic82po2',
+  c82po2: 'ic82po2',
+  '2po2': 'ic82po2',
+  po2: 'ic82po2',
+  bis244trimethylpentylphosphinate: 'ic82po2',
   aot: 'aot',
   dioctylsulfosuccinate: 'aot',
 }
 
-export type IonStructureRole = 'cation' | 'anion'
+export type IonStructureRole = 'cation' | 'anion' | 'compound'
 
 export type IonStructurePreviewItem = {
   key: string
@@ -632,11 +693,12 @@ export type LubricantStructurePair = {
 }
 
 export type LubricantStructureLayout = {
-  kind: 'single' | 'shared-cation' | 'component-pairs'
+  kind: 'single' | 'shared-cation' | 'component-pairs' | 'compounds'
   ratioLabel: string
   pairs: LubricantStructurePair[]
   cation?: IonStructurePreviewItem
   anions?: IonStructurePreviewItem[]
+  compounds?: IonStructurePreviewItem[]
 }
 
 function normalizeStructureIonKey(input: string): string {
@@ -651,6 +713,24 @@ function normalizeCationStructureKey(input: string): string {
 function normalizeAnionStructureKey(input: string): string {
   const key = normalizeStructureIonKey(input)
   return ANION_STRUCTURE_ALIASES[key] || key
+}
+
+function normalizeCompoundStructureKey(input: string): string {
+  const key = normalizeStructureIonKey(String(input || '').replace(/\boil\b/gi, ''))
+  return COMPOUND_STRUCTURE_ALIASES[key] || key
+}
+
+function resolveCompoundStructureSmiles(key: string): string | null {
+  return COMPOUND_STRUCTURE_SMILES[key] || null
+}
+
+function compoundStructureItem(compound: string, index = 0): IonStructurePreviewItem | null {
+  const label = canonicalIonicLiquidLabel(String(compound || '').trim())
+  if (!label) return null
+  const key = normalizeCompoundStructureKey(label)
+  const smiles = resolveCompoundStructureSmiles(key)
+  if (!smiles) return null
+  return structureItem('compound', label, key || `compound-${index}`, label, smiles)
 }
 
 function parseIonicLiquidCompound(compound: string) {
@@ -743,17 +823,27 @@ function recordLubricantComponents(record: RecordResponse): LubricantComponent[]
 }
 
 function componentRatioLabel(components: LubricantComponent[]): string {
-  const fractions = components.map((component) => Number(component.fraction))
-  if (!fractions.length || fractions.some((value) => !Number.isFinite(value))) return ''
-  const ratioParts = approximateRatioParts(fractions)
+  const units = Array.from(new Set(components.map((component) => String(component.unit || '').trim()).filter(Boolean)))
+  if (units.some(isInternalDatasetFractionUnit)) return ''
+
+  const fractions = components.map(componentFraction)
+  if (!fractions.length || fractions.some((value) => value == null)) return ''
+  const numericFractions = fractions.filter((value): value is number => value != null)
+  if (numericFractions.filter((value) => value > 0).length < 2) return ''
+
+  const ratioParts = approximateRatioParts(numericFractions)
   if (!ratioParts.length) return ''
   const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : Math.abs(a))
   const common = ratioParts.reduce((acc, value) => gcd(acc, value), ratioParts[0] || 1) || 1
   const ratio = ratioParts.map((value) => String(value / common)).join(':')
-  const units = Array.from(new Set(components.map((component) => String(component.unit || '').trim()).filter(Boolean)))
   if (units.length !== 1) return ratio
   const unit = units[0] === 'wt%' ? 'wt' : units[0] === 'mol%' ? 'mol' : units[0]
   return `${ratio} ${unit}`.trim()
+}
+
+function isInternalDatasetFractionUnit(unit: string): boolean {
+  const normalized = unit.toLowerCase().replace(/[\s_-]+/g, '')
+  return normalized.includes('datasetxil') || normalized === 'xil'
 }
 
 function approximateRatioParts(values: number[]): number[] {
@@ -761,12 +851,15 @@ function approximateRatioParts(values: number[]): number[] {
   if (!Number.isFinite(total) || total <= 0) return []
   let bestParts: number[] = []
   let bestError = Number.POSITIVE_INFINITY
-  for (let totalParts = values.length; totalParts <= 200; totalParts += 1) {
-    const parts = values.map((value) => Math.max(1, Math.round(value / total * totalParts)))
+  let bestScore = Number.POSITIVE_INFINITY
+  for (let totalParts = values.length; totalParts <= 1000; totalParts += 1) {
+    const parts = values.map((value) => value <= 0 ? 0 : Math.max(1, Math.round(value / total * totalParts)))
     if (parts.reduce((sum, value) => sum + value, 0) !== totalParts) continue
     const error = parts.reduce((sum, part, index) => sum + Math.abs(part / totalParts - (values[index] ?? 0) / total), 0)
-    if (error < bestError) {
+    const score = error + totalParts * 0.000001
+    if (score < bestScore) {
       bestError = error
+      bestScore = score
       bestParts = parts
       if (error < 1e-6) break
     }
@@ -778,7 +871,17 @@ function approximateRatioParts(values: number[]): number[] {
 function isBaseOilComponent(component: LubricantComponent): boolean {
   const role = String(component.role || '').trim().toLowerCase()
   const compound = String(component.compound || '').trim().toLowerCase()
-  return ['base_oil', 'oil', 'solvent'].includes(role) || compound.includes('oil') || ['degdbe', 'peg', 'pao'].includes(compound)
+  return ['base_oil', 'oil', 'solvent'].includes(role) || compound.includes('oil') || ['degdbe', 'hexadecane', 'peg', 'pao'].includes(compound)
+}
+
+function isIonicLiquidComponent(component: LubricantComponent): boolean {
+  return Boolean(parseIonicLiquidCompound(component.compound))
+}
+
+function componentFraction(component: LubricantComponent): number | null {
+  if (component.fraction == null) return null
+  const value = Number(component.fraction)
+  return Number.isFinite(value) ? value : null
 }
 
 function compactMixtureLabel(components: LubricantComponent[]): string {
@@ -788,8 +891,8 @@ function compactMixtureLabel(components: LubricantComponent[]): string {
   if (ionicComponents.length === 1 && baseOilComponents.length) {
     const ratio = componentRatioLabel(components)
     const ionicComponent = ionicComponents[0]
-    const oilComponent = baseOilComponents[0]
-    const label = `${canonicalIonicLiquidLabel(ionicComponent?.compound || '')} / ${oilComponent?.compound || 'base oil'}`
+    const oilLabel = String(baseOilComponents[0]?.compound || 'base oil').trim()
+    const label = `${canonicalIonicLiquidLabel(ionicComponent?.compound || '')} / ${oilLabel}`
     return ratio ? `${label} (${ratio})` : label
   }
 
@@ -806,17 +909,85 @@ function compactMixtureLabel(components: LubricantComponent[]): string {
   return ratio ? `${label} (${ratio})` : label
 }
 
-export function lubricantDisplay(record: RecordResponse): string {
+function ratioDisplayLine(components: LubricantComponent[]): LubricantDisplayLine[] {
+  const ratio = componentRatioLabel(components)
+  return ratio ? [{ text: `(${ratio})`, kind: 'ratio', emphasis: 'secondary' }] : []
+}
+
+function compoundLine(text: string, emphasis: LubricantDisplayLine['emphasis'] = 'primary'): LubricantDisplayLine {
+  return { text: canonicalIonicLiquidLabel(text), kind: 'compound', emphasis }
+}
+
+export function lubricantDisplayRows(record: RecordResponse): LubricantDisplayLine[] {
   const components = recordLubricantComponents(record)
+
+  if (components.length <= 1) {
+    const component = components[0]
+    const label = component?.compound || recordLubricantRaw(record) || '--'
+    return [compoundLine(label)]
+  }
+
+  const ionicComponents = components.filter(isIonicLiquidComponent)
+  const baseOilComponents = components.filter(isBaseOilComponent)
+  const nonIonicNonOilComponents = components.filter((component) => !isIonicLiquidComponent(component) && !isBaseOilComponent(component))
+
+  if (ionicComponents.length === 1) {
+    const lines = [compoundLine(ionicComponents[0]?.compound || recordLubricantRaw(record) || '--', 'primary')]
+    lines.push(...baseOilComponents.map((component) => compoundLine(component.compound, 'secondary')))
+    lines.push(...nonIonicNonOilComponents.map((component) => compoundLine(component.compound, 'secondary')))
+    return [...lines, ...ratioDisplayLine(components)]
+  }
+
+  const displayComponents = ionicComponents.length ? ionicComponents : components
+  const fractions = displayComponents.map(componentFraction).filter((value): value is number => value != null)
+  const maxFraction = fractions.length ? Math.max(...fractions) : null
+  const hasUnequalFractions = maxFraction != null && fractions.some((value) => Math.abs(value - maxFraction) > 1e-6)
+  const lines = displayComponents.map((component) => {
+    const fraction = componentFraction(component)
+    const emphasis = hasUnequalFractions && fraction != null && maxFraction != null && fraction < maxFraction
+      ? 'secondary'
+      : 'primary'
+    return compoundLine(component.compound, emphasis)
+  })
+
+  return [...lines, ...ratioDisplayLine(components)]
+}
+
+export function formatLiteratureBadge(literature?: RecordLiteratureDTO | null): { author: string, year: string, title: string, full: string } | null {
+  if (!literature) return null
+  const authors = String(literature.authors || '').trim()
+  const year = literature.year ? String(literature.year) : ''
+  const title = String(literature.title || '').trim()
   
-  if (components.length === 1) {
-    const [component] = components
-    return canonicalIonicLiquidLabel(component?.compound || recordLubricantRaw(record) || '--')
+  if (!authors && !year) return null
+
+  let firstAuthor = 'Unknown'
+  if (authors) {
+    const firstPart = (authors.split(/[;,]/)[0] || '').trim()
+    if (firstPart.includes(' ')) {
+      const words = firstPart.split(' ')
+      firstAuthor = words[words.length - 1] || firstAuthor
+    } else {
+      firstAuthor = firstPart
+    }
   }
   
-  const compactMixture = compactMixtureLabel(components)
-  if (compactMixture) return compactMixture
-  
+  return {
+    author: firstAuthor,
+    year: year ? `'${year.slice(-2)}` : '',
+    title: title,
+    full: `${authors ? firstAuthor + ' et al. ' : ''}${year}`.trim()
+  }
+}
+
+export function lubricantDisplay(record: RecordResponse): string {
+  const rows = lubricantDisplayRows(record)
+  const compounds = rows.filter((row) => row.kind === 'compound').map((row) => row.text).filter(Boolean)
+  const ratio = rows.find((row) => row.kind === 'ratio')?.text
+  if (compounds.length) {
+    return `${compounds.join(' / ')}${ratio ? ` ${ratio}` : ''}`.trim()
+  }
+
   const apiDisplay = String(record.ionicLiquidDisplay ?? (record as any).ionic_liquid_display ?? '').trim()
   if (apiDisplay) return canonicalIonicLiquidLabel(apiDisplay)
 
@@ -836,13 +1007,7 @@ export function lubricantAliasDisplay(record: RecordResponse): string {
 }
 
 export function lubricantDisplayLines(record: RecordResponse): string[] {
-  const components = recordLubricantComponents(record)
-  if (components.length <= 1) return [lubricantDisplay(record)]
-  if (components.some(isBaseOilComponent)) return [lubricantDisplay(record)]
-
-  const lines = components.map((component) => canonicalIonicLiquidLabel(component.compound))
-  const ratio = componentRatioLabel(components)
-  return ratio ? [...lines, `(${ratio})`] : lines
+  return lubricantDisplayRows(record).map((line) => line.text)
 }
 
 export function lubricantStructureLayout(record: RecordResponse): LubricantStructureLayout | null {
@@ -851,6 +1016,16 @@ export function lubricantStructureLayout(record: RecordResponse): LubricantStruc
     .map((component) => parseIonicLiquidCompound(component.compound))
     .filter((component): component is NonNullable<typeof component> => Boolean(component))
   const ratioLabel = componentRatioLabel(components)
+
+  const compoundItems = (components.length ? components.map((component) => component.compound) : [recordLubricantRaw(record)])
+    .map((compound, index) => compoundStructureItem(compound, index))
+    .filter((item): item is IonStructurePreviewItem => Boolean(item))
+
+  if (components.length > 0 && parsedComponents.length === 0) {
+    return compoundItems.length
+      ? { kind: 'compounds', ratioLabel, pairs: [], compounds: compoundItems }
+      : null
+  }
 
   if (parsedComponents.length >= 2) {
     const cationKeys = new Set(parsedComponents.map((component) => component.cationKey).filter(Boolean))
@@ -884,7 +1059,11 @@ export function lubricantStructureLayout(record: RecordResponse): LubricantStruc
   const anionToken = rawPair?.anionToken || String(record.anion || '').replace(/^\[|\]$/g, '')
   const cationKey = rawPair?.cationKey || normalizeCationStructureKey(cationToken)
   const anionKey = rawPair?.anionKey || normalizeAnionStructureKey(anionToken)
-  if (!cationToken && !anionToken && !record.cationSmiles && !record.anionSmiles) return null
+  if (!cationToken && !anionToken && !record.cationSmiles && !record.anionSmiles) {
+    return compoundItems.length
+      ? { kind: 'compounds', ratioLabel: '', pairs: [], compounds: compoundItems }
+      : null
+  }
 
   const cationLabel = cationToken ? `[${canonicalIonToken(cationToken)}]` : 'Cation'
   const anionLabel = anionToken ? `[${anionToken}]` : 'Anion'
@@ -902,7 +1081,9 @@ export function lubricantStructureLayout(record: RecordResponse): LubricantStruc
 export function lubricantStructureItems(record: RecordResponse): IonStructurePreviewItem[] {
   const layout = lubricantStructureLayout(record)
   if (!layout) return []
-  const items = layout.kind === 'shared-cation'
+  const items = layout.kind === 'compounds'
+    ? (layout.compounds || [])
+    : layout.kind === 'shared-cation'
     ? [layout.cation, ...(layout.anions || [])]
     : layout.pairs.flatMap((pair) => [pair.cation, pair.anion])
   const seen = new Set<string>()
@@ -941,7 +1122,9 @@ function renderChemicalDigitsAsSubscriptHtml(input: string): string {
   const withPhosphoniumAliases = escapeHtml(canonicalInput).replace(/\[([PNpn])([0-9,]+)\]/g, (_match, aliasHead, aliasDigits) => {
     return `[${escapeHtml(String(aliasHead))}<sub>${escapeHtml(String(aliasDigits))}</sub>]`
   })
-  return withPhosphoniumAliases.replace(/([A-Za-z\]\)])(\d{1,2})(?!\d)/g, '$1<sub>$2</sub>')
+  return withPhosphoniumAliases
+    .replace(/([A-Za-z\]\)])(\d{1,2})(?!\d)/g, '$1<sub>$2</sub>')
+    .replace(/(^|[\[\s])i(?=\()/g, '$1<sup>i</sup>')
 }
 
 export function ionicLiquidParts(input: string | null | undefined): string[] {

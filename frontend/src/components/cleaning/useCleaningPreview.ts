@@ -36,9 +36,9 @@ export const DEFAULT_KEEP_FEATURES = [
 ]
 
 export const SOURCE_MODE_OPTIONS = [
-  { value: 'group_library_fallback', label: '当前工作区优先,缺失时回退组库', detail: '适合快速构建覆盖更广的训练集。' },
-  { value: 'current_scope', label: '只使用当前工作区', detail: '适合做严格、可追踪的小范围分析。' },
-  { value: 'group_library', label: '只使用组级共享库', detail: '适合构建跨工作区的统一数据池。' },
+  { value: 'group_library', label: '使用课题组文献库', detail: '默认数据源，适合学生直接构建统一训练集。' },
+  { value: 'current_scope', label: '使用当前文献库', detail: '适合做严格、可追踪的小范围分析。' },
+  { value: 'group_library_fallback', label: '当前文献库 + 课题组补全', detail: '适合快速构建覆盖更广的训练集。' },
 ] as const
 
 export const TRAINING_VIEW_OPTIONS = [
@@ -82,7 +82,7 @@ function triggerDownload(blob: Blob, filename: string) {
 
 export function useCleaningPreview() {
   const form = reactive<ModelCleaningOptions>({
-    source_mode: 'group_library_fallback',
+    source_mode: 'group_library',
     training_view: 'all',
     drop_missing_target: true,
     require_dual_smiles: true,
@@ -134,7 +134,7 @@ export function useCleaningPreview() {
 
   const activePresetKey = computed<CleaningPresetKey | null>(() => {
     if (form.source_mode === 'current_scope' && form.drop_missing_target && form.require_dual_smiles && form.require_valid_smiles && form.remove_target_outliers) return 'strict'
-    if (form.source_mode === 'group_library_fallback' && form.drop_missing_target && form.require_dual_smiles && form.require_valid_smiles && !form.remove_target_outliers) return 'balanced'
+    if (form.source_mode === 'group_library' && form.drop_missing_target && form.require_dual_smiles && form.require_valid_smiles && !form.remove_target_outliers) return 'balanced'
     return null
   })
 
@@ -148,7 +148,7 @@ export function useCleaningPreview() {
       form.iqr_multiplier = 1.5
       return
     }
-    form.source_mode = 'group_library_fallback'
+    form.source_mode = 'group_library'
     form.drop_missing_target = true
     form.require_dual_smiles = true
     form.require_valid_smiles = true

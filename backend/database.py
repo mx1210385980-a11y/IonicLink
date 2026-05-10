@@ -44,7 +44,6 @@ async def _ensure_bootstrap_security_state() -> None:
         DEFAULT_GROUP_SLUG,
         ROLE_PRINCIPAL_INVESTIGATOR,
         build_scope_key,
-        ensure_personal_workspace,
         hash_password,
     )
 
@@ -73,9 +72,6 @@ async def _ensure_bootstrap_security_state() -> None:
             await session.flush()
         elif not admin.group_id:
             admin.group_id = group.id
-
-        workspace = await ensure_personal_workspace(session, admin)
-        await session.flush()
 
         await session.execute(
             text(

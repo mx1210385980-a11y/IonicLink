@@ -75,7 +75,7 @@ def test_normalize_record_chemistry_clears_il_from_film_field_and_uses_bracket_n
     assert records[0]["cation"] == "HMIM"
     assert records[0]["anion"] == "FAP"
 
-    assert records[1]["ionic_liquid"] == "[P6,6,6,14][(iC8)2PO2]"
+    assert records[1]["ionic_liquid"] == "[P6,6,6,14][i(C8)2PO2]"
     assert records[1]["film_thickness"] is None
 
     assert records[2]["ionic_liquid"] == "[P4,4,4,1][TFSI]"
@@ -114,14 +114,14 @@ def test_normalize_record_chemistry_can_recover_lubricant_from_evidence_text():
         {
             "ionic_liquid": "[P6,6,6,14][TFSI]",
             "lubricant": "[P6,6,6,14][TFSI]",
-            "evidence": "Table 2 lists friction coefficient μ for various conditions. The value for P6,6,6,14 (iC8)2PO2 is 0.40, with errors ±0.10.",
+            "evidence": "Table 2 lists friction coefficient μ for various conditions. The value for P6,6,6,14 i(C8)2PO2 is 0.40, with errors ±0.10.",
         }
     ]
 
     _normalize_record_chemistry(records)
 
-    assert records[0]["ionic_liquid"] == "[P6,6,6,14][(iC8)2PO2]"
-    assert records[0]["lubricant"] == "[P6,6,6,14][(iC8)2PO2]"
+    assert records[0]["ionic_liquid"] == "[P6,6,6,14][i(C8)2PO2]"
+    assert records[0]["lubricant"] == "[P6,6,6,14][i(C8)2PO2]"
 
 
 def test_normalize_record_chemistry_does_not_replace_with_unparsed_sentence():

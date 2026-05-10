@@ -291,7 +291,7 @@ async def get_request_scope(
     x_scope_type: str | None = Header(None, alias="X-Scope-Type"),
     x_workspace_id: str | None = Header(None, alias="X-Workspace-Id"),
 ) -> RequestScope:
-    requested_scope = str(x_scope_type or "workspace").strip().lower()
+    requested_scope = str(x_scope_type or "group_library").strip().lower()
     if requested_scope == "group_library":
         return RequestScope(
             scope_type="group_library",

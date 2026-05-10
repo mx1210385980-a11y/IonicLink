@@ -16,7 +16,8 @@ import {
   formatIonicLiquidPartHtml,
   ionicLiquidParts,
   lubricantAliasDisplay,
-  lubricantDisplayLines,
+  type LubricantDisplayLine,
+  lubricantDisplayRows,
   lubricantTooltip,
   surfaceRoughnessBadge,
   tribopairExtras,
@@ -63,8 +64,9 @@ const someOnPageSelected = computed(() => {
 })
 
 // Virtual scrolling configuration
-// 密集记录可能同时包含温度/速度/载荷/含水和涂层卡片，虚拟行高需要给足安全余量。
-const ROW_HEIGHT = 168 // Estimated row height in pixels
+// 行内会同时渲染长离子液体名、结构缩略图、文献卡片和多组条件芯片。
+// 估算偏小会让绝对定位的虚拟行互相覆盖，看起来像重复记录。
+const ROW_HEIGHT = 264 // Estimated row height in pixels
 const OVERSCAN = 5     // Number of items to render outside visible area
 
 const parentRef = ref<HTMLElement | null>(null)
@@ -111,6 +113,13 @@ const visibleRecordRows = computed(() =>
 
 function roughnessBadge(record: RecordResponse) {
   return surfaceRoughnessBadge(record)
+}
+
+function lubricantLineClass(line: LubricantDisplayLine): string {
+  if (line.kind === 'ratio') return 'mt-1'
+  return line.emphasis === 'secondary'
+    ? 'text-[12.5px] font-semibold leading-[1.12] text-slate-500 dark:text-slate-400'
+    : 'text-[15px] font-bold leading-[1.16] text-slate-900 dark:text-slate-100'
 }
 
 // 跟踪哪些行展开了"常规条件"（室温/0V等默认折叠的芯片）
@@ -179,11 +188,11 @@ defineExpose({
             @change="(e: any) => emit('toggle-select-page', !!e.target.checked)"
           >
         </div>
-        <div class="px-3 py-4 font-medium">序号</div>
-        <div class="min-w-0 px-3 py-4 font-medium">离子液体</div>
-        <div class="min-w-0 px-2 py-4 font-medium">摩擦副</div>
-        <div class="min-w-0 px-3 py-4 font-medium">实验条件</div>
-        <div class="px-3 py-4 text-right font-bold text-blue-600">COF / 操作</div>
+        <div class="whitespace-nowrap px-3 py-4 font-medium">序号</div>
+        <div class="min-w-0 whitespace-nowrap px-3 py-4 font-medium">离子液体</div>
+        <div class="min-w-0 whitespace-nowrap px-2 py-4 font-medium">摩擦副</div>
+        <div class="min-w-0 whitespace-nowrap px-3 py-4 font-medium">实验条件</div>
+        <div class="cof-sticky-header whitespace-nowrap px-3 py-4 text-right font-bold text-blue-600">COF / 操作</div>
       </div>
     </div>
 
@@ -228,6 +237,7 @@ defineExpose({
                     <div class="h-7 w-10 rounded bg-slate-200 dark:bg-slate-700" />
                     <div class="h-7 w-10 rounded bg-slate-200 dark:bg-slate-700" />
                   </div>
+                  <div class="h-8 w-full rounded-md bg-slate-200/80 dark:bg-slate-700/80" />
                 </div>
               </div>
               <div class="min-w-0 px-2">
@@ -243,7 +253,7 @@ defineExpose({
                   <div class="h-8 w-20 rounded-lg bg-slate-200 dark:bg-slate-700" />
                 </div>
               </div>
-              <div class="metric-rail h-full px-3">
+              <div class="metric-rail cof-sticky-rail h-full px-3">
                 <div class="flex h-full animate-pulse flex-col items-end justify-center gap-2">
                   <div class="h-5 w-16 rounded bg-slate-200 dark:bg-slate-700" />
                   <div class="h-3 w-14 rounded bg-slate-200 dark:bg-slate-700" />
@@ -287,7 +297,7 @@ defineExpose({
                   {{ displayRowNumber(virtualRow.index) }}
                   <span
                     v-if="focusRecordId != null && Number(record.id) === Number(focusRecordId)"
-                    class="rounded-md bg-amber-400 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white"
+                    class="rounded-md bg-amber-400 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white shadow-sm"
                   >已定位</span>
                 </span>
               </div>
@@ -300,20 +310,20 @@ defineExpose({
                     :title="lubricantTooltip(record)"
                   >
                     <span
-                      v-for="(line, lineIndex) in lubricantDisplayLines(record)"
-                      :key="`${record.id}-il-line-${lineIndex}-${line}`"
+                      v-for="(line, lineIndex) in lubricantDisplayRows(record)"
+                      :key="`${record.id}-il-line-${lineIndex}-${line.text}`"
                       class="block max-w-full break-words"
-                      :class="line.startsWith('(') && line.endsWith(')') ? 'mt-1' : ''"
+                      :class="lubricantLineClass(line)"
                     >
-                      <template v-if="line.startsWith('(') && line.endsWith(')')">
+                      <template v-if="line.kind === 'ratio'">
                         <span class="inline-flex items-center gap-1.5 rounded-[0.25rem] bg-[#f8fafc] px-1.5 py-[2px] text-[9.5px] font-bold text-[#475569] shadow-[inset_0_0_0_1px_rgba(226,232,240,1)] dark:bg-slate-800 dark:text-slate-300 dark:shadow-[inset_0_0_0_1px_rgba(51,65,85,1)]">
                           <span class="text-[8.5px] font-black uppercase tracking-wider text-[#94a3b8] dark:text-slate-500">Ratio</span>
-                          {{ line.slice(1, -1) }}
+                          {{ line.text.slice(1, -1) }}
                         </span>
                       </template>
                       <template v-else>
                         <span
-                          v-for="(part, partIndex) in ionicLiquidParts(line)"
+                          v-for="(part, partIndex) in ionicLiquidParts(line.text)"
                           :key="`${record.id}-il-${lineIndex}-${partIndex}-${part}`"
                           class="inline whitespace-normal break-words"
                           v-html="formatIonicLiquidPartHtml(part)"
@@ -333,70 +343,64 @@ defineExpose({
                     :active="structurePreviewOpen && structurePreviewRowId === record.id"
                     @open="openStructurePreview"
                   />
+                  <button
+                    v-if="record.literature"
+                    type="button"
+                    class="literature-inline-card text-left"
+                    :title="record.literature.title || undefined"
+                    @click.stop="openReviewRecord ? openReviewRecord(record) : openEvidenceModal(record)"
+                  >
+                    <span class="literature-inline-card__eyebrow">文献</span>
+                    <span class="literature-inline-card__title">{{ record.literature.title || '标题待补全' }}</span>
+                    <span class="literature-inline-card__meta">
+                      <span class="min-w-0 truncate">{{ record.literature.journal || '期刊待补全' }}</span>
+                      <span v-if="record.literature.year" class="shrink-0 tabular-nums">{{ record.literature.year }}</span>
+                    </span>
+                  </button>
                 </div>
               </div>
 
               <!-- Tribopair Column -->
               <div class="min-w-0 px-2 py-3">
-                <div class="flex flex-col gap-1.5">
-                  <!-- 探针：主名 + 副信息（几何/半径/粗糙度）一起显示 -->
+                <div class="tribopair-stack">
                   <div
-                    v-if="tribopairParts(record).probe && tribopairParts(record).probe !== 'Probe N/A'"
-                    class="rounded-md border border-slate-200 bg-white px-2 py-1 shadow-sm dark:border-slate-700 dark:bg-slate-950"
+                    v-if="(tribopairParts(record).probe && tribopairParts(record).probe !== 'Probe N/A') || tribopairExtras(record).probeDetails"
+                    class="tribopair-pill tribopair-pill--probe"
                     :title="'探针：' + tribopairParts(record).probe + (tribopairExtras(record).probeDetails ? ' · ' + tribopairExtras(record).probeDetails : '')"
                   >
-                    <div class="flex items-start gap-2">
-                      <span class="shrink-0 pt-px text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">探针</span>
-                      <span class="break-words text-[11.5px] font-semibold leading-snug text-slate-700 dark:text-slate-200">
-                        {{ tribopairParts(record).probe }}
-                      </span>
-                    </div>
-                    <p
-                      v-if="tribopairExtras(record).probeDetails"
-                      class="mt-0.5 ml-7 text-[10.5px] leading-snug text-slate-500"
-                    >
+                    <span class="tribopair-pill__label">探针</span>
+                    <span class="tribopair-pill__value">
+                      {{ tribopairParts(record).probe && tribopairParts(record).probe !== 'Probe N/A' ? tribopairParts(record).probe : '未记录' }}
+                    </span>
+                    <span v-if="tribopairExtras(record).probeDetails" class="tribopair-pill__meta">
                       {{ tribopairExtras(record).probeDetails }}
-                    </p>
-                  </div>
-
-                  <!-- 基底：主名 + 粗糙度内联 -->
-                  <div
-                    v-if="tribopairParts(record).substrate && tribopairParts(record).substrate !== 'Substrate N/A'"
-                    class="rounded-md bg-slate-800 px-2 py-1 shadow-sm dark:bg-slate-100"
-                    :title="'基底：' + tribopairParts(record).substrate + (roughnessBadge(record) ? ' · ' + roughnessBadge(record)?.label : '')"
-                  >
-                    <div class="flex min-w-0 items-start gap-2">
-                      <span class="shrink-0 pt-px text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">基底</span>
-                      <div class="min-w-0 flex-1">
-                        <div class="truncate text-[11.5px] font-semibold leading-snug text-white dark:text-slate-900">
-                          {{ tribopairParts(record).substrate }}
-                        </div>
-                        <div
-                          v-if="roughnessBadge(record)"
-                          class="mt-0.5 truncate text-[10.5px] leading-snug text-slate-300 dark:text-slate-500"
-                        >
-                          {{ roughnessBadge(record)?.label }}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- 涂层：单独胶囊 -->
-                  <div
-                    v-if="tribopairParts(record).coating"
-                    class="inline-flex w-fit max-w-full items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1 shadow-sm dark:border-amber-500/30 dark:bg-amber-500/10"
-                    :title="'涂层：' + tribopairParts(record).coating"
-                  >
-                    <span class="shrink-0 pt-px text-[10px] font-bold uppercase tracking-wider text-amber-600/70 dark:text-amber-500/70">涂层</span>
-                    <span class="break-words text-[11.5px] font-semibold leading-snug text-amber-800 dark:text-amber-300">
-                      {{ tribopairParts(record).coating }}
                     </span>
                   </div>
 
-                  <!-- 膜厚（如果有）放在最末，作为环境层属性 -->
+                  <div
+                    v-if="tribopairParts(record).substrate && tribopairParts(record).substrate !== 'Substrate N/A'"
+                    class="tribopair-pill tribopair-pill--substrate"
+                    :title="'基底：' + tribopairParts(record).substrate + (roughnessBadge(record) ? ' · ' + roughnessBadge(record)?.label : '')"
+                  >
+                    <span class="tribopair-pill__label">基底</span>
+                    <span class="tribopair-pill__value">{{ tribopairParts(record).substrate }}</span>
+                    <span v-if="roughnessBadge(record)" class="tribopair-pill__meta">
+                      {{ roughnessBadge(record)?.label }}
+                    </span>
+                  </div>
+
+                  <div
+                    v-if="tribopairParts(record).coating"
+                    class="tribopair-pill tribopair-pill--coating"
+                    :title="'涂层：' + tribopairParts(record).coating"
+                  >
+                    <span class="tribopair-pill__label">涂层</span>
+                    <span class="tribopair-pill__value">{{ tribopairParts(record).coating }}</span>
+                  </div>
+
                   <p
                     v-if="tribopairExtras(record).filmThickness"
-                    class="text-[10.5px] leading-snug text-slate-500"
+                    class="tribopair-film"
                     :title="'膜厚：' + tribopairExtras(record).filmThickness"
                   >
                     膜厚 · {{ tribopairExtras(record).filmThickness }}
@@ -406,7 +410,7 @@ defineExpose({
                     v-if="(!tribopairParts(record).probe || tribopairParts(record).probe === 'Probe N/A')
                       && (!tribopairParts(record).substrate || tribopairParts(record).substrate === 'Substrate N/A')
                       && !tribopairParts(record).coating"
-                    class="text-[11px] text-slate-400 italic"
+                    class="text-[11px] italic text-slate-400"
                   >
                     未提取
                   </span>
@@ -420,12 +424,12 @@ defineExpose({
                   <div
                     v-for="chip in notableConditionChips(record)"
                     :key="chip.key"
-                    class="flex items-baseline gap-1.5 text-[11px] leading-snug"
+                    class="flex min-w-0 items-baseline gap-1.5 text-[11px] leading-snug"
                   >
                     <span class="shrink-0 font-bold uppercase tracking-wider" :class="conditionToneLabelClass(chip.tone)">
                       {{ conditionDisplayLabel(chip) }}:
                     </span>
-                    <span class="text-slate-800 dark:text-slate-200 font-medium break-words">
+                    <span class="min-w-0 font-medium text-slate-800 dark:text-slate-200">
                       {{ conditionDisplayValue(chip) }}
                       <span
                         v-if="conditionDisplayUnit(chip)"
@@ -456,12 +460,12 @@ defineExpose({
                     <div
                       v-for="chip in commonConditionChips(record)"
                       :key="chip.key"
-                      class="flex items-baseline gap-1.5 text-[11px] leading-snug opacity-80"
+                      class="flex min-w-0 items-baseline gap-1.5 text-[11px] leading-snug opacity-80"
                     >
                       <span class="shrink-0 font-bold uppercase tracking-wider text-slate-500">
                         {{ conditionDisplayLabel(chip, chip.shortcut) }}:
                       </span>
-                      <span class="text-slate-700 dark:text-slate-300 font-medium break-words">
+                      <span class="min-w-0 font-medium text-slate-700 dark:text-slate-300">
                         {{ conditionDisplayValue(chip, chip.shortcut) }}
                         <span
                           v-if="conditionDisplayUnit(chip, chip.shortcut)"
@@ -482,7 +486,7 @@ defineExpose({
               </div>
 
               <!-- COF + Actions Rail -->
-              <div class="metric-rail min-w-0 px-3 py-3">
+              <div class="metric-rail cof-sticky-rail min-w-0 px-3 py-3">
                 <div class="flex h-full flex-col items-end justify-center gap-2">
                   <div class="text-right">
                     <div class="whitespace-nowrap text-lg font-black tabular-nums tracking-tight text-blue-600 dark:text-blue-400">{{ cofDisplay(record) }}</div>
@@ -550,10 +554,12 @@ defineExpose({
   grid-template-columns:
     36px
     52px
-    minmax(138px, 168px)
-    minmax(112px, 148px)
-    minmax(0, 1.55fr)
-    138px;
+    minmax(164px, 0.82fr)
+    minmax(190px, 1fr)
+    minmax(168px, 0.92fr)
+    minmax(118px, 126px);
+  width: 100%;
+  min-width: 0;
 }
 
 .virtual-table-list {
@@ -570,6 +576,159 @@ defineExpose({
   font-size: 0.72em;
 }
 
+.literature-inline-card {
+  display: grid;
+  gap: 0.15rem;
+  width: 100%;
+  max-width: 100%;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(199, 210, 254, 0.88);
+  background:
+    linear-gradient(135deg, rgba(238, 242, 255, 0.92), rgba(255, 255, 255, 0.96));
+  padding: 0.45rem 0.55rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  color: #1e293b;
+  transition:
+    border-color 150ms ease,
+    transform 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.literature-inline-card:hover {
+  border-color: rgba(99, 102, 241, 0.42);
+  box-shadow: 0 10px 24px -20px rgba(79, 70, 229, 0.45);
+  transform: translateY(-1px);
+}
+
+.literature-inline-card__eyebrow {
+  color: #6366f1;
+  font-size: 0.58rem;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+}
+
+.literature-inline-card__title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.literature-inline-card__meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.45rem;
+  color: #64748b;
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+
+:global(.dark) .literature-inline-card {
+  border-color: rgba(99, 102, 241, 0.25);
+  background:
+    linear-gradient(135deg, rgba(49, 46, 129, 0.26), rgba(15, 23, 42, 0.72));
+  color: #e2e8f0;
+}
+
+.tribopair-stack {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.tribopair-pill {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 0.5rem;
+  row-gap: 0.08rem;
+  min-width: 0;
+  border-radius: 0.62rem;
+  padding: 0.42rem 0.55rem;
+  box-shadow: 0 10px 18px -18px rgba(15, 23, 42, 0.5);
+}
+
+.tribopair-pill__label {
+  color: #94a3b8;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+
+.tribopair-pill__value {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: 0.78rem;
+  font-weight: 850;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tribopair-pill__meta {
+  grid-column: 2;
+  min-width: 0;
+  overflow: hidden;
+  color: currentColor;
+  font-size: 0.66rem;
+  font-weight: 600;
+  line-height: 1.18;
+  opacity: 0.72;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tribopair-pill--probe {
+  border: 1px solid rgba(203, 213, 225, 0.95);
+  background: rgba(255, 255, 255, 0.96);
+  color: #334155;
+}
+
+.tribopair-pill--substrate {
+  background: #172235;
+  color: #fff;
+}
+
+.tribopair-pill--coating {
+  border: 1px solid rgba(251, 191, 36, 0.55);
+  background: linear-gradient(135deg, #fff7ed, #fffbeb);
+  color: #92400e;
+}
+
+.tribopair-film {
+  min-width: 0;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 0.66rem;
+  font-weight: 650;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:global(.dark) .tribopair-pill--probe {
+  border-color: rgba(51, 65, 85, 0.9);
+  background: rgba(2, 6, 23, 0.72);
+  color: #e2e8f0;
+}
+
+:global(.dark) .tribopair-pill--substrate {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+:global(.dark) .tribopair-pill--coating {
+  border-color: rgba(245, 158, 11, 0.34);
+  background: rgba(245, 158, 11, 0.12);
+  color: #fcd34d;
+}
+
 .condition-token {
   max-width: 100%;
 }
@@ -584,6 +743,23 @@ defineExpose({
     linear-gradient(90deg, rgba(248, 250, 252, 0.42), rgba(255, 255, 255, 0.92));
 }
 
+.cof-sticky-header,
+.cof-sticky-rail {
+  position: sticky;
+  right: 0;
+  z-index: 8;
+}
+
+.cof-sticky-header {
+  z-index: 18;
+  background:
+    linear-gradient(90deg, rgba(248, 250, 252, 0.62), #f8fafc 24%, #f8fafc);
+}
+
+.cof-sticky-rail {
+  box-shadow: -14px 0 22px -24px rgba(15, 23, 42, 0.45);
+}
+
 :global(.dark) .metric-rail {
   border-left-color: rgba(51, 65, 85, 0.82);
   background:
@@ -595,10 +771,11 @@ defineExpose({
     grid-template-columns:
       32px
       48px
-      minmax(120px, 148px)
-      minmax(104px, 132px)
-      minmax(0, 1.45fr)
-      130px;
+      minmax(150px, 0.78fr)
+      minmax(174px, 1fr)
+      minmax(156px, 0.9fr)
+      minmax(112px, 120px);
+    min-width: 0;
   }
 }
 

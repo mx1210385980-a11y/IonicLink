@@ -107,6 +107,194 @@ class _ScaledRegressor:
         return prediction
 
 
+class _GatedSegmentedStackingRegressor:
+    """Lightweight gate-based high-COF model inspired by the WFF thesis.
+
+    The full thesis model trains separate low/mid/high stacks. On this platform
+    the high-COF tail is much smaller, so we use the same gate idea but only
+    calibrate the high segment: a weighted CatBoost global model keeps overall
+    stability, and a local high-COF CatBoost model corrects gated tail samples.
+    """
+
+    SEGMENT_ORDER = ("low", "mid", "high")
+
+    def __init__(
+        self,
+        *,
+        random_seed: int,
+        q1: float = 0.30,
+        q2: float = 0.80,
+        min_segment_size: int = 18,
+        high_train_threshold: float = 0.60,
+        high_gate_threshold: float = 0.50,
+        high_blend: float = 0.30,
+        high_weight: float = 1.50,
+    ) -> None:
+        self.random_seed = int(random_seed)
+        self.q1 = min(0.65, max(0.05, float(q1)))
+        self.q2 = min(0.95, max(self.q1 + 0.10, float(q2)))
+        self.min_segment_size = max(8, int(min_segment_size))
+        self.high_train_threshold = max(0.0, float(high_train_threshold))
+        self.high_gate_threshold = max(0.0, float(high_gate_threshold))
+        self.high_blend = min(0.85, max(0.0, float(high_blend)))
+        self.high_weight = min(10.0, max(1.0, float(high_weight)))
+        self.thresholds_: dict[str, float] = {}
+        self.segment_counts_: dict[str, int] = {}
+        self.segment_models_: dict[str, dict[str, Any] | None] = {}
+        self.gate_model_: Any | None = None
+        self.global_model_: Any | None = None
+        self.feature_importances_: np.ndarray | None = None
+
+    def _catboost(self, *, iterations: int, learning_rate: float, depth: int, l2_leaf_reg: float) -> Any:
+        if not CATBOOST_AVAILABLE or CatBoostRegressor is None:
+            return GradientBoostingRegressor(
+                n_estimators=max(40, min(iterations, 300)),
+                learning_rate=min(0.12, max(0.02, learning_rate)),
+                max_depth=max(2, min(depth, 4)),
+                random_state=self.random_seed,
+            )
+        return CatBoostRegressor(
+            iterations=iterations,
+            learning_rate=learning_rate,
+            depth=depth,
+            l2_leaf_reg=l2_leaf_reg,
+            loss_function="RMSE",
+            random_seed=self.random_seed,
+            verbose=False,
+            allow_writing_files=False,
+            thread_count=1,
+        )
+
+    def _make_gate_model(self) -> Any:
+        return self._catboost(iterations=300, learning_rate=0.08, depth=3, l2_leaf_reg=2.0)
+
+    def _fit_estimator(self, estimator: Any, X: np.ndarray, y: np.ndarray) -> Any:
+        if CATBOOST_AVAILABLE and CatBoostRegressor is not None and isinstance(estimator, CatBoostRegressor):
+            estimator.fit(X, y, verbose=False)
+        else:
+            estimator.fit(X, y)
+        return estimator
+
+    def _oof_predictions(self, make_estimator: Any, X: np.ndarray, y: np.ndarray) -> np.ndarray:
+        n_samples = int(len(y))
+        if n_samples < 12:
+            estimator = self._fit_estimator(make_estimator(), X, y)
+            return np.asarray(estimator.predict(X), dtype=np.float32)
+
+        n_splits = min(5, max(2, n_samples // 8))
+        preds = np.full(n_samples, np.nan, dtype=np.float32)
+        splitter = KFold(n_splits=n_splits, shuffle=True, random_state=self.random_seed)
+        for train_idx, val_idx in splitter.split(X, y):
+            estimator = self._fit_estimator(make_estimator(), X[train_idx], y[train_idx])
+            preds[val_idx] = np.asarray(estimator.predict(X[val_idx]), dtype=np.float32)
+        if np.isnan(preds).any():
+            fallback = self._fit_estimator(make_estimator(), X, y)
+            missing = np.isnan(preds)
+            preds[missing] = np.asarray(fallback.predict(X[missing]), dtype=np.float32)
+        return preds
+
+    def _segment_for_gate_values(self, gate_values: np.ndarray) -> np.ndarray:
+        low_threshold = float(self.thresholds_.get("low", 0.0))
+        high_threshold = float(self.thresholds_.get("high", 1.0))
+        labels = np.full(len(gate_values), "mid", dtype=object)
+        labels[gate_values < low_threshold] = "low"
+        labels[gate_values >= high_threshold] = "high"
+        return labels
+
+    def _fit_weighted_global(self, X: np.ndarray, y: np.ndarray) -> Any:
+        model = self._make_gate_model()
+        weights = np.ones(len(y), dtype=np.float32)
+        weights[y >= self.high_train_threshold] = self.high_weight
+        if CATBOOST_AVAILABLE and CatBoostRegressor is not None and isinstance(model, CatBoostRegressor):
+            model.fit(X, y, sample_weight=weights, verbose=False)
+        else:
+            model.fit(X, y, sample_weight=weights)
+        return model
+
+    def _make_high_local_model(self) -> Any:
+        # A compact local model is enough for #8; deeper thesis-scale stacks overfit this tail.
+        return self._catboost(iterations=220, learning_rate=0.06, depth=2, l2_leaf_reg=5.0)
+
+    def _collect_feature_importances(self, n_features: int) -> np.ndarray:
+        values = np.zeros(n_features, dtype=np.float32)
+
+        def add_importance(estimator: Any, weight: float) -> None:
+            raw = getattr(estimator, "feature_importances_", None)
+            if raw is None:
+                return
+            arr = np.asarray(raw, dtype=np.float32).ravel()
+            if arr.size != n_features:
+                return
+            total = float(np.sum(np.abs(arr)))
+            if total <= 0:
+                return
+            values[:] += (np.abs(arr) / total) * float(weight)
+
+        if self.gate_model_ is not None:
+            add_importance(self.gate_model_, 0.25)
+        total_segment_rows = max(1, sum(self.segment_counts_.values()))
+        for segment, model_bundle in self.segment_models_.items():
+            if not model_bundle:
+                continue
+            segment_weight = 0.75 * (self.segment_counts_.get(segment, 0) / total_segment_rows)
+            if model_bundle.get("local_model") is not None:
+                add_importance(model_bundle["local_model"], segment_weight)
+
+        if not np.any(values):
+            return values
+        return values / float(np.sum(values))
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> "_GatedSegmentedStackingRegressor":
+        X = np.asarray(X, dtype=np.float32)
+        y = np.asarray(y, dtype=np.float32)
+        gate_oof = self._oof_predictions(self._make_gate_model, X, y)
+        self.thresholds_ = {
+            "low": float(np.quantile(gate_oof, self.q1)),
+            "high": self.high_gate_threshold,
+            "high_quantile_reference": float(np.quantile(gate_oof, self.q2)),
+            "high_train_target": self.high_train_threshold,
+        }
+        if self.thresholds_["high"] <= self.thresholds_["low"]:
+            median = float(np.median(gate_oof))
+            spread = max(0.02, float(np.std(gate_oof)))
+            self.thresholds_["low"] = median - spread * 0.5
+            self.thresholds_["high"] = max(self.high_gate_threshold, median + spread * 0.5)
+
+        labels = self._segment_for_gate_values(gate_oof)
+        self.segment_counts_ = {segment: int(np.sum(labels == segment)) for segment in self.SEGMENT_ORDER}
+        self.segment_models_ = {segment: None for segment in self.SEGMENT_ORDER}
+        self.global_model_ = self._fit_weighted_global(X, y)
+        high_indices = np.where(y >= self.high_train_threshold)[0]
+        if len(high_indices) >= self.min_segment_size:
+            self.segment_models_["high"] = {
+                "segment": "high",
+                "local_model": self._fit_estimator(self._make_high_local_model(), X[high_indices], y[high_indices]),
+                "count": int(len(high_indices)),
+            }
+        self.gate_model_ = self.global_model_
+        self.feature_importances_ = self._collect_feature_importances(X.shape[1])
+        return self
+
+    def _predict_local(self, model_bundle: dict[str, Any], X: np.ndarray) -> np.ndarray:
+        if model_bundle.get("local_model") is not None:
+            return np.asarray(model_bundle["local_model"].predict(X), dtype=np.float32)
+        return np.asarray(self.global_model_.predict(X), dtype=np.float32)
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        X = np.asarray(X, dtype=np.float32)
+        if self.gate_model_ is None or self.global_model_ is None:
+            raise ValueError("Segmented model has not been fitted.")
+        gate_values = np.asarray(self.gate_model_.predict(X), dtype=np.float32)
+        labels = self._segment_for_gate_values(gate_values)
+        predictions = np.asarray(self.global_model_.predict(X), dtype=np.float32)
+        high_bundle = self.segment_models_.get("high")
+        high_mask = labels == "high"
+        if high_bundle is not None and np.any(high_mask):
+            local_predictions = self._predict_local(high_bundle, X[high_mask])
+            predictions[high_mask] = (1.0 - self.high_blend) * predictions[high_mask] + self.high_blend * local_predictions
+        return np.clip(predictions, 0.0, None)
+
+
 TARGET_DEFINITIONS: dict[str, dict[str, Any]] = {
     "cof": {
         "label": "摩擦系数 μ/COF",
@@ -295,12 +483,14 @@ DEFAULT_FEATURE_CONFIG = {
 }
 
 DEFAULT_HYPERPARAMETERS = {
-    "n_estimators": 120,
-    "learning_rate": 0.06,
+    "n_estimators": 300,
+    "learning_rate": 0.08,
     "max_depth": 3,
-    "l2_leaf_reg": 3.0,
+    "l2_leaf_reg": 2.0,
     "random_strength": 1.0,
 }
+
+MAX_TRAINING_ROUNDS = 300
 
 DEFAULT_DATA_OPTIONS = {
     "validation_split": 0.2,
@@ -309,13 +499,19 @@ DEFAULT_DATA_OPTIONS = {
     "random_seed": 42,
     "split_strategy": "joint_stratified",
     "cv_folds": 5,
+    "reserve_external_validation": False,
     "target_aggregation_strategy": "raw",
+    "target_outlier_strategy": "robust_iqr",
+    "target_outlier_iqr_multiplier": 3.0,
+    "target_outlier_min": 0.0,
+    "target_outlier_max": 2.0,
 }
 
 JOINT_STRATIFICATION_BINS = 8
 TARGET_NOISE_CONFLICT_RANGE = 0.03
 TARGET_NOISE_CONFLICT_RELATIVE_RANGE = 0.25
 TARGET_AGGREGATION_STRATEGIES = {"raw", "mean_by_condition", "drop_conflicts"}
+TARGET_OUTLIER_STRATEGIES = {"off", "physical", "robust_iqr"}
 
 DEFAULT_CLEANING_OPTIONS = {
     "source_mode": "group_library_fallback",
@@ -339,13 +535,31 @@ TUNE_PARAM_GRIDS: dict[str, list[dict[str, Any]]] = {
         for n in (100, 200, 400)
         for d in (4, 8, None)
     ],  # 9
+    "high_cof_segmented": [
+        {
+            "high_train_threshold": train_threshold,
+            "high_gate_threshold": gate_threshold,
+            "high_blend": blend,
+            "high_weight": 1.5,
+            "min_segment_size": 14,
+        }
+        for train_threshold in (0.55, 0.60)
+        for gate_threshold in (0.45, 0.50, 0.55)
+        for blend in (0.15, 0.30)
+    ],  # 12，轻量高 COF 门控校准；围绕 #8 上最稳区域搜索
     "catboost": [
         {"iterations": it, "learning_rate": lr, "depth": d, "l2_leaf_reg": l2}
-        for it in (200, 500)
-        for lr in (0.03, 0.08)
+        for it in (160, 220, 300)
+        for lr in (0.04, 0.06, 0.08)
+        for d in (3,)
+        for l2 in (2.0, 5.0, 10.0)
+    ] + [
+        {"iterations": it, "learning_rate": lr, "depth": d, "l2_leaf_reg": l2}
+        for it in (220, 300)
+        for lr in (0.06, 0.08)
         for d in (4, 6)
-        for l2 in (3.0, 7.0)
-    ],  # 16
+        for l2 in (2.0, 5.0)
+    ],  # 43，围绕 #8 增益实验中最稳的浅树区域搜索
     "xgboost": [
         {"n_estimators": n, "learning_rate": lr, "max_depth": d}
         for n in (100, 250)
@@ -867,6 +1081,11 @@ class ModelTrainingService:
     def __init__(self) -> None:
         self._tasks: dict[str, TrainingTaskState] = {}
 
+    def _default_algorithm_key(self) -> str:
+        if CATBOOST_AVAILABLE and "catboost" not in DISABLED_TRAINING_ALGORITHMS:
+            return "catboost"
+        return "gradient_boosting"
+
     async def summarize_scope(
         self,
         session: AsyncSession,
@@ -915,6 +1134,11 @@ class ModelTrainingService:
             "rows_removed_by_strategy": 0,
             "groups_merged_by_strategy": 0,
         })
+        _, target_outliers = self._apply_target_outlier_strategy(
+            target_ready_rows,
+            target_column=target_column,
+            data_options=DEFAULT_DATA_OPTIONS,
+        )
 
         return {
             "dataset": {
@@ -936,6 +1160,7 @@ class ModelTrainingService:
                 "rdkit_enabled": RDKit_AVAILABLE,
                 "source_scope": metadata.get("source_scope", {}),
                 "target_noise": target_noise,
+                "target_outliers": target_outliers,
             },
             "algorithms": self._algorithm_options(),
             "split_options": self._split_options(),
@@ -943,7 +1168,7 @@ class ModelTrainingService:
             "pca_info": metadata.get("pca_info"),
             "defaults": {
                 "target": target_column,
-                "algorithm": "gradient_boosting",
+                "algorithm": self._default_algorithm_key(),
                 "hyperparameters": DEFAULT_HYPERPARAMETERS,
                 "data_options": DEFAULT_DATA_OPTIONS,
                 "cleaned_dataset_id": dataset.id,
@@ -1005,7 +1230,7 @@ class ModelTrainingService:
             "pca_info": None,
             "defaults": {
                 "target": target_column,
-                "algorithm": "gradient_boosting",
+                "algorithm": self._default_algorithm_key(),
                 "hyperparameters": DEFAULT_HYPERPARAMETERS,
                 "data_options": DEFAULT_DATA_OPTIONS,
                 "cleaned_dataset_id": None,
@@ -1019,13 +1244,17 @@ class ModelTrainingService:
                 "label": "CatBoost",
                 "description": "对称树梯度提升，原生支持类别特征，小样本表现优秀。",
             }
+            definitions["high_cof_segmented"] = {
+                "label": "高 COF 分段混合模型",
+                "description": "先用 CatBoost 识别高摩擦尾部，再用高 COF 局部模型校准，重点降低长尾低估。",
+            }
         if XGBOOST_AVAILABLE:
             definitions["xgboost"] = {
                 "label": "极端梯度提升（XGBoost）",
                 "description": "工业界使用最广泛的梯度提升实现，对结构化数据表现稳定，支持 L1/L2 正则。",
             }
         # 排序：树模型在前，线性/SVR 在后，便于学生从效果好的开始尝试
-        order = ["gradient_boosting", "random_forest", "catboost", "xgboost", "svr", "linear_regression"]
+        order = ["catboost", "high_cof_segmented", "gradient_boosting", "random_forest", "xgboost", "svr", "linear_regression"]
         return [
             {"key": key, **definitions[key]}
             for key in order
@@ -1075,6 +1304,7 @@ class ModelTrainingService:
         model: Any | None,
         X_train: np.ndarray,
         y_train: np.ndarray,
+        hyperparameters: dict[str, Any] | None = None,
     ) -> Any:
         if algorithm == "gradient_boosting":
             if model is None:
@@ -1105,6 +1335,21 @@ class ModelTrainingService:
                     n_jobs=1,
                 )
             model.set_params(n_estimators=round_index)
+            model.fit(X_train, y_train)
+            return model
+
+        if algorithm == "high_cof_segmented":
+            segment_params = hyperparameters or {}
+            params = {
+                "q1": _float_or_default(segment_params.get("q1"), 0.30),
+                "q2": _float_or_default(segment_params.get("q2"), 0.80),
+                "min_segment_size": _int_or_default(segment_params.get("min_segment_size"), 18),
+                "high_train_threshold": _float_or_default(segment_params.get("high_train_threshold"), 0.60),
+                "high_gate_threshold": _float_or_default(segment_params.get("high_gate_threshold"), 0.50),
+                "high_blend": _float_or_default(segment_params.get("high_blend"), 0.30),
+                "high_weight": _float_or_default(segment_params.get("high_weight"), 1.50),
+            }
+            model = _GatedSegmentedStackingRegressor(random_seed=random_seed, **params)
             model.fit(X_train, y_train)
             return model
 
@@ -1679,6 +1924,15 @@ class ModelTrainingService:
         timestamp = created_at.strftime("%Y-%m-%d %H:%M") if created_at else "Run"
         return f"{algorithm} / {dataset_name} / {timestamp}"
 
+    def _training_round_count(self, algorithm: str, hyperparameters: dict[str, Any] | None) -> int:
+        if algorithm in {"linear_regression", "svr", "high_cof_segmented"}:
+            return 1
+        n_estimators = _int_or_default(
+            (hyperparameters or {}).get("n_estimators"),
+            DEFAULT_HYPERPARAMETERS["n_estimators"],
+        )
+        return min(MAX_TRAINING_ROUNDS, max(20, n_estimators))
+
     def _fit_full_model(self, config: dict[str, Any], X: np.ndarray, y: np.ndarray) -> Any:
         algorithm = str(config.get("algorithm") or "gradient_boosting")
         hyperparameters = config.get("hyperparameters") or {}
@@ -1688,11 +1942,7 @@ class ModelTrainingService:
         random_strength = _float_or_default(hyperparameters.get("random_strength"), DEFAULT_HYPERPARAMETERS["random_strength"])
         random_seed = _int_or_default((config.get("data_options") or {}).get("random_seed"), DEFAULT_DATA_OPTIONS["random_seed"])
 
-        if algorithm in {"linear_regression", "svr"}:
-            total_rounds = 1
-        else:
-            n_estimators = _int_or_default(hyperparameters.get("n_estimators"), DEFAULT_HYPERPARAMETERS["n_estimators"])
-            total_rounds = min(300, max(20, n_estimators))
+        total_rounds = self._training_round_count(algorithm, hyperparameters)
 
         model: Any | None = None
         for round_index in range(1, total_rounds + 1):
@@ -1707,6 +1957,7 @@ class ModelTrainingService:
                 model=model,
                 X_train=X,
                 y_train=y,
+                hyperparameters=hyperparameters,
             )
         return model
 
@@ -1919,6 +2170,103 @@ class ModelTrainingService:
         if strategy not in TARGET_AGGREGATION_STRATEGIES:
             return DEFAULT_DATA_OPTIONS["target_aggregation_strategy"]
         return strategy
+
+    def _normalize_target_outlier_strategy(self, value: Any) -> str:
+        if value in (None, ""):
+            return "off"
+        strategy = str(value).strip().lower()
+        if strategy not in TARGET_OUTLIER_STRATEGIES:
+            return DEFAULT_DATA_OPTIONS["target_outlier_strategy"]
+        return strategy
+
+    def _apply_target_outlier_strategy(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        target_column: str,
+        data_options: dict[str, Any],
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        strategy = self._normalize_target_outlier_strategy(data_options.get("target_outlier_strategy"))
+        values = [
+            float(value)
+            for value in (_safe_float(row.get("_target_value", row.get(target_column))) for row in rows)
+            if value is not None
+        ]
+        summary: dict[str, Any] = {
+            "strategy": strategy,
+            "enabled": strategy != "off",
+            "rows_before": len(rows),
+            "rows_after": len(rows),
+            "rows_removed": 0,
+            "bounds": {"lower": None, "upper": None},
+            "iqr": None,
+            "removed_records": [],
+        }
+        if strategy == "off" or not rows or not values:
+            return rows, summary
+
+        lower_bound = _safe_float(data_options.get("target_outlier_min"))
+        upper_bound = _safe_float(data_options.get("target_outlier_max"))
+        if strategy == "robust_iqr" and len(values) >= 12:
+            q1, q3 = np.quantile(np.asarray(values, dtype=np.float32), [0.25, 0.75])
+            iqr = float(q3 - q1)
+            multiplier = _float_or_default(
+                data_options.get("target_outlier_iqr_multiplier"),
+                DEFAULT_DATA_OPTIONS["target_outlier_iqr_multiplier"],
+            )
+            multiplier = min(6.0, max(1.0, multiplier))
+            if iqr > 1e-12:
+                iqr_lower = float(q1 - multiplier * iqr)
+                iqr_upper = float(q3 + multiplier * iqr)
+                lower_bound = iqr_lower if lower_bound is None else max(float(lower_bound), iqr_lower)
+                upper_bound = iqr_upper if upper_bound is None else min(float(upper_bound), iqr_upper)
+            summary["iqr"] = {
+                "q1": float(q1),
+                "q3": float(q3),
+                "iqr": iqr,
+                "multiplier": multiplier,
+            }
+
+        filtered_rows: list[dict[str, Any]] = []
+        removed_records: list[dict[str, Any]] = []
+        for row in rows:
+            target_value = _safe_float(row.get("_target_value", row.get(target_column)))
+            if target_value is None:
+                continue
+            reasons: list[str] = []
+            if lower_bound is not None and target_value < lower_bound:
+                reasons.append("below_lower_bound")
+            if upper_bound is not None and target_value > upper_bound:
+                reasons.append("above_upper_bound")
+            if reasons:
+                removed_records.append(
+                    {
+                        "row_index": row.get("_row_index"),
+                        "record_id": row.get("_record_id"),
+                        "literature_id": row.get("_literature_id"),
+                        "target": float(target_value),
+                        "reasons": reasons,
+                    }
+                )
+                continue
+            filtered_rows.append(row)
+
+        summary.update(
+            {
+                "rows_after": len(filtered_rows),
+                "rows_removed": len(removed_records),
+                "bounds": {
+                    "lower": float(lower_bound) if lower_bound is not None else None,
+                    "upper": float(upper_bound) if upper_bound is not None else None,
+                },
+                "removed_records": sorted(
+                    removed_records,
+                    key=lambda item: abs(float(item.get("target") or 0.0)),
+                    reverse=True,
+                )[:24],
+            }
+        )
+        return filtered_rows, summary
 
     def _condition_text_value(self, row: dict[str, Any], fields: tuple[str, ...], fallback: str = "unknown") -> str:
         for field in fields:
@@ -2237,6 +2585,7 @@ class ModelTrainingService:
         *,
         test_fraction: float,
         random_seed: int,
+        reserve_external_validation: bool = False,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         rng = np.random.default_rng(random_seed)
         label_to_indices: dict[str, list[int]] = {}
@@ -2250,7 +2599,10 @@ class ModelTrainingService:
             indices = np.asarray(label_to_indices[label], dtype=int)
             rng.shuffle(indices)
             if len(indices) == 1:
-                external.extend(indices.tolist())
+                if reserve_external_validation:
+                    external.extend(indices.tolist())
+                else:
+                    train_pool.extend(indices.tolist())
                 continue
             test_count = max(1, int(round(len(indices) * test_fraction)))
             test_count = min(test_count, len(indices) - 1)
@@ -2282,6 +2634,7 @@ class ModelTrainingService:
         validation_split = min(0.4, max(0.1, validation_split))
         split_strategy = _normalize_split_strategy(data_options.get("split_strategy"))
         cv_folds = _normalize_cv_folds(data_options.get("cv_folds"))
+        reserve_external_validation = bool(data_options.get("reserve_external_validation", DEFAULT_DATA_OPTIONS["reserve_external_validation"]))
 
         eligible_rows: list[dict[str, Any]] = []
         dropped_low_confidence = 0
@@ -2307,6 +2660,11 @@ class ModelTrainingService:
         if max_records:
             eligible_rows = eligible_rows[:max_records]
 
+        eligible_rows, target_outlier_summary = self._apply_target_outlier_strategy(
+            eligible_rows,
+            target_column=target_column,
+            data_options=data_options,
+        )
         target_noise = self._target_noise_diagnostics(eligible_rows, target_column)
         aggregation_strategy = self._normalize_target_aggregation_strategy(data_options.get("target_aggregation_strategy"))
         eligible_rows, aggregation_summary = self._apply_target_aggregation_strategy(
@@ -2356,6 +2714,7 @@ class ModelTrainingService:
                 joint_labels,
                 test_fraction=validation_split,
                 random_seed=int(random_seed) + 1000,
+                reserve_external_validation=reserve_external_validation,
             )
             if len(train_pool_idx) < 10:
                 # 极端稀疏数据无法按论文规则留下足够训练池时，回退为随机训练池以保持可用性。
@@ -2402,20 +2761,28 @@ class ModelTrainingService:
             validation_size = int(round(pool_size / effective_cv_folds))
 
         algorithm = str(config.get("algorithm") or "gradient_boosting")
-        if algorithm in {"linear_regression", "svr"}:
-            total_rounds = 1
-        else:
-            n_estimators = _int_or_default(
-                (config.get("hyperparameters") or {}).get("n_estimators"),
-                DEFAULT_HYPERPARAMETERS["n_estimators"],
-            )
-            total_rounds = min(300, max(20, n_estimators))
+        total_rounds = self._training_round_count(algorithm, config.get("hyperparameters") or {})
 
         warnings: list[str] = []
         if missing_before_imputation:
             warnings.append("Missing numeric values in the saved matrix were median-imputed during training.")
         if dropped_low_confidence:
             warnings.append(f"{dropped_low_confidence} rows were excluded because their confidence was below the selected threshold.")
+        if target_outlier_summary["rows_removed"]:
+            bounds = target_outlier_summary.get("bounds") or {}
+            upper = bounds.get("upper")
+            lower = bounds.get("lower")
+            if lower is not None and upper is not None:
+                bounds_label = f"{float(lower):.3g} to {float(upper):.3g}"
+            elif upper is not None:
+                bounds_label = f"<= {float(upper):.3g}"
+            elif lower is not None:
+                bounds_label = f">= {float(lower):.3g}"
+            else:
+                bounds_label = "the robust target range"
+            warnings.append(
+                f"Target outlier filter removed {target_outlier_summary['rows_removed']} rows outside {bounds_label}."
+            )
         if aggregation_strategy == "mean_by_condition" and aggregation_summary["groups_merged"]:
             warnings.append(
                 f"Target aggregation merged {aggregation_summary['groups_merged']} duplicate-condition groups "
@@ -2521,11 +2888,18 @@ class ModelTrainingService:
                     "validation_split": validation_split,
                     "split_strategy": split_strategy,
                     "cv_folds": effective_cv_folds,
+                    "reserve_external_validation": reserve_external_validation,
                     "training_view": training_view,
                     "feature_subset": feature_subset,
                     "target_aggregation_strategy": aggregation_strategy,
+                    "target_outlier_strategy": target_outlier_summary["strategy"],
+                    "target_outlier_iqr_multiplier": (
+                        (target_outlier_summary.get("iqr") or {}).get("multiplier")
+                    ),
+                    "target_outlier_bounds": target_outlier_summary.get("bounds"),
                 },
                 "feature_subset": feature_subset,
+                "target_outliers": target_outlier_summary,
                 "target_noise": serializable_target_noise,
                 "split": {
                     "strategy": split_strategy,
@@ -3255,9 +3629,9 @@ class ModelTrainingService:
             return estimator
         if algorithm == "gradient_boosting":
             estimator = GradientBoostingRegressor(
-                n_estimators=int(params.get("n_estimators", 120)),
-                learning_rate=float(params.get("learning_rate", 0.06)),
-                max_depth=int(params.get("max_depth", 3)),
+                n_estimators=int(params.get("n_estimators", DEFAULT_HYPERPARAMETERS["n_estimators"])),
+                learning_rate=float(params.get("learning_rate", DEFAULT_HYPERPARAMETERS["learning_rate"])),
+                max_depth=int(params.get("max_depth", DEFAULT_HYPERPARAMETERS["max_depth"])),
                 random_state=random_seed,
             )
             estimator.fit(X, y)
@@ -3272,14 +3646,28 @@ class ModelTrainingService:
             )
             estimator.fit(X, y)
             return estimator
+        if algorithm == "high_cof_segmented":
+            estimator = _GatedSegmentedStackingRegressor(
+                random_seed=random_seed,
+                q1=float(params.get("q1", 0.30)),
+                q2=float(params.get("q2", 0.80)),
+                min_segment_size=int(params.get("min_segment_size", 18)),
+                high_train_threshold=float(params.get("high_train_threshold", 0.60)),
+                high_gate_threshold=float(params.get("high_gate_threshold", 0.50)),
+                high_blend=float(params.get("high_blend", 0.30)),
+                high_weight=float(params.get("high_weight", 1.50)),
+            )
+            estimator.fit(X, y)
+            return estimator
         if algorithm == "catboost":
             if not CATBOOST_AVAILABLE or CatBoostRegressor is None:
                 raise ValueError("CatBoost is not installed.")
             estimator = CatBoostRegressor(
-                iterations=int(params.get("iterations", 300)),
-                learning_rate=float(params.get("learning_rate", 0.06)),
-                depth=int(params.get("depth", 4)),
-                l2_leaf_reg=float(params.get("l2_leaf_reg", 3.0)),
+                iterations=int(params.get("iterations", DEFAULT_HYPERPARAMETERS["n_estimators"])),
+                learning_rate=float(params.get("learning_rate", DEFAULT_HYPERPARAMETERS["learning_rate"])),
+                depth=int(params.get("depth", DEFAULT_HYPERPARAMETERS["max_depth"])),
+                l2_leaf_reg=float(params.get("l2_leaf_reg", DEFAULT_HYPERPARAMETERS["l2_leaf_reg"])),
+                random_strength=float(params.get("random_strength", DEFAULT_HYPERPARAMETERS["random_strength"])),
                 loss_function="RMSE",
                 random_seed=random_seed,
                 verbose=False,
@@ -3292,10 +3680,10 @@ class ModelTrainingService:
             if not XGBOOST_AVAILABLE or XGBRegressor is None:
                 raise ValueError("XGBoost is not installed.")
             estimator = XGBRegressor(
-                n_estimators=int(params.get("n_estimators", 200)),
-                learning_rate=float(params.get("learning_rate", 0.06)),
-                max_depth=int(params.get("max_depth", 4)),
-                reg_lambda=float(params.get("reg_lambda", 1.0)),
+                n_estimators=int(params.get("n_estimators", DEFAULT_HYPERPARAMETERS["n_estimators"])),
+                learning_rate=float(params.get("learning_rate", DEFAULT_HYPERPARAMETERS["learning_rate"])),
+                max_depth=int(params.get("max_depth", DEFAULT_HYPERPARAMETERS["max_depth"])),
+                reg_lambda=float(params.get("reg_lambda", DEFAULT_HYPERPARAMETERS["l2_leaf_reg"])),
                 random_state=random_seed,
                 tree_method="hist",
                 verbosity=0,
@@ -3490,6 +3878,10 @@ class ModelTrainingService:
                 await self._tune_hyperparameters(task, X[tune_pool_idx], y[tune_pool_idx])
                 if task.cancel_requested or task.status in {"cancelled", "failed"}:
                     return
+                task.total_rounds = self._training_round_count(
+                    str(task.config.get("algorithm") or "gradient_boosting"),
+                    task.config.get("hyperparameters") or {},
+                )
 
             algorithm = task.config.get("algorithm", "gradient_boosting")
             hyperparameters = task.config.get("hyperparameters") or {}
@@ -3532,6 +3924,7 @@ class ModelTrainingService:
                         model=fold_models[split_index],
                         X_train=X[train_idx],
                         y_train=y[train_idx],
+                        hyperparameters=hyperparameters,
                     )
                     fold_models[split_index] = model
 
@@ -3602,6 +3995,7 @@ class ModelTrainingService:
                     model=final_model,
                     X_train=X_pool,
                     y_train=y_pool,
+                    hyperparameters=hyperparameters,
                 )
 
             def evaluate_index_set(indices: np.ndarray, *, metric_prefix: str) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:

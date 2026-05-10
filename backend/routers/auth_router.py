@@ -22,7 +22,6 @@ from security import (
     hash_password,
     is_admin,
     list_accessible_workspaces,
-    scope_summary_from_workspace,
     verify_password,
 )
 from services.activity_logging_service import log_activity
@@ -61,9 +60,11 @@ class ResetPasswordRequest(BaseModel):
         populate_by_name = True
 
 
-def _user_payload(principal: AuthPrincipal, workspaces: list[Any]) -> dict[str, Any]:
-    available_scopes = [scope_summary_from_workspace(principal, workspace) for workspace in workspaces]
-    available_scopes.append(group_library_scope_summary(principal))
+def _user_payload(principal: AuthPrincipal, _workspaces: list[Any]) -> dict[str, Any]:
+    # Student-facing workflows should land in the shared research-group library.
+    # Personal workspaces are still kept for legacy data compatibility, but they
+    # are no longer exposed as selectable app scopes.
+    available_scopes = [group_library_scope_summary(principal)]
     personal_workspace_id = principal.personal_workspace.id if principal.personal_workspace else None
 
     return {

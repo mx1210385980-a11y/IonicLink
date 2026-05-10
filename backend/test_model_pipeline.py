@@ -602,7 +602,8 @@ def test_training_service_prepares_joint_stratified_thesis_split() -> None:
 
     assert prepared["dataset"]["split"]["strategy"] == "joint_stratified"
     assert prepared["dataset"]["split"]["strata_count"] >= 8
-    assert prepared["dataset"]["external_size"] >= 1
+    assert prepared["dataset"]["external_size"] == 0
+    assert prepared["dataset"]["filters"]["reserve_external_validation"] is False
     assert prepared["dataset"]["test_size"] > 0
     assert prepared["dataset"]["pool_size"] > 0
     assert len(split_plan) >= 2
@@ -615,6 +616,14 @@ def test_training_service_prepares_joint_stratified_thesis_split() -> None:
     assert preview["split_plan"][0]["train_size"] > 0
     assert set(prepared["external_idx"].tolist()).isdisjoint(set(prepared["train_pool_idx"].tolist()))
     assert set(prepared["external_idx"].tolist()).isdisjoint(set(prepared["test_idx"].tolist()))
+
+    external_config = copy.deepcopy(config)
+    external_config["data_options"]["reserve_external_validation"] = True
+    prepared_with_external = service._prepare_saved_dataset(rows, external_config, metadata)
+    assert prepared_with_external["dataset"]["external_size"] >= 1
+    assert prepared_with_external["dataset"]["filters"]["reserve_external_validation"] is True
+    assert set(prepared_with_external["external_idx"].tolist()).isdisjoint(set(prepared_with_external["train_pool_idx"].tolist()))
+    assert set(prepared_with_external["external_idx"].tolist()).isdisjoint(set(prepared_with_external["test_idx"].tolist()))
 
 
 @pytest.mark.anyio

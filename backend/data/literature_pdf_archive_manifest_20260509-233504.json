@@ -1,0 +1,542 @@
+[
+  {
+    "literature_id": 2,
+    "title": "Controlling the nanoscale friction by layered ionic liquid films†",
+    "old_path": "temp_uploads/pdfs/2.pdf",
+    "status": "dedupe",
+    "source": "backend/temp_uploads/pdfs/2.pdf",
+    "target": "Reference/Extracted/2020-an-Controlling the nanoscale friction by layered ionic.pdf",
+    "hash": "fd1e2d6020f2525ad8bc1f63aa225c5785ad0124a31e0d97746af16538c3b35a"
+  },
+  {
+    "literature_id": 13,
+    "title": "Investigation of Programmable Friction with Ionic Liquid Mixtures at the Nano- and Macroscales",
+    "old_path": "temp_uploads/pdfs/13.pdf",
+    "status": "dedupe",
+    "source": "backend/temp_uploads/pdfs/13.pdf",
+    "target": "Reference/Extracted/2023-Investigation of Programmable Friction with Ionic Liquid.pdf",
+    "hash": "874cd97b4bd152521e6af5265aa02c2cb64e4cc9c2644c157301f8d5ad5aa06e"
+  },
+  {
+    "literature_id": 17,
+    "title": "Tribological Properties of Self-Assembled Monolayers of Catecholic Imidazolium and the Spin-Coated Films of Ionic Liquids",
+    "old_path": "Reference/3.10/Tribological Properties of Self-Assembled Monolayers of Catecholic.pdf",
+    "status": "move",
+    "source": "Reference/3.10/Tribological Properties of Self-Assembled Monolayers of Catecholic.pdf",
+    "target": "Reference/Extracted/Tribological Properties of Self-Assembled Monolayers of Catecholic.pdf",
+    "hash": "5ebaffa8166c3ee377ec8aa287b0a4c8e40482d0fc24fe6209acec9d049bf54e"
+  },
+  {
+    "literature_id": 18,
+    "title": "Supporting Information for Potential-Dependent Superlubricity of Ionic Liquids on a Graphite Surface",
+    "old_path": "export/([P6,6,6,14][i(C8)2PO2]-graphite-rutland-2021-supporting information.pdf",
+    "status": "move",
+    "source": "export/([P6,6,6,14][( iC8)2PO2]-graphite-rutland-2021-supporting information.pdf",
+    "target": "Reference/Extracted/([P6,6,6,14][( iC8)2PO2]-graphite-rutland-2021-supporting information.pdf",
+    "hash": "a5f609b61ba10602b52d9c38e4ced14a921c1f77e1aeb969eae410f8228a952e"
+  },
+  {
+    "literature_id": 19,
+    "title": "Supporting Information for Control of Nanoscale Friction on Gold in an Ionic Liquid by a Potential-Dependent Ionic Lubricant Layer",
+    "old_path": "export/(Py1,4)FAP-Au（111）-rutland-2012_SupplementalMaterial02.pdf",
+    "status": "move",
+    "source": "export/(Py1,4)FAP-Au（111）-rutland-2012_SupplementalMaterial02.pdf",
+    "target": "Reference/Extracted/(Py1,4)FAP-Au（111）-rutland-2012_SupplementalMaterial02.pdf",
+    "hash": "0c70153fe7a01d91899e80afb6ed8eece36412c17044a0e6b796aa18f484a174"
+  },
+  {
+    "literature_id": 20,
+    "title": "Quantized friction across ionic liquid thin films",
+    "old_path": "export/2013-perkin-Quantized friction across ionic liquid thin films.pdf",
+    "status": "move",
+    "source": "export/2013-perkin-Quantized friction across ionic liquid thin films.pdf",
+    "target": "Reference/Extracted/2013-perkin-Quantized friction across ionic liquid thin films.pdf",
+    "hash": "5449dc4a0481d903d34c55a7a130db70d445fb6f2610a39e3138c779fbd9a125"
+  },
+  {
+    "literature_id": 21,
+    "title": "An ionic liquid lubricant enables superlubricity to be switched on in situ using an electrical potential",
+    "old_path": "export/2014-Rutland-An ionic liquid lubricant enables superlubricity to.pdf",
+    "status": "move",
+    "source": "export/2014-Rutland-An ionic liquid lubricant enables superlubricity to.pdf",
+    "target": "Reference/Extracted/2014-Rutland-An ionic liquid lubricant enables superlubricity to.pdf",
+    "hash": "76d1b1bc62a58acaa00a4a2a85873e4157683eb17ea0677e3de1aa894adacc31"
+  },
+  {
+    "literature_id": 22,
+    "title": "Nanostructure of Deep Eutectic Solvents at Graphite Electrodes as a Function of Potential and Water Content",
+    "old_path": "export/2016-atkin-Nanostructure of Deep Eutectic Solvents at Graphite Electrode.pdf",
+    "status": "move",
+    "source": "export/2016-atkin-Nanostructure of Deep Eutectic Solvents at Graphite Electrode.pdf",
+    "target": "Reference/Extracted/2016-atkin-Nanostructure of Deep Eutectic Solvents at Graphite Electrode.pdf",
+    "hash": "f2719e6281f05ff5293399eff034a92c77d805dd1e687319eae11f1f645eb852"
+  },
+  {
+    "literature_id": 23,
+    "title": "Addition of low concentrations of an ionic liquid to a base oil reduces friction over multiple length scales: a combined nano- and macrotribology investigation",
+    "old_path": "export/2016-rutland-Addition of low concentrations of an ionic liquid to a base oil reduces friction over multiple length scales  a combined nano- and macrotribology investigation.pdf",
+    "status": "move",
+    "source": "export/2016-rutland-Addition of low concentrations of an ionic liquid to a base oil reduces friction over multiple length scales  a combined nano- and macrotribology investigation.pdf",
+    "target": "Reference/Extracted/2016-rutland-Addition of low concentrations of an ionic liquid to a base oil reduces friction over multiple length scales a combined nano- and macrotribology investigation.pdf",
+    "hash": "ec90f0fcc178c87ae0268f4258e687419f5de36166e96f63cba469907fe77cd0"
+  },
+  {
+    "literature_id": 24,
+    "title": "Combined Nano- and Macrotribology Studies of Titania Lubrication Using the Oil-Ionic Liquid Hybrid Lubricant Concept",
+    "old_path": "export/2016-Rutland-Combined Nano- and Macrotribology Studies of Titania Lubrication.pdf",
+    "status": "move",
+    "source": "export/2016-Rutland-Combined Nano- and Macrotribology Studies of Titania Lubrication.pdf",
+    "target": "Reference/Extracted/2016-Rutland-Combined Nano- and Macrotribology Studies of Titania Lubrication.pdf",
+    "hash": "df514d1ce0f06dd3f26bbd0e7134f60a81e75638f168a66ea40d7bf3c0b32481"
+  },
+  {
+    "literature_id": 25,
+    "title": "Tribotronic control of friction in oil-based lubricants with ionic liquid additives",
+    "old_path": "temp_uploads/pdfs/25.pdf",
+    "status": "move",
+    "source": "backend/temp_uploads/pdfs/25.pdf",
+    "target": "Reference/Extracted/2016-cooper-Tribotronic control of friction in oil-based lubricants with ionic liquid additives.pdf",
+    "hash": "0dbb08892e1f37e5f3ffbb6abea1acd46a75a713d6a9797aa6b6d9e2836518d7"
+  },
+  {
+    "literature_id": 26,
+    "title": "Nanotribology of Ionic Liquids as Lubricant Additives for Alumina Surfaces",
+    "old_path": "export/2017-Atkin-Nanotribology of Ionic Liquids as Lubricant Additives for Alumina Surfaces.pdf",
+    "status": "move",
+    "source": "export/2017-Atkin-Nanotribology of Ionic Liquids as Lubricant Additives for Alumina Surfaces.pdf",
+    "target": "Reference/Extracted/2017-Atkin-Nanotribology of Ionic Liquids as Lubricant Additives for Alumina Surfaces.pdf",
+    "hash": "ccb76696e144a03ab9fe321442f4746b924b4d56461cf97d449c9a9b9c406000"
+  },
+  {
+    "literature_id": 27,
+    "title": "Nano- and Macroscale Study of the Lubrication of Titania Using Pure and Diluted Ionic Liquids",
+    "old_path": "export/2019-Atkin-Nano- and Macroscale Study of the Lubrication of Titania Using Pure and Diluted Ionic Liquids.pdf",
+    "status": "move",
+    "source": "export/2019-Atkin-Nano- and Macroscale Study of the Lubrication of Titania Using Pure and Diluted Ionic Liquids.pdf",
+    "target": "Reference/Extracted/2019-Atkin-Nano- and Macroscale Study of the Lubrication of Titania Using Pure and Diluted Ionic Liquids.pdf",
+    "hash": "272d43a7d7ecf61ef41bed383613fa790d11f4554dc6f6af18d3eb5780caeecb"
+  },
+  {
+    "literature_id": 30,
+    "title": "A new methodology for a detailed investigation of quantized friction in ionic liquids",
+    "old_path": "export/[C4C1Pyrr][NTf2]-dry-wet-SFB-prekin-2020.pdf",
+    "status": "move",
+    "source": "export/[C4C1Pyrr][NTf2]-dry-wet-SFB-prekin-2020.pdf",
+    "target": "Reference/Extracted/[C4C1Pyrr][NTf2]-dry-wet-SFB-prekin-2020.pdf",
+    "hash": "09b66ff56d5defafe080a976efdb99bcc0387c8e2c4919a886bfef4241876b52"
+  },
+  {
+    "literature_id": 31,
+    "title": "Supporting Information for Quantized friction across ionic liquid thin films",
+    "old_path": "export/[C4C1Pyrr][NTf2]-mica-perkin-2013-supporting information.pdf",
+    "status": "move",
+    "source": "export/[C4C1Pyrr][NTf2]-mica-perkin-2013-supporting information.pdf",
+    "target": "Reference/Extracted/[C4C1Pyrr][NTf2]-mica-perkin-2013-supporting information.pdf",
+    "hash": "4046fab234c5874e35818312aa71f9c4e91ba7c75a27353b8c4d6fb289f95abd"
+  },
+  {
+    "literature_id": 32,
+    "title": "Supporting Information for An ionic liquid lubricant enables superlubricity to be switched on in situ using an electrical potential",
+    "old_path": "export/[HMIm] FAP-HOPG-rutland-2014-supporting information.pdf",
+    "status": "move",
+    "source": "export/[HMIm] FAP-HOPG-rutland-2014-supporting information.pdf",
+    "target": "Reference/Extracted/[HMIm] FAP-HOPG-rutland-2014-supporting information.pdf",
+    "hash": "586c6a0be83cab5306f8a9b029580703060ecbb66dccfed3f42390b2b36cf553"
+  },
+  {
+    "literature_id": 33,
+    "title": "Electroresponsive structuring and friction of a non-halogenated ionic liquid in a polar solvent: effect of concentration",
+    "old_path": "export/[P6,6,6,14][BMB]&PC-gold-rutland-2020.pdf",
+    "status": "move",
+    "source": "export/[P6,6,6,14][BMB]&PC-gold-rutland-2020.pdf",
+    "target": "Reference/Extracted/[P6,6,6,14][BMB]&PC-gold-rutland-2020.pdf",
+    "hash": "f8d175bd9513206652b0c7d8f9cc83df582c0a93f348bba6c7211849e560b66e"
+  },
+  {
+    "literature_id": 34,
+    "title": "Effect of water on the electroresponsive structuring and friction in dilute and concentrated ionic liquid lubricant mixtures",
+    "old_path": "export/[P6,6,6,14][BMB]&PC-gold-water-rutland-2020.pdf",
+    "status": "move",
+    "source": "export/[P6,6,6,14][BMB]&PC-gold-water-rutland-2020.pdf",
+    "target": "Reference/Extracted/[P6,6,6,14][BMB]&PC-gold-water-rutland-2020.pdf",
+    "hash": "4c4d18cb70484655dee8b55e257914ce89286dcb70945bf7d0d36779b6f11d55"
+  },
+  {
+    "literature_id": 35,
+    "title": "Amyloid aggregation at solid-liquid interfaces: Perspectives of studies using model surfaces",
+    "old_path": "export/Applied Surface Science.pdf",
+    "status": "move",
+    "source": "export/Applied Surface Science.pdf",
+    "target": "Reference/Extracted/Applied Surface Science.pdf",
+    "hash": "7d7c9a9dee2f557e2ea15cc4a120d21a0c9d631dce4f123e43b6dcb060272763"
+  },
+  {
+    "literature_id": 37,
+    "title": "Supporting Information for Nanotribology of Ionic Liquids as Lubricant Additives for Alumina Surfaces",
+    "old_path": "export/P6,6,6,14 i(C8)2PO2-Alumina-atkin-2017.pdf",
+    "status": "move",
+    "source": "export/P6,6,6,14 (iC8)2PO2-Alumina-atkin-2017.pdf",
+    "target": "Reference/Extracted/P6,6,6,14 (iC8)2PO2-Alumina-atkin-2017.pdf",
+    "hash": "31448896374d034b2a2aff71c5dc78436a657ac01f19c97b55ffd347ef644037"
+  },
+  {
+    "literature_id": 38,
+    "title": "Supporting Information for Combined Nano- and Macrotribology Studies of Titania Lubrication Using the Oil-Ionic Liquid Hybrid Lubricant Concept",
+    "old_path": "export/P6,6,6,14i(C8)2PO2)-Ti-rutland-2016-support information.pdf",
+    "status": "move",
+    "source": "export/P6,6,6,14(iC8)2PO2)-Ti-rutland-2016-support information.pdf",
+    "target": "Reference/Extracted/P6,6,6,14(iC8)2PO2)-Ti-rutland-2016-support information.pdf",
+    "hash": "60557669145411ff55fab0a3d4a8deedfa48136d60dbff08158169361d2d299b"
+  },
+  {
+    "literature_id": 39,
+    "title": "The charge of glass and silica surfaces",
+    "old_path": "export/The charge of glass and silica surfaces.pdf",
+    "status": "move",
+    "source": "export/The charge of glass and silica surfaces.pdf",
+    "target": "Reference/Extracted/The charge of glass and silica surfaces.pdf",
+    "hash": "35670535af4a3b4b43a1982858ef9416786288d066f6630fde346d4b41edd7cf"
+  },
+  {
+    "literature_id": 40,
+    "title": "Titania surface chemistry and its influence on supported metal catalysts",
+    "old_path": "export/Titania surface chemistry and its influence on supported metal catalysts.pdf",
+    "status": "move",
+    "source": "export/Titania surface chemistry and its influence on supported metal catalysts.pdf",
+    "target": "Reference/Extracted/Titania surface chemistry and its influence on supported metal catalysts.pdf",
+    "hash": "7cb3082e8ec79e8c5f18e9059d445113770fe35c642ae57b77724390d01179b7"
+  },
+  {
+    "literature_id": 41,
+    "title": "2019-atkin-influence-of-hydrogen-bonding-between-ions-of-like-charge-on-the-ionic-liquid-interfacial-structure.pdf",
+    "old_path": "temp_uploads/pdfs/41.pdf",
+    "status": "move",
+    "source": "Reference/3.10/2019-atkin-influence-of-hydrogen-bonding-between-ions-of-like-charge-on-the-ionic-liquid-interfacial-structure.pdf",
+    "target": "Reference/Extracted/2019-atkin-influence-of-hydrogen-bonding-between-ions-of-like-charge-on-the-ionic-liquid-interfacial-structure.pdf",
+    "hash": "1b9e62a752bb6ae918e3e2ffd5a40aaa92302293cede82ec55afc7638c3266d6"
+  },
+  {
+    "literature_id": 53,
+    "title": "2020-perkin-Nanolubrication in Deep Eutectic Solvents.pdf",
+    "old_path": "temp_uploads/pdfs/53.pdf",
+    "status": "move",
+    "source": "backend/temp_uploads/pdfs/74.pdf",
+    "target": "Reference/Extracted/2020-perkin-Nanolubrication in Deep Eutectic Solvents.pdf",
+    "hash": "16099f2f6265185c5026bed3f5d8335116a112147984656918a5d2805c2a9b48"
+  },
+  {
+    "literature_id": 55,
+    "title": "2020-perkin-Nanolubrication in Deep Eutectic Solvents.pdf",
+    "old_path": "temp_uploads/pdfs/55.pdf",
+    "status": "already_extracted",
+    "source": "Reference/Extracted/2020-perkin-Nanolubrication in Deep Eutectic Solvents.pdf",
+    "target": "Reference/Extracted/2020-perkin-Nanolubrication in Deep Eutectic Solvents.pdf",
+    "hash": "16099f2f6265185c5026bed3f5d8335116a112147984656918a5d2805c2a9b48"
+  },
+  {
+    "literature_id": 56,
+    "title": "Rapid carbene formation increases ion diffusivity in an imidazolium acetate ionic liquid confined between polar glass plates",
+    "old_path": "temp_uploads/pdfs/56.pdf",
+    "status": "copy",
+    "source": "PaperData/Reference/filippov2019.pdf",
+    "target": "Reference/Extracted/filippov2019.pdf",
+    "hash": "7a64dd51371dde98ba27e57b0b4a5e429053d7170791ac69a8ae52ea4395a30a"
+  },
+  {
+    "literature_id": 57,
+    "title": "Ionic Mobility within Functionalized Silica Nanopores",
+    "old_path": "temp_uploads/pdfs/57.pdf",
+    "status": "copy",
+    "source": "PaperData/Reference/elola2019.pdf",
+    "target": "Reference/Extracted/elola2019.pdf",
+    "hash": "41e30582b9de6fcfb9774abe4a5b916a7f270802de59587c26d09a07b0cbfbfc"
+  },
+  {
+    "literature_id": 58,
+    "title": "Selective Control of Ion Transport by Nanoconfinement: Ionic Liquid in Mesoporous Resorcinol−Formaldehyde Monolith",
+    "old_path": "temp_uploads/pdfs/58.pdf",
+    "status": "copy",
+    "source": "PaperData/Reference/elverfeldt2019.pdf",
+    "target": "Reference/Extracted/elverfeldt2019.pdf",
+    "hash": "a161b394508ae1ca755a13cd49ad1c6471a63195160819fd099059a7e00c8bd5"
+  },
+  {
+    "literature_id": 59,
+    "title": "From chain length to ion diffusion: Molecular insights into phosphonium-based polymerized ionic liquid membranes for energy applications",
+    "old_path": "temp_uploads/pdfs/59.pdf",
+    "status": "copy",
+    "source": "PaperData/Reference/1-s2.0-S0011916425009105-main.pdf",
+    "target": "Reference/Extracted/1-s2.0-S0011916425009105-main.pdf",
+    "hash": "3880d8bb6367a79ea67adfc5c528c18d3cff52da9b1d33a01e529657a49c20c3"
+  },
+  {
+    "literature_id": 60,
+    "title": "Molecular structure and transport of ionic liquid confined in asymmetric graphene-coated silica nanochannel",
+    "old_path": "temp_uploads/pdfs/60.pdf",
+    "status": "copy",
+    "source": "PaperData/Reference/1-s2.0-S0167732221025940-main.pdf",
+    "target": "Reference/Extracted/1-s2.0-S0167732221025940-main.pdf",
+    "hash": "a0af1ef30460adde7d93079c7bfbee5e8a141603503aadc9389a839314ac54e1"
+  },
+  {
+    "literature_id": 61,
+    "title": "Layering and shear properties of an ionic liquid, 1-ethyl-3-methylimidazolium ethylsulfate, confined to nano-films between mica surfaces",
+    "old_path": "temp_uploads/pdfs/61.pdf",
+    "status": "dedupe",
+    "source": "backend/temp_uploads/pdfs/61.pdf",
+    "target": "Reference/Extracted/2010-perkin-Layering and shear properties of an ionic liquid, 1-ethyl-3-methylimidazolium ethylsulfate, confined to nano-films between mica surfaces.pdf",
+    "hash": "6d21122f8058de778413642e7bfe6a3976cce76836969566cb7f103df6926998"
+  },
+  {
+    "literature_id": 65,
+    "title": "2014-Atkin-Combined STM, AFM, and DFT Study of the Highly Ordered Pyrolytic.pdf",
+    "old_path": "temp_uploads/pdfs/65.pdf",
+    "status": "move",
+    "source": "Reference/3.10/2014-Atkin-Combined STM, AFM, and DFT Study of the Highly Ordered Pyrolytic.pdf",
+    "target": "Reference/Extracted/2014-Atkin-Combined STM, AFM, and DFT Study of the Highly Ordered Pyrolytic.pdf",
+    "hash": "377807545b2e7ec0624d76efe7f10d9bd07a9285b04630b405b95b119b10179f"
+  },
+  {
+    "literature_id": 67,
+    "title": "Control of Nanoscale Friction on Gold in an Ionic Liquid by a Potential-Dependent Ionic Lubricant Layer",
+    "old_path": "temp_uploads/pdfs/67.pdf",
+    "status": "dedupe",
+    "source": "backend/temp_uploads/pdfs/67.pdf",
+    "target": "Reference/Extracted/2012-Rutland-Control of Nanoscale Friction on Gold in an Ionic Liquid by a Potential-Dependent Ionic Lubricant Layer.pdf",
+    "hash": "4a2882fbcb5951f29f938d7349697ed264282ae57a99919107ce1a8ee605e2a5"
+  },
+  {
+    "literature_id": 68,
+    "title": "Ionic liquid nanotribology: mica-silica interactions in ethylammonium nitrate",
+    "old_path": "Reference/Extracted/2012-rutland-Ionic liquid nanotribology mica–silica interactions in ethylammonium nitrate.pdf",
+    "status": "already_extracted",
+    "source": "Reference/Extracted/2012-rutland-Ionic liquid nanotribology mica–silica interactions in ethylammonium nitrate.pdf",
+    "target": "Reference/Extracted/2012-rutland-Ionic liquid nanotribology mica–silica interactions in ethylammonium nitrate.pdf",
+    "hash": "690a50bff1e1837ffb62d4a37592e9b6adc4f212155fc5b37b781067739b8f5b"
+  },
+  {
+    "literature_id": 69,
+    "title": "Ionic Liquid Nanotribology: Stiction Suppression and Surface Induced Shear Thinning",
+    "old_path": "Reference/Extracted/2012-atkin-Ionic Liquid Nanotribology Stiction Suppression and SurfaceInduced Shear Thinning.pdf",
+    "status": "already_extracted",
+    "source": "Reference/Extracted/2012-atkin-Ionic Liquid Nanotribology Stiction Suppression and SurfaceInduced Shear Thinning.pdf",
+    "target": "Reference/Extracted/2012-atkin-Ionic Liquid Nanotribology Stiction Suppression and SurfaceInduced Shear Thinning.pdf",
+    "hash": "88e6c6463a6a3cb1bbe12e01fa06795811e66990cff9266e4f1c63149a5dc39f"
+  },
+  {
+    "literature_id": 70,
+    "title": "A Review of Ionic Liquids for Green Molecular Lubrication in Nanotechnology",
+    "old_path": "temp_uploads/pdfs/70.pdf",
+    "status": "dedupe",
+    "source": "backend/temp_uploads/pdfs/70.pdf",
+    "target": "Reference/Extracted/2010-Palacio M, Bhushan B. A review of ionic liquids for green molecular lubrication in nanotechnology[J]. Tribology Letters, 2010, 40(2) 247-268.pdf",
+    "hash": "ad88bb1c05acc5fd6f189d21ceaa22daf72d719cd9d7a56b2f560cfc8842f698"
+  },
+  {
+    "literature_id": 71,
+    "title": "Ionic Liquid Lubrication of Stainless Steel: Friction is Inversely Correlated with Interfacial Liquid Nanostructure",
+    "old_path": "Reference/Extracted/2017-atkin-Ionic Liquid Lubrication of Stainless Steel  Friction is Inversely Correlated with Interfacial Liquid Nanostructure.pdf",
+    "status": "already_extracted",
+    "source": "Reference/Extracted/2017-atkin-Ionic Liquid Lubrication of Stainless Steel  Friction is Inversely Correlated with Interfacial Liquid Nanostructure.pdf",
+    "target": "Reference/Extracted/2017-atkin-Ionic Liquid Lubrication of Stainless Steel  Friction is Inversely Correlated with Interfacial Liquid Nanostructure.pdf",
+    "hash": "00a094713798caad48cd78aebfb47e4d98d9afb563f7d891ebb71b8bf65a13fd"
+  },
+  {
+    "literature_id": 72,
+    "title": "Boundary layer friction of solvate ionic liquids as a function of potential",
+    "old_path": "Reference/Extracted/2017-Rutland-Boundary layer friction of solvate ionic liquids as a function of potential.pdf",
+    "status": "already_extracted",
+    "source": "Reference/Extracted/2017-Rutland-Boundary layer friction of solvate ionic liquids as a function of potential.pdf",
+    "target": "Reference/Extracted/2017-Rutland-Boundary layer friction of solvate ionic liquids as a function of potential.pdf",
+    "hash": "bec4289a832559f607ab7297a17e05aaeb98664329e2e32f10be17dfe223e340"
+  },
+  {
+    "literature_id": 73,
+    "title": "Molecular Mechanisms Underlying Lubrication by Ionic Liquids: Activated Slip and Flow",
+    "old_path": "temp_uploads/pdfs/73.pdf",
+    "status": "dedupe",
+    "source": "backend/temp_uploads/pdfs/73.pdf",
+    "target": "Reference/Extracted/2018-Molecular Mechanisms Underlying Lubrication by Ionic Liquids Activated Slip and Flow.pdf",
+    "hash": "a9e7dee8702df96351bcc4883ac72ed3eac9e527147f4fd62d68470454fd113b"
+  },
+  {
+    "literature_id": 74,
+    "title": "2020-perkin-Nanolubrication in Deep Eutectic Solvents.pdf",
+    "old_path": "temp_uploads/pdfs/74.pdf",
+    "status": "already_extracted",
+    "source": "Reference/Extracted/2020-perkin-Nanolubrication in Deep Eutectic Solvents.pdf",
+    "target": "Reference/Extracted/2020-perkin-Nanolubrication in Deep Eutectic Solvents.pdf",
+    "hash": "16099f2f6265185c5026bed3f5d8335116a112147984656918a5d2805c2a9b48"
+  },
+  {
+    "literature_id": 75,
+    "title": "Potential-Dependent Superlubricity of Ionic Liquids on a Graphite Surface",
+    "old_path": "temp_uploads/pdfs/75.pdf",
+    "status": "dedupe",
+    "source": "backend/temp_uploads/pdfs/75.pdf",
+    "target": "Reference/Extracted/2021-atkin-potential-dependent-superlubricity-of-ionic-liquids-on-a-graphite-surface.pdf",
+    "hash": "a408dbbafe8ce9f7107299f9998c195ea2df4fe63b8ff8106b9f75aa1b832861"
+  },
+  {
+    "literature_id": 76,
+    "title": "Atomic force microscopy probing interactions and microstructures of ionic liquids at solid surfaces",
+    "old_path": "temp_uploads/pdfs/76.pdf",
+    "status": "dedupe",
+    "source": "backend/temp_uploads/pdfs/76.pdf",
+    "target": "Reference/Extracted/2022-an-Atomic force microscopy probing interactions and microstructures of ionic liquids at solid surfaces.pdf",
+    "hash": "71bc89b56aa532023511b0b77306aa3d3a152bb3c59cd705456823f9247bce39"
+  },
+  {
+    "literature_id": 77,
+    "title": "Probing the nanofriction of non-halogenated phosphonium-based ionic liquid additives in glycol ether oil on titanium surface",
+    "old_path": "Reference/Extracted/2022-an-Probing the nanofriction of non-halogenated phosphonium-based ionic liquid additives in glycol ether oil on titanium surface.pdf",
+    "status": "already_extracted",
+    "source": "Reference/Extracted/2022-an-Probing the nanofriction of non-halogenated phosphonium-based ionic liquid additives in glycol ether oil on titanium surface.pdf",
+    "target": "Reference/Extracted/2022-an-Probing the nanofriction of non-halogenated phosphonium-based ionic liquid additives in glycol ether oil on titanium surface.pdf",
+    "hash": "365854c17ed4d698da2a7df431ab4c834343c77ff4b81f2cab8ee79b1f8d8090"
+  },
+  {
+    "literature_id": 78,
+    "title": "Ionic liquids on uncharged and charged surfaces: In situ microstructures and nanofriction",
+    "old_path": "temp_uploads/pdfs/78.pdf",
+    "status": "dedupe",
+    "source": "backend/temp_uploads/pdfs/78.pdf",
+    "target": "Reference/Extracted/2022-Ionic liquids on uncharged and charged surfaces In situ.pdf",
+    "hash": "f8f93b9093297c875f06be96b72a5ea1dae6d048227b606695bf0c953fff35ee"
+  },
+  {
+    "literature_id": 79,
+    "title": "Ionic liquid lubrication: influence of ion structure, surface potential and sliding velocity",
+    "old_path": "Reference/Extracted/2013-rutland-Ionic liquid lubrication influence of ion structure, surface potential and sliding velocity.pdf",
+    "status": "already_extracted",
+    "source": "Reference/Extracted/2013-rutland-Ionic liquid lubrication influence of ion structure, surface potential and sliding velocity.pdf",
+    "target": "Reference/Extracted/2013-rutland-Ionic liquid lubrication influence of ion structure, surface potential and sliding velocity.pdf",
+    "hash": "caf1c64677e9f5a05e8030e40adb3462f451c0dd563ff729d71281326ed69b9b"
+  },
+  {
+    "literature_id": 80,
+    "title": "2017-atkin-Ionic Liquid Lubrication of Stainless Steel  Friction is Inversely Correlated with Interfacial Liquid Nanostructure.pdf",
+    "old_path": "temp_uploads/pdfs/80.pdf",
+    "status": "dedupe",
+    "source": "backend/temp_uploads/pdfs/80.pdf",
+    "target": "Reference/Extracted/2017-atkin-Ionic Liquid Lubrication of Stainless Steel  Friction is Inversely Correlated with Interfacial Liquid Nanostructure.pdf",
+    "hash": "00a094713798caad48cd78aebfb47e4d98d9afb563f7d891ebb71b8bf65a13fd"
+  },
+  {
+    "literature_id": 81,
+    "title": "2017-Rutland-Boundary layer friction of solvate ionic liquids as a function of potential.pdf",
+    "old_path": "temp_uploads/pdfs/81.pdf",
+    "status": "dedupe",
+    "source": "backend/temp_uploads/pdfs/81.pdf",
+    "target": "Reference/Extracted/2017-Rutland-Boundary layer friction of solvate ionic liquids as a function of potential.pdf",
+    "hash": "bec4289a832559f607ab7297a17e05aaeb98664329e2e32f10be17dfe223e340"
+  },
+  {
+    "literature_id": 82,
+    "title": "2018-Molecular Mechanisms Underlying Lubrication by Ionic Liquids Activated Slip and Flow.pdf",
+    "old_path": "temp_uploads/pdfs/82.pdf",
+    "status": "dedupe",
+    "source": "backend/temp_uploads/pdfs/82.pdf",
+    "target": "Reference/Extracted/2018-Molecular Mechanisms Underlying Lubrication by Ionic Liquids Activated Slip and Flow.pdf",
+    "hash": "a9e7dee8702df96351bcc4883ac72ed3eac9e527147f4fd62d68470454fd113b"
+  },
+  {
+    "literature_id": 83,
+    "title": "2020-an-Controlling the nanoscale friction by layered ionic.pdf",
+    "old_path": "temp_uploads/pdfs/83.pdf",
+    "status": "dedupe",
+    "source": "backend/temp_uploads/pdfs/83.pdf",
+    "target": "Reference/Extracted/2020-an-Controlling the nanoscale friction by layered ionic.pdf",
+    "hash": "fd1e2d6020f2525ad8bc1f63aa225c5785ad0124a31e0d97746af16538c3b35a"
+  },
+  {
+    "literature_id": 84,
+    "title": "Effect of Hydrogen Bonding between Ions of Like Charge on the Boundary Layer Friction of Hydroxy-Functionalized Ionic Liquids",
+    "old_path": "Reference/3.10/2020-atkin-Effect of Hydrogen Bonding between Ions of Like Charge on the.pdf",
+    "status": "move",
+    "source": "Reference/3.10/2020-atkin-Effect of Hydrogen Bonding between Ions of Like Charge on the.pdf",
+    "target": "Reference/Extracted/2020-atkin-Effect of Hydrogen Bonding between Ions of Like Charge on the.pdf",
+    "hash": "8db086e69779e2c9456e75772a67ee11f355fbc7e8cb931499e24d1e8a01912c"
+  },
+  {
+    "literature_id": 85,
+    "title": "2016-rutland-Effect of Lithium Ions on Rheology and Interfacial Forces in Ethylammonium Nitrate and Ethanolammonium Nitrate.pdf",
+    "old_path": "temp_uploads/pdfs/85.pdf",
+    "status": "move",
+    "source": "backend/temp_uploads/pdfs/85.pdf",
+    "target": "Reference/Extracted/2016-rutland-Effect of Lithium Ions on Rheology and Interfacial Forces in Ethylammonium Nitrate and Ethanolammonium Nitrate.pdf",
+    "hash": "f314c76ac1f7cbdfbab00d566da0164c42212c3ed5fd1f312eec5c0e8cc00e4d"
+  },
+  {
+    "literature_id": 86,
+    "title": "Potential-dependent superlubricity of stainless steel and Au(111) using a water-in-surface-active ionic liquid mixture",
+    "old_path": "Reference/3.10/2025-Potential-dependent superlubricity of stainless steel and Au(111) using a.pdf",
+    "status": "move",
+    "source": "Reference/3.10/2025-Potential-dependent superlubricity of stainless steel and Au(111) using a.pdf",
+    "target": "Reference/Extracted/2025-Potential-dependent superlubricity of stainless steel and Au(111) using a.pdf",
+    "hash": "432d56b7f3bdce2bb4235391fb5ca9fc3209b606da26a54e72c2c51c5d11cd2e"
+  },
+  {
+    "literature_id": 87,
+    "title": "Surface-active ionic liquids as lubricant additives to hexadecane and diethyl succinate",
+    "old_path": "Reference/3.10/Surface-active ionic liquids as lubricant additives to hexadecane and diethyl succinate.pdf",
+    "status": "move",
+    "source": "Reference/3.10/Surface-active ionic liquids as lubricant additives to hexadecane and diethyl succinate.pdf",
+    "target": "Reference/Extracted/Surface-active ionic liquids as lubricant additives to hexadecane and diethyl succinate.pdf",
+    "hash": "897b9cf3ff343c4d5757d12ed3728c89ed4f5363e363b7a7baa61c48a24d3b6b"
+  },
+  {
+    "literature_id": 88,
+    "title": "Is the boundary layer of an ionic liquid equally lubricating at higher temperature?",
+    "old_path": "Reference/3.10/2016-Atkin-Is the boundary layer of an ionic liquid equally.pdf",
+    "status": "move",
+    "source": "Reference/3.10/2016-Atkin-Is the boundary layer of an ionic liquid equally.pdf",
+    "target": "Reference/Extracted/2016-Atkin-Is the boundary layer of an ionic liquid equally.pdf",
+    "hash": "bb779c69ffebc12e20d73b6e9cd4a4b5943a1203b04dece502814703e96e6ae7"
+  },
+  {
+    "literature_id": 89,
+    "title": "Interfacial Structure and Boundary Lubrication of a Dicationic Ionic Liquid",
+    "old_path": "Reference/3.10/2019-Interfacial structure and boundary lubrication of a dicationic ionic liquid.pdf",
+    "status": "move",
+    "source": "Reference/3.10/2019-Interfacial structure and boundary lubrication of a dicationic ionic liquid.pdf",
+    "target": "Reference/Extracted/2019-Interfacial structure and boundary lubrication of a dicationic ionic liquid.pdf",
+    "hash": "7c064fd488be7e9f606c0f415940e1e242bdce5e7fc629f9b9593cb290a89d41"
+  },
+  {
+    "literature_id": 90,
+    "title": "Effects of Nanoscale Roughness on the Lubricious Behavior of an Ionic Liquid",
+    "old_path": "Reference/3.10/Adv Materials Inter - 2020 - Nalam - Effects of Nanoscale Roughness on the Lubricious Behavior of an Ionic Liquid.pdf",
+    "status": "move",
+    "source": "Reference/3.10/Adv Materials Inter - 2020 - Nalam - Effects of Nanoscale Roughness on the Lubricious Behavior of an Ionic Liquid.pdf",
+    "target": "Reference/Extracted/Adv Materials Inter - 2020 - Nalam - Effects of Nanoscale Roughness on the Lubricious Behavior of an Ionic Liquid.pdf",
+    "hash": "9e39b115bae88e4a13cf0bfc3843005fd8e9a0067c830f62550df205fde3ebed"
+  },
+  {
+    "literature_id": 91,
+    "title": "Interfacial nanostructure and friction of a polymeric ionic liquid-ionic liquid mixture as a function of potential at Au(111) electrode interface",
+    "old_path": "Reference/3.10/Interfacial nanostructure and friction of a polymeric ionic liquid-ionic.pdf",
+    "status": "move",
+    "source": "Reference/3.10/Interfacial nanostructure and friction of a polymeric ionic liquid-ionic.pdf",
+    "target": "Reference/Extracted/Interfacial nanostructure and friction of a polymeric ionic liquid-ionic.pdf",
+    "hash": "789b72881544c0c2cfb8681caa3ce474997165bdbf9d3b28aefee90ea0d2e4fc"
+  },
+  {
+    "literature_id": 92,
+    "title": "Poly(ethylene oxide) Mushrooms Adsorbed at Silica-Ionic Liquid Interfaces Reduce Friction",
+    "old_path": "Reference/3.10/2016-Atkin-Poly(ethylene oxide) Mushrooms Adsorbed at Silica−Ionic Liquid.pdf",
+    "status": "move",
+    "source": "Reference/3.10/2016-Atkin-Poly(ethylene oxide) Mushrooms Adsorbed at Silica−Ionic Liquid.pdf",
+    "target": "Reference/Extracted/2016-Atkin-Poly(ethylene oxide) Mushrooms Adsorbed at Silica−Ionic Liquid.pdf",
+    "hash": "2753f4741d88299363485388e2e8fa7f0236615e3e194bf3c1162166c8384bc6"
+  },
+  {
+    "literature_id": 93,
+    "title": "Effect of ion structure on nanoscale friction in protic ionic liquids",
+    "old_path": "Reference/3.10/2014-Rutland-Effect of ion structure on nanoscale friction in protic ionic liquids.pdf",
+    "status": "move",
+    "source": "Reference/3.10/2014-Rutland-Effect of ion structure on nanoscale friction in protic ionic liquids.pdf",
+    "target": "Reference/Extracted/2014-Rutland-Effect of ion structure on nanoscale friction in protic ionic liquids.pdf",
+    "hash": "40165e3f450e94d9ac691ad2ba46d928fa3c89ad51dc128d8dcce960ccb1e4c7"
+  }
+]

@@ -76,6 +76,11 @@ const secondaryNav: NavItem[] = [
 const visibleSecondaryNav = computed(() =>
   secondaryNav.filter((item) => !item.adminOnly || props.canAccessAdmin),
 )
+const activeScopeName = computed(() => {
+  return props.availableScopes.find((scope) => scope.key === props.selectedScopeKey)?.label
+    || props.availableScopes[0]?.label
+    || (props.isChinese ? '课题组文献库' : 'Group Library')
+})
 const isCollapsed = ref(false)
 const hasStoredCollapsePreference = ref(false)
 const collapsedPaperItems = computed(() => props.batchFiles.slice(0, 8))
@@ -272,7 +277,7 @@ onBeforeUnmount(() => {
         >
           <Database class="h-3.5 w-3.5 shrink-0 text-slate-600 group-hover:text-slate-400" />
           <span class="flex-1 min-w-0 text-[12.5px] font-medium leading-tight">
-            {{ isChinese ? '当前范围总库' : 'Scope Library' }}
+            {{ isChinese ? '课题组文献库' : 'Group Library' }}
           </span>
         </button>
 
@@ -318,7 +323,7 @@ onBeforeUnmount(() => {
           :class="selectedFileId === null
             ? 'bg-white/8 text-slate-100'
             : 'text-slate-400 hover:bg-white/4 hover:text-slate-200'"
-          :title="isChinese ? '当前范围总库' : 'Scope Library'"
+          :title="isChinese ? '课题组文献库' : 'Group Library'"
           @click="openScopeLibrary"
         >
           <Database class="h-4 w-4 shrink-0 text-slate-500 group-hover:text-slate-300" />
@@ -373,22 +378,16 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <!-- Scope selector -->
+    <!-- Default library -->
     <div v-if="!isCollapsed" class="border-t border-white/6 px-3 pb-2 pt-2">
-      <label class="block">
-        <span class="block text-[9.5px] font-semibold uppercase tracking-[0.22em] text-slate-600 mb-0.5">
-          {{ isChinese ? '研究范围' : 'Scope' }}
+      <div class="rounded-md border border-white/8 bg-white/5 px-2 py-1.5">
+        <span class="block text-[9.5px] font-semibold uppercase tracking-[0.22em] text-slate-600">
+          {{ isChinese ? '默认文献库' : 'Default Library' }}
         </span>
-        <select
-          :value="selectedScopeKey"
-          class="w-full appearance-none bg-white/5 text-[12.5px] font-medium text-slate-300 rounded-md px-2 py-1 outline-none border border-white/8 hover:border-white/14 transition"
-          @change="emit('update:selectedScopeKey', ($event.target as HTMLSelectElement).value)"
-        >
-          <option v-for="scope in availableScopes" :key="scope.key" :value="scope.key">
-            {{ scope.label }}
-          </option>
-        </select>
-      </label>
+        <p class="mt-0.5 truncate text-[12.5px] font-medium text-slate-300">
+          {{ activeScopeName }}
+        </p>
+      </div>
     </div>
 
     <!-- User block -->

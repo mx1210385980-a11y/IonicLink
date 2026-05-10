@@ -23,6 +23,7 @@ const layout = computed(() => lubricantStructureLayout(props.record))
 const hasRenderableStructure = computed(() => {
   const current = layout.value
   if (!current) return false
+  if (current.kind === 'compounds') return Boolean(current.compounds?.some((item) => item.smiles))
   return current.pairs.some((pair) => pair.cation.smiles || pair.anion.smiles)
 })
 
@@ -31,6 +32,7 @@ function openPreview() {
 }
 
 function titleFor(item: IonStructurePreviewItem) {
+  if (item.role === 'compound') return `纯物质 ${item.label}`
   return `${item.role === 'cation' ? '阳离子' : '阴离子'} ${item.label}`
 }
 
@@ -41,7 +43,32 @@ function pairItems(pair: LubricantStructurePair): IonStructurePreviewItem[] {
 
 <template>
   <div v-if="layout && hasRenderableStructure" class="flex min-w-0 items-center gap-1.5">
-    <template v-if="layout.kind === 'shared-cation' && layout.cation">
+    <template v-if="layout.kind === 'compounds'">
+      <button
+        v-for="compound in layout.compounds || []"
+        :key="compound.key"
+        type="button"
+        class="rounded-md border border-slate-200 bg-white/80 transition hover:scale-[1.02] dark:border-slate-700 dark:bg-slate-950/80"
+        :class="active ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-950' : ''"
+        :title="titleFor(compound)"
+        @click.stop="openPreview"
+      >
+        <MoleculeViewer
+          v-if="compound.smiles"
+          :smiles="compound.smiles"
+          size="thumbnail"
+          :width="96"
+          :height="52"
+        />
+        <span
+          v-else
+          class="flex h-[52px] min-w-20 items-center justify-center px-2 text-[10px] font-semibold text-slate-700 dark:text-slate-200"
+          v-html="formatIonicLiquidPartHtml(compound.label)"
+        />
+      </button>
+    </template>
+
+    <template v-else-if="layout.kind === 'shared-cation' && layout.cation">
       <button
         v-if="layout.cation.smiles"
         type="button"

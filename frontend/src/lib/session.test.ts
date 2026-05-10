@@ -26,8 +26,8 @@ function createUser(): AuthUser {
     availableScopes: [
       {
         type: 'group_library',
-        key: 'group:1',
-        label: 'Group Library',
+        key: 'group_library',
+        label: '课题组文献库',
         workspaceId: null,
         ownerUserId: null,
         isPersonal: false,
@@ -55,10 +55,17 @@ describe('session state', () => {
     sessionState.ready = false
   })
 
-  it('prefers the personal workspace when no explicit scope is selected', () => {
+  it('prefers the group library when no explicit scope is selected', () => {
     const user = createUser()
 
-    expect(getActiveScope(user)?.key).toBe('workspace:42')
+    expect(getActiveScope(user)?.key).toBe('group_library')
+  })
+
+  it('ignores a persisted workspace scope when the group library is available', () => {
+    const user = createUser()
+    sessionState.activeScopeKey = 'workspace:42'
+
+    expect(getActiveScope(user)?.key).toBe('group_library')
   })
 
   it('persists token and resolved scope when setting a session', () => {
@@ -67,9 +74,9 @@ describe('session state', () => {
     setSession('secret-token', user)
 
     expect(sessionState.token).toBe('secret-token')
-    expect(sessionState.activeScopeKey).toBe('workspace:42')
+    expect(sessionState.activeScopeKey).toBe('group_library')
     expect(window.localStorage.getItem('ioniclink-access-token')).toBe('secret-token')
-    expect(window.localStorage.getItem('ioniclink-scope-key')).toBe('workspace:42')
+    expect(window.localStorage.getItem('ioniclink-scope-key')).toBe('group_library')
   })
 
   it('builds authorization and scope headers from the active session', () => {
@@ -77,8 +84,7 @@ describe('session state', () => {
 
     expect(getAuthHeaders()).toEqual({
       Authorization: 'Bearer secret-token',
-      'X-Scope-Type': 'workspace',
-      'X-Workspace-Id': '42',
+      'X-Scope-Type': 'group_library',
     })
   })
 

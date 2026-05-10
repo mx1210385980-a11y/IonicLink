@@ -55,6 +55,7 @@ import {
   type ExtractorType,
   type FieldEvidenceEntry,
   type LoadConditions,
+  type LubricantComponent,
   type RecordFieldEvidenceResponse,
   type SpeedConditions,
   type TribologyData,
@@ -797,6 +798,11 @@ function trim(value: unknown) {
   return String(value ?? '').trim()
 }
 
+function isPlaceholderValue(value: unknown) {
+  const normalized = trim(value).toLowerCase().replace(/[._-]+/g, ' ')
+  return ['unknown', 'not known', 'n/a', 'na', 'none', 'null', 'undefined', 'unstated'].includes(normalized)
+}
+
 function formatReviewSourceLabel(value: unknown) {
   return trim(value).replace(
     /\b(Fig(?:ure)?\.?\s*\d+)\s*([A-Z])\b/g,
@@ -805,7 +811,8 @@ function formatReviewSourceLabel(value: unknown) {
 }
 
 function present(value: unknown) {
-  return trim(value) || 'Not captured yet'
+  const text = trim(value)
+  return text && !isPlaceholderValue(text) ? text : 'Not captured yet'
 }
 
 function normalizeConfidenceValue(value: unknown): number | null {
@@ -1372,9 +1379,9 @@ function regimeStructuredTags(record: TribologyData | null | undefined): { label
   const friction = trim(system.friction_regime ?? system.frictionRegime)
   const geometry = trim(system.contact_geometry ?? system.contactGeometry)
   const scale = trim(system.scale)
-  if (friction && friction !== 'unstated') tags.push({ label: '摩擦状态', value: friction })
-  if (geometry) tags.push({ label: '接触几何', value: geometry })
-  if (scale) tags.push({ label: '尺度', value: scale })
+  if (friction && !isPlaceholderValue(friction)) tags.push({ label: '摩擦状态', value: friction })
+  if (geometry && !isPlaceholderValue(geometry)) tags.push({ label: '接触几何', value: geometry })
+  if (scale && !isPlaceholderValue(scale)) tags.push({ label: '尺度', value: scale })
   return tags
 }
 
@@ -1439,8 +1446,76 @@ function reviewLubricantProxy(record: TribologyData | null | undefined) {
   }
 }
 
+type ReviewLubricantComponent = LubricantComponent & { compound: string }
+
+function reviewLubricantComponents(record: TribologyData | null | undefined): ReviewLubricantComponent[] {
+  const source = (record || {}) as any
+  const raw = source.lubricantComponents || source.lubricant_components
+  if (!Array.isArray(raw)) return []
+  const components: ReviewLubricantComponent[] = []
+  raw.forEach((component) => {
+    if (typeof component === 'string') {
+      const compound = trim(component)
+      if (compound) components.push({ compound })
+      return
+    }
+    if (!component || typeof component !== 'object') return
+    const compound = trim(component.compound || component.component || component.name || component.ionic_liquid)
+    if (!compound) return
+    components.push({
+      compound,
+      fraction: component.fraction ?? null,
+      unit: component.unit ?? null,
+      role: component.role ?? null,
+    })
+  })
+  return components
+}
+
+function componentFieldSlug(compound: string) {
+  return trim(compound)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+function componentFieldKey(component: ReviewLubricantComponent, index: number) {
+  const slug = componentFieldSlug(component.compound)
+  return slug ? `compound_${slug}` : `lubricant_component_${index}`
+}
+
+function reviewComponentForFieldKey(record: TribologyData | null | undefined, key: string) {
+  const normalizedKey = normalizeFieldKey(key)
+  return reviewLubricantComponents(record).find((component, index) => (
+    componentFieldKey(component, index) === normalizedKey
+    || `lubricant_component_${index}` === normalizedKey
+  )) || null
+}
+
+function isIonicLiquidComponent(component: ReviewLubricantComponent) {
+  const role = trim(component.role).toLowerCase()
+  if (role.includes('ionic')) return true
+  if (['base_oil', 'oil', 'solvent', 'compound'].includes(role)) return false
+  return /\[[^\]]+\]\s*\[[^\]]+\]/.test(component.compound)
+}
+
+function isSeparateCompoundComponent(component: ReviewLubricantComponent) {
+  const role = trim(component.role).toLowerCase()
+  const compound = trim(component.compound).toLowerCase()
+  if (['base_oil', 'oil', 'solvent', 'compound'].includes(role)) return true
+  if (['hexadecane', 'degdbe', 'pao', 'peg'].includes(compound)) return true
+  return !isIonicLiquidComponent(component)
+}
+
 function reviewIonicLiquidDisplay(record: TribologyData | null | undefined) {
   if (!record) return 'Not captured yet'
+  const components = reviewLubricantComponents(record)
+  const ionicComponents = components.filter(isIonicLiquidComponent)
+  const hasSeparateCompound = components.some(isSeparateCompoundComponent)
+  if (ionicComponents.length && hasSeparateCompound) {
+    return ionicComponents.map((component) => component.compound).join(' / ')
+  }
+  if (ionicComponents.length === 1) return ionicComponents[0]?.compound || 'Not captured yet'
   const display = trim(lubricantDisplay(reviewLubricantProxy(record) as any))
   return display && display !== '--' ? display : present(record.ionic_liquid)
 }
@@ -1772,7 +1847,7 @@ function hasRecordValue(record: TribologyData | null | undefined, key: string, e
 function hasFieldEntry(fieldMap: Record<string, FieldEvidenceEntry>, key: string) {
   const entry = fieldMap[key]
   if (!entry) return false
-  return Boolean(trim(entry.value))
+  return Boolean(trim(entry.value)) && !isPlaceholderValue(entry.value)
 }
 
 function shouldShowOptionalField(
@@ -1933,6 +2008,9 @@ function evidenceLocation(record: TribologyData | null | undefined) {
 }
 
 function fieldValueForKey(record: TribologyData, key: string, extractorType: ExtractorType = recordExtractorType(record)) {
+  if (key.startsWith('compound_') || key.startsWith('lubricant_component_')) {
+    return present(reviewComponentForFieldKey(record, key)?.compound)
+  }
   if (extractorType === 'diffusion') {
     if (key === 'system_name') return present(record.system_name)
     if (key === 'confinement_material_class') return present(record.confinement_material_class)
@@ -2016,6 +2094,12 @@ function fieldEvidenceSpecs(field: ReviewField | null, record: TribologyData | n
   if (field.id === 'material') {
     const material = trim(record.material_name)
     if (material) addEvidenceSpec(specs, material, 'loose')
+  }
+
+  if (field.id.startsWith('compound_') || field.id.startsWith('lubricant_component_')) {
+    const component = reviewComponentForFieldKey(record, field.id)
+    const compound = trim(component?.compound || cleanValue)
+    if (compound) addEvidenceSpec(specs, compound, 'loose')
   }
 
   if (field.id === 'system_name') {
@@ -2492,6 +2576,34 @@ function buildField(
   }
 }
 
+function componentFieldEntry(
+  fieldMap: Record<string, FieldEvidenceEntry>,
+  component: ReviewLubricantComponent,
+  index: number,
+) {
+  const key = componentFieldKey(component, index)
+  return fieldMap[key] || fieldMap[`lubricant_component_${index}`]
+}
+
+function buildLubricantComponentReviewFields(
+  record: TribologyData,
+  fieldMap: Record<string, FieldEvidenceEntry>,
+) {
+  const components = reviewLubricantComponents(record)
+  if (components.length < 2) return []
+  return components
+    .map((component, index) => ({ component, index }))
+    .filter(({ component }) => isSeparateCompoundComponent(component))
+    .map(({ component, index }) => buildField(
+      'Compound',
+      componentFieldKey(component, index),
+      component.compound,
+      record,
+      componentFieldEntry(fieldMap, component, index),
+      `${component.compound} still needs grounding confirmation.`,
+    ))
+}
+
 function buildReviewFields(record: TribologyData | null, remoteFields?: Record<string, FieldEvidenceEntry> | null): ReviewField[] {
   if (!record) {
     return [
@@ -2541,6 +2653,7 @@ function buildReviewFields(record: TribologyData | null, remoteFields?: Record<s
   return [
     buildField('Material', 'material', present(record.material_name), record, fieldMap.material, 'Material still needs grounding confirmation.'),
     buildField('Ionic Liquid', 'ionic_liquid', reviewIonicLiquidDisplay(record), record, fieldMap.ionic_liquid, 'Ionic liquid still needs grounding confirmation.'),
+    ...buildLubricantComponentReviewFields(record, fieldMap),
     ...(primaryMetricKey
       ? [
           buildField(
@@ -2612,7 +2725,10 @@ function hasStructuredTribopair(record: TribologyData | null | undefined) {
 
 function filterVisibleReviewFields(record: TribologyData | null | undefined, fields: ReviewField[]) {
   if (!hasStructuredTribopair(record)) return fields
-  return fields.filter((field) => !['material', 'probe_roughness', 'substrate_roughness'].includes(field.id))
+  return fields.filter((field) => {
+    if (field.id === 'material') return field.evidenceStatus !== 'Grounded'
+    return !['probe_roughness', 'substrate_roughness'].includes(field.id)
+  })
 }
 
 function fieldEntryForAny(fieldMap: Record<string, FieldEvidenceEntry>, keys: string[]) {

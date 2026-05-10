@@ -91,11 +91,11 @@ def test_extract_table_fallback_records_recovers_two_ratios_per_il():
 def test_extract_table_fallback_records_recovers_atkin_graphite_figure2_mu_labels():
     content = """
 Potential-Dependent Superlubricity of Ionic Liquids on a Graphite Surface
-The four ILs used in this study—[P6,6,6,14][(iC8)2PO2], [P6,6,6,14][BEHP],
+The four ILs used in this study—[P6,6,6,14][i(C8)2PO2], [P6,6,6,14][BEHP],
 [P6,6,6,14][TFSI], and [P4,4,4,1][TFSI]—were measured on HOPG.
 The scan size was 500 nm, and scan rate was 6 Hz.
 Figure 2. Lateral force vs normal load of four ILs at OCP, −1.0 V and +1.0 V on HOPG:
-(a) [P6,6,6,14][(iC8)2PO2], (b) [P6,6,6,14][BEHP], (c) [P6,6,6,14][TFSI],
+(a) [P6,6,6,14][i(C8)2PO2], (b) [P6,6,6,14][BEHP], (c) [P6,6,6,14][TFSI],
 and (d) [P4,4,4,1][TFSI].
 When the load is higher than 20 nN, the lateral force increases slowly but linearly with the load.
 The friction coefficients (μ) extracted from the gradient of the lateral force vs normal load in these linear regions are listed in Figure 2.
@@ -106,8 +106,8 @@ The friction coefficients (μ) extracted from the gradient of the lateral force 
     assert debug["parser"] == "atkin_graphite_superlubricity_figure2"
     assert debug["record_count"] == 12
     by_key = {(record["ionic_liquid"], record["potential"]): record for record in records}
-    assert by_key[("[P6,6,6,14][(iC8)2PO2]", "OCP")]["cof"] == "0.002"
-    assert by_key[("[P6,6,6,14][(iC8)2PO2]", "+1.0 V")]["cof"] == "0.013"
+    assert by_key[("[P6,6,6,14][i(C8)2PO2]", "OCP")]["cof"] == "0.002"
+    assert by_key[("[P6,6,6,14][i(C8)2PO2]", "+1.0 V")]["cof"] == "0.013"
     assert by_key[("[P6,6,6,14][BEHP]", "-1.0 V")]["cof"] == "0.002"
     assert by_key[("[P6,6,6,14][TFSI]", "+1.0 V")]["cof"] == "0.004"
     assert by_key[("[P4,4,4,1][TFSI]", "OCP")]["cof"] == "0.018"

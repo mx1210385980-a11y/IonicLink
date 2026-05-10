@@ -46,7 +46,7 @@ def _normalize_unit(value: Any) -> str | None:
 def _is_base_oil_component(component: dict[str, Any]) -> bool:
     role = str(component.get("role") or "").strip().lower()
     compound = str(component.get("compound") or "").strip().lower()
-    return role in {"base_oil", "oil", "solvent"} or "oil" in compound or compound in {"degdbe", "peg", "pao"}
+    return role in {"base_oil", "oil", "solvent"} or "oil" in compound or compound in {"degdbe", "hexadecane", "peg", "pao"}
 
 
 def normalize_lubricant_components(value: Any) -> list[dict[str, Any]]:
@@ -188,6 +188,10 @@ def components_for_record(record: Any) -> list[dict[str, Any]]:
 
 
 def _component_ratio_label(components: list[dict[str, Any]]) -> str | None:
+    units = {_normalize_unit(component.get("unit")) for component in components if component.get("unit")}
+    if any(_is_internal_dataset_fraction_unit(unit) for unit in units if unit):
+        return None
+
     fractions = [_as_float(component.get("fraction")) for component in components]
     if not fractions or any(value is None for value in fractions):
         return None
@@ -195,8 +199,9 @@ def _component_ratio_label(components: list[dict[str, Any]]) -> str | None:
     total = sum(values)
     if total <= 0:
         return None
+    if sum(1 for value in values if value > 0) < 2:
+        return None
     ratio_parts = _approximate_ratio_parts(values)
-    units = {_normalize_unit(component.get("unit")) for component in components if component.get("unit")}
     suffix = ""
     if len(units) == 1:
         unit = next(iter(units))
@@ -209,19 +214,27 @@ def _component_ratio_label(components: list[dict[str, Any]]) -> str | None:
     return f"{':'.join(ratio_parts)}{suffix}"
 
 
+def _is_internal_dataset_fraction_unit(unit: str | None) -> bool:
+    normalized = re.sub(r"[\s_-]+", "", str(unit or "").lower())
+    return normalized in {"xil", "datasetxil"}
+
+
 def _approximate_ratio_parts(values: list[float]) -> list[str]:
     total = sum(values)
     if total <= 0:
         return [str(_compact_number(value)) for value in values]
     best_parts: list[int] | None = None
     best_error = float("inf")
-    for total_parts in range(len(values), 201):
-        parts = [max(1, int(round(value / total * total_parts))) for value in values]
+    best_score = float("inf")
+    for total_parts in range(len(values), 1001):
+        parts = [0 if value <= 0 else max(1, int(round(value / total * total_parts))) for value in values]
         if sum(parts) != total_parts:
             continue
         error = sum(abs(part / total_parts - value / total) for part, value in zip(parts, values))
-        if error < best_error:
+        score = error + total_parts * 0.000001
+        if score < best_score:
             best_error = error
+            best_score = score
             best_parts = parts
             if error < 1e-6:
                 break

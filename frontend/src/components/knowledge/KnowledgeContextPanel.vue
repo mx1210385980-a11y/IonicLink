@@ -174,18 +174,18 @@ function literatureCountLabel(item: Literature) {
       </button>
     </section>
 
-    <!-- 作用域与文献库 -->
+    <!-- 课题组文献库 -->
     <section class="flex min-h-0 flex-col rounded-[1.4rem] border border-[#dce5ef] bg-white overflow-hidden flex-1">
       <div class="p-4 pb-2">
         <div class="flex items-center justify-between gap-2">
           <div class="flex items-center gap-2 text-[11px] font-bold uppercase tracking-[0.22em] text-[#8ca0ba]">
             <LibraryBig class="h-3.5 w-3.5" />
-            文献库范围
+            默认文献库
           </div>
           <button
             type="button"
             class="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[#dce5ef] text-slate-400 transition hover:bg-[#f8fbff] hover:text-[#4c4fdc]"
-            title="刷新当前 scope 文献库"
+            title="刷新课题组文献库"
             @click="emit('refreshLiterature')"
           >
             <RefreshCw class="h-3 w-3" :class="props.literatureLoading ? 'animate-spin' : ''" />
@@ -233,7 +233,7 @@ function literatureCountLabel(item: Literature) {
             : 'bg-transparent text-slate-600 hover:bg-[#f8fafc] hover:text-slate-900 font-medium'"
           @click="emit('selectSource', null)"
         >
-          <span class="truncate text-[11.5px]">全库全部文献</span>
+          <span class="truncate text-[11.5px]">课题组文献库全部文献</span>
           <Check v-if="!props.activeSourceId" class="h-3.5 w-3.5 shrink-0" />
         </button>
 

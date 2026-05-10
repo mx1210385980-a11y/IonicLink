@@ -85,12 +85,11 @@ export function getSessionToken(): string {
 export function getActiveScope(user: AuthUser | null = sessionState.user): ScopeSummary | null {
   if (!user?.availableScopes?.length) return null
   const explicit = user.availableScopes.find((scope) => scope.key === sessionState.activeScopeKey)
+  const groupLibrary = user.availableScopes.find((scope) => scope.type === 'group_library')
+  if (explicit?.type === 'group_library') return explicit
+  if (groupLibrary) return groupLibrary
   if (explicit) return explicit
-
-  const preferredWorkspace = user.availableScopes.find(
-    (scope) => scope.type === 'workspace' && scope.workspaceId === user.personalWorkspaceId,
-  )
-  return preferredWorkspace || user.availableScopes[0] || null
+  return groupLibrary || user.availableScopes[0] || null
 }
 
 export function getAuthHeaders(): Record<string, string> {

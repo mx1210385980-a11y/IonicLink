@@ -539,7 +539,7 @@ def _extract_atkin_graphite_superlubricity_records(
         "The scan size was 500 nm, and the scan rate was 6 Hz, giving a derived sliding velocity of 6 μm/s."
     )
     superlubric_quote = (
-        "Superlubricity (μ < 0.01) is detected for -1.0 V and OCP for [P6,6,6,14][(iC8)2PO2], "
+        "Superlubricity (μ < 0.01) is detected for -1.0 V and OCP for [P6,6,6,14][i(C8)2PO2], "
         "-1.0 V for [P6,6,6,14][BEHP], and both +1.0 and -1.0 V for [P6,6,6,14][TFSI]."
     )
 
@@ -665,7 +665,7 @@ def _extract_atkin_graphite_superlubricity_records(
     rows = [
         {
             "panel": "a",
-            "ionic_liquid": "[P6,6,6,14][(iC8)2PO2]",
+            "ionic_liquid": "[P6,6,6,14][i(C8)2PO2]",
             "potential": "OCP",
             "potential_bbox": panel_legend_bboxes["a_ocp"],
             "cof": "0.002",
@@ -675,7 +675,7 @@ def _extract_atkin_graphite_superlubricity_records(
         },
         {
             "panel": "a",
-            "ionic_liquid": "[P6,6,6,14][(iC8)2PO2]",
+            "ionic_liquid": "[P6,6,6,14][i(C8)2PO2]",
             "potential": "-1.0 V",
             "potential_bbox": panel_legend_bboxes["a_minus"],
             "cof": "0.002",
@@ -685,7 +685,7 @@ def _extract_atkin_graphite_superlubricity_records(
         },
         {
             "panel": "a",
-            "ionic_liquid": "[P6,6,6,14][(iC8)2PO2]",
+            "ionic_liquid": "[P6,6,6,14][i(C8)2PO2]",
             "potential": "+1.0 V",
             "potential_bbox": panel_legend_bboxes["a_plus"],
             "cof": "0.013",
