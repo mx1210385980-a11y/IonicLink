@@ -68,6 +68,7 @@ import {
   lubricantDisplay,
   lubricantTooltip,
 } from '@/lib/integratedExplorerHelpers'
+import { canonicalExperimentScaleValue, experimentScaleLabel } from '@/lib/experimentScale'
 import { getIonicLiquidEvidenceParts, getIonicLiquidEvidenceTerms } from '@/lib/ionicLiquidAliasKnowledge'
 import { normalizePotentialDisplayText } from '@/lib/potential'
 import type { HighlightRect } from '@/types/pdf-highlight'
@@ -1381,7 +1382,7 @@ function regimeStructuredTags(record: TribologyData | null | undefined): { label
   const scale = trim(system.scale)
   if (friction && !isPlaceholderValue(friction)) tags.push({ label: '摩擦状态', value: friction })
   if (geometry && !isPlaceholderValue(geometry)) tags.push({ label: '接触几何', value: geometry })
-  if (scale && !isPlaceholderValue(scale)) tags.push({ label: '尺度', value: scale })
+  if (scale && !isPlaceholderValue(scale)) tags.push({ label: '尺度', value: experimentScaleLabel(scale) })
   return tags
 }
 
@@ -3080,7 +3081,7 @@ function openSystemEditor(record: TribologyData) {
   systemEditRawText.value = trim(current.raw_text ?? current.rawText ?? record.regime)
   systemEditFrictionRegime.value = trim(current.friction_regime ?? current.frictionRegime) || 'unstated'
   systemEditContactGeometry.value = trim(current.contact_geometry ?? current.contactGeometry)
-  systemEditScale.value = trim(current.scale)
+  systemEditScale.value = canonicalExperimentScaleValue(current.scale)
   systemEditError.value = ''
 }
 
@@ -3258,7 +3259,7 @@ async function saveSystemEditor() {
     raw_text: systemEditRawText.value || record.regime || '',
     friction_regime: systemEditFrictionRegime.value || 'unstated',
     contact_geometry: systemEditContactGeometry.value || null,
-    scale: systemEditScale.value || null,
+    scale: canonicalExperimentScaleValue(systemEditScale.value) || null,
   }
 
   reviewActionPending.value = `system-edit:${recordId}`
@@ -4582,9 +4583,9 @@ function roughnessTextParts(value: string) {
               class="h-10 rounded-lg border border-[#dbe4f2] bg-[#fbfcff] px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-[#aebdfc] focus:ring-2 focus:ring-[#dce3ff]"
             >
               <option value="">未指定</option>
-              <option value="macro">macro</option>
-              <option value="micro">micro</option>
-              <option value="nano">nano</option>
+              <option value="macroscale">宏观摩擦</option>
+              <option value="microscale">微观摩擦</option>
+              <option value="nanoscale">纳米摩擦</option>
             </select>
           </label>
           <p v-if="systemEditError" class="rounded-lg bg-[#fff5f6] px-3 py-2 text-xs font-semibold text-[#cf334f]">

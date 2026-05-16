@@ -35,6 +35,11 @@ class ResearchGroup(Base):
         back_populates="group",
         cascade="all, delete-orphan",
     )
+    model_prediction_runs: Mapped[List["ModelPredictionRun"]] = relationship(
+        "ModelPredictionRun",
+        back_populates="group",
+        cascade="all, delete-orphan",
+    )
 
 
 class User(Base):
@@ -68,6 +73,11 @@ class User(Base):
         back_populates="created_by",
         cascade="all, delete-orphan",
     )
+    model_prediction_runs: Mapped[List["ModelPredictionRun"]] = relationship(
+        "ModelPredictionRun",
+        back_populates="created_by",
+        cascade="all, delete-orphan",
+    )
 
 
 class Workspace(Base):
@@ -93,6 +103,10 @@ class Workspace(Base):
     )
     registered_models: Mapped[List["RegisteredModel"]] = relationship(
         "RegisteredModel",
+        back_populates="workspace",
+    )
+    model_prediction_runs: Mapped[List["ModelPredictionRun"]] = relationship(
+        "ModelPredictionRun",
         back_populates="workspace",
     )
 
@@ -185,6 +199,7 @@ class RegisteredModel(Base):
 
     config_json: Mapped[str] = mapped_column(Text, nullable=False)
     summary_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    training_view: Mapped[str] = mapped_column(String(64), default="all", index=True, nullable=False)
     is_recommended: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(default=func.now())
 
@@ -193,6 +208,69 @@ class RegisteredModel(Base):
     group: Mapped["ResearchGroup"] = relationship("ResearchGroup", back_populates="registered_models")
     workspace: Mapped[Optional["Workspace"]] = relationship("Workspace", back_populates="registered_models")
     created_by: Mapped["User"] = relationship("User", back_populates="registered_models")
+
+
+class ModelPredictionRun(Base):
+    __tablename__ = "model_prediction_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    registered_model_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("registered_models.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    training_run_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("model_training_runs.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    source_dataset_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("cleaned_datasets.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    target_dataset_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("cleaned_datasets.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+
+    group_id: Mapped[int] = mapped_column(ForeignKey("research_groups.id"), index=True, nullable=False)
+    workspace_id: Mapped[Optional[int]] = mapped_column(ForeignKey("workspaces.id"), index=True, nullable=True)
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    scope_type: Mapped[str] = mapped_column(String(32), default="workspace", index=True, nullable=False)
+    scope_key: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+
+    registered_model_name: Mapped[str] = mapped_column(String(180), nullable=False)
+    training_view: Mapped[str] = mapped_column(String(64), default="all", index=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="completed", index=True, nullable=False)
+    target_input_rows: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    target_predicted_rows: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    dropped_outside_training_view: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    scored_rows: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    feature_dimensions: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    r2: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    rmse: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    mae: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    feature_columns_json: Mapped[str] = mapped_column(Text, nullable=False)
+    preview_rows_json: Mapped[str] = mapped_column(Text, nullable=False)
+    result_json: Mapped[str] = mapped_column(Text, nullable=False)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    registered_model: Mapped[Optional["RegisteredModel"]] = relationship("RegisteredModel")
+    training_run: Mapped[Optional["ModelTrainingRun"]] = relationship("ModelTrainingRun")
+    source_dataset: Mapped[Optional["CleanedDataset"]] = relationship(
+        "CleanedDataset",
+        foreign_keys=[source_dataset_id],
+    )
+    target_dataset: Mapped[Optional["CleanedDataset"]] = relationship(
+        "CleanedDataset",
+        foreign_keys=[target_dataset_id],
+    )
+    group: Mapped["ResearchGroup"] = relationship("ResearchGroup", back_populates="model_prediction_runs")
+    workspace: Mapped[Optional["Workspace"]] = relationship("Workspace", back_populates="model_prediction_runs")
+    created_by: Mapped["User"] = relationship("User", back_populates="model_prediction_runs")
 
 
 class Literature(Base):

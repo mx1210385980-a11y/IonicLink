@@ -138,7 +138,31 @@ export async function getData(fileId?: string) {
 }
 
 // Chat
-export async function chat(message: string, context?: string) {
+export interface ChatSource {
+    index: number
+    source_type?: 'record' | 'literature' | string
+    literature_id: number
+    record_id?: number | null
+    title: string
+    doi?: string | null
+    journal?: string | null
+    year?: number | null
+    page?: number | null
+    summary?: string | null
+    snippet?: string | null
+}
+
+export interface ChatResponse {
+    success: boolean
+    response: string
+    sources?: ChatSource[]
+    retrieval?: {
+        query_terms?: string[]
+        source_count?: number
+    }
+}
+
+export async function chat(message: string, context?: string): Promise<ChatResponse> {
     const response = await api.post('/api/chat', { message, context })
     return response.data
 }
@@ -1170,6 +1194,7 @@ export type SearchFilter = {
     load_max?: number
     cof_min?: number
     cof_max?: number
+    reviewStatuses?: string[]
     experiment_scales?: string[]
     experiment_methods?: string[]
     measurement_types?: string[]
@@ -1191,6 +1216,10 @@ export interface RecordFilterOptions {
     temperatureValues: string[]
     potentialValues: string[]
     waterContentValues: string[]
+    experimentScales?: string[]
+    experimentMethods?: string[]
+    measurementTypes?: string[]
+    trainingViews?: string[]
 }
 
 export interface SourceFileDTO {
@@ -1268,6 +1297,7 @@ export interface RecordResponse {
         boost_total?: number
         boost_percent?: number
     }
+    reviewStatus?: string | null
     literatureId: number
     literature: RecordLiteratureDTO | null
     // Evidence / Source Evidence fields
@@ -1457,6 +1487,304 @@ export async function getDashboardStats() {
         top_journals: Array<{ name: string, count: number }>
         cof_ranges: Array<{ name: string, min: number, max: number }>
     }
+}
+
+export type QualityAssetTone = 'emerald' | 'sky' | 'amber' | 'rose' | 'slate'
+
+export interface QualityAssetMetric {
+    key: string
+    label: string
+    numerator: number
+    denominator: number
+    rate: number | null
+    detail: string
+    formula: string
+    tone: QualityAssetTone
+}
+
+export interface QualityAssetSummaryStats {
+    literatureCount: number
+    recordCount: number
+    activeRecordCount: number
+    coreFieldCount: number
+    coreFieldSlots: number
+    missingFieldSlots: number
+    missingFieldRate: number | null
+    unitIssueCount: number
+    unitFieldSlots: number
+    unitIssueRate: number | null
+    duplicateDoiGroups: number
+    duplicateDoiExcess: number
+    duplicateDoiLiteratureCount: number
+    doiLiteratureCount: number
+    cofOutlierCount: number
+    cofValueCount: number
+    missingEvidenceCount: number
+    missingEvidenceRate: number | null
+    pageEvidenceCount: number
+    figureEvidenceCount: number
+    textEvidenceCount: number
+    fieldEvidenceRecordCount: number
+    fieldEvidenceCoveredSlots: number
+    fieldEvidenceSlots: number
+    trainableSampleCount: number
+    trainableSampleRate: number | null
+    reviewedCount: number
+    unreviewedCount: number
+    reviewedRate: number | null
+}
+
+export interface QualityFieldCategoryRow {
+    category: string
+    filled: number
+    missing: number
+    denominator: number
+    rate: number | null
+    fields: string
+}
+
+export interface QualityUnitIssues {
+    fieldBreakdown: Array<{ key: string, label: string, issues: number, denominator: number, rate: number | null }>
+    examples: Array<{ recordId: number, literatureId: number, field: string, value: string, title: string, scale?: string, scaleLabel?: string }>
+}
+
+export interface QualityTrainingReadiness {
+    state: 'empty' | 'blocked' | 'limited' | 'needs_review' | 'ready' | string
+    tone: QualityAssetTone
+    label: string
+    detail: string
+    minimumSampleTarget: number
+}
+
+export interface QualityReplenishmentAction {
+    key: string
+    label: string
+    count: number
+    detail: string
+    tone: QualityAssetTone
+}
+
+export interface QualityReplenishmentRecord {
+    recordId: number
+    literatureId: number
+    title: string
+    doi?: string
+    lubricant?: string
+    tribopair?: string
+    cofValue?: number | null
+    reviewStatus?: string
+    scale?: string
+    scaleLabel?: string
+    reason: string
+}
+
+export interface QualityReplenishmentLiterature {
+    literatureId: number
+    title: string
+    doi?: string
+    recordCount: number
+    trainableCount: number
+}
+
+export interface QualityTrainingReplenishment {
+    currentTrainableCount: number
+    minimumSampleTarget: number
+    sampleGap: number
+    sourceLiteratureCount: number
+    sourceLiteratureTarget: number
+    sourceLiteratureGap: number
+    recommendedAction: string
+    actionItems: QualityReplenishmentAction[]
+    recordGroups: Record<string, QualityReplenishmentRecord[]>
+    sourceLiterature: QualityReplenishmentLiterature[]
+    unknownMacroCandidates: QualityReplenishmentRecord[]
+}
+
+export interface QualityAssetSlice {
+    key: string
+    label: string
+    trainingView?: string
+    summary: QualityAssetSummaryStats
+    metrics: QualityAssetMetric[]
+    fieldCategories: QualityFieldCategoryRow[]
+    unitIssues: QualityUnitIssues
+    doiDuplicates: Array<{ doi: string, count: number, literatureIds: number[], titles: string[] }>
+    cofOutliers: Array<{ recordId: number, literatureId: number, title: string, cofValue: number, reason: string, scale?: string, scaleLabel?: string }>
+    evidence: { missingRecordIds: number[] }
+    training: {
+        trainableRecordIds: number[]
+        blockers: {
+            missingTarget: number
+            missingLubricant: number
+            missingTribopair: number
+            missingCondition: number
+        }
+        readiness?: QualityTrainingReadiness
+        replenishment?: QualityTrainingReplenishment
+    }
+    review: {
+        statuses: Array<{ status: string, count: number }>
+    }
+}
+
+export interface QualityAssetSummary {
+    generatedAt: string
+    scope: Record<string, unknown>
+    summary: QualityAssetSummaryStats
+    metrics: QualityAssetMetric[]
+    fieldCategories: QualityFieldCategoryRow[]
+    unitIssues: QualityUnitIssues
+    doiDuplicates: Array<{ doi: string, count: number, literatureIds: number[], titles: string[] }>
+    cofOutliers: Array<{ recordId: number, literatureId: number, title: string, cofValue: number, reason: string, scale?: string, scaleLabel?: string }>
+    evidence: { missingRecordIds: number[] }
+    training: {
+        trainableRecordIds: number[]
+        blockers: {
+            missingTarget: number
+            missingLubricant: number
+            missingTribopair: number
+            missingCondition: number
+        }
+        readiness?: QualityTrainingReadiness
+        replenishment?: QualityTrainingReplenishment
+    }
+    review: {
+        statuses: Array<{ status: string, count: number }>
+    }
+    scaleBreakdown?: QualityAssetSlice[]
+}
+
+export async function getQualityAssetSummary() {
+    const response = await api.get('/api/records/quality-assets')
+    return response.data as QualityAssetSummary
+}
+
+export interface PatternDiscoverySummary {
+    recordCount: number
+    cofRecordCount: number
+    literatureCount: number
+    distinctLubricantCount: number
+    count?: number
+    minCof: number | null
+    maxCof: number | null
+    avgCof: number | null
+    meanCof?: number | null
+    medianCof: number | null
+    q1Cof?: number | null
+    q3Cof?: number | null
+    iqrCof?: number | null
+}
+
+export interface PatternDiscoverySeriesItem {
+    name: string
+    count: number
+    sharePercent?: number
+    avgCof?: number | null
+    meanCof?: number | null
+    medianCof?: number | null
+    q1Cof?: number | null
+    q3Cof?: number | null
+    iqrCof?: number | null
+    minCof?: number | null
+    maxCof?: number | null
+}
+
+export interface PatternDiscoveryYearItem {
+    year: number
+    recordCount: number
+    literatureCount: number
+    avgCof: number | null
+    medianCof?: number | null
+    q1Cof?: number | null
+    q3Cof?: number | null
+}
+
+export interface PatternDiscoveryChainItem {
+    chainLength: number
+    count: number
+    avgCof: number | null
+    medianCof?: number | null
+    q1Cof?: number | null
+    q3Cof?: number | null
+    minCof: number | null
+    maxCof: number | null
+}
+
+export interface PatternDiscoveryPotentialItem {
+    potential: string
+    potentialValue: number
+    count: number
+    avgCof: number | null
+    medianCof?: number | null
+    q1Cof?: number | null
+    q3Cof?: number | null
+    minCof: number | null
+    maxCof: number | null
+}
+
+export interface PatternDiscoveryCharts {
+    cofBuckets: PatternDiscoverySeriesItem[]
+    yearlyTrend: PatternDiscoveryYearItem[]
+    topMaterials: PatternDiscoverySeriesItem[]
+    lowFrictionMaterials: PatternDiscoverySeriesItem[]
+    highFrictionMaterials: PatternDiscoverySeriesItem[]
+    topLubricants: PatternDiscoverySeriesItem[]
+    lowFrictionLubricants: PatternDiscoverySeriesItem[]
+    cations: PatternDiscoverySeriesItem[]
+    anions: PatternDiscoverySeriesItem[]
+    lowFrictionAnions?: PatternDiscoverySeriesItem[]
+    chainLength: PatternDiscoveryChainItem[]
+    potential: {
+        byPotential: PatternDiscoveryPotentialItem[]
+        byPolarity: PatternDiscoverySeriesItem[]
+    }
+    reviewStatus: PatternDiscoverySeriesItem[]
+    fieldCoverage?: PatternDiscoverySeriesItem[]
+}
+
+export interface PatternDiscoveryInsight {
+    title: string
+    claim: string
+    evidence: string
+    interpretation?: string
+    limitation?: string
+    thesisUse: string
+}
+
+export interface PatternDiscoveryMethodology {
+    outcome: string
+    stratification: string
+    robustStatistic: string
+    minimumGroupSize: string
+    caveat: string
+}
+
+export interface PatternDiscoveryResponse {
+    generatedAt: string
+    scope: Record<string, unknown>
+    methodology?: PatternDiscoveryMethodology
+    summary: PatternDiscoverySummary
+    charts: PatternDiscoveryCharts
+    insights: PatternDiscoveryInsight[]
+    markdown: string
+}
+
+export interface PatternDiscoveryReportSaveResponse {
+    saved: boolean
+    path: string
+    relativePath: string
+    markdown: string
+    savedAt: string
+}
+
+export async function getPatternDiscovery(): Promise<PatternDiscoveryResponse> {
+    const response = await api.get('/api/records/pattern-discovery')
+    return response.data
+}
+
+export async function savePatternDiscoveryReport(): Promise<PatternDiscoveryReportSaveResponse> {
+    const response = await api.post('/api/records/pattern-discovery/report')
+    return response.data
 }
 
 export interface MentorProgressStage {
@@ -2035,6 +2363,7 @@ export interface ModelTrainingRunListItem {
     cleaned_dataset_id?: number | null
     cleaned_dataset_name?: string | null
     target_column?: string | null
+    training_view?: string | null
     val_r2?: number | null
     val_rmse?: number | null
     val_mae?: number | null
@@ -2045,6 +2374,7 @@ export interface ModelTrainingRunListItem {
     is_registered?: boolean
     registered_model_id?: number | null
     registered_model_name?: string | null
+    registered_model_training_view?: string | null
     is_recommended?: boolean
 }
 
@@ -2053,6 +2383,7 @@ export interface RegisteredModelListItem {
     name: string
     description?: string | null
     is_recommended: boolean
+    training_view?: string | null
     created_at?: string | null
     algorithm: string
     split_strategy?: string | null
@@ -2089,6 +2420,7 @@ export interface ModelTrainingSummary {
 }
 
 export interface ModelTrainingHyperparameters {
+    [key: string]: unknown
     n_estimators: number
     learning_rate: number
     max_depth: number
@@ -2098,6 +2430,7 @@ export interface ModelTrainingHyperparameters {
 
 export interface ModelTrainingDataOptions {
     validation_split: number
+    training_view?: 'all' | 'macro_performance' | 'afm_surface_response' | 'cross_scale'
     min_confidence: number
     max_records: number | null
     random_seed: number
@@ -2192,6 +2525,78 @@ export async function deleteRegisteredModel(registryId: number) {
 export async function setRecommendedRegisteredModel(registryId: number, recommended: boolean = true) {
     const response = await api.post(`/api/model-training/registry/${registryId}/recommend?recommended=${encodeURIComponent(String(recommended))}`)
     return response.data as { model: RegisteredModelListItem }
+}
+
+export interface RegisteredModelPredictionResult {
+    prediction_run_id?: number
+    registry_id: number
+    registered_model_name: string
+    training_view?: string | null
+    created_at?: string | null
+    source_dataset: {
+        id?: number | null
+        name?: string | null
+    }
+    target_dataset: {
+        id?: number | null
+        name?: string | null
+        input_row_count?: number
+        row_count: number
+        dropped_outside_training_view?: number
+    }
+    feature_columns: string[]
+    summary: {
+        predicted_rows: number
+        scored_rows: number
+        feature_dimensions: number
+        dropped_outside_training_view?: number
+        r2?: number | null
+        rmse?: number | null
+        mae?: number | null
+    }
+    preview_rows: Array<{
+        row_index: number
+        record_id?: number | null
+        literature_id?: number | null
+        confidence?: number | null
+        actual?: number | null
+        predicted?: number | null
+        residual?: number | null
+    }>
+}
+
+export interface ModelPredictionRunListItem {
+    id: number
+    registered_model_id?: number | null
+    registered_model_name: string
+    training_view?: string | null
+    status: string
+    created_at?: string | null
+    source_dataset_id?: number | null
+    source_dataset_name?: string | null
+    target_dataset_id?: number | null
+    target_dataset_name?: string | null
+    target_input_rows: number
+    target_predicted_rows: number
+    dropped_outside_training_view: number
+    scored_rows: number
+    feature_dimensions: number
+    r2?: number | null
+    rmse?: number | null
+    mae?: number | null
+    preview_rows?: RegisteredModelPredictionResult['preview_rows']
+}
+
+export async function predictWithRegisteredModel(registryId: number, cleanedDatasetId: number) {
+    const response = await api.post(`/api/model-training/registry/${registryId}/predict`, {
+        cleaned_dataset_id: cleanedDatasetId,
+    })
+    return response.data as { prediction: RegisteredModelPredictionResult }
+}
+
+export async function listModelPredictionRuns(limit: number = 20) {
+    const response = await api.get(`/api/model-training/predictions?limit=${encodeURIComponent(String(limit))}`)
+    return response.data as { items: ModelPredictionRunListItem[] }
 }
 
 export interface ModelCleaningOptions {

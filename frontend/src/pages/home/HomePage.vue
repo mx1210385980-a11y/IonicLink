@@ -4,12 +4,13 @@ import { Activity, Orbit, RefreshCw } from 'lucide-vue-next'
 
 import HomeCurrentFocus from '@/components/home/HomeCurrentFocus.vue'
 import HomeHealthSnapshot from '@/components/home/HomeHealthSnapshot.vue'
+import HomeLiteratureChat from '@/components/home/HomeLiteratureChat.vue'
 import HomeRecentRuns from '@/components/home/HomeRecentRuns.vue'
 import HomeSuggestedActions from '@/components/home/HomeSuggestedActions.vue'
 import HomeTodayPanel from '@/components/home/HomeTodayPanel.vue'
 import { useHomeSummary, type HomeSuggestedAction } from '@/composables/useHomeSummary'
 import { useI18n } from '@/composables/useI18n'
-import type { AgentWorkflow, BatchFile, ExtractionRunDetail } from '@/lib/api'
+import type { AgentWorkflow, BatchFile, ChatSource, ExtractionRunDetail } from '@/lib/api'
 
 const props = defineProps<{
   activeScopeLabel: string
@@ -22,6 +23,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   action: [action: HomeSuggestedAction]
+  openSource: [source: ChatSource]
 }>()
 
 const { isChinese } = useI18n()
@@ -140,7 +142,9 @@ function emitAction(action: HomeSuggestedAction | null) {
       </div>
     </section>
 
-    <div class="grid min-h-0 flex-1 gap-2.5 xl:grid-cols-[minmax(0,1.48fr)_22.5rem]">
+    <div class="grid min-h-0 flex-1 gap-2.5 xl:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.9fr)_22.5rem]">
+      <HomeLiteratureChat class="min-h-[34rem] xl:min-h-0" @open-source="emit('openSource', $event)" />
+
       <div class="grid min-h-0 gap-2.5 xl:grid-rows-[auto_minmax(0,1fr)]">
         <HomeSuggestedActions :actions="summary.suggestedActions" :loading="loading" @action="emitAction" />
         <HomeRecentRuns :runs="summary.recentRuns" @action="emitAction(pipelineAction)" />

@@ -20,7 +20,12 @@ from models.db_models import (
     TribologyData as TribologyDataDB,
 )
 from services.llm_service import llm_service
-from services.data_sync_service import get_records_by_literature, get_all_literature
+from services.data_sync_service import get_records_by_literature
+from services.literature_chat_service import (
+    build_literature_chat_context,
+    build_retrieval_fallback_answer,
+    retrieve_literature_chat_sources,
+)
 from database import get_db
 from security import (
     AuthPrincipal,
@@ -3838,23 +3843,32 @@ async def chat(
     db: AsyncSession = Depends(get_db),
     scope: RequestScope = Depends(get_request_scope),
 ):
-    """涓嶢I鍔╂墜瀵硅瘽"""
+    """AI assistant chat grounded in the current literature scope."""
 
-    context = None
+    user_context = None
     if request.context:
-        context = request.context
+        user_context = request.context
     else:
         if uploaded_files_store:
             latest_file = list(uploaded_files_store.values())[-1]
-            context = latest_file["content"][:3000]
-        else:
-            recent_lits = await get_all_literature(db, limit=1, scope_filter_values=scope_filters(scope))
-            if recent_lits:
-                context = recent_lits[0].content[:3000] if recent_lits[0].content else ""
+            user_context = latest_file["content"][:3000]
 
+    sources, query_terms = await retrieve_literature_chat_sources(
+        db,
+        request.message,
+        scope_filter_values=scope_filters(scope),
+    )
+    context = build_literature_chat_context(sources, user_context=user_context)
     response = await llm_service.chat(request.message, context)
+    if str(response or "").startswith("Request failed:"):
+        response = f"{response}\n\n{build_retrieval_fallback_answer(request.message, sources)}"
 
     return {
         "success": True,
-        "response": response
+        "response": response,
+        "sources": [source.to_payload() for source in sources],
+        "retrieval": {
+            "query_terms": query_terms,
+            "source_count": len(sources),
+        },
     }

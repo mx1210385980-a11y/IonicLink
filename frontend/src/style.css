@@ -170,6 +170,7 @@
 }
 
 @keyframes highlight-pulse {
+
   0%,
   100% {
     box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.3);

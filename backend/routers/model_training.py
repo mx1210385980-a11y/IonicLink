@@ -4,7 +4,7 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db_session
@@ -33,6 +33,8 @@ def _raise_internal_error(action: str, exc: Exception) -> None:
     raise HTTPException(status_code=500, detail=f"{action} failed.") from exc
 
 class HyperparameterPayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     n_estimators: int = Field(DEFAULT_HYPERPARAMETERS["n_estimators"], ge=20, le=300)
     learning_rate: float = Field(DEFAULT_HYPERPARAMETERS["learning_rate"], ge=0.01, le=0.3)
     max_depth: int = Field(DEFAULT_HYPERPARAMETERS["max_depth"], ge=1, le=8)
@@ -42,6 +44,7 @@ class HyperparameterPayload(BaseModel):
 
 class DataOptionPayload(BaseModel):
     validation_split: float = Field(DEFAULT_DATA_OPTIONS["validation_split"], ge=0.1, le=0.4)
+    training_view: str = DEFAULT_DATA_OPTIONS["training_view"]
     min_confidence: float = Field(DEFAULT_DATA_OPTIONS["min_confidence"], ge=0.0, le=1.0)
     max_records: int | None = Field(DEFAULT_DATA_OPTIONS["max_records"], ge=10, le=500)
     random_seed: int = Field(DEFAULT_DATA_OPTIONS["random_seed"], ge=1, le=9999)
@@ -318,6 +321,25 @@ async def list_registered_models(
         _raise_internal_error("List registered models", exc)
 
 
+@router.get("/predictions", response_model=dict)
+async def list_prediction_runs(
+    limit: int = Query(20, ge=1, le=100),
+    session: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    try:
+        items = await get_model_training_service().list_prediction_runs(
+            session,
+            group_id=principal.group.id,
+            scope_key=scope.scope_key,
+            limit=limit,
+        )
+        return {"items": items}
+    except Exception as exc:
+        _raise_internal_error("List prediction runs", exc)
+
+
 @router.delete("/registry/{registry_id}", response_model=dict)
 async def delete_registered_model(
     registry_id: int,
@@ -377,6 +399,9 @@ async def predict_with_registered_model(
             session,
             registry_id=registry_id,
             group_id=principal.group.id,
+            owner_user_id=principal.user.id,
+            workspace_id=scope.workspace.id if scope.workspace else None,
+            scope_type=scope.scope_type,
             scope_key=scope.scope_key,
             target_dataset=target_dataset,
         )

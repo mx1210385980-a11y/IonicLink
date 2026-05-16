@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowUpRight, BookOpen, Database, FolderKanban, GitBranch, LibraryBig, Sparkles } from 'lucide-vue-next'
+import { ArrowUpRight, BookOpen, Database, FolderKanban, GitBranch, LibraryBig, Sparkles, Table2 } from 'lucide-vue-next'
 
 type KnowledgeMode = {
   key: string
@@ -26,6 +26,8 @@ function isModeActive(mode: KnowledgeMode) {
 }
 
 function iconFor(section: string) {
+  if (section === 'snapshots') return Table2
+  if (section === 'insights') return Sparkles
   if (section === 'sources') return LibraryBig
   if (section === 'graph') return GitBranch
   if (section === 'cleaning') return Sparkles
@@ -36,6 +38,8 @@ function iconFor(section: string) {
 function labelZh(label: string) {
   switch (label) {
     case 'Data Grid': return '数据浏览'
+    case 'Data Snapshot': return '数据快照'
+    case 'Pattern Discovery': return '规律发现'
     case 'Graph View': return '关系图'
     case 'Data Cleaning': return '数据清洗'
     case 'Dataset Builder': return '训练数据集'
@@ -47,6 +51,8 @@ function labelZh(label: string) {
 
 function descriptionFor(section: string) {
   if (section === 'sources') return '期刊封面 / 来源分布'
+  if (section === 'snapshots') return 'approved 索引表'
+  if (section === 'insights') return '图表统计 / 文字稿'
   if (section === 'graph') return '阳/阴离子对热图'
   if (section === 'cleaning') return '清洗缺失 / 异常'
   if (section === 'datasets') return '质量检查 / 训练版本'
@@ -55,6 +61,8 @@ function descriptionFor(section: string) {
 
 function statusFor(mode: KnowledgeMode) {
   if (mode.key === 'explorer') return props.selectedRecordCount > 0 ? `${props.selectedRecordCount} 条` : '待选择'
+  if (mode.key === 'snapshots') return '可查看'
+  if (mode.key === 'insights') return '已生成'
   if (mode.key === 'sources') return mode.count ? `${mode.count} 篇` : '待入库'
   if (mode.key === 'cleaning') return mode.count ? `待处理 ${mode.count}` : '可继续'
   if (mode.key === 'datasets') {

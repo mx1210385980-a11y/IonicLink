@@ -5,6 +5,11 @@ import {
   type RecordResponse,
   type EvidenceResult,
 } from '@/lib/api'
+import {
+  canonicalExperimentScaleValue,
+  experimentScaleLabel,
+  experimentScaleSearchText,
+} from '@/lib/experimentScale'
 import type {
   EvidenceSnippet as InteractiveEvidenceSnippet,
   EvidenceTagType as InteractiveEvidenceTagType,
@@ -78,6 +83,7 @@ const {
   loading,
   result,
   filterOptions,
+  selectedExperimentScale,
   selectedCation,
   selectedAnion,
   selectedProbeMaterial,
@@ -137,6 +143,7 @@ type AdvancedFilterState = {
   temperature: string
   potential: string
   water: string
+  scale: string
   loadMin: string
   loadMax: string
   cofMin: string
@@ -156,6 +163,7 @@ type AdvancedOptionKey =
   | 'temperature'
   | 'potential'
   | 'water'
+  | 'scale'
 
 type AdvancedFilterField = {
   key: AdvancedOptionKey
@@ -173,6 +181,27 @@ const activeAdvancedOptionKey = ref<AdvancedOptionKey>('ions')
 type IonFilterRole = 'cation' | 'anion'
 const activeIonRole = ref<IonFilterRole>('cation')
 const advancedOptionSearch = ref('')
+
+const scaleFilterOptions = computed(() => {
+  const source = filterOptions.value.experimentScales?.length
+    ? filterOptions.value.experimentScales
+    : ['macroscale', 'nanoscale']
+  const seen = new Set<string>()
+  const options: string[] = []
+  for (const value of source) {
+    const canonical = canonicalExperimentScaleValue(value)
+    if (!canonical || seen.has(canonical)) continue
+    seen.add(canonical)
+    options.push(canonical)
+  }
+  const order = ['macroscale', 'nanoscale', 'microscale', 'unknown']
+  return options.sort((a, b) => {
+    const ai = order.indexOf(a)
+    const bi = order.indexOf(b)
+    if (ai >= 0 || bi >= 0) return (ai >= 0 ? ai : 999) - (bi >= 0 ? bi : 999)
+    return a.localeCompare(b)
+  })
+})
 
 const ionFilterRoles = computed(() => [
   {
@@ -241,6 +270,15 @@ const advancedFilterFields = computed<AdvancedFilterField[]>(() => [
     options: filterOptions.value.substrateCoatings,
     selected: selectedSubstrateCoating.value,
     accentClass: 'bg-amber-500',
+  },
+  {
+    key: 'scale',
+    label: '实验尺度',
+    group: '工况',
+    description: '宏观摩擦 / 纳米摩擦',
+    options: scaleFilterOptions.value,
+    selected: selectedExperimentScale.value,
+    accentClass: 'bg-indigo-500',
   },
   {
     key: 'speed',
@@ -325,7 +363,7 @@ const activeAdvancedCandidateLabel = computed(() => {
 const matchingAdvancedOptions = computed(() => {
   const query = normalizeAdvancedOptionText(advancedOptionSearch.value)
   if (!query) return activeAdvancedOptions.value
-  return activeAdvancedOptions.value.filter((option) => normalizeAdvancedOptionText(option).includes(query))
+  return activeAdvancedOptions.value.filter((option) => advancedFilterSearchText(activeAdvancedOptionKey.value, option).includes(query))
 })
 
 const visibleAdvancedOptions = computed(() => {
@@ -345,6 +383,23 @@ const hiddenAdvancedOptionCount = computed(() => {
 
 function normalizeAdvancedOptionText(value: string): string {
   return value.toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+function advancedFilterValueDisplay(key: AdvancedOptionKey, value: string): string {
+  if (!value) return ''
+  if (key === 'scale') return experimentScaleLabel(value)
+  return value
+}
+
+function advancedFilterSearchText(key: AdvancedOptionKey, value: string): string {
+  if (key === 'scale') return normalizeAdvancedOptionText(experimentScaleSearchText(value))
+  return normalizeAdvancedOptionText(value)
+}
+
+function advancedFilterRawTitle(key: AdvancedOptionKey, value: string): string | undefined {
+  if (!value) return undefined
+  if (key === 'scale') return canonicalExperimentScaleValue(value)
+  return value
 }
 
 function selectAdvancedFilterField(key: AdvancedOptionKey) {
@@ -375,6 +430,7 @@ function setAdvancedFilterValue(key: AdvancedOptionKey, value: string) {
   if (key === 'temperature') selectedTemperatureValue.value = value
   if (key === 'potential') selectedPotentialValue.value = value
   if (key === 'water') selectedWaterContentValue.value = value
+  if (key === 'scale') selectedExperimentScale.value = canonicalExperimentScaleValue(value)
   advancedOptionSearch.value = ''
   commitAdvancedDiscreteFilterChange()
 }
@@ -412,6 +468,7 @@ function captureAdvancedFilterState(): AdvancedFilterState {
     temperature: selectedTemperatureValue.value,
     potential: selectedPotentialValue.value,
     water: selectedWaterContentValue.value,
+    scale: selectedExperimentScale.value,
     loadMin: loadMin.value,
     loadMax: loadMax.value,
     cofMin: cofMin.value,
@@ -430,6 +487,7 @@ function restoreAdvancedFilterState(state: AdvancedFilterState) {
   selectedTemperatureValue.value = state.temperature
   selectedPotentialValue.value = state.potential
   selectedWaterContentValue.value = state.water
+  selectedExperimentScale.value = state.scale
   loadMin.value = state.loadMin
   loadMax.value = state.loadMax
   cofMin.value = state.cofMin
@@ -470,6 +528,7 @@ function removeAdvancedSearchChip(id: string) {
   if (id === 'manual-temperature') selectedTemperatureValue.value = ''
   if (id === 'manual-potential') selectedPotentialValue.value = ''
   if (id === 'manual-water') selectedWaterContentValue.value = ''
+  if (id === 'manual-scale') selectedExperimentScale.value = ''
   if (id === 'manual-load') {
     loadMin.value = ''
     loadMax.value = ''
@@ -1648,7 +1707,7 @@ onBeforeUnmount(() => {
                       class="mt-0.5 block truncate text-[11px]"
                       :class="field.key === activeAdvancedOptionKey ? 'text-slate-500 dark:text-slate-400' : 'text-slate-400/80 dark:text-slate-500/80'"
                     >
-                      {{ field.selected || field.description }}
+                      {{ advancedFilterValueDisplay(field.key, field.selected) || field.description }}
                     </span>
                   </span>
                 </button>
@@ -1746,7 +1805,7 @@ onBeforeUnmount(() => {
 	                class="mb-3 flex w-full items-center justify-between rounded-xl border border-dashed border-blue-200 bg-blue-50/50 px-4 py-2.5 text-left text-sm font-medium text-blue-700 transition hover:bg-blue-50 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20"
 	                @click="applyAdvancedTypedValue"
 	              >
-	                <span class="truncate">使用 “{{ advancedTypedCandidate }}” 作为 {{ activeAdvancedCandidateLabel }}</span>
+	                <span class="truncate">使用 “{{ advancedFilterValueDisplay(activeAdvancedOptionKey, advancedTypedCandidate) }}” 作为 {{ activeAdvancedCandidateLabel }}</span>
 	                <span class="ml-3 shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] uppercase text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">Enter</span>
 	              </button>
 
@@ -1756,7 +1815,10 @@ onBeforeUnmount(() => {
 	              >
 	                <div class="min-w-0">
 	                  <p class="text-[10px] font-bold uppercase tracking-wider text-blue-500/80 dark:text-blue-400/80">已选择</p>
-	                  <p class="mt-0.5 truncate text-sm font-semibold text-blue-900 dark:text-blue-100">{{ activeAdvancedSelectedValue }}</p>
+	                  <p
+	                    class="mt-0.5 truncate text-sm font-semibold text-blue-900 dark:text-blue-100"
+	                    :title="advancedFilterRawTitle(activeAdvancedOptionKey, activeAdvancedSelectedValue)"
+	                  >{{ advancedFilterValueDisplay(activeAdvancedOptionKey, activeAdvancedSelectedValue) }}</p>
                 </div>
                 <button
                   type="button"
@@ -1774,9 +1836,10 @@ onBeforeUnmount(() => {
 	                    type="button"
 	                    class="flex w-full items-center gap-3 border-b border-slate-50 px-4 py-2.5 text-left text-sm transition last:border-b-0 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/50"
 	                    :class="option === activeAdvancedSelectedValue ? 'bg-blue-50/50 dark:bg-blue-500/10' : ''"
+	                    :title="advancedFilterRawTitle(activeAdvancedFilterField.key, option)"
 	                    @click="setAdvancedFilterValue(activeAdvancedFilterField.key, option)"
 	                  >
-	                    <span class="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-300" :class="option === activeAdvancedSelectedValue ? 'font-semibold text-blue-700 dark:text-blue-300' : ''">{{ option }}</span>
+	                    <span class="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-300" :class="option === activeAdvancedSelectedValue ? 'font-semibold text-blue-700 dark:text-blue-300' : ''">{{ advancedFilterValueDisplay(activeAdvancedFilterField.key, option) }}</span>
 	                    <Check v-if="option === activeAdvancedSelectedValue" class="h-4 w-4 text-blue-600 dark:text-blue-400" />
 	                  </button>
                   <div v-if="!visibleAdvancedOptions.length" class="px-4 py-8 text-center text-sm text-slate-400">

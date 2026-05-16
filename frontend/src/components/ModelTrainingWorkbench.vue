@@ -36,11 +36,14 @@ import {
   buildModelTrainingWebSocketUrl,
   cancelModelTraining,
   deleteRegisteredModel,
+  getQualityAssetSummary,
   getModelTrainingRun,
   getModelTrainingSummary,
   listCleanedDatasets,
   listModelTrainingRuns,
+  listModelPredictionRuns,
   listRegisteredModels,
+  predictWithRegisteredModel,
   previewModelTrainingPlan,
   registerModelTrainingRun,
   setRecommendedRegisteredModel,
@@ -48,11 +51,17 @@ import {
   type ModelTrainingExternalDiagnosticItem,
   type ModelTrainingMetricPoint,
   type ModelTrainingPlanPreview,
+  type ModelPredictionRunListItem,
   type ModelTrainingRunListItem,
   type ModelTrainingStartPayload,
   type ModelTrainingSummary,
   type ModelTrainingTaskSnapshot,
+  type QualityAssetSlice,
+  type QualityAssetSummary,
+  type QualityTrainingReadiness,
+  type QualityTrainingReplenishment,
   type RegisteredModelListItem,
+  type RegisteredModelPredictionResult,
   type SavedCleanedDatasetSummary,
 } from '@/lib/api'
 
@@ -126,19 +135,77 @@ type FeatureGainRunStep = {
   error?: string | null
 }
 
+type SegmentMixRecipe = {
+  key: string
+  label: string
+  shortLabel: string
+  baseModels: string[]
+  metaModel: string
+  purpose: string
+  hyperparameters: Record<string, unknown>
+}
+
+type SegmentMixRunStep = {
+  key: string
+  label: string
+  shortLabel: string
+  baseModels: string[]
+  metaModel: string
+  purpose: string
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
+  taskId?: string | null
+  valR2?: number | null
+  valRmse?: number | null
+  valMae?: number | null
+  testR2?: number | null
+  testRmse?: number | null
+  testMae?: number | null
+  finishedAt?: string | null
+  snapshot?: ModelTrainingTaskSnapshot | null
+  error?: string | null
+}
+
+type TrainingViewKey = 'macro_performance' | 'afm_surface_response' | 'cross_scale' | 'all'
+type QualityScaleKey = 'macroscale' | 'nanoscale' | 'all'
+
+type TrainingViewEntry = {
+  key: TrainingViewKey
+  scaleKey: QualityScaleKey
+  label: string
+  shortLabel: string
+  detail: string
+  badge: string
+  recommended?: boolean
+}
+
+type TrainingViewCard = TrainingViewEntry & {
+  slice: QualityAssetSlice | null
+  readiness: QualityTrainingReadiness | null
+  replenishment: QualityTrainingReplenishment | null
+  trainableCount: number | null
+  activeCount: number | null
+  sampleGap: number | null
+  active: boolean
+  exploratory: boolean
+}
+
 const props = defineProps<{
   preselectedCleanedDatasetId?: number | null
 }>()
 
 const summary = ref<ModelTrainingSummary | null>(null)
+const qualitySummary = ref<QualityAssetSummary | null>(null)
 const activeTask = ref<ModelTrainingTaskSnapshot | null>(null)
 const savedDatasets = ref<SavedCleanedDatasetSummary[]>([])
 const trainingRuns = ref<ModelTrainingRunListItem[]>([])
 const registeredModels = ref<RegisteredModelListItem[]>([])
+const predictionRuns = ref<ModelPredictionRunListItem[]>([])
 const selectedCleanedDatasetId = ref<number | null>(null)
 const leaderboard = ref<LeaderboardRow[]>([])
 const loading = ref(true)
 const loadError = ref('')
+const qualityLoading = ref(false)
+const qualityError = ref('')
 const starting = ref(false)
 const cancelling = ref(false)
 const versionActionLoading = ref('')
@@ -146,8 +213,8 @@ const versionError = ref('')
 const socketRef = ref<WebSocket | null>(null)
 const completedTaskIds = new Set<string>()
 const showAdvanced = ref(false)
-const HIDDEN_ALGORITHMS = new Set(['mlp'])
-type WorkbenchTabKey = 'overview' | 'data' | 'experiments' | 'reports' | 'diagnostics' | 'versions'
+const HIDDEN_ALGORITHMS = new Set(['mlp', 'high_cof_segmented'])
+type WorkbenchTabKey = 'overview' | 'data' | 'experiments' | 'reports' | 'diagnostics' | 'predict' | 'versions'
 const activeWorkbenchTab = ref<WorkbenchTabKey>('overview')
 const defaultWorkbenchTab = { key: 'overview', label: '总览', description: '核心指标、拟合曲线和预测诊断。' } as const
 const workbenchTabs: Array<{ key: WorkbenchTabKey; label: string; description: string }> = [
@@ -156,6 +223,7 @@ const workbenchTabs: Array<{ key: WorkbenchTabKey; label: string; description: s
   { key: 'experiments', label: '实验', description: '特征组增益、自动调参和算法对比。' },
   { key: 'reports', label: '报告', description: '训练报告、特征重要性和可解释摘要。' },
   { key: 'diagnostics', label: '诊断', description: '高残差样本归因和数据回看。' },
+  { key: 'predict', label: '预测', description: '按训练视图选择推荐模型并批量预测目标数据集。' },
   { key: 'versions', label: '版本', description: '保存、推荐、编辑和回看模型版本。' },
 ]
 const activeWorkbenchTabMeta = computed(() => workbenchTabs.find((tab) => tab.key === activeWorkbenchTab.value) || defaultWorkbenchTab)
@@ -166,6 +234,14 @@ const experimentPreview = ref<ModelTrainingPlanPreview | null>(null)
 const experimentPreviewLoading = ref(false)
 const experimentPreviewError = ref('')
 const pendingExperimentAction = ref<'start' | 'tune' | 'compare' | null>(null)
+const activeVersionViewKey = ref<TrainingViewKey>('afm_surface_response')
+const predictionViewKey = ref<TrainingViewKey>('afm_surface_response')
+const selectedPredictionDatasetId = ref<number | null>(null)
+const predictionLoading = ref(false)
+const predictionError = ref('')
+const predictionResult = ref<RegisteredModelPredictionResult | null>(null)
+const predictionHistoryLoading = ref(false)
+const predictionHistoryError = ref('')
 const showSaveVersionModal = ref(false)
 const saveVersionName = ref('')
 const saveVersionDescription = ref('')
@@ -208,6 +284,41 @@ const targetOutlierOptions = [
     key: 'off',
     label: '不剔除',
     description: '完整保留所有样本；适合做审计对照，但容易被少数极端点拉低 R²。',
+  },
+]
+const TRAINING_VIEW_ENTRIES: TrainingViewEntry[] = [
+  {
+    key: 'afm_surface_response',
+    scaleKey: 'nanoscale',
+    label: '纳米摩擦',
+    shortLabel: '纳米',
+    detail: 'AFM / FFM / SFA 表面响应，当前最适合做稳定基线。',
+    badge: '推荐',
+    recommended: true,
+  },
+  {
+    key: 'macro_performance',
+    scaleKey: 'macroscale',
+    label: '宏观摩擦',
+    shortLabel: '宏观',
+    detail: 'ball-on-disk、pin-on-disk 等宏观 COF / 磨损性能。',
+    badge: '补数后训练',
+  },
+  {
+    key: 'cross_scale',
+    scaleKey: 'all',
+    label: '跨尺度研究',
+    shortLabel: '跨尺度',
+    detail: '只用于研究宏观与纳米是否可迁移，不作为默认模型。',
+    badge: '研究',
+  },
+  {
+    key: 'all',
+    scaleKey: 'all',
+    label: '统一数据池',
+    shortLabel: '全部',
+    detail: '包含所有训练样本，仅作审计或算法对照。',
+    badge: '对照',
   },
 ]
 const FEATURE_GROUP_DEFINITIONS: FeatureGroupDefinition[] = [
@@ -300,6 +411,59 @@ const FEATURE_GAIN_RECIPES: FeatureGainRecipe[] = [
     purpose: '最后加入指纹或 PCA 特征，观察是否增益或引入噪声。',
   },
 ]
+const SEGMENT_MIX_RECIPES: SegmentMixRecipe[] = [
+  {
+    key: 'catboost_rf_svr',
+    label: '二模型混合：CatBoost + RF / SVR',
+    shortLabel: 'CatBoost + RF / SVR',
+    baseModels: ['catboost', 'random_forest'],
+    metaModel: 'svr',
+    purpose: '低样本时更保守，观察 RF 的局部鲁棒性和 SVR 元模型能否降低高 COF 偏差。',
+    hyperparameters: {
+      base_models: ['catboost', 'random_forest'],
+      meta_model: 'svr',
+      high_train_threshold: 0.6,
+      high_gate_threshold: 0.5,
+      high_blend: 0.3,
+      high_weight: 1.5,
+      min_segment_size: 14,
+    },
+  },
+  {
+    key: 'catboost_xgboost_catboost',
+    label: '二模型混合：CatBoost + XGBoost / CatBoost',
+    shortLabel: 'CatBoost + XGBoost / CatBoost',
+    baseModels: ['catboost', 'xgboost'],
+    metaModel: 'catboost',
+    purpose: '比较两个 boosting 模型在高 COF 段的互补性，适合看测试集曲线是否更贴近对角线。',
+    hyperparameters: {
+      base_models: ['catboost', 'xgboost'],
+      meta_model: 'catboost',
+      high_train_threshold: 0.6,
+      high_gate_threshold: 0.5,
+      high_blend: 0.3,
+      high_weight: 1.5,
+      min_segment_size: 14,
+    },
+  },
+  {
+    key: 'catboost_rf_xgboost_catboost',
+    label: '三模型混合：CatBoost + RF + XGBoost / CatBoost',
+    shortLabel: 'CatBoost + RF + XGBoost / CatBoost',
+    baseModels: ['catboost', 'random_forest', 'xgboost'],
+    metaModel: 'catboost',
+    purpose: '最接近论文里的三基学习器思路，用 CatBoost 元模型融合三类基学习器的高 COF 局部预测。',
+    hyperparameters: {
+      base_models: ['catboost', 'random_forest', 'xgboost'],
+      meta_model: 'catboost',
+      high_train_threshold: 0.6,
+      high_gate_threshold: 0.5,
+      high_blend: 0.3,
+      high_weight: 1.5,
+      min_segment_size: 14,
+    },
+  },
+]
 
 // 全算法对比模式
 const compareMode = ref(false)
@@ -313,6 +477,11 @@ const featureGainResults = ref<FeatureGainRunStep[]>([])
 const featureGainTotal = ref(0)
 const featureGainCurrent = ref<FeatureGainRunStep | null>(null)
 const featureGainBaseAlgorithm = ref<string | null>(null)
+const segmentMixMode = ref(false)
+const segmentMixQueue = ref<SegmentMixRecipe[]>([])
+const segmentMixResults = ref<SegmentMixRunStep[]>([])
+const segmentMixTotal = ref(0)
+const segmentMixCurrent = ref<SegmentMixRunStep | null>(null)
 
 const emit = defineEmits<{
   'open-knowledge': []
@@ -334,6 +503,7 @@ const form = reactive<ModelTrainingStartPayload>({
   hyperparameters: { n_estimators: 300, learning_rate: 0.08, max_depth: 3, l2_leaf_reg: 2, random_strength: 1 },
   data_options: {
     validation_split: 0.2,
+    training_view: 'afm_surface_response',
     min_confidence: 0,
     max_records: null,
     random_seed: 42,
@@ -361,6 +531,65 @@ const currentPoint = computed(() => activeTask.value?.current || null)
 const hasSavedDatasets = computed(() => savedDatasets.value.length > 0)
 const selectedDataset = computed(() => savedDatasets.value.find((dataset) => dataset.id === selectedCleanedDatasetId.value) || null)
 const availableAlgorithms = computed(() => (summary.value?.algorithms || []).filter((algorithm) => !HIDDEN_ALGORITHMS.has(algorithm.key)))
+const availableAlgorithmKeys = computed(() => new Set(availableAlgorithms.value.map((algorithm) => algorithm.key)))
+const allQualitySlice = computed<QualityAssetSlice | null>(() => {
+  const payload = qualitySummary.value
+  if (!payload) return null
+  return {
+    key: 'all',
+    label: '全部',
+    trainingView: 'all',
+    summary: payload.summary,
+    metrics: payload.metrics,
+    fieldCategories: payload.fieldCategories,
+    unitIssues: payload.unitIssues,
+    doiDuplicates: payload.doiDuplicates,
+    cofOutliers: payload.cofOutliers,
+    evidence: payload.evidence,
+    training: payload.training,
+    review: payload.review,
+  }
+})
+const selectedTrainingViewKey = computed<TrainingViewKey>(() => normalizeTrainingViewKey(form.data_options.training_view))
+const trainingViewCards = computed<TrainingViewCard[]>(() => TRAINING_VIEW_ENTRIES.map((entry) => {
+  const slice = qualitySliceForScale(entry.scaleKey)
+  const readiness = slice?.training.readiness || null
+  const replenishment = slice?.training.replenishment || null
+  return {
+    ...entry,
+    slice,
+    readiness,
+    replenishment,
+    trainableCount: replenishment?.currentTrainableCount ?? slice?.training.trainableRecordIds?.length ?? null,
+    activeCount: slice?.summary.activeRecordCount ?? null,
+    sampleGap: replenishment?.sampleGap ?? null,
+    active: selectedTrainingViewKey.value === entry.key,
+    exploratory: entry.key === 'all' || entry.key === 'cross_scale',
+  }
+}))
+const selectedTrainingViewCard = computed(() =>
+  trainingViewCards.value.find((card) => card.key === selectedTrainingViewKey.value) || trainingViewCards.value[0] || null,
+)
+const selectedTrainingViewHardBlocked = computed(() => {
+  const state = selectedTrainingViewCard.value?.readiness?.state
+  return state === 'empty' || state === 'blocked'
+})
+const selectedTrainingViewWarnings = computed(() => buildTrainingViewWarnings(selectedTrainingViewCard.value))
+const trainingLaunchDisabled = computed(() =>
+  starting.value
+  || selectedCleanedDatasetId.value == null
+  || usableRecords.value < 10
+  || activeTask.value?.status === 'running'
+  || selectedTrainingViewHardBlocked.value,
+)
+const trainingCompareDisabled = computed(() =>
+  trainingLaunchDisabled.value
+  || !summary.value
+  || !availableAlgorithms.value.length,
+)
+const segmentMixPlan = computed(() => SEGMENT_MIX_RECIPES.filter((recipe) => (
+  recipe.baseModels.every((key) => key !== 'xgboost' || availableAlgorithmKeys.value.has('xgboost'))
+)))
 const isRandomForest = computed(() => form.algorithm === 'random_forest')
 const usableRecords = computed(() => activeTask.value?.dataset.usable_records || summary.value?.dataset.usable_records || 0)
 const progressPercent = computed(() => Math.round((currentPoint.value?.progress || 0) * 100))
@@ -396,7 +625,54 @@ const fitModeDescription = computed(() => {
   }
   return '线性回归一次性求解系数，没有逐轮训练轨迹；这里固定展示最终交叉验证和测试集表现。'
 })
-const recommendedModel = computed(() => registeredModels.value.find((model) => model.is_recommended) || null)
+const activeTaskTrainingViewKey = computed<TrainingViewKey>(() => normalizeTrainingViewKey(
+  activeTask.value?.config?.data_options?.training_view
+  || activeTask.value?.dataset?.filters?.training_view
+  || form.data_options.training_view,
+))
+const versionTrainingViewTabs = computed(() => TRAINING_VIEW_ENTRIES.map((entry) => {
+  const models = registeredModels.value.filter((model) => modelTrainingViewKey(model) === entry.key)
+  const runs = trainingRuns.value.filter((run) => runTrainingViewKey(run) === entry.key)
+  return {
+    ...entry,
+    modelCount: models.length,
+    runCount: runs.length,
+    recommended: models.find((model) => model.is_recommended) || null,
+  }
+}))
+const activeVersionViewMeta = computed(() =>
+  versionTrainingViewTabs.value.find((tab) => tab.key === activeVersionViewKey.value) || versionTrainingViewTabs.value[0],
+)
+const filteredRegisteredModels = computed(() =>
+  registeredModels.value.filter((model) => modelTrainingViewKey(model) === activeVersionViewKey.value),
+)
+const recommendedModel = computed(() => filteredRegisteredModels.value.find((model) => model.is_recommended) || null)
+const recommendedModelForActiveTaskView = computed(() =>
+  registeredModels.value.find((model) => model.is_recommended && modelTrainingViewKey(model) === activeTaskTrainingViewKey.value) || null,
+)
+const predictionViewTabs = computed(() => TRAINING_VIEW_ENTRIES.map((entry) => {
+  const recommended = registeredModels.value.find((model) => model.is_recommended && modelTrainingViewKey(model) === entry.key) || null
+  const fallback = registeredModels.value.find((model) => modelTrainingViewKey(model) === entry.key) || null
+  return {
+    ...entry,
+    recommended,
+    fallback,
+    modelCount: registeredModels.value.filter((model) => modelTrainingViewKey(model) === entry.key).length,
+  }
+}))
+const activePredictionViewMeta = computed(() =>
+  predictionViewTabs.value.find((tab) => tab.key === predictionViewKey.value) || predictionViewTabs.value[0],
+)
+const selectedPredictionModel = computed(() => {
+  const meta = activePredictionViewMeta.value
+  return meta?.recommended || meta?.fallback || null
+})
+const selectedPredictionDataset = computed(() =>
+  savedDatasets.value.find((dataset) => dataset.id === selectedPredictionDatasetId.value) || null,
+)
+const filteredPredictionRuns = computed(() =>
+  predictionRuns.value.filter((run) => normalizeTrainingViewKey(run.training_view) === predictionViewKey.value),
+)
 const activeRegisteredModel = computed(() => {
   const taskId = activeTask.value?.task_id
   if (!taskId) return null
@@ -408,6 +684,7 @@ const activeRunVersion = computed(() => {
   return trainingRuns.value.find((run) => run.task_id === taskId) || null
 })
 const versionRuns = computed(() => trainingRuns.value.slice(0, 12))
+const filteredVersionRuns = computed(() => versionRuns.value.filter((run) => runTrainingViewKey(run) === activeVersionViewKey.value))
 const canSaveActiveVersion = computed(() => Boolean(activeTask.value?.status === 'completed'))
 const versionModalTitle = computed(() => activeRegisteredModel.value ? '编辑模型版本' : '保存模型版本')
 const versionModalConfirmLabel = computed(() => activeRegisteredModel.value ? '保存修改' : '保存模型版本')
@@ -852,7 +1129,13 @@ const experimentSplitSubsets = computed(() => experimentSplitDetails.value?.subs
 const experimentFeatureColumns = computed(() => experimentDataset.value?.feature_columns || summary.value?.dataset.feature_columns || [])
 const experimentFeaturePreview = computed(() => experimentFeatureColumns.value.slice(0, 14))
 const experimentFeatureHiddenCount = computed(() => Math.max(0, experimentFeatureColumns.value.length - experimentFeaturePreview.value.length))
-const experimentWarnings = computed(() => experimentPreview.value?.warnings || [])
+const experimentWarnings = computed(() => {
+  const warnings = [...(experimentPreview.value?.warnings || [])]
+  for (const warning of selectedTrainingViewWarnings.value) {
+    if (!warnings.includes(warning)) warnings.push(warning)
+  }
+  return warnings
+})
 const experimentSplitPlanPreview = computed(() => experimentPreview.value?.split_plan?.slice(0, 4) || [])
 const experimentCleaning = computed(() => summary.value?.cleaning || selectedDataset.value?.summary || null)
 const experimentSmiles = computed(() => experimentCleaning.value?.smiles_screening || null)
@@ -944,6 +1227,16 @@ const featureGainProgressLabel = computed(() => {
 })
 const featureGainCurrentLabel = computed(() => featureGainCurrent.value?.label || '')
 const featureGainBestResult = computed(() => [...featureGainCompleted.value].sort((a, b) => featureGainScore(b) - featureGainScore(a))[0] || null)
+const segmentMixCompleted = computed(() => segmentMixResults.value.filter((row) => row.status === 'completed' && row.valR2 != null))
+const segmentMixSorted = computed(() => [...segmentMixCompleted.value].sort((a, b) => Number(b.valR2) - Number(a.valR2)))
+const segmentMixFailed = computed(() => segmentMixResults.value.filter((row) => row.status !== 'completed'))
+const segmentMixBestResult = computed(() => segmentMixSorted.value[0] || null)
+const segmentMixProgressLabel = computed(() => {
+  const done = segmentMixResults.value.filter((row) => row.status !== 'queued' && row.status !== 'running').length
+  const total = segmentMixTotal.value || segmentMixResults.value.length
+  return `${done} / ${total}`
+})
+const segmentMixCurrentLabel = computed(() => segmentMixCurrent.value?.shortLabel || '')
 const fitDiagnostic = computed(() => {
   if (activeTask.value?.status !== 'completed' || !currentPoint.value) return null
   const trainR2 = nullableNumber(currentPoint.value.train_r2)
@@ -1146,6 +1439,62 @@ const compareChartOptions = computed(() => ({
   },
 }))
 
+const segmentMixChartData = computed(() => ({
+  labels: segmentMixSorted.value.map((row) => row.shortLabel),
+  datasets: [
+    {
+      label: '验证集 R²',
+      data: segmentMixSorted.value.map((row) => Number(row.valR2 || 0)),
+      backgroundColor: segmentMixSorted.value.map((_, idx) => idx === 0 ? 'rgba(14, 165, 142, 0.85)' : 'rgba(91, 86, 234, 0.62)'),
+      borderRadius: 6,
+      borderSkipped: false as const,
+    },
+  ],
+}))
+
+const segmentMixR2Axis = computed(() => {
+  const values = segmentMixSorted.value
+    .map((row) => Number(row.valR2))
+    .filter((value) => Number.isFinite(value))
+  if (!values.length) return { min: 0, max: 1 }
+  const min = Math.min(0, ...values)
+  const max = Math.max(0, ...values)
+  return {
+    min: min < 0 ? Math.floor((min - 0.05) * 10) / 10 : 0,
+    max: max <= 0 ? 0.05 : Math.min(1, Math.ceil((max + 0.05) * 10) / 10),
+  }
+})
+
+const segmentMixChartOptions = computed(() => ({
+  ...compareChartOptions.value,
+  plugins: {
+    ...compareChartOptions.value.plugins,
+    tooltip: {
+      ...(compareChartOptions.value.plugins as any)?.tooltip,
+      callbacks: {
+        label: (ctx: any) => {
+          const row = segmentMixSorted.value[ctx.dataIndex]
+          if (!row) return `R²：${Number(ctx.parsed.x).toFixed(4)}`
+          return [
+            `R² = ${formatMetric(row.valR2, 3)}`,
+            `RMSE = ${formatMetric(row.valRmse, 3)}`,
+            `MAE = ${formatMetric(row.valMae, 3)}`,
+            `测试 R² = ${formatMetric(row.testR2, 3)}`,
+          ]
+        },
+      },
+    },
+  },
+  scales: {
+    ...compareChartOptions.value.scales,
+    x: {
+      ...(compareChartOptions.value.scales as any).x,
+      min: segmentMixR2Axis.value.min,
+      max: segmentMixR2Axis.value.max,
+    },
+  },
+}))
+
 const featureImportanceChartData = computed(() => ({
   labels: featureImportances.value.map((entry) => formatColumnLabel(entry.feature)),
   datasets: [
@@ -1238,6 +1587,112 @@ function formatNumber(value: number | null | undefined) {
 
 function formatDateTime(value: string | null | undefined) {
   return value ? new Date(value).toLocaleString() : '--'
+}
+
+function normalizeTrainingViewKey(value: string | null | undefined): TrainingViewKey {
+  if (value === 'macro_performance' || value === 'afm_surface_response' || value === 'cross_scale' || value === 'all') {
+    return value
+  }
+  return 'afm_surface_response'
+}
+
+function trainingViewEntryFor(value: string | null | undefined) {
+  const key = normalizeTrainingViewKey(value)
+  return TRAINING_VIEW_ENTRIES.find((entry) => entry.key === key) ?? TRAINING_VIEW_ENTRIES[0]!
+}
+
+function trainingViewShortLabel(value: string | null | undefined) {
+  return trainingViewEntryFor(value).shortLabel
+}
+
+function modelTrainingViewKey(model: RegisteredModelListItem | null | undefined): TrainingViewKey {
+  return normalizeTrainingViewKey(model?.training_view)
+}
+
+function runTrainingViewKey(row: ModelTrainingRunListItem | null | undefined): TrainingViewKey {
+  return normalizeTrainingViewKey(row?.training_view || row?.registered_model_training_view)
+}
+
+function qualitySliceForScale(scaleKey: QualityScaleKey): QualityAssetSlice | null {
+  if (scaleKey === 'all') return allQualitySlice.value
+  return qualitySummary.value?.scaleBreakdown?.find((slice) => slice.key === scaleKey) || null
+}
+
+function buildTrainingViewWarnings(card: TrainingViewCard | null) {
+  if (!card) return []
+  const warnings: string[] = []
+  const readiness = card.readiness
+  const gap = card.sampleGap || 0
+  if (card.exploratory) {
+    warnings.push(`${card.label}包含多个实验尺度,只建议作为算法对照；正式模型请优先选择宏观摩擦或纳米摩擦视图。`)
+  }
+  if (readiness?.state === 'limited') {
+    warnings.push(`${card.label}训练池只有 ${formatNumber(card.trainableCount)} 条可训练样本,建议先补 ${formatNumber(gap)} 条后再作为正式模型。`)
+  } else if (readiness?.state === 'empty' || readiness?.state === 'blocked') {
+    warnings.push(`${card.label}训练池暂时未达启动条件,请先补齐目标值、润滑体系和工况字段。`)
+  } else if (readiness?.state === 'needs_review') {
+    warnings.push(`${card.label}仍有待审记录,建议先完成审阅再冻结正式训练版本。`)
+  }
+  return warnings
+}
+
+function trainingViewReadinessClass(readiness: QualityTrainingReadiness | null | undefined, active = false) {
+  if (readiness?.state === 'ready') return active ? 'bg-[#e8fff2] text-[#087443] ring-[#bdeccf]' : 'bg-[#f2fbf5] text-[#28784d] ring-[#d8f3df]'
+  if (readiness?.state === 'limited' || readiness?.state === 'needs_review') return active ? 'bg-[#fff4da] text-[#9a5a0b] ring-[#f6d99a]' : 'bg-[#fffaf0] text-[#a16207] ring-[#ffe4b5]'
+  if (readiness?.state === 'empty' || readiness?.state === 'blocked') return active ? 'bg-[#fff5f6] text-[#cf334f] ring-[#ffd4da]' : 'bg-[#fff5f6] text-[#cf334f] ring-[#ffd4da]'
+  return active ? 'bg-[#f5f7ff] text-[#3d56d2] ring-[#cdd7ff]' : 'bg-[#f8fafc] text-slate-500 ring-[#e2e8f0]'
+}
+
+function trainingViewCardClass(card: TrainingViewCard) {
+  if (card.active) {
+    if (card.readiness?.state === 'ready') return 'border-[#9be4b5] bg-[#f2fbf5] ring-1 ring-[#bdeccf]'
+    if (card.readiness?.state === 'limited' || card.readiness?.state === 'needs_review') return 'border-[#f6d99a] bg-[#fffaf0] ring-1 ring-[#f6d99a]/70'
+    if (card.readiness?.state === 'empty' || card.readiness?.state === 'blocked') return 'border-[#ffd4da] bg-[#fff5f6] ring-1 ring-[#ffd4da]'
+    return 'border-[#aebdfc] bg-[#f5f7ff] ring-1 ring-[#aebdfc]/40'
+  }
+  return 'border-[#eef2f6] bg-white hover:border-[#d8e0eb]'
+}
+
+function trainingViewStatusLabel(card: TrainingViewCard) {
+  if (card.readiness?.label) return card.readiness.label
+  if (qualityLoading.value) return '加载中'
+  if (qualityError.value) return '质量数据不可用'
+  return card.badge
+}
+
+function selectTrainingView(key: TrainingViewKey) {
+  form.data_options.training_view = key
+  activeVersionViewKey.value = key
+  predictionViewKey.value = key
+  experimentPreview.value = null
+  experimentPreviewError.value = ''
+}
+
+function setActiveVersionView(key: TrainingViewKey) {
+  activeVersionViewKey.value = key
+}
+
+function setPredictionView(key: TrainingViewKey) {
+  predictionViewKey.value = key
+  predictionResult.value = null
+  predictionError.value = ''
+}
+
+async function handleRunPrediction() {
+  const model = selectedPredictionModel.value
+  if (!model || selectedPredictionDatasetId.value == null) return
+  predictionLoading.value = true
+  predictionError.value = ''
+  predictionResult.value = null
+  try {
+    const response = await predictWithRegisteredModel(model.id, selectedPredictionDatasetId.value)
+    predictionResult.value = response.prediction
+    await refreshPredictionRuns()
+  } catch (error: any) {
+    predictionError.value = error?.response?.data?.detail || error?.message || 'Failed to run prediction.'
+  } finally {
+    predictionLoading.value = false
+  }
 }
 
 function trainingViewLabel(value: string | null | undefined) {
@@ -1487,17 +1942,40 @@ function formatTitleLabel(value: string | null | undefined) {
     .replace(/\b\w/g, (char) => char.toUpperCase())
 }
 
+function preferredTrainingViewKey(): TrainingViewKey {
+  const datasetView = selectedDataset.value?.summary?.rules?.training_view
+  const normalized = normalizeTrainingViewKey(datasetView)
+  return datasetView && normalized !== 'all' ? normalized : 'afm_surface_response'
+}
+
+function ensureExplicitTrainingView(replaceMixedDefault = false) {
+  const current = normalizeTrainingViewKey(form.data_options.training_view)
+  if (replaceMixedDefault && (!form.data_options.training_view || current === 'all')) {
+    form.data_options.training_view = preferredTrainingViewKey()
+    activeVersionViewKey.value = form.data_options.training_view
+    predictionViewKey.value = form.data_options.training_view
+    return
+  }
+  form.data_options.training_view = current
+  activeVersionViewKey.value = current
+  predictionViewKey.value = current
+}
+
 function hydrateDefaults(nextSummary: ModelTrainingSummary) {
   form.target = nextSummary.defaults.target
   form.algorithm = nextSummary.defaults.algorithm
   Object.assign(form.hyperparameters, nextSummary.defaults.hyperparameters)
   Object.assign(form.data_options, nextSummary.defaults.data_options)
+  ensureExplicitTrainingView(true)
   form.cleaned_dataset_id = nextSummary.defaults.cleaned_dataset_id // selectedCleanedDatasetId.value
 }
 
 async function refreshSavedDatasets() {
   const response = await listCleanedDatasets()
   savedDatasets.value = response.items
+  if (selectedPredictionDatasetId.value == null) {
+    selectedPredictionDatasetId.value = response.items[0]?.id ?? null
+  }
 }
 
 async function refreshModelVersions() {
@@ -1507,6 +1985,31 @@ async function refreshModelVersions() {
   ])
   trainingRuns.value = runsResponse.items
   registeredModels.value = registryResponse.items
+}
+
+async function refreshPredictionRuns() {
+  predictionHistoryLoading.value = true
+  predictionHistoryError.value = ''
+  try {
+    const response = await listModelPredictionRuns(30)
+    predictionRuns.value = response.items
+  } catch (error: any) {
+    predictionHistoryError.value = error?.response?.data?.detail || error?.message || 'Failed to load prediction history.'
+  } finally {
+    predictionHistoryLoading.value = false
+  }
+}
+
+async function refreshQualitySummary() {
+  qualityLoading.value = true
+  qualityError.value = ''
+  try {
+    qualitySummary.value = await getQualityAssetSummary()
+  } catch (error: any) {
+    qualityError.value = error?.response?.data?.detail || error?.message || 'Failed to load quality assets.'
+  } finally {
+    qualityLoading.value = false
+  }
 }
 
 function defaultVersionNameForActiveTask() {
@@ -1523,7 +2026,7 @@ function openSaveVersionModal() {
   versionError.value = ''
   saveVersionName.value = existing?.name || defaultVersionNameForActiveTask()
   saveVersionDescription.value = existing?.description || ''
-  saveVersionRecommended.value = existing?.is_recommended ?? !recommendedModel.value
+  saveVersionRecommended.value = existing?.is_recommended ?? !recommendedModelForActiveTaskView.value
   showSaveVersionModal.value = true
 }
 
@@ -1550,6 +2053,7 @@ async function handleSaveVersion() {
       description: saveVersionDescription.value.trim() || null,
       is_recommended: saveVersionRecommended.value,
     })
+    activeVersionViewKey.value = activeTaskTrainingViewKey.value
     showSaveVersionModal.value = false
     await refreshModelVersions()
   } catch (error: any) {
@@ -1566,6 +2070,10 @@ async function handleViewRun(taskId: string) {
     const response = await getModelTrainingRun(taskId)
     activeTask.value = response.task
     form.algorithm = response.task.config.algorithm
+    const runView = normalizeTrainingViewKey(response.task.config.data_options?.training_view || response.task.dataset.filters?.training_view)
+    form.data_options.training_view = runView
+    activeVersionViewKey.value = runView
+    predictionViewKey.value = runView
     if (response.task.config.cleaned_dataset_id != null) {
       selectedCleanedDatasetId.value = response.task.config.cleaned_dataset_id
       form.cleaned_dataset_id = response.task.config.cleaned_dataset_id
@@ -1622,6 +2130,8 @@ async function refreshTrainingSummary(datasetId: number | null, applyDefaults: b
   form.cleaned_dataset_id = datasetId // nextSummary.defaults.cleaned_dataset_id // null
   if (applyDefaults) {
     hydrateDefaults(nextSummary)
+  } else {
+    ensureExplicitTrainingView(false)
   }
 }
 
@@ -1629,8 +2139,12 @@ async function initialize() {
   loading.value = true
   loadError.value = ''
   try {
-    await refreshSavedDatasets()
-    await refreshModelVersions()
+    await Promise.all([
+      refreshSavedDatasets(),
+      refreshModelVersions(),
+      refreshPredictionRuns(),
+      refreshQualitySummary(),
+    ])
     const preferredId = props.preselectedCleanedDatasetId // savedDatasets.value[0]?.id // null
     selectedCleanedDatasetId.value = preferredId ?? null
     await refreshTrainingSummary(selectedCleanedDatasetId.value, true)
@@ -1721,6 +2235,22 @@ function viewCompareResult(row: ComparisonRow) {
 
 async function onTaskTerminal(snapshot: ModelTrainingTaskSnapshot) {
   void refreshModelVersionsQuietly()
+  if (segmentMixMode.value) {
+    recordSegmentMixResult(snapshot)
+    if (snapshot.status === 'cancelled') {
+      segmentMixMode.value = false
+      segmentMixQueue.value = []
+      segmentMixCurrent.value = null
+      return
+    }
+    if (segmentMixQueue.value.length) {
+      await runNextSegmentMixItem()
+    } else {
+      segmentMixMode.value = false
+      segmentMixCurrent.value = null
+    }
+    return
+  }
   if (featureGainMode.value) {
     recordFeatureGainResult(snapshot)
     if (snapshot.status === 'cancelled') {
@@ -1845,7 +2375,7 @@ async function runNextFeatureGainItem() {
 
 async function handleStartFeatureGainExperiment() {
   if (!summary.value || selectedCleanedDatasetId.value == null) return
-  if (compareMode.value || featureGainMode.value || activeTask.value?.status === 'running') return
+  if (compareMode.value || featureGainMode.value || segmentMixMode.value || activeTask.value?.status === 'running') return
   const steps = buildFeatureGainSteps()
   if (!steps.length) return
   featureGainResults.value = steps.map((step) => ({ ...step }))
@@ -1870,9 +2400,116 @@ async function handleStopFeatureGainExperiment() {
 
 function viewFeatureGainResult(key: string) {
   const row = featureGainResultFor(key)
-  if (!row?.snapshot || featureGainMode.value || activeTask.value?.status === 'running') return
+  if (!row?.snapshot || featureGainMode.value || segmentMixMode.value || activeTask.value?.status === 'running') return
   activeTask.value = row.snapshot
   form.algorithm = row.snapshot.config.algorithm
+}
+
+function upsertSegmentMixResult(row: SegmentMixRunStep) {
+  const existing = segmentMixResults.value.find((item) => item.key === row.key)
+  if (existing) Object.assign(existing, row)
+  else segmentMixResults.value.push(row)
+}
+
+function recordSegmentMixResult(snapshot: ModelTrainingTaskSnapshot) {
+  const current = segmentMixCurrent.value
+  if (!current) return
+  upsertSegmentMixResult({
+    ...current,
+    status: (snapshot.status as SegmentMixRunStep['status']) || 'cancelled',
+    taskId: snapshot.task_id,
+    valR2: snapshot.current?.val_r2 ?? null,
+    valRmse: snapshot.current?.val_rmse ?? null,
+    valMae: snapshot.current?.val_mae ?? null,
+    testR2: snapshot.test_metrics?.test_r2 ?? null,
+    testRmse: snapshot.test_metrics?.test_rmse ?? null,
+    testMae: snapshot.test_metrics?.test_mae ?? null,
+    finishedAt: snapshot.finished_at || snapshot.created_at,
+    snapshot,
+    error: snapshot.error,
+  })
+}
+
+function buildSegmentMixStep(recipe: SegmentMixRecipe, status: SegmentMixRunStep['status'] = 'queued'): SegmentMixRunStep {
+  return {
+    key: recipe.key,
+    label: recipe.label,
+    shortLabel: recipe.shortLabel,
+    baseModels: recipe.baseModels,
+    metaModel: recipe.metaModel,
+    purpose: recipe.purpose,
+    status,
+    taskId: null,
+    valR2: null,
+    valRmse: null,
+    valMae: null,
+    testR2: null,
+    testRmse: null,
+    testMae: null,
+    finishedAt: null,
+    snapshot: null,
+    error: null,
+  }
+}
+
+async function runNextSegmentMixItem() {
+  const next = segmentMixQueue.value.shift()
+  if (!next) {
+    segmentMixMode.value = false
+    segmentMixCurrent.value = null
+    return
+  }
+  const runningStep = buildSegmentMixStep(next, 'running')
+  segmentMixCurrent.value = runningStep
+  upsertSegmentMixResult(runningStep)
+  loadError.value = ''
+  await startTrainingRun({
+    tune: false,
+    algorithm: 'high_cof_segmented',
+    hyperparameters: next.hyperparameters,
+  })
+  if (loadError.value) {
+    upsertSegmentMixResult({
+      ...runningStep,
+      status: 'failed',
+      taskId: `error-${Date.now()}`,
+      finishedAt: new Date().toISOString(),
+      error: loadError.value,
+    })
+    if (segmentMixQueue.value.length) {
+      await runNextSegmentMixItem()
+    } else {
+      segmentMixMode.value = false
+      segmentMixCurrent.value = null
+    }
+  }
+}
+
+async function handleStartSegmentMixExperiment() {
+  if (!summary.value || selectedCleanedDatasetId.value == null) return
+  if (compareMode.value || featureGainMode.value || segmentMixMode.value || activeTask.value?.status === 'running') return
+  if (!segmentMixPlan.value.length) return
+  segmentMixResults.value = segmentMixPlan.value.map((recipe) => buildSegmentMixStep(recipe))
+  segmentMixQueue.value = segmentMixPlan.value.slice()
+  segmentMixTotal.value = segmentMixPlan.value.length
+  segmentMixMode.value = true
+  await runNextSegmentMixItem()
+}
+
+async function handleStopSegmentMixExperiment() {
+  if (!segmentMixMode.value) return
+  segmentMixQueue.value = []
+  if (activeTask.value && activeTask.value.status === 'running') {
+    await handleCancelTraining()
+  } else {
+    segmentMixMode.value = false
+    segmentMixCurrent.value = null
+  }
+}
+
+function viewSegmentMixResult(row: SegmentMixRunStep) {
+  if (!row.snapshot || segmentMixMode.value || activeTask.value?.status === 'running') return
+  activeTask.value = row.snapshot
 }
 
 async function runNextCompareItem() {
@@ -1909,7 +2546,8 @@ async function runNextCompareItem() {
 
 async function startCompareAllConfirmed() {
   if (!summary.value || selectedCleanedDatasetId.value == null) return
-  if (compareMode.value || activeTask.value?.status === 'running') return
+  if (selectedTrainingViewHardBlocked.value) return
+  if (compareMode.value || featureGainMode.value || segmentMixMode.value || activeTask.value?.status === 'running') return
   const algorithms = availableAlgorithms.value.map((alg) => alg.key)
   if (!algorithms.length) return
   compareResults.value = []
@@ -1921,7 +2559,8 @@ async function startCompareAllConfirmed() {
 
 async function handleCompareAll() {
   if (!summary.value || selectedCleanedDatasetId.value == null) return
-  if (compareMode.value || activeTask.value?.status === 'running') return
+  if (selectedTrainingViewHardBlocked.value) return
+  if (compareMode.value || featureGainMode.value || segmentMixMode.value || activeTask.value?.status === 'running') return
   await openExperimentPreview('compare')
 }
 
@@ -1949,6 +2588,7 @@ function buildTrainingPayload(options: {
   tune?: boolean
   algorithm?: string
   featureSubset?: { key: string; label: string; columns: string[] }
+  hyperparameters?: Record<string, unknown>
 } = {}): ModelTrainingStartPayload | null {
   if (!summary.value || selectedCleanedDatasetId.value == null) return null
   const dataOptions = { ...form.data_options }
@@ -1964,10 +2604,10 @@ function buildTrainingPayload(options: {
   return {
     target: summary.value.dataset.target_column || form.target,
     algorithm: options.algorithm || form.algorithm,
-    hyperparameters: { ...form.hyperparameters },
+    hyperparameters: { ...form.hyperparameters, ...(options.hyperparameters || {}) },
     data_options: dataOptions,
     cleaned_dataset_id: selectedCleanedDatasetId.value,
-    tune: Boolean(options.tune) && !compareMode.value && !featureGainMode.value,
+    tune: Boolean(options.tune) && !compareMode.value && !featureGainMode.value && !segmentMixMode.value,
   }
 }
 
@@ -2002,7 +2642,9 @@ async function startTrainingRun(options: {
   tune?: boolean
   algorithm?: string
   featureSubset?: { key: string; label: string; columns: string[] }
+  hyperparameters?: Record<string, unknown>
 } = {}) {
+  if (selectedTrainingViewHardBlocked.value) return
   const payload = buildTrainingPayload(options)
   if (!payload) return
   starting.value = true
@@ -2020,7 +2662,7 @@ async function startTrainingRun(options: {
 
 async function confirmExperimentStart() {
   const action = pendingExperimentAction.value
-  if (!action || experimentPreviewLoading.value || experimentPreviewError.value) return
+  if (!action || experimentPreviewLoading.value || experimentPreviewError.value || selectedTrainingViewHardBlocked.value) return
   showExperimentModal.value = false
   pendingExperimentAction.value = null
   if (action === 'compare') {
@@ -2032,13 +2674,15 @@ async function confirmExperimentStart() {
 
 async function handleStartTraining() {
   if (!summary.value || selectedCleanedDatasetId.value == null) return
-  if (compareMode.value || activeTask.value?.status === 'running') return
+  if (selectedTrainingViewHardBlocked.value) return
+  if (compareMode.value || featureGainMode.value || segmentMixMode.value || activeTask.value?.status === 'running') return
   await openExperimentPreview('start')
 }
 
 async function handleAutoTune() {
   if (!summary.value || selectedCleanedDatasetId.value == null) return
-  if (compareMode.value || activeTask.value?.status === 'running') return
+  if (selectedTrainingViewHardBlocked.value) return
+  if (compareMode.value || featureGainMode.value || segmentMixMode.value || activeTask.value?.status === 'running') return
   await openExperimentPreview('tune')
 }
 
@@ -2102,6 +2746,13 @@ watch(
           预测 {{ targetLabel }}
         </span>
         <span
+          v-if="selectedTrainingViewCard"
+          class="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1"
+          :class="trainingViewReadinessClass(selectedTrainingViewCard.readiness, true)"
+        >
+          {{ selectedTrainingViewCard.label }} · {{ trainingViewStatusLabel(selectedTrainingViewCard) }}
+        </span>
+        <span
           class="shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold"
           :class="statusBadgeClass(activeTask?.status)"
         >
@@ -2126,6 +2777,12 @@ watch(
           特征增益 {{ featureGainProgressLabel }} · {{ featureGainCurrentLabel }}
         </span>
         <span
+          v-if="segmentMixMode"
+          class="shrink-0 rounded-full bg-[#ecfdf5] px-2.5 py-0.5 text-xs font-semibold text-[#0f766e]"
+        >
+          分段混合 {{ segmentMixProgressLabel }} · {{ segmentMixCurrentLabel }}
+        </span>
+        <span
           v-if="tuneActive"
           class="shrink-0 rounded-full bg-[#fff4da] px-2.5 py-0.5 text-xs font-semibold text-[#c97a00]"
         >
@@ -2135,10 +2792,10 @@ watch(
 
       <div class="flex shrink-0 items-center gap-1.5">
         <button
-          v-if="!compareMode && !featureGainMode"
+          v-if="!compareMode && !featureGainMode && !segmentMixMode"
           type="button"
           class="inline-flex items-center gap-1.5 rounded-[0.6rem] bg-[#5b56ea] px-3.5 py-1.5 text-xs font-semibold text-white shadow-[0_10px_24px_-18px_rgba(91,86,234,0.85)] transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3] disabled:shadow-none"
-          :disabled="starting || selectedCleanedDatasetId == null || usableRecords < 10 || activeTask?.status === 'running'"
+          :disabled="trainingLaunchDisabled"
           @click="handleStartTraining"
         >
           <Loader2 v-if="starting" class="h-3.5 w-3.5 animate-spin" />
@@ -2146,10 +2803,10 @@ watch(
           {{ starting ? '启动中' : '开始训练' }}
         </button>
         <button
-          v-if="!compareMode && !featureGainMode"
+          v-if="!compareMode && !featureGainMode && !segmentMixMode"
           type="button"
           class="inline-flex items-center gap-1.5 rounded-[0.6rem] border border-[#5b56ea] bg-white px-3 py-1.5 text-xs font-semibold text-[#5b56ea] transition hover:bg-[#f5f7ff] disabled:cursor-not-allowed disabled:border-[#cfd2f3] disabled:text-[#cfd2f3]"
-          :disabled="starting || selectedCleanedDatasetId == null || usableRecords < 10 || activeTask?.status === 'running' || !summary"
+          :disabled="trainingLaunchDisabled || !summary"
           title="对当前算法做小规模网格搜索，自动找到最佳超参数后再训练"
           @click="handleAutoTune"
         >
@@ -2157,10 +2814,10 @@ watch(
           自动调参
         </button>
         <button
-          v-if="!compareMode && !featureGainMode"
+          v-if="!compareMode && !featureGainMode && !segmentMixMode"
           type="button"
           class="inline-flex items-center gap-1.5 rounded-[0.6rem] border border-[#5b56ea] bg-white px-3 py-1.5 text-xs font-semibold text-[#5b56ea] transition hover:bg-[#f5f7ff] disabled:cursor-not-allowed disabled:border-[#cfd2f3] disabled:text-[#cfd2f3]"
-          :disabled="starting || selectedCleanedDatasetId == null || usableRecords < 10 || activeTask?.status === 'running' || !summary || !availableAlgorithms.length"
+          :disabled="trainingCompareDisabled"
           title="依次跑全部算法，自动选出表现最好的一个"
           @click="handleCompareAll"
         >
@@ -2186,7 +2843,16 @@ watch(
           停止特征实验
         </button>
         <button
-          v-if="!compareMode && !featureGainMode"
+          v-if="segmentMixMode"
+          type="button"
+          class="inline-flex items-center gap-1 rounded-[0.6rem] border border-[#ffd4da] bg-white px-2.5 py-1.5 text-xs font-medium text-[#cf334f] transition hover:bg-[#fff5f6]"
+          @click="handleStopSegmentMixExperiment"
+        >
+          <Square class="h-3.5 w-3.5" />
+          停止分段实验
+        </button>
+        <button
+          v-if="!compareMode && !featureGainMode && !segmentMixMode"
           type="button"
           class="inline-flex items-center gap-1 rounded-[0.6rem] border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[#f8fbff] hover:text-slate-900"
           :disabled="!activeTask || activeTask.status !== 'running' || cancelling"
@@ -2296,10 +2962,64 @@ watch(
               </div>
             </section>
 
-            <!-- ② 算法 -->
+            <!-- ② 训练视图 -->
             <section>
               <p class="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#5b56ea]">
                 <span class="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[#5b56ea] text-[9px] text-white">2</span>
+                训练视图
+              </p>
+              <div v-if="qualityError" class="mb-2 rounded-[0.6rem] border border-[#ffe4b5] bg-[#fffaf0] px-3 py-2 text-[11px] leading-5 text-[#854d0e]">
+                Quality 状态暂不可用，训练仍会按所选视图过滤。
+              </div>
+              <div class="space-y-2">
+                <button
+                  v-for="card in trainingViewCards"
+                  :key="card.key"
+                  type="button"
+                  class="w-full rounded-[0.75rem] border px-3 py-2.5 text-left transition"
+                  :class="trainingViewCardClass(card)"
+                  @click="selectTrainingView(card.key)"
+                >
+                  <span class="flex items-start justify-between gap-2">
+                    <span class="min-w-0">
+                      <span class="block text-sm font-semibold text-slate-950">{{ card.label }}</span>
+                      <span class="mt-0.5 block text-[11px] leading-4 text-slate-500">{{ card.detail }}</span>
+                    </span>
+                    <span
+                      class="shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1"
+                      :class="trainingViewReadinessClass(card.readiness, card.active)"
+                    >
+                      {{ trainingViewStatusLabel(card) }}
+                    </span>
+                  </span>
+                  <span class="mt-2 grid grid-cols-3 gap-1.5 text-[10px] font-semibold text-slate-500">
+                    <span class="rounded-md bg-white/75 px-2 py-1 ring-1 ring-black/5">
+                      可训练 {{ formatNumber(card.trainableCount) }}
+                    </span>
+                    <span class="rounded-md bg-white/75 px-2 py-1 ring-1 ring-black/5">
+                      活跃 {{ formatNumber(card.activeCount) }}
+                    </span>
+                    <span
+                      class="rounded-md bg-white/75 px-2 py-1 ring-1 ring-black/5"
+                      :class="card.sampleGap ? 'text-[#a16207]' : 'text-[#28784d]'"
+                    >
+                      {{ card.sampleGap ? `缺 ${formatNumber(card.sampleGap)}` : '达标' }}
+                    </span>
+                  </span>
+                </button>
+              </div>
+              <div
+                v-if="selectedTrainingViewWarnings.length"
+                class="mt-2 rounded-[0.6rem] border border-[#ffe4b5] bg-[#fffaf0] px-3 py-2 text-[11px] leading-5 text-[#854d0e]"
+              >
+                <p v-for="warning in selectedTrainingViewWarnings" :key="warning">{{ warning }}</p>
+              </div>
+            </section>
+
+            <!-- ③ 算法 -->
+            <section>
+              <p class="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#5b56ea]">
+                <span class="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[#5b56ea] text-[9px] text-white">3</span>
                 算法
               </p>
               <div class="space-y-1.5">
@@ -2327,7 +3047,7 @@ watch(
               </div>
             </section>
 
-            <!-- ③ 高级设置（默认折叠） -->
+            <!-- ④ 高级设置（默认折叠） -->
             <section>
               <button
                 type="button"
@@ -2948,7 +3668,7 @@ watch(
           </section>
 
           <section
-            v-if="activeWorkbenchTab === 'overview' && fitDiagnostic"
+            v-if="activeWorkbenchTab === 'diagnostics' && fitDiagnostic"
             class="rounded-[0.95rem] border p-4"
             :class="fitDiagnosticClass(fitDiagnostic.tone)"
           >
@@ -2995,6 +3715,140 @@ watch(
           </section>
 
           <section
+            v-if="activeWorkbenchTab === 'experiments'"
+            class="rounded-[0.95rem] border border-[#bbf7d0] bg-gradient-to-br from-[#f0fdfa] via-white to-[#f8fafc] p-4"
+          >
+            <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#0f766e]">
+                  <Layers class="h-3.5 w-3.5" />
+                  高 COF 分段混合实验
+                </p>
+                <p class="mt-1 max-w-3xl text-xs leading-5 text-slate-600">
+                  这是单独的论文式实验入口，不再混在普通算法里。先用 CatBoost 做高 COF 门控，再比较二模型、三模型局部混合对高摩擦尾部的修正效果。
+                </p>
+              </div>
+              <div class="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold">
+                <span class="rounded-full bg-white/80 px-2.5 py-1 text-[#0f766e] ring-1 ring-[#bbf7d0]">
+                  {{ segmentMixPlan.length }} 个组合
+                </span>
+                <button
+                  v-if="!segmentMixMode"
+                  type="button"
+                  class="inline-flex items-center gap-1 rounded-full bg-[#0f766e] px-3 py-1 text-[11px] font-semibold text-white shadow-[0_10px_24px_-18px_rgba(15,118,110,0.85)] transition hover:bg-[#0b635d] disabled:cursor-not-allowed disabled:bg-[#b6dfd8] disabled:shadow-none"
+                  :disabled="starting || compareMode || featureGainMode || activeTask?.status === 'running' || selectedCleanedDatasetId == null || !segmentMixPlan.length"
+                  title="固定当前数据划分，依次训练二模型和三模型高 COF 分段混合方案"
+                  @click="handleStartSegmentMixExperiment"
+                >
+                  <Play class="h-3 w-3" />
+                  开始分段混合
+                </button>
+                <button
+                  v-else
+                  type="button"
+                  class="inline-flex items-center gap-1 rounded-full border border-[#ffd4da] bg-white px-3 py-1 text-[11px] font-semibold text-[#cf334f] transition hover:bg-[#fff5f6]"
+                  @click="handleStopSegmentMixExperiment"
+                >
+                  <Square class="h-3 w-3" />
+                  停止
+                </button>
+              </div>
+            </div>
+
+            <div class="grid gap-3 xl:grid-cols-[1fr_1.1fr]">
+              <div class="space-y-2">
+                <article
+                  v-for="recipe in segmentMixPlan"
+                  :key="recipe.key"
+                  class="rounded-[0.75rem] border border-[#ccfbf1] bg-white/85 px-3 py-2"
+                >
+                  <div class="flex flex-wrap items-start justify-between gap-2">
+                    <div class="min-w-0">
+                      <p class="text-sm font-semibold text-slate-950">{{ recipe.label }}</p>
+                      <p class="mt-1 text-[11px] leading-5 text-slate-500">{{ recipe.purpose }}</p>
+                    </div>
+                    <span class="shrink-0 rounded-full bg-[#ecfdf5] px-2 py-0.5 text-[10px] font-semibold text-[#0f766e]">
+                      Meta: {{ algorithmLabelZh(recipe.metaModel) }}
+                    </span>
+                  </div>
+                  <div class="mt-2 flex flex-wrap gap-1.5 text-[10px] font-semibold">
+                    <span
+                      v-for="modelKey in recipe.baseModels"
+                      :key="`${recipe.key}-${modelKey}`"
+                      class="rounded-full bg-[#f8fafc] px-2 py-1 text-slate-600 ring-1 ring-[#e2e8f0]"
+                    >
+                      {{ algorithmLabelZh(modelKey) }}
+                    </span>
+                  </div>
+                </article>
+              </div>
+
+              <div class="rounded-[0.85rem] border border-[#ccfbf1] bg-white/85 p-3">
+                <div class="mb-2 flex items-center justify-between gap-2">
+                  <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#0f766e]">混合效果对比</p>
+                  <span class="text-[10px] text-slate-400">
+                    <template v-if="segmentMixMode">运行中 {{ segmentMixProgressLabel }}</template>
+                    <template v-else-if="segmentMixResults.length">已完成 {{ segmentMixCompleted.length }} / {{ segmentMixResults.length }}</template>
+                    <template v-else>独立入口，不参与全部算法对比</template>
+                  </span>
+                </div>
+                <div
+                  v-if="segmentMixBestResult"
+                  class="mb-2 rounded-[0.7rem] border border-[#99f6e4] bg-[#ecfdf5] px-3 py-2 text-xs text-slate-700"
+                >
+                  当前最佳：
+                  <span class="font-semibold text-[#0f766e]">{{ segmentMixBestResult.shortLabel }}</span>
+                  · 验证 R² {{ formatMetric(segmentMixBestResult.valR2, 3) }}
+                  · 测试 R² {{ formatMetric(segmentMixBestResult.testR2, 3) }}
+                </div>
+                <div v-if="segmentMixSorted.length" :style="{ height: `${Math.max(140, segmentMixSorted.length * 42)}px` }">
+                  <Bar :data="segmentMixChartData" :options="segmentMixChartOptions" />
+                </div>
+                <div v-if="segmentMixResults.length" class="mt-3 space-y-1.5">
+                  <button
+                    v-for="(row, idx) in segmentMixSorted"
+                    :key="row.key"
+                    type="button"
+                    class="flex w-full items-center gap-3 rounded-[0.6rem] border px-3 py-2 text-left text-xs transition"
+                    :class="[
+                      activeTask?.task_id === row.taskId
+                        ? 'border-[#0f766e] bg-[#ecfdf5] ring-1 ring-[#99f6e4]/70'
+                        : idx === 0
+                          ? 'border-[#99f6e4] bg-[#f0fdfa]'
+                          : 'border-[#eef2f6] bg-white',
+                      row.snapshot && !segmentMixMode && activeTask?.status !== 'running' ? 'cursor-pointer hover:border-[#99f6e4] hover:bg-[#f0fdfa]' : 'cursor-default',
+                    ]"
+                    :disabled="!row.snapshot || segmentMixMode || activeTask?.status === 'running'"
+                    @click="viewSegmentMixResult(row)"
+                  >
+                    <span
+                      class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
+                      :class="idx === 0 ? 'bg-[#0f766e] text-white' : 'bg-slate-100 text-slate-600'"
+                    >{{ idx + 1 }}</span>
+                    <span class="min-w-0 flex-1 truncate font-medium text-slate-800">
+                      {{ row.shortLabel }}
+                    </span>
+                    <span class="shrink-0 font-semibold text-slate-900 tabular-nums">R²={{ formatMetric(row.valR2, 3) }}</span>
+                    <span class="shrink-0 text-slate-500 tabular-nums">测试={{ formatMetric(row.testR2, 3) }}</span>
+                  </button>
+                  <div
+                    v-for="row in segmentMixFailed"
+                    :key="`segment-failed-${row.key}`"
+                    class="flex items-center gap-3 rounded-[0.6rem] border border-[#ffe4e6] bg-[#fff5f6] px-3 py-2 text-xs text-[#cf334f]"
+                  >
+                    <AlertTriangle class="h-3.5 w-3.5 shrink-0" />
+                    <span class="min-w-0 flex-1 truncate font-medium">{{ row.shortLabel }} · {{ row.status === 'failed' ? '失败' : '已中止' }}</span>
+                  </div>
+                </div>
+                <div v-else class="rounded-[0.6rem] border border-dashed border-[#a7f3d0] bg-[#f0fdfa]/60 px-3 py-3 text-center text-xs text-slate-500">
+                  <Loader2 v-if="segmentMixMode" class="mx-auto h-4 w-4 animate-spin text-[#0f766e]" />
+                  <p class="mt-1">{{ segmentMixMode ? '正在训练第一个分段混合组合...' : '尚未运行分段混合实验' }}</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section
             v-if="activeWorkbenchTab === 'experiments' && activeFeatureGroupSummaries.length"
             class="rounded-[0.95rem] border border-[#dbe4f2] bg-white p-4"
           >
@@ -3019,7 +3873,7 @@ watch(
                   v-if="!featureGainMode"
                   type="button"
                   class="inline-flex items-center gap-1 rounded-full bg-[#5b56ea] px-3 py-1 text-[11px] font-semibold text-white shadow-[0_10px_24px_-18px_rgba(91,86,234,0.85)] transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3] disabled:shadow-none"
-                  :disabled="starting || compareMode || activeTask?.status === 'running' || selectedCleanedDatasetId == null || !featureGainRunnablePlan.length"
+                  :disabled="starting || compareMode || segmentMixMode || activeTask?.status === 'running' || selectedCleanedDatasetId == null || !featureGainRunnablePlan.length"
                   title="按同一算法、同一 seed 和同一 split 依次训练累计特征组"
                   @click="handleStartFeatureGainExperiment"
                 >
@@ -3138,7 +3992,7 @@ watch(
                       <button
                         type="button"
                         class="inline-flex justify-self-start rounded-md border border-[#e2e8f0] bg-white px-2 py-1 text-[10px] font-semibold text-slate-600 transition disabled:cursor-not-allowed disabled:opacity-40 hover:bg-[#f8fbff] hover:text-[#5b56ea] sm:justify-self-end"
-                        :disabled="!featureGainResultFor(recipe.key)?.snapshot || featureGainMode || activeTask?.status === 'running'"
+                        :disabled="!featureGainResultFor(recipe.key)?.snapshot || featureGainMode || segmentMixMode || activeTask?.status === 'running'"
                         @click="viewFeatureGainResult(recipe.key)"
                       >
                         查看
@@ -3814,6 +4668,196 @@ watch(
             </div>
           </section>
 
+          <!-- 预测入口 -->
+          <section v-if="activeWorkbenchTab === 'predict'" class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
+            <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#5b56ea]">
+                  <Sparkles class="h-3.5 w-3.5" />
+                  按训练视图预测
+                </p>
+                <p class="mt-1 text-xs leading-5 text-slate-500">
+                  先选择宏观/纳米视图，系统会使用该视图的推荐模型；目标数据集也会按相同视图过滤后再预测。
+                </p>
+              </div>
+              <button
+                type="button"
+                class="inline-flex items-center gap-1.5 rounded-[0.65rem] bg-[#5b56ea] px-3.5 py-2 text-xs font-semibold text-white shadow-[0_12px_28px_-18px_rgba(91,86,234,0.85)] transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3] disabled:shadow-none"
+                :disabled="predictionLoading || !selectedPredictionModel || selectedPredictionDatasetId == null"
+                @click="handleRunPrediction"
+              >
+                <Loader2 v-if="predictionLoading" class="h-3.5 w-3.5 animate-spin" />
+                <Play v-else class="h-3.5 w-3.5" />
+                {{ predictionLoading ? '预测中' : '运行预测' }}
+              </button>
+            </div>
+
+            <div class="grid gap-3 xl:grid-cols-[0.95fr_1.05fr]">
+              <div class="space-y-3">
+                <div class="rounded-[0.85rem] border border-[#eef2f6] bg-[#fbfcff] p-3">
+                  <p class="mb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">训练视图</p>
+                  <div class="grid gap-2 sm:grid-cols-2">
+                    <button
+                      v-for="tab in predictionViewTabs"
+                      :key="`predict-${tab.key}`"
+                      type="button"
+                      class="rounded-[0.75rem] border px-3 py-2.5 text-left transition"
+                      :class="predictionViewKey === tab.key
+                        ? 'border-[#aebdfc] bg-[#f5f7ff] ring-1 ring-[#aebdfc]/40'
+                        : 'border-[#eef2f6] bg-white hover:border-[#d8e0eb]'"
+                      @click="setPredictionView(tab.key)"
+                    >
+                      <span class="flex items-center justify-between gap-2">
+                        <span class="text-sm font-semibold text-slate-950">{{ tab.label }}</span>
+                        <span
+                          class="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                          :class="tab.recommended ? 'bg-[#edf2ff] text-[#5b56ea]' : tab.fallback ? 'bg-[#fff4da] text-[#b97113]' : 'bg-slate-100 text-slate-400'"
+                        >
+                          {{ tab.recommended ? '推荐模型' : tab.fallback ? '有版本' : '无模型' }}
+                        </span>
+                      </span>
+                      <span class="mt-1 block text-[11px] leading-4 text-slate-500">
+                        {{ tab.modelCount }} 个版本<template v-if="tab.recommended"> · {{ algorithmLabelZh(tab.recommended.algorithm) }}</template>
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="rounded-[0.85rem] border border-[#eef2f6] bg-white p-3">
+                  <p class="mb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">推荐模型</p>
+                  <div v-if="selectedPredictionModel" class="rounded-[0.7rem] border border-[#cdd7ff] bg-[#f5f7ff] px-3 py-2">
+                    <p class="truncate text-sm font-semibold text-slate-950">{{ selectedPredictionModel.name }}</p>
+                    <p class="mt-1 text-[11px] leading-5 text-slate-500">
+                      {{ trainingViewShortLabel(selectedPredictionModel.training_view) }} · {{ algorithmLabelZh(selectedPredictionModel.algorithm) }} ·
+                      {{ versionScoreLabel(selectedPredictionModel) }} {{ formatMetric(versionScoreValue(selectedPredictionModel), 3) }}
+                    </p>
+                    <p v-if="!selectedPredictionModel.is_recommended" class="mt-1 text-[11px] text-[#b97113]">
+                      当前视图还没有推荐模型，暂用最新保存版本。建议先在版本页标记推荐模型。
+                    </p>
+                  </div>
+                  <div v-else class="rounded-[0.7rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] px-3 py-6 text-center text-xs text-slate-500">
+                    当前视图还没有可用模型。先完成训练并保存为模型版本。
+                  </div>
+                </div>
+
+                <div class="rounded-[0.85rem] border border-[#eef2f6] bg-white p-3">
+                  <label class="block text-xs">
+                    <span class="mb-1.5 block font-semibold text-slate-700">目标数据集</span>
+                    <select
+                      v-model.number="selectedPredictionDatasetId"
+                      class="h-10 w-full rounded-[0.6rem] border border-[#e2e8f0] bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-[#aebdfc] focus:ring-2 focus:ring-[#aebdfc]/20"
+                    >
+                      <option v-for="dataset in savedDatasets" :key="`predict-dataset-${dataset.id}`" :value="dataset.id">
+                        {{ dataset.name }} · {{ dataset.row_count }} 条
+                      </option>
+                    </select>
+                  </label>
+                  <p class="mt-2 text-[11px] leading-5 text-slate-500">
+                    目标数据集会先按 {{ activePredictionViewMeta?.label }} 过滤，再进入推荐模型预测。
+                  </p>
+                </div>
+              </div>
+
+              <div class="rounded-[0.85rem] border border-[#eef2f6] bg-[#fbfcff] p-3">
+                <div class="mb-3 flex items-center justify-between gap-2">
+                  <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">预测结果</p>
+                  <span v-if="predictionResult" class="text-[10px] text-slate-400">{{ predictionResult.preview_rows.length }} 条预览</span>
+                </div>
+
+                <p
+                  v-if="predictionError"
+                  class="mb-3 rounded-[0.7rem] border border-[#ffd4da] bg-[#fff5f6] px-3 py-2 text-xs text-[#cf334f]"
+                >
+                  {{ predictionError }}
+                </p>
+
+                <div v-if="predictionResult" class="space-y-3">
+                  <div class="grid gap-2 sm:grid-cols-4">
+                    <div class="rounded-[0.65rem] bg-white px-3 py-2 ring-1 ring-[#eef2f6]">
+                      <p class="text-[10px] font-semibold text-slate-400">预测行</p>
+                      <p class="mt-1 text-lg font-semibold text-slate-950 tabular-nums">{{ formatNumber(predictionResult.summary.predicted_rows) }}</p>
+                    </div>
+                    <div class="rounded-[0.65rem] bg-white px-3 py-2 ring-1 ring-[#eef2f6]">
+                      <p class="text-[10px] font-semibold text-slate-400">有真值</p>
+                      <p class="mt-1 text-lg font-semibold text-slate-950 tabular-nums">{{ formatNumber(predictionResult.summary.scored_rows) }}</p>
+                    </div>
+                    <div class="rounded-[0.65rem] bg-white px-3 py-2 ring-1 ring-[#eef2f6]">
+                      <p class="text-[10px] font-semibold text-slate-400">R²</p>
+                      <p class="mt-1 text-lg font-semibold text-slate-950 tabular-nums">{{ formatMetric(predictionResult.summary.r2, 3) }}</p>
+                    </div>
+                    <div class="rounded-[0.65rem] bg-white px-3 py-2 ring-1 ring-[#eef2f6]">
+                      <p class="text-[10px] font-semibold text-slate-400">排除</p>
+                      <p class="mt-1 text-lg font-semibold text-slate-950 tabular-nums">{{ formatNumber(predictionResult.summary.dropped_outside_training_view || 0) }}</p>
+                    </div>
+                  </div>
+                  <p class="text-[11px] leading-5 text-slate-500">
+                    {{ predictionResult.registered_model_name }} → {{ selectedPredictionDataset?.name || predictionResult.target_dataset.name }}；
+                    仅预测 {{ trainingViewShortLabel(predictionResult.training_view) }} 视图内记录。
+                  </p>
+                  <div class="space-y-1.5">
+                    <div
+                      v-for="row in predictionResult.preview_rows"
+                      :key="`prediction-${row.row_index}-${row.record_id || 'row'}`"
+                      class="grid gap-2 rounded-[0.6rem] border border-[#eef2f6] bg-white px-3 py-2 text-xs sm:grid-cols-[5rem_minmax(0,1fr)_8rem_8rem]"
+                    >
+                      <span class="font-semibold text-slate-500">#{{ row.record_id || row.row_index }}</span>
+                      <span class="truncate text-slate-500">
+                        文献 {{ row.literature_id || '--' }} · 置信度 {{ formatMetric(row.confidence, 2) }}
+                      </span>
+                      <span class="font-semibold text-slate-900 tabular-nums">预测 {{ formatMetric(row.predicted, 3) }}</span>
+                      <span class="text-slate-500 tabular-nums">残差 {{ formatMetric(row.residual, 3) }}</span>
+                    </div>
+                  </div>
+                </div>
+                <div v-else class="rounded-[0.7rem] border border-dashed border-[#dbe4f2] bg-white px-3 py-10 text-center text-xs text-slate-500">
+                  选择训练视图和目标数据集后运行预测。
+                </div>
+
+                <div class="mt-4 border-t border-[#e6edf5] pt-3">
+                  <div class="mb-2 flex items-center justify-between gap-2">
+                    <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">Prediction Runs</p>
+                    <span class="text-[10px] text-slate-400">
+                      {{ predictionHistoryLoading ? '加载中' : `${filteredPredictionRuns.length} 条` }}
+                    </span>
+                  </div>
+                  <p
+                    v-if="predictionHistoryError"
+                    class="mb-2 rounded-[0.65rem] border border-[#ffd4da] bg-[#fff5f6] px-3 py-2 text-xs text-[#cf334f]"
+                  >
+                    {{ predictionHistoryError }}
+                  </p>
+                  <div v-if="filteredPredictionRuns.length" class="space-y-2">
+                    <div
+                      v-for="run in filteredPredictionRuns.slice(0, 5)"
+                      :key="`prediction-run-${run.id}`"
+                      class="grid gap-2 border-b border-[#eef2f6] pb-2 text-xs last:border-b-0 last:pb-0 sm:grid-cols-[minmax(0,1fr)_7rem_5rem]"
+                    >
+                      <div class="min-w-0">
+                        <p class="truncate font-semibold text-slate-900">
+                          {{ run.registered_model_name }}
+                        </p>
+                        <p class="mt-0.5 truncate text-[11px] text-slate-500">
+                          {{ trainingViewShortLabel(run.training_view) }} · {{ run.target_dataset_name || '目标数据集' }} · {{ formatDateTime(run.created_at) }}
+                        </p>
+                      </div>
+                      <div class="text-slate-500">
+                        <p class="font-semibold text-slate-900 tabular-nums">{{ formatNumber(run.target_predicted_rows) }} 行</p>
+                        <p class="mt-0.5 text-[11px]">排除 {{ formatNumber(run.dropped_outside_training_view) }}</p>
+                      </div>
+                      <div class="text-right">
+                        <p class="font-semibold text-slate-900 tabular-nums">{{ formatMetric(run.r2, 3) }}</p>
+                        <p class="mt-0.5 text-[11px] text-slate-500">R²</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-else class="rounded-[0.65rem] border border-dashed border-[#dbe4f2] bg-white px-3 py-5 text-center text-xs text-slate-500">
+                    当前训练视图还没有预测历史。
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
           <!-- 模型版本与训练回看 -->
           <section v-if="activeWorkbenchTab === 'versions'" class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
             <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
@@ -3869,11 +4913,28 @@ watch(
               {{ versionError }}
             </p>
 
+            <div class="mb-3 flex max-w-full gap-1 overflow-x-auto rounded-[0.75rem] bg-[#f8fafc] p-1 ring-1 ring-[#e2e8f0]">
+              <button
+                v-for="tab in versionTrainingViewTabs"
+                :key="tab.key"
+                type="button"
+                class="shrink-0 rounded-[0.58rem] px-3 py-1.5 text-left text-xs font-semibold transition"
+                :class="activeVersionViewKey === tab.key
+                  ? 'bg-[#5b56ea] text-white shadow-[0_10px_22px_-18px_rgba(91,86,234,0.95)]'
+                  : 'text-slate-500 hover:bg-white hover:text-slate-900'"
+                @click="setActiveVersionView(tab.key)"
+              >
+                <span>{{ tab.shortLabel }}</span>
+                <span class="ml-1 tabular-nums opacity-75">{{ tab.modelCount }}</span>
+                <span v-if="tab.recommended" class="ml-1 opacity-75">推荐</span>
+              </button>
+            </div>
+
             <div class="grid gap-3 xl:grid-cols-[1.1fr_0.9fr]">
               <div class="min-w-0 rounded-[0.85rem] border border-[#eef2f6] bg-[#fbfcff] p-3">
                 <div class="mb-2 flex items-center justify-between gap-2">
-                  <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">已保存模型版本</p>
-                  <span class="text-[10px] text-slate-400">{{ registeredModels.length }} 个</span>
+                  <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">已保存模型版本 · {{ activeVersionViewMeta?.label }}</p>
+                  <span class="text-[10px] text-slate-400">{{ filteredRegisteredModels.length }} / {{ registeredModels.length }} 个</span>
                 </div>
 
                 <div
@@ -3904,13 +4965,13 @@ watch(
                   </div>
                 </div>
 
-                <div v-if="!registeredModels.length" class="rounded-[0.7rem] border border-dashed border-[#dbe4f2] bg-white px-3 py-8 text-center text-xs text-slate-500">
-                  还没有保存的模型版本。训练完成后点击“保存当前模型”即可固定一个可复用版本。
+                <div v-if="!filteredRegisteredModels.length" class="rounded-[0.7rem] border border-dashed border-[#dbe4f2] bg-white px-3 py-8 text-center text-xs text-slate-500">
+                  当前训练视图还没有保存的模型版本。训练完成后点击“保存当前模型”即可固定一个可复用版本。
                 </div>
 
                 <div v-else class="space-y-2">
                   <div
-                    v-for="model in registeredModels"
+                    v-for="model in filteredRegisteredModels"
                     :key="model.id"
                     class="rounded-[0.75rem] border bg-white px-3 py-3"
                     :class="model.is_recommended ? 'border-[#aebdfc] ring-1 ring-[#aebdfc]/50' : 'border-[#eef2f6]'"
@@ -3928,7 +4989,7 @@ watch(
                           </span>
                         </div>
                         <p class="mt-1 text-[11px] leading-5 text-slate-500">
-                          {{ algorithmLabelZh(model.algorithm) }} · {{ splitStrategyLabel(model.split_strategy) }} ·
+                          {{ trainingViewShortLabel(model.training_view) }} · {{ algorithmLabelZh(model.algorithm) }} · {{ splitStrategyLabel(model.split_strategy) }} ·
                           {{ formatNumber(model.usable_records) }} 行 · {{ formatNumber(model.feature_dimensions) }} 特征
                         </p>
                         <p v-if="model.description" class="mt-1 line-clamp-2 text-[11px] leading-5 text-slate-500">
@@ -4001,19 +5062,19 @@ watch(
 
               <div class="min-w-0 rounded-[0.85rem] border border-[#eef2f6] bg-white p-3">
                 <div class="mb-2 flex items-center justify-between gap-2">
-                  <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">训练 run 回看</p>
-                  <span class="text-[10px] text-slate-400">{{ versionRuns.length }} 条</span>
+                  <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">训练 run 回看 · {{ activeVersionViewMeta?.label }}</p>
+                  <span class="text-[10px] text-slate-400">{{ filteredVersionRuns.length }} / {{ versionRuns.length }} 条</span>
                 </div>
                 <p class="mb-2 text-[11px] leading-5 text-slate-500">
                   这里按后端持久化记录列出最近训练。点“回看”后，上方报告区会切到当时冻结的配置、特征、split/fold。
                 </p>
 
-                <div v-if="!versionRuns.length" class="rounded-[0.7rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] px-3 py-8 text-center text-xs text-slate-500">
-                  暂无训练 run。完成一次训练后会自动出现在这里。
+                <div v-if="!filteredVersionRuns.length" class="rounded-[0.7rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] px-3 py-8 text-center text-xs text-slate-500">
+                  当前训练视图暂无训练 run。完成一次训练后会自动出现在这里。
                 </div>
                 <div v-else class="space-y-1.5">
                   <div
-                    v-for="row in versionRuns"
+                    v-for="row in filteredVersionRuns"
                     :key="row.task_id"
                     class="rounded-[0.65rem] border px-3 py-2 text-xs"
                     :class="activeTask?.task_id === row.task_id ? 'border-[#aebdfc] bg-[#f5f7ff] ring-1 ring-[#aebdfc]/40' : 'border-[#eef2f6] bg-[#fbfcff]'"
@@ -4024,7 +5085,7 @@ watch(
                           {{ algorithmLabelZh(row.algorithm) }}
                         </p>
                         <p class="mt-0.5 text-[11px] text-slate-500">
-                          {{ formatDateTime(row.finished_at || row.created_at) }} · {{ formatNumber(row.usable_records) }} 行 · {{ splitStrategyLabel(row.split_strategy) }}
+                          {{ trainingViewShortLabel(row.training_view) }} · {{ formatDateTime(row.finished_at || row.created_at) }} · {{ formatNumber(row.usable_records) }} 行 · {{ splitStrategyLabel(row.split_strategy) }}
                         </p>
                       </div>
                       <span
@@ -4100,7 +5161,7 @@ watch(
           </section>
 
           <section
-            v-if="activeWorkbenchTab === 'diagnostics' && !externalDiagnosticItems.length && !topResiduals.length"
+            v-if="activeWorkbenchTab === 'diagnostics' && !fitDiagnostic && !externalDiagnosticItems.length && !topResiduals.length"
             class="rounded-[0.95rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] px-4 py-10 text-center"
           >
             <p class="text-sm font-semibold text-slate-900">暂无诊断样本</p>
@@ -4184,7 +5245,7 @@ watch(
                   </div>
                   <div class="rounded-[0.6rem] bg-white px-3 py-2 ring-1 ring-[#e2e8f0]">
                     <p class="text-[10px] font-semibold text-slate-400">训练视图</p>
-                    <p class="mt-1 truncate font-semibold text-slate-900">{{ trainingViewLabel(experimentRules?.training_view) }}</p>
+                    <p class="mt-1 truncate font-semibold text-slate-900">{{ trainingViewLabel(form.data_options.training_view || experimentRules?.training_view) }}</p>
                   </div>
                 </div>
               </div>
@@ -4376,7 +5437,7 @@ watch(
             <button
               type="button"
               class="inline-flex items-center gap-1.5 rounded-[0.65rem] bg-[#5b56ea] px-4 py-2 text-xs font-semibold text-white shadow-[0_12px_28px_-18px_rgba(91,86,234,0.85)] transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3] disabled:shadow-none"
-              :disabled="starting || experimentPreviewLoading || Boolean(experimentPreviewError)"
+              :disabled="starting || experimentPreviewLoading || Boolean(experimentPreviewError) || selectedTrainingViewHardBlocked"
               @click="confirmExperimentStart"
             >
               <Loader2 v-if="starting" class="h-3.5 w-3.5 animate-spin" />
@@ -4417,10 +5478,14 @@ watch(
         </header>
 
         <div class="space-y-4 px-5 py-4">
-          <div class="grid gap-2 text-xs sm:grid-cols-4">
+          <div class="grid gap-2 text-xs sm:grid-cols-5">
             <div class="rounded-[0.65rem] bg-[#fbfcff] px-3 py-2 ring-1 ring-[#eef2f6]">
               <p class="text-[10px] font-semibold text-slate-400">算法</p>
               <p class="mt-1 truncate font-semibold text-slate-900">{{ algorithmLabelZh(activeTask?.config.algorithm) }}</p>
+            </div>
+            <div class="rounded-[0.65rem] bg-[#fbfcff] px-3 py-2 ring-1 ring-[#eef2f6]">
+              <p class="text-[10px] font-semibold text-slate-400">视图</p>
+              <p class="mt-1 truncate font-semibold text-slate-900">{{ trainingViewShortLabel(activeTaskTrainingViewKey) }}</p>
             </div>
             <div class="rounded-[0.65rem] bg-[#fbfcff] px-3 py-2 ring-1 ring-[#eef2f6]">
               <p class="text-[10px] font-semibold text-slate-400">划分</p>
@@ -4468,7 +5533,7 @@ watch(
                 标记为推荐模型
               </span>
               <span class="mt-1 block text-xs leading-5 text-slate-500">
-                同一工作区只保留一个推荐模型；勾选后会自动取消其他版本的推荐状态。
+                同一工作区的同一训练视图只保留一个推荐模型；宏观与纳米会分别保留自己的推荐版本。
               </span>
             </span>
           </label>

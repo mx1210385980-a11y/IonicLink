@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 
 import type { EvidenceResult, RecordResponse } from '@/lib/api'
+import { canonicalExperimentScaleValue, experimentScaleBadgeClass, experimentScaleLabel } from '@/lib/experimentScale'
 import {
   cofDisplay,
   confidenceDisplay,
@@ -24,6 +25,12 @@ const props = withDefaults(defineProps<{
 })
 
 const confidenceValue = computed(() => confidenceValueFor(props.record, props.evidence))
+const experimentScaleValue = computed(() => canonicalExperimentScaleValue(
+  props.record.experimentScale
+  || props.record.experimentProfile?.scale
+  || props.record.tribologicalSystem?.scale,
+))
+const experimentScaleDisplay = computed(() => experimentScaleValue.value ? experimentScaleLabel(experimentScaleValue.value) : '')
 
 function lubricantLineClass(line: LubricantDisplayLine): string {
   if (line.kind === 'ratio') return 'mt-1'
@@ -72,6 +79,14 @@ function lubricantLineClass(line: LubricantDisplayLine): string {
       {{ tribopairDisplay(record) }}
     </div>
     <div class="mt-4 flex flex-wrap gap-2 text-[11px] font-semibold">
+      <span
+        v-if="experimentScaleDisplay"
+        class="rounded-full border px-3 py-1"
+        :class="experimentScaleBadgeClass(experimentScaleValue)"
+        :title="experimentScaleValue"
+      >
+        尺度 {{ experimentScaleDisplay }}
+      </span>
       <span class="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
         COF {{ cofDisplay(record) }}
       </span>

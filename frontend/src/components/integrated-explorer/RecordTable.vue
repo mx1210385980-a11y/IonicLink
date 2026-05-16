@@ -5,6 +5,7 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 import { Edit, Eye, Trash2 } from 'lucide-vue-next'
 import LubricantStructurePreview from '@/components/integrated-explorer/LubricantStructurePreview.vue'
 import type { EvidenceResult, RecordResponse } from '@/lib/api'
+import { canonicalExperimentScaleValue, experimentScaleBadgeClass, experimentScaleLabel } from '@/lib/experimentScale'
 import {
   cofDisplay,
   type DetailedConditionChip,
@@ -163,6 +164,19 @@ function conditionDisplayUnit(chip: DetailedConditionChip, fallback?: string): s
 
 function conditionDisplayLabel(chip: DetailedConditionChip, fallback?: string): string {
   return conditionChipDisplayParts(chip, fallback).label
+}
+
+function recordExperimentScaleValue(record: RecordResponse): string {
+  return canonicalExperimentScaleValue(
+    record.experimentScale
+    || record.experimentProfile?.scale
+    || record.tribologicalSystem?.scale,
+  )
+}
+
+function recordExperimentScaleLabel(record: RecordResponse): string {
+  const value = recordExperimentScaleValue(record)
+  return value ? experimentScaleLabel(value) : ''
 }
 
 // Expose scroll methods for external control
@@ -420,6 +434,16 @@ defineExpose({
               <!-- Conditions Column -->
               <div class="min-w-0 px-3 py-3">
                 <div class="flex flex-col gap-1.5">
+                  <span
+                    v-if="recordExperimentScaleLabel(record)"
+                    class="mb-0.5 inline-flex w-fit items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-bold"
+                    :class="experimentScaleBadgeClass(recordExperimentScaleValue(record))"
+                    :title="recordExperimentScaleValue(record)"
+                  >
+                    <span class="uppercase tracking-wider opacity-70">尺度</span>
+                    <span>{{ recordExperimentScaleLabel(record) }}</span>
+                  </span>
+
                   <!-- 主要条件 -->
                   <div
                     v-for="chip in notableConditionChips(record)"

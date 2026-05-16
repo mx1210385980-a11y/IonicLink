@@ -42,10 +42,10 @@ export const SOURCE_MODE_OPTIONS = [
 ] as const
 
 export const TRAINING_VIEW_OPTIONS = [
-  { value: 'all', label: '统一知识库全部样本', detail: '保留 macro 与 AFM 数据,适合先看总体覆盖。' },
-  { value: 'macro_performance', label: '宏观性能预测', detail: '优先使用 ball-on-disk / ball-on-flat / pin-on-disk 等宏观 COF 与磨损数据。' },
   { value: 'afm_surface_response', label: 'AFM 表面响应', detail: '优先使用 AFM / FFM 的纳米摩擦、侧向力、粘附和表面响应数据。' },
+  { value: 'macro_performance', label: '宏观性能预测', detail: '优先使用 ball-on-disk / ball-on-flat / pin-on-disk 等宏观 COF 与磨损数据。' },
   { value: 'cross_scale', label: '跨尺度数据池', detail: '保留已识别为宏观或 AFM 的记录,为后续跨尺度建模做准备。' },
+  { value: 'all', label: '统一知识库全部样本', detail: '保留 macro 与 AFM 数据,仅适合总体覆盖审计或算法对照。' },
 ] as const
 
 export const STARTER_PRESETS = [
@@ -83,7 +83,7 @@ function triggerDownload(blob: Blob, filename: string) {
 export function useCleaningPreview() {
   const form = reactive<ModelCleaningOptions>({
     source_mode: 'group_library',
-    training_view: 'all',
+    training_view: 'afm_surface_response',
     drop_missing_target: true,
     require_dual_smiles: true,
     require_valid_smiles: true,

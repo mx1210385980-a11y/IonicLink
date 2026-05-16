@@ -7,7 +7,12 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from models.db_models import CleanedDataset
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
+
+from database import Base
+from models.db_models import CleanedDataset, ModelPredictionRun, ModelTrainingRun, RegisteredModel, ResearchGroup, User
 from security import RequestScope
 from routers import model_training as model_training_router
 from services.model_cleaning_service import DEFAULT_CLEANING_WORKBENCH_OPTIONS, ModelCleaningService
@@ -374,6 +379,153 @@ def test_prediction_insights_skip_none_predictions() -> None:
     assert insights["prediction_samples"][0]["cation"] == "emi"
     assert insights["prediction_samples"][0]["friction_bin"] == 2
     assert insights["largest_residuals"][0]["predicted"] == 0.21
+
+
+def test_registered_model_prediction_is_saved_as_history() -> None:
+    async def _case() -> None:
+        engine = create_async_engine(
+            "sqlite+aiosqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        session_maker = async_sessionmaker(engine, expire_on_commit=False)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+
+            async with session_maker() as session:
+                group = ResearchGroup(name="Prediction Group", slug="prediction-group")
+                user = User(
+                    username="prediction-user",
+                    display_name="Prediction User",
+                    password_hash="hashed",
+                    role="researcher",
+                    group=group,
+                )
+                session.add_all([group, user])
+                await session.flush()
+
+                rows = [
+                    {
+                        "Target_COF": 0.10 + index * 0.02,
+                        "Temperature": 25.0 + index,
+                        "Speed": 0.10 + index * 0.01,
+                        "__record_id": index + 1,
+                        "__literature_id": 1,
+                        "__confidence": 0.9,
+                        "__training_view": "all",
+                    }
+                    for index in range(12)
+                ]
+                metadata = {
+                    "target_column": "Target_COF",
+                    "feature_columns": ["Temperature", "Speed"],
+                    "matrix_columns": ["Target_COF", "Temperature", "Speed"],
+                    "summary": {"rules": {"training_view": "all"}},
+                }
+                config = {
+                    "algorithm": "linear_regression",
+                    "hyperparameters": {"n_estimators": 20, "learning_rate": 0.06, "max_depth": 3},
+                    "data_options": {
+                        "validation_split": 0.2,
+                        "random_seed": 42,
+                        "max_records": None,
+                        "split_strategy": "random_holdout",
+                        "cv_folds": 5,
+                        "min_confidence": 0.0,
+                        "training_view": "all",
+                    },
+                }
+                dataset = CleanedDataset(
+                    name="Prediction Matrix",
+                    description=None,
+                    target_key="cof",
+                    source_scope_type="workspace",
+                    source_scope_key="workspace:1",
+                    group_id=group.id,
+                    workspace_id=None,
+                    created_by_user_id=user.id,
+                    scope_type="workspace",
+                    scope_key="workspace:1",
+                    row_count=len(rows),
+                    config_json=json.dumps({}),
+                    summary_json=json.dumps(metadata),
+                    rows_json=json.dumps(rows),
+                )
+                session.add(dataset)
+                await session.flush()
+
+                training_run = ModelTrainingRun(
+                    task_id="prediction-history-task",
+                    status="completed",
+                    target_column="Target_COF",
+                    algorithm="linear_regression",
+                    split_strategy="random_holdout",
+                    group_id=group.id,
+                    workspace_id=None,
+                    cleaned_dataset_id=dataset.id,
+                    owner_user_id=user.id,
+                    scope_type="workspace",
+                    scope_key="workspace:1",
+                    usable_records=len(rows),
+                    config_json=json.dumps(config),
+                    summary_json=json.dumps({
+                        "config": config,
+                        "snapshot": {
+                            "current": {"val_r2": 1.0},
+                            "dataset": {"feature_dimensions": 2, "filters": {"training_view": "all"}},
+                        },
+                    }),
+                )
+                session.add(training_run)
+                await session.flush()
+
+                registered = RegisteredModel(
+                    name="Reusable COF Model",
+                    description=None,
+                    training_run_id=training_run.id,
+                    source_dataset_id=dataset.id,
+                    group_id=group.id,
+                    workspace_id=None,
+                    created_by_user_id=user.id,
+                    scope_type="workspace",
+                    scope_key="workspace:1",
+                    config_json=json.dumps(config),
+                    summary_json=json.dumps({}),
+                    training_view="all",
+                    is_recommended=True,
+                )
+                session.add(registered)
+                await session.commit()
+
+                service = ModelTrainingService()
+                result = await service.predict_with_registered_model(
+                    session,
+                    registry_id=registered.id,
+                    group_id=group.id,
+                    owner_user_id=user.id,
+                    workspace_id=None,
+                    scope_type="workspace",
+                    scope_key="workspace:1",
+                    target_dataset=dataset,
+                )
+                saved_runs = await service.list_prediction_runs(
+                    session,
+                    group_id=group.id,
+                    scope_key="workspace:1",
+                    limit=10,
+                )
+                row_count = (await session.execute(select(ModelPredictionRun))).scalars().all()
+
+                assert result["prediction_run_id"] == saved_runs[0]["id"]
+                assert saved_runs[0]["registered_model_name"] == "Reusable COF Model"
+                assert saved_runs[0]["target_predicted_rows"] == len(rows)
+                assert saved_runs[0]["training_view"] == "all"
+                assert len(row_count) == 1
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_case())
 
 
 @pytest.mark.anyio

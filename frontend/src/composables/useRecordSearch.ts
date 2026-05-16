@@ -7,6 +7,7 @@ import {
   type PaginatedRecordResponse,
   type SearchFilter,
 } from '@/lib/api'
+import { canonicalExperimentScaleValue, experimentScaleLabel } from '@/lib/experimentScale'
 import { useDashboardFilters } from '@/composables/useDashboardFilters'
 
 type UseRecordSearchOptions = {
@@ -41,8 +42,13 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
     temperatureValues: [],
     potentialValues: [],
     waterContentValues: [],
+    experimentScales: [],
+    experimentMethods: [],
+    measurementTypes: [],
+    trainingViews: [],
   })
 
+  const selectedExperimentScale = ref('')
   const selectedCation = ref('')
   const selectedAnion = ref('')
   const selectedProbeMaterial = ref('')
@@ -107,6 +113,9 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
     if (selectedWaterContentValue.value) {
       chips.push({ id: 'manual-water', label: 'Water', value: selectedWaterContentValue.value })
     }
+    if (selectedExperimentScale.value) {
+      chips.push({ id: 'manual-scale', label: '尺度', value: experimentScaleLabel(selectedExperimentScale.value) })
+    }
     if (loadMin.value.trim() || loadMax.value.trim()) {
       chips.push({
         id: 'manual-load',
@@ -162,6 +171,8 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
     const dashboardCofMin = filters.cofRange.min ?? undefined
     const dashboardCofMax = filters.cofRange.max ?? undefined
 
+    const experimentScale = canonicalExperimentScaleValue(selectedExperimentScale.value)
+
     return {
       materials: dashboardMaterials,
       probe_materials: selectedProbeMaterial.value ? [selectedProbeMaterial.value] : undefined,
@@ -175,6 +186,7 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
       temperature_values: selectedTemperatureValue.value ? [selectedTemperatureValue.value] : undefined,
       potential_values: selectedPotentialValue.value ? [selectedPotentialValue.value] : undefined,
       water_content_values: selectedWaterContentValue.value ? [selectedWaterContentValue.value] : undefined,
+      experiment_scales: experimentScale ? [experimentScale] : undefined,
       load_min: parsedLoadMin.value ?? undefined,
       load_max: parsedLoadMax.value ?? undefined,
       cof_min: parsedCofMin.value ?? dashboardCofMin,
@@ -226,6 +238,7 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
     selectedTemperatureValue.value = ''
     selectedPotentialValue.value = ''
     selectedWaterContentValue.value = ''
+    selectedExperimentScale.value = ''
     loadMin.value = ''
     loadMax.value = ''
     cofMin.value = ''
@@ -287,6 +300,7 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
     loading,
     result,
     filterOptions,
+    selectedExperimentScale,
     selectedCation,
     selectedAnion,
     selectedProbeMaterial,

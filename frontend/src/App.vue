@@ -470,6 +470,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
             :latest-workflow="latestAgentWorkflow"
             :preferred-training-dataset-id="preferredTrainingDatasetId"
             @action="handleHomeAction"
+            @open-source="(source) => openReviewTarget({ literatureId: source.literature_id })"
           />
 
           <PipelinePage

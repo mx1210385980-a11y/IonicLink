@@ -27,6 +27,8 @@ from services.score_service import calculate_confidence, calculate_confidence_de
 from services.agent_runtime_service import get_agent_runtime
 from services.file_service import _normalize_record_chemistry
 from services.il_resolver_service import ANION_DB, CATION_DB, resolve_il
+from services.insight_service import get_pattern_discovery, save_pattern_discovery_report
+from services.quality_service import get_quality_asset_summary
 from services.query_service import _ion_component_filter_terms
 from services.relationship_graph_service import (
     build_relationship_graph,
@@ -77,6 +79,31 @@ def _raise_internal_error(action: str, exc: Exception) -> None:
     raise HTTPException(status_code=500, detail=f"{action} failed.") from exc
 
 
+def _normalized_scale_filter_terms(values: list[str] | tuple[str, ...] | set[str]) -> list[str]:
+    terms: set[str] = set()
+    for value in values or []:
+        text = str(value or "").strip().lower().replace("-", "_")
+        if not text:
+            continue
+        if text in {"macro", "macroscopic", "macroscale", "macro_performance"}:
+            terms.update({"macroscale", "macro"})
+        elif text in {"nano", "nanoscopic", "nanoscale", "nanotribology", "afm", "afm_surface_response", "nanoscale_afm"}:
+            terms.update({"nanoscale", "nano"})
+        elif text in {"micro", "microscopic", "microscale"}:
+            terms.update({"microscale", "micro"})
+        else:
+            terms.add(text)
+    return sorted(terms)
+
+
+def _normalized_json_filter_terms(values: list[str] | tuple[str, ...] | set[str]) -> list[str]:
+    return sorted({str(value or "").strip().lower() for value in values or [] if str(value or "").strip()})
+
+
+def _json_text(path: str):
+    return func.lower(func.coalesce(func.json_extract(TribologyData.tribological_system_json, path), ""))
+
+
 # --- Pydantic Models ---
 
 class SearchFilter(BaseModel):
@@ -98,6 +125,11 @@ class SearchFilter(BaseModel):
     load_max: Optional[float] = Field(None, alias="loadMax", description="Max load (N)")
     cof_min: Optional[float] = Field(None, alias="cofMin", description="Min COF")
     cof_max: Optional[float] = Field(None, alias="cofMax", description="Max COF")
+    review_statuses: List[str] = Field(default_factory=list, alias="reviewStatuses", description="Review statuses to include")
+    experiment_scales: List[str] = Field(default_factory=list, alias="experimentScales", description="Experiment scales to include")
+    experiment_methods: List[str] = Field(default_factory=list, alias="experimentMethods", description="Experiment methods to include")
+    measurement_types: List[str] = Field(default_factory=list, alias="measurementTypes", description="Measurement types to include")
+    training_views: List[str] = Field(default_factory=list, alias="trainingViews", description="Training views to include")
     doi: Optional[str] = Field(None, description="Literature DOI")
     file_id: Optional[str] = Field(None, alias="fileId", description="File ID to filter by a specific uploaded file")
     
@@ -181,6 +213,7 @@ class RecordResponse(BaseModel):
     
     confidence: float
     confidence_details: dict = Field(default_factory=dict, alias="confidenceDetails")
+    review_status: Optional[str] = Field(None, alias="reviewStatus")
     literature_id: int = Field(..., alias="literatureId")
     literature: Optional[LiteratureDTO] = None
 
@@ -429,6 +462,22 @@ def _build_conditions(filter_params: SearchFilter):
         conditions.append(TribologyData.cof_value >= filter_params.cof_min)
     if filter_params.cof_max is not None:
         conditions.append(TribologyData.cof_value <= filter_params.cof_max)
+    if filter_params.review_statuses:
+        review_statuses = [str(status).strip().lower() for status in filter_params.review_statuses if str(status or "").strip()]
+        if review_statuses:
+            conditions.append(func.lower(TribologyData.review_status).in_(review_statuses))
+    experiment_scales = _normalized_scale_filter_terms(filter_params.experiment_scales)
+    if experiment_scales:
+        conditions.append(_json_text("$.scale").in_(experiment_scales))
+    experiment_methods = _normalized_json_filter_terms(filter_params.experiment_methods)
+    if experiment_methods:
+        conditions.append(_json_text("$.method").in_(experiment_methods))
+    measurement_types = _normalized_json_filter_terms(filter_params.measurement_types)
+    if measurement_types:
+        conditions.append(_json_text("$.measurement_type").in_(measurement_types))
+    training_views = _normalized_json_filter_terms(filter_params.training_views)
+    if training_views:
+        conditions.append(_json_text("$.training_view").in_(training_views))
     if filter_params.doi:
         conditions.append(Literature.doi == filter_params.doi)
     if filter_params.file_id:
@@ -650,6 +699,7 @@ def _record_to_response(r: TribologyData) -> RecordResponse:
         "source_figure": getattr(r, 'source_figure', None),
         "confidence": runtime_confidence,
         "confidence_details": runtime_details,
+        "review_status": getattr(r, "review_status", None),
         "literature_id": r.literature_id,
         "literature": lit_dto.model_dump() if lit_dto else None,
     }
@@ -732,6 +782,54 @@ async def get_stats(
         raise
     except Exception as exc:
         _raise_internal_error("Get record stats", exc)
+
+
+@router.get("/quality-assets", response_model=dict)
+async def get_quality_assets(
+    session: AsyncSession = Depends(get_db_session),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """Summarize data-asset quality gates for the current literature scope."""
+    try:
+        return await get_quality_asset_summary(session, scope_filter_values=scope_filters(scope))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_internal_error("Get quality asset summary", exc)
+
+
+@router.get("/pattern-discovery", response_model=dict)
+async def get_pattern_discovery_stats(
+    session: AsyncSession = Depends(get_db_session),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """Build chart-ready statistics and manuscript text for pattern discovery."""
+    try:
+        return await get_pattern_discovery(session, scope_filter_values=scope_filters(scope))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_internal_error("Get pattern discovery stats", exc)
+
+
+@router.post("/pattern-discovery/report", response_model=dict)
+async def save_pattern_discovery_stats_report(
+    session: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """Save the current pattern-discovery manuscript into the user's personal space."""
+    try:
+        payload = await get_pattern_discovery(session, scope_filter_values=scope_filters(scope))
+        return save_pattern_discovery_report(
+            payload,
+            username=principal.user.username,
+            display_name=principal.user.display_name,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_internal_error("Save pattern discovery report", exc)
 
 
 @router.post("/relationship-graph", response_model=RelationshipGraphResponse, response_model_by_alias=True)

@@ -13,7 +13,17 @@ import {
   RefreshCcw,
 } from 'lucide-vue-next'
 
-import { listLiterature, type BatchFile, type Literature, type TribologyData } from '@/lib/api'
+import {
+  getQualityAssetSummary,
+  listLiterature,
+  type BatchFile,
+  type Literature,
+  type QualityAssetMetric,
+  type QualityAssetSlice,
+  type QualityAssetSummary,
+  type QualityReplenishmentRecord,
+  type TribologyData,
+} from '@/lib/api'
 
 type MetricTone = 'emerald' | 'sky' | 'amber' | 'rose' | 'slate'
 
@@ -24,6 +34,7 @@ type MetricCard = {
   detail: string
   formula: string
   tone: MetricTone
+  progress?: number | null
 }
 
 type MetricSectionGroup = {
@@ -50,6 +61,8 @@ const props = defineProps<{
 const loading = ref(false)
 const loadError = ref('')
 const literatureItems = ref<Literature[]>([])
+const qualityAssetSummary = ref<QualityAssetSummary | null>(null)
+const selectedQualityScale = ref('all')
 
 const coreFields: CoreField[] = [
   { key: 'ionic_liquid', label: '离子液体名称', category: '材料结构', fields: ['ionic_liquid', 'lubricant_alias', 'ionic_liquid_display'] },
@@ -182,6 +195,91 @@ const evidenceStats = computed(() => {
   }
 })
 
+const allQualitySlice = computed<QualityAssetSlice | null>(() => {
+  const payload = qualityAssetSummary.value
+  if (!payload) return null
+  return {
+    key: 'all',
+    label: '全部',
+    trainingView: 'all',
+    summary: payload.summary,
+    metrics: payload.metrics,
+    fieldCategories: payload.fieldCategories,
+    unitIssues: payload.unitIssues,
+    doiDuplicates: payload.doiDuplicates,
+    cofOutliers: payload.cofOutliers,
+    evidence: payload.evidence,
+    training: payload.training,
+    review: payload.review,
+  }
+})
+
+const qualityScaleOptions = computed(() => {
+  const all = allQualitySlice.value
+  const slices = qualityAssetSummary.value?.scaleBreakdown || []
+  return [
+    ...(all ? [all] : []),
+    ...slices,
+  ].map((slice) => ({
+    key: slice.key,
+    label: slice.label,
+    recordCount: slice.summary.activeRecordCount,
+    trainableCount: slice.summary.trainableSampleCount,
+    tone: (slice.training.readiness?.tone || 'slate') as MetricTone,
+  }))
+})
+
+const activeQualitySlice = computed<QualityAssetSlice | null>(() => {
+  const all = allQualitySlice.value
+  if (!all) return null
+  if (selectedQualityScale.value === 'all') return all
+  return qualityAssetSummary.value?.scaleBreakdown?.find((slice) => slice.key === selectedQualityScale.value) || all
+})
+
+const assetSummary = computed(() => activeQualitySlice.value?.summary || null)
+const trainingReadiness = computed(() => activeQualitySlice.value?.training.readiness || null)
+const trainingReplenishment = computed(() => activeQualitySlice.value?.training.replenishment || null)
+const replenishmentActionRows = computed(() => trainingReplenishment.value?.actionItems || [])
+const replenishmentSourceRows = computed(() => trainingReplenishment.value?.sourceLiterature || [])
+const blockerRecordRows = computed(() => {
+  const groups = trainingReplenishment.value?.recordGroups || {}
+  const orderedKeys = ['missingTarget', 'missingCondition', 'missingTribopair', 'missingLubricant', 'missingEvidence']
+  const rows: Array<QualityReplenishmentRecord & { groupKey: string; groupLabel: string }> = []
+  orderedKeys.forEach((key) => {
+    ;(groups[key] || []).slice(0, 4).forEach((record) => {
+      rows.push({
+        ...record,
+        groupKey: key,
+        groupLabel: blockerLabel(key),
+      })
+    })
+  })
+  return rows.slice(0, 8)
+})
+const unknownMacroCandidateRows = computed(() => trainingReplenishment.value?.unknownMacroCandidates || [])
+const effectiveFieldStats = computed(() => {
+  if (assetSummary.value) {
+    return {
+      filled: Math.max(0, assetSummary.value.coreFieldSlots - assetSummary.value.missingFieldSlots),
+      denominator: assetSummary.value.coreFieldSlots,
+    }
+  }
+  return fieldStats.value
+})
+const effectiveEvidenceStats = computed(() => {
+  if (assetSummary.value) {
+    return {
+      rows: assetSummary.value.activeRecordCount,
+      pageCovered: assetSummary.value.pageEvidenceCount,
+      figureCovered: assetSummary.value.figureEvidenceCount,
+      textCovered: assetSummary.value.textEvidenceCount,
+      fieldEvidenceCovered: assetSummary.value.fieldEvidenceCoveredSlots,
+      fieldEvidenceTotal: assetSummary.value.fieldEvidenceSlots,
+    }
+  }
+  return evidenceStats.value
+})
+
 const literatureMetrics = computed<MetricCard[]>(() => [
   {
     key: 'document_success',
@@ -266,10 +364,10 @@ const fieldMetrics = computed<MetricCard[]>(() => [
   {
     key: 'field_completeness',
     label: '字段完整率',
-    value: formatPercent(fieldStats.value.filled, fieldStats.value.denominator),
-    detail: `${fieldStats.value.filled} / ${fieldStats.value.denominator} 个核心字段已填`,
+    value: formatPercent(effectiveFieldStats.value.filled, effectiveFieldStats.value.denominator),
+    detail: `${effectiveFieldStats.value.filled} / ${effectiveFieldStats.value.denominator} 个核心字段已填`,
     formula: '已填核心字段数 / 应填核心字段数',
-    tone: rateTone(ratio(fieldStats.value.filled, fieldStats.value.denominator)),
+    tone: rateTone(ratio(effectiveFieldStats.value.filled, effectiveFieldStats.value.denominator)),
   },
   {
     key: 'field_accuracy',
@@ -285,34 +383,34 @@ const evidenceMetrics = computed<MetricCard[]>(() => [
   {
     key: 'page',
     label: '页码证据覆盖率',
-    value: formatPercent(evidenceStats.value.pageCovered, evidenceStats.value.rows),
-    detail: `${evidenceStats.value.pageCovered} / ${evidenceStats.value.rows} 条记录有 source_page`,
+    value: formatPercent(effectiveEvidenceStats.value.pageCovered, effectiveEvidenceStats.value.rows),
+    detail: `${effectiveEvidenceStats.value.pageCovered} / ${effectiveEvidenceStats.value.rows} 条记录有 source_page 或 evidence_page`,
     formula: '有 source_page 的记录数 / 有效记录数',
-    tone: rateTone(ratio(evidenceStats.value.pageCovered, evidenceStats.value.rows)),
+    tone: rateTone(ratio(effectiveEvidenceStats.value.pageCovered, effectiveEvidenceStats.value.rows)),
   },
   {
     key: 'figure',
     label: '图表证据覆盖率',
-    value: formatPercent(evidenceStats.value.figureCovered, evidenceStats.value.rows),
-    detail: `${evidenceStats.value.figureCovered} / ${evidenceStats.value.rows} 条记录有 source_figure`,
+    value: formatPercent(effectiveEvidenceStats.value.figureCovered, effectiveEvidenceStats.value.rows),
+    detail: `${effectiveEvidenceStats.value.figureCovered} / ${effectiveEvidenceStats.value.rows} 条记录有 source_figure`,
     formula: '有 source_figure 的记录数 / 有效记录数',
-    tone: rateTone(ratio(evidenceStats.value.figureCovered, evidenceStats.value.rows)),
+    tone: rateTone(ratio(effectiveEvidenceStats.value.figureCovered, effectiveEvidenceStats.value.rows)),
   },
   {
     key: 'text',
     label: '原文证据覆盖率',
-    value: formatPercent(evidenceStats.value.textCovered, evidenceStats.value.rows),
-    detail: `${evidenceStats.value.textCovered} / ${evidenceStats.value.rows} 条记录有 evidence_text`,
+    value: formatPercent(effectiveEvidenceStats.value.textCovered, effectiveEvidenceStats.value.rows),
+    detail: `${effectiveEvidenceStats.value.textCovered} / ${effectiveEvidenceStats.value.rows} 条记录有 evidence 或 source 文本`,
     formula: '有 evidence_text 的记录数 / 有效记录数',
-    tone: rateTone(ratio(evidenceStats.value.textCovered, evidenceStats.value.rows)),
+    tone: rateTone(ratio(effectiveEvidenceStats.value.textCovered, effectiveEvidenceStats.value.rows)),
   },
   {
     key: 'field_evidence',
     label: '字段级证据覆盖率',
-    value: formatPercent(evidenceStats.value.fieldEvidenceCovered, evidenceStats.value.fieldEvidenceTotal),
-    detail: `${evidenceStats.value.fieldEvidenceCovered} / ${evidenceStats.value.fieldEvidenceTotal} 个核心字段有 field_evidence`,
+    value: formatPercent(effectiveEvidenceStats.value.fieldEvidenceCovered, effectiveEvidenceStats.value.fieldEvidenceTotal),
+    detail: `${effectiveEvidenceStats.value.fieldEvidenceCovered} / ${effectiveEvidenceStats.value.fieldEvidenceTotal} 个核心字段有 field_evidence`,
     formula: '有 field_evidence 的字段数 / 应检查核心字段数',
-    tone: rateTone(ratio(evidenceStats.value.fieldEvidenceCovered, evidenceStats.value.fieldEvidenceTotal)),
+    tone: rateTone(ratio(effectiveEvidenceStats.value.fieldEvidenceCovered, effectiveEvidenceStats.value.fieldEvidenceTotal)),
   },
   {
     key: 'evidence_accuracy',
@@ -323,6 +421,95 @@ const evidenceMetrics = computed<MetricCard[]>(() => [
     tone: 'slate',
   },
 ])
+
+const assetMetricCards = computed<MetricCard[]>(() => {
+  const metrics = activeQualitySlice.value?.metrics || []
+  if (metrics.length) {
+    return metrics.map((metric) => ({
+      key: metric.key,
+      label: metric.label,
+      value: formatAssetMetricValue(metric),
+      detail: metric.detail,
+      formula: metric.formula,
+      tone: metric.tone,
+      progress: metric.rate,
+    }))
+  }
+
+  const missingFieldSlots = Math.max(0, fieldStats.value.denominator - fieldStats.value.filled)
+  const missingEvidence = Math.max(0, evidenceStats.value.rows - Math.max(
+    evidenceStats.value.pageCovered,
+    evidenceStats.value.figureCovered,
+    evidenceStats.value.textCovered,
+  ))
+  const reviewed = acceptedCount.value + correctedCount.value + rejectedCount.value
+
+  return [
+    {
+      key: 'missing_fields',
+      label: '缺失字段率',
+      value: formatPercent(missingFieldSlots, fieldStats.value.denominator),
+      detail: `${missingFieldSlots} / ${fieldStats.value.denominator} 个核心字段槽位为空`,
+      formula: '空核心字段槽位 / 活跃记录数 × 核心字段数',
+      tone: riskTone(ratio(missingFieldSlots, fieldStats.value.denominator)),
+      progress: ratio(missingFieldSlots, fieldStats.value.denominator),
+    },
+    {
+      key: 'unit_issues',
+      label: '单位混乱率',
+      value: '后端统计',
+      detail: '刷新后由文献库记录统一检查载荷、速度、剪切率、温度、电位和水含量单位。',
+      formula: '疑似单位问题字段 / 已填工况字段',
+      tone: 'slate',
+      progress: null,
+    },
+    {
+      key: 'duplicate_doi',
+      label: 'DOI 重复率',
+      value: '后端统计',
+      detail: '刷新后按规范化 DOI 检查同一范围内的重复文献。',
+      formula: '重复 DOI 超额文献数 / 有 DOI 文献数',
+      tone: 'slate',
+      progress: null,
+    },
+    {
+      key: 'cof_outliers',
+      label: 'COF 异常值率',
+      value: '后端统计',
+      detail: '刷新后检查 COF 是否触发硬阈值或 IQR 异常。',
+      formula: '异常 COF 记录 / 有 COF 数值记录',
+      tone: 'slate',
+      progress: null,
+    },
+    {
+      key: 'missing_evidence',
+      label: '证据缺失率',
+      value: formatPercent(missingEvidence, evidenceStats.value.rows),
+      detail: `${missingEvidence} / ${evidenceStats.value.rows} 条当前记录缺少可用证据线索`,
+      formula: '无证据记录 / 活跃记录数',
+      tone: riskTone(ratio(missingEvidence, evidenceStats.value.rows)),
+      progress: ratio(missingEvidence, evidenceStats.value.rows),
+    },
+    {
+      key: 'trainable_samples',
+      label: '可训练样本数量',
+      value: formatInteger(validRecordCount.value),
+      detail: '当前会话中可用记录的保守下限；后端统计会进一步检查 COF、材料、润滑剂和工况字段。',
+      formula: '可训练记录 / 活跃记录数',
+      tone: rateTone(ratio(validRecordCount.value, reviewableRecords.value.length)),
+      progress: ratio(validRecordCount.value, reviewableRecords.value.length),
+    },
+    {
+      key: 'reviewed_records',
+      label: '已审阅比例',
+      value: formatPercent(reviewed, loadedRecords.value.length),
+      detail: `${reviewed} 条已有 accepted / corrected / rejected 状态`,
+      formula: '有明确 Review 状态的记录 / 全部记录数',
+      tone: rateTone(ratio(reviewed, loadedRecords.value.length)),
+      progress: ratio(reviewed, loadedRecords.value.length),
+    },
+  ]
+})
 
 const metricGroups = computed<MetricSectionGroup[]>(() => [
   {
@@ -356,17 +543,82 @@ const metricGroups = computed<MetricSectionGroup[]>(() => [
 ])
 
 const documentRows = computed(() => documents.value.slice(0, 10))
+const overviewDocumentTotal = computed(() => assetSummary.value?.literatureCount ?? documentTotal.value)
+const overviewActiveRecordTotal = computed(() => assetSummary.value?.activeRecordCount ?? validRecordCount.value)
+const overviewTrainableTotal = computed(() => assetSummary.value?.trainableSampleCount ?? validRecordCount.value)
+const overviewUnreviewedTotal = computed(() => assetSummary.value?.unreviewedCount ?? Math.max(0, loadedRecords.value.length - acceptedCount.value - correctedCount.value - rejectedCount.value))
+const displayedFieldCategoryRows = computed(() => {
+  return activeQualitySlice.value?.fieldCategories?.length
+    ? activeQualitySlice.value.fieldCategories
+    : fieldCategoryRows.value
+})
+const unitIssueRows = computed(() => activeQualitySlice.value?.unitIssues.fieldBreakdown || [])
+const issuePreviewRows = computed(() => {
+  const rows: Array<{ key: string; type: string; label: string; detail: string; scaleLabel?: string }> = []
+  ;(activeQualitySlice.value?.unitIssues.examples || []).slice(0, 4).forEach((item) => {
+    rows.push({
+      key: `unit-${item.recordId}-${item.field}`,
+      type: '单位',
+      label: `#${item.recordId} ${item.field}`,
+      detail: item.value,
+      scaleLabel: item.scaleLabel,
+    })
+  })
+  ;(activeQualitySlice.value?.cofOutliers || []).slice(0, 4).forEach((item) => {
+    rows.push({
+      key: `cof-${item.recordId}`,
+      type: 'COF',
+      label: `#${item.recordId} COF ${item.cofValue}`,
+      detail: item.reason,
+      scaleLabel: item.scaleLabel,
+    })
+  })
+  ;(activeQualitySlice.value?.doiDuplicates || []).slice(0, 4).forEach((item) => {
+    rows.push({
+      key: `doi-${item.doi}`,
+      type: 'DOI',
+      label: item.doi,
+      detail: `${item.count} 篇重复：${item.literatureIds.join(', ')}`,
+      scaleLabel: activeQualitySlice.value?.key === 'all' ? undefined : activeQualitySlice.value?.label,
+    })
+  })
+  return rows.slice(0, 8)
+})
 
 async function refreshLiterature() {
   loading.value = true
   loadError.value = ''
-  try {
-    literatureItems.value = await listLiterature(0, 500)
-  } catch (error: any) {
-    loadError.value = error?.response?.data?.detail || error?.message || '加载文献库统计失败。'
-  } finally {
-    loading.value = false
+  const errors: string[] = []
+  const [literatureResult, qualityResult] = await Promise.allSettled([
+    listLiterature(0, 500),
+    getQualityAssetSummary(),
+  ])
+
+  if (literatureResult.status === 'fulfilled') {
+    literatureItems.value = literatureResult.value
+  } else {
+    const error: any = literatureResult.reason
+    errors.push(error?.response?.data?.detail || error?.message || '加载文献库列表失败。')
   }
+
+  if (qualityResult.status === 'fulfilled') {
+    qualityAssetSummary.value = qualityResult.value
+  } else {
+    const error: any = qualityResult.reason
+    errors.push(error?.response?.data?.detail || error?.message || '加载数据资产质量统计失败。')
+  }
+
+  if (errors.length) {
+    loadError.value = errors.join(' ')
+  }
+  loading.value = false
+}
+
+function formatAssetMetricValue(metric: QualityAssetMetric) {
+  if (metric.key === 'trainable_samples') {
+    return formatInteger(metric.numerator)
+  }
+  return formatPercent(metric.numerator, metric.denominator)
 }
 
 function normalizeStatus(value: unknown) {
@@ -401,11 +653,30 @@ function formatInteger(value: number) {
   return new Intl.NumberFormat('zh-CN').format(value || 0)
 }
 
+function blockerLabel(key: string) {
+  const labels: Record<string, string> = {
+    missingTarget: '缺 COF',
+    missingLubricant: '缺润滑剂/离子结构',
+    missingTribopair: '缺摩擦副',
+    missingCondition: '缺工况',
+    missingEvidence: '缺证据',
+  }
+  return labels[key] || key
+}
+
 function rateTone(value: number | null): MetricTone {
   if (value == null) return 'slate'
   if (value >= 0.8) return 'emerald'
   if (value >= 0.6) return 'sky'
   if (value >= 0.35) return 'amber'
+  return 'rose'
+}
+
+function riskTone(value: number | null): MetricTone {
+  if (value == null) return 'slate'
+  if (value <= 0.05) return 'emerald'
+  if (value <= 0.15) return 'sky'
+  if (value <= 0.35) return 'amber'
   return 'rose'
 }
 
@@ -425,7 +696,11 @@ function progressClass(tone: MetricTone) {
   return 'bg-slate-400'
 }
 
-function metricWidth(value: string) {
+function metricWidth(metric: MetricCard) {
+  if (typeof metric.progress === 'number') {
+    return `${Math.max(4, Math.min(100, Math.round(metric.progress * 100)))}%`
+  }
+  const value = metric.value
   if (!value.endsWith('%')) return '100%'
   const numeric = Number(value.replace('%', ''))
   return `${Math.max(4, Math.min(100, Number.isFinite(numeric) ? numeric : 0))}%`
@@ -576,39 +851,299 @@ onMounted(() => {
         </div>
       </section>
 
+      <section v-if="qualityScaleOptions.length" class="rounded-[1.5rem] border border-slate-200 bg-white p-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-semibold tracking-tight text-slate-950">按实验尺度查看质量</h2>
+            <p class="mt-1 text-sm leading-6 text-slate-500">把同一套质量门禁拆到宏观摩擦和纳米摩擦训练池，避免混在一起看不出短板。</p>
+          </div>
+          <p v-if="trainingReadiness" class="rounded-full px-3 py-1 text-xs font-semibold" :class="toneClass(trainingReadiness.tone)">
+            {{ trainingReadiness.label }}
+          </p>
+        </div>
+
+        <div class="mt-4 grid gap-2 md:grid-cols-3">
+          <button
+            v-for="option in qualityScaleOptions"
+            :key="option.key"
+            type="button"
+            class="rounded-2xl border px-4 py-3 text-left transition"
+            :class="selectedQualityScale === option.key ? toneClass(option.tone) : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-white'"
+            @click="selectedQualityScale = option.key"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <p class="font-semibold">{{ option.label }}</p>
+              <span class="rounded-full bg-white/70 px-2 py-0.5 text-[11px] font-semibold">{{ option.recordCount }} 条</span>
+            </div>
+            <p class="mt-2 text-xs leading-5 opacity-80">可训练 {{ option.trainableCount }} 条</p>
+          </button>
+        </div>
+
+        <p v-if="trainingReadiness" class="mt-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+          {{ trainingReadiness.detail }}
+        </p>
+      </section>
+
+      <section v-if="trainingReplenishment" class="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+        <section class="rounded-[1.5rem] border border-slate-200 bg-white p-5">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 class="text-lg font-semibold tracking-tight text-slate-950">训练池补数建议</h2>
+              <p class="mt-1 text-sm leading-6 text-slate-500">把当前尺度的数据缺口拆成可以执行的补记录、补文献和补字段任务。</p>
+            </div>
+            <span class="rounded-full px-3 py-1 text-xs font-semibold" :class="toneClass(trainingReadiness?.tone || 'slate')">
+              {{ activeQualitySlice?.trainingView || 'all' }}
+            </span>
+          </div>
+
+          <div class="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p class="text-xs font-semibold text-slate-500">当前可训练</p>
+              <p class="mt-1 text-2xl font-semibold text-slate-950">{{ formatInteger(trainingReplenishment.currentTrainableCount) }}</p>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p class="text-xs font-semibold text-slate-500">建议门槛</p>
+              <p class="mt-1 text-2xl font-semibold text-slate-950">{{ formatInteger(trainingReplenishment.minimumSampleTarget) }}</p>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p class="text-xs font-semibold text-slate-500">样本缺口</p>
+              <p class="mt-1 text-2xl font-semibold" :class="trainingReplenishment.sampleGap ? 'text-amber-700' : 'text-emerald-700'">
+                {{ formatInteger(trainingReplenishment.sampleGap) }}
+              </p>
+            </div>
+            <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <p class="text-xs font-semibold text-slate-500">来源文献</p>
+              <p class="mt-1 text-2xl font-semibold text-slate-950">
+                {{ formatInteger(trainingReplenishment.sourceLiteratureCount) }}
+                <span class="text-sm text-slate-400">/ {{ trainingReplenishment.sourceLiteratureTarget }}</span>
+              </p>
+            </div>
+          </div>
+
+          <p class="mt-4 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold leading-6 text-white">
+            {{ trainingReplenishment.recommendedAction }}
+          </p>
+
+          <div class="mt-4 divide-y divide-slate-100 rounded-2xl border border-slate-200">
+            <div
+              v-for="item in replenishmentActionRows"
+              :key="item.key"
+              class="flex items-start justify-between gap-3 px-4 py-3"
+            >
+              <div class="min-w-0">
+                <p class="font-semibold text-slate-950">{{ item.label }}</p>
+                <p class="mt-1 text-xs leading-5 text-slate-500">{{ item.detail }}</p>
+              </div>
+              <span class="shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold" :class="toneClass(item.tone)">
+                {{ formatInteger(item.count) }}
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <section class="rounded-[1.5rem] border border-slate-200 bg-white p-5">
+          <div class="flex items-center gap-3">
+            <FileSearch class="h-5 w-5 text-indigo-600" />
+            <div>
+              <h2 class="text-lg font-semibold tracking-tight text-slate-950">待办来源和阻断记录</h2>
+              <p class="mt-1 text-sm leading-6 text-slate-500">先看字段阻断，再看来源文献是否过于集中。</p>
+            </div>
+          </div>
+
+          <div class="mt-5">
+            <div class="flex items-center justify-between">
+              <p class="text-sm font-semibold text-slate-950">字段阻断记录</p>
+              <span class="text-xs text-slate-400">最多展示 8 条</span>
+            </div>
+            <div class="mt-3 overflow-hidden rounded-2xl border border-slate-200">
+              <table class="min-w-full text-left text-sm">
+                <thead class="bg-slate-50 text-xs font-semibold text-slate-500">
+                  <tr>
+                    <th class="px-3 py-3">问题</th>
+                    <th class="px-3 py-3">记录</th>
+                    <th class="px-3 py-3">文献</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in blockerRecordRows" :key="`${row.groupKey}-${row.recordId}`" class="border-t border-slate-100">
+                    <td class="px-3 py-3">
+                      <span class="rounded-full bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700">{{ row.groupLabel }}</span>
+                    </td>
+                    <td class="max-w-[12rem] px-3 py-3">
+                      <p class="font-semibold text-slate-900">#{{ row.recordId }}</p>
+                      <p class="mt-1 truncate text-xs text-slate-500">{{ row.lubricant || row.tribopair || row.scaleLabel }}</p>
+                    </td>
+                    <td class="max-w-[18rem] px-3 py-3">
+                      <p class="truncate text-xs leading-5 text-slate-500">{{ row.title }}</p>
+                    </td>
+                  </tr>
+                  <tr v-if="!blockerRecordRows.length">
+                    <td colspan="3" class="px-3 py-8 text-center text-sm text-slate-500">当前尺度没有字段阻断记录，补数重点是新增同尺度样本或扩大来源文献。</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="mt-5">
+            <div class="flex items-center justify-between">
+              <p class="text-sm font-semibold text-slate-950">来源文献分布</p>
+              <span class="text-xs text-slate-400">按可训练记录排序</span>
+            </div>
+            <div class="mt-3 divide-y divide-slate-100 rounded-2xl border border-slate-200">
+              <div
+                v-for="row in replenishmentSourceRows.slice(0, 5)"
+                :key="row.literatureId"
+                class="px-4 py-3"
+              >
+                <div class="flex items-start justify-between gap-3">
+                  <p class="min-w-0 truncate text-sm font-semibold text-slate-900">{{ row.title }}</p>
+                  <span class="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                    {{ row.trainableCount }} / {{ row.recordCount }}
+                  </span>
+                </div>
+                <p v-if="row.doi" class="mt-1 truncate text-xs text-slate-400">{{ row.doi }}</p>
+              </div>
+              <p v-if="!replenishmentSourceRows.length" class="px-4 py-8 text-center text-sm text-slate-500">暂无来源文献分布。</p>
+            </div>
+          </div>
+
+          <div v-if="unknownMacroCandidateRows.length" class="mt-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            有 {{ unknownMacroCandidateRows.length }} 条未归类记录疑似宏观摩擦，建议回到 Review 核查尺度。
+          </div>
+        </section>
+      </section>
+
       <section class="grid gap-4 xl:grid-cols-4">
         <div class="rounded-[1.35rem] border border-slate-200 bg-white px-5 py-4">
           <div class="flex items-center gap-3">
             <FileText class="h-5 w-5 text-indigo-600" />
             <p class="text-sm font-semibold text-slate-950">文献总数</p>
           </div>
-          <p class="mt-3 text-3xl font-semibold tracking-tight text-slate-950">{{ documentTotal }}</p>
-          <p class="mt-1 text-xs text-slate-500">来自文献库和当前上传队列</p>
+          <p class="mt-3 text-3xl font-semibold tracking-tight text-slate-950">{{ overviewDocumentTotal }}</p>
+          <p class="mt-1 text-xs text-slate-500">当前 scope 中的文献资产</p>
         </div>
         <div class="rounded-[1.35rem] border border-slate-200 bg-white px-5 py-4">
           <div class="flex items-center gap-3">
             <Database class="h-5 w-5 text-emerald-600" />
-            <p class="text-sm font-semibold text-slate-950">有效记录</p>
+            <p class="text-sm font-semibold text-slate-950">活跃记录</p>
           </div>
-          <p class="mt-3 text-3xl font-semibold tracking-tight text-slate-950">{{ validRecordCount }}</p>
-          <p class="mt-1 text-xs text-slate-500">入库记录或 Review 后可用记录</p>
+          <p class="mt-3 text-3xl font-semibold tracking-tight text-slate-950">{{ overviewActiveRecordTotal }}</p>
+          <p class="mt-1 text-xs text-slate-500">排除 rejected / discarded / excluded</p>
         </div>
         <div class="rounded-[1.35rem] border border-slate-200 bg-white px-5 py-4">
           <div class="flex items-center gap-3">
             <ListChecks class="h-5 w-5 text-sky-600" />
-            <p class="text-sm font-semibold text-slate-950">核心字段</p>
+            <p class="text-sm font-semibold text-slate-950">可训练样本</p>
           </div>
-          <p class="mt-3 text-3xl font-semibold tracking-tight text-slate-950">{{ coreFields.length }}</p>
-          <p class="mt-1 text-xs text-slate-500">覆盖材料、界面、工况、性能和证据</p>
+          <p class="mt-3 text-3xl font-semibold tracking-tight text-slate-950">{{ overviewTrainableTotal }}</p>
+          <p class="mt-1 text-xs text-slate-500">具备 COF、材料/润滑剂和工况字段</p>
         </div>
         <div class="rounded-[1.35rem] border border-slate-200 bg-white px-5 py-4">
           <div class="flex items-center gap-3">
             <LocateFixed class="h-5 w-5 text-amber-600" />
-            <p class="text-sm font-semibold text-slate-950">证据字段</p>
+            <p class="text-sm font-semibold text-slate-950">未审阅记录</p>
           </div>
-          <p class="mt-3 text-3xl font-semibold tracking-tight text-slate-950">{{ evidenceStats.fieldEvidenceCovered }}</p>
-          <p class="mt-1 text-xs text-slate-500">已有字段级证据的核心字段数</p>
+          <p class="mt-3 text-3xl font-semibold tracking-tight text-slate-950">{{ overviewUnreviewedTotal }}</p>
+          <p class="mt-1 text-xs text-slate-500">需要进入 Review 队列</p>
         </div>
+      </section>
+
+      <section>
+        <div class="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-semibold tracking-tight text-slate-950">数据资产质量门禁</h2>
+            <p class="mt-1 text-sm leading-6 text-slate-500">
+              面向建库和建模的七个核心指标：字段、单位、DOI、COF、证据、训练样本和审阅覆盖。
+            </p>
+          </div>
+          <p v-if="qualityAssetSummary" class="text-xs font-medium text-slate-400">
+            生成时间 {{ qualityAssetSummary.generatedAt }}
+          </p>
+        </div>
+
+        <div class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-7">
+          <article
+            v-for="metric in assetMetricCards"
+            :key="metric.key"
+            class="rounded-2xl border px-4 py-4"
+            :class="toneClass(metric.tone)"
+          >
+            <p class="text-sm font-semibold">{{ metric.label }}</p>
+            <p class="mt-2 text-3xl font-semibold tracking-tight">{{ metric.value }}</p>
+            <div class="mt-3 h-2 overflow-hidden rounded-full bg-white/75">
+              <div class="h-full rounded-full" :class="progressClass(metric.tone)" :style="{ width: metricWidth(metric) }"></div>
+            </div>
+            <p class="mt-3 text-xs leading-5 opacity-85">{{ metric.detail }}</p>
+            <p class="mt-2 rounded-xl bg-white/65 px-3 py-2 text-[11px] leading-5 opacity-80">{{ metric.formula }}</p>
+          </article>
+        </div>
+      </section>
+
+      <section v-if="unitIssueRows.length || issuePreviewRows.length" class="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+        <section class="rounded-[1.5rem] border border-slate-200 bg-white p-5">
+          <div class="flex items-center gap-3">
+            <AlertTriangle class="h-5 w-5 text-amber-600" />
+            <div>
+              <h2 class="text-lg font-semibold tracking-tight text-slate-950">单位字段体检</h2>
+              <p class="mt-1 text-sm leading-6 text-slate-500">按工况字段定位可能缺少单位或单位不可识别的位置。</p>
+            </div>
+          </div>
+          <div class="mt-5 divide-y divide-slate-100">
+            <div v-for="row in unitIssueRows" :key="row.key" class="py-3">
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <p class="text-sm font-semibold text-slate-950">{{ row.label }}</p>
+                  <p class="mt-1 text-xs text-slate-500">{{ row.issues }} / {{ row.denominator }} 个已填字段疑似有问题</p>
+                </div>
+                <p class="text-sm font-semibold text-slate-900">{{ formatPercent(row.issues, row.denominator) }}</p>
+              </div>
+              <div class="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+                <div class="h-full rounded-full bg-amber-500" :style="{ width: `${Math.max(4, Math.round((row.rate || 0) * 100))}%` }"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="rounded-[1.5rem] border border-slate-200 bg-white p-5">
+          <div class="flex items-center gap-3">
+            <FileSearch class="h-5 w-5 text-rose-600" />
+            <div>
+              <h2 class="text-lg font-semibold tracking-tight text-slate-950">优先核查样本</h2>
+              <p class="mt-1 text-sm leading-6 text-slate-500">展示单位、COF 异常和 DOI 重复的前几个样本。</p>
+            </div>
+          </div>
+
+          <div class="mt-5 overflow-hidden rounded-2xl border border-slate-200">
+            <table class="min-w-full text-left text-sm">
+              <thead class="bg-slate-50 text-xs font-semibold text-slate-500">
+                <tr>
+                  <th class="px-3 py-3">类型</th>
+                  <th class="px-3 py-3">尺度</th>
+                  <th class="px-3 py-3">对象</th>
+                  <th class="px-3 py-3">说明</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in issuePreviewRows" :key="row.key" class="border-t border-slate-100">
+                  <td class="px-3 py-3">
+                    <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">{{ row.type }}</span>
+                  </td>
+                  <td class="px-3 py-3">
+                    <span class="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-semibold text-indigo-700">{{ row.scaleLabel || activeQualitySlice?.label || '全部' }}</span>
+                  </td>
+                  <td class="max-w-[14rem] px-3 py-3">
+                    <p class="truncate font-medium text-slate-900">{{ row.label }}</p>
+                  </td>
+                  <td class="px-3 py-3 text-xs leading-5 text-slate-500">{{ row.detail }}</td>
+                </tr>
+                <tr v-if="!issuePreviewRows.length">
+                  <td colspan="4" class="px-3 py-8 text-center text-sm text-slate-500">当前没有需要优先核查的样本。</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
       </section>
 
       <section class="grid gap-5 2xl:grid-cols-2">
@@ -637,7 +1172,7 @@ onMounted(() => {
               <p class="text-sm font-semibold">{{ metric.label }}</p>
               <p class="mt-2 text-3xl font-semibold tracking-tight">{{ metric.value }}</p>
               <div class="mt-3 h-2 overflow-hidden rounded-full bg-white/75">
-                <div class="h-full rounded-full" :class="progressClass(metric.tone)" :style="{ width: metricWidth(metric.value) }"></div>
+                <div class="h-full rounded-full" :class="progressClass(metric.tone)" :style="{ width: metricWidth(metric) }"></div>
               </div>
               <p class="mt-3 text-xs leading-5 opacity-85">{{ metric.detail }}</p>
               <p class="mt-2 rounded-xl bg-white/65 px-3 py-2 text-[11px] leading-5 opacity-80">{{ metric.formula }}</p>
@@ -657,7 +1192,7 @@ onMounted(() => {
           </div>
 
           <div class="mt-5 divide-y divide-slate-100">
-            <div v-for="row in fieldCategoryRows" :key="row.category" class="py-3">
+            <div v-for="row in displayedFieldCategoryRows" :key="row.category" class="py-3">
               <div class="flex items-center justify-between gap-3">
                 <div>
                   <p class="text-sm font-semibold text-slate-950">{{ row.category }}</p>

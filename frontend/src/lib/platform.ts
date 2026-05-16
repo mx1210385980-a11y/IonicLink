@@ -33,6 +33,8 @@ export type AppSection =
   | 'grounding'
   | 'queue'
   | 'explorer'
+  | 'snapshots'
+  | 'insights'
   | 'sources'
   | 'graph'
   | 'cleaning'
@@ -70,7 +72,7 @@ export const SECTION_OPTIONS_BY_VIEW: Record<AppView, AppSection[]> = {
   home: ['today', 'alerts', 'actions'],
   pipeline: ['upload', 'runs', 'batch'],
   review: ['inbox', 'record-review', 'grounding', 'queue'],
-  knowledge: ['explorer', 'sources', 'graph', 'cleaning', 'datasets'],
+  knowledge: ['explorer', 'snapshots', 'insights', 'sources', 'graph', 'cleaning', 'datasets'],
   quality: ['overview'],
   modeling: ['training', 'evaluation', 'registry'],
   admin: ['runtime', 'users', 'metrics'],

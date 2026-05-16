@@ -5,6 +5,8 @@ import DataCleaningWorkbench from '@/components/DataCleaningWorkbench.vue'
 import IntegratedExplorer from '@/components/IntegratedExplorer.vue'
 import DiffusionExplorerWorkspace from '@/components/knowledge/DiffusionExplorerWorkspace.vue'
 import KnowledgeContextPanel from '@/components/knowledge/KnowledgeContextPanel.vue'
+import KnowledgeDataSnapshot from '@/components/knowledge/KnowledgeDataSnapshot.vue'
+import KnowledgePatternDiscovery from '@/components/knowledge/KnowledgePatternDiscovery.vue'
 import KnowledgeSidebar from '@/components/knowledge/KnowledgeSidebar.vue'
 import LiteratureSourceAtlas from '@/components/knowledge/LiteratureSourceAtlas.vue'
 import RelationshipGraphPanel from '@/components/RelationshipGraphPanel.vue'
@@ -91,6 +93,8 @@ const qualityIssueCount = computed(() => {
 
 const sidebarModes = computed(() => [
   { key: 'explorer', label: 'Data Grid', count: selectedRecordCount.value || undefined },
+  { key: 'snapshots', label: 'Data Snapshot' },
+  { key: 'insights', label: 'Pattern Discovery' },
   { key: 'sources', label: 'Source Atlas', count: scopeLiterature.value.length || undefined },
   { key: 'graph', label: 'Graph View' },
   { key: 'datasets', label: 'Dataset Workflow', count: qualityIssueCount.value || undefined },
@@ -105,6 +109,8 @@ const sourceLabel = computed(() => {
 const modeMeta = computed<{ label: string }>(() => {
   const modes: Record<string, { label: string }> = {
     explorer: { label: 'Data Grid' },
+    snapshots: { label: 'Data Snapshot' },
+    insights: { label: 'Pattern Discovery' },
     sources: { label: 'Source Atlas' },
     graph: { label: isDiffusionScope.value ? 'Evidence View' : 'Graph View' },
     cleaning: { label: 'Dataset Workflow' },
@@ -228,7 +234,12 @@ watch(
 
 <template>
   <div class="flex h-full min-h-0 flex-col bg-[#f3f7fb] p-3">
-    <div class="grid min-h-0 flex-1 gap-3 xl:grid-cols-[12rem_minmax(0,1fr)_15rem] 2xl:grid-cols-[12.5rem_minmax(0,1fr)_15rem]">
+    <div
+      class="grid min-h-0 flex-1 gap-3"
+      :class="currentSection === 'snapshots' || currentSection === 'insights'
+        ? 'xl:grid-cols-[12rem_minmax(0,1fr)] 2xl:grid-cols-[12.5rem_minmax(0,1fr)]'
+        : 'xl:grid-cols-[12rem_minmax(0,1fr)_15rem] 2xl:grid-cols-[12.5rem_minmax(0,1fr)_15rem]'"
+    >
       <KnowledgeSidebar
         :current-section="currentSection"
         :modes="sidebarModes"
@@ -240,7 +251,23 @@ watch(
       <main class="flex min-h-0 flex-col gap-3 overflow-hidden">
         <section class="min-h-0 flex-1 overflow-hidden rounded-[1.8rem] border border-[#dbe5f0] bg-white shadow-[0_28px_64px_-46px_rgba(15,23,42,0.34)]">
           <div
-            v-if="currentSection === 'sources'"
+            v-if="currentSection === 'snapshots'"
+            class="h-full min-h-0 overflow-hidden"
+          >
+            <KnowledgeDataSnapshot
+              @open-record="(payload) => emit('open-review', payload)"
+            />
+          </div>
+
+          <div
+            v-else-if="currentSection === 'insights'"
+            class="h-full min-h-0 overflow-hidden"
+          >
+            <KnowledgePatternDiscovery :active-scope-label="activeScopeLabel" />
+          </div>
+
+          <div
+            v-else-if="currentSection === 'sources'"
             class="h-full min-h-0 overflow-hidden"
           >
             <LiteratureSourceAtlas
@@ -319,6 +346,7 @@ watch(
       </main>
 
       <KnowledgeContextPanel
+        v-if="currentSection !== 'snapshots' && currentSection !== 'insights'"
         :current-section="currentSection"
         :mode-label="modeMeta.label"
         :selected-source-name="sourceLabel"

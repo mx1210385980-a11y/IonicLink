@@ -14,18 +14,18 @@ from typing import Any
 import numpy as np
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import GroupKFold, KFold, StratifiedKFold, train_test_split
 from sklearn.neural_network import MLPRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVR
-from sqlalchemy import desc, select, update
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from database import async_session_maker
-from models.db_models import CleanedDataset, ModelTrainingRun, RegisteredModel, TribologyData
+from models.db_models import CleanedDataset, ModelPredictionRun, ModelTrainingRun, RegisteredModel, TribologyData
 from security import literature_scope_conditions
 from services.unit_converter import parse_force_range_to_newtons, parse_force_to_newtons, parse_speed_to_mps
 from utils.experiment_profile import build_experiment_profile, normalize_training_view, record_matches_training_view
@@ -108,12 +108,12 @@ class _ScaledRegressor:
 
 
 class _GatedSegmentedStackingRegressor:
-    """Lightweight gate-based high-COF model inspired by the WFF thesis.
+    """Gate high-COF samples, then compare two/three-model local stacks.
 
-    The full thesis model trains separate low/mid/high stacks. On this platform
-    the high-COF tail is much smaller, so we use the same gate idea but only
-    calibrate the high segment: a weighted CatBoost global model keeps overall
-    stability, and a local high-COF CatBoost model corrects gated tail samples.
+    The UI exposes this as a separate experiment rather than as a normal
+    algorithm. A weighted CatBoost model keeps the global baseline stable, while
+    the gated high-COF segment can use configurable base learners plus a small
+    meta learner.
     """
 
     SEGMENT_ORDER = ("low", "mid", "high")
@@ -129,6 +129,8 @@ class _GatedSegmentedStackingRegressor:
         high_gate_threshold: float = 0.50,
         high_blend: float = 0.30,
         high_weight: float = 1.50,
+        base_models: list[str] | str | None = None,
+        meta_model: str = "catboost",
     ) -> None:
         self.random_seed = int(random_seed)
         self.q1 = min(0.65, max(0.05, float(q1)))
@@ -138,6 +140,8 @@ class _GatedSegmentedStackingRegressor:
         self.high_gate_threshold = max(0.0, float(high_gate_threshold))
         self.high_blend = min(0.85, max(0.0, float(high_blend)))
         self.high_weight = min(10.0, max(1.0, float(high_weight)))
+        self.base_models = self._normalize_model_keys(base_models or ["catboost", "random_forest", "xgboost"])
+        self.meta_model = str(meta_model or "catboost").strip().lower()
         self.thresholds_: dict[str, float] = {}
         self.segment_counts_: dict[str, int] = {}
         self.segment_models_: dict[str, dict[str, Any] | None] = {}
@@ -164,6 +168,25 @@ class _GatedSegmentedStackingRegressor:
             allow_writing_files=False,
             thread_count=1,
         )
+
+    def _normalize_model_keys(self, value: list[str] | str) -> list[str]:
+        if isinstance(value, str):
+            raw = [part.strip() for part in value.split(",")]
+        else:
+            raw = [str(part).strip() for part in value]
+        allowed = {"catboost", "random_forest", "xgboost", "gradient_boosting", "svr", "linear_regression"}
+        keys: list[str] = []
+        for key in raw:
+            normalized = key.lower()
+            if normalized in {"rf", "randomforest"}:
+                normalized = "random_forest"
+            elif normalized in {"xgb", "xgboost_regressor"}:
+                normalized = "xgboost"
+            elif normalized in {"gb", "gbr", "gradientboosting"}:
+                normalized = "gradient_boosting"
+            if normalized in allowed and normalized not in keys:
+                keys.append(normalized)
+        return keys or ["catboost", "random_forest"]
 
     def _make_gate_model(self) -> Any:
         return self._catboost(iterations=300, learning_rate=0.08, depth=3, l2_leaf_reg=2.0)
@@ -211,9 +234,68 @@ class _GatedSegmentedStackingRegressor:
             model.fit(X, y, sample_weight=weights)
         return model
 
-    def _make_high_local_model(self) -> Any:
-        # A compact local model is enough for #8; deeper thesis-scale stacks overfit this tail.
+    def _make_base_model(self, key: str) -> Any:
+        if key == "catboost":
+            return self._catboost(iterations=220, learning_rate=0.06, depth=2, l2_leaf_reg=5.0)
+        if key == "random_forest":
+            return RandomForestRegressor(
+                n_estimators=80,
+                max_depth=9,
+                max_features=0.8,
+                random_state=self.random_seed,
+                n_jobs=1,
+            )
+        if key == "xgboost":
+            if XGBOOST_AVAILABLE and XGBRegressor is not None:
+                return XGBRegressor(
+                    n_estimators=160,
+                    learning_rate=0.08,
+                    max_depth=3,
+                    reg_lambda=5.0,
+                    random_state=self.random_seed,
+                    tree_method="hist",
+                    verbosity=0,
+                    n_jobs=1,
+                )
+            return GradientBoostingRegressor(
+                n_estimators=160,
+                learning_rate=0.06,
+                max_depth=3,
+                random_state=self.random_seed,
+            )
+        if key == "gradient_boosting":
+            return GradientBoostingRegressor(
+                n_estimators=160,
+                learning_rate=0.06,
+                max_depth=3,
+                random_state=self.random_seed,
+            )
+        if key == "svr":
+            return _ScaledRegressor(StandardScaler(), SVR(kernel="rbf", C=8.0, epsilon=0.04, gamma="scale"))
+        if key == "linear_regression":
+            return LinearRegression()
         return self._catboost(iterations=220, learning_rate=0.06, depth=2, l2_leaf_reg=5.0)
+
+    def _make_meta_model(self, n_inputs: int) -> Any:
+        if n_inputs <= 1:
+            return LinearRegression()
+        if self.meta_model == "catboost" and CATBOOST_AVAILABLE and CatBoostRegressor is not None:
+            return CatBoostRegressor(
+                iterations=260,
+                learning_rate=0.08,
+                depth=2,
+                l2_leaf_reg=3.0,
+                loss_function="RMSE",
+                random_seed=self.random_seed,
+                verbose=False,
+                allow_writing_files=False,
+                thread_count=1,
+            )
+        if self.meta_model == "svr":
+            return _ScaledRegressor(StandardScaler(), SVR(kernel="rbf", C=4.0, epsilon=0.03, gamma="scale"))
+        if self.meta_model == "linear_regression":
+            return LinearRegression()
+        return Ridge(alpha=0.05)
 
     def _collect_feature_importances(self, n_features: int) -> np.ndarray:
         values = np.zeros(n_features, dtype=np.float32)
@@ -237,12 +319,52 @@ class _GatedSegmentedStackingRegressor:
             if not model_bundle:
                 continue
             segment_weight = 0.75 * (self.segment_counts_.get(segment, 0) / total_segment_rows)
-            if model_bundle.get("local_model") is not None:
-                add_importance(model_bundle["local_model"], segment_weight)
+            for estimator in model_bundle.get("base_models", {}).values():
+                add_importance(estimator, segment_weight)
 
         if not np.any(values):
             return values
         return values / float(np.sum(values))
+
+    def _fit_local_stack(self, X: np.ndarray, y: np.ndarray) -> dict[str, Any]:
+        if len(self.base_models) == 1:
+            key = self.base_models[0]
+            model = self._fit_estimator(self._make_base_model(key), X, y)
+            return {
+                "base_model_keys": [key],
+                "base_models": {key: model},
+                "meta_model_key": None,
+                "meta_model": None,
+                "count": int(len(y)),
+            }
+
+        n_samples = int(len(y))
+        n_splits = min(5, max(2, n_samples // 6))
+        oof_matrix = np.zeros((n_samples, len(self.base_models)), dtype=np.float32)
+        splitter = KFold(n_splits=n_splits, shuffle=True, random_state=self.random_seed)
+        for model_index, key in enumerate(self.base_models):
+            predictions = np.full(n_samples, np.nan, dtype=np.float32)
+            for train_idx, val_idx in splitter.split(X, y):
+                estimator = self._fit_estimator(self._make_base_model(key), X[train_idx], y[train_idx])
+                predictions[val_idx] = np.asarray(estimator.predict(X[val_idx]), dtype=np.float32)
+            if np.isnan(predictions).any():
+                fallback = self._fit_estimator(self._make_base_model(key), X, y)
+                missing = np.isnan(predictions)
+                predictions[missing] = np.asarray(fallback.predict(X[missing]), dtype=np.float32)
+            oof_matrix[:, model_index] = predictions
+
+        meta_model = self._fit_estimator(self._make_meta_model(oof_matrix.shape[1]), oof_matrix, y)
+        base_models = {
+            key: self._fit_estimator(self._make_base_model(key), X, y)
+            for key in self.base_models
+        }
+        return {
+            "base_model_keys": list(self.base_models),
+            "base_models": base_models,
+            "meta_model_key": self.meta_model,
+            "meta_model": meta_model,
+            "count": int(n_samples),
+        }
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> "_GatedSegmentedStackingRegressor":
         X = np.asarray(X, dtype=np.float32)
@@ -268,16 +390,25 @@ class _GatedSegmentedStackingRegressor:
         if len(high_indices) >= self.min_segment_size:
             self.segment_models_["high"] = {
                 "segment": "high",
-                "local_model": self._fit_estimator(self._make_high_local_model(), X[high_indices], y[high_indices]),
-                "count": int(len(high_indices)),
+                **self._fit_local_stack(X[high_indices], y[high_indices]),
             }
         self.gate_model_ = self.global_model_
         self.feature_importances_ = self._collect_feature_importances(X.shape[1])
         return self
 
     def _predict_local(self, model_bundle: dict[str, Any], X: np.ndarray) -> np.ndarray:
-        if model_bundle.get("local_model") is not None:
-            return np.asarray(model_bundle["local_model"].predict(X), dtype=np.float32)
+        base_models = model_bundle.get("base_models") or {}
+        base_keys = model_bundle.get("base_model_keys") or list(base_models.keys())
+        if len(base_keys) == 1 and base_models:
+            return np.asarray(base_models[base_keys[0]].predict(X), dtype=np.float32)
+        if base_models and model_bundle.get("meta_model") is not None:
+            stacked = np.column_stack([
+                np.asarray(base_models[key].predict(X), dtype=np.float32)
+                for key in base_keys
+                if key in base_models
+            ])
+            if stacked.size:
+                return np.asarray(model_bundle["meta_model"].predict(stacked), dtype=np.float32)
         return np.asarray(self.global_model_.predict(X), dtype=np.float32)
 
     def predict(self, X: np.ndarray) -> np.ndarray:
@@ -494,6 +625,7 @@ MAX_TRAINING_ROUNDS = 300
 
 DEFAULT_DATA_OPTIONS = {
     "validation_split": 0.2,
+    "training_view": "all",
     "min_confidence": 0.0,
     "max_records": None,
     "random_seed": 42,
@@ -537,16 +669,23 @@ TUNE_PARAM_GRIDS: dict[str, list[dict[str, Any]]] = {
     ],  # 9
     "high_cof_segmented": [
         {
+            "base_models": base_models,
+            "meta_model": meta_model,
             "high_train_threshold": train_threshold,
             "high_gate_threshold": gate_threshold,
             "high_blend": blend,
             "high_weight": 1.5,
             "min_segment_size": 14,
         }
+        for base_models, meta_model in (
+            (["catboost", "random_forest"], "svr"),
+            (["catboost", "xgboost"], "catboost"),
+            (["catboost", "random_forest", "xgboost"], "catboost"),
+        )
         for train_threshold in (0.55, 0.60)
-        for gate_threshold in (0.45, 0.50, 0.55)
-        for blend in (0.15, 0.30)
-    ],  # 12，轻量高 COF 门控校准；围绕 #8 上最稳区域搜索
+        for gate_threshold in (0.45, 0.50)
+        for blend in (0.20, 0.35)
+    ],  # 36，后台分段混合实验入口使用；不展示在普通算法列表中
     "catboost": [
         {"iterations": it, "learning_rate": lr, "depth": d, "l2_leaf_reg": l2}
         for it in (160, 220, 300)
@@ -627,6 +766,16 @@ def _int_or_default(value: Any, default: int) -> int:
     if numeric is None:
         return int(default)
     return int(round(numeric))
+
+
+def _saved_row_matches_training_view(row: dict[str, Any], training_view: Any) -> bool:
+    view = normalize_training_view(training_view)
+    if view == "all":
+        return True
+    row_view = normalize_training_view(row.get("__training_view") or row.get("training_view"))
+    if view == "cross_scale":
+        return row_view in {"macro_performance", "afm_surface_response", "cross_scale"}
+    return row_view == view
 
 
 def _extract_first_number(raw: str | None) -> float | None:
@@ -728,6 +877,15 @@ def _structured_load_conditions(record: dict[str, Any]) -> dict[str, Any]:
         except Exception:
             return {}
     return value if isinstance(value, dict) else {}
+
+
+def _json_loads(value: str | None, fallback: Any) -> Any:
+    if not value:
+        return fallback
+    try:
+        return json.loads(value)
+    except Exception:
+        return fallback
 
 
 def _load_statistics_for_record(record: dict[str, Any]) -> dict[str, float] | None:
@@ -1244,17 +1402,13 @@ class ModelTrainingService:
                 "label": "CatBoost",
                 "description": "对称树梯度提升，原生支持类别特征，小样本表现优秀。",
             }
-            definitions["high_cof_segmented"] = {
-                "label": "高 COF 分段混合模型",
-                "description": "先用 CatBoost 识别高摩擦尾部，再用高 COF 局部模型校准，重点降低长尾低估。",
-            }
         if XGBOOST_AVAILABLE:
             definitions["xgboost"] = {
                 "label": "极端梯度提升（XGBoost）",
                 "description": "工业界使用最广泛的梯度提升实现，对结构化数据表现稳定，支持 L1/L2 正则。",
             }
         # 排序：树模型在前，线性/SVR 在后，便于学生从效果好的开始尝试
-        order = ["catboost", "high_cof_segmented", "gradient_boosting", "random_forest", "xgboost", "svr", "linear_regression"]
+        order = ["catboost", "gradient_boosting", "random_forest", "xgboost", "svr", "linear_regression"]
         return [
             {"key": key, **definitions[key]}
             for key in order
@@ -1348,6 +1502,8 @@ class ModelTrainingService:
                 "high_gate_threshold": _float_or_default(segment_params.get("high_gate_threshold"), 0.50),
                 "high_blend": _float_or_default(segment_params.get("high_blend"), 0.30),
                 "high_weight": _float_or_default(segment_params.get("high_weight"), 1.50),
+                "base_models": segment_params.get("base_models") or segment_params.get("segment_base_models"),
+                "meta_model": str(segment_params.get("meta_model") or "catboost"),
             }
             model = _GatedSegmentedStackingRegressor(random_seed=random_seed, **params)
             model.fit(X_train, y_train)
@@ -1556,7 +1712,9 @@ class ModelTrainingService:
             RegisteredModel.scope_key == scope_key,
         )
         existing = (await session.execute(existing_stmt)).scalar_one_or_none()
-        snapshot = (self._run_payload(run).get("snapshot") or {})
+        run_payload = self._run_payload(run)
+        snapshot = (run_payload.get("snapshot") or {})
+        training_view = self._training_view_for_run(run, run_payload)
         model_name = (name or "").strip() or self._default_registry_name(run, snapshot)
         model_description = (description or "").strip() or None
 
@@ -1564,6 +1722,7 @@ class ModelTrainingService:
             existing.name = model_name
             existing.description = model_description
             existing.summary_json = json.dumps(snapshot, ensure_ascii=False)
+            existing.training_view = training_view
             existing.is_recommended = bool(is_recommended)
             if is_recommended:
                 await self._clear_other_recommended_models(session, existing, group_id=group_id, scope_key=scope_key)
@@ -1589,6 +1748,7 @@ class ModelTrainingService:
             scope_key=scope_key,
             config_json=run.config_json,
             summary_json=json.dumps(snapshot, ensure_ascii=False),
+            training_view=training_view,
             is_recommended=bool(is_recommended),
         )
         session.add(registered)
@@ -1620,7 +1780,7 @@ class ModelTrainingService:
                 RegisteredModel.group_id == group_id,
                 RegisteredModel.scope_key == scope_key,
             )
-            .order_by(desc(RegisteredModel.is_recommended), desc(RegisteredModel.created_at), desc(RegisteredModel.id))
+            .order_by(RegisteredModel.training_view, desc(RegisteredModel.is_recommended), desc(RegisteredModel.created_at), desc(RegisteredModel.id))
         )
         result = await session.execute(stmt)
         return [self._registered_model_list_item(item) for item in result.scalars().all()]
@@ -1633,15 +1793,22 @@ class ModelTrainingService:
         group_id: int,
         scope_key: str,
     ) -> None:
-        await session.execute(
-            update(RegisteredModel)
+        selected_view = self._registered_model_training_view(selected)
+        result = await session.execute(
+            select(RegisteredModel)
+            .options(selectinload(RegisteredModel.training_run))
             .where(
                 RegisteredModel.group_id == group_id,
                 RegisteredModel.scope_key == scope_key,
                 RegisteredModel.id != selected.id,
+                RegisteredModel.is_recommended.is_(True),
             )
-            .values(is_recommended=False)
         )
+        for model in result.scalars().all():
+            model_view = self._registered_model_training_view(model)
+            if model_view == selected_view:
+                model.is_recommended = False
+                model.training_view = model_view
 
     async def set_recommended_registered_model(
         self,
@@ -1664,6 +1831,7 @@ class ModelTrainingService:
         model = (await session.execute(stmt)).scalar_one_or_none()
         if model is None:
             raise KeyError(registry_id)
+        model.training_view = self._registered_model_training_view(model)
         model.is_recommended = bool(recommended)
         if recommended:
             await self._clear_other_recommended_models(session, model, group_id=group_id, scope_key=scope_key)
@@ -1702,6 +1870,9 @@ class ModelTrainingService:
         *,
         registry_id: int,
         group_id: int,
+        owner_user_id: int,
+        workspace_id: int | None,
+        scope_type: str,
         scope_key: str,
         target_dataset: CleanedDataset,
     ) -> dict[str, Any]:
@@ -1726,6 +1897,7 @@ class ModelTrainingService:
         source_dataset = registered.training_run.cleaned_dataset
         run_payload = self._run_payload(registered.training_run)
         config = run_payload.get("config") or json.loads(registered.training_run.config_json or "{}")
+        training_view = self._registered_model_training_view(registered)
         source_rows, source_metadata = self._load_saved_dataset_rows(source_dataset)
         target_rows, target_metadata = self._load_saved_dataset_rows(target_dataset)
         prepared = self._prepare_saved_dataset(source_rows, config, source_metadata)
@@ -1743,6 +1915,11 @@ class ModelTrainingService:
             )
         if not target_rows:
             raise ValueError("The target dataset does not contain any rows to predict.")
+        input_target_count = len(target_rows)
+        target_rows = [row for row in target_rows if _saved_row_matches_training_view(row, training_view)]
+        dropped_outside_training_view = max(0, input_target_count - len(target_rows))
+        if not target_rows:
+            raise ValueError("The target dataset does not contain rows for the registered model's training view.")
 
         imputer = SimpleImputer(strategy="median")
         imputer.fit(prepared["matrix_raw"])
@@ -1780,9 +1957,10 @@ class ModelTrainingService:
             reverse=True,
         )
         metrics = self._prediction_metrics(actual_values, predicted_values)
-        return {
+        result = {
             "registry_id": registered.id,
             "registered_model_name": registered.name,
+            "training_view": training_view,
             "source_dataset": {
                 "id": source_dataset.id,
                 "name": source_dataset.name,
@@ -1790,19 +1968,80 @@ class ModelTrainingService:
             "target_dataset": {
                 "id": target_dataset.id,
                 "name": target_dataset.name,
+                "input_row_count": input_target_count,
                 "row_count": len(target_rows),
+                "dropped_outside_training_view": dropped_outside_training_view,
             },
             "feature_columns": feature_columns,
             "summary": {
                 "predicted_rows": len(target_rows),
                 "scored_rows": len(actual_values),
                 "feature_dimensions": len(feature_columns),
+                "dropped_outside_training_view": dropped_outside_training_view,
                 "r2": metrics["r2"],
                 "rmse": metrics["rmse"],
                 "mae": metrics["mae"],
             },
             "preview_rows": preview_rows[:20],
         }
+        prediction_run = ModelPredictionRun(
+            registered_model_id=registered.id,
+            training_run_id=registered.training_run_id,
+            source_dataset_id=source_dataset.id,
+            target_dataset_id=target_dataset.id,
+            group_id=group_id,
+            workspace_id=workspace_id,
+            created_by_user_id=owner_user_id,
+            scope_type=scope_type,
+            scope_key=scope_key,
+            registered_model_name=registered.name,
+            training_view=training_view,
+            status="completed",
+            target_input_rows=input_target_count,
+            target_predicted_rows=len(target_rows),
+            dropped_outside_training_view=dropped_outside_training_view,
+            scored_rows=len(actual_values),
+            feature_dimensions=len(feature_columns),
+            r2=metrics["r2"],
+            rmse=metrics["rmse"],
+            mae=metrics["mae"],
+            feature_columns_json=json.dumps(feature_columns, ensure_ascii=False),
+            preview_rows_json=json.dumps(result["preview_rows"], ensure_ascii=False),
+            result_json=json.dumps(result, ensure_ascii=False),
+        )
+        session.add(prediction_run)
+        await session.commit()
+        await session.refresh(prediction_run)
+        result["prediction_run_id"] = prediction_run.id
+        result["created_at"] = prediction_run.created_at.isoformat() if prediction_run.created_at else None
+        prediction_run.result_json = json.dumps(result, ensure_ascii=False)
+        await session.commit()
+        return result
+
+    async def list_prediction_runs(
+        self,
+        session: AsyncSession,
+        *,
+        group_id: int,
+        scope_key: str,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        stmt = (
+            select(ModelPredictionRun)
+            .options(
+                selectinload(ModelPredictionRun.registered_model),
+                selectinload(ModelPredictionRun.source_dataset),
+                selectinload(ModelPredictionRun.target_dataset),
+            )
+            .where(
+                ModelPredictionRun.group_id == group_id,
+                ModelPredictionRun.scope_key == scope_key,
+            )
+            .order_by(desc(ModelPredictionRun.created_at), desc(ModelPredictionRun.id))
+            .limit(limit)
+        )
+        result = await session.execute(stmt)
+        return [self._prediction_run_list_item(item) for item in result.scalars().all()]
 
     def get_task(self, task_id: str, requester_user_id: int) -> TrainingTaskState:
         logger.debug("Fetching training task task_id=%s requester_user_id=%s", task_id, requester_user_id)
@@ -1844,11 +2083,42 @@ class ModelTrainingService:
             "snapshot": None,
         }
 
+    def _training_view_for_run(self, run: ModelTrainingRun, payload: dict[str, Any] | None = None) -> str:
+        payload = payload or self._run_payload(run)
+        config = payload.get("config")
+        if not isinstance(config, dict):
+            try:
+                config = json.loads(run.config_json or "{}")
+            except Exception:
+                config = {}
+        data_options = config.get("data_options") if isinstance(config, dict) else {}
+        view = data_options.get("training_view") if isinstance(data_options, dict) else None
+        snapshot = payload.get("snapshot") if isinstance(payload, dict) else {}
+        if not view and isinstance(snapshot, dict):
+            dataset = snapshot.get("dataset") or {}
+            filters = dataset.get("filters") or {}
+            if isinstance(filters, dict):
+                view = filters.get("training_view")
+            cleaning = dataset.get("cleaning") or {}
+            rules = cleaning.get("rules") or {}
+            if not view and isinstance(rules, dict):
+                view = rules.get("training_view")
+        return normalize_training_view(view)
+
+    def _registered_model_training_view(self, model: RegisteredModel) -> str:
+        stored_view = normalize_training_view(getattr(model, "training_view", None))
+        if stored_view != "all":
+            return stored_view
+        if getattr(model, "training_run", None) is not None:
+            return self._training_view_for_run(model.training_run)
+        return stored_view
+
     def _run_list_item(self, run: ModelTrainingRun) -> dict[str, Any]:
         payload = self._run_payload(run)
         snapshot = payload.get("snapshot") or {}
         current = snapshot.get("current") or {}
         dataset = snapshot.get("dataset") or {}
+        training_view = self._training_view_for_run(run, payload)
         registered = None
         try:
             registered = next(iter(run.registered_models or []), None)
@@ -1867,6 +2137,7 @@ class ModelTrainingService:
             "cleaned_dataset_id": run.cleaned_dataset_id,
             "cleaned_dataset_name": run.cleaned_dataset.name if run.cleaned_dataset else None,
             "target_column": run.target_column,
+            "training_view": training_view,
             "val_r2": current.get("val_r2"),
             "val_rmse": current.get("val_rmse"),
             "val_mae": current.get("val_mae"),
@@ -1878,6 +2149,7 @@ class ModelTrainingService:
             "registered_model_id": registered.id if registered else None,
             "registered_model_name": registered.name if registered else None,
             "is_recommended": bool(registered.is_recommended) if registered else False,
+            "registered_model_training_view": self._registered_model_training_view(registered) if registered else None,
         }
 
     def _registered_model_list_item(self, model: RegisteredModel) -> dict[str, Any]:
@@ -1893,6 +2165,7 @@ class ModelTrainingService:
             "name": model.name,
             "description": model.description,
             "is_recommended": bool(model.is_recommended),
+            "training_view": self._registered_model_training_view(model),
             "created_at": model.created_at.isoformat() if model.created_at else None,
             "algorithm": model.training_run.algorithm,
             "split_strategy": model.training_run.split_strategy,
@@ -1911,6 +2184,29 @@ class ModelTrainingService:
             "feature_dimensions": dataset.get("feature_dimensions"),
             "usable_records": dataset.get("usable_records"),
             "risk_count": len(report.get("risks") or []),
+        }
+
+    def _prediction_run_list_item(self, run: ModelPredictionRun) -> dict[str, Any]:
+        return {
+            "id": run.id,
+            "registered_model_id": run.registered_model_id,
+            "registered_model_name": run.registered_model_name,
+            "training_view": normalize_training_view(run.training_view),
+            "status": run.status,
+            "created_at": run.created_at.isoformat() if run.created_at else None,
+            "source_dataset_id": run.source_dataset_id,
+            "source_dataset_name": run.source_dataset.name if run.source_dataset else None,
+            "target_dataset_id": run.target_dataset_id,
+            "target_dataset_name": run.target_dataset.name if run.target_dataset else None,
+            "target_input_rows": int(run.target_input_rows or 0),
+            "target_predicted_rows": int(run.target_predicted_rows or 0),
+            "dropped_outside_training_view": int(run.dropped_outside_training_view or 0),
+            "scored_rows": int(run.scored_rows or 0),
+            "feature_dimensions": int(run.feature_dimensions or 0),
+            "r2": run.r2,
+            "rmse": run.rmse,
+            "mae": run.mae,
+            "preview_rows": _json_loads(run.preview_rows_json, []),
         }
 
     def _default_registry_name(self, run: ModelTrainingRun, snapshot: dict[str, Any]) -> str:
@@ -2625,6 +2921,8 @@ class ModelTrainingService:
             raise ValueError("The saved dataset does not contain any feature columns.")
 
         data_options = config.get("data_options") or {}
+        cleaning_rules = (metadata.get("summary") or {}).get("rules") or {}
+        training_view = normalize_training_view(data_options.get("training_view") or cleaning_rules.get("training_view"))
         feature_columns = self._feature_columns_for_config(available_feature_columns, data_options)
         max_records = data_options.get("max_records")
         max_records = _int_or_default(max_records, 0) if max_records not in (None, "", 0) else None
@@ -2638,7 +2936,11 @@ class ModelTrainingService:
 
         eligible_rows: list[dict[str, Any]] = []
         dropped_low_confidence = 0
+        dropped_outside_training_view = 0
         for row_index, row in enumerate(rows):
+            if not _saved_row_matches_training_view(row, training_view):
+                dropped_outside_training_view += 1
+                continue
             target_value = _safe_float(row.get(target_column))
             if target_value is None:
                 continue
@@ -2768,6 +3070,8 @@ class ModelTrainingService:
             warnings.append("Missing numeric values in the saved matrix were median-imputed during training.")
         if dropped_low_confidence:
             warnings.append(f"{dropped_low_confidence} rows were excluded because their confidence was below the selected threshold.")
+        if dropped_outside_training_view:
+            warnings.append(f"{dropped_outside_training_view} rows were excluded because they are outside the selected training view.")
         if target_outlier_summary["rows_removed"]:
             bounds = target_outlier_summary.get("bounds") or {}
             upper = bounds.get("upper")
@@ -2814,8 +3118,6 @@ class ModelTrainingService:
             column=target_column,
         )
         split_label = SPLIT_STRATEGY_DEFINITIONS[split_strategy]["label"]
-        cleaning_rules = (metadata.get("summary") or {}).get("rules") or {}
-        training_view = normalize_training_view(cleaning_rules.get("training_view"))
         feature_subset_label = str(data_options.get("feature_subset_label") or "").strip()
         feature_subset_key = str(data_options.get("feature_subset_key") or "").strip()
         feature_subset = None
@@ -3656,6 +3958,8 @@ class ModelTrainingService:
                 high_gate_threshold=float(params.get("high_gate_threshold", 0.50)),
                 high_blend=float(params.get("high_blend", 0.30)),
                 high_weight=float(params.get("high_weight", 1.50)),
+                base_models=params.get("base_models") or params.get("segment_base_models"),
+                meta_model=str(params.get("meta_model") or "catboost"),
             )
             estimator.fit(X, y)
             return estimator

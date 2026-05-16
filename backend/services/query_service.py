@@ -116,6 +116,31 @@ def _ion_component_filter_terms(
     return sorted(terms)
 
 
+def _normalized_scale_filter_terms(values: list[str] | tuple[str, ...] | set[str]) -> list[str]:
+    terms: set[str] = set()
+    for value in values or []:
+        text = str(value or "").strip().lower().replace("-", "_")
+        if not text:
+            continue
+        if text in {"macro", "macroscopic", "macroscale", "macro_performance"}:
+            terms.update({"macroscale", "macro"})
+        elif text in {"nano", "nanoscopic", "nanoscale", "nanotribology", "afm", "afm_surface_response", "nanoscale_afm"}:
+            terms.update({"nanoscale", "nano"})
+        elif text in {"micro", "microscopic", "microscale"}:
+            terms.update({"microscale", "micro"})
+        else:
+            terms.add(text)
+    return sorted(terms)
+
+
+def _normalized_json_filter_terms(values: list[str] | tuple[str, ...] | set[str]) -> list[str]:
+    return sorted({str(value or "").strip().lower() for value in values or [] if str(value or "").strip()})
+
+
+def _json_text(path: str):
+    return func.lower(func.coalesce(func.json_extract(TribologyData.tribological_system_json, path), ""))
+
+
 def _build_conditions(filter_params: Any):
     conditions = []
     if getattr(filter_params, "record_id", None) is not None:
@@ -173,6 +198,21 @@ def _build_conditions(filter_params: Any):
         conditions.append(TribologyData.cof_value >= filter_params.cof_min)
     if getattr(filter_params, "cof_max", None) is not None:
         conditions.append(TribologyData.cof_value <= filter_params.cof_max)
+    review_statuses = [str(status).strip().lower() for status in (getattr(filter_params, "review_statuses", None) or []) if str(status or "").strip()]
+    if review_statuses:
+        conditions.append(func.lower(TribologyData.review_status).in_(review_statuses))
+    experiment_scales = _normalized_scale_filter_terms(getattr(filter_params, "experiment_scales", None) or [])
+    if experiment_scales:
+        conditions.append(_json_text("$.scale").in_(experiment_scales))
+    experiment_methods = _normalized_json_filter_terms(getattr(filter_params, "experiment_methods", None) or [])
+    if experiment_methods:
+        conditions.append(_json_text("$.method").in_(experiment_methods))
+    measurement_types = _normalized_json_filter_terms(getattr(filter_params, "measurement_types", None) or [])
+    if measurement_types:
+        conditions.append(_json_text("$.measurement_type").in_(measurement_types))
+    training_views = _normalized_json_filter_terms(getattr(filter_params, "training_views", None) or [])
+    if training_views:
+        conditions.append(_json_text("$.training_view").in_(training_views))
     if getattr(filter_params, "speed_values", None):
         conditions.append(TribologyData.speed_value.in_(filter_params.speed_values))
     if getattr(filter_params, "shear_rate_values", None):
@@ -418,6 +458,7 @@ def _record_to_payload(record: TribologyData) -> dict[str, Any]:
         "source_figure": getattr(record, "source_figure", None),
         "confidence": float(runtime_details.get("score") or 0.0),
         "confidence_details": runtime_details,
+        "review_status": getattr(record, "review_status", None),
         "literature_id": record.literature_id,
         "literature": literature_payload,
     }
@@ -530,6 +571,10 @@ async def get_filter_options(
         "temperatureValues": set(),
         "potentialValues": set(),
         "waterContentValues": set(),
+        "experimentScales": set(),
+        "experimentMethods": set(),
+        "measurementTypes": set(),
+        "trainingViews": set(),
     }
     conditions = literature_scope_conditions(scope_filter_values) if scope_filter_values else []
     if conditions:
@@ -573,6 +618,19 @@ async def get_filter_options(
     )
     lubricants = result_lubricants.scalars().all()
 
+    json_option_fields = [
+        ("filter_options.experiment.scale", "$.scale", "experimentScales"),
+        ("filter_options.experiment.method", "$.method", "experimentMethods"),
+        ("filter_options.experiment.measurement_type", "$.measurement_type", "measurementTypes"),
+        ("filter_options.experiment.training_view", "$.training_view", "trainingViews"),
+    ]
+    for operation, path, key in json_option_fields:
+        stmt = select(func.json_extract(TribologyData.tribological_system_json, path)).distinct()
+        if conditions:
+            stmt = stmt.join(TribologyData.literature).where(*conditions)
+        result_values = await _execute_counted(session, stmt, operation=operation)
+        option_values[key].update(str(item).strip() for item in result_values.scalars().all() if str(item or "").strip())
+
     normalized_lubricants: list[str] = []
     for value in lubricants:
         payload = {"lubricant": value}
@@ -594,6 +652,10 @@ async def get_filter_options(
         "temperatureValues": sorted(option_values["temperatureValues"]),
         "potentialValues": sorted(option_values["potentialValues"]),
         "waterContentValues": sorted(option_values["waterContentValues"]),
+        "experimentScales": sorted(option_values["experimentScales"]),
+        "experimentMethods": sorted(option_values["experimentMethods"]),
+        "measurementTypes": sorted(option_values["measurementTypes"]),
+        "trainingViews": sorted(option_values["trainingViews"]),
     }
 
 
