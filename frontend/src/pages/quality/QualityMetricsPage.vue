@@ -800,9 +800,9 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="min-h-0 flex-1 overflow-auto bg-[#f5f7fb] text-slate-900">
+  <div class="min-h-0 flex-1 overflow-auto bg-slate-100 text-slate-900">
     <div class="mx-auto flex w-full max-w-[1480px] flex-col gap-5 px-4 py-5 lg:px-6">
-      <section class="rounded-[1.5rem] border border-slate-200 bg-white px-5 py-5">
+      <section class="rounded-lg border border-slate-200 bg-white px-5 py-5">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="max-w-4xl">
             <div class="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50 px-3 py-1 text-[11px] font-semibold text-indigo-700">
@@ -816,13 +816,13 @@ onMounted(() => {
           </div>
 
           <div class="flex flex-col items-stretch gap-2 sm:min-w-[17rem]">
-            <div class="rounded-2xl bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-500">
+            <div class="rounded-md bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-500">
               当前范围：<span class="font-semibold text-slate-800">{{ activeScopeLabel }}</span><br />
               操作员：<span class="font-semibold text-slate-800">{{ operatorName }}</span>
             </div>
             <button
               type="button"
-              class="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
+              class="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-60"
               :disabled="loading"
               @click="refreshLiterature"
             >

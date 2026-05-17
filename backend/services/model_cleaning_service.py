@@ -6,6 +6,7 @@ import json
 import logging
 import math
 import re
+from pathlib import Path
 from collections import defaultdict
 from typing import Any, Callable
 
@@ -62,6 +63,7 @@ DEFAULT_CLEANING_WORKBENCH_OPTIONS = {
 }
 
 IMPORTED_DATASET_KIND = "imported_csv"
+WFF_THESIS_DATASET_KIND = "wff_thesis_csv"
 IMPORTED_TARGET_ALIASES = {
     "cof",
     "mu",
@@ -71,6 +73,35 @@ IMPORTED_TARGET_ALIASES = {
     "targetcof",
     "targetmu",
 }
+
+IMPORT_RESERVED_METADATA_COLUMNS = {
+    "frictionbin",
+    "cationbin",
+    "stratifylabel",
+    "originalindex",
+    "frictionpred",
+    "frictionprediction",
+    "frictiondiff",
+    "predictiondiff",
+    "errorflag",
+}
+
+WFF_DATASET_SPECS = [
+    {
+        "key": "dataset_b",
+        "filename": "film+dataset0312.csv",
+        "name": "WFF 论文复刻 Dataset-B（含膜厚 h）",
+        "description": "来自 backend/data/wff；保留论文 Dataset-B 的训练集、测试集和外部文献验证集固定划分。",
+        "target_column": "μ",
+    },
+    {
+        "key": "dataset_a",
+        "filename": "no+film+dataset+0312.csv",
+        "name": "WFF 论文复刻 Dataset-A（不含膜厚）",
+        "description": "来自 backend/data/wff；用于对照不含界面膜厚 h 的单模型复现实验。",
+        "target_column": "μ",
+    },
+]
 
 LOAD_RANGE_FEATURE_KEYS = ["load_min", "load_max", "load_span", "load_is_range"]
 LOAD_RANGE_COLUMN_NAMES = ["Load_Min", "Load_Max", "Load_Span", "Load_Is_Range"]
@@ -434,6 +465,93 @@ class ModelCleaningService:
         logger.info("Imported CSV dataset dataset_id=%s rows=%s", dataset.id, dataset.row_count)
         return dataset
 
+    async def import_wff_thesis_datasets(
+        self,
+        session: AsyncSession,
+        *,
+        principal: AuthPrincipal,
+        scope: RequestScope,
+    ) -> list[CleanedDataset]:
+        logger.info("Importing built-in WFF thesis datasets scope=%s", scope.scope_key)
+        ensure_scope_writable(principal, scope)
+        data_dir = Path(__file__).resolve().parents[1] / "data" / "wff"
+        if not data_dir.exists():
+            raise ValueError("WFF data directory was not found under backend/data/wff.")
+
+        imported: list[CleanedDataset] = []
+        for spec in WFF_DATASET_SPECS:
+            path = data_dir / spec["filename"]
+            if not path.exists():
+                raise ValueError(f"WFF dataset file '{spec['filename']}' was not found.")
+
+            existing = await self._find_existing_imported_dataset(
+                session,
+                scope=scope,
+                dataset_kind=WFF_THESIS_DATASET_KIND,
+                filename=spec["filename"],
+            )
+            if existing is not None:
+                imported.append(existing)
+                continue
+
+            csv_text = path.read_text(encoding="utf-8-sig")
+            payload = self._build_imported_csv_payload(
+                csv_text,
+                filename=spec["filename"],
+                target_column=spec["target_column"],
+                scope=scope,
+            )
+            self._apply_wff_thesis_metadata(payload, dataset_key=spec["key"], filename=spec["filename"])
+
+            dataset = CleanedDataset(
+                name=spec["name"],
+                description=spec["description"],
+                target_key=payload["target"]["key"],
+                source_scope_type=scope.scope_type,
+                source_scope_key=scope.scope_key,
+                group_id=scope.group_id,
+                workspace_id=scope.workspace.id if scope.workspace else None,
+                created_by_user_id=principal.user.id,
+                scope_type=scope.scope_type,
+                scope_key=scope.scope_key,
+                row_count=len(payload["rows"]),
+                config_json=json.dumps(
+                    self._build_imported_dataset_config(
+                        filename=spec["filename"],
+                        target_column=payload["target_column"],
+                        feature_columns=payload["feature_columns"],
+                        identifier_columns=payload["import_metadata"]["identifier_columns"],
+                        dataset_kind=WFF_THESIS_DATASET_KIND,
+                    ),
+                    ensure_ascii=False,
+                ),
+                summary_json=json.dumps(
+                    {
+                        "dataset_kind": WFF_THESIS_DATASET_KIND,
+                        "summary": payload["summary"],
+                        "source_scope": payload["source_scope"],
+                        "feature_coverage": payload["feature_coverage"],
+                        "target": payload["target"],
+                        "pca_info": None,
+                        "matrix_columns": payload["matrix_columns"],
+                        "feature_columns": payload["feature_columns"],
+                        "target_column": payload["target_column"],
+                        "import_metadata": payload["import_metadata"],
+                    },
+                    ensure_ascii=False,
+                ),
+                rows_json=json.dumps(payload["rows"], ensure_ascii=False),
+            )
+            session.add(dataset)
+            await session.flush()
+            imported.append(dataset)
+
+        await session.commit()
+        for dataset in imported:
+            await session.refresh(dataset)
+        logger.info("Imported WFF thesis datasets count=%s", len(imported))
+        return imported
+
     async def preview_cleaning(
         self,
         session: AsyncSession,
@@ -619,7 +737,7 @@ class ModelCleaningService:
         logger.debug("Checking dataset upgrade requirements dataset_id=%s", dataset.id)
         config_payload = json.loads(dataset.config_json or "{}")
         summary_payload = json.loads(dataset.summary_json or "{}")
-        if self._dataset_kind(config_payload, summary_payload) == IMPORTED_DATASET_KIND:
+        if self._dataset_kind(config_payload, summary_payload) in {IMPORTED_DATASET_KIND, WFF_THESIS_DATASET_KIND}:
             target_column = str(summary_payload.get("target_column") or "").strip()
             if target_column:
                 target_payload = self._build_import_target_payload(target_column)
@@ -768,13 +886,14 @@ class ModelCleaningService:
         target_column: str,
         feature_columns: list[str],
         identifier_columns: list[str],
+        dataset_kind: str = IMPORTED_DATASET_KIND,
     ) -> dict[str, Any]:
         feature_config = dict(DEFAULT_FEATURE_CONFIG)
         feature_config["keep_features"] = self._upgrade_legacy_keep_features(list(DEFAULT_FEATURE_CONFIG["keep_features"]))
         return {
             **DEFAULT_CLEANING_WORKBENCH_OPTIONS,
             "feature_config": feature_config,
-            "dataset_kind": IMPORTED_DATASET_KIND,
+            "dataset_kind": dataset_kind,
             "import_config": {
                 "filename": filename,
                 "target_column": target_column,
@@ -782,6 +901,37 @@ class ModelCleaningService:
                 "identifier_columns": list(identifier_columns),
             },
         }
+
+    async def _find_existing_imported_dataset(
+        self,
+        session: AsyncSession,
+        *,
+        scope: RequestScope,
+        dataset_kind: str,
+        filename: str,
+    ) -> CleanedDataset | None:
+        stmt = (
+            select(CleanedDataset)
+            .where(
+                CleanedDataset.group_id == scope.group_id,
+                CleanedDataset.scope_key == scope.scope_key,
+                CleanedDataset.target_key == "cof",
+            )
+            .order_by(CleanedDataset.created_at.desc(), CleanedDataset.id.desc())
+        )
+        result = await session.execute(stmt)
+        for dataset in result.scalars().all():
+            try:
+                summary_payload = json.loads(dataset.summary_json or "{}")
+            except Exception:
+                continue
+            metadata = summary_payload.get("import_metadata") or {}
+            if (
+                str(summary_payload.get("dataset_kind") or "").strip() == dataset_kind
+                and str(metadata.get("filename") or "").strip() == filename
+            ):
+                return await self.upgrade_dataset_if_needed(session, dataset)
+        return None
 
     def _build_imported_csv_payload(
         self,
@@ -936,6 +1086,9 @@ class ModelCleaningService:
         for fieldname in fieldnames:
             if fieldname == target_column:
                 continue
+            if self._is_import_reserved_metadata_column(fieldname):
+                identifier_columns.append(fieldname)
+                continue
             if fieldname.startswith("__"):
                 identifier_columns.append(fieldname)
                 continue
@@ -953,8 +1106,72 @@ class ModelCleaningService:
 
         return feature_columns, identifier_columns
 
+    def _is_import_reserved_metadata_column(self, fieldname: str) -> bool:
+        normalized = self._normalize_import_lookup_key(fieldname)
+        return normalized in IMPORT_RESERVED_METADATA_COLUMNS
+
+    def _apply_wff_thesis_metadata(self, payload: dict[str, Any], *, dataset_key: str, filename: str) -> None:
+        rows = payload["rows"]
+        if not rows:
+            return
+
+        external_indices = {
+            index
+            for index, row in enumerate(rows)
+            if not str(row.get("stratify_label") or "").strip()
+        }
+        if dataset_key == "dataset_b":
+            test_indices = {
+                index
+                for index, row in enumerate(rows)
+                if index not in external_indices and self._safe_import_float(row.get("friction_pred")) is not None
+            }
+        else:
+            test_count = 50
+            non_external = [index for index in range(len(rows)) if index not in external_indices]
+            test_indices = set(non_external[-test_count:]) if len(non_external) > test_count else set()
+
+        split_counts = {"train": 0, "test": 0, "external": 0}
+        for index, row in enumerate(rows):
+            if index in external_indices:
+                split = "external"
+            elif index in test_indices:
+                split = "test"
+            else:
+                split = "train"
+            row["__thesis_split"] = split
+            row["__wff_row_index"] = index
+            split_counts[split] += 1
+
+        for column in ("__thesis_split", "__wff_row_index"):
+            if column not in payload["matrix_columns"]:
+                payload["matrix_columns"].append(column)
+        metadata = payload["import_metadata"]
+        for column in ("__thesis_split", "__wff_row_index"):
+            if column not in metadata["identifier_columns"]:
+                metadata["identifier_columns"].append(column)
+        metadata.update(
+            {
+                "dataset_kind": WFF_THESIS_DATASET_KIND,
+                "wff_dataset_key": dataset_key,
+                "filename": filename,
+                "thesis_fixed_split": True,
+                "thesis_split_counts": split_counts,
+                "reserved_metadata_columns": sorted(
+                    column
+                    for column in payload["matrix_columns"]
+                    if self._is_import_reserved_metadata_column(column) or column.startswith("__")
+                ),
+            }
+        )
+        payload["summary"]["rules"]["training_view"] = "all"
+        payload["summary"]["rules"]["thesis_fixed_split"] = True
+        payload["summary"]["rules"]["thesis_split_counts"] = split_counts
+        payload["summary"]["rules"]["dataset_kind"] = WFF_THESIS_DATASET_KIND
+        payload["source_scope"]["label"] = "WFF thesis data"
+
     def _parse_import_float(self, value: Any) -> float | None:
-        text = str(value or "").strip()
+        text = "" if value is None else str(value).strip()
         if not text:
             return None
         if text.lower() in {"na", "n/a", "none", "null", "nan"}:

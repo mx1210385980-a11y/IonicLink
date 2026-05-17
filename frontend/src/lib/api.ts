@@ -1938,6 +1938,17 @@ export interface ModelTrainingExternalDiagnostics {
     items: ModelTrainingExternalDiagnosticItem[]
 }
 
+export interface ModelTrainingSegmentSummary {
+    thresholds?: Record<string, number | null>
+    counts?: Record<string, number>
+    base_models?: string[]
+    meta_model?: string | null
+    min_segment_size?: number
+    prediction_mode?: string
+    blend_weights?: Record<string, number> | null
+    local_blend?: number
+}
+
 export interface ModelTrainingInsights {
     feature_importance?: ModelTrainingFeatureImportance[]
     prediction_samples?: ModelTrainingPredictionPoint[]
@@ -1946,6 +1957,7 @@ export interface ModelTrainingInsights {
     external_samples?: ModelTrainingPredictionPoint[]
     external_metrics?: ModelTrainingExternalMetrics | null
     external_diagnostics?: ModelTrainingExternalDiagnostics | null
+    segment_summary?: ModelTrainingSegmentSummary | null
     experiment_report?: ModelTrainingExperimentReport | null
 }
 
@@ -2022,6 +2034,7 @@ export interface ModelTrainingExperimentReport {
     feature_importance_top: ModelTrainingFeatureImportance[]
     residual_top: Array<ModelTrainingPredictionPoint & { source: 'val' | 'test' | 'external' }>
     external_diagnostics?: ModelTrainingExternalDiagnostics | null
+    segment_summary?: ModelTrainingSegmentSummary | null
     risks: ModelTrainingExperimentRisk[]
     warnings: string[]
 }
@@ -2767,6 +2780,9 @@ export interface SavedCleanedDatasetSummary {
     dataset_kind?: string
     import_metadata?: {
         filename?: string
+        wff_dataset_key?: string
+        thesis_fixed_split?: boolean
+        thesis_split_counts?: Record<string, number>
         original_columns?: string[]
         identifier_columns?: string[]
         feature_columns?: string[]
@@ -2819,6 +2835,11 @@ export async function importCleanedDatasetCsv(payload: {
         },
     })
     return response.data as { dataset: SavedCleanedDatasetDetail }
+}
+
+export async function importWffThesisDatasets() {
+    const response = await api.post('/api/model-cleaning/datasets/import-wff-thesis')
+    return response.data as { items: SavedCleanedDatasetDetail[] }
 }
 
 export async function getCleanedDataset(datasetId: number) {

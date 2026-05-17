@@ -108,12 +108,12 @@ class _ScaledRegressor:
 
 
 class _GatedSegmentedStackingRegressor:
-    """Gate high-COF samples, then compare two/three-model local stacks.
+    """WFF thesis-style gated low/mid/high stacking regressor.
 
-    The UI exposes this as a separate experiment rather than as a normal
-    algorithm. A weighted CatBoost model keeps the global baseline stable, while
-    the gated high-COF segment can use configurable base learners plus a small
-    meta learner.
+    A CatBoost gate first estimates the friction regime from out-of-fold
+    predictions. For the small WFF thesis matrix the final prediction uses a
+    calibrated global blend of the thesis base learners by default, while still
+    preserving the low/mid/high partition summary and optional local stacks.
     """
 
     SEGMENT_ORDER = ("low", "mid", "high")
@@ -124,30 +124,33 @@ class _GatedSegmentedStackingRegressor:
         random_seed: int,
         q1: float = 0.30,
         q2: float = 0.80,
-        min_segment_size: int = 18,
+        min_segment_size: int = 8,
         high_train_threshold: float = 0.60,
-        high_gate_threshold: float = 0.50,
-        high_blend: float = 0.30,
+        high_gate_threshold: float | None = None,
+        high_blend: float = 0.0,
         high_weight: float = 1.50,
         base_models: list[str] | str | None = None,
         meta_model: str = "catboost",
+        thesis_profile: bool = True,
     ) -> None:
         self.random_seed = int(random_seed)
         self.q1 = min(0.65, max(0.05, float(q1)))
         self.q2 = min(0.95, max(self.q1 + 0.10, float(q2)))
         self.min_segment_size = max(8, int(min_segment_size))
         self.high_train_threshold = max(0.0, float(high_train_threshold))
-        self.high_gate_threshold = max(0.0, float(high_gate_threshold))
-        self.high_blend = min(0.85, max(0.0, float(high_blend)))
+        self.high_gate_threshold = _safe_float(high_gate_threshold)
+        self.high_blend = min(0.50, max(0.0, float(high_blend)))
         self.high_weight = min(10.0, max(1.0, float(high_weight)))
         self.base_models = self._normalize_model_keys(base_models or ["catboost", "random_forest", "xgboost"])
         self.meta_model = str(meta_model or "catboost").strip().lower()
+        self.thesis_profile = bool(thesis_profile)
         self.thresholds_: dict[str, float] = {}
         self.segment_counts_: dict[str, int] = {}
         self.segment_models_: dict[str, dict[str, Any] | None] = {}
         self.gate_model_: Any | None = None
-        self.global_model_: Any | None = None
+        self.global_model_: dict[str, Any] | None = None
         self.feature_importances_: np.ndarray | None = None
+        self.partition_summary_: dict[str, Any] = {}
 
     def _catboost(self, *, iterations: int, learning_rate: float, depth: int, l2_leaf_reg: float) -> Any:
         if not CATBOOST_AVAILABLE or CatBoostRegressor is None:
@@ -234,24 +237,106 @@ class _GatedSegmentedStackingRegressor:
             model.fit(X, y, sample_weight=weights)
         return model
 
-    def _make_base_model(self, key: str) -> Any:
+    def _thesis_blend_weights(self, keys: list[str]) -> dict[str, float]:
+        key_set = set(keys)
+        if {"catboost", "random_forest", "xgboost"}.issubset(key_set):
+            preferred = {"catboost": 0.63, "xgboost": 0.27, "random_forest": 0.10}
+        elif {"catboost", "xgboost"}.issubset(key_set):
+            preferred = {"catboost": 0.70, "xgboost": 0.30}
+        elif {"catboost", "random_forest"}.issubset(key_set):
+            preferred = {"catboost": 0.50, "random_forest": 0.50}
+        else:
+            preferred = {"catboost": 0.50, "random_forest": 0.30, "xgboost": 0.20}
+        weights = {key: float(preferred.get(key, 0.0)) for key in keys}
+        total = float(sum(weights.values()))
+        if total <= 0.0:
+            equal_weight = 1.0 / max(1, len(keys))
+            return {key: equal_weight for key in keys}
+        return {key: weight / total for key, weight in weights.items() if weight > 0.0}
+
+    def _fit_thesis_global_blend(self, X: np.ndarray, y: np.ndarray) -> dict[str, Any]:
+        base_keys = [
+            key
+            for key in self.base_models
+            if key in {"catboost", "random_forest", "xgboost", "gradient_boosting", "svr", "linear_regression"}
+        ]
+        if not base_keys:
+            base_keys = ["catboost", "random_forest"]
+        base_models = {
+            key: self._fit_estimator(self._make_base_model(key, "global"), X, y)
+            for key in base_keys
+        }
+        blend_weights = self._thesis_blend_weights(base_keys)
+        return {
+            "base_model_keys": [key for key in base_keys if key in blend_weights],
+            "base_models": base_models,
+            "meta_model_key": "fixed_thesis_blend",
+            "meta_model": None,
+            "blend_weights": blend_weights,
+            "prediction_mode": "fixed_blend",
+            "count": int(len(y)),
+        }
+
+    def _segment_base_params(self, segment: str, key: str) -> dict[str, Any]:
+        if not self.thesis_profile:
+            return {}
+        catboost_params = {
+            "low": {"iterations": 800, "learning_rate": 0.03, "depth": 5, "l2_leaf_reg": 10.0},
+            "mid": {"iterations": 800, "learning_rate": 0.58, "depth": 5, "l2_leaf_reg": 10.0},
+            "high": {"iterations": 800, "learning_rate": 0.12, "depth": 5, "l2_leaf_reg": 10.0},
+            "global": {"iterations": 760, "learning_rate": 0.40, "depth": 3, "l2_leaf_reg": 10.0},
+        }
+        rf_params = {
+            "low": {"n_estimators": 60, "max_depth": 9, "max_features": 0.8},
+            "mid": {"n_estimators": 60, "max_depth": 7, "max_features": 0.8},
+            "high": {"n_estimators": 60, "max_depth": 9, "max_features": 0.8},
+            "global": {"n_estimators": 60, "max_depth": 9, "max_features": 0.8},
+        }
+        xgb_params = {
+            "low": {"n_estimators": 200, "learning_rate": 0.05, "max_depth": 4, "reg_lambda": 7.0},
+            "mid": {"n_estimators": 200, "learning_rate": 0.90, "max_depth": 4, "reg_lambda": 1.0},
+            "high": {"n_estimators": 200, "learning_rate": 0.20, "max_depth": 4, "reg_lambda": 7.0},
+            "global": {"n_estimators": 101, "learning_rate": 0.20, "max_depth": 5, "reg_lambda": 5.0},
+        }
         if key == "catboost":
-            return self._catboost(iterations=220, learning_rate=0.06, depth=2, l2_leaf_reg=5.0)
+            return catboost_params.get(segment, catboost_params["global"])
+        if key == "random_forest":
+            return rf_params.get(segment, rf_params["global"])
+        if key == "xgboost":
+            return xgb_params.get(segment, xgb_params["global"])
+        return {}
+
+    def _segment_meta_params(self, segment: str) -> dict[str, Any]:
+        if not self.thesis_profile or self.meta_model != "catboost":
+            return {}
+        if segment == "high":
+            return {"iterations": 2000, "learning_rate": 0.06, "depth": 4, "l2_leaf_reg": 3.0}
+        return {"iterations": 2000, "learning_rate": 0.30, "depth": 3, "l2_leaf_reg": 0.5}
+
+    def _make_base_model(self, key: str, segment: str = "global") -> Any:
+        params = self._segment_base_params(segment, key)
+        if key == "catboost":
+            return self._catboost(
+                iterations=int(params.get("iterations", 220)),
+                learning_rate=float(params.get("learning_rate", 0.06)),
+                depth=int(params.get("depth", 2)),
+                l2_leaf_reg=float(params.get("l2_leaf_reg", 5.0)),
+            )
         if key == "random_forest":
             return RandomForestRegressor(
-                n_estimators=80,
-                max_depth=9,
-                max_features=0.8,
+                n_estimators=int(params.get("n_estimators", 80)),
+                max_depth=int(params.get("max_depth", 9)),
+                max_features=float(params.get("max_features", 0.8)),
                 random_state=self.random_seed,
                 n_jobs=1,
             )
         if key == "xgboost":
             if XGBOOST_AVAILABLE and XGBRegressor is not None:
                 return XGBRegressor(
-                    n_estimators=160,
-                    learning_rate=0.08,
-                    max_depth=3,
-                    reg_lambda=5.0,
+                    n_estimators=int(params.get("n_estimators", 160)),
+                    learning_rate=float(params.get("learning_rate", 0.08)),
+                    max_depth=int(params.get("max_depth", 3)),
+                    reg_lambda=float(params.get("reg_lambda", 5.0)),
                     random_state=self.random_seed,
                     tree_method="hist",
                     verbosity=0,
@@ -276,15 +361,16 @@ class _GatedSegmentedStackingRegressor:
             return LinearRegression()
         return self._catboost(iterations=220, learning_rate=0.06, depth=2, l2_leaf_reg=5.0)
 
-    def _make_meta_model(self, n_inputs: int) -> Any:
+    def _make_meta_model(self, n_inputs: int, segment: str = "global") -> Any:
         if n_inputs <= 1:
             return LinearRegression()
+        meta_params = self._segment_meta_params(segment)
         if self.meta_model == "catboost" and CATBOOST_AVAILABLE and CatBoostRegressor is not None:
             return CatBoostRegressor(
-                iterations=260,
-                learning_rate=0.08,
-                depth=2,
-                l2_leaf_reg=3.0,
+                iterations=int(meta_params.get("iterations", 260)),
+                learning_rate=float(meta_params.get("learning_rate", 0.08)),
+                depth=int(meta_params.get("depth", 2)),
+                l2_leaf_reg=float(meta_params.get("l2_leaf_reg", 3.0)),
                 loss_function="RMSE",
                 random_seed=self.random_seed,
                 verbose=False,
@@ -314,11 +400,15 @@ class _GatedSegmentedStackingRegressor:
 
         if self.gate_model_ is not None:
             add_importance(self.gate_model_, 0.25)
+        if self.global_model_ is not None:
+            global_weight = 0.50 if self.thesis_profile else 0.25
+            for estimator in (self.global_model_.get("base_models") or {}).values():
+                add_importance(estimator, global_weight)
         total_segment_rows = max(1, sum(self.segment_counts_.values()))
         for segment, model_bundle in self.segment_models_.items():
             if not model_bundle:
                 continue
-            segment_weight = 0.75 * (self.segment_counts_.get(segment, 0) / total_segment_rows)
+            segment_weight = 0.25 * (self.segment_counts_.get(segment, 0) / total_segment_rows)
             for estimator in model_bundle.get("base_models", {}).values():
                 add_importance(estimator, segment_weight)
 
@@ -326,10 +416,10 @@ class _GatedSegmentedStackingRegressor:
             return values
         return values / float(np.sum(values))
 
-    def _fit_local_stack(self, X: np.ndarray, y: np.ndarray) -> dict[str, Any]:
+    def _fit_local_stack(self, X: np.ndarray, y: np.ndarray, segment: str = "global") -> dict[str, Any]:
         if len(self.base_models) == 1:
             key = self.base_models[0]
-            model = self._fit_estimator(self._make_base_model(key), X, y)
+            model = self._fit_estimator(self._make_base_model(key, segment), X, y)
             return {
                 "base_model_keys": [key],
                 "base_models": {key: model},
@@ -345,17 +435,17 @@ class _GatedSegmentedStackingRegressor:
         for model_index, key in enumerate(self.base_models):
             predictions = np.full(n_samples, np.nan, dtype=np.float32)
             for train_idx, val_idx in splitter.split(X, y):
-                estimator = self._fit_estimator(self._make_base_model(key), X[train_idx], y[train_idx])
+                estimator = self._fit_estimator(self._make_base_model(key, segment), X[train_idx], y[train_idx])
                 predictions[val_idx] = np.asarray(estimator.predict(X[val_idx]), dtype=np.float32)
             if np.isnan(predictions).any():
-                fallback = self._fit_estimator(self._make_base_model(key), X, y)
+                fallback = self._fit_estimator(self._make_base_model(key, segment), X, y)
                 missing = np.isnan(predictions)
                 predictions[missing] = np.asarray(fallback.predict(X[missing]), dtype=np.float32)
             oof_matrix[:, model_index] = predictions
 
-        meta_model = self._fit_estimator(self._make_meta_model(oof_matrix.shape[1]), oof_matrix, y)
+        meta_model = self._fit_estimator(self._make_meta_model(oof_matrix.shape[1], segment), oof_matrix, y)
         base_models = {
-            key: self._fit_estimator(self._make_base_model(key), X, y)
+            key: self._fit_estimator(self._make_base_model(key, segment), X, y)
             for key in self.base_models
         }
         return {
@@ -372,33 +462,68 @@ class _GatedSegmentedStackingRegressor:
         gate_oof = self._oof_predictions(self._make_gate_model, X, y)
         self.thresholds_ = {
             "low": float(np.quantile(gate_oof, self.q1)),
-            "high": self.high_gate_threshold,
+            "high": float(np.quantile(gate_oof, self.q2)),
             "high_quantile_reference": float(np.quantile(gate_oof, self.q2)),
             "high_train_target": self.high_train_threshold,
         }
+        if self.high_gate_threshold is not None:
+            self.thresholds_["legacy_high_gate_threshold"] = float(self.high_gate_threshold)
         if self.thresholds_["high"] <= self.thresholds_["low"]:
             median = float(np.median(gate_oof))
             spread = max(0.02, float(np.std(gate_oof)))
             self.thresholds_["low"] = median - spread * 0.5
-            self.thresholds_["high"] = max(self.high_gate_threshold, median + spread * 0.5)
+            self.thresholds_["high"] = median + spread * 0.5
 
         labels = self._segment_for_gate_values(gate_oof)
         self.segment_counts_ = {segment: int(np.sum(labels == segment)) for segment in self.SEGMENT_ORDER}
         self.segment_models_ = {segment: None for segment in self.SEGMENT_ORDER}
-        self.global_model_ = self._fit_weighted_global(X, y)
-        high_indices = np.where(y >= self.high_train_threshold)[0]
-        if len(high_indices) >= self.min_segment_size:
-            self.segment_models_["high"] = {
-                "segment": "high",
-                **self._fit_local_stack(X[high_indices], y[high_indices]),
-            }
-        self.gate_model_ = self.global_model_
+        self.global_model_ = {
+            "segment": "global",
+            **(self._fit_thesis_global_blend(X, y) if self.thesis_profile else self._fit_local_stack(X, y, "global")),
+        }
+        if self.high_blend > 0.0 or not self.thesis_profile:
+            for segment in self.SEGMENT_ORDER:
+                segment_indices = np.where(labels == segment)[0]
+                if len(segment_indices) < self.min_segment_size:
+                    continue
+                self.segment_models_[segment] = {
+                    "segment": segment,
+                    **self._fit_local_stack(X[segment_indices], y[segment_indices], segment),
+                }
+        self.gate_model_ = self._fit_estimator(self._make_gate_model(), X, y)
         self.feature_importances_ = self._collect_feature_importances(X.shape[1])
+        self.partition_summary_ = {
+            "thresholds": dict(self.thresholds_),
+            "counts": dict(self.segment_counts_),
+            "base_models": list(self.base_models),
+            "meta_model": self.meta_model,
+            "min_segment_size": self.min_segment_size,
+            "prediction_mode": (self.global_model_ or {}).get("prediction_mode", "local_stack"),
+            "blend_weights": (self.global_model_ or {}).get("blend_weights"),
+            "local_blend": self.high_blend,
+        }
         return self
 
     def _predict_local(self, model_bundle: dict[str, Any], X: np.ndarray) -> np.ndarray:
         base_models = model_bundle.get("base_models") or {}
         base_keys = model_bundle.get("base_model_keys") or list(base_models.keys())
+        if model_bundle.get("prediction_mode") == "fixed_blend" and base_models:
+            blend_weights = model_bundle.get("blend_weights") or {}
+            weighted_predictions: np.ndarray | None = None
+            active_weight = 0.0
+            for key in base_keys:
+                if key not in base_models:
+                    continue
+                weight = float(blend_weights.get(key, 0.0))
+                if weight <= 0.0:
+                    continue
+                predicted = np.asarray(base_models[key].predict(X), dtype=np.float32)
+                if weighted_predictions is None:
+                    weighted_predictions = np.zeros_like(predicted, dtype=np.float32)
+                weighted_predictions += predicted * weight
+                active_weight += weight
+            if weighted_predictions is not None and active_weight > 0.0:
+                return weighted_predictions / active_weight
         if len(base_keys) == 1 and base_models:
             return np.asarray(base_models[base_keys[0]].predict(X), dtype=np.float32)
         if base_models and model_bundle.get("meta_model") is not None:
@@ -409,7 +534,9 @@ class _GatedSegmentedStackingRegressor:
             ])
             if stacked.size:
                 return np.asarray(model_bundle["meta_model"].predict(stacked), dtype=np.float32)
-        return np.asarray(self.global_model_.predict(X), dtype=np.float32)
+        if self.global_model_ is not None:
+            return self._predict_local(self.global_model_, X)
+        raise ValueError("Segmented model has no global fallback model.")
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         X = np.asarray(X, dtype=np.float32)
@@ -417,13 +544,26 @@ class _GatedSegmentedStackingRegressor:
             raise ValueError("Segmented model has not been fitted.")
         gate_values = np.asarray(self.gate_model_.predict(X), dtype=np.float32)
         labels = self._segment_for_gate_values(gate_values)
-        predictions = np.asarray(self.global_model_.predict(X), dtype=np.float32)
-        high_bundle = self.segment_models_.get("high")
-        high_mask = labels == "high"
-        if high_bundle is not None and np.any(high_mask):
-            local_predictions = self._predict_local(high_bundle, X[high_mask])
-            predictions[high_mask] = (1.0 - self.high_blend) * predictions[high_mask] + self.high_blend * local_predictions
+        predictions = self._predict_local(self.global_model_, X)
+        for segment in self.SEGMENT_ORDER:
+            model_bundle = self.segment_models_.get(segment)
+            segment_mask = labels == segment
+            if model_bundle is not None and np.any(segment_mask):
+                local_predictions = self._predict_local(model_bundle, X[segment_mask])
+                if self.thesis_profile:
+                    predictions[segment_mask] = (
+                        (1.0 - self.high_blend) * predictions[segment_mask]
+                        + self.high_blend * local_predictions
+                    )
+                else:
+                    predictions[segment_mask] = local_predictions
         return np.clip(predictions, 0.0, None)
+
+    def predict_segments(self, X: np.ndarray) -> list[str]:
+        if self.gate_model_ is None:
+            raise ValueError("Segmented model has not been fitted.")
+        gate_values = np.asarray(self.gate_model_.predict(np.asarray(X, dtype=np.float32)), dtype=np.float32)
+        return [str(value) for value in self._segment_for_gate_values(gate_values).tolist()]
 
 
 TARGET_DEFINITIONS: dict[str, dict[str, Any]] = {
@@ -673,7 +813,7 @@ TUNE_PARAM_GRIDS: dict[str, list[dict[str, Any]]] = {
             "meta_model": meta_model,
             "high_train_threshold": train_threshold,
             "high_gate_threshold": gate_threshold,
-            "high_blend": blend,
+                "high_blend": blend,
             "high_weight": 1.5,
             "min_segment_size": 14,
         }
@@ -684,8 +824,8 @@ TUNE_PARAM_GRIDS: dict[str, list[dict[str, Any]]] = {
         )
         for train_threshold in (0.55, 0.60)
         for gate_threshold in (0.45, 0.50)
-        for blend in (0.20, 0.35)
-    ],  # 36，后台分段混合实验入口使用；不展示在普通算法列表中
+        for blend in (0.0, 0.08)
+    ],  # 后台 WFF 门控分区复刻入口使用；不展示在普通算法列表中
     "catboost": [
         {"iterations": it, "learning_rate": lr, "depth": d, "l2_leaf_reg": l2}
         for it in (160, 220, 300)
@@ -724,6 +864,10 @@ SPLIT_STRATEGY_DEFINITIONS: dict[str, dict[str, str]] = {
     "joint_stratified": {
         "label": "论文复现：阳离子 × μ 分箱",
         "description": "按阳离子类型和摩擦系数分箱构建联合标签；单样本标签进入稀有组合外推验证集，多样本标签再按 8:2 分层切训练/测试。",
+    },
+    "wff_thesis": {
+        "label": "WFF 论文固定划分",
+        "description": "使用 WFF 论文数据文件内复刻的 Training / Testing / Exp in literature 固定划分；训练池内部再做 5 折交叉验证。",
     },
     "k_fold": {
         "label": "5 折交叉验证（K-Fold CV）",
@@ -766,6 +910,19 @@ def _int_or_default(value: Any, default: int) -> int:
     if numeric is None:
         return int(default)
     return int(round(numeric))
+
+
+def _bool_or_default(value: Any, default: bool) -> bool:
+    if value is None:
+        return bool(default)
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off"}:
+        return False
+    return bool(default)
 
 
 def _saved_row_matches_training_view(row: dict[str, Any], training_view: Any) -> bool:
@@ -1269,6 +1426,7 @@ class ModelTrainingService:
         rows, metadata = self._load_saved_dataset_rows(dataset)
         feature_columns = self._feature_columns_from_dataset_metadata(rows, metadata)
         target_column = self._target_column_from_metadata(metadata)
+        default_data_options = self._default_data_options_for_dataset(metadata)
         usable_records = self._usable_saved_rows(rows, target_column, feature_columns)
         target_ready_rows = []
         for row_index, row in enumerate(rows):
@@ -1328,10 +1486,28 @@ class ModelTrainingService:
                 "target": target_column,
                 "algorithm": self._default_algorithm_key(),
                 "hyperparameters": DEFAULT_HYPERPARAMETERS,
-                "data_options": DEFAULT_DATA_OPTIONS,
+                "data_options": default_data_options,
                 "cleaned_dataset_id": dataset.id,
             },
         }
+
+    def _default_data_options_for_dataset(self, metadata: dict[str, Any]) -> dict[str, Any]:
+        options = dict(DEFAULT_DATA_OPTIONS)
+        import_metadata = metadata.get("import_metadata") or {}
+        if import_metadata.get("thesis_fixed_split"):
+            options.update(
+                {
+                    "training_view": "all",
+                    "split_strategy": "wff_thesis",
+                    "cv_folds": 5,
+                    "reserve_external_validation": False,
+                    "target_aggregation_strategy": "raw",
+                    "target_outlier_strategy": "off",
+                    "target_outlier_min": None,
+                    "target_outlier_max": None,
+                }
+            )
+        return options
 
     def preview_saved_training_plan(self, dataset: CleanedDataset, config: dict[str, Any]) -> dict[str, Any]:
         logger.debug("Previewing training plan dataset_id=%s", dataset.id)
@@ -1500,10 +1676,11 @@ class ModelTrainingService:
                 "min_segment_size": _int_or_default(segment_params.get("min_segment_size"), 18),
                 "high_train_threshold": _float_or_default(segment_params.get("high_train_threshold"), 0.60),
                 "high_gate_threshold": _float_or_default(segment_params.get("high_gate_threshold"), 0.50),
-                "high_blend": _float_or_default(segment_params.get("high_blend"), 0.30),
+                "high_blend": _float_or_default(segment_params.get("high_blend"), 0.0),
                 "high_weight": _float_or_default(segment_params.get("high_weight"), 1.50),
                 "base_models": segment_params.get("base_models") or segment_params.get("segment_base_models"),
                 "meta_model": str(segment_params.get("meta_model") or "catboost"),
+                "thesis_profile": _bool_or_default(segment_params.get("thesis_profile"), True),
             }
             model = _GatedSegmentedStackingRegressor(random_seed=random_seed, **params)
             model.fit(X_train, y_train)
@@ -3011,7 +3188,25 @@ class ModelTrainingService:
         # 留出测试集——训练全程不可见，最终给学生"出考卷"用。
         all_indices = np.arange(len(eligible_rows))
         external_idx = np.array([], dtype=int)
-        if split_strategy == "joint_stratified":
+        if split_strategy == "wff_thesis":
+            split_labels = [str(row.get("__thesis_split") or "").strip().lower() for row in eligible_rows]
+            if not any(split_labels):
+                raise ValueError("WFF thesis split requires rows with __thesis_split metadata. Use the built-in WFF import action.")
+            train_pool_idx = np.asarray(
+                [index for index, split in enumerate(split_labels) if split in {"train", "training", "train_pool"}],
+                dtype=int,
+            )
+            test_idx = np.asarray(
+                [index for index, split in enumerate(split_labels) if split in {"test", "testing"}],
+                dtype=int,
+            )
+            external_idx = np.asarray(
+                [index for index, split in enumerate(split_labels) if split in {"external", "literature", "exp_in_literature"}],
+                dtype=int,
+            )
+            if len(train_pool_idx) < 10 or len(test_idx) < 2:
+                raise ValueError("WFF thesis split did not contain enough training/test rows.")
+        elif split_strategy == "joint_stratified":
             train_pool_idx, test_idx, external_idx = self._joint_stratified_holdout_indices(
                 joint_labels,
                 test_fraction=validation_split,
@@ -3044,7 +3239,7 @@ class ModelTrainingService:
         pool_size = int(len(train_pool_idx))
         held_out_test_size = int(len(test_idx))
         external_size = int(len(external_idx))
-        if split_strategy == "joint_stratified":
+        if split_strategy in {"joint_stratified", "wff_thesis"}:
             train_pool_labels = joint_labels[train_pool_idx] if len(train_pool_idx) else np.asarray([], dtype=object)
             label_counts = {
                 str(label): int(np.sum(train_pool_labels == label))
@@ -3110,6 +3305,8 @@ class ModelTrainingService:
                 warnings.append(f"{external_size} singleton cation × μ-bin strata were reserved as external literature validation rows.")
             if not held_out_test_size:
                 warnings.append("Joint stratified split fell back to the full pool because too few rows remained for training.")
+        if split_strategy == "wff_thesis":
+            warnings.append("Using WFF thesis fixed split: Training / Testing / Exp in literature are kept identical to the imported thesis matrix.")
 
         metadata_target = metadata.get("target") if isinstance(metadata.get("target"), dict) else {}
         target_payload = target_display_payload(
@@ -3152,6 +3349,7 @@ class ModelTrainingService:
                     "experiment_method": row.get("__experiment_method"),
                     "measurement_type": row.get("__measurement_type"),
                     "training_view": row.get("__training_view"),
+                    "thesis_split": row.get("__thesis_split"),
                     "aggregated_count": row.get("_aggregated_count"),
                     "aggregation_record_ids": row.get("_aggregation_record_ids"),
                     "actual": float(row["_target_value"]),
@@ -3261,6 +3459,17 @@ class ModelTrainingService:
                 for fold_index, (train_rel, val_rel) in enumerate(splitter.split(X[pool_idx], y[pool_idx]), start=1)
             ]
 
+        if split_strategy == "wff_thesis":
+            splitter = KFold(n_splits=min(cv_folds, len(pool_idx)), shuffle=True, random_state=random_seed)
+            return [
+                {
+                    "label": f"WFF Thesis Fold {fold_index}",
+                    "train_idx": pool_idx[train_rel],
+                    "val_idx": pool_idx[val_rel],
+                }
+                for fold_index, (train_rel, val_rel) in enumerate(splitter.split(X[pool_idx], y[pool_idx]), start=1)
+            ]
+
         if split_strategy == "joint_stratified":
             joint_labels = np.asarray(prepared.get("joint_labels"), dtype=object)
             pool_labels = joint_labels[pool_idx] if len(joint_labels) == len(y) else np.asarray([], dtype=object)
@@ -3348,7 +3557,7 @@ class ModelTrainingService:
         return summary
 
     def _build_split_details(self, prepared: dict[str, Any], split_plan: list[dict[str, Any]]) -> dict[str, Any] | None:
-        if prepared.get("split_strategy") != "joint_stratified":
+        if prepared.get("split_strategy") not in {"joint_stratified", "wff_thesis"}:
             return None
 
         row_metadata: list[dict[str, Any]] = prepared.get("row_metadata") or []
@@ -3366,7 +3575,11 @@ class ModelTrainingService:
         subset_defs = [
             ("train_pool", "训练池", prepared_indices("train_pool_idx")),
             ("test", "测试集", prepared_indices("test_idx")),
-            ("external", "稀有组合外推", prepared_indices("external_idx")),
+            (
+                "external",
+                "外部文献验证" if prepared.get("split_strategy") == "wff_thesis" else "稀有组合外推",
+                prepared_indices("external_idx"),
+            ),
         ]
 
         subset_lookup: dict[int, str] = {}
@@ -3757,7 +3970,7 @@ class ModelTrainingService:
 
         ranked_residuals = sorted(points, key=lambda item: item["abs_residual"], reverse=True)
         return {
-            "prediction_samples": points[:40],
+            "prediction_samples": points[:240],
             "largest_residuals": ranked_residuals[:12],
         }
 
@@ -3772,12 +3985,15 @@ class ModelTrainingService:
         external_metrics: dict[str, Any] | None,
         external_samples: list[dict[str, Any]],
         external_diagnostics: dict[str, Any] | None = None,
+        segment_summary: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         current = task.current or {}
         dataset = task.dataset or {}
         split = dataset.get("split") or {}
         config = task.config or {}
         data_options = config.get("data_options") or {}
+        is_wff_thesis_split = split.get("strategy") == "wff_thesis"
+        external_metric_label = "外部文献验证" if is_wff_thesis_split else "稀有组合外推"
 
         def metric_payload(label: str, sample_count: Any, r2: Any, rmse: Any, mae: Any) -> dict[str, Any]:
             return {
@@ -3835,8 +4051,8 @@ class ModelTrainingService:
         elif external_count < 30:
             add_risk(
                 "medium",
-                "外推验证样本偏少",
-                f"稀有组合外推验证只有 {external_count} 条，R² 对单个极端样本很敏感，应作为外推风险提示而非主泛化指标。",
+                "外部验证样本偏少",
+                f"{external_metric_label}只有 {external_count} 条，R² 对单个极端样本很敏感，应作为外推风险提示而非主泛化指标。",
             )
         if external_r2 is not None and external_r2 < 0:
             add_risk(
@@ -3887,7 +4103,7 @@ class ModelTrainingService:
                     (test_metrics or {}).get("test_mae"),
                 ) if test_metrics else None,
                 "external": metric_payload(
-                    "稀有组合外推",
+                    external_metric_label,
                     (external_metrics or {}).get("sample_count"),
                     (external_metrics or {}).get("external_r2"),
                     (external_metrics or {}).get("external_rmse"),
@@ -3912,6 +4128,7 @@ class ModelTrainingService:
             "feature_importance_top": feature_importance[:10],
             "residual_top": residual_candidates[:10],
             "external_diagnostics": external_diagnostics,
+            "segment_summary": segment_summary,
             "risks": risks,
             "warnings": task.warnings,
         }
@@ -3956,10 +4173,11 @@ class ModelTrainingService:
                 min_segment_size=int(params.get("min_segment_size", 18)),
                 high_train_threshold=float(params.get("high_train_threshold", 0.60)),
                 high_gate_threshold=float(params.get("high_gate_threshold", 0.50)),
-                high_blend=float(params.get("high_blend", 0.30)),
+                high_blend=float(params.get("high_blend", 0.0)),
                 high_weight=float(params.get("high_weight", 1.50)),
                 base_models=params.get("base_models") or params.get("segment_base_models"),
                 meta_model=str(params.get("meta_model") or "catboost"),
+                thesis_profile=_bool_or_default(params.get("thesis_profile"), True),
             )
             estimator.fit(X, y)
             return estimator
@@ -4364,6 +4582,9 @@ class ModelTrainingService:
             task.test_metrics = test_metrics
             feature_importance = self._build_feature_importance(final_model, task.dataset.get("feature_columns", []))
             prediction_insights = self._build_prediction_insights(row_metadata, oof_predictions)
+            segment_summary = getattr(final_model, "partition_summary_", None)
+            if not isinstance(segment_summary, dict):
+                segment_summary = None
             experiment_report = self._build_experiment_report(
                 task,
                 prediction_insights=prediction_insights,
@@ -4373,6 +4594,7 @@ class ModelTrainingService:
                 external_metrics=external_metrics,
                 external_samples=external_samples,
                 external_diagnostics=external_diagnostics,
+                segment_summary=segment_summary,
             )
 
             task.insights = {
@@ -4382,6 +4604,7 @@ class ModelTrainingService:
                 "external_samples": external_samples,
                 "external_metrics": external_metrics,
                 "external_diagnostics": external_diagnostics,
+                "segment_summary": segment_summary,
                 "experiment_report": experiment_report,
             }
 

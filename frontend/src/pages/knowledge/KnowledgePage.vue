@@ -233,7 +233,7 @@ watch(
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col bg-[#f3f7fb] p-3">
+  <div class="flex h-full min-h-0 flex-col bg-slate-100 p-3 dark:bg-slate-950">
     <div
       class="grid min-h-0 flex-1 gap-3"
       :class="currentSection === 'snapshots' || currentSection === 'insights'
@@ -249,7 +249,7 @@ watch(
       />
 
       <main class="flex min-h-0 flex-col gap-3 overflow-hidden">
-        <section class="min-h-0 flex-1 overflow-hidden rounded-[1.8rem] border border-[#dbe5f0] bg-white shadow-[0_28px_64px_-46px_rgba(15,23,42,0.34)]">
+        <section class="min-h-0 flex-1 overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
           <div
             v-if="currentSection === 'snapshots'"
             class="h-full min-h-0 overflow-hidden"
@@ -305,7 +305,7 @@ watch(
             >
               <div class="max-w-xl">
                 <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#8ca0ba]">扩散数据</p>
-                <h3 class="mt-3 text-[1.55rem] font-semibold tracking-[-0.05em] text-slate-950">关系图当前仅支持摩擦学数据</h3>
+                <h3 class="mt-3 text-[1.55rem] font-semibold tracking-normal text-slate-950">关系图当前仅支持摩擦学数据</h3>
                 <p class="mt-3 text-sm leading-7 text-slate-500">
                   扩散数据请使用"数据浏览"、"质量检查"和"训练数据集"三个视图来筛选记录、检查证据并导出特征集。
                 </p>

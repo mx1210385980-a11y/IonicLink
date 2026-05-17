@@ -183,12 +183,12 @@ onBeforeUnmount(() => {
 
 <template>
   <aside
-    class="relative z-50 flex h-screen shrink-0 flex-col overflow-hidden bg-[#0b1520] text-slate-300 transition-[width] duration-300"
-    :class="isCollapsed ? 'w-[4.9rem]' : 'w-[220px]'"
+    class="relative z-50 flex h-screen shrink-0 flex-col overflow-hidden border-r border-slate-800 bg-slate-950 text-slate-300 transition-[width] duration-300"
+    :class="isCollapsed ? 'w-[4.75rem]' : 'w-[224px]'"
   >
     <button
       type="button"
-      class="absolute right-2 top-3 flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-white/6 hover:text-slate-200"
+      class="absolute right-2 top-3 flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-white/8 hover:text-slate-200"
       :title="isCollapsed ? (isChinese ? '展开侧栏' : 'Expand sidebar') : (isChinese ? '收起侧栏' : 'Collapse sidebar')"
       @click="toggleSidebarCollapse"
     >
@@ -198,12 +198,12 @@ onBeforeUnmount(() => {
 
     <!-- Brand -->
     <div
-      class="flex border-b border-white/6"
+      class="flex border-b border-white/10"
       :class="isCollapsed ? 'justify-center px-2 py-4' : 'items-center gap-2.5 px-4 py-4'"
     >
       <button
         type="button"
-        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-[0.6rem] bg-[#f4d18f]/10 text-[#f4d18f] hover:bg-[#f4d18f]/18 transition"
+        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-white/10 text-slate-100 transition hover:bg-white/15"
         :title="isChinese ? '打开内容中心' : 'Open Content Center'"
         @click="emit('navigate', 'blog', 'articles')"
       >
@@ -212,7 +212,7 @@ onBeforeUnmount(() => {
       <button
         v-if="!isCollapsed"
         type="button"
-        class="brand-serif text-[1.1rem] leading-none text-white hover:text-[#f4d18f] transition"
+        class="text-[1.05rem] font-semibold leading-none text-white transition hover:text-slate-200"
         @click="emit('navigate', 'home')"
       >
         IonicLink
@@ -225,17 +225,17 @@ onBeforeUnmount(() => {
         v-for="item in primaryNav"
         :key="item.key"
         type="button"
-        class="group relative flex rounded-lg text-[13.5px] font-medium transition-all"
+        class="group relative flex rounded-md text-[13.5px] font-medium transition"
         :class="currentView === item.key
-          ? (isCollapsed ? 'justify-center bg-white/8 px-0 py-2.5 text-[#f4d18f]' : 'items-center gap-2.5 bg-white/8 px-2.5 py-2 text-[#f4d18f]')
-          : (isCollapsed ? 'justify-center px-0 py-2.5 text-slate-400 hover:bg-white/5 hover:text-slate-100' : 'items-center gap-2.5 px-2.5 py-2 text-slate-400 hover:bg-white/5 hover:text-slate-100')"
+          ? (isCollapsed ? 'justify-center bg-white/10 px-0 py-2.5 text-white' : 'items-center gap-2.5 bg-white/10 px-2.5 py-2 text-white')
+          : (isCollapsed ? 'justify-center px-0 py-2.5 text-slate-400 hover:bg-white/6 hover:text-slate-100' : 'items-center gap-2.5 px-2.5 py-2 text-slate-400 hover:bg-white/6 hover:text-slate-100')"
         :title="item.label"
         @click="emit('navigate', item.key)"
       >
         <component
           :is="item.icon"
           class="h-4 w-4 shrink-0 transition-colors"
-          :class="currentView === item.key ? 'text-[#f4d18f]' : 'text-slate-500 group-hover:text-slate-300'"
+          :class="currentView === item.key ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'"
         />
         <span v-if="!isCollapsed">{{ item.label }}</span>
         <span
@@ -255,7 +255,7 @@ onBeforeUnmount(() => {
         </p>
         <button
           type="button"
-          class="text-[10px] font-medium text-slate-600 hover:text-[#f4d18f] transition"
+          class="text-[10px] font-medium text-slate-500 transition hover:text-slate-200"
           @click="emit('navigate', 'pipeline', 'upload')"
         >
           + {{ isChinese ? '上传' : 'Add' }}
@@ -269,10 +269,10 @@ onBeforeUnmount(() => {
       >
         <button
           type="button"
-          class="group mb-1 w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-all"
+          class="group mb-1 flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition"
           :class="selectedFileId === null
-            ? 'bg-white/8 text-slate-100'
-            : 'hover:bg-white/4 text-slate-400 hover:text-slate-200'"
+            ? 'bg-white/10 text-slate-100'
+            : 'text-slate-400 hover:bg-white/6 hover:text-slate-200'"
           @click="openScopeLibrary"
         >
           <Database class="h-3.5 w-3.5 shrink-0 text-slate-600 group-hover:text-slate-400" />
@@ -292,10 +292,10 @@ onBeforeUnmount(() => {
           v-for="file in batchFiles"
           :key="file.id"
           type="button"
-          class="group w-full flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition-all"
+          class="group flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition"
           :class="selectedFileId === file.id
-            ? 'bg-white/8 text-slate-100'
-            : 'hover:bg-white/4 text-slate-400 hover:text-slate-200'"
+            ? 'bg-white/10 text-slate-100'
+            : 'text-slate-400 hover:bg-white/6 hover:text-slate-200'"
           @click="handlePaperClick(file)"
         >
           <FileText class="h-3.5 w-3.5 shrink-0 text-slate-600 group-hover:text-slate-400" />
@@ -319,10 +319,10 @@ onBeforeUnmount(() => {
       >
         <button
           type="button"
-          class="group flex h-10 w-10 items-center justify-center rounded-xl transition-all"
+          class="group flex h-10 w-10 items-center justify-center rounded-md transition"
           :class="selectedFileId === null
-            ? 'bg-white/8 text-slate-100'
-            : 'text-slate-400 hover:bg-white/4 hover:text-slate-200'"
+            ? 'bg-white/10 text-slate-100'
+            : 'text-slate-400 hover:bg-white/6 hover:text-slate-200'"
           :title="isChinese ? '课题组文献库' : 'Group Library'"
           @click="openScopeLibrary"
         >
@@ -331,7 +331,7 @@ onBeforeUnmount(() => {
 
         <button
           type="button"
-          class="flex h-10 w-10 items-center justify-center rounded-xl text-slate-400 transition hover:bg-white/4 hover:text-slate-200"
+          class="flex h-10 w-10 items-center justify-center rounded-md text-slate-400 transition hover:bg-white/6 hover:text-slate-200"
           :title="isChinese ? '上传论文' : 'Upload paper'"
           @click="emit('navigate', 'pipeline', 'upload')"
         >
@@ -344,10 +344,10 @@ onBeforeUnmount(() => {
           v-for="file in collapsedPaperItems"
           :key="file.id"
           type="button"
-          class="relative flex h-10 w-10 items-center justify-center rounded-xl transition-all"
+          class="relative flex h-10 w-10 items-center justify-center rounded-md transition"
           :class="selectedFileId === file.id
-            ? 'bg-white/8 text-slate-100'
-            : 'text-slate-400 hover:bg-white/4 hover:text-slate-200'"
+            ? 'bg-white/10 text-slate-100'
+            : 'text-slate-400 hover:bg-white/6 hover:text-slate-200'"
           :title="truncateName(file.name, 36)"
           @click="handlePaperClick(file)"
         >
@@ -361,15 +361,15 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Secondary nav + footer -->
-    <div class="flex flex-col gap-0.5 border-t border-white/6 px-2 pb-1 pt-2">
+    <div class="flex flex-col gap-0.5 border-t border-white/10 px-2 pb-1 pt-2">
       <button
         v-for="item in visibleSecondaryNav"
         :key="item.key"
         type="button"
-        class="group flex rounded-lg text-[13px] font-medium transition-all"
+        class="group flex rounded-md text-[13px] font-medium transition"
         :class="currentView === item.key
-          ? (isCollapsed ? 'justify-center bg-white/8 px-0 py-2 text-[#f4d18f]' : 'items-center gap-2.5 bg-white/8 px-2.5 py-1.5 text-[#f4d18f]')
-          : (isCollapsed ? 'justify-center px-0 py-2 text-slate-500 hover:bg-white/5 hover:text-slate-300' : 'items-center gap-2.5 px-2.5 py-1.5 text-slate-500 hover:bg-white/5 hover:text-slate-300')"
+          ? (isCollapsed ? 'justify-center bg-white/10 px-0 py-2 text-white' : 'items-center gap-2.5 bg-white/10 px-2.5 py-1.5 text-white')
+          : (isCollapsed ? 'justify-center px-0 py-2 text-slate-500 hover:bg-white/6 hover:text-slate-300' : 'items-center gap-2.5 px-2.5 py-1.5 text-slate-500 hover:bg-white/6 hover:text-slate-300')"
         :title="item.label"
         @click="emit('navigate', item.key)"
       >
@@ -379,8 +379,8 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Default library -->
-    <div v-if="!isCollapsed" class="border-t border-white/6 px-3 pb-2 pt-2">
-      <div class="rounded-md border border-white/8 bg-white/5 px-2 py-1.5">
+    <div v-if="!isCollapsed" class="border-t border-white/10 px-3 pb-2 pt-2">
+      <div class="rounded-md border border-white/10 bg-white/[0.04] px-2 py-1.5">
         <span class="block text-[9.5px] font-semibold uppercase tracking-[0.22em] text-slate-600">
           {{ isChinese ? '默认文献库' : 'Default Library' }}
         </span>
@@ -392,7 +392,7 @@ onBeforeUnmount(() => {
 
     <!-- User block -->
     <div
-      class="border-t border-white/6"
+      class="border-t border-white/10"
       :class="isCollapsed ? 'px-2 py-2' : 'px-3 py-2.5'"
     >
       <div
@@ -400,7 +400,7 @@ onBeforeUnmount(() => {
         :class="isCollapsed ? 'flex-col items-center gap-2' : 'items-center gap-2'"
       >
       <div
-        class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/8"
+        class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white/10"
         :title="operatorName"
       >
         <UserCircle2 class="h-4 w-4 text-slate-400" />
@@ -413,10 +413,10 @@ onBeforeUnmount(() => {
         class="flex items-center"
         :class="isCollapsed ? 'flex-col gap-1' : 'gap-0.5'"
       >
-        <LanguageToggle class="opacity-70 hover:opacity-100 transition" />
+        <LanguageToggle v-if="!isCollapsed" class="opacity-70 transition hover:opacity-100" />
         <button
           type="button"
-          class="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:text-slate-200 hover:bg-white/6 transition"
+          class="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition hover:bg-white/8 hover:text-slate-200"
           :title="isChinese ? '切换主题' : 'Toggle theme'"
           @click="emit('toggleDark')"
         >
@@ -425,7 +425,7 @@ onBeforeUnmount(() => {
         </button>
         <button
           type="button"
-          class="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 hover:text-red-400 hover:bg-white/6 transition"
+          class="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition hover:bg-white/8 hover:text-red-400"
           :title="isChinese ? '退出登录' : 'Sign out'"
           @click="emit('logout')"
         >

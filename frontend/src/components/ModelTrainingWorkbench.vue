@@ -39,6 +39,7 @@ import {
   getQualityAssetSummary,
   getModelTrainingRun,
   getModelTrainingSummary,
+  importWffThesisDatasets,
   listCleanedDatasets,
   listModelTrainingRuns,
   listModelPredictionRuns,
@@ -65,7 +66,87 @@ import {
   type SavedCleanedDatasetSummary,
 } from '@/lib/api'
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler)
+const paperRegionPlugin = {
+  id: 'paperRegionBackground',
+  beforeDraw(chart: any) {
+    const region = chart.options?.plugins?.paperRegion
+    if (!region?.enabled) return
+    const { ctx, chartArea, scales } = chart
+    const xScale = scales.x
+    const yScale = scales.y
+    if (!chartArea || !xScale || !yScale) return
+    const colors = region.colors || ['rgba(220, 252, 231, 0.48)', 'rgba(207, 250, 254, 0.46)', 'rgba(252, 231, 243, 0.50)']
+    const min = Number(region.min ?? 0)
+    const max = Number(region.max ?? 1)
+    const low = Number(region.low ?? min)
+    const high = Number(region.high ?? max)
+
+    const drawBand = (from: number, to: number, color: string) => {
+      if (to <= from) return
+      ctx.save()
+      ctx.fillStyle = color
+      if (region.axis === 'y') {
+        const y1 = yScale.getPixelForValue(Math.min(Math.max(from, min), max))
+        const y2 = yScale.getPixelForValue(Math.min(Math.max(to, min), max))
+        ctx.fillRect(chartArea.left, Math.min(y1, y2), chartArea.right - chartArea.left, Math.abs(y2 - y1))
+      } else {
+        const x1 = xScale.getPixelForValue(Math.min(Math.max(from, min), max))
+        const x2 = xScale.getPixelForValue(Math.min(Math.max(to, min), max))
+        ctx.fillRect(Math.min(x1, x2), chartArea.top, Math.abs(x2 - x1), chartArea.bottom - chartArea.top)
+      }
+      ctx.restore()
+    }
+
+    drawBand(min, low, colors[0])
+    drawBand(low, high, colors[1])
+    drawBand(high, max, colors[2])
+  },
+  afterDatasetsDraw(chart: any) {
+    const region = chart.options?.plugins?.paperRegion
+    if (!region?.enabled) return
+    const { ctx, chartArea, scales } = chart
+    const scale = region.axis === 'y' ? scales.y : scales.x
+    if (!chartArea || !scale) return
+    const thresholds = [
+      Number(region.low),
+      Number(region.high),
+    ].filter((value) => Number.isFinite(value))
+    ctx.save()
+    ctx.setLineDash([3, 4])
+    ctx.strokeStyle = 'rgba(100,116,139,0.72)'
+    ctx.fillStyle = 'rgba(15,23,42,0.86)'
+    ctx.lineWidth = 1
+    ctx.font = '600 10px system-ui, -apple-system, BlinkMacSystemFont, sans-serif'
+    thresholds.forEach((threshold) => {
+      if (region.axis === 'y') {
+        const y = scale.getPixelForValue(threshold)
+        if (y < chartArea.top || y > chartArea.bottom) return
+        ctx.beginPath()
+        ctx.moveTo(chartArea.left, y)
+        ctx.lineTo(chartArea.right, y)
+        ctx.stroke()
+        ctx.setLineDash([])
+        ctx.textAlign = 'right'
+        ctx.fillText(String(Number(threshold.toFixed(3))), chartArea.right - 4, y - 5)
+        ctx.setLineDash([3, 4])
+      } else {
+        const x = scale.getPixelForValue(threshold)
+        if (x < chartArea.left || x > chartArea.right) return
+        ctx.beginPath()
+        ctx.moveTo(x, chartArea.top)
+        ctx.lineTo(x, chartArea.bottom)
+        ctx.stroke()
+        ctx.setLineDash([])
+        ctx.textAlign = 'center'
+        ctx.fillText(String(Number(threshold.toFixed(3))), x, chartArea.top + 12)
+        ctx.setLineDash([3, 4])
+      }
+    })
+    ctx.restore()
+  },
+}
+
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler, paperRegionPlugin)
 
 type LeaderboardRow = {
   taskId: string
@@ -130,6 +211,9 @@ type FeatureGainRunStep = {
   testR2?: number | null
   testRmse?: number | null
   testMae?: number | null
+  externalR2?: number | null
+  externalRmse?: number | null
+  externalMae?: number | null
   finishedAt?: string | null
   snapshot?: ModelTrainingTaskSnapshot | null
   error?: string | null
@@ -160,6 +244,9 @@ type SegmentMixRunStep = {
   testR2?: number | null
   testRmse?: number | null
   testMae?: number | null
+  externalR2?: number | null
+  externalRmse?: number | null
+  externalMae?: number | null
   finishedAt?: string | null
   snapshot?: ModelTrainingTaskSnapshot | null
   error?: string | null
@@ -204,6 +291,7 @@ const selectedCleanedDatasetId = ref<number | null>(null)
 const leaderboard = ref<LeaderboardRow[]>([])
 const loading = ref(true)
 const loadError = ref('')
+const wffImporting = ref(false)
 const qualityLoading = ref(false)
 const qualityError = ref('')
 const starting = ref(false)
@@ -414,53 +502,53 @@ const FEATURE_GAIN_RECIPES: FeatureGainRecipe[] = [
 const SEGMENT_MIX_RECIPES: SegmentMixRecipe[] = [
   {
     key: 'catboost_rf_svr',
-    label: '二模型混合：CatBoost + RF / SVR',
-    shortLabel: 'CatBoost + RF / SVR',
+    label: '论文对照：CatBoost + RF 稳定融合',
+    shortLabel: 'CatBoost + RF 融合',
     baseModels: ['catboost', 'random_forest'],
     metaModel: 'svr',
-    purpose: '低样本时更保守，观察 RF 的局部鲁棒性和 SVR 元模型能否降低高 COF 偏差。',
+    purpose: '论文 4.3.2 的两基学习器对照：外部文献验证较稳，用来和三基最优方案比较。',
     hyperparameters: {
+      q1: 0.3,
+      q2: 0.8,
+      high_blend: 0,
       base_models: ['catboost', 'random_forest'],
       meta_model: 'svr',
-      high_train_threshold: 0.6,
-      high_gate_threshold: 0.5,
-      high_blend: 0.3,
-      high_weight: 1.5,
-      min_segment_size: 14,
+      thesis_profile: true,
+      min_segment_size: 8,
     },
   },
   {
     key: 'catboost_xgboost_catboost',
-    label: '二模型混合：CatBoost + XGBoost / CatBoost',
-    shortLabel: 'CatBoost + XGBoost / CatBoost',
+    label: '论文对照：CatBoost + XGBoost 稳定融合',
+    shortLabel: 'CatBoost + XGBoost 融合',
     baseModels: ['catboost', 'xgboost'],
     metaModel: 'catboost',
-    purpose: '比较两个 boosting 模型在高 COF 段的互补性，适合看测试集曲线是否更贴近对角线。',
+    purpose: '论文 4.3.2 的测试集强对照：测试集拟合高，但超低摩擦趋势不是最终最优。',
     hyperparameters: {
+      q1: 0.3,
+      q2: 0.8,
+      high_blend: 0,
       base_models: ['catboost', 'xgboost'],
       meta_model: 'catboost',
-      high_train_threshold: 0.6,
-      high_gate_threshold: 0.5,
-      high_blend: 0.3,
-      high_weight: 1.5,
-      min_segment_size: 14,
+      thesis_profile: true,
+      min_segment_size: 8,
     },
   },
   {
     key: 'catboost_rf_xgboost_catboost',
-    label: '三模型混合：CatBoost + RF + XGBoost / CatBoost',
-    shortLabel: 'CatBoost + RF + XGBoost / CatBoost',
+    label: '论文最优：CatBoost + RF + XGBoost 稳定融合',
+    shortLabel: '三基稳定融合',
     baseModels: ['catboost', 'random_forest', 'xgboost'],
     metaModel: 'catboost',
-    purpose: '最接近论文里的三基学习器思路，用 CatBoost 元模型融合三类基学习器的高 COF 局部预测。',
+    purpose: '复刻论文第 4 章最终模型：CatBoost 门控低/中/高区间，三基学习器按论文矩阵做稳定融合。',
     hyperparameters: {
+      q1: 0.3,
+      q2: 0.8,
+      high_blend: 0,
       base_models: ['catboost', 'random_forest', 'xgboost'],
       meta_model: 'catboost',
-      high_train_threshold: 0.6,
-      high_gate_threshold: 0.5,
-      high_blend: 0.3,
-      high_weight: 1.5,
-      min_segment_size: 14,
+      thesis_profile: true,
+      min_segment_size: 8,
     },
   },
 ]
@@ -613,7 +701,7 @@ const fitProgressLabel = computed(() => {
 })
 const fitModeTitle = computed(() => {
   if (activeAlgorithm.value === 'svr') return 'SVR 单次拟合结果'
-  if (activeAlgorithm.value === 'high_cof_segmented') return '高 COF 分段模型结果'
+  if (activeAlgorithm.value === 'high_cof_segmented') return 'WFF 门控分区堆叠结果'
   return '线性回归单次拟合结果'
 })
 const fitModeDescription = computed(() => {
@@ -621,7 +709,7 @@ const fitModeDescription = computed(() => {
     return 'SVR 一次性求解支持向量回归目标，没有逐轮加树或 epoch；这里固定展示最终交叉验证和测试集表现。'
   }
   if (activeAlgorithm.value === 'high_cof_segmented') {
-    return '先用 CatBoost 识别高摩擦尾部，再用高 COF 局部模型校准；它没有逐轮曲线，重点观察最终 CV、测试和高 COF 残差。'
+    return '先用 CatBoost 门控低/中/高摩擦区间，再在各区间做局部堆叠；它没有逐轮曲线，重点观察最终 CV、测试和外部文献验证。'
   }
   return '线性回归一次性求解系数，没有逐轮训练轨迹；这里固定展示最终交叉验证和测试集表现。'
 })
@@ -782,6 +870,7 @@ const externalMetrics = computed(() => insights.value?.external_metrics || null)
 const featureImportances = computed(() => (insights.value?.feature_importance || []).slice(0, 10))
 const testMetrics = computed(() => activeTask.value?.test_metrics || null)
 const experimentReport = computed(() => insights.value?.experiment_report || null)
+const segmentSummary = computed(() => insights.value?.segment_summary || experimentReport.value?.segment_summary || null)
 const reportMetrics = computed(() => {
   const metrics = experimentReport.value?.metrics
   if (!metrics) return []
@@ -1116,6 +1205,255 @@ const predictionScatterOptions = computed(() => ({
   },
 }))
 
+const isWffThesisRun = computed(() =>
+  selectedDataset.value?.dataset_kind === 'wff_thesis_csv'
+  || activeTask.value?.config?.data_options?.split_strategy === 'wff_thesis'
+  || experimentReport.value?.split?.strategy === 'wff_thesis',
+)
+
+const paperFitThresholds = computed(() => {
+  const thresholds = segmentSummary.value?.thresholds || {}
+  const low = nullableNumber(thresholds.low)
+  const high = nullableNumber(thresholds.high ?? thresholds.high_quantile_reference)
+  if (low != null && high != null && high > low) return { low, high }
+  if (isWffThesisRun.value) return { low: 0.10, high: 1.06 }
+  const range = predictionRange.value
+  const span = Math.max(0.1, range.max - range.min)
+  return {
+    low: range.min + span * 0.30,
+    high: range.min + span * 0.80,
+  }
+})
+
+const paperFitAxisRange = computed(() => {
+  if (isWffThesisRun.value) return { min: 0, max: 5 }
+  const range = predictionRange.value
+  return {
+    min: Math.min(0, range.min),
+    max: Math.max(1, range.max),
+  }
+})
+
+const paperExternalAxisRange = computed(() => {
+  if (isWffThesisRun.value) return { min: 0, max: 1.4 }
+  const values = externalSamples.value.flatMap((sample) => [Number(sample.actual), Number(sample.predicted)])
+    .filter((value) => Number.isFinite(value))
+  const maxValue = Math.max(1, ...values)
+  return { min: 0, max: maxValue + Math.max(0.08, maxValue * 0.08) }
+})
+
+const paperFitScatterData = computed(() => {
+  const range = paperFitAxisRange.value
+  return {
+    datasets: [
+      {
+        type: 'line' as const,
+        label: 'Y = X',
+        data: [
+          { x: range.min, y: range.min },
+          { x: range.max, y: range.max },
+        ],
+        borderColor: 'rgba(15,23,42,0.88)',
+        borderDash: [7, 5],
+        borderWidth: 1.6,
+        pointRadius: 0,
+        showLine: true,
+      },
+      {
+        type: 'line' as const,
+        label: `训练池 CV · ${predictionSamples.value.length}`,
+        data: predictionSamples.value.map((sample) => ({ x: sample.actual, y: sample.predicted })),
+        backgroundColor: 'rgba(239, 68, 68, 0.82)',
+        borderColor: 'rgba(255,255,255,0.86)',
+        borderWidth: 0.8,
+        pointRadius: 3.8,
+        pointHoverRadius: 6,
+        showLine: false,
+      },
+      {
+        type: 'line' as const,
+        label: `Testing set · ${testSamples.value.length}`,
+        data: testSamples.value.map((sample) => ({ x: sample.actual, y: sample.predicted })),
+        backgroundColor: 'rgba(37, 99, 235, 0.82)',
+        borderColor: 'rgba(255,255,255,0.9)',
+        borderWidth: 0.9,
+        pointRadius: 4.4,
+        pointHoverRadius: 7,
+        showLine: false,
+      },
+    ],
+  }
+})
+
+const paperFitScatterOptions = computed(() => {
+  const range = paperFitAxisRange.value
+  const thresholds = paperFitThresholds.value
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false as const,
+    plugins: {
+      paperRegion: {
+        enabled: true,
+        axis: 'x',
+        min: range.min,
+        max: range.max,
+        low: thresholds.low,
+        high: thresholds.high,
+      },
+      legend: {
+        labels: {
+          usePointStyle: true,
+          boxWidth: 10,
+          color: 'rgba(15,23,42,0.80)',
+          padding: 12,
+          font: { size: 11, weight: 600 },
+        },
+      },
+      tooltip: {
+        backgroundColor: '#ffffff',
+        titleColor: '#0f172a',
+        bodyColor: '#475569',
+        borderColor: 'rgba(148,163,184,0.22)',
+        borderWidth: 1,
+        callbacks: {
+          label: (ctx: any) => {
+            const x = Number(ctx.parsed?.x ?? 0)
+            const y = Number(ctx.parsed?.y ?? 0)
+            if (ctx.dataset.label === 'Y = X') return `Y = X (${x.toFixed(3)}, ${y.toFixed(3)})`
+            return `True ${x.toFixed(3)} / Predicted ${y.toFixed(3)} / Residual ${(y - x).toFixed(3)}`
+          },
+        },
+      },
+    },
+    scales: {
+      x: {
+        type: 'linear' as const,
+        min: range.min,
+        max: range.max,
+        title: { display: true, text: 'True', color: 'rgba(15,23,42,0.86)', font: { size: 12, weight: 700 } },
+        grid: { color: 'rgba(148,163,184,0.12)' },
+        ticks: { color: 'rgba(15,23,42,0.74)' },
+      },
+      y: {
+        type: 'linear' as const,
+        min: range.min,
+        max: range.max,
+        title: { display: true, text: 'Predicted', color: 'rgba(15,23,42,0.86)', font: { size: 12, weight: 700 } },
+        grid: { color: 'rgba(148,163,184,0.12)' },
+        ticks: { color: 'rgba(15,23,42,0.74)' },
+      },
+    },
+  }
+})
+
+const paperExternalLineData = computed(() => {
+  return {
+    datasets: [
+      {
+        type: 'line' as const,
+        label: 'Exp in literature',
+        data: externalSamples.value.map((sample, index) => ({ x: index + 1, y: sample.actual })),
+        borderColor: 'rgba(15,23,42,0.92)',
+        backgroundColor: 'rgba(15,23,42,0.92)',
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        borderWidth: 2,
+        tension: 0.12,
+      },
+      {
+        type: 'line' as const,
+        label: 'Predicted',
+        data: externalSamples.value.map((sample, index) => ({ x: index + 1, y: sample.predicted })),
+        borderColor: 'rgba(22, 163, 74, 0.95)',
+        backgroundColor: 'rgba(22, 163, 74, 0.95)',
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        borderWidth: 2.5,
+        tension: 0.12,
+      },
+    ],
+  }
+})
+
+const paperExternalLineOptions = computed(() => {
+  const range = paperExternalAxisRange.value
+  const thresholds = paperFitThresholds.value
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false as const,
+    interaction: { intersect: false, mode: 'index' as const },
+    plugins: {
+      paperRegion: {
+        enabled: true,
+        axis: 'y',
+        min: range.min,
+        max: range.max,
+        low: thresholds.low,
+        high: thresholds.high,
+      },
+      legend: {
+        position: 'top' as const,
+        align: 'start' as const,
+        labels: {
+          usePointStyle: true,
+          boxWidth: 10,
+          color: 'rgba(15,23,42,0.82)',
+          padding: 10,
+          font: { size: 11, weight: 600 },
+        },
+      },
+      tooltip: {
+        backgroundColor: '#ffffff',
+        titleColor: '#0f172a',
+        bodyColor: '#475569',
+        borderColor: 'rgba(148,163,184,0.22)',
+        borderWidth: 1,
+      },
+    },
+    scales: {
+      x: {
+        type: 'linear' as const,
+        min: 0.5,
+        max: Math.max(1.5, externalSamples.value.length + 0.5),
+        title: { display: true, text: 'Data points', color: 'rgba(15,23,42,0.86)', font: { size: 12, weight: 700 } },
+        ticks: { stepSize: 1, color: 'rgba(15,23,42,0.74)' },
+        grid: { color: 'rgba(148,163,184,0.10)' },
+      },
+      y: {
+        type: 'linear' as const,
+        min: range.min,
+        max: range.max,
+        title: { display: true, text: 'Friction coefficient', color: 'rgba(15,23,42,0.86)', font: { size: 12, weight: 700 } },
+        ticks: { color: 'rgba(15,23,42,0.74)' },
+        grid: { color: 'rgba(148,163,184,0.12)' },
+      },
+    },
+  }
+})
+
+const paperFitMetrics = computed(() => [
+  {
+    label: 'Train/CV',
+    r2: currentPoint.value?.train_r2 ?? null,
+    rmse: currentPoint.value?.train_rmse ?? null,
+    mae: currentPoint.value?.train_mae ?? null,
+  },
+  {
+    label: 'Test',
+    r2: testMetrics.value?.test_r2 ?? null,
+    rmse: testMetrics.value?.test_rmse ?? null,
+    mae: testMetrics.value?.test_mae ?? null,
+  },
+  {
+    label: 'External',
+    r2: externalMetrics.value?.external_r2 ?? null,
+    rmse: externalMetrics.value?.external_rmse ?? null,
+    mae: externalMetrics.value?.external_mae ?? null,
+  },
+])
+
 // 数据切分策略 ─────────────────────────────────────────────────
 const splitOptions = computed(() => summary.value?.split_options || [])
 const activeSplitOption = computed(() =>
@@ -1228,7 +1566,7 @@ const featureGainProgressLabel = computed(() => {
 const featureGainCurrentLabel = computed(() => featureGainCurrent.value?.label || '')
 const featureGainBestResult = computed(() => [...featureGainCompleted.value].sort((a, b) => featureGainScore(b) - featureGainScore(a))[0] || null)
 const segmentMixCompleted = computed(() => segmentMixResults.value.filter((row) => row.status === 'completed' && row.valR2 != null))
-const segmentMixSorted = computed(() => [...segmentMixCompleted.value].sort((a, b) => Number(b.valR2) - Number(a.valR2)))
+const segmentMixSorted = computed(() => [...segmentMixCompleted.value].sort((a, b) => segmentMixScore(b) - segmentMixScore(a)))
 const segmentMixFailed = computed(() => segmentMixResults.value.filter((row) => row.status !== 'completed'))
 const segmentMixBestResult = computed(() => segmentMixSorted.value[0] || null)
 const segmentMixProgressLabel = computed(() => {
@@ -1480,6 +1818,7 @@ const segmentMixChartOptions = computed(() => ({
             `RMSE = ${formatMetric(row.valRmse, 3)}`,
             `MAE = ${formatMetric(row.valMae, 3)}`,
             `测试 R² = ${formatMetric(row.testR2, 3)}`,
+            `外部 R² = ${formatMetric(row.externalR2, 3)}`,
           ]
         },
       },
@@ -1543,7 +1882,7 @@ function algorithmLabelZh(key: string | null | undefined) {
     case 'gradient_boosting': return '梯度提升（Gradient Boosting）'
     case 'random_forest': return '随机森林（Random Forest）'
     case 'catboost': return 'CatBoost'
-    case 'high_cof_segmented': return '高 COF 分段模型'
+    case 'high_cof_segmented': return 'WFF 门控分区堆叠'
     case 'xgboost': return '极端梯度提升（XGBoost）'
     case 'svr': return '支持向量回归（SVR）'
     case 'mlp': return '多层感知机（MLP）'
@@ -1871,6 +2210,15 @@ function featureGainScore(row: FeatureGainRunStep | null | undefined) {
   return valScore ?? Number.NEGATIVE_INFINITY
 }
 
+function segmentMixScore(row: SegmentMixRunStep | null | undefined) {
+  const testScore = nullableNumber(row?.testR2)
+  const externalScore = nullableNumber(row?.externalR2)
+  if (testScore != null && externalScore != null) return (testScore + externalScore) / 2
+  if (testScore != null) return testScore
+  const valScore = nullableNumber(row?.valR2)
+  return valScore ?? Number.NEGATIVE_INFINITY
+}
+
 function featureGainResultFor(key: string) {
   return featureGainResults.value.find((row) => row.key === key) || null
 }
@@ -1943,6 +2291,9 @@ function formatTitleLabel(value: string | null | undefined) {
 }
 
 function preferredTrainingViewKey(): TrainingViewKey {
+  if (selectedDataset.value?.dataset_kind === 'imported_csv' || selectedDataset.value?.dataset_kind === 'wff_thesis_csv') {
+    return 'all'
+  }
   const datasetView = selectedDataset.value?.summary?.rules?.training_view
   const normalized = normalizeTrainingViewKey(datasetView)
   return datasetView && normalized !== 'all' ? normalized : 'afm_surface_response'
@@ -1975,6 +2326,33 @@ async function refreshSavedDatasets() {
   savedDatasets.value = response.items
   if (selectedPredictionDatasetId.value == null) {
     selectedPredictionDatasetId.value = response.items[0]?.id ?? null
+  }
+}
+
+async function handleImportWffThesisDatasets() {
+  if (wffImporting.value || activeTask.value?.status === 'running') return
+  wffImporting.value = true
+  loadError.value = ''
+  try {
+    const response = await importWffThesisDatasets()
+    await refreshSavedDatasets()
+    const datasetB = response.items.find((dataset) => dataset.import_metadata?.wff_dataset_key === 'dataset_b')
+      || response.items.find((dataset) => dataset.name.includes('Dataset-B'))
+      || response.items[0]
+    if (datasetB) {
+      selectedCleanedDatasetId.value = datasetB.id
+      await refreshTrainingSummary(datasetB.id, true)
+      form.algorithm = 'catboost'
+      form.data_options.training_view = 'all'
+      form.data_options.split_strategy = 'wff_thesis'
+      form.data_options.target_aggregation_strategy = 'raw'
+      form.data_options.target_outlier_strategy = 'off'
+      activeWorkbenchTab.value = 'experiments'
+    }
+  } catch (error: any) {
+    loadError.value = error?.response?.data?.detail || error?.message || 'Failed to import WFF thesis datasets.'
+  } finally {
+    wffImporting.value = false
   }
 }
 
@@ -2414,6 +2792,7 @@ function upsertSegmentMixResult(row: SegmentMixRunStep) {
 function recordSegmentMixResult(snapshot: ModelTrainingTaskSnapshot) {
   const current = segmentMixCurrent.value
   if (!current) return
+  const external = snapshot.insights?.external_metrics || null
   upsertSegmentMixResult({
     ...current,
     status: (snapshot.status as SegmentMixRunStep['status']) || 'cancelled',
@@ -2424,6 +2803,9 @@ function recordSegmentMixResult(snapshot: ModelTrainingTaskSnapshot) {
     testR2: snapshot.test_metrics?.test_r2 ?? null,
     testRmse: snapshot.test_metrics?.test_rmse ?? null,
     testMae: snapshot.test_metrics?.test_mae ?? null,
+    externalR2: external?.external_r2 ?? null,
+    externalRmse: external?.external_rmse ?? null,
+    externalMae: external?.external_mae ?? null,
     finishedAt: snapshot.finished_at || snapshot.created_at,
     snapshot,
     error: snapshot.error,
@@ -2446,6 +2828,9 @@ function buildSegmentMixStep(recipe: SegmentMixRecipe, status: SegmentMixRunStep
     testR2: null,
     testRmse: null,
     testMae: null,
+    externalR2: null,
+    externalRmse: null,
+    externalMae: null,
     finishedAt: null,
     snapshot: null,
     error: null,
@@ -2780,7 +3165,7 @@ watch(
           v-if="segmentMixMode"
           class="shrink-0 rounded-full bg-[#ecfdf5] px-2.5 py-0.5 text-xs font-semibold text-[#0f766e]"
         >
-          分段混合 {{ segmentMixProgressLabel }} · {{ segmentMixCurrentLabel }}
+          论文复刻 {{ segmentMixProgressLabel }} · {{ segmentMixCurrentLabel }}
         </span>
         <span
           v-if="tuneActive"
@@ -2932,7 +3317,18 @@ watch(
               <div v-if="!hasSavedDatasets" class="mt-2 rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] px-3 py-2.5 text-xs text-slate-500">
                 尚无已清洗的数据集，请先到"知识库"页保存一份。
               </div>
-              <div v-else class="mt-2.5 grid grid-cols-3 gap-2 text-xs">
+              <button
+                type="button"
+                class="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-[0.6rem] border border-[#bbf7d0] bg-[#f0fdfa] px-3 py-2 text-xs font-semibold text-[#0f766e] transition hover:bg-[#dcfce7] disabled:cursor-not-allowed disabled:opacity-60"
+                :disabled="wffImporting || activeTask?.status === 'running'"
+                title="从 backend/data/wff 导入 Dataset-A 和 Dataset-B，并保留论文固定划分"
+                @click="handleImportWffThesisDatasets"
+              >
+                <Loader2 v-if="wffImporting" class="h-3.5 w-3.5 animate-spin" />
+                <Database v-else class="h-3.5 w-3.5" />
+                {{ wffImporting ? '导入 WFF 数据中' : '导入 WFF 论文数据' }}
+              </button>
+              <div v-if="hasSavedDatasets" class="mt-2.5 grid grid-cols-3 gap-2 text-xs">
                 <div class="rounded-[0.55rem] bg-[#f8fafc] px-2 py-2">
                   <p class="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#8fa0ba]">目标</p>
                   <p class="mt-0.5 truncate font-semibold text-slate-900">{{ targetLabel }}</p>
@@ -3722,10 +4118,10 @@ watch(
               <div>
                 <p class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#0f766e]">
                   <Layers class="h-3.5 w-3.5" />
-                  高 COF 分段混合实验
+                  WFF 论文门控分区复刻
                 </p>
                 <p class="mt-1 max-w-3xl text-xs leading-5 text-slate-600">
-                  这是单独的论文式实验入口，不再混在普通算法里。先用 CatBoost 做高 COF 门控，再比较二模型、三模型局部混合对高摩擦尾部的修正效果。
+                  按论文第 4 章执行：CatBoost 门控低/中/高摩擦区间，并用 CatBoost、RF、XGBoost 的稳定融合复刻固定划分下的测试和外部文献验证效果。
                 </p>
               </div>
               <div class="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold">
@@ -3737,11 +4133,11 @@ watch(
                   type="button"
                   class="inline-flex items-center gap-1 rounded-full bg-[#0f766e] px-3 py-1 text-[11px] font-semibold text-white shadow-[0_10px_24px_-18px_rgba(15,118,110,0.85)] transition hover:bg-[#0b635d] disabled:cursor-not-allowed disabled:bg-[#b6dfd8] disabled:shadow-none"
                   :disabled="starting || compareMode || featureGainMode || activeTask?.status === 'running' || selectedCleanedDatasetId == null || !segmentMixPlan.length"
-                  title="固定当前数据划分，依次训练二模型和三模型高 COF 分段混合方案"
+                  title="固定当前数据划分，依次训练论文中的二基和三基门控分区方案"
                   @click="handleStartSegmentMixExperiment"
                 >
                   <Play class="h-3 w-3" />
-                  开始分段混合
+                  开始论文复刻
                 </button>
                 <button
                   v-else
@@ -3768,7 +4164,7 @@ watch(
                       <p class="mt-1 text-[11px] leading-5 text-slate-500">{{ recipe.purpose }}</p>
                     </div>
                     <span class="shrink-0 rounded-full bg-[#ecfdf5] px-2 py-0.5 text-[10px] font-semibold text-[#0f766e]">
-                      Meta: {{ algorithmLabelZh(recipe.metaModel) }}
+                      固定融合
                     </span>
                   </div>
                   <div class="mt-2 flex flex-wrap gap-1.5 text-[10px] font-semibold">
@@ -3789,7 +4185,7 @@ watch(
                   <span class="text-[10px] text-slate-400">
                     <template v-if="segmentMixMode">运行中 {{ segmentMixProgressLabel }}</template>
                     <template v-else-if="segmentMixResults.length">已完成 {{ segmentMixCompleted.length }} / {{ segmentMixResults.length }}</template>
-                    <template v-else>独立入口，不参与全部算法对比</template>
+                    <template v-else>固定 split / seed，独立复刻入口</template>
                   </span>
                 </div>
                 <div
@@ -3800,6 +4196,7 @@ watch(
                   <span class="font-semibold text-[#0f766e]">{{ segmentMixBestResult.shortLabel }}</span>
                   · 验证 R² {{ formatMetric(segmentMixBestResult.valR2, 3) }}
                   · 测试 R² {{ formatMetric(segmentMixBestResult.testR2, 3) }}
+                  · 外部 R² {{ formatMetric(segmentMixBestResult.externalR2, 3) }}
                 </div>
                 <div v-if="segmentMixSorted.length" :style="{ height: `${Math.max(140, segmentMixSorted.length * 42)}px` }">
                   <Bar :data="segmentMixChartData" :options="segmentMixChartOptions" />
@@ -3809,7 +4206,7 @@ watch(
                     v-for="(row, idx) in segmentMixSorted"
                     :key="row.key"
                     type="button"
-                    class="flex w-full items-center gap-3 rounded-[0.6rem] border px-3 py-2 text-left text-xs transition"
+                    class="flex w-full flex-wrap items-center gap-2 rounded-[0.6rem] border px-3 py-2 text-left text-xs transition"
                     :class="[
                       activeTask?.task_id === row.taskId
                         ? 'border-[#0f766e] bg-[#ecfdf5] ring-1 ring-[#99f6e4]/70'
@@ -3830,6 +4227,7 @@ watch(
                     </span>
                     <span class="shrink-0 font-semibold text-slate-900 tabular-nums">R²={{ formatMetric(row.valR2, 3) }}</span>
                     <span class="shrink-0 text-slate-500 tabular-nums">测试={{ formatMetric(row.testR2, 3) }}</span>
+                    <span class="shrink-0 text-slate-500 tabular-nums">外部={{ formatMetric(row.externalR2, 3) }}</span>
                   </button>
                   <div
                     v-for="row in segmentMixFailed"
@@ -3842,7 +4240,7 @@ watch(
                 </div>
                 <div v-else class="rounded-[0.6rem] border border-dashed border-[#a7f3d0] bg-[#f0fdfa]/60 px-3 py-3 text-center text-xs text-slate-500">
                   <Loader2 v-if="segmentMixMode" class="mx-auto h-4 w-4 animate-spin text-[#0f766e]" />
-                  <p class="mt-1">{{ segmentMixMode ? '正在训练第一个分段混合组合...' : '尚未运行分段混合实验' }}</p>
+                  <p class="mt-1">{{ segmentMixMode ? '正在训练第一个论文复刻组合...' : '尚未运行论文复刻实验' }}</p>
                 </div>
               </div>
             </div>
@@ -4449,6 +4847,73 @@ watch(
                 <p class="text-slate-400">紫色 = 验证集 K 折预测，红色 = 测试集</p>
               </div>
               <Line v-else :data="predictionScatterData" :options="predictionScatterOptions" />
+            </div>
+          </section>
+
+          <section v-if="activeWorkbenchTab === 'overview'" class="rounded-[0.95rem] border border-[#eef2f6] bg-white p-4">
+            <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#0f766e]">
+                  <Layers class="h-3.5 w-3.5" />
+                  论文 4.3.3 拟合图
+                </p>
+                <p class="mt-0.5 max-w-3xl text-xs leading-5 text-slate-500">
+                  左图复刻预测值-真实值散点，右图复刻外部文献样本逐点真实/预测对比；背景色按低/中/高摩擦区间分区。
+                </p>
+              </div>
+              <div v-if="allScatterSamples.length" class="flex flex-wrap gap-1.5 text-[11px] font-semibold text-slate-600">
+                <span class="rounded-full bg-[#f8fafc] px-2.5 py-1 ring-1 ring-[#e2e8f0]">
+                  训练池 {{ predictionSamples.length }}
+                </span>
+                <span class="rounded-full bg-[#f8fafc] px-2.5 py-1 ring-1 ring-[#e2e8f0]">
+                  测试 {{ testSamples.length }}
+                </span>
+                <span class="rounded-full bg-[#f8fafc] px-2.5 py-1 ring-1 ring-[#e2e8f0]">
+                  外部文献 {{ externalSamples.length }}
+                </span>
+              </div>
+            </div>
+
+            <div v-if="!allScatterSamples.length" class="flex h-[260px] flex-col items-center justify-center gap-1 rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] text-center text-xs text-slate-500">
+              <p>训练完成后在此显示论文式拟合图</p>
+              <p class="text-slate-400">WFF 论文固定划分会自动显示外部文献 6 点折线</p>
+            </div>
+            <div v-else class="space-y-3">
+              <div class="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+                <div class="min-w-0">
+                  <div class="mb-1 flex items-center justify-between gap-2 text-[11px] font-semibold text-slate-600">
+                    <span>(a) Training / Testing predicted vs true</span>
+                    <span class="text-slate-400">Y = X</span>
+                  </div>
+                  <div class="h-[360px]">
+                    <Line :data="paperFitScatterData" :options="paperFitScatterOptions" />
+                  </div>
+                </div>
+                <div class="min-w-0">
+                  <div class="mb-1 flex items-center justify-between gap-2 text-[11px] font-semibold text-slate-600">
+                    <span>(b) Exp in literature</span>
+                    <span class="text-slate-400">Pred-literature</span>
+                  </div>
+                  <div v-if="!externalSamples.length" class="flex h-[360px] items-center justify-center rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] text-xs text-slate-500">
+                    当前训练没有外部文献验证样本
+                  </div>
+                  <div v-else class="h-[360px]">
+                    <Line :data="paperExternalLineData" :options="paperExternalLineOptions" />
+                  </div>
+                </div>
+              </div>
+              <div class="grid gap-2 text-xs sm:grid-cols-3">
+                <div
+                  v-for="item in paperFitMetrics"
+                  :key="item.label"
+                  class="rounded-[0.6rem] bg-[#f8fafc] px-3 py-2"
+                >
+                  <p class="font-semibold text-slate-900">{{ item.label }}</p>
+                  <p class="mt-1 text-slate-500">
+                    R² {{ formatMetric(item.r2, 3) }} · RMSE {{ formatMetric(item.rmse, 3) }} · MAE {{ formatMetric(item.mae, 3) }}
+                  </p>
+                </div>
+              </div>
             </div>
           </section>
 

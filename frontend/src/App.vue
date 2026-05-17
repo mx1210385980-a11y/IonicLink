@@ -388,12 +388,11 @@ function handleHomeAction(action: HomeSuggestedAction) {
 </script>
 
 <template>
-  <div v-if="!sessionState.ready" class="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#07111a] px-6 text-white">
-    <div class="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(232,185,104,0.18),transparent_32%),radial-gradient(circle_at_bottom_right,_rgba(56,189,248,0.12),transparent_28%)]" />
-    <div class="shell-surface-strong relative w-full max-w-xl px-8 py-8 text-center">
-      <p class="text-[11px] font-semibold uppercase tracking-[0.32em] text-[#d9b266]">IonicLink</p>
-      <h1 class="brand-serif mt-4 text-4xl text-white">{{ t('loading.restore_title') }}</h1>
-      <p class="mt-3 text-sm leading-7 text-slate-300">
+  <div v-if="!sessionState.ready" class="flex min-h-screen items-center justify-center bg-slate-950 px-6 text-white">
+    <div class="w-full max-w-md rounded-lg border border-white/10 bg-slate-900 px-6 py-6 text-center shadow-sm">
+      <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-400">IonicLink</p>
+      <h1 class="mt-3 text-2xl font-semibold text-white">{{ t('loading.restore_title') }}</h1>
+      <p class="mt-2 text-sm leading-6 text-slate-300">
         {{ t('loading.restore_description') }}
       </p>
     </div>
@@ -412,14 +411,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
     @exit="navigateTo('help', 'content')"
   />
 
-  <div v-else class="app-shell relative flex h-screen overflow-hidden bg-background text-foreground">
-    <!-- Ambient gradient orbs -->
-    <div class="pointer-events-none absolute inset-0 overflow-hidden z-0">
-      <div class="absolute left-[220px] top-[-12rem] h-[30rem] w-[30rem] rounded-full bg-[#e4bf78]/14 blur-3xl dark:bg-[#e4bf78]/6" />
-      <div class="absolute right-[-12rem] top-[8rem] h-[26rem] w-[26rem] rounded-full bg-sky-300/12 blur-3xl dark:bg-sky-400/8" />
-      <div class="absolute bottom-[-14rem] left-[30%] h-[28rem] w-[28rem] rounded-full bg-emerald-200/14 blur-3xl dark:bg-emerald-300/6" />
-    </div>
-
+  <div v-else class="app-shell flex h-screen overflow-hidden bg-slate-100 text-foreground dark:bg-slate-950">
     <!-- Left sidebar -->
     <AppSidebar
       :current-view="currentView"
@@ -440,10 +432,10 @@ function handleHomeAction(action: HomeSuggestedAction) {
     />
 
     <!-- Right content column -->
-    <div class="relative z-10 flex flex-1 flex-col min-w-0 min-h-0">
+    <div class="flex min-h-0 min-w-0 flex-1 flex-col">
       <!-- Minimal top bar -->
-      <header class="flex h-11 shrink-0 items-center gap-3 border-b border-black/8 bg-[rgba(251,248,242,0.72)] px-4 backdrop-blur-xl dark:border-white/8 dark:bg-[rgba(8,16,26,0.72)]">
-        <h2 class="text-[13px] font-semibold capitalize text-slate-700 dark:text-slate-200">
+      <header class="flex h-12 shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 dark:border-slate-800 dark:bg-slate-900">
+        <h2 class="text-sm font-semibold capitalize text-slate-800 dark:text-slate-100">
           {{ currentView }}
         </h2>
         <div class="ml-auto flex items-center gap-1.5">
@@ -451,16 +443,17 @@ function handleHomeAction(action: HomeSuggestedAction) {
             href="https://github.com/mx1210385980-a11y/IonicLink/tree/main"
             target="_blank"
             rel="noreferrer"
-            class="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:text-slate-700 hover:bg-black/5 transition dark:text-slate-500 dark:hover:text-slate-200 dark:hover:bg-white/6"
+            class="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+            title="GitHub"
           >
-            <Github class="h-3.5 w-3.5" />
+            <Github class="h-4 w-4" />
           </a>
         </div>
       </header>
 
       <!-- Page workspace -->
       <main class="flex-1 min-h-0 overflow-hidden">
-        <div class="flex h-full min-h-0 flex-col gap-3 px-3 pb-3 pt-3 sm:gap-4 sm:px-4 sm:pb-4">
+        <div class="flex h-full min-h-0 flex-col gap-3 px-3 py-3 sm:px-4 sm:py-4">
           <HomePage
             v-if="currentView === 'home'"
             :active-scope-label="activeScopeLabel"

@@ -218,6 +218,47 @@ async def import_cleaned_dataset_csv(
     return {"dataset": get_model_cleaning_service().dataset_payload(dataset)}
 
 
+@router.post("/datasets/import-wff-thesis", response_model=dict)
+async def import_wff_thesis_datasets(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    try:
+        datasets = await get_model_cleaning_service().import_wff_thesis_datasets(
+            session,
+            principal=principal,
+            scope=scope,
+        )
+        await log_activity(
+            db=session,
+            user_id=principal.user.id,
+            group_id=principal.group.id,
+            action_type="clean_data",
+            action_detail={
+                "mode": "import_wff_thesis",
+                "dataset_ids": [dataset.id for dataset in datasets],
+                "dataset_names": [dataset.name for dataset in datasets],
+            },
+            resource_type="cleaned_dataset",
+            request=request,
+        )
+        return {
+            "items": [
+                get_model_cleaning_service().dataset_payload(dataset)
+                for dataset in datasets
+            ]
+        }
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        await session.rollback()
+        _raise_internal_error("Import WFF thesis datasets", exc)
+
+
 @router.get("/datasets/{dataset_id}", response_model=dict)
 async def get_cleaned_dataset(
     dataset_id: int,

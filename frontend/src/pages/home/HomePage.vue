@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, toRef } from 'vue'
-import { Activity, Orbit, RefreshCw } from 'lucide-vue-next'
+import { Activity, AlertTriangle, RefreshCw, ScanLine } from 'lucide-vue-next'
 
-import HomeCurrentFocus from '@/components/home/HomeCurrentFocus.vue'
 import HomeHealthSnapshot from '@/components/home/HomeHealthSnapshot.vue'
 import HomeLiteratureChat from '@/components/home/HomeLiteratureChat.vue'
 import HomeRecentRuns from '@/components/home/HomeRecentRuns.vue'
@@ -85,6 +84,30 @@ const commandStatus = computed(() => {
   }
 })
 
+const focusMetrics = computed(() => [
+  {
+    key: 'failed',
+    label: isChinese.value ? '失败运行' : 'Failed Runs',
+    value: summary.value.today.failedRuns,
+    helper: isChinese.value ? '优先重试或排查' : 'Retry or inspect first',
+    icon: AlertTriangle,
+  },
+  {
+    key: 'review',
+    label: isChinese.value ? '待审记录' : 'Pending Review',
+    value: summary.value.today.reviewPending,
+    helper: isChinese.value ? '等待人工确认' : 'Awaiting human review',
+    icon: ScanLine,
+  },
+  {
+    key: 'running',
+    label: isChinese.value ? '运行中' : 'Running Runs',
+    value: summary.value.today.runningRuns,
+    helper: isChinese.value ? '持续监控状态' : 'Keep an eye on status',
+    icon: Activity,
+  },
+])
+
 function emitAction(action: HomeSuggestedAction | null) {
   if (action) {
     emit('action', action)
@@ -93,64 +116,60 @@ function emitAction(action: HomeSuggestedAction | null) {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col gap-2.5 overflow-auto xl:overflow-hidden">
-    <section class="relative overflow-hidden rounded-[1.5rem] border border-[#22338b]/10 bg-[linear-gradient(135deg,#16265e_0%,#23378f_48%,#3f55c4_100%)] px-4 py-3.5 text-white shadow-[0_20px_44px_-34px_rgba(28,42,120,0.72)] sm:px-5 sm:py-4">
-      <div class="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.14),transparent_24%),radial-gradient(circle_at_bottom_left,rgba(107,163,255,0.16),transparent_28%)]" />
-      <div class="absolute -right-8 top-2 h-32 w-32 rounded-full border border-white/10 bg-white/5 blur-2xl" />
-
-      <div class="relative grid gap-3 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)] xl:gap-4">
-        <div class="flex min-w-0 flex-col rounded-[1.35rem] border border-white/12 bg-white/6 px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] sm:px-5">
-          <div class="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-white/82">
-            <Orbit class="h-3.5 w-3.5" />
-            {{ isChinese ? 'Platform Command Center' : 'Platform Command Center' }}
+  <div class="flex h-full min-h-0 flex-col gap-3 overflow-auto xl:overflow-hidden">
+    <section class="shell-surface px-5 py-4">
+      <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(26rem,0.78fr)] xl:items-start">
+        <div class="min-w-0">
+          <div class="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
+            {{ isChinese ? '工作台概览' : 'Workspace Overview' }}
           </div>
-
-          <h1
-            class="mt-3 max-w-none text-[1.5rem] font-semibold leading-[1.14] tracking-[-0.055em] sm:text-[1.75rem]"
-          >
+          <h1 class="mt-3 max-w-3xl text-xl font-semibold leading-7 text-slate-950 dark:text-white sm:text-2xl">
             {{ commandStatus.title }}
           </h1>
-          <p
-            class="mt-1.5 max-w-none text-[13px] leading-5 text-white/76 sm:text-sm"
-          >
+          <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-300">
             {{ commandStatus.body }}
           </p>
 
-          <div class="mt-3 flex flex-wrap gap-2">
-            <span class="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white">
-              <Activity class="h-4 w-4" />
+          <div class="mt-4 flex flex-wrap gap-2 text-xs">
+            <span class="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
+              <Activity class="h-3.5 w-3.5" />
               {{ commandStatus.badge }}
             </span>
-            <span class="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/8 px-3 py-1.5 text-[11px] text-white/78">
+            <span class="inline-flex items-center rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
               {{ activeScopeLabel }}
             </span>
-            <span class="hidden items-center gap-2 rounded-full border border-white/15 bg-white/8 px-3 py-1.5 text-[11px] text-white/78 xl:inline-flex">
+            <span class="inline-flex items-center rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
               {{ operatorName }}
             </span>
           </div>
         </div>
 
-        <HomeCurrentFocus
-          compact
-          class="h-full"
-          :badge="commandStatus.badge"
-          :title="commandStatus.title"
-          :failed-runs="summary.today.failedRuns"
-          :review-pending="summary.today.reviewPending"
-          :running-runs="summary.today.runningRuns"
-        />
+        <div class="grid gap-2 sm:grid-cols-3">
+          <article
+            v-for="metric in focusMetrics"
+            :key="metric.key"
+            class="rounded-md border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-800 dark:bg-slate-950"
+          >
+            <div class="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+              <component :is="metric.icon" class="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" />
+              <span>{{ metric.label }}</span>
+            </div>
+            <p class="mt-2 text-2xl font-semibold leading-none text-slate-950 dark:text-white">{{ metric.value }}</p>
+            <p class="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">{{ metric.helper }}</p>
+          </article>
+        </div>
       </div>
     </section>
 
-    <div class="grid min-h-0 flex-1 gap-2.5 xl:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.9fr)_22.5rem]">
+    <div class="grid min-h-0 flex-1 gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.9fr)_22rem]">
       <HomeLiteratureChat class="min-h-[34rem] xl:min-h-0" @open-source="emit('openSource', $event)" />
 
-      <div class="grid min-h-0 gap-2.5 xl:grid-rows-[auto_minmax(0,1fr)]">
+      <div class="grid min-h-0 gap-3 xl:grid-rows-[auto_minmax(0,1fr)]">
         <HomeSuggestedActions :actions="summary.suggestedActions" :loading="loading" @action="emitAction" />
         <HomeRecentRuns :runs="summary.recentRuns" @action="emitAction(pipelineAction)" />
       </div>
 
-      <div class="grid min-h-0 gap-2.5 xl:grid-rows-[auto_minmax(0,1fr)]">
+      <div class="grid min-h-0 gap-3 xl:grid-rows-[auto_minmax(0,1fr)]">
         <HomeTodayPanel :today="summary.today" @action="emitAction(reviewQueueAction)" />
         <HomeHealthSnapshot :health="summary.health" @action="emitAction(datasetBuilderAction)" />
       </div>
@@ -158,7 +177,7 @@ function emitAction(action: HomeSuggestedAction | null) {
 
     <div
       v-if="error"
-      class="inline-flex max-w-max items-center gap-2 rounded-full border border-black/8 bg-white/70 px-4 py-2 text-sm text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300"
+      class="inline-flex max-w-max items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
     >
       <RefreshCw class="h-4 w-4" />
       {{ error }}

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { BookOpen, Bot, FileSearch, Loader2, Send, Sparkles, UserRound } from 'lucide-vue-next'
+import { BookOpen, Bot, FileSearch, Loader2, Send, UserRound } from 'lucide-vue-next'
 
 import Textarea from '@/components/ui/Textarea.vue'
 import { useI18n } from '@/composables/useI18n'
@@ -152,23 +152,23 @@ function sourceMeta(source: ChatSource) {
 </script>
 
 <template>
-  <section class="shell-surface flex min-h-[32rem] flex-col overflow-hidden border border-[#dbe4f2] bg-white shadow-[0_22px_48px_-36px_rgba(15,23,42,0.24)] dark:border-white/10 dark:bg-[#0f1728] xl:min-h-0">
-    <div class="flex shrink-0 items-center justify-between gap-3 border-b border-black/8 px-4 py-3 dark:border-white/10 sm:px-5">
+  <section class="shell-surface flex min-h-[32rem] flex-col overflow-hidden xl:min-h-0">
+    <div class="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800 sm:px-5">
       <div class="flex min-w-0 items-center gap-3">
-        <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-[0.85rem] bg-[#1f3a8a] text-white shadow-[0_14px_32px_-22px_rgba(31,58,138,0.9)]">
-          <Sparkles class="h-4.5 w-4.5" />
+        <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+          <Bot class="h-4.5 w-4.5" />
         </div>
         <div class="min-w-0">
-          <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">
+          <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
             {{ isChinese ? 'Materials AI' : 'Materials AI' }}
           </p>
-          <h2 class="truncate text-base font-semibold tracking-[-0.035em] text-slate-950 dark:text-white">
+          <h2 class="truncate text-base font-semibold tracking-normal text-slate-950 dark:text-white">
             {{ isChinese ? '材料文献对话' : 'Literature Chat' }}
           </h2>
         </div>
       </div>
 
-      <div class="hidden items-center gap-2 rounded-full border border-[#d8e3f0] bg-[#f8fafc] px-2.5 py-1 text-[11px] font-semibold text-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-slate-300 sm:flex">
+      <div class="hidden items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300 sm:flex">
         <BookOpen class="h-3.5 w-3.5" />
         {{ latestSourceCount || 0 }}
       </div>
@@ -182,10 +182,10 @@ function sourceMeta(source: ChatSource) {
         :class="message.role === 'user' ? 'flex-row-reverse' : ''"
       >
         <div
-          class="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+          class="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-md"
           :class="message.role === 'user'
-            ? 'bg-slate-100 text-slate-500 dark:bg-white/8 dark:text-slate-300'
-            : 'bg-[#eaf1ff] text-[#2442a0] dark:bg-[#314aa7]/20 dark:text-[#9db3ff]'"
+            ? 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300'
+            : 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950'"
         >
           <UserRound v-if="message.role === 'user'" class="h-4 w-4" />
           <Bot v-else class="h-4 w-4" />
@@ -193,10 +193,10 @@ function sourceMeta(source: ChatSource) {
 
         <div class="min-w-0 max-w-[92%]" :class="message.role === 'user' ? 'items-end text-right' : 'items-start'">
           <div
-            class="rounded-[1rem] border px-4 py-3 text-left shadow-sm"
+            class="rounded-md border px-4 py-3 text-left"
             :class="message.role === 'user'
-              ? 'rounded-br-sm border-[#263f9d]/18 bg-[#23378f] text-white shadow-[#23378f]/20'
-              : 'rounded-tl-sm border-[#e2e8f0] bg-[#fbfdff] text-slate-700 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200'"
+              ? 'border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-950'
+              : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200'"
           >
             <p class="whitespace-pre-wrap text-[13px] leading-6">{{ message.content }}</p>
           </div>
@@ -206,11 +206,11 @@ function sourceMeta(source: ChatSource) {
               v-for="source in message.sources"
               :key="`${source.literature_id}-${source.record_id || 'lit'}-${source.index}`"
               type="button"
-              class="group rounded-[0.85rem] border border-[#dbe4f2] bg-white px-3 py-2 text-left transition hover:border-[#9fb0d8] hover:bg-[#f8fbff] dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/[0.08]"
+              class="group rounded-md border border-slate-200 bg-white px-3 py-2 text-left transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800"
               @click="emit('openSource', source)"
             >
               <div class="flex items-start gap-2">
-                <div class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#eef4ff] text-[10px] font-black text-[#2442a0] dark:bg-[#314aa7]/20 dark:text-[#b7c5ff]">
+                <div class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-slate-100 text-[10px] font-black text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                   {{ source.index }}
                 </div>
                 <div class="min-w-0">
@@ -242,37 +242,37 @@ function sourceMeta(source: ChatSource) {
           v-for="prompt in quickPrompts"
           :key="prompt"
           type="button"
-          class="flex min-h-[4.25rem] items-start gap-2 rounded-[1rem] border border-[#dbe4f2] bg-[#f8fafc] px-3 py-2.5 text-left text-[12px] font-semibold leading-5 text-slate-600 transition hover:border-[#9fb0d8] hover:bg-white dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-200 dark:hover:bg-white/[0.08]"
+          class="flex min-h-[4.25rem] items-start gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2.5 text-left text-[12px] font-semibold leading-5 text-slate-600 transition hover:border-slate-300 hover:bg-white dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-slate-900"
           @click="sendMessage(prompt)"
         >
-          <FileSearch class="mt-0.5 h-4 w-4 shrink-0 text-[#2442a0] dark:text-[#9db3ff]" />
+          <FileSearch class="mt-0.5 h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" />
           <span class="min-w-0">{{ prompt }}</span>
         </button>
       </div>
 
       <div v-if="loading" class="flex gap-3">
-        <div class="mt-1 flex h-8 w-8 items-center justify-center rounded-full bg-[#eaf1ff] text-[#2442a0] dark:bg-[#314aa7]/20 dark:text-[#9db3ff]">
+        <div class="mt-1 flex h-8 w-8 items-center justify-center rounded-md bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-950">
           <Bot class="h-4 w-4" />
         </div>
-        <div class="rounded-[1rem] rounded-tl-sm border border-[#e2e8f0] bg-[#fbfdff] px-4 py-3 text-slate-500 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-300">
+        <div class="rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
           <Loader2 class="h-4 w-4 animate-spin" />
         </div>
       </div>
     </div>
 
-    <div class="shrink-0 border-t border-black/8 bg-[#fbfcff] px-4 py-3 dark:border-white/10 dark:bg-white/[0.03] sm:px-5">
+    <div class="shrink-0 border-t border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950 sm:px-5">
       <div class="relative">
         <Textarea
           v-model="input"
           :placeholder="isChinese ? '询问材料、离子液体、COF、实验条件或 DOI…' : 'Ask about materials, ionic liquids, COF, conditions, or DOI...'"
           :disabled="loading"
           :rows="2"
-          class="min-h-[4.5rem] resize-none rounded-[1rem] border-[#d7e2f0] bg-white py-3 pr-12 text-[13px] leading-5 shadow-sm dark:border-white/10 dark:bg-[#0b1322]"
+          class="min-h-[4.5rem] resize-none rounded-md border-slate-300 bg-white py-3 pr-12 text-[13px] leading-5 dark:border-slate-700 dark:bg-slate-900"
           @keydown="handleKeydown"
         />
         <button
           type="button"
-          class="absolute bottom-2.5 right-2.5 flex h-9 w-9 items-center justify-center rounded-[0.8rem] bg-[#23378f] text-white shadow-[0_12px_26px_-18px_rgba(35,55,143,0.9)] transition hover:bg-[#1b2b77] disabled:cursor-not-allowed disabled:opacity-45"
+          class="absolute bottom-2.5 right-2.5 flex h-9 w-9 items-center justify-center rounded-md bg-slate-950 text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
           :disabled="isInputEmpty || loading"
           :title="isChinese ? '发送' : 'Send'"
           @click="sendMessage()"

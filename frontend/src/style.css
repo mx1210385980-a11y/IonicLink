@@ -3,28 +3,28 @@
 
 @layer base {
   :root {
-    --background: 40 36% 97%;
-    --foreground: 214 38% 12%;
+    --background: 210 24% 97%;
+    --foreground: 222 47% 11%;
     --card: 0 0% 100%;
-    --card-foreground: 214 38% 12%;
+    --card-foreground: 222 47% 11%;
     --popover: 0 0% 100%;
-    --popover-foreground: 214 38% 12%;
-    --primary: 40 79% 59%;
-    --primary-foreground: 222 47% 11%;
-    --secondary: 38 27% 92%;
-    --secondary-foreground: 214 30% 18%;
-    --muted: 38 21% 93%;
-    --muted-foreground: 217 17% 42%;
-    --accent: 42 44% 92%;
-    --accent-foreground: 214 34% 18%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 222 47% 11%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 20% 94%;
+    --secondary-foreground: 222 36% 16%;
+    --muted: 210 20% 94%;
+    --muted-foreground: 215 16% 40%;
+    --accent: 213 27% 92%;
+    --accent-foreground: 222 36% 16%;
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
-    --border: 32 21% 84%;
-    --input: 32 21% 84%;
-    --ring: 40 79% 59%;
-    --radius: 0.75rem;
+    --border: 214 24% 88%;
+    --input: 214 24% 88%;
+    --ring: 217 71% 46%;
+    --radius: 0.5rem;
     --app-sans: "Segoe UI Variable Text", "Segoe UI", "Aptos", "Helvetica Neue", Arial, sans-serif;
-    --app-serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+    --app-serif: var(--app-sans);
   }
 
   .dark {
@@ -34,7 +34,7 @@
     --card-foreground: 210 40% 96%;
     --popover: 214 35% 10%;
     --popover-foreground: 210 40% 96%;
-    --primary: 40 82% 69%;
+    --primary: 210 40% 96%;
     --primary-foreground: 214 40% 8%;
     --secondary: 214 25% 16%;
     --secondary-foreground: 210 40% 96%;
@@ -46,7 +46,7 @@
     --destructive-foreground: 210 40% 98%;
     --border: 214 19% 23%;
     --input: 214 19% 23%;
-    --ring: 40 82% 69%;
+    --ring: 213 70% 65%;
   }
 }
 
@@ -69,10 +69,7 @@
     color: hsl(var(--foreground));
     font-feature-settings: "rlig" 1, "calt" 1;
     min-height: 100vh;
-    background-image:
-      radial-gradient(circle at top left, hsl(var(--primary) / 0.12), transparent 22%),
-      radial-gradient(circle at top right, hsl(197 89% 61% / 0.08), transparent 24%),
-      linear-gradient(180deg, hsl(var(--background)), hsl(var(--background)));
+    background-image: none;
   }
 
   #app {
@@ -83,7 +80,7 @@
 @layer components {
   .brand-serif {
     font-family: var(--app-serif);
-    letter-spacing: -0.04em;
+    letter-spacing: 0;
   }
 
   .app-shell {
@@ -91,35 +88,29 @@
   }
 
   .shell-surface {
-    border: 1px solid rgba(15, 23, 42, 0.08);
-    background: rgba(255, 255, 255, 0.72);
-    border-radius: 1.9rem;
-    box-shadow: 0 24px 70px -34px rgba(15, 23, 42, 0.35);
-    backdrop-filter: blur(24px);
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--card));
+    border-radius: var(--radius);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
   }
 
   .shell-surface-strong {
-    border: 1px solid rgba(15, 23, 42, 0.08);
-    background:
-      linear-gradient(135deg, rgba(255, 248, 235, 0.88), rgba(255, 255, 255, 0.76) 48%, rgba(225, 238, 247, 0.76)),
-      rgba(255, 255, 255, 0.72);
-    border-radius: 2rem;
-    box-shadow: 0 28px 90px -40px rgba(15, 23, 42, 0.42);
-    backdrop-filter: blur(26px);
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--card));
+    border-radius: var(--radius);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
   }
 
   .dark .shell-surface {
-    border-color: rgba(255, 255, 255, 0.08);
-    background: rgba(8, 17, 29, 0.74);
-    box-shadow: 0 28px 90px -44px rgba(0, 0, 0, 0.82);
+    border-color: hsl(var(--border));
+    background: hsl(var(--card));
+    box-shadow: none;
   }
 
   .dark .shell-surface-strong {
-    border-color: rgba(255, 255, 255, 0.08);
-    background:
-      linear-gradient(135deg, rgba(24, 18, 11, 0.72), rgba(8, 17, 29, 0.8) 46%, rgba(10, 29, 36, 0.76)),
-      rgba(8, 17, 29, 0.76);
-    box-shadow: 0 32px 96px -46px rgba(0, 0, 0, 0.86);
+    border-color: hsl(var(--border));
+    background: hsl(var(--card));
+    box-shadow: none;
   }
 }
 
@@ -153,16 +144,12 @@
 }
 
 .gradient-text {
-  background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(197 89% 61%) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: hsl(var(--foreground));
 }
 
 .glass {
-  background: hsl(var(--background) / 0.8);
-  backdrop-filter: blur(12px);
-  border: 1px solid hsl(var(--border) / 0.5);
+  background: hsl(var(--card));
+  border: 1px solid hsl(var(--border));
 }
 
 .highlight-active {
