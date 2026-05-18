@@ -264,6 +264,7 @@ class SyncResult(BaseModel):
 
 class LiteratureWithRecords(LiteratureSchema):
     tribology_data: List[TribologyDataSchema] = Field(default_factory=list, alias="tribologyData")
+    diffusion_data: List[dict[str, Any]] = Field(default_factory=list, alias="diffusionData")
 
     class Config:
         from_attributes = True

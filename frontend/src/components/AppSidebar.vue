@@ -60,8 +60,8 @@ const emit = defineEmits<{
 }>()
 
 const primaryNav: NavItem[] = [
-  { key: 'home',      label: 'Home',      icon: PieChart    },
-  { key: 'pipeline',  label: 'Pipeline',  icon: Search      },
+  { key: 'pipeline',  label: 'Extract',   icon: Search      },
+  { key: 'home',      label: 'Overview',  icon: PieChart    },
   { key: 'review',    label: 'Review',    icon: Library     },
   { key: 'knowledge', label: 'Knowledge', icon: Database    },
   { key: 'quality',   label: 'Quality',   icon: ShieldCheck },
@@ -111,6 +111,7 @@ function handleResize() {
 }
 
 function statusDotClass(file: BatchFile): string {
+  if (file.status === 'uploading') return 'bg-sky-400 animate-pulse'
   if (file.status === 'processing') return 'bg-blue-400 animate-pulse'
   if (file.status === 'success' && file.hasWarnings) return 'bg-amber-400'
   if (file.status === 'success') return 'bg-emerald-400'
@@ -121,6 +122,7 @@ function statusDotClass(file: BatchFile): string {
 }
 
 function statusLabel(file: BatchFile): string {
+  if (file.status === 'uploading') return props.isChinese ? '上传中' : 'Uploading'
   if (file.status === 'processing') return props.isChinese ? '处理中' : 'Processing'
   if (file.status === 'success' && file.hasWarnings) return props.isChinese ? '待审核' : 'Review'
   if (file.status === 'success') return props.isChinese ? '完成' : 'Done'
@@ -130,9 +132,22 @@ function statusLabel(file: BatchFile): string {
   return props.isChinese ? '已上传' : 'Uploaded'
 }
 
+function navLabel(item: NavItem): string {
+  if (!props.isChinese) return item.label
+  if (item.key === 'pipeline') return '抽取'
+  if (item.key === 'home') return '概览'
+  if (item.key === 'review') return '审阅'
+  if (item.key === 'knowledge') return '知识库'
+  if (item.key === 'quality') return '质量'
+  if (item.key === 'modeling') return '建模'
+  if (item.key === 'admin') return '管理'
+  if (item.key === 'help') return '帮助'
+  return item.label
+}
+
 function handlePaperClick(file: BatchFile) {
   emit('selectFile', file.id)
-  if (file.status === 'processing' || file.status === 'uploaded') {
+  if (file.status === 'uploading' || file.status === 'processing' || file.status === 'uploaded') {
     emit('navigate', 'pipeline', 'runs')
   } else if (file.status === 'success' && file.hasWarnings) {
     emit('navigate', 'review', 'inbox')
@@ -229,7 +244,7 @@ onBeforeUnmount(() => {
         :class="currentView === item.key
           ? (isCollapsed ? 'justify-center bg-white/10 px-0 py-2.5 text-white' : 'items-center gap-2.5 bg-white/10 px-2.5 py-2 text-white')
           : (isCollapsed ? 'justify-center px-0 py-2.5 text-slate-400 hover:bg-white/6 hover:text-slate-100' : 'items-center gap-2.5 px-2.5 py-2 text-slate-400 hover:bg-white/6 hover:text-slate-100')"
-        :title="item.label"
+        :title="navLabel(item)"
         @click="emit('navigate', item.key)"
       >
         <component
@@ -237,7 +252,7 @@ onBeforeUnmount(() => {
           class="h-4 w-4 shrink-0 transition-colors"
           :class="currentView === item.key ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'"
         />
-        <span v-if="!isCollapsed">{{ item.label }}</span>
+        <span v-if="!isCollapsed">{{ navLabel(item) }}</span>
         <span
           v-if="item.key === 'review' && batchFiles.some(f => f.status === 'success' && f.hasWarnings)"
           class="h-1.5 w-1.5 rounded-full bg-amber-400"
@@ -370,11 +385,11 @@ onBeforeUnmount(() => {
         :class="currentView === item.key
           ? (isCollapsed ? 'justify-center bg-white/10 px-0 py-2 text-white' : 'items-center gap-2.5 bg-white/10 px-2.5 py-1.5 text-white')
           : (isCollapsed ? 'justify-center px-0 py-2 text-slate-500 hover:bg-white/6 hover:text-slate-300' : 'items-center gap-2.5 px-2.5 py-1.5 text-slate-500 hover:bg-white/6 hover:text-slate-300')"
-        :title="item.label"
+        :title="navLabel(item)"
         @click="emit('navigate', item.key)"
       >
         <component :is="item.icon" class="h-3.5 w-3.5 shrink-0" />
-        <span v-if="!isCollapsed">{{ item.label }}</span>
+        <span v-if="!isCollapsed">{{ navLabel(item) }}</span>
       </button>
     </div>
 

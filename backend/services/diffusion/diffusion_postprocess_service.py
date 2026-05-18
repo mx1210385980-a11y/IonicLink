@@ -43,6 +43,18 @@ _SUPERSCRIPT_TRANSLATION = str.maketrans(
 
 _CANONICAL_DIFFUSION_UNIT = "10\u207b\u00b9\u00b2 m\u00b2/s"
 
+_IL_TOKEN_RE = re.compile(
+    r"(\[[^\]]+\]\s*\[[^\]]+\]|"
+    r"\b(?:bmim|emim|hmim|omim|mim|pyr\d*|pyrr|pyrrolidinium|imidazolium|phosphonium|ammonium|"
+    r"tfsi|ntf2|bf4|pf6|fap|dca|no3|ethylammonium|ean|pan|pil|mpil)\b)",
+    flags=re.IGNORECASE,
+)
+
+_COMMON_NON_IL_SOLUTES_RE = re.compile(
+    r"\b(?:nacl|kcl|licl|lacl3|mgcl2|cacl2|hcl|naoh|koh|water|aqueous|brine|salt solution)\b",
+    flags=re.IGNORECASE,
+)
+
 
 def _normalize_unicode_text(value: Any) -> str:
     text = unicodedata.normalize("NFKC", str(value or "").strip())
@@ -90,58 +102,169 @@ def _compact_diffusion_unit(unit: Any) -> str:
     return compact
 
 
-def _normalize_diffusion_unit_and_value(value: Any, unit: Any) -> tuple[float | None, str | None]:
-    numeric = _to_float(value)
-    unit_text = str(unit or "").strip()
-    if numeric is None:
-        return None, unit_text or None
-
-    def _clean(number: float) -> float:
-        return round(float(number), 12)
-
+def _diffusion_unit_scale_to_canonical(unit: Any) -> float | None:
     compact = _compact_diffusion_unit(unit)
 
     if compact in {"a2/ps-1", "a^2/ps-1", "a2ps-1", "a^2ps-1", "a2/ps", "a^2/ps", "a2ps", "a^2ps"}:
-        return _clean(numeric * 1.0e4), _CANONICAL_DIFFUSION_UNIT
-    if compact in {"10^-12m2/s", "10-12m2/s", "1e-12m2/s", "10^-12m^2/s", "10-12m^2/s", "1e-12m^2/s"}:
-        return _clean(numeric), _CANONICAL_DIFFUSION_UNIT
-    if compact in {"m2/s", "m^2/s"}:
-        return _clean(numeric * 1.0e12), _CANONICAL_DIFFUSION_UNIT
-    if compact in {"cm2/s", "cm^2/s"}:
-        return _clean(numeric * 1.0e8), _CANONICAL_DIFFUSION_UNIT
-    return _clean(numeric), unit_text or None
+        return 1.0e4
+    if compact in {"a2/ns-1", "a^2/ns-1", "a2ns-1", "a^2ns-1", "a2/ns", "a^2/ns", "a2ns", "a^2ns"}:
+        return 10.0
+    if compact in {"m2/s", "m^2/s", "m2s-1", "m^2s-1"}:
+        return 1.0e12
+    if compact in {"cm2/s", "cm^2/s", "cm2s-1", "cm^2s-1"}:
+        return 1.0e8
+
+    power_match = re.fullmatch(
+        r"(?:10(?:\^)?(?P<power>-?\d+)|1e(?P<epower>-?\d+))m\^?2(?:/s|s-1)",
+        compact,
+    )
+    if power_match:
+        exponent = int(power_match.group("power") or power_match.group("epower"))
+        return 10 ** (exponent + 12)
+
+    power_match = re.fullmatch(
+        r"(?:10(?:\^)?(?P<power>-?\d+)|1e(?P<epower>-?\d+))cm\^?2(?:/s|s-1)",
+        compact,
+    )
+    if power_match:
+        exponent = int(power_match.group("power") or power_match.group("epower"))
+        return 10 ** (exponent + 16)
+
+    return None
+
+
+def _is_supported_diffusion_unit(unit: Any) -> bool:
+    return _diffusion_unit_scale_to_canonical(unit) is not None
+
+
+def _normalize_diffusion_unit_and_value(value: Any, unit: Any) -> tuple[float | None, str | None]:
+    numeric = _to_float(value)
+    if numeric is None:
+        return None, None
+
+    scale = _diffusion_unit_scale_to_canonical(unit)
+    if scale is None:
+        return round(float(numeric), 12), None
+    return round(float(numeric) * scale, 12), _CANONICAL_DIFFUSION_UNIT
 
 
 def _extract_diffusion_measure_from_text(text: Any) -> tuple[float | None, str | None]:
+    measures = _extract_diffusion_measures_from_text(text)
+    if not measures:
+        return None, None
+    return measures[0]["value"], measures[0]["unit"]
+
+
+def _extract_diffusion_measures_from_text(text: Any) -> list[dict[str, Any]]:
     normalized = _normalize_unicode_text(text)
     if not normalized:
-        return None, None
+        return []
 
-    sci_match = re.search(
-        r"\(?\s*([-+]?\d+(?:\.\d+)?)\s*(?:±|\+/-)\s*[-+]?\d+(?:\.\d+)?\s*\)?\s*(?:x|\*)\s*10\s*(?:\^)?\s*([-+]?\d+)\s*([A-Za-zÅå0-9^/.\-]+)",
-        normalized,
+    measures: list[dict[str, Any]] = []
+
+    sci_pattern = re.compile(
+        r"\(?\s*([-+]?\d+(?:\.\d+)?)"
+        r"(?:\s*(?:±|\+/-)\s*[-+]?\d+(?:\.\d+)?)?"
+        r"\s*\)?\s*(?:x|\*)\s*10\s*(?:\^)?\s*([-+]?\d+)\s*"
+        r"((?:10\s*(?:\^)?\s*-?\d+\s*)?(?:m|cm|a|A|Å|å|angstrom|Angstrom)\s*(?:\^?2|2)\s*(?:/|/?s)?\s*(?:s|ps|ns)?\s*(?:-?1)?)",
         flags=re.IGNORECASE,
     )
-    if sci_match:
+    for match in sci_pattern.finditer(normalized):
         try:
-            value = float(sci_match.group(1)) * (10 ** int(sci_match.group(2)))
+            raw_value = float(match.group(1)) * (10 ** int(match.group(2)))
         except Exception:
-            value = None
-        return value, sci_match.group(3).strip() or None
+            continue
+        unit = match.group(3).strip()
+        normalized_value, normalized_unit = _normalize_diffusion_unit_and_value(raw_value, unit)
+        if normalized_value is None or not normalized_unit:
+            continue
+        measures.append(
+            {
+                "value": normalized_value,
+                "unit": normalized_unit,
+                "start": match.start(),
+                "end": match.end(),
+                "context": normalized[max(0, match.start() - 90): min(len(normalized), match.end() + 90)].lower(),
+                "prefix": normalized[max(0, match.start() - 90): match.start()].lower(),
+                "suffix": normalized[match.end(): min(len(normalized), match.end() + 90)].lower(),
+            }
+        )
 
-    plain_match = re.search(
-        r"([-+]?\d+(?:\.\d+)?)\s*([A-Za-zÅå0-9^/.\-]+)",
-        normalized,
+    plain_pattern = re.compile(
+        r"([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*"
+        r"((?:10\s*(?:\^)?\s*-?\d+\s*)?(?:m|cm|a|A|Å|å|angstrom|Angstrom)\s*(?:\^?2|2)\s*(?:/|/?s)?\s*(?:s|ps|ns)?\s*(?:-?1)?)",
         flags=re.IGNORECASE,
     )
-    if plain_match:
-        try:
-            value = float(plain_match.group(1))
-        except Exception:
-            value = None
-        return value, plain_match.group(2).strip() or None
+    for match in plain_pattern.finditer(normalized):
+        if any(match.start() >= item["start"] and match.end() <= item["end"] for item in measures):
+            continue
+        normalized_value, normalized_unit = _normalize_diffusion_unit_and_value(match.group(1), match.group(2))
+        if normalized_value is None or not normalized_unit:
+            continue
+        measures.append(
+            {
+                "value": normalized_value,
+                "unit": normalized_unit,
+                "start": match.start(),
+                "end": match.end(),
+                "context": normalized[max(0, match.start() - 90): min(len(normalized), match.end() + 90)].lower(),
+                "prefix": normalized[max(0, match.start() - 90): match.start()].lower(),
+                "suffix": normalized[match.end(): min(len(normalized), match.end() + 90)].lower(),
+            }
+        )
 
-    return None, None
+    return sorted(measures, key=lambda item: item["start"])
+
+
+def _pick_evidence_measure_for_field(measures: list[dict[str, Any]], field_key: str) -> dict[str, Any] | None:
+    if not measures:
+        return None
+    field_terms = {
+        "D_cation": ("cation", "cationic", "positive ion"),
+        "D_anion": ("anion", "anionic", "negative ion", "cl-", "cl−"),
+        "D_total": ("total", "self-diffusion", "self diffusion", "diffusion coefficient"),
+    }.get(field_key, ())
+    if not field_terms:
+        return None
+    best: tuple[int, int, dict[str, Any]] | None = None
+    ion_terms = ("cation", "cationic", "anion", "anionic", "positive ion", "negative ion")
+    for index, measure in enumerate(measures):
+        prefix = str(measure.get("prefix") or "")
+        suffix = str(measure.get("suffix") or "")
+        prefix_score = max((prefix.rfind(term) for term in field_terms), default=-1)
+        suffix_score = 1 if any(term in suffix[:36] for term in field_terms) else 0
+        if field_key == "D_total" and any(term in prefix[-48:] for term in ion_terms):
+            continue
+        score = max(prefix_score, -1) * 10 + suffix_score
+        if score < 0:
+            continue
+        if best is None or score > best[0]:
+            best = (score, -index, measure)
+    return best[2] if best else None
+
+
+def _looks_like_ionic_liquid(value: Any) -> bool:
+    return bool(_IL_TOKEN_RE.search(str(value or "")))
+
+
+def _is_non_ionic_liquid_solute(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    return bool(_COMMON_NON_IL_SOLUTES_RE.search(text)) and not _looks_like_ionic_liquid(text)
+
+
+def diffusion_drop_reason(record: dict[str, Any]) -> str | None:
+    if not isinstance(record, dict):
+        return "invalid_payload"
+    if not record_has_diffusion_value(record):
+        return "no_diffusion_value"
+    if _is_non_ionic_liquid_solute(record.get("ionic_liquid")):
+        return "non_ionic_liquid_solute"
+    unit = record.get("D_unit")
+    if unit and not _is_supported_diffusion_unit(unit) and not _extract_diffusion_measures_from_text(record.get("evidence")):
+        return "unsupported_diffusion_unit"
+    return None
 
 
 def record_has_diffusion_value(record: dict[str, Any]) -> bool:
@@ -248,22 +371,31 @@ def normalize_diffusion_records(
         if not isinstance(raw, dict):
             continue
         row = dict(raw)
-        if not record_has_diffusion_value(row):
+        if diffusion_drop_reason(row):
             continue
 
         d_unit = row.get("D_unit")
+        evidence_measures = _extract_diffusion_measures_from_text(row.get("evidence"))
         row["D_total"], d_unit = _normalize_diffusion_unit_and_value(row.get("D_total"), d_unit)
         row["D_cation"], d_unit = _normalize_diffusion_unit_and_value(row.get("D_cation"), d_unit)
         row["D_anion"], d_unit = _normalize_diffusion_unit_and_value(row.get("D_anion"), d_unit)
         row["D_unit"] = d_unit
-        evidence_value, evidence_unit = _extract_diffusion_measure_from_text(row.get("evidence"))
-        if evidence_value is not None and evidence_unit:
-            normalized_evidence_value, normalized_evidence_unit = _normalize_diffusion_unit_and_value(evidence_value, evidence_unit)
-            for key in ("D_total", "D_cation", "D_anion"):
-                if row.get(key) is not None:
-                    row[key] = normalized_evidence_value
-                    if normalized_evidence_unit:
-                        row["D_unit"] = normalized_evidence_unit
+
+        for key in ("D_total", "D_cation", "D_anion"):
+            evidence_measure = _pick_evidence_measure_for_field(evidence_measures, key)
+            if evidence_measure:
+                row[key] = evidence_measure["value"]
+                row["D_unit"] = evidence_measure["unit"]
+
+        if not row.get("D_unit") and len(evidence_measures) == 1:
+            populated_fields = [key for key in ("D_total", "D_cation", "D_anion") if row.get(key) is not None]
+            if len(populated_fields) == 1:
+                row[populated_fields[0]] = evidence_measures[0]["value"]
+                row["D_unit"] = evidence_measures[0]["unit"]
+
+        if not row.get("D_unit") or not record_has_diffusion_value(row):
+            continue
+
         row["temperature_value"] = _to_float(row.get("temperature_value"))
         row["confinement_scale_value"] = _to_float(row.get("confinement_scale_value"))
 
@@ -390,6 +522,7 @@ def serialize_diffusion_row_for_response(row: dict[str, Any], *, row_id: int | N
     payload = dict(row)
     if row_id is not None:
         payload["id"] = str(row_id)
+    payload["extractor_type"] = "diffusion"
     payload["field_evidence_json"] = payload.get("field_evidence_json") or {}
     payload["novel_features_json"] = payload.get("novel_features_json") or {}
     payload["rdkit_features_json"] = payload.get("rdkit_features_json") or {}

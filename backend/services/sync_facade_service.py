@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import logging
 import os
 import re
@@ -10,7 +11,7 @@ from fastapi import HTTPException, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models.db_models import RecordCandidate, TribologyData
+from models.db_models import DiffusionCandidate, DiffusionRecord, RecordCandidate, TribologyData
 from schemas import SyncPayload
 from security import AuthPrincipal, RequestScope, scope_filters
 from services.agent_runtime_service import get_agent_runtime
@@ -29,6 +30,7 @@ from services.file_service import _read_file_content, _resolve_existing_path, _s
 from services.il_resolver_service import resolve_il
 from services.llm_service import llm_service
 from services.score_service import calculate_confidence_details
+from services.diffusion.diffusion_postprocess_service import serialize_diffusion_row_for_response
 from utils.tribopair import compose_tribopair_label, composite_roughness_label
 from utils.cof_extraction import derive_cof_extracted, normalize_cof_extracted
 from utils.experiment_profile import build_experiment_profile
@@ -266,6 +268,61 @@ def _record_to_payload(record) -> dict[str, Any]:
     return payload
 
 
+def _parse_json_payload(value: Any, fallback: Any) -> Any:
+    if value is None:
+        return fallback
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except Exception:
+            return fallback
+    return fallback
+
+
+def _diffusion_record_to_payload(record) -> dict[str, Any]:
+    review_entity_type = "candidate" if isinstance(record, DiffusionCandidate) else "record"
+    payload = serialize_diffusion_row_for_response(
+        {
+            "system_name": record.system_name,
+            "confinement_material_class": record.confinement_material_class,
+            "confinement_geometry_class": record.confinement_geometry_class,
+            "surface_functional_groups": record.surface_functional_groups,
+            "confinement_dimensionality": record.confinement_dimensionality,
+            "ionic_liquid": record.ionic_liquid,
+            "D_total": record.d_total,
+            "D_cation": record.d_cation,
+            "D_anion": record.d_anion,
+            "D_unit": record.d_unit,
+            "temperature_value": record.temperature_value,
+            "confinement_scale_value": record.confinement_scale_value,
+            "confinement_scale_unit": record.confinement_scale_unit,
+            "source": record.source,
+            "source_page": record.source_page,
+            "source_bbox": _parse_json_payload(record.source_bbox, None),
+            "evidence": record.evidence,
+            "provider": record.provider,
+            "prompt_version": record.prompt_version,
+            "raw_model_output": record.raw_model_output,
+            "field_evidence_json": _parse_json_payload(record.field_evidence_json, {}),
+            "review_status": record.review_status,
+            "record_origin": record.record_origin,
+            "assembly_notes": record.assembly_notes,
+            "confidence": record.confidence,
+            "novel_features_json": _parse_json_payload(record.novel_features_json, {}),
+            "smiles": record.smiles,
+            "rdkit_features_json": _parse_json_payload(record.rdkit_features_json, {}),
+        },
+        row_id=record.id,
+    )
+    payload["literature_id"] = record.literature_id
+    payload["literatureId"] = record.literature_id
+    payload["extractor_type"] = "diffusion"
+    payload["review_entity_type"] = review_entity_type
+    return payload
+
+
 async def sync_payload(
     db: AsyncSession,
     payload: SyncPayload,
@@ -307,11 +364,17 @@ async def list_literature_payload(
         candidate_count = (
             await db.execute(select(func.count(RecordCandidate.id)).where(RecordCandidate.literature_id == item.id))
         ).scalar() or 0
+        diffusion_record_count = (
+            await db.execute(select(func.count(DiffusionRecord.id)).where(DiffusionRecord.literature_id == item.id))
+        ).scalar() or 0
+        diffusion_candidate_count = (
+            await db.execute(select(func.count(DiffusionCandidate.id)).where(DiffusionCandidate.literature_id == item.id))
+        ).scalar() or 0
         payload.append(
             _literature_to_payload(
                 item,
-                record_count=int(record_count or 0),
-                candidate_count=int(candidate_count or 0),
+                record_count=int((record_count or 0) + (diffusion_record_count or 0)),
+                candidate_count=int((candidate_count or 0) + (diffusion_candidate_count or 0)),
             )
         )
     return payload
@@ -333,12 +396,30 @@ async def get_literature_detail_payload(db: AsyncSession, literature_id: int, *,
         )
         records = list(candidate_result.scalars().all())
     detail_records_are_candidates = bool(records and isinstance(records[0], RecordCandidate))
+
+    diffusion_result = await db.execute(
+        select(DiffusionCandidate)
+        .where(DiffusionCandidate.literature_id == literature_id)
+        .order_by(DiffusionCandidate.id.asc())
+    )
+    diffusion_records = list(diffusion_result.scalars().all())
+    diffusion_rows_are_candidates = bool(diffusion_records)
+    if not diffusion_records:
+        diffusion_final_result = await db.execute(
+            select(DiffusionRecord)
+            .where(DiffusionRecord.literature_id == literature_id)
+            .order_by(DiffusionRecord.id.asc())
+        )
+        diffusion_records = list(diffusion_final_result.scalars().all())
+        diffusion_rows_are_candidates = False
+
     payload = _literature_to_payload(
         literature,
-        record_count=0 if detail_records_are_candidates else len(records),
-        candidate_count=len(records) if detail_records_are_candidates else 0,
+        record_count=(0 if detail_records_are_candidates else len(records)) + (0 if diffusion_rows_are_candidates else len(diffusion_records)),
+        candidate_count=(len(records) if detail_records_are_candidates else 0) + (len(diffusion_records) if diffusion_rows_are_candidates else 0),
     )
     payload["tribologyData"] = [_record_to_payload(record) for record in records]
+    payload["diffusionData"] = [_diffusion_record_to_payload(record) for record in diffusion_records]
     return payload
 
 

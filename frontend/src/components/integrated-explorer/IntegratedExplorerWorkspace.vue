@@ -36,8 +36,6 @@ import RecordCard from '@/components/integrated-explorer/RecordCard.vue'
 import RecordTable from '@/components/integrated-explorer/RecordTable.vue'
 import Modal from '@/components/ui/Modal.vue'
 import InteractiveEvidencePanelHost from '@/components/InteractiveEvidencePanelHost.vue'
-import PdfViewerWithHighlight from '@/components/PdfViewerWithHighlight.vue'
-import MoleculeViewer from '@/components/MoleculeViewer.vue'
 import { useEvidencePanel } from '@/composables/useEvidencePanel'
 import { useRecordEditing } from '@/composables/useRecordEditing'
 import { useRecordSearch } from '@/composables/useRecordSearch'
@@ -58,12 +56,14 @@ import {
   type IonStructurePreviewItem,
 } from '@/lib/integratedExplorerHelpers'
 import { normalizePotentialDisplayText } from '@/lib/potential'
+import { lazyComponent } from '@/lib/lazyComponent'
 
 const props = defineProps<{
   initialDoi?: string
   sourceName?: string
   literatureMetadata?: any
   selectedFileId?: string | null
+  fixedExperimentScale?: string | null
   focusRecordId?: number | null
   externalExportRequest?: { id: number, format: ExportFormat } | null
 }>()
@@ -74,6 +74,9 @@ const emit = defineEmits<{
   'clear-source': []
   'clear-focused-record': []
 }>()
+
+const MoleculeViewer = lazyComponent(() => import('@/components/MoleculeViewer.vue'))
+const PdfViewerWithHighlight = lazyComponent(() => import('@/components/PdfViewerWithHighlight.vue'))
 
 const PAGE_SIZE = 10
 const exporting = ref(false)
@@ -120,6 +123,7 @@ const {
 } = useRecordSearch({
   initialDoi: toRef(props, 'initialDoi'),
   selectedFileId: toRef(props, 'selectedFileId'),
+  fixedExperimentScale: toRef(props, 'fixedExperimentScale'),
   pageSize: PAGE_SIZE,
 })
 

@@ -58,7 +58,7 @@ function createViewRoute(view: AppView): RouteRecordRaw {
 }
 
 const legacyRedirects: Array<{ path: string; view: AppView }> = [
-  { path: '/dashboard', view: 'home' },
+  { path: '/dashboard', view: 'pipeline' },
   { path: '/workspace', view: 'pipeline' },
   { path: '/cleaning', view: 'knowledge' },
   { path: '/predict', view: 'modeling' },
@@ -106,7 +106,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/:pathMatch(.*)*',
     redirect: {
-      name: 'home',
+      name: 'pipeline',
     },
   },
 ]

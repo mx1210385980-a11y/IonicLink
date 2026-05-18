@@ -4738,7 +4738,13 @@ async def process_file_safe(
             return {}, [], {}
 
 
-async def process_file_background(file_id: int, extractor_type: str = "tribology"):
+async def process_file_background(
+    file_id: int,
+    extractor_type: str = "tribology",
+    force: bool = False,
+    profile: str = "high_accuracy",
+    strict_cof_mode: Optional[bool] = None,
+):
     """
     Background Task for File Processing with Idempotency Check.
     Wraps process_file_safe with an additional status check to prevent overwriting completed files.
@@ -4748,7 +4754,7 @@ async def process_file_background(file_id: int, extractor_type: str = "tribology
     if extractor_type == "diffusion":
         from services.diffusion.diffusion_extractor_service import process_diffusion_file_background
 
-        await process_diffusion_file_background(file_id)
+        await process_diffusion_file_background(file_id, force=force, profile=profile)
         return
     
     async with async_session_maker() as db:
@@ -4770,7 +4776,7 @@ async def process_file_background(file_id: int, extractor_type: str = "tribology
             candidate_count, final_count = await _count_cached_record_artifacts(db, file_id)
             data_count = candidate_count or final_count
             
-            if data_count > 0:
+            if data_count > 0 and not force:
                 logger.info("Background processing aborted for literature_id=%s existing_records=%s", file_id, data_count)
                 # Self-healing: Ensure status reflects reality
                 if literature.status != 'completed':
@@ -4778,7 +4784,7 @@ async def process_file_background(file_id: int, extractor_type: str = "tribology
                     literature.status = 'completed'
                     await db.commit()
                 return
-            if await _normalize_legacy_no_data_state(
+            if not force and await _normalize_legacy_no_data_state(
                 db,
                 literature,
                 candidate_count=candidate_count,
@@ -4790,13 +4796,18 @@ async def process_file_background(file_id: int, extractor_type: str = "tribology
             # ------------------------------------------------
 
             # 2. Update Status to Processing (Only if not completed)
-            literature.status = "processing"
+            literature.status = "queued"
             await db.commit()
             
             # 3. Process Logic (Delegate to safe function)
             # process_file_safe will handle the actual extraction, saving, and final status update
             logger.info("Delegating background processing to process_file_safe for literature_id=%s", file_id)
-            await process_file_safe(file_id)
+            await process_file_safe(
+                file_id,
+                force=force,
+                profile=profile,
+                strict_cof_mode=strict_cof_mode,
+            )
             
         except Exception as e:
             logger.exception("Background processing failed for literature_id=%s", file_id)

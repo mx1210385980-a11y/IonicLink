@@ -1,36 +1,36 @@
 import { gzipSync, constants as zlibConstants } from 'node:zlib'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import type { Plugin } from 'vite'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { fileURLToPath, URL } from 'node:url'
 
 function gzipCompressionPlugin(): Plugin {
+  let outputDir = ''
+
   return {
     name: 'ioniclink:gzip-compression',
     apply: 'build',
-    generateBundle(_, bundle) {
-      for (const [fileName, chunk] of Object.entries(bundle)) {
+    configResolved(config) {
+      outputDir = resolve(config.root, config.build.outDir)
+    },
+    writeBundle(_, bundle) {
+      for (const fileName of Object.keys(bundle)) {
         if (!/\.(js|mjs|css|html|json|svg|txt|xml)$/.test(fileName)) {
           continue
         }
 
-        const source =
-          chunk.type === 'asset'
-            ? chunk.source
-            : chunk.type === 'chunk'
-              ? chunk.code
-              : null
-
-        if (source == null) {
+        const sourcePath = resolve(outputDir, fileName)
+        if (!existsSync(sourcePath)) {
           continue
         }
 
-        const buffer = Buffer.isBuffer(source) ? source : Buffer.from(String(source))
-        this.emitFile({
-          type: 'asset',
-          fileName: `${fileName}.gz`,
-          source: gzipSync(buffer, { level: zlibConstants.Z_BEST_COMPRESSION })
-        })
+        const compressedPath = resolve(dirname(sourcePath), `${fileName.split('/').pop()}.gz`)
+        writeFileSync(
+          compressedPath,
+          gzipSync(readFileSync(sourcePath), { level: zlibConstants.Z_BEST_COMPRESSION })
+        )
       }
     }
   }

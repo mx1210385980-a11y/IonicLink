@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import * as echarts from 'echarts'
+import type { ECharts, EChartsCoreOption } from 'echarts'
 import { AlertTriangle, BookOpen, Database, Loader2, RefreshCw } from 'lucide-vue-next'
 
 import {
@@ -15,6 +15,7 @@ import {
   type RelationshipGraphSelection,
   type SearchFilter,
 } from '@/lib/api'
+import { recoverFromChunkLoadError } from '@/lib/lazyComponent'
 import { normalizePotentialDisplayText } from '@/lib/potential'
 
 const props = defineProps<{
@@ -32,7 +33,9 @@ const drilldown = ref<RelationshipGraphDrilldownResponse | null>(null)
 const drilldownLoading = ref(false)
 const drilldownError = ref('')
 
-let chart: echarts.ECharts | null = null
+let chart: ECharts | null = null
+let echartsModule: typeof import('echarts') | null = null
+let echartsPromise: Promise<typeof import('echarts')> | null = null
 let resizeObserver: ResizeObserver | null = null
 let lastLoadedRefreshKey: number | null = null
 
@@ -139,8 +142,26 @@ function disposeChart() {
   }
 }
 
-function ensureChart() {
+async function loadECharts() {
+  if (echartsModule) return echartsModule
+  if (!echartsPromise) {
+    echartsPromise = import('echarts')
+      .then((module) => {
+        echartsModule = module
+        return module
+      })
+      .catch((error) => {
+        echartsPromise = null
+        recoverFromChunkLoadError(error)
+        throw error
+      })
+  }
+  return echartsPromise
+}
+
+async function ensureChart() {
   if (!chartRoot.value) return null
+  const echarts = await loadECharts()
   if (!chart) {
     chart = echarts.init(chartRoot.value)
   }
@@ -163,7 +184,7 @@ function edgeWidth(edge: RelationshipGraphEdge, maxCount: number): number {
   return Number((1.8 + ratio * 5.2).toFixed(2))
 }
 
-function buildChartOption(data: RelationshipGraphResponse): echarts.EChartsCoreOption {
+function buildChartOption(data: RelationshipGraphResponse): EChartsCoreOption {
   const isDark = document.documentElement.classList.contains('dark')
   const categories = Array.from(new Set(data.nodes.map((node) => node.type))).map((type) => ({
     name: typeLabel(type),
@@ -261,7 +282,7 @@ async function renderGraph() {
   }
 
   await nextTick()
-  const instance = ensureChart()
+  const instance = await ensureChart()
   if (!instance) return
 
   instance.off('click')

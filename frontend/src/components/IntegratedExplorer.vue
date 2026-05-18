@@ -6,6 +6,7 @@ defineProps<{
   sourceName?: string
   literatureMetadata?: any
   selectedFileId?: string | null
+  fixedExperimentScale?: string | null
   focusRecordId?: number | null
   externalExportRequest?: { id: number, format: 'json' | 'csv' | 'ndjson' } | null
 }>()
@@ -24,6 +25,7 @@ defineEmits<{
     :source-name="sourceName"
     :literature-metadata="literatureMetadata"
     :selected-file-id="selectedFileId"
+    :fixed-experiment-scale="fixedExperimentScale"
     :focus-record-id="focusRecordId ?? null"
     :external-export-request="externalExportRequest"
     @view-literature="$emit('view-literature', $event)"

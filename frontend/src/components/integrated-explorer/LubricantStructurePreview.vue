@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-import MoleculeViewer from '@/components/MoleculeViewer.vue'
 import type { RecordResponse } from '@/lib/api'
+import { lazyComponent } from '@/lib/lazyComponent'
 import {
   formatIonicLiquidPartHtml,
   lubricantStructureLayout,
@@ -18,6 +18,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   open: [record: RecordResponse]
 }>()
+
+const MoleculeViewer = lazyComponent(() => import('@/components/MoleculeViewer.vue'))
 
 const layout = computed(() => lubricantStructureLayout(props.record))
 const hasRenderableStructure = computed(() => {

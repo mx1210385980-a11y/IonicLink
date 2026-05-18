@@ -19,8 +19,6 @@ import {
   Search,
 } from 'lucide-vue-next'
 
-import PdfViewerWithHighlight from '@/components/PdfViewerWithHighlight.vue'
-
 import {
   approveDiffusionReviewCandidate,
   approveReviewCandidate,
@@ -71,7 +69,14 @@ import {
 import { canonicalExperimentScaleValue, experimentScaleLabel } from '@/lib/experimentScale'
 import { getIonicLiquidEvidenceParts, getIonicLiquidEvidenceTerms } from '@/lib/ionicLiquidAliasKnowledge'
 import { normalizePotentialDisplayText } from '@/lib/potential'
+import { lazyComponent } from '@/lib/lazyComponent'
 import type { HighlightRect } from '@/types/pdf-highlight'
+
+type PdfViewerBridge = {
+  scrollToPage: (page: number) => void
+}
+
+const PdfViewerWithHighlight = lazyComponent(() => import('@/components/PdfViewerWithHighlight.vue'))
 
 const props = defineProps<{
   currentSection: string
@@ -227,7 +232,7 @@ const systemEditFrictionRegime = ref('unstated')
 const systemEditContactGeometry = ref('')
 const systemEditScale = ref('')
 const systemEditError = ref('')
-const pdfViewerRef = ref<InstanceType<typeof PdfViewerWithHighlight> | null>(null)
+const pdfViewerRef = ref<PdfViewerBridge | null>(null)
 const pdfPageInput = ref('')
 const pdfPageCount = ref(0)
 const pdfPageError = ref('')

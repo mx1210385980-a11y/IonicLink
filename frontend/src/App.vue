@@ -3,26 +3,30 @@ import { computed, ref } from 'vue'
 import { Github } from 'lucide-vue-next'
 
 import AppSidebar from '@/components/AppSidebar.vue'
-import BlogView from '@/components/BlogView.vue'
-import FileUpload from '@/components/FileUpload.vue'
-import ChatPanel from '@/components/ChatPanel.vue'
 import LoginScreen from '@/components/LoginScreen.vue'
 import type { HomeSuggestedAction } from '@/composables/useHomeSummary'
 import { useAppShell } from '@/composables/useAppShell'
 import { useI18n } from '@/composables/useI18n'
 import { getLiteratureDetails, type BatchFile, type TribologyData, type ValidationStatus } from '@/lib/api'
+import { lazyComponent } from '@/lib/lazyComponent'
 import type { AppSection, AppView } from '@/lib/platform'
-import AdminPage from '@/pages/admin/AdminPage.vue'
-import HelpPage from '@/pages/help/HelpPage.vue'
-import HomePage from '@/pages/home/HomePage.vue'
-import KnowledgePage from '@/pages/knowledge/KnowledgePage.vue'
-import ModelingPage from '@/pages/modeling/ModelingPage.vue'
-import PipelinePage from '@/pages/pipeline/PipelinePage.vue'
-import QualityMetricsPage from '@/pages/quality/QualityMetricsPage.vue'
-import ReviewPage from '@/pages/review/ReviewPage.vue'
 
-type FileUploadBridge = InstanceType<typeof FileUpload>
-type ChatPanelBridge = InstanceType<typeof ChatPanel>
+type FileUploadBridge = {
+  setUploading: (value: boolean) => void
+}
+type ChatPanelBridge = {
+  addMessage: (role: 'user' | 'assistant', message: string) => void
+}
+
+const AdminPage = lazyComponent(() => import('@/pages/admin/AdminPage.vue'))
+const BlogView = lazyComponent(() => import('@/components/BlogView.vue'))
+const HelpPage = lazyComponent(() => import('@/pages/help/HelpPage.vue'))
+const HomePage = lazyComponent(() => import('@/pages/home/HomePage.vue'))
+const KnowledgePage = lazyComponent(() => import('@/pages/knowledge/KnowledgePage.vue'))
+const ModelingPage = lazyComponent(() => import('@/pages/modeling/ModelingPage.vue'))
+const PipelinePage = lazyComponent(() => import('@/pages/pipeline/PipelinePage.vue'))
+const QualityMetricsPage = lazyComponent(() => import('@/pages/quality/QualityMetricsPage.vue'))
+const ReviewPage = lazyComponent(() => import('@/pages/review/ReviewPage.vue'))
 
 const ADMIN_ROLES = new Set(['principal_investigator', 'group_admin'])
 
@@ -89,6 +93,7 @@ const {
   latestAgentWorkflow,
   navigateTo,
   openTrainingWorkbench,
+  prepareFileForReview,
   preferredTrainingDatasetId,
   selectedFileId,
   selectedScopeKey,
@@ -101,6 +106,35 @@ const {
 
 const canAccessAdmin = computed(() => ADMIN_ROLES.has(String(sessionState.user?.role || '')))
 const isBlogView = computed(() => currentView.value === 'blog')
+const viewTitle = computed(() => {
+  if (isChinese.value) {
+    const labels: Record<AppView, string> = {
+      admin: '管理',
+      blog: '内容',
+      help: '帮助',
+      home: '概览',
+      knowledge: '知识库',
+      modeling: '建模',
+      pipeline: '抽取',
+      quality: '质量',
+      review: '审阅',
+    }
+    return labels[currentView.value] || currentView.value
+  }
+
+  const labels: Record<AppView, string> = {
+    admin: 'Admin',
+    blog: 'Content',
+    help: 'Help',
+    home: 'Overview',
+    knowledge: 'Knowledge',
+    modeling: 'Modeling',
+    pipeline: 'Extract',
+    quality: 'Quality',
+    review: 'Review',
+  }
+  return labels[currentView.value] || formatLabel(currentView.value)
+})
 
 const queueSizeLabel = computed(() => {
   const count = batchFiles.value.length
@@ -257,6 +291,21 @@ function normalizeReviewRecord(record: any): TribologyData {
     confidence: Number.isFinite(confidence) ? confidence : null,
     confidence_details: record.confidence_details ?? record.confidenceDetails ?? null,
     confidenceDetails: record.confidenceDetails ?? record.confidence_details ?? null,
+    system_name: record.system_name ?? record.systemName ?? '',
+    confinement_material_class: record.confinement_material_class ?? record.confinementMaterialClass ?? '',
+    confinement_geometry_class: record.confinement_geometry_class ?? record.confinementGeometryClass ?? '',
+    surface_functional_groups: record.surface_functional_groups ?? record.surfaceFunctionalGroups ?? '',
+    confinement_dimensionality: record.confinement_dimensionality ?? record.confinementDimensionality ?? '',
+    D_total: record.D_total ?? record.d_total ?? record.dTotal ?? null,
+    D_cation: record.D_cation ?? record.d_cation ?? record.dCation ?? null,
+    D_anion: record.D_anion ?? record.d_anion ?? record.dAnion ?? null,
+    D_unit: record.D_unit ?? record.d_unit ?? record.dUnit ?? '',
+    temperature_value: record.temperature_value ?? record.temperatureValue ?? null,
+    confinement_scale_value: record.confinement_scale_value ?? record.confinementScaleValue ?? null,
+    confinement_scale_unit: record.confinement_scale_unit ?? record.confinementScaleUnit ?? '',
+    smiles: record.smiles ?? '',
+    novel_features_json: record.novel_features_json ?? record.novelFeaturesJson ?? {},
+    rdkit_features_json: record.rdkit_features_json ?? record.rdkitFeaturesJson ?? {},
     validationStatus: validationStatusFromReviewStatus(record.review_status ?? record.reviewStatus),
   }
 }
@@ -274,18 +323,24 @@ async function ensureReviewFileForTarget(target: ReviewTarget) {
     })
     if (hasTargetFinalRecord) return
   } else if (existingIndex >= 0) {
-    return
+    const existingFile = batchFiles.value[existingIndex]
+    if (existingFile && existingFile.records.length > 0) return
   }
 
   try {
     const details = await getLiteratureDetails(literatureId)
-    const records = (details.tribologyData || []).map(normalizeReviewRecord)
+    const diffusionRows = Array.isArray((details as any).diffusionData) ? (details as any).diffusionData : []
+    const tribologyRows = Array.isArray(details.tribologyData) ? details.tribologyData : []
+    const rows = diffusionRows.length ? diffusionRows : tribologyRows
+    const records: TribologyData[] = rows.map(normalizeReviewRecord)
+    const extractorType = (diffusionRows.length ? 'diffusion' : (records[0]?.extractor_type || 'tribology')) as 'tribology' | 'diffusion'
     const batchFile: BatchFile = {
       id: String(literatureId),
       name: details.title || details.doi || `Literature ${literatureId}`,
       status: 'success',
       progress: 100,
       progressMessage: 'Loaded from literature library',
+      extractor_type: extractorType,
       metadata: {
         title: details.title || '',
         authors: details.authors || '',
@@ -318,6 +373,23 @@ async function openReviewTarget(target?: ReviewTarget) {
     selectedFileId.value = String(target.literatureId)
   }
 
+  navigateTo('review', 'inbox')
+}
+
+async function openReviewForCurrentFile(fileId?: string | null) {
+  reviewTargetRecordId.value = null
+  reviewTargetMode.value = null
+  const targetFileId = fileId || selectedFileId.value
+  let readyForReview = false
+  if (targetFileId) {
+    readyForReview = await prepareFileForReview(targetFileId)
+  }
+  const targetFile = targetFileId ? batchFiles.value.find((file) => file.id === targetFileId) : null
+  if (!readyForReview && !targetFile?.records.length) {
+    if (targetFileId) selectedFileId.value = targetFileId
+    navigateTo('pipeline', 'runs')
+    return
+  }
   navigateTo('review', 'inbox')
 }
 
@@ -436,7 +508,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
       <!-- Minimal top bar -->
       <header class="flex h-12 shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 dark:border-slate-800 dark:bg-slate-900">
         <h2 class="text-sm font-semibold capitalize text-slate-800 dark:text-slate-100">
-          {{ currentView }}
+          {{ viewTitle }}
         </h2>
         <div class="ml-auto flex items-center gap-1.5">
           <a
@@ -499,7 +571,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
             @cancel-extraction="handleCancelExtraction"
             @send-chat="handleChat"
             @update-sidebar-tab="setSidebarTab"
-            @open-review="navigateTo('review', 'inbox')"
+            @open-review="openReviewForCurrentFile"
             @open-knowledge="navigateTo('knowledge', 'explorer')"
             @clear-doi="clearExplorerDoi"
             @set-default-extractor-type="setDefaultExtractorType"

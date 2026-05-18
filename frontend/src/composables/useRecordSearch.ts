@@ -13,6 +13,7 @@ import { useDashboardFilters } from '@/composables/useDashboardFilters'
 type UseRecordSearchOptions = {
   initialDoi: Ref<string | undefined>
   selectedFileId: Ref<string | null | undefined>
+  fixedExperimentScale?: Ref<string | null | undefined>
   targetRecordId?: Ref<string | number | null | undefined>
   pageSize?: number
 }
@@ -171,7 +172,8 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
     const dashboardCofMin = filters.cofRange.min ?? undefined
     const dashboardCofMax = filters.cofRange.max ?? undefined
 
-    const experimentScale = canonicalExperimentScaleValue(selectedExperimentScale.value)
+    const fixedExperimentScale = canonicalExperimentScaleValue(options.fixedExperimentScale?.value || '')
+    const experimentScale = fixedExperimentScale || canonicalExperimentScaleValue(selectedExperimentScale.value)
 
     return {
       materials: dashboardMaterials,
@@ -279,6 +281,18 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
     watch(
       options.targetRecordId,
       () => {
+        currentPage.value = 1
+        markGraphDirty()
+        void fetchData()
+      },
+    )
+  }
+
+  if (options.fixedExperimentScale) {
+    watch(
+      options.fixedExperimentScale,
+      () => {
+        selectedExperimentScale.value = ''
         currentPage.value = 1
         markGraphDirty()
         void fetchData()

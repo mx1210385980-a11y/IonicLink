@@ -8,12 +8,14 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Backgro
 import base64
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import func, select, update
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.tribology import TribologyData, ChatRequest, LiteratureMetadata
 from models.db_models import (
     DiffusionCandidate,
+    DiffusionFeatureSet,
     DiffusionRecord,
     Literature,
     RecordCandidate,
@@ -118,6 +120,118 @@ _TRIBOLOGY_PRIMARY_METRIC_KEYS = (
     "layer_spacing_delta",
     "surface_roughness",
 )
+
+
+def _build_diffusion_processing_summary(*, profile: str = "high_accuracy", message: str | None = None) -> dict[str, Any]:
+    return _build_processing_summary(
+        extractor_type="diffusion",
+        profile=profile,
+        message=message or "Diffusion extraction is running in the background.",
+    )
+
+
+def _parse_json_object(value: Any) -> dict[str, Any]:
+    if not value:
+        return {}
+    if isinstance(value, dict):
+        return value
+    try:
+        loaded = json.loads(value)
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        return {}
+
+
+def _build_processing_summary(
+    *,
+    extractor_type: str,
+    profile: str = "high_accuracy",
+    message: str | None = None,
+    run: Any | None = None,
+) -> dict[str, Any]:
+    summary = _parse_json_object(getattr(run, "summary_json", None))
+    dropped_by_reason = _parse_json_object(getattr(run, "dropped_by_reason", None))
+    page_coverage = _parse_json_object(getattr(run, "page_coverage", None))
+    current_message = (
+        message
+        or summary.get("current_message")
+        or f"{extractor_type.title()} extraction is running in the background."
+    )
+    progress_log = summary.get("progress_log")
+    if not isinstance(progress_log, list) or not progress_log:
+        progress_log = [{"stage": "stage_a.queued", "message": current_message}]
+
+    return {
+        "run_id": getattr(run, "run_id", None),
+        "extractor_type": extractor_type,
+        "profile": profile,
+        "status": "processing",
+        "candidate_count": int(getattr(run, "candidate_count", 0) or summary.get("candidate_count") or 0),
+        "final_count": int(getattr(run, "final_count", 0) or summary.get("final_count") or 0),
+        "dropped_by_reason": dropped_by_reason or summary.get("dropped_by_reason") or {"in_progress": 1},
+        "page_coverage": page_coverage or summary.get("page_coverage") or {},
+        "page_candidate_counts": summary.get("page_candidate_counts") or {},
+        "progress_log": progress_log,
+        "current_stage": summary.get("current_stage") or "stage_a.queued",
+        "current_message": current_message,
+    }
+
+
+async def _diffusion_can_resolve_inline(db: AsyncSession, literature_id: int, *, force: bool = False) -> bool:
+    if force:
+        return False
+    candidate_count = (
+        await db.execute(select(func.count(DiffusionCandidate.id)).where(DiffusionCandidate.literature_id == literature_id))
+    ).scalar() or 0
+    record_count = (
+        await db.execute(select(func.count(DiffusionRecord.id)).where(DiffusionRecord.literature_id == literature_id))
+    ).scalar() or 0
+    if candidate_count or record_count:
+        return True
+    latest_run = await get_latest_extraction_run_by_literature(db, literature_id, extractor_type="diffusion")
+    return bool(latest_run and str(latest_run.status or "").strip().lower() in {"running", "processing", "completed", "no_data"})
+
+
+async def _cached_artifact_counts_for_extractor(
+    db: AsyncSession,
+    literature_id: int,
+    extractor_type: str,
+) -> tuple[int, int]:
+    if extractor_type == "diffusion":
+        candidate_count = (
+            await db.execute(select(func.count(DiffusionCandidate.id)).where(DiffusionCandidate.literature_id == literature_id))
+        ).scalar() or 0
+        final_count = (
+            await db.execute(select(func.count(DiffusionRecord.id)).where(DiffusionRecord.literature_id == literature_id))
+        ).scalar() or 0
+        return int(candidate_count), int(final_count)
+
+    return await _count_cached_record_artifacts(db, literature_id)
+
+
+async def _upload_status_for_extractor(db: AsyncSession, literature: Literature, extractor_type: str) -> str:
+    """Return upload status for the selected extraction lane, not the shared literature row."""
+    candidate_count, final_count = await _cached_artifact_counts_for_extractor(db, literature.id, extractor_type)
+    if candidate_count or final_count:
+        return "completed"
+
+    latest_run = await get_latest_extraction_run_by_literature(db, literature.id, extractor_type=extractor_type)
+    run_status = str(getattr(latest_run, "status", "") or "").strip().lower()
+    if run_status in {"queued", "running", "processing", "extracting"}:
+        return "processing"
+    if run_status in {"completed", "success"}:
+        return "completed"
+    if run_status in {"no_data", "failed", "error", "cancelled"}:
+        return run_status
+
+    literature_status = str(literature.status or "").strip().lower()
+    if literature_status in {"queued", "extracting", "processing", "running"}:
+        return "processing"
+    if literature_status in {"failed", "error", "cancelled"}:
+        return literature_status
+
+    # A literature-level completed/no_data status may belong to the other extractor.
+    return "pending"
 
 
 def _normalize_field_key(field_key: str) -> str:
@@ -3308,6 +3422,11 @@ async def approve_diffusion_candidate_review(
     else:
         _copy_diffusion_candidate_to_final_record(candidate, promoted_record)
 
+    await db.execute(
+        update(DiffusionFeatureSet)
+        .where(DiffusionFeatureSet.candidate_id == candidate.id)
+        .values(record_id=promoted_record.id)
+    )
     candidate.promoted_at = datetime.utcnow()
     await db.commit()
     await db.refresh(candidate)
@@ -3370,18 +3489,24 @@ async def upload_file(
             request=request,
         )
 
-        if auto_extract and literature.status == "pending":
+        upload_status = await _upload_status_for_extractor(db, literature, extractor_type)
+
+        if auto_extract and upload_status == "pending":
             logger.info("Queueing background extraction for literature_id=%s", literature.id)
+            literature.status = "queued"
+            literature.error_message = None
+            await db.commit()
             background_tasks.add_task(process_file_background, literature.id, extractor_type)
+            upload_status = "processing"
         elif auto_extract:
-            logger.info("Skipping background extraction for literature_id=%s status=%s", literature.id, literature.status)
+            logger.info("Skipping background extraction for literature_id=%s status=%s", literature.id, upload_status)
 
         return {
             "success": True,
             "message": "File uploaded",
             "file_id": str(literature.id),
             "filename": literature.title,
-            "status": literature.status,
+            "status": upload_status,
             "extractor_type": extractor_type,
         }
     except HTTPException:
@@ -3457,6 +3582,7 @@ async def cancel_extraction(
 async def extract_data(
     file_id: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     force: bool = False,
     profile: str = Query("high_accuracy", pattern="^(high_accuracy|standard|review_figure_estimate)$"),
     extractor_type: str = Query("tribology", pattern="^(tribology|diffusion)$"),
@@ -3476,7 +3602,7 @@ async def extract_data(
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid File ID format (expected integer)")
 
-        await require_literature_access(db, principal, lit_id, write=True)
+        literature = await require_literature_access(db, principal, lit_id, write=True)
 
         # 记录提取活动
         await log_activity(
@@ -3504,6 +3630,57 @@ async def extract_data(
             extractor_type,
             strict_cof_mode,
         )
+
+        lane_status = await _upload_status_for_extractor(db, literature, extractor_type)
+        latest_run = await get_latest_extraction_run_by_literature(db, lit_id, extractor_type=extractor_type)
+        run_status = str(getattr(latest_run, "status", "") or "").strip().lower()
+        if lane_status == "processing" or run_status in {"queued", "running", "processing", "extracting"}:
+            summary = _build_processing_summary(
+                extractor_type=extractor_type,
+                profile=profile,
+                run=latest_run,
+                message=f"{extractor_type.title()} extraction is already running in the background.",
+            )
+            await db.commit()
+            return {
+                "success": True,
+                "status": "processing",
+                "metadata": {},
+                "data": [],
+                "extraction_summary": summary,
+                "agent_workflow": {},
+                "extractor_type": extractor_type,
+                "message": summary["current_message"],
+            }
+
+        should_read_cached_inline = (not force) and lane_status in {"completed", "no_data"}
+        if not should_read_cached_inline:
+            literature.status = "queued"
+            literature.error_message = None
+            await db.commit()
+            background_tasks.add_task(
+                process_file_background,
+                lit_id,
+                extractor_type,
+                force,
+                profile,
+                strict_cof_mode,
+            )
+            summary = _build_processing_summary(
+                extractor_type=extractor_type,
+                profile=profile,
+                message=f"{extractor_type.title()} extraction started in the background. You can keep working while it runs.",
+            )
+            return {
+                "success": True,
+                "status": "processing",
+                "metadata": {},
+                "data": [],
+                "extraction_summary": summary,
+                "agent_workflow": {},
+                "extractor_type": extractor_type,
+                "message": summary["current_message"],
+            }
 
         workflow_result = await get_agent_runtime().run_extraction_workflow(
             file_id=lit_id,
@@ -3707,6 +3884,28 @@ async def get_latest_extraction_run_detail(
         await db.commit()
     run = await get_latest_extraction_run_by_literature(db, literature_id, extractor_type=extractor_type)
     if not run:
+        if literature and str(literature.status or "").strip().lower() in {"queued", "extracting", "processing", "running"}:
+            summary = _build_processing_summary(
+                extractor_type=extractor_type,
+                message=f"{extractor_type.title()} extraction is queued. The run log will appear shortly."
+            )
+            return {
+                "run_id": None,
+                "literature_id": literature_id,
+                "extractor_type": extractor_type,
+                "profile": "high_accuracy",
+                "status": "processing",
+                "candidate_count": 0,
+                "final_count": 0,
+                "dropped_by_reason": summary["dropped_by_reason"],
+                "page_coverage": {},
+                "page_candidate_counts": {},
+                "progress_log": summary["progress_log"],
+                "summary": summary,
+                "error_message": None,
+                "created_at": None,
+                "updated_at": None,
+            }
         return {
             "run_id": None,
             "extractor_type": extractor_type,
@@ -3778,8 +3977,8 @@ async def get_latest_extraction_run_detail(
         "extractor_type": run.extractor_type,
         "profile": run.profile,
         "status": response_status,
-        "candidate_count": run.candidate_count,
-        "final_count": run.final_count,
+        "candidate_count": int(candidate_count or 0),
+        "final_count": int(final_count or 0),
         "dropped_by_reason": _parse_json(run.dropped_by_reason),
         "page_coverage": _parse_json(run.page_coverage),
         "page_candidate_counts": summary.get("page_candidate_counts") or {},

@@ -35,6 +35,21 @@ import {
   type AppSection,
   type AppView,
 } from '@/lib/platform'
+import {
+  buildInitialFileState,
+  createUploadPlaceholder,
+  hasExtractionWarnings,
+  isNoDataResponse,
+  normalizeExtractionPayload,
+  replaceBatchFileId,
+  resetFileForExtractorChange,
+  setFileCancelled,
+  setFileError,
+  setFileNoData,
+  setFileProcessing,
+  setFileSuccess,
+  uploadErrorMessage,
+} from '@/lib/extractionWorkspace'
 import { useI18n } from '@/composables/useI18n'
 import type { HighlightRect } from '@/types/pdf-highlight'
 type SidebarTab = 'chat' | 'agents'
@@ -235,29 +250,6 @@ export function useAppShell(
     }
   }, { immediate: true })
 
-  function deriveValidationStatus(reviewStatus?: string | null): TribologyData['validationStatus'] {
-    const normalized = String(reviewStatus || '').trim().toLowerCase()
-    if (normalized === 'approved') return 'verified'
-    if (normalized === 'flagged' || normalized === 'needs_evidence') return 'warning'
-    return 'unverified'
-  }
-
-  function hasWarnings(records: TribologyData[], extractorType: ExtractorType = 'tribology'): boolean {
-    const hasLowConfidence = records.some((record) => {
-      const confidence = Number(record.confidence ?? record.confidence_details?.score ?? record.confidenceDetails?.score)
-      return Number.isFinite(confidence) && confidence < 0.8
-    })
-    if (hasLowConfidence) return true
-
-    if (extractorType === 'diffusion') {
-      return records.some((record) => {
-        const hasCoefficient = [record.D_total, record.D_cation, record.D_anion].some((value) => value !== null && value !== undefined)
-        return !record.system_name || !record.ionic_liquid || !hasCoefficient
-      })
-    }
-    return records.some((record) => !record.cof || record.cof === '-' || record.cof === 'null')
-  }
-
   function toggleDarkMode() {
     isDark.value = !isDark.value
   }
@@ -395,139 +387,6 @@ export function useAppShell(
     }
   }
 
-  function setFileProcessing(batchFile: BatchFile | undefined, progress: number, message: string) {
-    if (!batchFile) return
-    batchFile.status = 'processing'
-    batchFile.progress = Math.min(96, Math.max(batchFile.progress || 0, progress))
-    batchFile.progressMessage = message
-    batchFile.errorMessage = undefined
-  }
-
-  function setFileError(batchFile: BatchFile | undefined, message: string) {
-    if (!batchFile) return
-    batchFile.status = 'error'
-    batchFile.progress = 0
-    batchFile.progressMessage = t('progress.needs_review')
-    batchFile.errorMessage = message
-  }
-
-  function setFileSuccess(batchFile: BatchFile | undefined, message: string) {
-    if (!batchFile) return
-    batchFile.status = 'success'
-    batchFile.progress = 100
-    batchFile.progressMessage = message
-    batchFile.errorMessage = undefined
-  }
-
-  function setFileNoData(batchFile: BatchFile | undefined, message: string) {
-    if (!batchFile) return
-    batchFile.status = 'no_data'
-    batchFile.progress = 100
-    batchFile.progressMessage = message
-    batchFile.errorMessage = message
-  }
-
-  function setFileCancelled(batchFile: BatchFile | undefined, message: string = 'Extraction stopped.') {
-    if (!batchFile) return
-    batchFile.status = 'cancelled'
-    batchFile.progress = Math.max(0, Math.round(batchFile.progress || 0))
-    batchFile.progressMessage = message
-    batchFile.errorMessage = message
-  }
-
-  function normalizeExtractionPayload(fileId: string, response: ExtractionResponse) {
-    const normalizeMetadata = (value: unknown): BatchFile['metadata'] | undefined => {
-      if (!value || typeof value !== 'object') return undefined
-      const raw = value as Record<string, unknown>
-      const title = String(raw.title || '').trim()
-      const authors = String(raw.authors || '').trim()
-      const doi = String(raw.doi || '').trim()
-      const journal = String(raw.journal || '').trim()
-      const yearCandidate = Number(raw.year)
-      const normalizedYear = Number.isFinite(yearCandidate) && yearCandidate > 0
-        ? Math.round(yearCandidate)
-        : new Date().getFullYear()
-      const optionalText = (field: unknown) => {
-        const normalized = String(field || '').trim()
-        return normalized || null
-      }
-
-      return {
-        title,
-        authors,
-        doi,
-        journal,
-        year: normalizedYear,
-        issn: optionalText(raw.issn),
-        volume: optionalText(raw.volume),
-        issue: optionalText(raw.issue),
-        pages: optionalText(raw.pages),
-      }
-    }
-
-    const metadata = normalizeMetadata(response.metadata)
-    const extractorType = (response.extractor_type || response.extraction_summary?.extractor_type || 'tribology') as ExtractorType
-    const rawRecords = Array.isArray(response.data) ? response.data : []
-    const parseFieldEvidenceMap = (value: unknown) => {
-      if (!value) return undefined
-      if (typeof value === 'string') {
-        try {
-          const parsed = JSON.parse(value)
-          return parsed && typeof parsed === 'object' ? parsed : undefined
-        } catch {
-          return undefined
-        }
-      }
-      return typeof value === 'object' ? value as TribologyData['field_evidence_json'] : undefined
-    }
-    const parseSourceBbox = (value: unknown) => {
-      if (Array.isArray(value)) return value
-      if (typeof value === 'string') {
-        try {
-          const parsed = JSON.parse(value)
-          return Array.isArray(parsed) ? parsed : null
-        } catch {
-          return null
-        }
-      }
-      return null
-    }
-    const records = rawRecords.map((record: any, index: number) => ({
-      ...record,
-      id: record.id || `${fileId}-${index}-${Date.now()}`,
-      fileId,
-      extractor_type: record.extractor_type || extractorType,
-      cof_extracted: record.cof_extracted || record.cofExtracted || null,
-      load_conditions: record.load_conditions || record.loadConditions || null,
-      tribological_system: record.tribological_system || record.tribologicalSystem || null,
-      lubricant_components: record.lubricant_components || record.lubricantComponents || [],
-      lubricant_alias: record.lubricant_alias || record.lubricantAlias || null,
-      ionic_liquid_display: record.ionic_liquid_display || record.ionicLiquidDisplay || null,
-      lubricant_tooltip: record.lubricant_tooltip || record.lubricantTooltip || null,
-      review_entity_type: record.review_entity_type || record.reviewEntityType || 'candidate',
-      field_evidence_json: parseFieldEvidenceMap(record.field_evidence_json),
-      source_bbox: parseSourceBbox(record.source_bbox),
-      confidence: Number.isFinite(Number(record.confidence ?? record.confidence_details?.score ?? record.confidenceDetails?.score))
-        ? Number(record.confidence ?? record.confidence_details?.score ?? record.confidenceDetails?.score)
-        : null,
-      confidence_details: record.confidence_details || record.confidenceDetails || null,
-      confidenceDetails: record.confidenceDetails || record.confidence_details || null,
-      validationStatus: record.validationStatus || deriveValidationStatus(record.review_status),
-    }))
-
-    return {
-      metadata,
-      records,
-      extractorType,
-    }
-  }
-
-  function isNoDataResponse(response: ExtractionResponse, recordCount: number) {
-    const status = String(response.status || '').toLowerCase()
-    return status === 'no_data'
-      || (status !== 'processing' && !!response.success && recordCount === 0)
-  }
-
   function isNoDataRun(run: ExtractionRunDetail) {
     const status = String(run.status || '').toLowerCase()
     if (status === 'cancelled') return false
@@ -648,6 +507,22 @@ export function useAppShell(
     const run = await fetchLatestRun(fileId, silentNotFound)
     if (run) {
       applyRunProgress(fileId, run)
+      const batchFile = findBatchFile(fileId)
+      const status = String(run.status || '').toLowerCase()
+      const canHydrateTerminalRun = batchFile
+        && ['completed', 'success', 'no_data'].includes(status)
+        && !hydratingFileIds.has(fileId)
+        && (batchFile.records.length === 0 || batchFile.status === 'processing')
+      if (canHydrateTerminalRun && batchFile) {
+        hydratingFileIds.add(fileId)
+        try {
+          await hydrateCompletedUpload(batchFile, { preserveRunState: true })
+        } catch (error) {
+          console.warn(`[Progress] Failed to load completed extraction ${fileId}:`, error)
+        } finally {
+          hydratingFileIds.delete(fileId)
+        }
+      }
     }
     return run
   }
@@ -841,6 +716,14 @@ export function useAppShell(
 
       if (response.status === 'processing') {
         setFileProcessing(batchFile, 16, response.message || t('progress.agent_running'))
+        if (trackActiveRun) {
+          return {
+            success: true,
+            message: response.message || t('progress.agent_running'),
+            recordCount: 0,
+            running: true,
+          }
+        }
         const terminalRun = await waitForExtractionCompletion(fileId, 180000, (run) => {
           const snapshot = getRunSnapshot(run)
           setFileProcessing(batchFile, snapshot.progress, snapshot.message)
@@ -884,7 +767,7 @@ export function useAppShell(
       batchFile.metadata = metadata
       batchFile.extractor_type = resolvedExtractorType
       batchFile.records = records
-      batchFile.hasWarnings = hasWarnings(records, resolvedExtractorType)
+      batchFile.hasWarnings = hasExtractionWarnings(records, resolvedExtractorType)
 
       if (isNoDataResponse(response, records.length)) {
         const message = response.message || 'No extractable records found.'
@@ -904,7 +787,7 @@ export function useAppShell(
         if (trackActiveRun) {
           syncActiveRunFromResponse(fileId, { ...response, success: false, message }, records.length, 'failed')
         }
-        setFileError(batchFile, message)
+        setFileError(batchFile, message, t)
         return {
           success: false,
           message,
@@ -927,36 +810,28 @@ export function useAppShell(
     }
   }
 
-  function buildInitialFileState(response: { file_id: string; filename: string; status?: string | null }): BatchFile {
-    const normalizedStatus = String(response.status || '').toLowerCase()
-    const alreadyExtracted = ['completed', 'no_data'].includes(normalizedStatus)
-    return {
-      id: response.file_id,
-      name: response.filename,
-      scopeKey: activeScope.value?.key,
-      extractor_type: defaultExtractorType.value,
-      status: normalizedStatus === 'no_data' ? 'no_data' : (alreadyExtracted ? 'success' : 'uploaded'),
-      progress: alreadyExtracted ? 100 : 0,
-      progressMessage: normalizedStatus === 'no_data'
-        ? 'No extractable records found.'
-        : (alreadyExtracted ? t('progress.already_extracted_ready') : t('progress.ready_to_extract')),
-      records: [],
-      hasWarnings: false,
-    }
-  }
-
-  async function hydrateCompletedUpload(batchFile: BatchFile) {
+  async function hydrateCompletedUpload(batchFile: BatchFile, options: { preserveRunState?: boolean } = {}) {
     batchFile.status = batchFile.status === 'no_data' ? 'no_data' : 'success'
     batchFile.progress = 100
     batchFile.progressMessage = t('progress.loading_cached_results')
     batchFile.errorMessage = undefined
-    resetExtractionState(batchFile.id)
+    if (!options.preserveRunState) {
+      resetExtractionState(batchFile.id)
+    }
     const response = await extractData(batchFile.id, false, 'high_accuracy', undefined, batchFile.extractor_type || 'tribology')
     const { metadata, records, extractorType } = normalizeExtractionPayload(batchFile.id, response)
+    if (String(response.status || '').toLowerCase() === 'processing') {
+      batchFile.extractor_type = extractorType
+      setFileProcessing(batchFile, 16, response.message || t('progress.agent_running'))
+      if (!options.preserveRunState) {
+        startExtractionTracking(batchFile.id)
+      }
+      return
+    }
     batchFile.metadata = metadata
     batchFile.extractor_type = extractorType
     batchFile.records = records
-    batchFile.hasWarnings = hasWarnings(records, extractorType)
+    batchFile.hasWarnings = hasExtractionWarnings(records, extractorType)
     if (isNoDataResponse(response, records.length)) {
       setFileNoData(batchFile, response.message || 'No extractable records found.')
       return
@@ -965,6 +840,31 @@ export function useAppShell(
       batchFile,
       records.length ? t('progress.loaded_cached_records', { count: records.length }) : t('progress.cached_extraction_loaded'),
     )
+  }
+
+  async function prepareFileForReview(fileId: string | null | undefined) {
+    if (!fileId) return false
+    const batchFile = findBatchFile(fileId)
+    if (!batchFile) return false
+
+    selectedFileId.value = batchFile.id
+    const status = String(batchFile.status || '').toLowerCase()
+    const canHydrateCachedResult = ['success', 'no_data'].includes(status)
+      && batchFile.records.length === 0
+      && !hydratingFileIds.has(batchFile.id)
+
+    if (canHydrateCachedResult) {
+      hydratingFileIds.add(batchFile.id)
+      try {
+        await hydrateCompletedUpload(batchFile)
+      } catch (error) {
+        console.warn(`[Review] Failed to prepare ${batchFile.id} before opening review:`, error)
+      } finally {
+        hydratingFileIds.delete(batchFile.id)
+      }
+    }
+
+    return batchFile.records.length > 0
   }
 
   function handleClearFiles() {
@@ -988,20 +888,37 @@ export function useAppShell(
   }
 
   async function handleUpload(file: File) {
+    const placeholder = createUploadPlaceholder(file, {
+      scopeKey: activeScope.value?.key,
+      extractorType: defaultExtractorType.value,
+      t,
+    })
+    batchFiles.value.push(placeholder)
+    selectedFileId.value = placeholder.id
+
     try {
       fileUploadRef.value?.setUploading(true)
-      const response = await uploadFile(file)
+      const response = await uploadFile(file, placeholder.extractor_type || defaultExtractorType.value)
 
       if (response.success) {
-        const batchFile = buildInitialFileState(response)
-        batchFiles.value.push(batchFile)
-
-        if (!selectedFileId.value) {
+        const previousId = replaceBatchFileId(placeholder, response.file_id)
+        if (selectedFileId.value === previousId || !selectedFileId.value) {
           selectedFileId.value = response.file_id
+        }
+        const batchFile = buildInitialFileState(response, {
+          scopeKey: activeScope.value?.key,
+          defaultExtractorType: defaultExtractorType.value,
+          t,
+        })
+        Object.assign(placeholder, batchFile)
+        selectedFileId.value = response.file_id
+
+        if (String(response.status || '').toLowerCase() === 'processing') {
+          startExtractionTracking(response.file_id)
         }
 
         if (['completed', 'no_data'].includes(String(response.status || '').toLowerCase())) {
-          await hydrateCompletedUpload(batchFile)
+          await hydrateCompletedUpload(placeholder)
         }
 
         chatPanelRef.value?.addMessage(
@@ -1012,9 +929,13 @@ export function useAppShell(
               ? t('progress.file_already_indexed', { name: response.filename })
             : t('progress.file_uploaded', { name: response.filename }),
         )
+      } else {
+        setFileError(placeholder, response.message || t('progress.upload_failed', { message: 'Unknown error' }), t)
       }
     } catch (error: any) {
-      chatPanelRef.value?.addMessage('assistant', t('chat.upload_failed', { message: error.message || 'Unknown error' }))
+      const message = uploadErrorMessage(error, t)
+      setFileError(placeholder, message, t)
+      chatPanelRef.value?.addMessage('assistant', message)
     } finally {
       fileUploadRef.value?.setUploading(false)
     }
@@ -1025,24 +946,48 @@ export function useAppShell(
 
     let successCount = 0
     let failCount = 0
+    const placeholders = files.map((file) => createUploadPlaceholder(file, {
+      scopeKey: activeScope.value?.key,
+      extractorType: defaultExtractorType.value,
+      t,
+    }))
+    batchFiles.value.push(...placeholders)
+    if (!selectedFileId.value && placeholders[0]) {
+      selectedFileId.value = placeholders[0].id
+    }
 
-    for (const file of files) {
+    for (const [index, file] of files.entries()) {
+      const placeholder = placeholders[index]!
       try {
-        const response = await uploadFile(file)
+        const response = await uploadFile(file, placeholder.extractor_type || defaultExtractorType.value)
 
         if (response.success) {
-          const batchFile = buildInitialFileState(response)
-          batchFiles.value.push(batchFile)
+          const batchFile = buildInitialFileState(response, {
+            scopeKey: activeScope.value?.key,
+            defaultExtractorType: defaultExtractorType.value,
+            t,
+          })
+          const previousId = replaceBatchFileId(placeholder, response.file_id)
+          if (selectedFileId.value === previousId || !selectedFileId.value) {
+            selectedFileId.value = response.file_id
+          }
+          Object.assign(placeholder, batchFile)
+
+          if (String(response.status || '').toLowerCase() === 'processing') {
+            startExtractionTracking(response.file_id)
+          }
 
           if (['completed', 'no_data'].includes(String(response.status || '').toLowerCase())) {
-            await hydrateCompletedUpload(batchFile)
+            await hydrateCompletedUpload(placeholder)
           }
 
           successCount++
         } else {
+          setFileError(placeholder, response.message || t('progress.upload_failed', { message: 'Unknown error' }), t)
           failCount++
         }
-      } catch {
+      } catch (error: any) {
+        setFileError(placeholder, uploadErrorMessage(error, t), t)
         failCount++
       }
     }
@@ -1054,6 +999,7 @@ export function useAppShell(
   async function handleExtract(fileId: string, force: boolean = false, options: { profile?: ExtractionProfile } = {}) {
     const batchFile = findBatchFile(fileId)
     if (!batchFile) return
+    let keepPolling = false
 
     try {
       chatPanelRef.value?.addMessage(
@@ -1062,9 +1008,12 @@ export function useAppShell(
       )
 
       const result = await executeExtraction(fileId, force, options)
+      keepPolling = Boolean((result as any).running)
 
       if ((result as any).cancelled) {
         chatPanelRef.value?.addMessage('assistant', result.message || 'Extraction stopped.')
+      } else if ((result as any).running) {
+        chatPanelRef.value?.addMessage('assistant', result.message || t('progress.agent_running'))
       } else if (result.success && result.recordCount > 0) {
         chatPanelRef.value?.addMessage(
           'assistant',
@@ -1082,10 +1031,12 @@ export function useAppShell(
         )
       }
     } catch (error: any) {
-      setFileError(batchFile, error.message || 'Unknown error')
+      setFileError(batchFile, error.message || 'Unknown error', t)
       chatPanelRef.value?.addMessage('assistant', t('chat.extraction_failed', { message: error.message || 'Unknown error' }))
     } finally {
-      clearExtractionPolling()
+      if (!keepPolling) {
+        clearExtractionPolling()
+      }
     }
   }
 
@@ -1179,7 +1130,7 @@ export function useAppShell(
             failCount++
           }
         } catch (error: any) {
-          setFileError(batchFile, error.message || 'Unknown error')
+          setFileError(batchFile, error.message || 'Unknown error', t)
           failCount++
         } finally {
           completedCount++
@@ -1234,14 +1185,18 @@ export function useAppShell(
     defaultExtractorType.value = extractorType
     const selected = selectedFileId.value ? findBatchFile(selectedFileId.value) : null
     if (selected && ['uploaded', 'error', 'no_data', 'success', 'cancelled'].includes(String(selected.status || '').toLowerCase())) {
-      selected.extractor_type = extractorType
+      if (resetFileForExtractorChange(selected, extractorType, t)) {
+        resetExtractionState(selected.id)
+      }
     }
   }
 
   function setFileExtractorType(fileId: string, extractorType: ExtractorType) {
     const file = findBatchFile(fileId)
     if (!file) return
-    file.extractor_type = extractorType
+    if (resetFileForExtractorChange(file, extractorType, t)) {
+      resetExtractionState(file.id)
+    }
     if (selectedFileId.value === fileId) {
       defaultExtractorType.value = extractorType
     }
@@ -1316,6 +1271,7 @@ export function useAppShell(
     handleLogout,
     handleRemoveFile,
     handleUpload,
+    prepareFileForReview,
     isAuthenticating,
     isChatting,
     isDark,

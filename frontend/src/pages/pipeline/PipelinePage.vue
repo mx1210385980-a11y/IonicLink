@@ -14,6 +14,7 @@ import {
   Upload,
 } from 'lucide-vue-next'
 
+import { useI18n } from '@/composables/useI18n'
 import type { AgentMessage, AgentWorkflow, BatchFile, ExtractionRunDetail, ExtractorType } from '@/lib/api'
 
 const props = defineProps<{
@@ -85,24 +86,99 @@ type InspectorLog = {
   tone: 'info' | 'agent' | 'system'
 }
 
+type ExtractorOption = {
+  key: ExtractorType
+  label: string
+  shortLabel: string
+  helper: string
+  detail: string
+  activeClass: string
+  inactiveClass: string
+  badgeClass: string
+}
+
 const searchQuery = ref('')
 const statusFilter = ref<PipelineFilter>('all')
 const fileInput = ref<HTMLInputElement | null>(null)
-const extractorOptions: Array<{ key: ExtractorType; label: string; helper: string }> = [
-  { key: 'tribology', label: 'Tribology Schema', helper: 'COF, tribopair, test conditions' },
-  { key: 'diffusion', label: 'Diffusion Schema', helper: 'Confinement, D values, ionic liquid' },
-]
+const { isChinese } = useI18n()
+const extractorOptions = computed<ExtractorOption[]>(() => [
+  {
+    key: 'tribology',
+    label: isChinese.value ? '摩擦学数据抽取' : 'Tribology Data',
+    shortLabel: isChinese.value ? '摩擦学抽取' : 'Tribology',
+    helper: isChinese.value ? '用于润滑、摩擦、磨损实验论文' : 'For lubrication, friction, and wear papers',
+    detail: isChinese.value ? '抽取 COF、载荷、速度、温度、材料配副、离子液体。' : 'Extracts COF, load, speed, temperature, tribopair, and ionic liquid.',
+    activeClass: 'border-blue-300 bg-blue-50 text-blue-950 shadow-sm ring-1 ring-blue-200',
+    inactiveClass: 'border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50/40',
+    badgeClass: 'border-blue-200 bg-blue-50 text-blue-700',
+  },
+  {
+    key: 'diffusion',
+    label: isChinese.value ? '扩散数据抽取' : 'Diffusion Data',
+    shortLabel: isChinese.value ? '扩散抽取' : 'Diffusion',
+    helper: isChinese.value ? '用于限域扩散、输运和分子动力学论文' : 'For confined diffusion, transport, and MD papers',
+    detail: isChinese.value ? '抽取 D 值、限域尺度、温度、体系组成、离子液体。' : 'Extracts D values, confinement scale, temperature, system composition, and ionic liquid.',
+    activeClass: 'border-emerald-300 bg-emerald-50 text-emerald-950 shadow-sm ring-1 ring-emerald-200',
+    inactiveClass: 'border-slate-200 bg-white text-slate-700 hover:border-emerald-200 hover:bg-emerald-50/40',
+    badgeClass: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  },
+])
+
+const pageCopy = computed(() => ({
+  eyebrow: isChinese.value ? '核心工作流' : 'Core Workflow',
+  title: isChinese.value ? '文献数据抽取' : 'Literature Extraction',
+  subtitle: isChinese.value
+    ? '上传论文，选择抽取类型，启动代理抽取并进入审阅。'
+    : 'Upload papers, choose an extraction type, run agents, then move results into review.',
+  upload: isChinese.value ? '上传论文' : 'Upload Document',
+  extractSelected: isChinese.value ? '抽取当前论文' : 'Extract Selected',
+  batchExtract: isChinese.value ? '抽取队列' : 'Extract Queue',
+  selected: isChinese.value ? '当前论文' : 'Selected',
+  noSelection: isChinese.value ? '尚未选择论文' : 'No document selected',
+  extractionType: isChinese.value ? '抽取类型' : 'Extraction Type',
+  extractionTypeHint: isChinese.value ? '先选类型，再上传或抽取；当前论文会沿用这个类型。' : 'Choose the task type before upload or extraction. The selected paper will use it.',
+  search: isChinese.value ? '搜索运行...' : 'Search runs...',
+  filter: isChinese.value ? '筛选' : 'Filter',
+  autoRefresh: isChinese.value ? '自动刷新' : 'Auto-refreshing',
+  groupedRuns: isChinese.value ? '批量运行' : 'Batch Runs',
+}))
+
+const extractionMetrics = computed(() => {
+  const files = props.files
+  return [
+    {
+      key: 'queued',
+      label: isChinese.value ? '待抽取' : 'Ready',
+      value: files.filter((file) => ['uploaded', 'cancelled', 'no_data'].includes(String(file.status || '').toLowerCase())).length,
+    },
+    {
+      key: 'running',
+      label: isChinese.value ? '运行中' : 'Running',
+      value: files.filter((file) => String(file.status || '').toLowerCase() === 'processing').length,
+    },
+    {
+      key: 'done',
+      label: isChinese.value ? '已抽取' : 'Extracted',
+      value: files.filter((file) => String(file.status || '').toLowerCase() === 'success').length,
+    },
+    {
+      key: 'failed',
+      label: isChinese.value ? '待重试' : 'Retry',
+      value: files.filter((file) => String(file.status || '').toLowerCase() === 'error').length,
+    },
+  ]
+})
 
 const queueEyebrow = computed(() => {
-  if (props.currentSection === 'batch') return 'BATCH SYNC & RETRIES'
-  if (props.currentSection === 'upload') return 'UPLOAD QUEUE & STAGING'
-  return 'ACTIVE QUEUE & RECENT'
+  if (props.currentSection === 'batch') return isChinese.value ? '批量抽取与重试' : 'BATCH EXTRACTION & RETRIES'
+  if (props.currentSection === 'upload') return isChinese.value ? '上传队列' : 'UPLOAD QUEUE & STAGING'
+  return isChinese.value ? '抽取运行队列' : 'ACTIVE EXTRACTION QUEUE'
 })
 
 const queueTitle = computed(() => {
-  if (props.currentSection === 'batch') return 'Monitor grouped sync and retry work.'
-  if (props.currentSection === 'upload') return 'Stage documents before extraction.'
-  return 'Monitor extraction flow.'
+  if (props.currentSection === 'batch') return isChinese.value ? '管理批量抽取、失败重试和结果同步。' : 'Monitor grouped extraction, retries, and sync work.'
+  if (props.currentSection === 'upload') return isChinese.value ? '先把论文放入队列，再启动抽取。' : 'Stage documents before extraction.'
+  return isChinese.value ? '跟踪抽取进度和代理日志。' : 'Monitor extraction flow and agent logs.'
 })
 
 const filteredFiles = computed(() => {
@@ -131,6 +207,8 @@ const selectedQueueFile = computed<BatchFile | null>(() => {
 
 const activeExtractorType = computed<ExtractorType>(() => selectedQueueFile.value?.extractor_type || props.defaultExtractorType || 'tribology')
 
+const activeExtractorOption = computed(() => extractorOptions.value.find((option) => option.key === activeExtractorType.value) || extractorOptions.value[0]!)
+
 const extractableFiles = computed(() => {
   return props.files.filter((file) => ['uploaded', 'error', 'no_data', 'success'].includes(String(file.status || '').toLowerCase()))
 })
@@ -138,7 +216,7 @@ const extractableFiles = computed(() => {
 const canExtractSelected = computed(() => {
   const file = selectedQueueFile.value
   if (!file) return false
-  return !['processing'].includes(String(file.status || '').toLowerCase())
+  return !['uploading', 'processing'].includes(String(file.status || '').toLowerCase())
 })
 
 const canCancelSelected = computed(() => {
@@ -149,8 +227,22 @@ const canCancelSelected = computed(() => {
   return fileStatus === 'processing' || ['running', 'processing'].includes(runStatus)
 })
 
+const canOpenSelectedReview = computed(() => {
+  const file = selectedQueueFile.value
+  if (!file) return false
+  const status = String(file.status || '').toLowerCase()
+  return file.records.length > 0 || status === 'success'
+})
+
 const selectedExtractLabel = computed(() => {
   const status = String(selectedQueueFile.value?.status || '').toLowerCase()
+  if (isChinese.value) {
+    if (status === 'error') return '重试抽取'
+    if (status === 'no_data') return '重新抽取'
+    if (status === 'success') return '重新抽取'
+    if (status === 'cancelled') return '恢复抽取'
+    return '开始抽取'
+  }
   if (status === 'error') return 'Retry Extract'
   if (status === 'no_data') return 'Re-run Extract'
   if (status === 'success') return 'Re-run Extract'
@@ -200,10 +292,10 @@ const inspectorSteps = computed<InspectorStep[]>(() => {
   const activeIndex = inferActiveStage(activeRun, selectedFile)
 
   const definitions = [
-    { id: 'register', label: 'Document Registration' },
-    { id: 'layout', label: 'Layout Analysis & Chunking' },
-    { id: 'extract', label: 'LLM Agent Extraction' },
-    { id: 'validate', label: 'Schema Validation' },
+    { id: 'register', label: isChinese.value ? '论文登记' : 'Document Registration' },
+    { id: 'layout', label: isChinese.value ? '版面解析与分块' : 'Layout Analysis & Chunking' },
+    { id: 'extract', label: isChinese.value ? '代理抽取' : 'LLM Agent Extraction' },
+    { id: 'validate', label: isChinese.value ? '结果校验' : 'Result Validation' },
   ]
 
   return definitions.map((definition, index) => {
@@ -321,14 +413,27 @@ function cycleFilter() {
 }
 
 function filterLabel() {
-  if (statusFilter.value === 'processing') return 'Running'
-  if (statusFilter.value === 'error') return 'Failed'
-  if (statusFilter.value === 'success') return 'Completed'
-  return 'All'
+  if (statusFilter.value === 'processing') return isChinese.value ? '运行中' : 'Running'
+  if (statusFilter.value === 'error') return isChinese.value ? '失败' : 'Failed'
+  if (statusFilter.value === 'success') return isChinese.value ? '完成' : 'Completed'
+  return isChinese.value ? '全部' : 'All'
+}
+
+function extractorLabel(extractorType?: ExtractorType | string | null) {
+  const normalized = extractorType === 'diffusion' ? 'diffusion' : 'tribology'
+  return extractorOptions.value.find((option) => option.key === normalized)?.shortLabel
+    || (normalized === 'diffusion' ? 'Diffusion' : 'Tribology')
+}
+
+function extractorBadgeClass(extractorType?: ExtractorType | string | null) {
+  const normalized = extractorType === 'diffusion' ? 'diffusion' : 'tribology'
+  return extractorOptions.value.find((option) => option.key === normalized)?.badgeClass
+    || 'border-slate-200 bg-slate-50 text-slate-600'
 }
 
 function queueWeight(file: BatchFile) {
   if (file.id === props.activeId || file.id === props.selectedFileId) return 100
+  if (file.status === 'uploading') return 90
   if (file.status === 'processing') return 80
   if (file.status === 'no_data') return 70
   if (file.status === 'error') return 60
@@ -339,6 +444,7 @@ function queueWeight(file: BatchFile) {
 function progressForFile(file: BatchFile) {
   if (file.status === 'success') return 100
   if (file.status === 'no_data') return 100
+  if (file.status === 'uploading') return Math.max(6, Math.round(file.progress || 6))
   if (file.status === 'cancelled') return Math.max(8, Math.round(file.progress || 18))
   if (file.status === 'error') return Math.max(18, Math.round(file.progress || 35))
   if (file.status === 'processing') return Math.max(12, Math.round(file.progress || 18))
@@ -348,6 +454,7 @@ function progressForFile(file: BatchFile) {
 function detailLabel(file: BatchFile) {
   if (file.status === 'success') return `${file.records?.length || 0} records extracted`
   if (file.status === 'no_data') return file.errorMessage || 'No extractable records found'
+  if (file.status === 'uploading') return isChinese.value ? '正在上传到服务器' : 'Uploading to server'
   if (file.status === 'cancelled') return 'Stopped by user'
   if (file.status === 'error') return 'Needs retry'
   return 'Ready to launch'
@@ -356,6 +463,7 @@ function detailLabel(file: BatchFile) {
 function stageLabelFromFile(file: BatchFile) {
   if (file.errorMessage) return file.errorMessage
   if (file.progressMessage) return file.progressMessage
+  if (file.status === 'uploading') return isChinese.value ? '正在上传并登记论文' : 'Uploading and registering document'
   if (file.status === 'processing') return 'Agent extraction in progress'
   if (file.status === 'success') return 'Completed'
   if (file.status === 'no_data') return 'No extractable records found'
@@ -365,6 +473,7 @@ function stageLabelFromFile(file: BatchFile) {
 }
 
 function statusBadge(status: string) {
+  if (status === 'uploading') return isChinese.value ? '上传中' : 'UPLOADING'
   if (status === 'processing') return 'RUNNING'
   if (status === 'success') return 'SUCCESS'
   if (status === 'no_data') return 'NO DATA'
@@ -374,6 +483,7 @@ function statusBadge(status: string) {
 }
 
 function statusBadgeClass(status: string) {
+  if (status === 'uploading') return 'border-sky-200 bg-sky-50 text-sky-700'
   if (status === 'processing') return 'border-blue-200 bg-blue-50 text-blue-700'
   if (status === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
   if (status === 'no_data') return 'border-amber-200 bg-amber-50 text-amber-700'
@@ -383,6 +493,7 @@ function statusBadgeClass(status: string) {
 }
 
 function progressTone(status: string) {
+  if (status === 'uploading') return 'bg-sky-500'
   if (status === 'processing') return 'bg-blue-600'
   if (status === 'success') return 'bg-emerald-500'
   if (status === 'no_data') return 'bg-amber-500'
@@ -460,7 +571,7 @@ function formatStageLabel(stage?: string | null) {
   if (normalized.includes('stage_b')) return 'Layout analysis'
   if (normalized.includes('stage_c')) return 'Chunking and extraction'
   if (normalized.includes('stage_d')) return 'Candidate validation'
-  if (normalized.includes('stage_e')) return 'Schema validation'
+  if (normalized.includes('stage_e')) return isChinese.value ? '结果校验' : 'Result validation'
   return String(stage || '').replace(/[_\.]+/g, ' ')
 }
 
@@ -506,64 +617,134 @@ function logToneClass(tone: InspectorLog['tone']) {
     >
 
     <section class="shell-surface px-4 py-4 sm:px-5">
-      <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div class="flex flex-wrap items-center gap-2.5">
-          <button
-            type="button"
-            class="inline-flex items-center gap-2 rounded-md bg-slate-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
-            @click="triggerUpload"
-          >
-            <Upload class="h-4 w-4" />
-            Upload Document
-          </button>
+      <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_28rem] xl:items-center">
+        <div class="min-w-0">
+          <div class="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-slate-500">
+            {{ pageCopy.eyebrow }}
+          </div>
+          <div class="mt-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+            <div class="min-w-0">
+              <h1 class="text-2xl font-semibold leading-8 text-slate-950 sm:text-3xl">
+                {{ pageCopy.title }}
+              </h1>
+              <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+                {{ pageCopy.subtitle }}
+              </p>
+            </div>
 
-          <button
-            type="button"
-            class="inline-flex items-center gap-2 rounded-md px-5 py-2.5 text-sm font-medium transition"
-            :class="canBatchExtract
-              ? 'bg-slate-100 text-slate-900 hover:bg-slate-200'
-              : 'cursor-not-allowed bg-slate-50 text-slate-400'"
-            :disabled="!canBatchExtract"
-            @click="triggerBatchExtract"
-          >
-            <Bot class="h-4 w-4" />
-            Extract Queue
-          </button>
+            <div class="grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-4 lg:w-[28rem]">
+              <article
+                v-for="metric in extractionMetrics"
+                :key="metric.key"
+                class="rounded-md border border-slate-200 bg-white px-3 py-2.5"
+              >
+                <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-400">{{ metric.label }}</p>
+                <p class="mt-1 text-2xl font-semibold leading-none text-slate-950">{{ metric.value }}</p>
+              </article>
+            </div>
+          </div>
 
-          <div class="inline-flex flex-wrap items-center gap-1 rounded-md border border-slate-200 bg-white p-1">
+          <div class="mt-4 flex flex-wrap items-center gap-2.5">
             <button
-              v-for="option in extractorOptions"
-              :key="option.key"
               type="button"
-              class="inline-flex items-center rounded-md px-3 py-1.5 text-sm font-medium transition"
-              :class="activeExtractorType === option.key ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'"
-              @click="setActiveExtractor(option.key)"
+              class="inline-flex items-center gap-2 rounded-md bg-slate-950 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
+              @click="triggerUpload"
             >
-              {{ option.label }}
+              <Upload class="h-4 w-4" />
+              {{ pageCopy.upload }}
             </button>
+
+            <button
+              type="button"
+              class="inline-flex items-center gap-2 rounded-md px-5 py-2.5 text-sm font-medium transition"
+              :class="canExtractSelected
+                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                : 'cursor-not-allowed bg-slate-100 text-slate-400'"
+              :disabled="!canExtractSelected"
+              @click="triggerSelectedExtract"
+            >
+              <Bot class="h-4 w-4" />
+              {{ selectedExtractLabel }}
+            </button>
+
+            <button
+              type="button"
+              class="inline-flex items-center gap-2 rounded-md px-5 py-2.5 text-sm font-medium transition"
+              :class="canBatchExtract
+                ? 'bg-slate-100 text-slate-900 hover:bg-slate-200'
+                : 'cursor-not-allowed bg-slate-50 text-slate-400'"
+              :disabled="!canBatchExtract"
+              @click="triggerBatchExtract"
+            >
+              <CheckCircle2 class="h-4 w-4" />
+              {{ pageCopy.batchExtract }}
+            </button>
+
+            <span class="min-w-0 truncate text-sm text-slate-500">
+              {{ pageCopy.selected }}:
+              <span class="font-semibold text-slate-800">{{ selectedQueueFile?.name || pageCopy.noSelection }}</span>
+            </span>
           </div>
         </div>
 
-        <div class="flex flex-wrap items-center gap-2">
-          <div class="relative min-w-[16rem] flex-1 lg:w-[17rem] lg:flex-none">
-            <Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              v-model="searchQuery"
-              type="text"
-              class="h-10 w-full rounded-md border border-slate-200 bg-white pl-10 pr-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-500 focus:border-slate-400 focus:ring-1 focus:ring-slate-400"
-              placeholder="Search runs..."
-            >
+        <div class="grid gap-3">
+          <div>
+            <div class="mb-2 flex items-end justify-between gap-3">
+              <div>
+                <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-400">{{ pageCopy.extractionType }}</p>
+                <p class="mt-1 text-xs leading-5 text-slate-500">{{ pageCopy.extractionTypeHint }}</p>
+              </div>
+              <span class="shrink-0 rounded-md border px-2.5 py-1 text-xs font-semibold" :class="activeExtractorOption.badgeClass">
+                {{ activeExtractorOption.shortLabel }}
+              </span>
+            </div>
+            <div class="grid gap-2">
+              <button
+                v-for="option in extractorOptions"
+                :key="option.key"
+                type="button"
+                class="rounded-md border px-3.5 py-3 text-left transition"
+                :class="activeExtractorType === option.key ? option.activeClass : option.inactiveClass"
+                @click="setActiveExtractor(option.key)"
+              >
+                <span class="flex items-start justify-between gap-3">
+                  <span class="min-w-0">
+                    <span class="block text-sm font-semibold">{{ option.label }}</span>
+                    <span class="mt-1 block text-xs leading-5 opacity-75">{{ option.helper }}</span>
+                  </span>
+                  <span
+                    class="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border"
+                    :class="activeExtractorType === option.key ? 'border-current bg-white/60' : 'border-slate-300'"
+                  >
+                    <span v-if="activeExtractorType === option.key" class="h-2 w-2 rounded-full bg-current" />
+                  </span>
+                </span>
+                <span class="mt-2 block text-xs leading-5 opacity-80">{{ option.detail }}</span>
+              </button>
+            </div>
           </div>
 
-          <button
-            type="button"
-            class="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-            :title="`Filter: ${filterLabel()}`"
-            @click="cycleFilter"
-          >
-            <Filter class="h-4 w-4" />
-            <span class="hidden sm:inline">{{ filterLabel() }}</span>
-          </button>
+          <div class="flex flex-wrap items-center gap-2">
+            <div class="relative min-w-[16rem] flex-1">
+              <Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                v-model="searchQuery"
+                type="text"
+                class="h-10 w-full rounded-md border border-slate-200 bg-white pl-10 pr-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-500 focus:border-slate-400 focus:ring-1 focus:ring-slate-400"
+                :placeholder="pageCopy.search"
+              >
+            </div>
+
+            <button
+              type="button"
+              class="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              :title="`${pageCopy.filter}: ${filterLabel()}`"
+              @click="cycleFilter"
+            >
+              <Filter class="h-4 w-4" />
+              <span class="hidden sm:inline">{{ filterLabel() }}</span>
+            </button>
+          </div>
         </div>
       </div>
     </section>
@@ -577,7 +758,10 @@ function logToneClass(tone: InspectorLog['tone']) {
               {{ queueTitle }}
             </h2>
             <p class="mt-2 text-sm text-slate-500">
-              Current schema: <span class="font-semibold text-slate-800">{{ activeExtractorType === 'diffusion' ? 'Diffusion' : 'Tribology' }}</span>
+              {{ pageCopy.extractionType }}:
+              <span class="ml-1 inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-semibold" :class="activeExtractorOption.badgeClass">
+                {{ activeExtractorOption.shortLabel }}
+              </span>
             </p>
           </div>
           <div class="flex flex-wrap items-center justify-end gap-3">
@@ -590,12 +774,11 @@ function logToneClass(tone: InspectorLog['tone']) {
               @click="emit('change-section', currentSection === 'batch' ? 'runs' : 'batch')"
             >
               <Bot class="h-4 w-4" />
-              Batch Sync
+              {{ pageCopy.groupedRuns }}
             </button>
-            <p class="hidden text-xs text-slate-400 xl:block">Open grouped sync and retry view.</p>
             <div class="inline-flex items-center gap-2 text-sm text-slate-500">
               <Clock3 class="h-4 w-4" />
-              Auto-refreshing
+              {{ pageCopy.autoRefresh }}
             </div>
           </div>
         </div>
@@ -623,9 +806,12 @@ function logToneClass(tone: InspectorLog['tone']) {
                       {{ item.name }}
                     </p>
                     <p class="mt-1 truncate text-sm text-slate-500">{{ item.meta }}</p>
-                    <p class="mt-1 text-xs font-medium text-slate-400">
-                      {{ (files.find((file) => file.id === item.id)?.extractor_type || defaultExtractorType) === 'diffusion' ? 'Diffusion schema' : 'Tribology schema' }}
-                    </p>
+                    <span
+                      class="mt-2 inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-semibold"
+                      :class="extractorBadgeClass(files.find((file) => file.id === item.id)?.extractor_type || defaultExtractorType)"
+                    >
+                      {{ extractorLabel(files.find((file) => file.id === item.id)?.extractor_type || defaultExtractorType) }}
+                    </span>
                   </div>
                 </div>
 
@@ -643,7 +829,7 @@ function logToneClass(tone: InspectorLog['tone']) {
               <div class="mt-3 flex items-center justify-between gap-3 text-sm">
                 <p class="min-w-0 truncate text-slate-500">{{ item.sublabel }}</p>
                 <div class="inline-flex shrink-0 items-center gap-1 text-slate-500">
-                  <span>{{ item.status === 'processing' ? 'Agent: Extraction' : item.status === 'error' ? 'Needs retry' : item.status === 'cancelled' ? 'Stopped' : item.status === 'no_data' ? 'No related data' : item.status === 'success' ? 'Completed' : 'Queued' }}</span>
+                  <span>{{ item.status === 'uploading' ? (isChinese ? '上传中' : 'Uploading') : item.status === 'processing' ? (isChinese ? '代理抽取中' : 'Agent: Extraction') : item.status === 'error' ? (isChinese ? '需要重试' : 'Needs retry') : item.status === 'cancelled' ? (isChinese ? '已停止' : 'Stopped') : item.status === 'no_data' ? (isChinese ? '无相关数据' : 'No related data') : item.status === 'success' ? (isChinese ? '完成' : 'Completed') : (isChinese ? '待抽取' : 'Queued') }}</span>
                   <ChevronRight class="h-4 w-4" />
                 </div>
               </div>
@@ -764,8 +950,13 @@ function logToneClass(tone: InspectorLog['tone']) {
             </button>
             <button
               type="button"
-              class="inline-flex items-center justify-center rounded-md border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 transition hover:bg-slate-50"
-              @click="emit('open-review')"
+              class="inline-flex items-center justify-center rounded-md border px-4 py-2.5 text-sm font-medium transition"
+              :class="canOpenSelectedReview
+                ? 'border-slate-200 bg-white text-slate-900 hover:bg-slate-50'
+                : 'cursor-not-allowed border-slate-100 bg-slate-50 text-slate-400'"
+              :disabled="!canOpenSelectedReview"
+              :title="canOpenSelectedReview ? 'Open review workspace' : 'Review opens after extraction records are ready'"
+              @click="emit('open-review', selectedQueueFile?.id || selectedFileId)"
             >
               Open Review
             </button>

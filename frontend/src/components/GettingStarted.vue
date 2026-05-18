@@ -22,6 +22,7 @@ const isPlaying = ref(false)
 const currentTime = ref(0)
 const duration = ref(0)
 const { t } = useI18n()
+const guideVideoSrc = '/guide.mp4'
 
 const progressPercent = computed(() => {
   if (duration.value <= 0) {
@@ -208,7 +209,7 @@ const formatTime = (timeInSeconds: number) => {
           <video
             ref="guideVideoRef"
             class="aspect-[16/9] w-full object-cover"
-            src="/guide.mp4"
+            :src="guideVideoSrc"
             preload="metadata"
             playsinline
             @click="toggleVideo"

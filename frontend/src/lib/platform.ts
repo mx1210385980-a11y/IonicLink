@@ -81,7 +81,7 @@ export const SECTION_OPTIONS_BY_VIEW: Record<AppView, AppSection[]> = {
 }
 
 const LEGACY_ROUTE_MAP: Record<LegacyAppView, AppRoute> = {
-  dashboard: { view: 'home', section: 'today' },
+  dashboard: { view: 'pipeline', section: 'upload' },
   workspace: { view: 'pipeline', section: 'upload' },
   cleaning: { view: 'knowledge', section: 'cleaning' },
   predict: { view: 'modeling', section: 'training' },
@@ -125,7 +125,7 @@ export function resolveRoute(
   }
 
   return {
-    view: 'home',
-    section: DEFAULT_SECTION_BY_VIEW.home,
+    view: 'pipeline',
+    section: DEFAULT_SECTION_BY_VIEW.pipeline,
   }
 }

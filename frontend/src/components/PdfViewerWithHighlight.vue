@@ -20,7 +20,8 @@ import { authFetch } from '@/lib/session'
 
 // ─── Worker (Vite-local, no CDN) ─────────────────────────────────────────────
 import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
+const pdfjsWorkerSrc = `${pdfjsWorkerUrl}?v=mjs-worker-20260518`
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerSrc
 
 function resolvePdfContentUrl(src: string): string {
   const normalized = String(src || '').trim()

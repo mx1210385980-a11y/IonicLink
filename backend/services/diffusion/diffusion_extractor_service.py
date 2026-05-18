@@ -16,6 +16,7 @@ from models.db_models import DiffusionCandidate, DiffusionFeatureSet, DiffusionR
 from services.diffusion.diffusion_postprocess_service import (
     build_feature_set_payload,
     dedupe_normalized_diffusion_records,
+    diffusion_drop_reason,
     json_dumps,
     normalize_diffusion_records,
     record_has_diffusion_value,
@@ -131,41 +132,41 @@ async def _load_cached_diffusion_result(db, literature: Literature) -> tuple[dic
 
     data = []
     for row in candidate_rows:
-        data.append(
-            serialize_diffusion_row_for_response(
-                {
-                    "system_name": row.system_name,
-                    "confinement_material_class": row.confinement_material_class,
-                    "confinement_geometry_class": row.confinement_geometry_class,
-                    "surface_functional_groups": row.surface_functional_groups,
-                    "confinement_dimensionality": row.confinement_dimensionality,
-                    "ionic_liquid": row.ionic_liquid,
-                    "D_total": row.d_total,
-                    "D_cation": row.d_cation,
-                    "D_anion": row.d_anion,
-                    "D_unit": row.d_unit,
-                    "temperature_value": row.temperature_value,
-                    "confinement_scale_value": row.confinement_scale_value,
-                    "confinement_scale_unit": row.confinement_scale_unit,
-                    "source": row.source,
-                    "source_page": row.source_page,
-                    "source_bbox": _parse_json(row.source_bbox, None),
-                    "evidence": row.evidence,
-                    "provider": row.provider,
-                    "prompt_version": row.prompt_version,
-                    "raw_model_output": row.raw_model_output,
-                    "field_evidence_json": _parse_json(row.field_evidence_json, {}),
-                    "review_status": row.review_status,
-                    "record_origin": row.record_origin,
-                    "assembly_notes": row.assembly_notes,
-                    "confidence": row.confidence,
-                    "novel_features_json": _parse_json(row.novel_features_json, {}),
-                    "smiles": row.smiles,
-                    "rdkit_features_json": _parse_json(row.rdkit_features_json, {}),
-                },
-                row_id=row.id,
-            )
+        payload = serialize_diffusion_row_for_response(
+            {
+                "system_name": row.system_name,
+                "confinement_material_class": row.confinement_material_class,
+                "confinement_geometry_class": row.confinement_geometry_class,
+                "surface_functional_groups": row.surface_functional_groups,
+                "confinement_dimensionality": row.confinement_dimensionality,
+                "ionic_liquid": row.ionic_liquid,
+                "D_total": row.d_total,
+                "D_cation": row.d_cation,
+                "D_anion": row.d_anion,
+                "D_unit": row.d_unit,
+                "temperature_value": row.temperature_value,
+                "confinement_scale_value": row.confinement_scale_value,
+                "confinement_scale_unit": row.confinement_scale_unit,
+                "source": row.source,
+                "source_page": row.source_page,
+                "source_bbox": _parse_json(row.source_bbox, None),
+                "evidence": row.evidence,
+                "provider": row.provider,
+                "prompt_version": row.prompt_version,
+                "raw_model_output": row.raw_model_output,
+                "field_evidence_json": _parse_json(row.field_evidence_json, {}),
+                "review_status": row.review_status,
+                "record_origin": row.record_origin,
+                "assembly_notes": row.assembly_notes,
+                "confidence": row.confidence,
+                "novel_features_json": _parse_json(row.novel_features_json, {}),
+                "smiles": row.smiles,
+                "rdkit_features_json": _parse_json(row.rdkit_features_json, {}),
+            },
+            row_id=row.id,
         )
+        payload["review_entity_type"] = "candidate" if isinstance(row, DiffusionCandidate) else "record"
+        data.append(payload)
 
     metadata = {
         "title": literature.title,
@@ -346,6 +347,28 @@ async def process_diffusion_file_safe(
             return await _load_cached_diffusion_result(db, literature)
 
         latest_run = await _get_latest_diffusion_run(db, literature.id)
+        if not force and latest_run and str(latest_run.status or "").strip().lower() in {"completed", "no_data"}:
+            metadata = {
+                "title": literature.title,
+                "authors": literature.authors,
+                "doi": literature.doi,
+                "journal": literature.journal,
+                "year": literature.year,
+                "volume": literature.volume,
+                "issue": literature.issue,
+                "pages": literature.pages,
+                "issn": literature.issn,
+            }
+            summary = _parse_json(getattr(latest_run, "summary_json", None), {})
+            summary.setdefault("run_id", latest_run.run_id)
+            summary.setdefault("extractor_type", EXTRACTOR_TYPE)
+            summary.setdefault("candidate_count", 0)
+            summary.setdefault("final_count", 0)
+            summary.setdefault("status", latest_run.status)
+            if latest_run.error_message:
+                summary.setdefault("current_message", latest_run.error_message)
+                summary.setdefault("no_data_reason", latest_run.error_message)
+            return metadata, [], summary
         if not force and latest_run and latest_run.status == "running":
             last_touch = latest_run.updated_at or latest_run.created_at
             if last_touch and (datetime.utcnow() - last_touch) <= timedelta(minutes=6):
@@ -461,7 +484,11 @@ async def process_diffusion_file_safe(
 
         raw_rows = payload.get("data") if isinstance(payload.get("data"), list) else []
         trace_candidates: list[dict[str, Any]] = []
+        raw_drop_reasons: dict[str, int] = {}
         for row in raw_rows:
+            drop_reason = diffusion_drop_reason(row)
+            if drop_reason:
+                raw_drop_reasons[drop_reason] = raw_drop_reasons.get(drop_reason, 0) + 1
             trace_candidates.append(
                 {
                     "stage": "stage_c",
@@ -470,7 +497,7 @@ async def process_diffusion_file_safe(
                     "source_figure": row.get("source"),
                     "raw": row,
                     "normalized": None,
-                    "drop_reason": None if record_has_diffusion_value(row) else "no_diffusion_value",
+                    "drop_reason": drop_reason,
                 }
             )
 
@@ -483,9 +510,10 @@ async def process_diffusion_file_safe(
         )
         normalized_rows = dedupe_normalized_diffusion_records(normalized_rows)
 
-        dropped_by_reason: dict[str, int] = {}
+        dropped_by_reason: dict[str, int] = dict(raw_drop_reasons)
         if raw_rows and not normalized_rows:
-            dropped_by_reason["no_diffusion_value"] = len(raw_rows)
+            if not dropped_by_reason:
+                dropped_by_reason["no_valid_normalized_rows"] = len(raw_rows)
 
         try:
             await _raise_if_cancelled()
@@ -656,7 +684,8 @@ async def process_diffusion_file_safe(
 async def process_diffusion_file_background(
     file_id: int,
     *,
+    force: bool = False,
     profile: str = "high_accuracy",
 ) -> None:
     logger.info("Starting background diffusion extraction for literature_id=%s", file_id)
-    await process_diffusion_file_safe(file_id=file_id, force=False, profile=profile)
+    await process_diffusion_file_safe(file_id=file_id, force=force, profile=profile)

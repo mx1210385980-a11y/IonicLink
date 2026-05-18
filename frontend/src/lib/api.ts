@@ -8,7 +8,7 @@ import {
     type AuthUser,
 } from './session'
 
-export const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '')
+export const API_BASE_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
 export type ExtractorType = 'tribology' | 'diffusion'
 
 function normalizeApiPath(path: string) {
@@ -90,14 +90,17 @@ export async function getCurrentUser() {
 }
 
 // File Upload
-export async function uploadFile(file: File) {
+export async function uploadFile(file: File, extractorType: ExtractorType = 'tribology') {
     const formData = new FormData()
     formData.append('file', file)
 
-    const response = await api.post('/api/upload', formData, {
+    const query = new URLSearchParams()
+    query.set('extractor_type', extractorType)
+    const response = await api.post(`/api/upload?${query.toString()}`, formData, {
         headers: {
             'Content-Type': 'multipart/form-data',
         },
+        timeout: 180000,
     })
     return response.data
 }
@@ -1159,7 +1162,7 @@ export async function syncBatchData(metadata: LiteratureMetadata, records: Tribo
 }
 
 // Batch processing related types
-export type FileExtractionStatus = 'uploaded' | 'processing' | 'success' | 'error' | 'no_data' | 'cancelled'
+export type FileExtractionStatus = 'uploading' | 'uploaded' | 'processing' | 'success' | 'error' | 'no_data' | 'cancelled'
 
 export interface BatchFile {
     id: string
