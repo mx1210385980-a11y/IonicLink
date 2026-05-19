@@ -2393,6 +2393,20 @@ async def get_diffusion_candidate_evidence(
     return _build_diffusion_candidate_pdf_evidence_payload(literature, candidate, candidate_id=candidate_id)
 
 
+@router.get("/pdf/{literature_id}/diffusion-records/{record_id}/evidence")
+async def get_diffusion_record_evidence(
+    literature_id: int,
+    record_id: int,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    literature = await require_literature_access(db, principal, literature_id)
+    record = await require_diffusion_record_access(db, principal, record_id)
+    if record.literature_id != literature_id:
+        raise HTTPException(status_code=404, detail="Diffusion record not found")
+    return _build_diffusion_candidate_pdf_evidence_payload(literature, record, candidate_id=record_id)
+
+
 @router.get("/review/records/{record_id}/field-evidence")
 async def get_record_field_evidence(
     record_id: int,

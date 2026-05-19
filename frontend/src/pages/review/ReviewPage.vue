@@ -21,16 +21,21 @@ import {
 
 import {
   approveDiffusionReviewCandidate,
+  approveDiffusionReviewRecord,
   approveReviewCandidate,
   approveReviewRecord,
   confirmDiffusionCandidateFieldEvidence,
+  confirmDiffusionRecordFieldEvidence,
   confirmCandidateFieldEvidence,
   confirmRecordFieldEvidence,
   flagDiffusionCandidateFieldEvidence,
+  flagDiffusionRecordFieldEvidence,
   flagCandidateFieldEvidence,
   flagRecordFieldEvidence,
   getDiffusionCandidateEvidence,
   getDiffusionCandidateFieldEvidence,
+  getDiffusionRecordEvidence,
+  getDiffusionRecordFieldEvidence,
   getCandidateEvidence,
   getCandidateFieldEvidence,
   getRecordEvidence,
@@ -40,6 +45,7 @@ import {
   updateReviewCandidateSpeedConditions,
   updateReviewCandidateTribologicalSystem,
   unflagDiffusionCandidateFieldEvidence,
+  unflagDiffusionRecordFieldEvidence,
   unflagCandidateFieldEvidence,
   unflagRecordFieldEvidence,
   updateReviewRecordCofExtracted,
@@ -474,6 +480,25 @@ function reviewRecordEntityType(record: TribologyData | null | undefined): Revie
   return 'candidate'
 }
 
+function reviewEntityType(record: TribologyData | null | undefined): ReviewRecordEntityType {
+  if (recordExtractorType(record) === 'diffusion') {
+    const explicit = trim((record as any)?.review_entity_type || (record as any)?.reviewEntityType).toLowerCase()
+    if (explicit === 'record' || explicit === 'final' || explicit === 'final_record' || explicit === 'diffusion_record') {
+      return 'record'
+    }
+    if (explicit === 'candidate' || explicit === 'record_candidate' || explicit === 'diffusion_candidate') {
+      return 'candidate'
+    }
+
+    const origin = trim(record?.record_origin).toLowerCase()
+    if (origin.includes('knowledge') || origin.includes('sync') || origin.includes('cached') || origin.includes('promoted')) {
+      return 'record'
+    }
+    return 'candidate'
+  }
+  return reviewRecordEntityType(record)
+}
+
 function reviewCacheKey(
   literatureId: number,
   recordId: number,
@@ -544,6 +569,58 @@ async function fetchTribologyFieldEvidence(
   }
 }
 
+async function fetchDiffusionEvidence(
+  record: TribologyData,
+  literatureId: number,
+  entityType: ReviewRecordEntityType,
+) {
+  const recordId = Number(record.id || '')
+  const primary = entityType === 'record'
+    ? () => getDiffusionRecordEvidence(literatureId, recordId)
+    : () => getDiffusionCandidateEvidence(literatureId, recordId)
+  const fallback = entityType === 'record'
+    ? () => getDiffusionCandidateEvidence(literatureId, recordId)
+    : () => getDiffusionRecordEvidence(literatureId, recordId)
+
+  try {
+    return await primary()
+  } catch (primaryError) {
+    console.warn('[Review] Diffusion evidence lookup failed; trying alternate endpoint.', primaryError)
+    return fallback()
+  }
+}
+
+async function fetchDiffusionFieldEvidence(
+  record: TribologyData,
+  literatureId: number,
+  entityType: ReviewRecordEntityType,
+) {
+  const recordId = Number(record.id || '')
+  const loadCandidate = async () => {
+    const payload = await getDiffusionCandidateFieldEvidence(recordId)
+    if (!payloadMatchesLiterature(payload, literatureId)) {
+      throw new Error(`Diffusion candidate field evidence belongs to literature ${payload.literature_id}, expected ${literatureId}`)
+    }
+    return payload
+  }
+  const loadRecord = async () => {
+    const payload = await getDiffusionRecordFieldEvidence(recordId)
+    if (!payloadMatchesLiterature(payload, literatureId)) {
+      throw new Error(`Diffusion record field evidence belongs to literature ${payload.literature_id}, expected ${literatureId}`)
+    }
+    return payload
+  }
+  const primary = entityType === 'record' ? loadRecord : loadCandidate
+  const fallback = entityType === 'record' ? loadCandidate : loadRecord
+
+  try {
+    return await primary()
+  } catch (primaryError) {
+    console.warn('[Review] Diffusion field evidence lookup failed or mismatched; trying alternate endpoint.', primaryError)
+    return fallback()
+  }
+}
+
 const reviewFields = computed<ReviewField[]>(() => buildReviewFields(activeRecord.value, activeRecordFieldEvidence.value?.fields))
 const visibleReviewFields = computed(() => filterVisibleReviewFields(activeRecord.value, reviewFields.value))
 const embeddedTribopairFieldIds = new Set(['probe_roughness', 'substrate_roughness'])
@@ -572,7 +649,7 @@ watch(
 	      return
 	    }
 
-	    const entityType = extractorType === 'diffusion' ? 'candidate' : reviewRecordEntityType(record)
+	    const entityType = reviewEntityType(record)
 	    const cacheKey = reviewCacheKey(literatureId, recordId, extractorType, entityType)
     const cachedEvidence = evidenceCache.value[cacheKey]
     if (cachedEvidence) {
@@ -580,7 +657,7 @@ watch(
     } else {
       try {
         const evidence = extractorType === 'diffusion'
-	          ? await getDiffusionCandidateEvidence(literatureId, recordId)
+	          ? await fetchDiffusionEvidence(record, literatureId, entityType)
 	          : await fetchTribologyEvidence(record, literatureId, entityType)
 	        evidenceCache.value[cacheKey] = evidence
 	        activeRecordEvidence.value = evidence
@@ -596,7 +673,7 @@ watch(
 	    } else {
 	      try {
 	        const fieldEvidence = extractorType === 'diffusion'
-	          ? await getDiffusionCandidateFieldEvidence(recordId)
+	          ? await fetchDiffusionFieldEvidence(record, literatureId, entityType)
 	          : await fetchTribologyFieldEvidence(record, literatureId, entityType)
 	        fieldEvidenceCache.value[cacheKey] = fieldEvidence
 	        activeRecordFieldEvidence.value = fieldEvidence
@@ -1784,7 +1861,7 @@ function applyReviewResponse(payload: RecordFieldEvidenceResponse) {
   if (literatureId && Number.isFinite(payload.record_id)) {
     const extractorType = payload.extractor_type === 'diffusion' ? 'diffusion' : 'tribology'
     const entityType = activeRecord.value && String(activeRecord.value.id || '') === recordId
-      ? reviewRecordEntityType(activeRecord.value)
+      ? reviewEntityType(activeRecord.value)
       : 'candidate'
     fieldEvidenceCache.value[reviewCacheKey(literatureId, payload.record_id, extractorType, entityType)] = payload
   }
@@ -2953,13 +3030,15 @@ const approvalBlockedReason = computed(() => {
 })
 
 function usesRecordReviewEndpoint(record: TribologyData | null | undefined) {
-  return recordExtractorType(record) === 'tribology' && reviewRecordEntityType(record) === 'record'
+  return reviewEntityType(record) === 'record'
 }
 
 async function confirmReviewFieldPayload(record: TribologyData, fieldId: string) {
   const recordId = Number(record.id || '')
   if (recordExtractorType(record) === 'diffusion') {
-    return confirmDiffusionCandidateFieldEvidence(recordId, fieldId)
+    return usesRecordReviewEndpoint(record)
+      ? confirmDiffusionRecordFieldEvidence(recordId, fieldId)
+      : confirmDiffusionCandidateFieldEvidence(recordId, fieldId)
   }
   return usesRecordReviewEndpoint(record)
     ? confirmRecordFieldEvidence(recordId, fieldId)
@@ -2969,7 +3048,9 @@ async function confirmReviewFieldPayload(record: TribologyData, fieldId: string)
 async function flagReviewFieldPayload(record: TribologyData, fieldId: string, note: string) {
   const recordId = Number(record.id || '')
   if (recordExtractorType(record) === 'diffusion') {
-    return flagDiffusionCandidateFieldEvidence(recordId, fieldId, note)
+    return usesRecordReviewEndpoint(record)
+      ? flagDiffusionRecordFieldEvidence(recordId, fieldId, note)
+      : flagDiffusionCandidateFieldEvidence(recordId, fieldId, note)
   }
   return usesRecordReviewEndpoint(record)
     ? flagRecordFieldEvidence(recordId, fieldId, note)
@@ -2979,7 +3060,9 @@ async function flagReviewFieldPayload(record: TribologyData, fieldId: string, no
 async function unflagReviewFieldPayload(record: TribologyData, fieldId: string, note?: string | null) {
   const recordId = Number(record.id || '')
   if (recordExtractorType(record) === 'diffusion') {
-    return unflagDiffusionCandidateFieldEvidence(recordId, fieldId, note)
+    return usesRecordReviewEndpoint(record)
+      ? unflagDiffusionRecordFieldEvidence(recordId, fieldId, note)
+      : unflagDiffusionCandidateFieldEvidence(recordId, fieldId, note)
   }
   return usesRecordReviewEndpoint(record)
     ? unflagRecordFieldEvidence(recordId, fieldId, note)
@@ -2989,7 +3072,9 @@ async function unflagReviewFieldPayload(record: TribologyData, fieldId: string, 
 async function approveReviewRecordPayload(record: TribologyData) {
   const recordId = Number(record.id || '')
   if (recordExtractorType(record) === 'diffusion') {
-    return approveDiffusionReviewCandidate(recordId)
+    return usesRecordReviewEndpoint(record)
+      ? approveDiffusionReviewRecord(recordId)
+      : approveDiffusionReviewCandidate(recordId)
   }
   return usesRecordReviewEndpoint(record)
     ? approveReviewRecord(recordId)

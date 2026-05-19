@@ -321,6 +321,11 @@ export async function getDiffusionCandidateEvidence(litId: number, candidateId: 
     return response.data
 }
 
+export async function getDiffusionRecordEvidence(litId: number, recordId: number): Promise<EvidenceResult> {
+    const response = await api.get(`/api/pdf/${litId}/diffusion-records/${recordId}/evidence`)
+    return response.data
+}
+
 export async function getRecordFieldEvidence(recordId: number): Promise<RecordFieldEvidenceResponse> {
     const response = await api.get(`/api/review/records/${recordId}/field-evidence`)
     return response.data
@@ -335,6 +340,11 @@ export async function getCandidateFieldEvidence(candidateId: number, literatureI
 
 export async function getDiffusionCandidateFieldEvidence(candidateId: number): Promise<RecordFieldEvidenceResponse> {
     const response = await api.get(`/api/review/diffusion-candidates/${candidateId}/field-evidence`)
+    return response.data
+}
+
+export async function getDiffusionRecordFieldEvidence(recordId: number): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.get(`/api/review/diffusion-records/${recordId}/field-evidence`)
     return response.data
 }
 
@@ -354,6 +364,13 @@ export async function confirmCandidateFieldEvidence(candidateId: number, fieldKe
 
 export async function confirmDiffusionCandidateFieldEvidence(candidateId: number, fieldKey: string, note?: string | null): Promise<RecordFieldEvidenceResponse> {
     const response = await api.post(`/api/review/diffusion-candidates/${candidateId}/fields/${fieldKey}/confirm`, {
+        note: note ?? null,
+    })
+    return response.data
+}
+
+export async function confirmDiffusionRecordFieldEvidence(recordId: number, fieldKey: string, note?: string | null): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/diffusion-records/${recordId}/fields/${fieldKey}/confirm`, {
         note: note ?? null,
     })
     return response.data
@@ -380,6 +397,13 @@ export async function flagDiffusionCandidateFieldEvidence(candidateId: number, f
     return response.data
 }
 
+export async function flagDiffusionRecordFieldEvidence(recordId: number, fieldKey: string, note?: string | null): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/diffusion-records/${recordId}/fields/${fieldKey}/flag`, {
+        note: note ?? null,
+    })
+    return response.data
+}
+
 export async function unflagRecordFieldEvidence(recordId: number, fieldKey: string, note?: string | null): Promise<RecordFieldEvidenceResponse> {
     const response = await api.post(`/api/review/records/${recordId}/fields/${fieldKey}/unflag`, {
         note: note ?? null,
@@ -401,6 +425,13 @@ export async function unflagDiffusionCandidateFieldEvidence(candidateId: number,
     return response.data
 }
 
+export async function unflagDiffusionRecordFieldEvidence(recordId: number, fieldKey: string, note?: string | null): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/diffusion-records/${recordId}/fields/${fieldKey}/unflag`, {
+        note: note ?? null,
+    })
+    return response.data
+}
+
 export async function approveReviewRecord(recordId: number): Promise<RecordFieldEvidenceResponse> {
     const response = await api.post(`/api/review/records/${recordId}/approve`)
     return response.data
@@ -413,6 +444,11 @@ export async function approveReviewCandidate(candidateId: number): Promise<Recor
 
 export async function approveDiffusionReviewCandidate(candidateId: number): Promise<RecordFieldEvidenceResponse> {
     const response = await api.post(`/api/review/diffusion-candidates/${candidateId}/approve`)
+    return response.data
+}
+
+export async function approveDiffusionReviewRecord(recordId: number): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/diffusion-records/${recordId}/approve`)
     return response.data
 }
 

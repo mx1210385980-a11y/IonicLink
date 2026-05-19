@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { Github } from 'lucide-vue-next'
 
 import AppSidebar from '@/components/AppSidebar.vue'
@@ -52,11 +53,13 @@ const statusLabelKeys = {
 
 const fileUploadRef = ref<FileUploadBridge>()
 const chatPanelRef = ref<ChatPanelBridge>()
+const route = useRoute()
 
 // 从异常诊断面板跳转过来时高亮的目标记录 id（一次性，用户切走后清掉）
 const focusedRecordId = ref<number | null>(null)
 const reviewTargetRecordId = ref<string | null>(null)
 const reviewTargetMode = ref<'training-blockers' | null>(null)
+const hydratedReviewRouteKey = ref('')
 const { isChinese, t } = useI18n()
 
 type ReviewTarget = {
@@ -364,6 +367,32 @@ async function ensureReviewFileForTarget(target: ReviewTarget) {
   }
 }
 
+function positiveNumberFromQuery(value: unknown) {
+  const raw = Array.isArray(value) ? value[0] : value
+  const parsed = Number(raw || 0)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+async function hydrateReviewTargetFromRoute() {
+  if (route.name !== 'review' || !sessionState.user) return
+  const literatureId = positiveNumberFromQuery(
+    route.query.literatureId ?? route.query.literature_id ?? route.query.lit,
+  )
+  if (!literatureId) return
+
+  const recordId = positiveNumberFromQuery(
+    route.query.recordId ?? route.query.record_id ?? route.query.candidateId ?? route.query.candidate_id,
+  )
+  const key = `${literatureId}:${recordId || ''}`
+  if (hydratedReviewRouteKey.value === key) return
+  hydratedReviewRouteKey.value = key
+
+  reviewTargetRecordId.value = recordId ? String(recordId) : null
+  reviewTargetMode.value = null
+  await ensureReviewFileForTarget({ literatureId, recordId })
+  selectedFileId.value = String(literatureId)
+}
+
 async function openReviewTarget(target?: ReviewTarget) {
   reviewTargetRecordId.value = target?.recordId ? String(target.recordId) : null
   reviewTargetMode.value = target?.mode ?? null
@@ -375,6 +404,24 @@ async function openReviewTarget(target?: ReviewTarget) {
 
   navigateTo('review', 'inbox')
 }
+
+watch(
+  () => [
+    route.name,
+    route.query.literatureId,
+    route.query.literature_id,
+    route.query.lit,
+    route.query.recordId,
+    route.query.record_id,
+    route.query.candidateId,
+    route.query.candidate_id,
+    sessionState.user?.id,
+  ],
+  () => {
+    void hydrateReviewTargetFromRoute()
+  },
+  { immediate: true },
+)
 
 async function openReviewForCurrentFile(fileId?: string | null) {
   reviewTargetRecordId.value = null
