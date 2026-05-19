@@ -187,14 +187,14 @@ defineExpose({
 </script>
 
 <template>
-  <div class="virtual-table-container flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950/85 dark:shadow-[0_10px_30px_rgba(2,8,23,0.35)]">
+  <div class="virtual-table-container flex flex-col overflow-hidden rounded-md border border-slate-200 bg-white shadow-[0_16px_36px_-30px_rgba(15,23,42,0.34)] dark:border-slate-800 dark:bg-slate-950/85 dark:shadow-[0_10px_30px_rgba(2,8,23,0.35)]">
     <!-- Fixed Header -->
     <div class="virtual-table-header shrink-0 border-b border-slate-100 bg-slate-50 text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
       <div class="record-table-grid items-center">
         <div class="flex items-center justify-center px-2 py-4">
           <input
             type="checkbox"
-            class="h-4 w-4 cursor-pointer rounded border-slate-300 text-[#5b56ea] focus:ring-[#5b56ea]"
+            class="h-4 w-4 cursor-pointer rounded border-slate-300 text-[#0f172a] focus:ring-[#64748b]"
             :checked="allOnPageSelected"
             :indeterminate.prop="someOnPageSelected"
             :disabled="!records.length"
@@ -206,7 +206,7 @@ defineExpose({
         <div class="min-w-0 whitespace-nowrap px-3 py-4 font-medium">离子液体</div>
         <div class="min-w-0 whitespace-nowrap px-2 py-4 font-medium">摩擦副</div>
         <div class="min-w-0 whitespace-nowrap px-3 py-4 font-medium">实验条件</div>
-        <div class="cof-sticky-header whitespace-nowrap px-3 py-4 text-right font-bold text-blue-600">COF / 操作</div>
+        <div class="cof-sticky-header whitespace-nowrap px-3 py-4 text-right font-bold text-[#315083] dark:text-sky-300">COF / 操作</div>
       </div>
     </div>
 
@@ -288,7 +288,7 @@ defineExpose({
               class="virtual-record-row record-table-grid absolute left-0 top-0 w-full items-stretch border-b border-slate-100 transition-colors hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900/70"
               :class="[
                 focusRecordId != null && Number(record.id) === Number(focusRecordId) ? 'ring-2 ring-amber-400 bg-amber-50/70 dark:bg-amber-900/20' : '',
-                isSelected(record.id) ? 'bg-[#f5f7ff] hover:bg-[#eef0ff] dark:bg-[#5b56ea]/10' : '',
+                isSelected(record.id) ? 'bg-slate-100 hover:bg-slate-100 dark:bg-slate-800/70' : '',
               ]"
               :style="{
                 height: `${virtualRow.size}px`,
@@ -299,7 +299,7 @@ defineExpose({
               <div class="flex min-w-0 items-center justify-center px-2 py-4">
                 <input
                   type="checkbox"
-                  class="h-4 w-4 cursor-pointer rounded border-slate-300 text-[#5b56ea] focus:ring-[#5b56ea]"
+                  class="h-4 w-4 cursor-pointer rounded border-slate-300 text-[#0f172a] focus:ring-[#64748b]"
                   :checked="isSelected(record.id)"
                   @change="emit('toggle-select', Number(record.id))"
                   @click.stop
@@ -513,7 +513,7 @@ defineExpose({
               <div class="metric-rail cof-sticky-rail min-w-0 px-3 py-3">
                 <div class="flex h-full flex-col items-end justify-center gap-2">
                   <div class="text-right">
-                    <div class="whitespace-nowrap text-lg font-black tabular-nums tracking-tight text-blue-600 dark:text-blue-400">{{ cofDisplay(record) }}</div>
+                    <div class="whitespace-nowrap text-lg font-black tabular-nums tracking-tight text-[#315083] dark:text-sky-300">{{ cofDisplay(record) }}</div>
                     <div class="mt-0.5 whitespace-nowrap text-[11px] font-semibold text-slate-400 dark:text-slate-500">
                       Conf: {{ confidenceDisplay(confidenceValueFor(record, evidenceData[record.id])) }}
                     </div>
@@ -521,7 +521,7 @@ defineExpose({
                   <div class="flex items-center justify-end gap-1" @click.stop>
                     <button
                       type="button"
-                      class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-blue-200 bg-blue-50 text-blue-600 transition hover:border-blue-300 hover:bg-blue-100 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/15"
+                      class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                       title="进入审核"
                       @click="openReviewRecord ? openReviewRecord(record) : openEvidenceModal(record)"
                     >
@@ -605,27 +605,23 @@ defineExpose({
   gap: 0.15rem;
   width: 100%;
   max-width: 100%;
-  border-radius: 0.75rem;
-  border: 1px solid rgba(199, 210, 254, 0.88);
-  background:
-    linear-gradient(135deg, rgba(238, 242, 255, 0.92), rgba(255, 255, 255, 0.96));
+  border-radius: 0.5rem;
+  border: 1px solid rgba(226, 232, 240, 0.96);
+  background: #f8fafc;
   padding: 0.45rem 0.55rem;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
   color: #1e293b;
   transition:
     border-color 150ms ease,
-    transform 150ms ease,
-    box-shadow 150ms ease;
+    background-color 150ms ease;
 }
 
 .literature-inline-card:hover {
-  border-color: rgba(99, 102, 241, 0.42);
-  box-shadow: 0 10px 24px -20px rgba(79, 70, 229, 0.45);
-  transform: translateY(-1px);
+  border-color: rgba(148, 163, 184, 0.72);
+  background: #fff;
 }
 
 .literature-inline-card__eyebrow {
-  color: #6366f1;
+  color: #64748b;
   font-size: 0.58rem;
   font-weight: 900;
   letter-spacing: 0.16em;
@@ -652,9 +648,8 @@ defineExpose({
 }
 
 :global(.dark) .literature-inline-card {
-  border-color: rgba(99, 102, 241, 0.25);
-  background:
-    linear-gradient(135deg, rgba(49, 46, 129, 0.26), rgba(15, 23, 42, 0.72));
+  border-color: rgba(51, 65, 85, 0.9);
+  background: rgba(15, 23, 42, 0.78);
   color: #e2e8f0;
 }
 
@@ -671,9 +666,8 @@ defineExpose({
   column-gap: 0.5rem;
   row-gap: 0.08rem;
   min-width: 0;
-  border-radius: 0.62rem;
+  border-radius: 0.5rem;
   padding: 0.42rem 0.55rem;
-  box-shadow: 0 10px 18px -18px rgba(15, 23, 42, 0.5);
 }
 
 .tribopair-pill__label {
@@ -715,13 +709,14 @@ defineExpose({
 }
 
 .tribopair-pill--substrate {
-  background: #172235;
-  color: #fff;
+  border: 1px solid rgba(203, 213, 225, 0.95);
+  background: #f8fafc;
+  color: #1e293b;
 }
 
 .tribopair-pill--coating {
   border: 1px solid rgba(251, 191, 36, 0.55);
-  background: linear-gradient(135deg, #fff7ed, #fffbeb);
+  background: #fff7ed;
   color: #92400e;
 }
 
@@ -743,8 +738,9 @@ defineExpose({
 }
 
 :global(.dark) .tribopair-pill--substrate {
-  background: #e2e8f0;
-  color: #0f172a;
+  border-color: rgba(51, 65, 85, 0.9);
+  background: rgba(15, 23, 42, 0.78);
+  color: #e2e8f0;
 }
 
 :global(.dark) .tribopair-pill--coating {
@@ -763,8 +759,7 @@ defineExpose({
 
 .metric-rail {
   border-left: 1px solid rgba(226, 232, 240, 0.78);
-  background:
-    linear-gradient(90deg, rgba(248, 250, 252, 0.42), rgba(255, 255, 255, 0.92));
+  background: rgba(248, 250, 252, 0.92);
 }
 
 .cof-sticky-header,
@@ -776,8 +771,7 @@ defineExpose({
 
 .cof-sticky-header {
   z-index: 18;
-  background:
-    linear-gradient(90deg, rgba(248, 250, 252, 0.62), #f8fafc 24%, #f8fafc);
+  background: #f8fafc;
 }
 
 .cof-sticky-rail {
@@ -786,8 +780,7 @@ defineExpose({
 
 :global(.dark) .metric-rail {
   border-left-color: rgba(51, 65, 85, 0.82);
-  background:
-    linear-gradient(90deg, rgba(15, 23, 42, 0.35), rgba(2, 6, 23, 0.72));
+  background: rgba(15, 23, 42, 0.72);
 }
 
 @media (max-width: 1280px) {

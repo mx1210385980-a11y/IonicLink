@@ -1584,7 +1584,7 @@ onBeforeUnmount(() => {
                 v-model="searchDoi"
                 type="text"
                 placeholder="按文献 DOI 搜索…"
-                class="h-12 w-full rounded-2xl border border-slate-200 bg-slate-50/60 pl-11 pr-12 text-sm text-slate-700 shadow-sm transition focus:border-blue-500 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 dark:placeholder:text-slate-500 dark:focus:border-blue-500 dark:focus:bg-slate-900 dark:focus:ring-blue-500/10"
+                class="h-12 w-full rounded-md border border-slate-200 bg-slate-50/60 pl-11 pr-12 text-sm text-slate-700 shadow-sm transition focus:border-slate-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-slate-100 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 dark:placeholder:text-slate-500 dark:focus:border-slate-500 dark:focus:bg-slate-900 dark:focus:ring-slate-500/10"
                 @keydown.enter.prevent="applyAdvancedFilters"
               />
               <button
@@ -1600,14 +1600,14 @@ onBeforeUnmount(() => {
             <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2">
               <button
                 type="button"
-                class="inline-flex h-9 shrink-0 items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 text-sm font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200 dark:hover:bg-blue-500/15"
+                class="inline-flex h-9 shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                 @click="toggleAdvancedFilters"
               >
                 <SlidersHorizontal class="h-4 w-4" />
                 <span>高级筛选</span>
                 <span
                   v-if="activeManualFilterCount"
-                  class="inline-flex min-w-5 items-center justify-center rounded-full bg-blue-600 px-1.5 py-0.5 text-[11px] font-bold text-white"
+                  class="inline-flex min-w-5 items-center justify-center rounded-md bg-slate-900 px-1.5 py-0.5 text-[11px] font-bold text-white dark:bg-slate-100 dark:text-slate-950"
                 >
                   {{ activeManualFilterCount }}
                 </span>
@@ -1619,7 +1619,7 @@ onBeforeUnmount(() => {
                 v-for="chip in manualFilterChips"
                 :key="chip.id"
                 type="button"
-                class="inline-flex items-center gap-2 rounded-2xl border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 transition hover:border-blue-300 hover:bg-blue-100/80 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-200 dark:hover:bg-blue-500/15"
+                class="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
                 @click="removeAdvancedSearchChip(chip.id)"
               >
                 <span>{{ chip.label }}: {{ chip.value }}</span>
@@ -1644,18 +1644,18 @@ onBeforeUnmount(() => {
 
 	        <div
 	          v-if="showAdvancedFilters"
-	          class="mx-auto mt-3 max-h-[72vh] w-[calc(100vw-2rem)] max-w-[860px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-200/40 dark:border-slate-800 dark:bg-slate-900/90 dark:shadow-none"
+	          class="mx-auto mt-3 max-h-[72vh] w-[calc(100vw-2rem)] max-w-[860px] overflow-hidden rounded-md border border-slate-200 bg-white shadow-[0_20px_44px_-34px_rgba(15,23,42,0.45)] dark:border-slate-800 dark:bg-slate-900/90 dark:shadow-none"
 	        >
           <!-- Header -->
 	          <div class="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800/60 lg:flex-row lg:items-center lg:justify-between">
             <div class="flex min-w-0 items-center gap-3">
-              <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 dark:bg-blue-500/10 dark:text-blue-400">
+              <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
                 <SlidersHorizontal class="h-5 w-5" />
               </div>
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
                   <h3 class="text-base font-bold text-slate-900 dark:text-white">高级筛选检索台</h3>
-                  <span v-if="activeManualFilterCount" class="rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700 dark:bg-blue-500/20 dark:text-blue-300">
+                  <span v-if="activeManualFilterCount" class="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                     {{ activeManualFilterCount }} active
                   </span>
                 </div>
@@ -1695,7 +1695,7 @@ onBeforeUnmount(() => {
                   v-for="field in advancedFilterFields"
                   :key="field.key"
                   type="button"
-                  class="group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition"
+                  class="group flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition"
                   :class="field.key === activeAdvancedOptionKey
                     ? 'bg-white shadow-sm ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-700'
                     : 'text-slate-600 hover:bg-slate-100/50 dark:text-slate-400 dark:hover:bg-slate-800/30'"
@@ -1739,14 +1739,14 @@ onBeforeUnmount(() => {
 
               <div
                 v-if="activeAdvancedOptionKey === 'ions'"
-	                class="mb-3 rounded-xl border border-slate-200 bg-slate-50/70 p-2 dark:border-slate-800 dark:bg-slate-950/30"
+	                class="mb-3 rounded-md border border-slate-200 bg-slate-50/70 p-2 dark:border-slate-800 dark:bg-slate-950/30"
               >
                 <div
                   v-for="role in ionFilterRoles"
                   :key="role.key"
                   class="group flex w-full items-center overflow-hidden rounded-lg transition"
                   :class="role.key === activeIonRole
-                    ? 'bg-white shadow-sm ring-1 ring-blue-200 dark:bg-slate-900 dark:ring-blue-500/40'
+                    ? 'bg-white shadow-sm ring-1 ring-slate-300 dark:bg-slate-900 dark:ring-slate-600'
                     : 'hover:bg-white/80 dark:hover:bg-slate-900/70'"
                 >
                   <button
@@ -1766,12 +1766,12 @@ onBeforeUnmount(() => {
                       </span>
                       <span
                         class="mt-0.5 block truncate text-xs"
-                        :class="role.selected ? 'font-semibold text-blue-700 dark:text-blue-300' : 'text-slate-400 dark:text-slate-500'"
+                        :class="role.selected ? 'font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-400 dark:text-slate-500'"
                       >
                         {{ role.selected || '不固定' }}
                       </span>
                     </span>
-                    <Check v-if="!role.selected && role.key === activeIonRole" class="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                    <Check v-if="!role.selected && role.key === activeIonRole" class="h-4 w-4 shrink-0 text-slate-700 dark:text-slate-200" />
                   </button>
                   <button
                     v-if="role.selected"
@@ -1790,7 +1790,7 @@ onBeforeUnmount(() => {
                   v-model="advancedOptionSearch"
                   type="search"
                   :placeholder="`搜索 ${activeAdvancedCandidateLabel} 候选…`"
-                  class="h-10 w-full rounded-xl border-0 bg-slate-100 pl-10 pr-10 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 transition placeholder:text-slate-500 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-blue-500 dark:bg-slate-800 dark:text-white dark:ring-slate-700 dark:focus:bg-slate-900"
+                  class="h-10 w-full rounded-md border-0 bg-slate-100 pl-10 pr-10 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 transition placeholder:text-slate-500 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-slate-400 dark:bg-slate-800 dark:text-white dark:ring-slate-700 dark:focus:bg-slate-900"
                   @keydown.enter.prevent="advancedTypedCandidate ? applyAdvancedTypedValue() : applyAdvancedFilters()"
                 >
                 <button
@@ -1806,45 +1806,45 @@ onBeforeUnmount(() => {
               <button
                 v-if="advancedTypedCandidate"
                 type="button"
-	                class="mb-3 flex w-full items-center justify-between rounded-xl border border-dashed border-blue-200 bg-blue-50/50 px-4 py-2.5 text-left text-sm font-medium text-blue-700 transition hover:bg-blue-50 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20"
+	                class="mb-3 flex w-full items-center justify-between rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 py-2.5 text-left text-sm font-medium text-slate-700 transition hover:bg-white dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-200 dark:hover:bg-slate-800"
 	                @click="applyAdvancedTypedValue"
 	              >
 	                <span class="truncate">使用 “{{ advancedFilterValueDisplay(activeAdvancedOptionKey, advancedTypedCandidate) }}” 作为 {{ activeAdvancedCandidateLabel }}</span>
-	                <span class="ml-3 shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] uppercase text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">Enter</span>
+	                <span class="ml-3 shrink-0 rounded bg-slate-200 px-1.5 py-0.5 text-[10px] uppercase text-slate-600 dark:bg-slate-700 dark:text-slate-300">Enter</span>
 	              </button>
 
 	              <div
 	                v-if="activeAdvancedOptionKey !== 'ions' && activeAdvancedSelectedValue"
-		                class="mb-3 flex items-center justify-between gap-3 rounded-xl bg-blue-50 px-4 py-3 dark:bg-blue-500/10"
+		                class="mb-3 flex items-center justify-between gap-3 rounded-md bg-slate-50 px-4 py-3 ring-1 ring-slate-200 dark:bg-slate-800/60 dark:ring-slate-700"
 	              >
 	                <div class="min-w-0">
-	                  <p class="text-[10px] font-bold uppercase tracking-wider text-blue-500/80 dark:text-blue-400/80">已选择</p>
+	                  <p class="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">已选择</p>
 	                  <p
-	                    class="mt-0.5 truncate text-sm font-semibold text-blue-900 dark:text-blue-100"
+	                    class="mt-0.5 truncate text-sm font-semibold text-slate-900 dark:text-slate-100"
 	                    :title="advancedFilterRawTitle(activeAdvancedOptionKey, activeAdvancedSelectedValue)"
 	                  >{{ advancedFilterValueDisplay(activeAdvancedOptionKey, activeAdvancedSelectedValue) }}</p>
                 </div>
                 <button
                   type="button"
-                  class="shrink-0 rounded-lg bg-white/60 px-2.5 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-white dark:bg-slate-800 dark:text-blue-300 dark:hover:bg-slate-700"
+                  class="shrink-0 rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700"
                   @click="clearAdvancedFilterValue(activeAdvancedFilterField.key)"
                 >
                   清除
                 </button>
               </div>
 
-	              <div class="max-h-56 overflow-auto rounded-xl border border-slate-100 bg-white dark:border-slate-800 dark:bg-slate-950/50">
+	              <div class="max-h-56 overflow-auto rounded-md border border-slate-100 bg-white dark:border-slate-800 dark:bg-slate-950/50">
 	                  <button
 	                    v-for="option in visibleAdvancedOptions"
 	                    :key="`${activeAdvancedFilterField.key}-${activeIonRole}-${option}`"
 	                    type="button"
 	                    class="flex w-full items-center gap-3 border-b border-slate-50 px-4 py-2.5 text-left text-sm transition last:border-b-0 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/50"
-	                    :class="option === activeAdvancedSelectedValue ? 'bg-blue-50/50 dark:bg-blue-500/10' : ''"
+	                    :class="option === activeAdvancedSelectedValue ? 'bg-slate-100 dark:bg-slate-800/80' : ''"
 	                    :title="advancedFilterRawTitle(activeAdvancedFilterField.key, option)"
 	                    @click="setAdvancedFilterValue(activeAdvancedFilterField.key, option)"
 	                  >
-	                    <span class="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-300" :class="option === activeAdvancedSelectedValue ? 'font-semibold text-blue-700 dark:text-blue-300' : ''">{{ advancedFilterValueDisplay(activeAdvancedFilterField.key, option) }}</span>
-	                    <Check v-if="option === activeAdvancedSelectedValue" class="h-4 w-4 text-blue-600 dark:text-blue-400" />
+	                    <span class="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-300" :class="option === activeAdvancedSelectedValue ? 'font-semibold text-slate-900 dark:text-slate-100' : ''">{{ advancedFilterValueDisplay(activeAdvancedFilterField.key, option) }}</span>
+	                    <Check v-if="option === activeAdvancedSelectedValue" class="h-4 w-4 text-slate-700 dark:text-slate-200" />
 	                  </button>
                   <div v-if="!visibleAdvancedOptions.length" class="px-4 py-8 text-center text-sm text-slate-400">
                     没有匹配候选。可以直接使用当前输入作为筛选值。
@@ -1892,8 +1892,8 @@ onBeforeUnmount(() => {
                         type="text"
                         inputmode="decimal"
                         placeholder="Min"
-                        class="h-9 w-full rounded-lg border-0 bg-white px-3 text-sm text-slate-900 ring-1 ring-inset transition focus:ring-2 focus:ring-inset dark:bg-slate-900 dark:text-white"
-                        :class="isLoadRangeInvalid ? 'ring-rose-300 focus:ring-rose-500 dark:ring-rose-500/50' : 'ring-slate-200 focus:ring-blue-500 dark:ring-slate-700'"
+                        class="h-9 w-full rounded-md border-0 bg-white px-3 text-sm text-slate-900 ring-1 ring-inset transition focus:ring-2 focus:ring-inset dark:bg-slate-900 dark:text-white"
+                        :class="isLoadRangeInvalid ? 'ring-rose-300 focus:ring-rose-500 dark:ring-rose-500/50' : 'ring-slate-200 focus:ring-slate-400 dark:ring-slate-700'"
                         @keydown.enter.prevent="applyAdvancedFilters"
                       />
                       <span class="text-slate-400">-</span>
@@ -1902,8 +1902,8 @@ onBeforeUnmount(() => {
                         type="text"
                         inputmode="decimal"
                         placeholder="Max"
-                        class="h-9 w-full rounded-lg border-0 bg-white px-3 text-sm text-slate-900 ring-1 ring-inset transition focus:ring-2 focus:ring-inset dark:bg-slate-900 dark:text-white"
-                        :class="isLoadRangeInvalid ? 'ring-rose-300 focus:ring-rose-500 dark:ring-rose-500/50' : 'ring-slate-200 focus:ring-blue-500 dark:ring-slate-700'"
+                        class="h-9 w-full rounded-md border-0 bg-white px-3 text-sm text-slate-900 ring-1 ring-inset transition focus:ring-2 focus:ring-inset dark:bg-slate-900 dark:text-white"
+                        :class="isLoadRangeInvalid ? 'ring-rose-300 focus:ring-rose-500 dark:ring-rose-500/50' : 'ring-slate-200 focus:ring-slate-400 dark:ring-slate-700'"
                         @keydown.enter.prevent="applyAdvancedFilters"
                       />
                     </div>
@@ -1918,8 +1918,8 @@ onBeforeUnmount(() => {
                         type="text"
                         inputmode="decimal"
                         placeholder="Min"
-                        class="h-9 w-full rounded-lg border-0 bg-white px-3 text-sm text-slate-900 ring-1 ring-inset transition focus:ring-2 focus:ring-inset dark:bg-slate-900 dark:text-white"
-                        :class="isCofRangeInvalid ? 'ring-rose-300 focus:ring-rose-500 dark:ring-rose-500/50' : 'ring-slate-200 focus:ring-blue-500 dark:ring-slate-700'"
+                        class="h-9 w-full rounded-md border-0 bg-white px-3 text-sm text-slate-900 ring-1 ring-inset transition focus:ring-2 focus:ring-inset dark:bg-slate-900 dark:text-white"
+                        :class="isCofRangeInvalid ? 'ring-rose-300 focus:ring-rose-500 dark:ring-rose-500/50' : 'ring-slate-200 focus:ring-slate-400 dark:ring-slate-700'"
                         @keydown.enter.prevent="applyAdvancedFilters"
                       />
                       <span class="text-slate-400">-</span>
@@ -1928,8 +1928,8 @@ onBeforeUnmount(() => {
                         type="text"
                         inputmode="decimal"
                         placeholder="Max"
-                        class="h-9 w-full rounded-lg border-0 bg-white px-3 text-sm text-slate-900 ring-1 ring-inset transition focus:ring-2 focus:ring-inset dark:bg-slate-900 dark:text-white"
-                        :class="isCofRangeInvalid ? 'ring-rose-300 focus:ring-rose-500 dark:ring-rose-500/50' : 'ring-slate-200 focus:ring-blue-500 dark:ring-slate-700'"
+                        class="h-9 w-full rounded-md border-0 bg-white px-3 text-sm text-slate-900 ring-1 ring-inset transition focus:ring-2 focus:ring-inset dark:bg-slate-900 dark:text-white"
+                        :class="isCofRangeInvalid ? 'ring-rose-300 focus:ring-rose-500 dark:ring-rose-500/50' : 'ring-slate-200 focus:ring-slate-400 dark:ring-slate-700'"
                         @keydown.enter.prevent="applyAdvancedFilters"
                       />
                     </div>
@@ -1948,14 +1948,14 @@ onBeforeUnmount(() => {
             <div class="flex w-full justify-end gap-3 sm:w-auto">
               <button
                 type="button"
-                class="rounded-lg px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200/50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+                class="rounded-md px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200/50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
                 @click="cancelAdvancedFilters"
               >
                 取消
               </button>
               <button
                 type="button"
-                class="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-blue-600 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 dark:focus:ring-offset-slate-900"
+                class="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-slate-900 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white dark:focus:ring-offset-slate-900"
                 :disabled="hasInvalidManualRange"
                 @click="applyAdvancedFilters"
               >
@@ -1969,7 +1969,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="selectedIds.size > 0" class="px-6 pt-3">
-      <div class="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white/90 px-3 py-2.5 text-sm text-slate-700 shadow-[0_18px_42px_-34px_rgba(15,23,42,0.65)] ring-1 ring-slate-100 backdrop-blur dark:border-slate-800 dark:bg-slate-950/85 dark:text-slate-200 dark:ring-slate-800">
+      <div class="flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-white/90 px-3 py-2.5 text-sm text-slate-700 shadow-[0_18px_42px_-34px_rgba(15,23,42,0.65)] ring-1 ring-slate-100 backdrop-blur dark:border-slate-800 dark:bg-slate-950/85 dark:text-slate-200 dark:ring-slate-800">
         <div class="mr-1 flex items-center gap-2">
           <span class="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-slate-950 px-2 text-xs font-black tabular-nums text-white dark:bg-white dark:text-slate-950">
             {{ selectedIds.size }}
@@ -1989,7 +1989,7 @@ onBeforeUnmount(() => {
 
         <select
           v-model="batchEditField"
-          class="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 outline-none transition focus:border-blue-300 focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:focus:border-blue-500 dark:focus:ring-blue-500/10"
+          class="h-9 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:focus:border-slate-500 dark:focus:ring-slate-500/10"
         >
           <option value="">选择字段...</option>
           <option v-for="opt in BATCH_FIELD_OPTIONS" :key="opt.key" :value="opt.key">{{ opt.label }}</option>
@@ -1999,7 +1999,7 @@ onBeforeUnmount(() => {
           type="text"
           :placeholder="batchEditField ? '新值，留空则清除' : '先选字段'"
           :disabled="!batchEditField"
-          class="h-9 w-48 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:ring-4 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:focus:border-blue-500 dark:focus:ring-blue-500/10 dark:disabled:bg-slate-900"
+          class="h-9 w-48 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100 disabled:bg-slate-50 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:focus:border-slate-500 dark:focus:ring-slate-500/10 dark:disabled:bg-slate-900"
         >
         <button
           type="button"
@@ -2098,7 +2098,7 @@ onBeforeUnmount(() => {
       <template #header>
         <div v-if="evidenceModalRecord" class="flex w-full items-center justify-between gap-4">
           <div class="min-w-0">
-            <div class="text-xs font-semibold uppercase tracking-[0.22em] text-blue-500">Evidence Workspace</div>
+            <div class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Evidence Workspace</div>
             <div class="mt-1 truncate text-base font-semibold text-slate-900 dark:text-slate-100">
               Record #{{ evidenceModalRecord.id }} · {{ tribopairDisplay(evidenceModalRecord) }}
             </div>
@@ -2114,7 +2114,7 @@ onBeforeUnmount(() => {
             <button
               v-if="evidenceModalRecord.literatureId"
               type="button"
-              class="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
+              class="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"
               @click="openRecordPdf(evidenceModalRecord)"
             >
               <ExternalLink class="h-4 w-4" /> Open PDF
@@ -2126,7 +2126,7 @@ onBeforeUnmount(() => {
       <div v-if="evidenceModalRecord" class="grid h-[78vh] gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
         <aside class="space-y-4 overflow-auto pr-1">
           <!-- Tribopair Cross-Check Card -->
-          <div class="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div class="rounded-md border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
             <div class="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
               <Layers class="h-4 w-4 text-emerald-500" /> Tribopair Cross-Check
             </div>
@@ -2177,7 +2177,7 @@ onBeforeUnmount(() => {
             eyebrow="Selected Record"
           />
 
-          <div class="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div class="rounded-md border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
             <div class="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
               <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-book-open h-4 w-4"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> Reference Source
             </div>
@@ -2205,7 +2205,7 @@ onBeforeUnmount(() => {
                     v-if="evidenceModalRecord.literature?.doi"
                     :href="`https://doi.org/${evidenceModalRecord.literature?.doi}`"
                     target="_blank"
-                    class="inline-flex items-center gap-1 text-blue-600 hover:underline dark:text-blue-300"
+                    class="inline-flex items-center gap-1 text-[#315083] hover:underline dark:text-sky-300"
                   >
                     {{ evidenceModalRecord.literature?.doi }}
                     <ExternalLink class="h-3.5 w-3.5" />
@@ -2223,10 +2223,10 @@ onBeforeUnmount(() => {
           />
         </aside>
 
-        <section class="flex min-h-0 flex-col rounded-[28px] bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.18),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(168,85,247,0.12),transparent_26%),linear-gradient(135deg,#09101d_0%,#08162f_45%,#0b1530_100%)] p-4">
+        <section class="flex min-h-0 flex-col rounded-lg border border-slate-800 bg-[#08111f] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
           <div class="mb-4 flex flex-wrap items-start justify-between gap-3 px-1">
             <div>
-              <div class="text-xs font-semibold uppercase tracking-[0.24em] text-blue-200/70">Context-Aware Evidence</div>
+              <div class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Context-Aware Evidence</div>
               <div class="mt-1 text-sm text-slate-300">
                 <span class="font-semibold text-white" v-html="formatIonicLiquidHtml(lubricantDisplay(evidenceModalRecord))"></span>
                 <span class="mx-2 text-slate-500">·</span>
@@ -2237,7 +2237,7 @@ onBeforeUnmount(() => {
               <span
                 v-for="group in conditionGroups(evidenceModalRecord)"
                 :key="`modal-cond-${group.key}`"
-                class="inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold"
+                class="inline-flex max-w-full items-center gap-2 rounded-md border px-3 py-1 text-[11px] font-semibold"
                 :class="conditionGroupClass(group.key)"
               >
                 <span class="tracking-[0.16em]">{{ group.label }}</span>
@@ -2247,24 +2247,24 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="min-h-0 flex-1 overflow-auto">
-            <p v-if="evidenceLoading[evidenceModalRecord.id]" class="rounded-2xl border border-slate-700/70 bg-slate-900/60 px-4 py-5 text-sm text-slate-300">
+            <p v-if="evidenceLoading[evidenceModalRecord.id]" class="rounded-md border border-slate-700/70 bg-slate-900/60 px-4 py-5 text-sm text-slate-300">
               Locating evidence...
             </p>
-            <p v-else-if="evidenceError[evidenceModalRecord.id]" class="rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-5 text-sm text-rose-200">
+            <p v-else-if="evidenceError[evidenceModalRecord.id]" class="rounded-md border border-rose-500/30 bg-rose-500/10 px-4 py-5 text-sm text-rose-200">
               {{ evidenceError[evidenceModalRecord.id] }}
             </p>
             <template v-else-if="activeEvidenceRow">
-              <p v-if="evidenceData[evidenceModalRecord.id] && !evidenceData[evidenceModalRecord.id]?.has_pdf" class="mb-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+              <p v-if="evidenceData[evidenceModalRecord.id] && !evidenceData[evidenceModalRecord.id]?.has_pdf" class="mb-3 rounded-md border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
                 PDF file not found on backend disk; evidence image cannot be generated.
               </p>
               <InteractiveEvidencePanelHost
                 :row="activeEvidenceRow"
                 :pdf-url="evidenceModalRecord.literatureId ? `/api/pdf/${evidenceModalRecord.literatureId}` : ''"
-                class-name="rounded-[26px]"
+                class-name="rounded-md"
                 @open-pdf="handleEvidenceModalPdfOpen"
               />
             </template>
-            <p v-else class="rounded-2xl border border-slate-700/70 bg-slate-900/60 px-4 py-5 text-sm text-slate-300">
+            <p v-else class="rounded-md border border-slate-700/70 bg-slate-900/60 px-4 py-5 text-sm text-slate-300">
               No evidence available for this record.
             </p>
           </div>
@@ -2310,13 +2310,13 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="mt-4 flex flex-wrap gap-2 text-[11px] font-semibold">
-                <span class="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-blue-700 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-300">
+                <span class="rounded-md border border-slate-200 bg-slate-50 px-3 py-1 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
                   COF {{ cofDisplay(editDrawerRecord) }}
                 </span>
-                <span class="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300">
+                <span class="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300">
                   Confidence {{ confidenceDisplay(confidenceValueFor(editDrawerRecord)) }}
                 </span>
-                <span class="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                <span class="rounded-md border border-slate-200 bg-slate-50 px-3 py-1 text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
                   {{ tribopairDisplay(editDrawerRecord) }}
                 </span>
               </div>
@@ -2324,7 +2324,7 @@ onBeforeUnmount(() => {
 
             <div class="flex-1 overflow-auto px-6 py-5">
               <div class="space-y-5">
-                <section class="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-900/60">
+                <section class="rounded-md border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-900/60">
                   <div class="mb-4 text-sm font-semibold text-slate-900 dark:text-slate-100">Core Fields</div>
                   <div class="grid gap-4 md:grid-cols-2">
                     <div class="md:col-span-2">
@@ -2360,7 +2360,7 @@ onBeforeUnmount(() => {
                   </div>
                 </section>
 
-                <section class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+                <section class="rounded-md border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
                   <div class="mb-4 text-sm font-semibold text-slate-900 dark:text-slate-100">Tribopair</div>
                   <div class="grid gap-4 md:grid-cols-2">
                     <div>
@@ -2406,7 +2406,7 @@ onBeforeUnmount(() => {
                   </div>
                 </section>
 
-                <section class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+                <section class="rounded-md border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
                   <div class="mb-4 text-sm font-semibold text-slate-900 dark:text-slate-100">Experimental Conditions</div>
                   <div class="grid gap-4 md:grid-cols-2">
                     <div>
@@ -2462,7 +2462,7 @@ onBeforeUnmount(() => {
                   </div>
                 </section>
 
-                <details class="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+                <details class="rounded-md border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
                   <summary class="cursor-pointer list-none text-sm font-semibold text-slate-900 dark:text-slate-100">
                     Advanced Surface Metadata
                   </summary>
@@ -2518,14 +2518,14 @@ onBeforeUnmount(() => {
                 <div class="flex items-center gap-2">
                   <button
                     type="button"
-                    class="inline-flex h-10 items-center rounded-xl border border-slate-300 px-4 text-sm font-medium text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                    class="inline-flex h-10 items-center rounded-md border border-slate-300 px-4 text-sm font-medium text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
                     @click="closeEditDrawer"
                   >
                     Cancel
                   </button>
                   <button
                     type="button"
-                    class="inline-flex h-10 items-center gap-1.5 rounded-xl bg-blue-600 px-4 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-60"
+                    class="inline-flex h-10 items-center gap-1.5 rounded-md bg-slate-900 px-4 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"
                     :disabled="isSavingActiveEditRecord()"
                     @click="saveActiveEditRecord"
                   >

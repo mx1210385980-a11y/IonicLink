@@ -3618,7 +3618,7 @@ function recordBadgeForRecord(record: TribologyData, status: RecordItem['status'
 }
 
 function fieldRowTone(field: ReviewField) {
-  if (field.id === activeFieldId.value) return 'border-[#b8c1ff] bg-[#fbfcff] ring-1 ring-[#c5cbff]'
+  if (field.id === activeFieldId.value) return 'border-[#9db1c8] bg-[#f8fafc] ring-1 ring-[#cbd9e8]'
   if (field.status === 'low_conf') return 'border-[#f1ddbd] bg-white hover:border-[#dcc89e]'
   if (field.status === 'confirmed') return 'border-[#e5ebf4] bg-white opacity-90 hover:opacity-100'
   return 'border-[#e5ebf4] bg-white hover:border-[#cdd5e2]'
@@ -3668,12 +3668,12 @@ function roughnessTextParts(value: string) {
 
 
 <template>
-  <div class="flex h-full min-h-0 flex-col gap-3 overflow-hidden bg-[#f1f5f9] p-3">
+  <div class="flex h-full min-h-0 flex-col gap-3 overflow-hidden bg-[#f4f7fb] p-3">
     <!-- ─── 顶部状态条 ─────────────────────────────────────────────── -->
     <section class="shell-surface flex flex-wrap items-center gap-3 px-4 py-2.5 sm:px-5">
       <button
         type="button"
-        class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[0.6rem] border border-[#e2e8f0] bg-white text-slate-500 transition hover:bg-[#f8fbff] hover:text-slate-800"
+        class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#dbe4ef] bg-white text-slate-500 transition hover:bg-[#f8fafc] hover:text-slate-800"
         :title="inboxCollapsed ? '展开文献列表' : '收起文献列表'"
         @click="inboxCollapsed = !inboxCollapsed"
       >
@@ -3689,7 +3689,7 @@ function roughnessTextParts(value: string) {
           </h1>
           <span
             v-if="documentTotal"
-            class="shrink-0 rounded-full bg-[#edf2ff] px-2.5 py-0.5 text-xs font-semibold text-[#3d56d2]"
+            class="shrink-0 rounded-md bg-[#eef4ff] px-2.5 py-0.5 text-xs font-semibold text-[#315083]"
           >
             待审 {{ documentPending }} / {{ documentTotal }}
           </span>
@@ -3711,7 +3711,7 @@ function roughnessTextParts(value: string) {
       <div class="flex shrink-0 items-center gap-1.5">
         <button
           type="button"
-          class="inline-flex items-center gap-1 rounded-[0.6rem] border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[#f8fbff] hover:text-slate-900"
+          class="inline-flex items-center gap-1 rounded-md border border-[#dbe4ef] bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[#f8fafc] hover:text-slate-900"
           :disabled="!hasPrevRecord"
           title="上一条"
           @click="gotoPrevRecord"
@@ -3724,7 +3724,7 @@ function roughnessTextParts(value: string) {
         </span>
         <button
           type="button"
-          class="inline-flex items-center gap-1 rounded-[0.6rem] border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[#f8fbff] hover:text-slate-900"
+          class="inline-flex items-center gap-1 rounded-md border border-[#dbe4ef] bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition disabled:cursor-not-allowed disabled:opacity-50 hover:bg-[#f8fafc] hover:text-slate-900"
           :disabled="!hasNextRecord"
           title="下一条"
           @click="gotoNextRecord"
@@ -3737,7 +3737,7 @@ function roughnessTextParts(value: string) {
 
         <button
           type="button"
-          class="inline-flex items-center gap-1.5 rounded-[0.6rem] border border-[#bfdbfe] bg-[#eff6ff] px-3 py-1.5 text-xs font-semibold text-[#1d4ed8] transition hover:border-[#93c5fd] hover:bg-[#dbeafe] disabled:cursor-not-allowed disabled:border-[#dbeafe] disabled:bg-[#f8fbff] disabled:text-slate-400"
+          class="inline-flex items-center gap-1.5 rounded-md border border-[#cbd9e8] bg-[#f8fafc] px-3 py-1.5 text-xs font-semibold text-[#315083] transition hover:border-[#9db1c8] hover:bg-white disabled:cursor-not-allowed disabled:border-[#dbe4ef] disabled:bg-[#f8fafc] disabled:text-slate-400"
           :disabled="!canReextractCurrentFile"
           title="对当前文献强制重新提取，重新生成候选记录和字段证据"
           @click="handleReextractCurrentFile"
@@ -3749,7 +3749,7 @@ function roughnessTextParts(value: string) {
 
         <button
           type="button"
-          class="inline-flex items-center gap-1.5 rounded-[0.6rem] bg-[#5b56ea] px-3.5 py-1.5 text-xs font-semibold text-white shadow-[0_10px_24px_-18px_rgba(91,86,234,0.85)] transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3] disabled:shadow-none"
+          class="inline-flex items-center gap-1.5 rounded-md bg-[#0f172a] px-3.5 py-1.5 text-xs font-semibold text-white shadow-[0_10px_22px_-18px_rgba(15,23,42,0.9)] transition hover:bg-[#1e293b] disabled:cursor-not-allowed disabled:bg-[#cbd5e1] disabled:shadow-none"
           :disabled="!canApproveAllVisible || reviewActionPending === 'approve-all'"
           @click="handleApproveAll"
         >
@@ -3760,14 +3760,14 @@ function roughnessTextParts(value: string) {
 
         <button
           type="button"
-          class="inline-flex items-center gap-1 rounded-[0.6rem] border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-[#f8fbff] hover:text-slate-900"
+          class="inline-flex items-center gap-1 rounded-md border border-[#dbe4ef] bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-[#f8fafc] hover:text-slate-900"
           @click="emit('open-pipeline')"
         >
           返回提取
         </button>
         <button
           type="button"
-          class="inline-flex items-center gap-1 rounded-[0.6rem] border border-[#e2e8f0] bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-[#f8fbff] hover:text-slate-900"
+          class="inline-flex items-center gap-1 rounded-md border border-[#dbe4ef] bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-[#f8fafc] hover:text-slate-900"
           @click="emit('open-knowledge')"
         >
           打开知识库
@@ -3776,13 +3776,13 @@ function roughnessTextParts(value: string) {
 
       <p
         v-if="reviewActionError"
-        class="basis-full rounded-[0.6rem] border border-[#ffd4da] bg-[#fff5f6] px-3 py-1.5 text-xs text-[#cf334f]"
+        class="basis-full rounded-md border border-[#ffd4da] bg-[#fff5f6] px-3 py-1.5 text-xs text-[#cf334f]"
       >
         {{ reviewActionError }}
       </p>
       <p
         v-else-if="approvalBlockedReason"
-        class="basis-full rounded-[0.6rem] border border-[#f1ddbd] bg-[#fffaf0] px-3 py-1.5 text-xs text-[#9a5b00]"
+        class="basis-full rounded-md border border-[#f1ddbd] bg-[#fffaf0] px-3 py-1.5 text-xs text-[#9a5b00]"
       >
         {{ approvalBlockedReason }}
       </p>
@@ -3798,7 +3798,7 @@ function roughnessTextParts(value: string) {
       <!-- ── 左：文献列表 ──────────────────────────────── -->
       <aside
         v-if="!inboxCollapsed"
-        class="flex min-h-0 flex-col overflow-hidden rounded-[1.25rem] border border-[#e2e8f0] bg-white"
+        class="flex min-h-0 flex-col overflow-hidden rounded-md border border-[#dbe4ef] bg-white shadow-[0_16px_36px_-30px_rgba(15,23,42,0.35)]"
       >
         <div class="border-b border-[#eef2f6] px-3 py-3">
           <div class="flex items-center justify-between gap-2">
@@ -3812,7 +3812,7 @@ function roughnessTextParts(value: string) {
             <input
               v-model="query"
               type="text"
-              class="h-8 w-full rounded-[0.55rem] border border-[#e2e8f0] bg-white pl-7 pr-2 text-xs text-slate-700 outline-none placeholder:text-slate-400 focus:border-[#b7c6ef]"
+              class="h-8 w-full rounded-md border border-[#dbe4ef] bg-white pl-7 pr-2 text-xs text-slate-700 outline-none placeholder:text-slate-400 focus:border-[#8aa0bd] focus:ring-2 focus:ring-[#dbe4ef]"
               placeholder="搜索文献..."
             >
           </div>
@@ -3820,7 +3820,7 @@ function roughnessTextParts(value: string) {
             <input
               v-model="prioritizeLowConfidence"
               type="checkbox"
-              class="h-3.5 w-3.5 rounded border-slate-300 text-[#5b56ea] focus:ring-[#5b56ea]"
+              class="h-3.5 w-3.5 rounded border-slate-300 text-[#0f172a] focus:ring-[#64748b]"
             >
             优先显示低置信度
           </label>
@@ -3831,16 +3831,16 @@ function roughnessTextParts(value: string) {
             v-for="item in queueItems"
             :key="item.id"
             type="button"
-            class="w-full rounded-[0.75rem] border px-2.5 py-2 text-left transition"
-            :class="item.selected
-              ? 'border-[#aebdfc] bg-[#f5f7ff] ring-1 ring-[#aebdfc]/40'
-              : 'border-[#eef2f6] bg-white hover:border-[#d8e0eb] hover:bg-[#f8fbff]'"
+              class="w-full rounded-md border px-2.5 py-2 text-left transition"
+              :class="item.selected
+              ? 'border-[#9db1c8] bg-[#f8fafc] ring-1 ring-[#cbd9e8]'
+              : 'border-[#eef2f6] bg-white hover:border-[#cbd9e8] hover:bg-[#f8fafc]'"
             @click="item.id !== 'empty' && emit('select-file', item.id)"
           >
             <div class="flex items-start justify-between gap-1.5">
               <p
                 class="line-clamp-2 text-xs font-semibold leading-snug"
-                :class="item.selected ? 'text-[#2c3ea8]' : 'text-slate-800'"
+                :class="item.selected ? 'text-[#0f172a]' : 'text-slate-800'"
               >
                 {{ item.name }}
               </p>
@@ -3867,7 +3867,7 @@ function roughnessTextParts(value: string) {
 
       <aside
         v-else
-        class="flex min-h-0 flex-col items-center gap-1.5 overflow-y-auto rounded-[1.25rem] border border-[#e2e8f0] bg-white py-3"
+        class="flex min-h-0 flex-col items-center gap-1.5 overflow-y-auto rounded-md border border-[#dbe4ef] bg-white py-3 shadow-[0_16px_36px_-30px_rgba(15,23,42,0.35)]"
       >
         <button
           v-for="item in queueItems"
@@ -3875,7 +3875,7 @@ function roughnessTextParts(value: string) {
           type="button"
           class="relative flex h-8 w-8 items-center justify-center rounded-[0.55rem] text-[10px] font-bold uppercase transition"
           :class="item.selected
-            ? 'bg-[#5b56ea] text-white'
+            ? 'bg-[#0f172a] text-white'
             : 'bg-[#f1f5f9] text-slate-500 hover:bg-[#e2e8f0]'"
           :title="item.name"
           @click="item.id !== 'empty' && emit('select-file', item.id)"
@@ -3889,14 +3889,14 @@ function roughnessTextParts(value: string) {
       </aside>
 
       <!-- ── 中：PDF 内联预览 ──────────────────────── -->
-      <section class="flex min-h-0 flex-col overflow-hidden rounded-[1.25rem] border border-[#e2e8f0] bg-white">
+      <section class="flex min-h-0 flex-col overflow-hidden rounded-md border border-[#dbe4ef] bg-white shadow-[0_16px_36px_-30px_rgba(15,23,42,0.35)]">
         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[#eef2f6] px-4 py-2.5">
           <div class="flex min-w-0 items-center gap-2">
             <FileText class="h-4 w-4 text-[#7d8eaa]" />
             <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">原文预览</p>
             <span
               v-if="activeField"
-              class="rounded-md bg-[#f5f7ff] px-2 py-0.5 text-[11px] font-medium text-[#5061d1]"
+              class="rounded-md bg-[#f3f6fa] px-2 py-0.5 text-[11px] font-semibold text-[#315083]"
             >
               当前字段：{{ activeField.label }}
             </span>
@@ -3917,7 +3917,7 @@ function roughnessTextParts(value: string) {
                 :max="pdfPageCount || undefined"
                 inputmode="numeric"
                 placeholder="8"
-                class="h-6 w-14 rounded border border-[#dbe4f0] bg-white px-2 text-center text-[12px] font-semibold text-[#1e293b] outline-none transition focus:border-[#5b56ea] focus:ring-2 focus:ring-[#5b56ea]/15"
+                class="h-6 w-14 rounded border border-[#dbe4ef] bg-white px-2 text-center text-[12px] font-semibold text-[#1e293b] outline-none transition focus:border-[#8aa0bd] focus:ring-2 focus:ring-[#dbe4ef]"
                 :aria-invalid="Boolean(pdfPageError)"
                 @change="jumpToPdfPage"
               >
@@ -3928,7 +3928,7 @@ function roughnessTextParts(value: string) {
               :href="pdfUrl"
               target="_blank"
               rel="noreferrer"
-              class="inline-flex items-center gap-1 text-[11px] font-medium text-[#5b56ea] transition hover:text-[#403bcb]"
+              class="inline-flex items-center gap-1 text-[11px] font-semibold text-[#315083] transition hover:text-[#0f172a]"
             >
               新窗口打开
               <ExternalLink class="h-3 w-3" />
@@ -3956,7 +3956,7 @@ function roughnessTextParts(value: string) {
       </section>
 
       <!-- ── 右：数据卡片 ──────────────────────────── -->
-      <aside class="flex min-h-0 flex-col overflow-hidden rounded-[1.25rem] border border-[#e2e8f0] bg-white">
+      <aside class="flex min-h-0 flex-col overflow-hidden rounded-md border border-[#dbe4ef] bg-white shadow-[0_16px_36px_-30px_rgba(15,23,42,0.35)]">
         <div class="border-b border-[#eef2f6] px-4 py-2.5">
           <div class="flex items-center justify-between gap-2">
             <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">提取记录</p>
@@ -4020,10 +4020,10 @@ function roughnessTextParts(value: string) {
           <article
             v-for="item in visibleRecordItems"
             :key="item.id"
-            class="relative rounded-[0.95rem] border transition hover:z-10"
+            class="relative rounded-md border transition hover:z-10"
             :class="item.id === activeRecordId
-              ? 'border-[#aebdfc] bg-white shadow-[0_12px_28px_-22px_rgba(91,86,234,0.45)] ring-1 ring-[#aebdfc]/50 z-10'
-              : 'border-[#eef2f6] bg-white hover:border-[#d8e0eb]'"
+              ? 'z-10 border-[#9db1c8] bg-white shadow-[0_12px_26px_-22px_rgba(15,23,42,0.55)] ring-1 ring-[#cbd9e8]'
+              : 'border-[#eef2f6] bg-white hover:border-[#cbd9e8]'"
           >
             <button
               type="button"
@@ -4121,7 +4121,7 @@ function roughnessTextParts(value: string) {
                 <div class="flex items-start gap-1.5">
                   <button
                     type="button"
-                    class="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-[#5b56ea] px-2.5 text-[10px] font-bold normal-case tracking-normal text-white transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3]"
+                    class="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-[#0f172a] px-2.5 text-[10px] font-bold normal-case tracking-normal text-white transition hover:bg-[#1e293b] disabled:cursor-not-allowed disabled:bg-[#cbd5e1]"
                     :disabled="!recordCanApprove(item.record, remoteFieldsForRecord(item.record)) || reviewActionPending === `approve:${Number(item.record.id || '')}`"
                     :title="approveActionTitle(item.record, remoteFieldsForRecord(item.record))"
                     @click.stop="handleApproveRecord(item.record)"
@@ -4135,14 +4135,14 @@ function roughnessTextParts(value: string) {
                   </button>
                   <ChevronDown
                     class="mt-1.5 h-4 w-4 shrink-0 text-slate-400 transition"
-                    :class="isRecordExpanded(item.id) ? 'rotate-180 text-[#5b56ea]' : ''"
+                    :class="isRecordExpanded(item.id) ? 'rotate-180 text-[#0f172a]' : ''"
                   />
                 </div>
               </div>
             </button>
 
             <!-- 展开：字段列表 -->
-            <div v-if="isRecordExpanded(item.id)" class="border-t border-[#eef2f6] bg-[#fbfcff] px-3 py-2.5 rounded-b-[0.95rem]">
+            <div v-if="isRecordExpanded(item.id)" class="rounded-b-md border-t border-[#eef2f6] bg-[#fbfcff] px-3 py-2.5">
               <div
                 v-if="recordExtractorType(item.record) === 'tribology'"
                 class="mb-2"
@@ -4266,7 +4266,7 @@ function roughnessTextParts(value: string) {
                       <div class="flex items-center gap-1.5">
                         <span
                           class="text-[10px] font-bold uppercase tracking-[0.14em]"
-                          :class="field.id === activeFieldId ? 'text-[#5b56ea]' : 'text-[#7f90aa]'"
+                          :class="field.id === activeFieldId ? 'text-[#0f172a]' : 'text-[#7f90aa]'"
                         >{{ field.label }}</span>
                         <span
                           v-if="field.confidence !== 'High'"
@@ -4461,7 +4461,7 @@ function roughnessTextParts(value: string) {
                         type="button"
                         class="inline-flex h-7 w-7 items-center justify-center rounded-md transition disabled:cursor-not-allowed disabled:text-slate-300"
                         :class="field.canConfirm
-                          ? 'text-[#5b56ea] hover:bg-[#eef2ff]'
+                          ? 'text-[#0f172a] hover:bg-[#f1f5f9]'
                           : ''"
                         :disabled="!field.canConfirm || reviewActionPending === `confirm:${Number(item.record.id || '')}:${field.id}`"
                         title="确认本字段"
@@ -4537,7 +4537,7 @@ function roughnessTextParts(value: string) {
       class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4"
       @click.self="closeCofEditor"
     >
-      <section class="w-full max-w-2xl overflow-hidden rounded-2xl border border-[#dbe4f2] bg-white shadow-2xl">
+      <section class="w-full max-w-2xl overflow-hidden rounded-lg border border-[#dbe4f2] bg-white shadow-xl">
         <div class="border-b border-[#eef2f6] px-5 py-4">
           <p class="text-[11px] font-black uppercase tracking-[0.18em] text-[#7f90aa]">结构化 COF 编辑</p>
           <p class="mt-1 text-sm font-semibold text-slate-900">{{ reviewIonicLiquidDisplay(cofEditRecord) }}</p>
@@ -4546,7 +4546,7 @@ function roughnessTextParts(value: string) {
         <div class="p-5">
           <textarea
             v-model="cofEditJson"
-            class="min-h-[18rem] w-full resize-y rounded-xl border border-[#dbe4f2] bg-[#fbfcff] p-3 font-mono text-xs leading-5 text-slate-800 outline-none transition focus:border-[#aebdfc] focus:ring-2 focus:ring-[#dce3ff]"
+            class="min-h-[18rem] w-full resize-y rounded-md border border-[#dbe4f2] bg-[#fbfcff] p-3 font-mono text-xs leading-5 text-slate-800 outline-none transition focus:border-[#8aa0bd] focus:ring-2 focus:ring-[#dbe4ef]"
             spellcheck="false"
           />
           <p v-if="cofEditError" class="mt-2 rounded-lg bg-[#fff5f6] px-3 py-2 text-xs font-semibold text-[#cf334f]">
@@ -4563,7 +4563,7 @@ function roughnessTextParts(value: string) {
           </button>
           <button
             type="button"
-            class="inline-flex items-center gap-1 rounded-lg bg-[#5b56ea] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3]"
+            class="inline-flex items-center gap-1 rounded-md bg-[#0f172a] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#1e293b] disabled:cursor-not-allowed disabled:bg-[#cbd5e1]"
             :disabled="reviewActionPending === `cof-edit:${Number(cofEditRecord?.id || '')}`"
             @click="saveCofEditor"
           >
@@ -4582,7 +4582,7 @@ function roughnessTextParts(value: string) {
       class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4"
       @click.self="closeLoadEditor"
     >
-      <section class="w-full max-w-xl overflow-hidden rounded-2xl border border-[#dbe4f2] bg-white shadow-2xl">
+      <section class="w-full max-w-xl overflow-hidden rounded-lg border border-[#dbe4f2] bg-white shadow-xl">
         <div class="border-b border-[#eef2f6] px-5 py-4">
           <p class="text-[11px] font-black uppercase tracking-[0.18em] text-[#7f90aa]">结构化载荷编辑</p>
           <p class="mt-1 text-sm font-semibold text-slate-900">{{ reviewIonicLiquidDisplay(loadEditRecord) }}</p>
@@ -4644,7 +4644,7 @@ function roughnessTextParts(value: string) {
           </button>
           <button
             type="button"
-            class="inline-flex items-center gap-1 rounded-lg bg-[#5b56ea] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3]"
+            class="inline-flex items-center gap-1 rounded-md bg-[#0f172a] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#1e293b] disabled:cursor-not-allowed disabled:bg-[#cbd5e1]"
             :disabled="reviewActionPending === `load-edit:${Number(loadEditRecord?.id || '')}`"
             @click="saveLoadEditor"
           >
@@ -4663,7 +4663,7 @@ function roughnessTextParts(value: string) {
       class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4"
       @click.self="closeSpeedEditor"
     >
-      <section class="w-full max-w-xl overflow-hidden rounded-2xl border border-[#dbe4f2] bg-white shadow-2xl">
+      <section class="w-full max-w-xl overflow-hidden rounded-lg border border-[#dbe4f2] bg-white shadow-xl">
         <div class="border-b border-[#eef2f6] px-5 py-4">
           <p class="text-[11px] font-black uppercase tracking-[0.18em] text-[#7f90aa]">结构化速度编辑</p>
           <p class="mt-1 text-sm font-semibold text-slate-900">{{ reviewIonicLiquidDisplay(speedEditRecord) }}</p>
@@ -4729,7 +4729,7 @@ function roughnessTextParts(value: string) {
           </button>
           <button
             type="button"
-            class="inline-flex items-center gap-1 rounded-lg bg-[#5b56ea] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3]"
+            class="inline-flex items-center gap-1 rounded-md bg-[#0f172a] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#1e293b] disabled:cursor-not-allowed disabled:bg-[#cbd5e1]"
             :disabled="reviewActionPending === `speed-edit:${Number(speedEditRecord?.id || '')}`"
             @click="saveSpeedEditor"
           >
@@ -4748,7 +4748,7 @@ function roughnessTextParts(value: string) {
       class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4"
       @click.self="closeSystemEditor"
     >
-      <section class="w-full max-w-xl overflow-hidden rounded-2xl border border-[#dbe4f2] bg-white shadow-2xl">
+      <section class="w-full max-w-xl overflow-hidden rounded-lg border border-[#dbe4f2] bg-white shadow-xl">
         <div class="border-b border-[#eef2f6] px-5 py-4">
           <p class="text-[11px] font-black uppercase tracking-[0.18em] text-[#7f90aa]">结构化测试机制编辑</p>
           <p class="mt-1 text-sm font-semibold text-slate-900">{{ reviewIonicLiquidDisplay(systemEditRecord) }}</p>
@@ -4820,7 +4820,7 @@ function roughnessTextParts(value: string) {
           </button>
           <button
             type="button"
-            class="inline-flex items-center gap-1 rounded-lg bg-[#5b56ea] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3]"
+            class="inline-flex items-center gap-1 rounded-md bg-[#0f172a] px-3 py-2 text-xs font-bold text-white transition hover:bg-[#1e293b] disabled:cursor-not-allowed disabled:bg-[#cbd5e1]"
             :disabled="reviewActionPending === `system-edit:${Number(systemEditRecord?.id || '')}`"
             @click="saveSystemEditor"
           >
