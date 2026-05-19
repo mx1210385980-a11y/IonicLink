@@ -96,10 +96,16 @@ export type UploadProgressSnapshot = {
     percent: number | null
 }
 
+export type UploadFileOptions = {
+    signal?: AbortSignal
+    timeoutMs?: number
+}
+
 export async function uploadFile(
     file: File,
     extractorType: ExtractorType = 'tribology',
     onProgress?: (progress: UploadProgressSnapshot) => void,
+    options: UploadFileOptions = {},
 ) {
     const formData = new FormData()
     formData.append('file', file)
@@ -119,7 +125,8 @@ export async function uploadFile(
                 percent,
             })
         },
-        timeout: 180000,
+        signal: options.signal,
+        timeout: options.timeoutMs ?? 120000,
     })
     return response.data
 }

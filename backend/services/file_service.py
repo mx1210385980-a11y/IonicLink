@@ -3672,7 +3672,14 @@ async def save_upload_entry(
         logger.info("Saving upload entry filename=%s scope=%s", file.filename, scope.scope_key)
         scope_key = build_scope_key(scope.scope_type, scope.workspace.id if scope.workspace else None)
         # 1. Read file content
+        read_started_at = time.perf_counter()
         content_bytes = await file.read()
+        logger.info(
+            "Upload body read filename=%s bytes=%s duration=%.2fs",
+            file.filename,
+            len(content_bytes or b""),
+            time.perf_counter() - read_started_at,
+        )
         await file.seek(0)
         file_hash = hashlib.sha256(content_bytes).hexdigest() if content_bytes else None
         is_pdf_upload = file.filename.lower().endswith('.pdf')
@@ -3684,8 +3691,14 @@ async def save_upload_entry(
         # 2. Extract Text & DOI Check
         text_content = ""
         if is_pdf_upload:
-            from utils.pdf_utils import extract_pdf_text_fitz
+            text_started_at = time.perf_counter()
             text_content = extract_pdf_text_fitz(content_bytes)
+            logger.info(
+                "Upload PDF text extracted filename=%s chars=%s duration=%.2fs",
+                file.filename,
+                len(text_content or ""),
+                time.perf_counter() - text_started_at,
+            )
         else:
             text_content = content_bytes.decode('utf-8', errors='ignore')
 

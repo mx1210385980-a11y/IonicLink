@@ -3,6 +3,7 @@ import json
 import logging
 import re
 from datetime import datetime, timedelta
+from time import perf_counter
 from typing import Any, List
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Request
 import base64
@@ -3560,10 +3561,18 @@ async def upload_file(
     still be enabled via auto_extract=true when needed.
     """
     try:
+        started_at = perf_counter()
         if not file.filename:
             raise HTTPException(status_code=400, detail="Filename is required")
 
         ensure_scope_writable(principal, scope)
+        logger.info(
+            "Upload request accepted filename=%s extractor_type=%s content_length=%s scope=%s",
+            file.filename,
+            extractor_type,
+            request.headers.get("content-length"),
+            scope.scope_key,
+        )
 
         literature = await save_upload_entry(db, file, principal=principal, scope=scope)
 
@@ -3595,6 +3604,14 @@ async def upload_file(
             upload_status = "processing"
         elif auto_extract:
             logger.info("Skipping background extraction for literature_id=%s status=%s", literature.id, upload_status)
+
+        logger.info(
+            "Upload request completed literature_id=%s status=%s extractor_type=%s duration=%.2fs",
+            literature.id,
+            upload_status,
+            extractor_type,
+            perf_counter() - started_at,
+        )
 
         return {
             "success": True,

@@ -127,6 +127,9 @@ export function replaceBatchFileId(batchFile: BatchFile, nextId: string) {
 }
 
 export function uploadErrorMessage(error: any, t: WorkspaceTranslator) {
+  if (error?.code === 'ERR_CANCELED' || error?.name === 'CanceledError') {
+    return t('progress.upload_timeout')
+  }
   const status = Number(error?.response?.status || 0)
   if (status === 413) {
     return t('progress.upload_too_large')

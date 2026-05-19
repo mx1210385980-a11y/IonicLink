@@ -68,6 +68,8 @@ const DARK_MODE_STORAGE_KEY = 'ioniclink-theme'
 const DEFAULT_EXTRACTOR_STORAGE_KEY = 'ioniclink-default-extractor-type'
 const BATCH_EXTRACTION_CONCURRENCY = 3
 const SESSION_RESTORE_TIMEOUT_MS = 9000
+const UPLOAD_REQUEST_TIMEOUT_MS = 120000
+const UPLOAD_WAITING_MESSAGE_MS = 20000
 
 export function useAppShell(
   fileUploadRef: Ref<FileUploadBridge | undefined>,
@@ -343,6 +345,29 @@ export function useAppShell(
       return
     }
     batchFiles.value.splice(index, 1, nextFile)
+  }
+
+  function createUploadRequestController(batchFile: BatchFile) {
+    const controller = new AbortController()
+    const waitingTimer = window.setTimeout(() => {
+      if (String(batchFile.status || '').toLowerCase() === 'uploading') {
+        batchFile.progressMessage = t('progress.upload_server_waiting')
+      }
+    }, UPLOAD_WAITING_MESSAGE_MS)
+    const timeoutTimer = window.setTimeout(() => {
+      if (!controller.signal.aborted) {
+        controller.abort()
+      }
+    }, UPLOAD_REQUEST_TIMEOUT_MS)
+
+    return {
+      signal: controller.signal,
+      timeoutMs: UPLOAD_REQUEST_TIMEOUT_MS,
+      cleanup() {
+        window.clearTimeout(waitingTimer)
+        window.clearTimeout(timeoutTimer)
+      },
+    }
   }
 
   function isTerminalRunStatus(status?: string | null): boolean {
@@ -954,10 +979,14 @@ export function useAppShell(
     batchFiles.value.push(placeholder)
     selectedFileId.value = placeholder.id
 
+    const uploadRequest = createUploadRequestController(placeholder)
     try {
       fileUploadRef.value?.setUploading(true)
       const response = await uploadFile(file, placeholder.extractor_type || defaultExtractorType.value, (progress) => {
         setFileUploadProgress(placeholder, progress.percent, t)
+      }, {
+        signal: uploadRequest.signal,
+        timeoutMs: uploadRequest.timeoutMs,
       })
 
       if (response.success) {
@@ -997,6 +1026,7 @@ export function useAppShell(
       setFileError(placeholder, message, t)
       chatPanelRef.value?.addMessage('assistant', message)
     } finally {
+      uploadRequest.cleanup()
       fileUploadRef.value?.setUploading(false)
     }
   }
@@ -1018,9 +1048,13 @@ export function useAppShell(
 
     for (const [index, file] of files.entries()) {
       const placeholder = placeholders[index]!
+      const uploadRequest = createUploadRequestController(placeholder)
       try {
         const response = await uploadFile(file, placeholder.extractor_type || defaultExtractorType.value, (progress) => {
           setFileUploadProgress(placeholder, progress.percent, t)
+        }, {
+          signal: uploadRequest.signal,
+          timeoutMs: uploadRequest.timeoutMs,
         })
 
         if (response.success) {
@@ -1051,6 +1085,8 @@ export function useAppShell(
       } catch (error: any) {
         setFileError(placeholder, uploadErrorMessage(error, t), t)
         failCount++
+      } finally {
+        uploadRequest.cleanup()
       }
     }
 
