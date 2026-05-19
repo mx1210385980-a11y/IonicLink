@@ -86,6 +86,12 @@ type InspectorLog = {
   tone: 'info' | 'agent' | 'system'
 }
 
+type InspectorDiagnostic = {
+  key: string
+  label: string
+  value: string
+}
+
 type ExtractorOption = {
   key: ExtractorType
   label: string
@@ -231,7 +237,11 @@ const canOpenSelectedReview = computed(() => {
   const file = selectedQueueFile.value
   if (!file) return false
   const status = String(file.status || '').toLowerCase()
-  return file.records.length > 0 || status === 'success'
+  const run = activeInspectorRun.value
+  const diffusionReviewableCount = activeExtractorType.value === 'diffusion' && run
+    ? diffusionArtifactCounts(run).reviewable
+    : 0
+  return file.records.length > 0 || status === 'success' || diffusionReviewableCount > 0
 })
 
 const selectedExtractLabel = computed(() => {
@@ -291,12 +301,20 @@ const inspectorSteps = computed<InspectorStep[]>(() => {
   const completed = isCompletedRun(activeRun?.status) || selectedFile?.status === 'success'
   const activeIndex = inferActiveStage(activeRun, selectedFile)
 
-  const definitions = [
-    { id: 'register', label: isChinese.value ? '论文登记' : 'Document Registration' },
-    { id: 'layout', label: isChinese.value ? '版面解析与分块' : 'Layout Analysis & Chunking' },
-    { id: 'extract', label: isChinese.value ? '代理抽取' : 'LLM Agent Extraction' },
-    { id: 'validate', label: isChinese.value ? '结果校验' : 'Result Validation' },
-  ]
+  const definitions = activeExtractorType.value === 'diffusion'
+    ? [
+        { id: 'register', label: isChinese.value ? '论文登记' : 'Document Registration' },
+        { id: 'layout', label: isChinese.value ? 'PDF 解析与分块' : 'PDF Parsing & Chunking' },
+        { id: 'extract', label: isChinese.value ? '扩散候选抽取' : 'Diffusion Candidate Extraction' },
+        { id: 'standardize', label: isChinese.value ? '字段标准化' : 'Field Standardization' },
+        { id: 'review', label: isChinese.value ? '进入审阅队列' : 'Review Queue Handoff' },
+      ]
+    : [
+        { id: 'register', label: isChinese.value ? '论文登记' : 'Document Registration' },
+        { id: 'layout', label: isChinese.value ? '版面解析与分块' : 'Layout Analysis & Chunking' },
+        { id: 'extract', label: isChinese.value ? '代理抽取' : 'LLM Agent Extraction' },
+        { id: 'validate', label: isChinese.value ? '结果校验' : 'Result Validation' },
+      ]
 
   return definitions.map((definition, index) => {
     let state: InspectorStep['state'] = 'waiting'
@@ -355,6 +373,61 @@ const inspectorLogs = computed<InspectorLog[]>(() => {
       tone: 'info',
     },
   ]
+})
+
+const inspectorDiagnostics = computed(() => {
+  const file = selectedQueueFile.value
+  const run = activeInspectorRun.value
+  const isDiffusion = activeExtractorType.value === 'diffusion'
+  const artifacts = diffusionArtifactCounts(run)
+  const status = String(run?.status || file?.status || '').toLowerCase()
+  const currentMessage = String(
+    run?.summary?.current_message
+    || run?.progress_log?.slice(-1)[0]?.message
+    || file?.progressMessage
+    || '',
+  ).trim()
+  const issue = String(
+    run?.summary?.no_data_reason
+    || run?.error_message
+    || file?.errorMessage
+    || '',
+  ).trim()
+  const reviewable = isDiffusion ? artifacts.reviewable : Number(run?.final_count || file?.records.length || 0)
+  const chips: InspectorDiagnostic[] = isDiffusion
+    ? [
+        { key: 'candidate', label: isChinese.value ? '候选' : 'Candidates', value: String(artifacts.candidates) },
+        { key: 'final', label: isChinese.value ? '已入库' : 'Approved', value: String(artifacts.final) },
+        { key: 'dropped', label: isChinese.value ? '丢弃' : 'Dropped', value: String(droppedTotal(run)) },
+      ]
+    : [
+        { key: 'final', label: isChinese.value ? '记录' : 'Records', value: String(run?.final_count || file?.records.length || 0) },
+        { key: 'candidate', label: isChinese.value ? '候选' : 'Candidates', value: String(run?.candidate_count || 0) },
+        { key: 'dropped', label: isChinese.value ? '丢弃' : 'Dropped', value: String(droppedTotal(run)) },
+      ]
+  const readyForReview = reviewable > 0 || Boolean(file?.records.length)
+  const noData = status === 'no_data' || (!readyForReview && ['success', 'completed'].includes(status))
+
+  return {
+    show: Boolean(file),
+    title: isDiffusion
+      ? (isChinese.value ? '扩散抽取诊断' : 'Diffusion Extraction Diagnostics')
+      : (isChinese.value ? '抽取诊断' : 'Extraction Diagnostics'),
+    message: readyForReview
+      ? (isDiffusion
+        ? (isChinese.value
+          ? `已生成 ${reviewable} 条可审阅扩散记录，下一步进入 Review 确认。`
+          : `${reviewable} diffusion rows are ready for review.`)
+        : (currentMessage || (isChinese.value ? '结果已准备好，可以进入审阅。' : 'Records are ready for review.')))
+      : issue || currentMessage || (isChinese.value ? '等待运行日志返回。' : 'Waiting for run logs.'),
+    tone: readyForReview ? 'ready' : noData ? 'warning' : status === 'error' || status === 'failed' ? 'error' : 'neutral',
+    chips,
+    nextAction: readyForReview
+      ? (isChinese.value ? '打开审阅，确认候选记录后再入库。' : 'Open Review and confirm candidates before promotion.')
+      : noData
+        ? (isChinese.value ? '建议重抽，或检查论文是否真的包含扩散系数表述。' : 'Re-run extraction or check whether the paper contains diffusion coefficients.')
+        : (isChinese.value ? '保持本页打开，系统会继续刷新运行状态。' : 'Keep this page open while the run refreshes.'),
+  }
 })
 
 const inspectorSummary = computed(() => ({
@@ -526,6 +599,12 @@ function stepMeta(id: string, state: InspectorStep['state'], activeRun: Extracti
   if (id === 'extract' && activeRun) {
     return `${activeRun.candidate_count || 0} candidates`
   }
+  if (id === 'standardize' && activeRun) {
+    return `${diffusionArtifactCounts(activeRun).reviewable} ready`
+  }
+  if (id === 'review' && activeRun) {
+    return diffusionArtifactCounts(activeRun).reviewable > 0 ? 'review' : 'pending'
+  }
   if (id === 'validate' && activeRun) {
     if (String(activeRun.status || '').toLowerCase() === 'no_data') return 'no data'
     return `${activeRun.final_count || 0} records`
@@ -552,6 +631,33 @@ function isCompletedRun(status?: string | null) {
 
 function isFailedRun(status?: string | null) {
   return ['failed', 'error', 'cancelled'].includes(String(status || '').toLowerCase())
+}
+
+function diffusionArtifactCounts(run: ExtractionRunDetail | null) {
+  const artifacts = (run?.summary?.diffusion_artifacts || {}) as Record<string, unknown>
+  const candidates = Number(artifacts.candidate_count ?? run?.candidate_count ?? 0)
+  const final = Number(artifacts.final_count ?? run?.final_count ?? 0)
+  const reviewable = Number(artifacts.reviewable_count ?? (candidates + final))
+  return {
+    candidates: Number.isFinite(candidates) ? Math.max(0, candidates) : 0,
+    final: Number.isFinite(final) ? Math.max(0, final) : 0,
+    reviewable: Number.isFinite(reviewable) ? Math.max(0, reviewable) : 0,
+  }
+}
+
+function droppedTotal(run: ExtractionRunDetail | null) {
+  const dropped = run?.dropped_by_reason || {}
+  return Object.values(dropped).reduce((sum, value) => {
+    const numeric = Number(value)
+    return sum + (Number.isFinite(numeric) ? numeric : 0)
+  }, 0)
+}
+
+function diagnosticToneClass(tone: string) {
+  if (tone === 'ready') return 'border-emerald-200 bg-emerald-50 text-emerald-900'
+  if (tone === 'warning') return 'border-amber-200 bg-amber-50 text-amber-900'
+  if (tone === 'error') return 'border-rose-200 bg-rose-50 text-rose-900'
+  return 'border-slate-200 bg-slate-50 text-slate-700'
 }
 
 function formatRunStatus(status?: string | null) {
@@ -894,6 +1000,34 @@ function logToneClass(tone: InspectorLog['tone']) {
                 <span class="shrink-0 text-sm text-slate-400">{{ step.meta }}</span>
               </div>
             </div>
+          </div>
+
+          <div
+            v-if="inspectorDiagnostics.show"
+            class="mt-6 rounded-md border px-4 py-4"
+            :class="diagnosticToneClass(inspectorDiagnostics.tone)"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <p class="text-[11px] font-semibold uppercase tracking-widest opacity-70">{{ inspectorDiagnostics.title }}</p>
+                <p class="mt-2 text-sm leading-6">{{ inspectorDiagnostics.message }}</p>
+              </div>
+              <CircleAlert v-if="inspectorDiagnostics.tone !== 'ready'" class="mt-0.5 h-4 w-4 shrink-0 opacity-70" />
+              <CheckCircle2 v-else class="mt-0.5 h-4 w-4 shrink-0 opacity-70" />
+            </div>
+
+            <div class="mt-3 grid grid-cols-3 gap-2">
+              <div
+                v-for="chip in inspectorDiagnostics.chips"
+                :key="chip.key"
+                class="rounded border border-current/10 bg-white/55 px-2.5 py-2"
+              >
+                <p class="text-[10px] font-semibold uppercase tracking-widest opacity-60">{{ chip.label }}</p>
+                <p class="mt-1 text-lg font-semibold leading-none">{{ chip.value }}</p>
+              </div>
+            </div>
+
+            <p class="mt-3 text-xs leading-5 opacity-75">{{ inspectorDiagnostics.nextAction }}</p>
           </div>
 
           <div class="mt-8">

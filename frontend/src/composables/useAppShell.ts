@@ -370,7 +370,16 @@ export function useAppShell(
     const lastEntry = progressLog[progressLog.length - 1]
     const summary = run?.summary || {}
     const stage = String(summary.current_stage || lastEntry?.stage || '')
-    const message = String(summary.current_message || lastEntry?.message || '')
+    const diffusionReviewableCount = run?.extractor_type === 'diffusion'
+      ? Number((summary.diffusion_artifacts as any)?.reviewable_count ?? 0)
+      : 0
+    const message = String(
+      summary.current_message
+      || lastEntry?.message
+      || (diffusionReviewableCount > 0
+        ? `扩散抽取已生成 ${diffusionReviewableCount} 条候选记录，请进入审阅确认。`
+        : ''),
+    )
     let progress = mapStageToProgress(stage, run?.status)
 
     if (run?.candidate_count && progress < 48) {
@@ -487,6 +496,9 @@ export function useAppShell(
   function applyRunProgress(fileId: string, run: ExtractionRunDetail) {
     const batchFile = findBatchFile(fileId)
     const snapshot = getRunSnapshot(run)
+    const reviewableCount = run.extractor_type === 'diffusion'
+      ? Number(run.candidate_count || 0) + Number(run.final_count || 0)
+      : Number(run.final_count || 0)
 
     if (run.status === 'running' || run.status === 'processing') {
       setFileProcessing(batchFile, snapshot.progress, snapshot.message)
@@ -494,6 +506,13 @@ export function useAppShell(
       setFileCancelled(batchFile, run.error_message || snapshot.message || 'Extraction stopped.')
     } else if (isNoDataRun(run)) {
       setFileNoData(batchFile, snapshot.message || 'No extractable records found.')
+    } else if (['completed', 'success'].includes(String(run.status || '').toLowerCase())) {
+      setFileSuccess(
+        batchFile,
+        run.extractor_type === 'diffusion' && reviewableCount > 0
+          ? `扩散抽取已生成 ${reviewableCount} 条候选记录，请进入审阅确认。`
+          : snapshot.message || t('progress.completed'),
+      )
     }
 
     if (activeExtractionFileId.value === fileId) {

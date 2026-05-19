@@ -4025,6 +4025,11 @@ async def get_latest_extraction_run_detail(
                 sa_select(func.count(DiffusionRecord.id)).where(DiffusionRecord.literature_id == literature_id)
             )
         ).scalar() or 0
+        summary["diffusion_artifacts"] = {
+            "candidate_count": int(candidate_count or 0),
+            "final_count": int(final_count or 0),
+            "reviewable_count": int((candidate_count or 0) + (final_count or 0)),
+        }
     else:
         candidate_count, final_count = await _count_cached_record_artifacts(db, literature_id)
     response_status = run.status
@@ -4052,6 +4057,30 @@ async def get_latest_extraction_run_detail(
         summary["current_stage"] = "stage_e.finalize"
         summary["current_message"] = no_data_message
         summary["no_data_reason"] = no_data_message
+        summary["progress_log"] = progress_log
+    elif (
+        extractor_type == "diffusion"
+        and str(response_status or "").strip().lower() in {"completed", "success"}
+        and int((candidate_count or 0) + (final_count or 0)) > 0
+    ):
+        reviewable_count = int((candidate_count or 0) + (final_count or 0))
+        current_message = (
+            f"Diffusion extraction produced {reviewable_count} reviewable records "
+            f"({int(candidate_count or 0)} candidates, {int(final_count or 0)} approved)."
+        )
+        progress_log = summary.get("progress_log")
+        if not isinstance(progress_log, list):
+            progress_log = []
+        if not any(
+            isinstance(item, dict)
+            and str(item.get("stage") or "").strip() == "stage_e.review_queue"
+            and str(item.get("message") or "").strip() == current_message
+            for item in progress_log
+        ):
+            progress_log = [*progress_log, {"stage": "stage_e.review_queue", "message": current_message}]
+        summary["current_stage"] = "stage_e.review_queue"
+        summary["current_message"] = current_message
+        summary["next_action"] = "open_review"
         summary["progress_log"] = progress_log
 
     return {
