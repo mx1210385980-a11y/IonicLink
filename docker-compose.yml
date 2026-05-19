@@ -19,6 +19,7 @@ services:
       LLM_TEXT_MODEL: ${LLM_TEXT_MODEL:-Pro/deepseek-ai/DeepSeek-V3.2}
       LLM_VISION_MODEL: ${LLM_VISION_MODEL:-Qwen/Qwen3-VL-32B-Instruct}
       LLM_VISION_API_KEY: ${LLM_VISION_API_KEY:-}
+      EXTRACTION_WORKER_COUNT: ${EXTRACTION_WORKER_COUNT:-1}
     volumes:
       - ./backend/data:/app/backend/data
       - ./temp_uploads:/app/backend/temp_uploads

@@ -47,6 +47,7 @@ from services.extraction_trace_service import (
     add_extraction_candidates,
     create_extraction_run,
     finalize_extraction_run,
+    get_extraction_run,
     is_extraction_cancelled,
     update_extraction_run_progress,
 )
@@ -4102,6 +4103,7 @@ async def process_file_safe(
     force: bool = False,
     profile: str = "high_accuracy",
     strict_cof_mode: Optional[bool] = None,
+    run_id: str | None = None,
 ):
     """
     Process file with an ISOLATED database session. 
@@ -4123,7 +4125,7 @@ async def process_file_safe(
     
     # 1. Open Scoped Session
     async with async_session_maker() as db:
-        run_id = uuid.uuid4().hex
+        run_id = run_id or uuid.uuid4().hex
         run_created = False
         try:
             # 2. Fetch Literature
@@ -4175,6 +4177,8 @@ async def process_file_safe(
                 run_result = await db.execute(run_stmt)
                 running_run = run_result.scalar_one_or_none()
                 running_run_id = running_run.run_id if running_run else None
+                if running_run_id == run_id:
+                    running_run = None
 
                 is_stale = False
                 if running_run:
@@ -4318,13 +4322,19 @@ async def process_file_safe(
             literature.status = "extracting"
             await db.commit()
 
-            await create_extraction_run(
-                db,
-                run_id=run_id,
-                literature_id=literature.id,
-                extractor_type="tribology",
-                profile=profile,
-            )
+            existing_run = await get_extraction_run(db, run_id)
+            if existing_run:
+                existing_run.status = "running"
+                existing_run.profile = profile
+                existing_run.error_message = None
+            else:
+                await create_extraction_run(
+                    db,
+                    run_id=run_id,
+                    literature_id=literature.id,
+                    extractor_type="tribology",
+                    profile=profile,
+                )
             run_created = True
             await db.commit()
 
@@ -4744,6 +4754,7 @@ async def process_file_background(
     force: bool = False,
     profile: str = "high_accuracy",
     strict_cof_mode: Optional[bool] = None,
+    run_id: str | None = None,
 ):
     """
     Background Task for File Processing with Idempotency Check.
@@ -4754,7 +4765,7 @@ async def process_file_background(
     if extractor_type == "diffusion":
         from services.diffusion.diffusion_extractor_service import process_diffusion_file_background
 
-        await process_diffusion_file_background(file_id, force=force, profile=profile)
+        await process_diffusion_file_background(file_id, force=force, profile=profile, run_id=run_id)
         return
     
     async with async_session_maker() as db:
@@ -4782,7 +4793,31 @@ async def process_file_background(
                 if literature.status != 'completed':
                     logger.info("Updating literature_id=%s status to completed during self-heal", file_id)
                     literature.status = 'completed'
-                    await db.commit()
+                if run_id and await get_extraction_run(db, run_id):
+                    summary = {
+                        "run_id": run_id,
+                        "extractor_type": "tribology",
+                        "candidate_count": int(candidate_count or 0),
+                        "final_count": int(final_count or 0),
+                        "current_stage": "stage_e.finalize",
+                        "current_message": "Existing extraction records are already available.",
+                        "progress_log": [
+                            {
+                                "stage": "stage_e.finalize",
+                                "message": "Existing extraction records are already available.",
+                            }
+                        ],
+                    }
+                    await finalize_extraction_run(
+                        db,
+                        run_id=run_id,
+                        status="completed",
+                        candidate_count=int(candidate_count or 0),
+                        final_count=int(final_count or 0),
+                        dropped_by_reason={},
+                        summary=summary,
+                    )
+                await db.commit()
                 return
             if not force and await _normalize_legacy_no_data_state(
                 db,
@@ -4791,6 +4826,29 @@ async def process_file_background(
                 final_count=final_count,
             ):
                 logger.info("Background processing aborted for literature_id=%s normalized to no_data", file_id)
+                if run_id and await get_extraction_run(db, run_id):
+                    no_data_message = literature.error_message or "No extractable records found."
+                    summary = {
+                        "run_id": run_id,
+                        "extractor_type": "tribology",
+                        "candidate_count": 0,
+                        "final_count": 0,
+                        "dropped_by_reason": {"no_records": 1},
+                        "current_stage": "stage_e.finalize",
+                        "current_message": no_data_message,
+                        "no_data_reason": no_data_message,
+                        "progress_log": [{"stage": "stage_e.finalize", "message": no_data_message}],
+                    }
+                    await finalize_extraction_run(
+                        db,
+                        run_id=run_id,
+                        status="no_data",
+                        candidate_count=0,
+                        final_count=0,
+                        dropped_by_reason=summary["dropped_by_reason"],
+                        summary=summary,
+                        error_message=no_data_message,
+                    )
                 await db.commit()
                 return
             # ------------------------------------------------
@@ -4807,12 +4865,37 @@ async def process_file_background(
                 force=force,
                 profile=profile,
                 strict_cof_mode=strict_cof_mode,
+                run_id=run_id,
             )
             
         except Exception as e:
             logger.exception("Background processing failed for literature_id=%s", file_id)
-            import traceback
-            traceback.print_exc()
+            await db.rollback()
+            message = str(e) or e.__class__.__name__
+            literature = await db.get(Literature, file_id)
+            if literature:
+                literature.status = "failed"
+                literature.error_message = message
+            if run_id and await get_extraction_run(db, run_id):
+                summary = {
+                    "run_id": run_id,
+                    "extractor_type": "tribology",
+                    "current_stage": "failed",
+                    "current_message": message,
+                    "progress_log": [{"stage": "failed", "message": message}],
+                }
+                await finalize_extraction_run(
+                    db,
+                    run_id=run_id,
+                    status="failed",
+                    candidate_count=0,
+                    final_count=0,
+                    dropped_by_reason={"worker_error": 1},
+                    summary=summary,
+                    error_message=message,
+                )
+            await db.commit()
+            raise
 
 def _should_update_metadata(literature: Literature, new_metadata: dict) -> bool:
     """

@@ -29,6 +29,7 @@ from services.extraction_trace_service import (
     add_extraction_candidates,
     create_extraction_run,
     finalize_extraction_run,
+    get_extraction_run,
     is_extraction_cancelled,
     update_extraction_run_progress,
 )
@@ -330,13 +331,14 @@ async def process_diffusion_file_safe(
     *,
     force: bool = False,
     profile: str = "high_accuracy",
+    run_id: str | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
     profile = (profile or "high_accuracy").strip().lower()
     if profile not in {"high_accuracy", "standard"}:
         profile = "high_accuracy"
 
     async with async_session_maker() as db:
-        run_id = uuid.uuid4().hex
+        run_id = run_id or uuid.uuid4().hex
         run_created = False
         literature = await db.get(Literature, file_id)
         if not literature:
@@ -369,7 +371,7 @@ async def process_diffusion_file_safe(
                 summary.setdefault("current_message", latest_run.error_message)
                 summary.setdefault("no_data_reason", latest_run.error_message)
             return metadata, [], summary
-        if not force and latest_run and latest_run.status == "running":
+        if not force and latest_run and latest_run.status == "running" and latest_run.run_id != run_id:
             last_touch = latest_run.updated_at or latest_run.created_at
             if last_touch and (datetime.utcnow() - last_touch) <= timedelta(minutes=6):
                 return {}, [], _build_in_progress_summary(latest_run)
@@ -388,13 +390,19 @@ async def process_diffusion_file_safe(
 
         literature.status = "extracting"
         await db.commit()
-        await create_extraction_run(
-            db,
-            run_id=run_id,
-            literature_id=literature.id,
-            extractor_type=EXTRACTOR_TYPE,
-            profile=profile,
-        )
+        existing_run = await get_extraction_run(db, run_id)
+        if existing_run:
+            existing_run.status = "running"
+            existing_run.profile = profile
+            existing_run.error_message = None
+        else:
+            await create_extraction_run(
+                db,
+                run_id=run_id,
+                literature_id=literature.id,
+                extractor_type=EXTRACTOR_TYPE,
+                profile=profile,
+            )
         run_created = True
         await db.commit()
 
@@ -686,6 +694,7 @@ async def process_diffusion_file_background(
     *,
     force: bool = False,
     profile: str = "high_accuracy",
+    run_id: str | None = None,
 ) -> None:
     logger.info("Starting background diffusion extraction for literature_id=%s", file_id)
-    await process_diffusion_file_safe(file_id=file_id, force=force, profile=profile)
+    await process_diffusion_file_safe(file_id=file_id, force=force, profile=profile, run_id=run_id)

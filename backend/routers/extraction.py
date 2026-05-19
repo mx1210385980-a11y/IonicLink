@@ -4,7 +4,7 @@ import logging
 import re
 from datetime import datetime
 from typing import Any, List
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, BackgroundTasks, Query, Request
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Request
 import base64
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -51,9 +51,9 @@ from services.file_service import (
     _refine_potential_evidence_from_metric_context_with_pdf,
     _temperature_default_evidence_entry,
     _text_explicitly_matches_field_value,
-    process_file_background,
     save_upload_entry,
 )
+from services.extraction_queue_service import get_extraction_queue
 from services.extraction_trace_service import (
     CANCELLED_EXTRACTION_MESSAGE,
     cancel_latest_extraction_run,
@@ -3545,7 +3545,6 @@ async def approve_diffusion_candidate_review(
 async def upload_file(
     request: Request,
     file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = BackgroundTasks(),
     auto_extract: bool = Query(False),
     extractor_type: str = Query("tribology", pattern="^(tribology|diffusion)$"),
     db: AsyncSession = Depends(get_db),
@@ -3583,13 +3582,14 @@ async def upload_file(
         )
 
         upload_status = await _upload_status_for_extractor(db, literature, extractor_type)
+        queue_snapshot = None
 
         if auto_extract and upload_status == "pending":
             logger.info("Queueing background extraction for literature_id=%s", literature.id)
-            literature.status = "queued"
-            literature.error_message = None
-            await db.commit()
-            background_tasks.add_task(process_file_background, literature.id, extractor_type)
+            queue_snapshot = await get_extraction_queue().enqueue(
+                literature_id=literature.id,
+                extractor_type=extractor_type,
+            )
             upload_status = "processing"
         elif auto_extract:
             logger.info("Skipping background extraction for literature_id=%s status=%s", literature.id, upload_status)
@@ -3601,6 +3601,8 @@ async def upload_file(
             "filename": literature.title,
             "status": upload_status,
             "extractor_type": extractor_type,
+            "run_id": queue_snapshot.get("run_id") if queue_snapshot else None,
+            "queue_position": queue_snapshot.get("queue_position") if queue_snapshot else None,
         }
     except HTTPException:
         raise
@@ -3675,7 +3677,6 @@ async def cancel_extraction(
 async def extract_data(
     file_id: str,
     request: Request,
-    background_tasks: BackgroundTasks,
     force: bool = False,
     profile: str = Query("high_accuracy", pattern="^(high_accuracy|standard|review_figure_estimate)$"),
     extractor_type: str = Query("tribology", pattern="^(tribology|diffusion)$"),
@@ -3748,22 +3749,23 @@ async def extract_data(
 
         should_read_cached_inline = (not force) and lane_status in {"completed", "no_data"}
         if not should_read_cached_inline:
-            literature.status = "queued"
-            literature.error_message = None
-            await db.commit()
-            background_tasks.add_task(
-                process_file_background,
-                lit_id,
-                extractor_type,
-                force,
-                profile,
-                strict_cof_mode,
+            queue_snapshot = await get_extraction_queue().enqueue(
+                literature_id=lit_id,
+                extractor_type=extractor_type,
+                force=force,
+                profile=profile,
+                strict_cof_mode=strict_cof_mode,
             )
             summary = _build_processing_summary(
                 extractor_type=extractor_type,
                 profile=profile,
                 message=f"{extractor_type.title()} extraction started in the background. You can keep working while it runs.",
             )
+            summary["run_id"] = queue_snapshot.get("run_id") or summary.get("run_id")
+            summary["queue_position"] = queue_snapshot.get("queue_position")
+            summary["current_stage"] = "stage_a.queued"
+            if queue_snapshot.get("queue_position"):
+                summary["current_message"] = f"Extraction queued at position {queue_snapshot['queue_position']}."
             return {
                 "success": True,
                 "status": "processing",
@@ -4070,7 +4072,7 @@ async def get_latest_extraction_run_detail(
         }
     else:
         candidate_count, final_count = await _count_cached_record_artifacts(db, literature_id)
-    response_status = run.status
+    response_status = "processing" if run_status == "queued" else run.status
     response_error = run.error_message
     if literature and str(literature.status or "").strip().lower() == "no_data" and not (candidate_count or final_count):
         response_status = "no_data"

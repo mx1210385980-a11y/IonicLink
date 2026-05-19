@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from database import init_db
 from logging_config import setup_logging
 from services.agent_runtime_service import get_agent_runtime
+from services.extraction_queue_service import get_extraction_queue
 from services.literature_monitor_service import get_literature_monitor_service
 
 setup_logging()
@@ -39,11 +40,14 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing application resources")
     await init_db()
     get_agent_runtime()
+    extraction_queue = get_extraction_queue()
+    await extraction_queue.start()
     literature_monitor = get_literature_monitor_service()
     await literature_monitor.start()
     logger.info("Application startup complete")
     yield
     await literature_monitor.stop()
+    await extraction_queue.stop()
     logger.info("Application shutdown complete")
 
 

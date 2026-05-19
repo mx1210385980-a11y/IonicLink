@@ -36,6 +36,7 @@ async def create_extraction_run(
     literature_id: int,
     profile: str,
     extractor_type: str = "tribology",
+    status: str = "running",
     page_coverage: Optional[dict[str, Any]] = None,
     summary: Optional[dict[str, Any]] = None,
 ) -> ExtractionRun:
@@ -44,7 +45,7 @@ async def create_extraction_run(
         literature_id=literature_id,
         extractor_type=extractor_type,
         profile=profile,
-        status="running",
+        status=status,
         page_coverage=_json_dumps(page_coverage),
         summary_json=_json_dumps(summary),
     )
