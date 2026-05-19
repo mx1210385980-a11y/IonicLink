@@ -63,7 +63,9 @@ type ChatPanelBridge = {
 }
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'error', 'cancelled', 'no_data'])
+const ACTIVE_RUN_STATUSES = new Set(['queued', 'running', 'processing', 'extracting'])
 const DARK_MODE_STORAGE_KEY = 'ioniclink-theme'
+const DEFAULT_EXTRACTOR_STORAGE_KEY = 'ioniclink-default-extractor-type'
 const BATCH_EXTRACTION_CONCURRENCY = 3
 const SESSION_RESTORE_TIMEOUT_MS = 9000
 
@@ -330,6 +332,10 @@ export function useAppShell(
     return batchFiles.value.find((file) => file.id === fileId)
   }
 
+  function normalizeExtractorType(value: unknown): ExtractorType {
+    return value === 'diffusion' ? 'diffusion' : 'tribology'
+  }
+
   function replaceUploadPlaceholder(placeholder: BatchFile, nextFile: BatchFile) {
     const index = batchFiles.value.findIndex((file) => file === placeholder || file.id === placeholder.id)
     if (index === -1) {
@@ -341,6 +347,25 @@ export function useAppShell(
 
   function isTerminalRunStatus(status?: string | null): boolean {
     return TERMINAL_RUN_STATUSES.has(String(status || '').toLowerCase())
+  }
+
+  function isActiveRunStatus(status?: string | null): boolean {
+    return ACTIVE_RUN_STATUSES.has(String(status || '').toLowerCase())
+  }
+
+  function requestFailureMessage(error: any, fallback: string) {
+    const status = Number(error?.response?.status || 0)
+    const detail = error?.response?.data?.detail || error?.response?.data?.message
+    if (status === 502) {
+      return '服务器网关暂时不可用，但任务可能已经送达。系统已回查任务状态，请稍后重试或刷新页面。'
+    }
+    if (status === 503 || status === 504) {
+      return '服务器正在忙或响应超时。请稍后重试，已上传的论文不会丢失。'
+    }
+    if (status === 401) {
+      return '登录状态已过期，请重新登录后再开始抽取。'
+    }
+    return detail || error?.message || fallback
   }
 
   function formatStageLabel(stage?: string | null): string {
@@ -1068,8 +1093,21 @@ export function useAppShell(
         )
       }
     } catch (error: any) {
-      setFileError(batchFile, error.message || 'Unknown error', t)
-      chatPanelRef.value?.addMessage('assistant', t('chat.extraction_failed', { message: error.message || 'Unknown error' }))
+      const recoveredRun = await refreshLatestRun(fileId, true).catch(() => null)
+      if (recoveredRun && isActiveRunStatus(recoveredRun.status)) {
+        keepPolling = true
+        startExtractionTracking(fileId)
+        const message = recoveredRun.summary?.current_message
+          || recoveredRun.progress_log?.slice(-1)[0]?.message
+          || t('progress.agent_running')
+        setFileProcessing(batchFile, Math.max(batchFile.progress || 0, 16), message)
+        chatPanelRef.value?.addMessage('assistant', message)
+        return
+      }
+
+      const failureMessage = requestFailureMessage(error, 'Unknown error')
+      setFileError(batchFile, failureMessage, t)
+      chatPanelRef.value?.addMessage('assistant', t('chat.extraction_failed', { message: failureMessage }))
     } finally {
       if (!keepPolling) {
         clearExtractionPolling()
@@ -1167,7 +1205,7 @@ export function useAppShell(
             failCount++
           }
         } catch (error: any) {
-          setFileError(batchFile, error.message || 'Unknown error', t)
+          setFileError(batchFile, requestFailureMessage(error, 'Unknown error'), t)
           failCount++
         } finally {
           completedCount++
@@ -1219,28 +1257,32 @@ export function useAppShell(
   }
 
   function setDefaultExtractorType(extractorType: ExtractorType) {
-    defaultExtractorType.value = extractorType
+    defaultExtractorType.value = normalizeExtractorType(extractorType)
+    window.localStorage.setItem(DEFAULT_EXTRACTOR_STORAGE_KEY, defaultExtractorType.value)
     const selected = selectedFileId.value ? findBatchFile(selectedFileId.value) : null
     if (selected && ['uploaded', 'error', 'no_data', 'success', 'cancelled'].includes(String(selected.status || '').toLowerCase())) {
-      if (resetFileForExtractorChange(selected, extractorType, t)) {
+      if (resetFileForExtractorChange(selected, defaultExtractorType.value, t)) {
         resetExtractionState(selected.id)
       }
     }
   }
 
   function setFileExtractorType(fileId: string, extractorType: ExtractorType) {
+    const normalizedExtractorType = normalizeExtractorType(extractorType)
     const file = findBatchFile(fileId)
     if (!file) return
-    if (resetFileForExtractorChange(file, extractorType, t)) {
+    if (resetFileForExtractorChange(file, normalizedExtractorType, t)) {
       resetExtractionState(file.id)
     }
     if (selectedFileId.value === fileId) {
-      defaultExtractorType.value = extractorType
+      defaultExtractorType.value = normalizedExtractorType
+      window.localStorage.setItem(DEFAULT_EXTRACTOR_STORAGE_KEY, normalizedExtractorType)
     }
   }
 
   onMounted(() => {
     syncStateFromRoute()
+    defaultExtractorType.value = normalizeExtractorType(window.localStorage.getItem(DEFAULT_EXTRACTOR_STORAGE_KEY))
     const storedTheme = window.localStorage.getItem(DARK_MODE_STORAGE_KEY)
     if (storedTheme === 'dark') {
       isDark.value = true

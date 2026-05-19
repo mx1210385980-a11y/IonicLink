@@ -319,7 +319,10 @@ const activeInspectorRun = computed<ExtractionRunDetail | null>(() => {
   const selectedFile = selectedQueueFile.value
   const activeRun = props.activeRun
   if (!selectedFile || !activeRun) return null
-  return String(activeRun.literature_id) === String(selectedFile.id) ? activeRun : null
+  const runExtractorType = activeRun.extractor_type === 'diffusion' ? 'diffusion' : 'tribology'
+  return String(activeRun.literature_id) === String(selectedFile.id) && runExtractorType === activeExtractorType.value
+    ? activeRun
+    : null
 })
 
 const queueItems = computed<QueueItem[]>(() => filteredFiles.value.map((file) => ({
