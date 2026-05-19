@@ -55,6 +55,8 @@ _COMMON_NON_IL_SOLUTES_RE = re.compile(
     flags=re.IGNORECASE,
 )
 
+_STANDARD_FIELDS_VERSION = "diffusion.standard.v1"
+
 
 def _normalize_unicode_text(value: Any) -> str:
     text = unicodedata.normalize("NFKC", str(value or "").strip())
@@ -254,6 +256,260 @@ def _is_non_ionic_liquid_solute(value: Any) -> bool:
     return bool(_COMMON_NON_IL_SOLUTES_RE.search(text)) and not _looks_like_ionic_liquid(text)
 
 
+def _json_dict(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            loaded = json.loads(value)
+            return loaded if isinstance(loaded, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
+
+def _subscript_digits(value: Any) -> str:
+    return str(value).translate(str.maketrans({"0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄", "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉"}))
+
+
+def _format_ion_label(value: Any, *, default_charge: str | None = None) -> str | None:
+    text = _normalize_unicode_text(value)
+    if not text:
+        return None
+    lower_text = text.lower()
+    if any(term in lower_text for term in ("cation", "anion", "phosphonium", "imidazolium", "ammonium")):
+        return text.replace("-", "−")
+    compact = re.sub(r"[\s\[\]_\-]+", "", text).lower()
+    compact = compact.replace("+", "").replace("-", "")
+    labels = {
+        "cl": "Cl−",
+        "chloride": "Cl−",
+        "bf4": "BF₄−",
+        "tetrafluoroborate": "BF₄−",
+        "pf6": "PF₆−",
+        "hexafluorophosphate": "PF₆−",
+        "tfsi": "TFSI−",
+        "ntf2": "TFSI−",
+        "fsi": "FSI−",
+        "br": "Br−",
+        "i": "I−",
+        "na": "Na+",
+        "li": "Li+",
+        "k": "K+",
+    }
+    if compact in labels:
+        return labels[compact]
+    if default_charge and not text.endswith(("+", "−", "-")):
+        return f"{text}{default_charge}"
+    return text.replace("-", "−")
+
+
+def _bracket_ions(value: Any) -> tuple[str | None, str | None]:
+    parts = [match.strip() for match in re.findall(r"\[([^\]]+)\]", str(value or "")) if match.strip()]
+    if len(parts) < 2:
+        return None, None
+    return _format_ion_label(parts[0], default_charge="+"), _format_ion_label(parts[1], default_charge="−")
+
+
+_CHAIN_WORDS: tuple[tuple[str, int], ...] = (
+    ("methyl", 1),
+    ("ethyl", 2),
+    ("propyl", 3),
+    ("butyl", 4),
+    ("pentyl", 5),
+    ("hexyl", 6),
+    ("heptyl", 7),
+    ("octyl", 8),
+    ("nonyl", 9),
+    ("dodecyl", 12),
+    ("decyl", 10),
+)
+
+
+def _chain_label(carbons: int | None) -> str | None:
+    if not carbons:
+        return None
+    hydrogens = carbons * 2 + 1
+    return f"-C{_subscript_digits(carbons)}H{_subscript_digits(hydrogens)}"
+
+
+def _infer_side_chain(row: dict[str, Any]) -> dict[str, Any]:
+    text = f"{row.get('system_name') or ''} {row.get('ionic_liquid') or ''} {row.get('evidence') or ''}".lower()
+    for word, carbons in _CHAIN_WORDS:
+        if word in text:
+            return {
+                "side_chain_label": _chain_label(carbons),
+                "side_chain_carbons": carbons,
+                "side_chain_name": word,
+            }
+    match = re.search(r"\bc\s*([1-9]\d?)\b", text)
+    if match:
+        carbons = int(match.group(1))
+        return {
+            "side_chain_label": _chain_label(carbons),
+            "side_chain_carbons": carbons,
+            "side_chain_name": f"C{carbons}",
+        }
+    return {}
+
+
+def _infer_water_uptake(row: dict[str, Any]) -> dict[str, Any]:
+    features = _json_dict(row.get("novel_features_json"))
+    value = _first_present(
+        features.get("water_uptake_value"),
+        features.get("waterUptakeValue"),
+        features.get("water_uptake"),
+        features.get("waterUptake"),
+    )
+    unit = str(_first_present(features.get("water_uptake_unit"), features.get("waterUptakeUnit"), "wt%")).replace(" ", "")
+    if value in (None, ""):
+        match = re.search(
+            r"(?:water\s+uptake|WU|hydration)[^0-9]{0,32}(\d+(?:\.\d+)?)\s*(wt\s*%|%)",
+            str(row.get("evidence") or ""),
+            flags=re.IGNORECASE,
+        )
+        if match:
+            value = match.group(1)
+            unit = match.group(2).replace(" ", "")
+    numeric = _to_float(value)
+    if numeric is None:
+        return {}
+    value_label = f"{numeric:g}" if abs(numeric) >= 1 else f"{numeric:.3g}"
+    return {
+        "water_uptake_value": numeric,
+        "water_uptake_unit": unit or "wt%",
+        "water_uptake_label": f"{value_label} {unit or 'wt%'}",
+    }
+
+
+def _infer_cation(row: dict[str, Any], side_chain: dict[str, Any]) -> str | None:
+    explicit = _format_ion_label(_first_present(row.get("cation"), _json_dict(row.get("novel_features_json")).get("cation")), default_charge="+")
+    if explicit:
+        return explicit
+    text = f"{row.get('system_name') or ''} {row.get('ionic_liquid') or ''}"
+    bracket_cation, _ = _bracket_ions(text)
+    if bracket_cation:
+        return bracket_cation
+    lower = text.lower()
+    if "mpil" in lower or "phosphonium" in lower:
+        chain_name = side_chain.get("side_chain_name")
+        if chain_name and str(chain_name).isalpha():
+            return f"phosphonium, tri{chain_name}-substituted"
+        return "polymer-bound phosphonium-type cation"
+    if "imidazolium" in lower or re.search(r"\b[beho]mim\b", lower):
+        return "imidazolium cation"
+    if "ammonium" in lower:
+        return "ammonium cation"
+    return None
+
+
+def _infer_anion(row: dict[str, Any]) -> str | None:
+    explicit = _format_ion_label(_first_present(row.get("anion"), _json_dict(row.get("novel_features_json")).get("anion")), default_charge="−")
+    if explicit:
+        return explicit
+    text = f"{row.get('system_name') or ''} {row.get('ionic_liquid') or ''}"
+    _, bracket_anion = _bracket_ions(text)
+    if bracket_anion:
+        return bracket_anion
+    lower_system = text.lower()
+    if "mpil" in lower_system:
+        return "BF₄−"
+    lower = f"{text} {row.get('evidence') or ''}".lower()
+    for pattern, label in (
+        (r"bf\s*4|bf4|tetrafluoroborate", "BF₄−"),
+        (r"pf\s*6|pf6|hexafluorophosphate", "PF₆−"),
+        (r"tfsi|ntf2", "TFSI−"),
+        (r"\bcl[−-]?\b|chloride", "Cl−"),
+    ):
+        if re.search(pattern, lower):
+            return label
+    return None
+
+
+def _infer_diffusing_ion(row: dict[str, Any], standard_anion: str | None) -> str | None:
+    features = _json_dict(row.get("novel_features_json"))
+    explicit = _format_ion_label(_first_present(row.get("diffusing_species"), features.get("diffusing_ion"), features.get("diffusingIon")))
+    if explicit:
+        return explicit
+    text = f"{row.get('evidence') or ''} {row.get('system_name') or ''} {row.get('ionic_liquid') or ''}".lower()
+    if re.search(r"\bcl[−-]?\b|chloride", text) and ("diffus" in text or "msd" in text or row.get("D_anion") is not None):
+        return "Cl−"
+    if row.get("D_cation") is not None and row.get("D_anion") is None:
+        return "cation"
+    if row.get("D_anion") is not None and row.get("D_cation") is None:
+        return standard_anion or "anion"
+    if row.get("D_cation") is not None and row.get("D_anion") is not None:
+        return "cation / anion"
+    if row.get("D_total") is not None:
+        return "overall"
+    return None
+
+
+def _coefficient_metadata(row: dict[str, Any]) -> dict[str, Any]:
+    for key, kind in (("D_total", "total"), ("D_anion", "anion"), ("D_cation", "cation")):
+        value = row.get(key)
+        if value is None:
+            continue
+        numeric = _to_float(value)
+        if numeric is None:
+            continue
+        unit = row.get("D_unit")
+        payload: dict[str, Any] = {
+            "coefficient_kind": kind,
+            "coefficient_value": numeric,
+            "coefficient_unit": unit,
+        }
+        if str(unit or "") == _CANONICAL_DIFFUSION_UNIT:
+            payload["coefficient_m2_s"] = numeric * 1e-12
+            payload["coefficient_a2_ps"] = numeric * 1e-4
+        return payload
+    return {}
+
+
+def _diffusion_data_type(row: dict[str, Any]) -> str:
+    text = f"{row.get('evidence') or ''} {row.get('source') or ''}".lower()
+    if re.search(r"msd|einstein|molecular dynamics|\bmd\b|a2|å2|ps", text):
+        return "MD 计算值"
+    if re.search(r"table|reported|experiment", text):
+        return "文献报道值"
+    return "结构化记录"
+
+
+def build_diffusion_standard_fields(row: dict[str, Any]) -> dict[str, Any]:
+    side_chain = _infer_side_chain(row)
+    cation = _infer_cation(row, side_chain)
+    anion = _infer_anion(row)
+    standard: dict[str, Any] = {
+        "schema_version": _STANDARD_FIELDS_VERSION,
+        "cation": cation,
+        "anion": anion,
+        "diffusing_ion": _infer_diffusing_ion(row, anion),
+        "data_type": _diffusion_data_type(row),
+        **side_chain,
+        **_infer_water_uptake(row),
+        **_coefficient_metadata(row),
+    }
+    return {key: value for key, value in standard.items() if value not in (None, "", [], {})}
+
+
+def apply_diffusion_standard_fields(row: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(row)
+    novel_features = _json_dict(payload.get("novel_features_json"))
+    standard_fields = build_diffusion_standard_fields({**payload, "novel_features_json": novel_features})
+    novel_features["standard_fields"] = standard_fields
+    payload["novel_features_json"] = novel_features
+    payload["diffusion_standard_fields"] = standard_fields
+    payload["diffusionStandardFields"] = standard_fields
+    return payload
+
+
 def diffusion_drop_reason(record: dict[str, Any]) -> str | None:
     if not isinstance(record, dict):
         return "invalid_payload"
@@ -316,6 +572,7 @@ def _format_field_value(value: Any) -> Any:
 
 
 def build_diffusion_field_evidence_map(row: dict[str, Any]) -> dict[str, Any]:
+    standard_fields = build_diffusion_standard_fields(row)
     evidence = {
         "source_type": _diffusion_source_type(row),
         "page": row.get("source_page"),
@@ -334,6 +591,19 @@ def build_diffusion_field_evidence_map(row: dict[str, Any]) -> dict[str, Any]:
             "review_note": None,
         }
 
+    def _inferred_entry(value: Any) -> dict[str, Any]:
+        payload = {
+            "value": _format_field_value(value),
+            "confidence": confidence,
+            "evidence": evidence,
+            "review_state": None,
+            "review_note": None,
+        }
+        if value not in (None, "", [], {}):
+            payload["grounding_mode"] = "inferred"
+            payload["grounding_note"] = "Derived by diffusion.standard.v1 from extracted system/evidence."
+        return payload
+
     return {
         "system_name": _entry("system_name"),
         "confinement_material_class": _entry("confinement_material_class"),
@@ -341,6 +611,11 @@ def build_diffusion_field_evidence_map(row: dict[str, Any]) -> dict[str, Any]:
         "surface_functional_groups": _entry("surface_functional_groups"),
         "confinement_dimensionality": _entry("confinement_dimensionality"),
         "ionic_liquid": _entry("ionic_liquid"),
+        "cation": _inferred_entry(standard_fields.get("cation")),
+        "anion": _inferred_entry(standard_fields.get("anion")),
+        "diffusing_ion": _inferred_entry(standard_fields.get("diffusing_ion")),
+        "side_chain": _inferred_entry(standard_fields.get("side_chain_label")),
+        "water_uptake": _inferred_entry(standard_fields.get("water_uptake_label")),
         "d_total": _entry("D_total"),
         "d_cation": _entry("D_cation"),
         "d_anion": _entry("D_anion"),
@@ -420,6 +695,7 @@ def normalize_diffusion_records(
         row["source_bbox"] = bbox
         row["confidence"] = _confidence_from_row(row)
         row = enrich_diffusion_record(row)
+        row = apply_diffusion_standard_fields(row)
         row["field_evidence_json"] = build_diffusion_field_evidence_map(row)
         row["assembly_notes"] = row.get("assembly_notes")
 
@@ -523,9 +799,10 @@ def serialize_diffusion_row_for_response(row: dict[str, Any], *, row_id: int | N
     if row_id is not None:
         payload["id"] = str(row_id)
     payload["extractor_type"] = "diffusion"
-    payload["field_evidence_json"] = payload.get("field_evidence_json") or {}
-    payload["novel_features_json"] = payload.get("novel_features_json") or {}
-    payload["rdkit_features_json"] = payload.get("rdkit_features_json") or {}
+    payload["field_evidence_json"] = _json_dict(payload.get("field_evidence_json"))
+    payload["novel_features_json"] = _json_dict(payload.get("novel_features_json"))
+    payload["rdkit_features_json"] = _json_dict(payload.get("rdkit_features_json"))
+    payload = apply_diffusion_standard_fields(payload)
     return payload
 
 

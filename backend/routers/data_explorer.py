@@ -769,6 +769,7 @@ def _diffusion_library_item(record: DiffusionCandidate | DiffusionRecord) -> dic
     payload = _diffusion_record_to_payload(record)
     entity_type = "candidate" if isinstance(record, DiffusionCandidate) else "record"
     literature = _diffusion_literature_payload(getattr(record, "literature", None))
+    standard_fields = payload.get("diffusion_standard_fields") if isinstance(payload.get("diffusion_standard_fields"), dict) else {}
     payload["library_id"] = f"{entity_type}:{record.id}"
     payload["libraryId"] = payload["library_id"]
     payload["review_entity_type"] = entity_type
@@ -778,7 +779,7 @@ def _diffusion_library_item(record: DiffusionCandidate | DiffusionRecord) -> dic
     payload["literatureTitle"] = payload["literature_title"]
     payload["literature_doi"] = (literature or {}).get("doi", "")
     payload["literatureDoi"] = payload["literature_doi"]
-    payload["diffusing_species"] = _diffusion_primary_species(record)
+    payload["diffusing_species"] = standard_fields.get("diffusing_ion") or _diffusion_primary_species(record)
     payload["diffusingSpecies"] = payload["diffusing_species"]
     return payload
 

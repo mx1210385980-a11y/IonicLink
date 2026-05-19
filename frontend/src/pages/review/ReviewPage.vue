@@ -55,6 +55,7 @@ import {
   type BatchFile,
   type ConfidenceDetails,
   type CofExtracted,
+  type DiffusionStandardFields,
   type EvidenceResult,
   type ExtractorType,
   type FieldEvidenceEntry,
@@ -879,6 +880,32 @@ async function handleReextractCurrentFile() {
 
 function trim(value: unknown) {
   return String(value ?? '').trim()
+}
+
+function readPlainObject(value: unknown): Record<string, unknown> {
+  if (!value) return {}
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value)
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+    } catch {
+      return {}
+    }
+  }
+  return typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+}
+
+function diffusionStandardFields(record: TribologyData | null | undefined): DiffusionStandardFields {
+  if (!record) return {}
+  const features = readPlainObject(record.novel_features_json)
+  const nested = readPlainObject(features.standard_fields || features.standardFields)
+  const direct = readPlainObject((record as any).diffusion_standard_fields || (record as any).diffusionStandardFields)
+  return { ...nested, ...direct } as DiffusionStandardFields
+}
+
+function diffusionStandardText(record: TribologyData, ...keys: string[]) {
+  const standard = diffusionStandardFields(record) as Record<string, unknown>
+  return keys.map((key) => trim(standard[key])).find(Boolean) || ''
 }
 
 function isPlaceholderValue(value: unknown) {
@@ -1837,6 +1864,10 @@ function syncRecordReviewState(recordId: string, payload: RecordFieldEvidenceRes
       file.extractor_type = 'diffusion'
     }
     record.field_evidence_json = payload.fields
+    if (payload.diffusion_standard_fields || payload.diffusionStandardFields) {
+      record.diffusion_standard_fields = payload.diffusion_standard_fields || payload.diffusionStandardFields
+      record.diffusionStandardFields = payload.diffusionStandardFields || payload.diffusion_standard_fields
+    }
     record.review_status = payload.review_status || undefined
     record.record_origin = payload.record_origin || record.record_origin
     record.assembly_notes = payload.assembly_notes || undefined
@@ -2100,6 +2131,11 @@ function fieldValueForKey(record: TribologyData, key: string, extractorType: Ext
     if (key === 'surface_functional_groups') return present(record.surface_functional_groups)
     if (key === 'confinement_dimensionality') return present(record.confinement_dimensionality)
     if (key === 'ionic_liquid') return reviewIonicLiquidDisplay(record)
+    if (key === 'cation') return present(diffusionStandardText(record, 'cation'))
+    if (key === 'anion') return present(diffusionStandardText(record, 'anion'))
+    if (key === 'diffusing_ion') return present(diffusionStandardText(record, 'diffusing_ion', 'diffusingIon'))
+    if (key === 'side_chain') return present(diffusionStandardText(record, 'side_chain_label', 'sideChainLabel'))
+    if (key === 'water_uptake') return present(diffusionStandardText(record, 'water_uptake_label', 'waterUptakeLabel'))
     if (key === 'd_total') return formatDiffusionNumber(record.D_total)
     if (key === 'd_cation') return formatDiffusionNumber(record.D_cation)
     if (key === 'd_anion') return formatDiffusionNumber(record.D_anion)
@@ -2167,7 +2203,7 @@ function fieldEvidenceSpecs(field: ReviewField | null, record: TribologyData | n
     addEvidenceSpec(
       specs,
       cleanValue,
-      ['cof', 'friction_force', 'wear_rate', 'film_thickness', 'residual_film_thickness_d', 'layer_spacing_delta', 'surface_roughness', 'probe_roughness', 'substrate_roughness', 'd_total', 'd_cation', 'd_anion'].includes(field.id)
+      ['cof', 'friction_force', 'wear_rate', 'film_thickness', 'residual_film_thickness_d', 'layer_spacing_delta', 'surface_roughness', 'probe_roughness', 'substrate_roughness', 'd_total', 'd_cation', 'd_anion', 'water_uptake'].includes(field.id)
         ? 'numeric'
         : 'loose',
     )
@@ -2709,9 +2745,22 @@ function buildReviewFields(record: TribologyData | null, remoteFields?: Record<s
   const extractorType = recordExtractorType(record)
   const fieldMap = resolveRecordFieldEvidenceMap(record, remoteFields)
   if (extractorType === 'diffusion') {
+    const diffusionValue = (key: string) => {
+      const value = fieldValueForKey(record, key, extractorType)
+      return value !== 'Not captured yet' ? value : present(fieldMap[key]?.value)
+    }
     return [
-      buildField('System', 'system_name', present(record.system_name), record, fieldMap.system_name, 'System name still needs grounding confirmation.'),
-      buildField('Ionic Liquid', 'ionic_liquid', reviewIonicLiquidDisplay(record), record, fieldMap.ionic_liquid, 'Ionic liquid still needs grounding confirmation.'),
+      buildField('System', 'system_name', diffusionValue('system_name'), record, fieldMap.system_name, 'System name still needs grounding confirmation.'),
+      buildField('Ionic Liquid', 'ionic_liquid', diffusionValue('ionic_liquid'), record, fieldMap.ionic_liquid, 'Ionic liquid still needs grounding confirmation.'),
+      buildField('Cation', 'cation', diffusionValue('cation'), record, fieldMap.cation, 'Cation still needs grounding confirmation.'),
+      buildField('Anion', 'anion', diffusionValue('anion'), record, fieldMap.anion, 'Anion still needs grounding confirmation.'),
+      buildField('Diffusing Ion', 'diffusing_ion', diffusionValue('diffusing_ion'), record, fieldMap.diffusing_ion, 'Diffusing ion still needs grounding confirmation.'),
+      ...(shouldShowOptionalField(record, fieldMap, 'side_chain', extractorType)
+        ? [buildField('Side Chain', 'side_chain', diffusionValue('side_chain'), record, fieldMap.side_chain, 'Side chain still needs confirmation.')]
+        : []),
+      ...(shouldShowOptionalField(record, fieldMap, 'water_uptake', extractorType)
+        ? [buildField('Water Uptake', 'water_uptake', diffusionValue('water_uptake'), record, fieldMap.water_uptake, 'Water uptake still needs confirmation.')]
+        : []),
       buildField('D_total', 'd_total', formatDiffusionNumber(record.D_total), record, fieldMap.d_total, 'Total diffusion coefficient still needs grounding confirmation.'),
       buildField('D_cation', 'd_cation', formatDiffusionNumber(record.D_cation), record, fieldMap.d_cation, 'Cation diffusion coefficient still needs grounding confirmation.'),
       buildField('D_anion', 'd_anion', formatDiffusionNumber(record.D_anion), record, fieldMap.d_anion, 'Anion diffusion coefficient still needs grounding confirmation.'),

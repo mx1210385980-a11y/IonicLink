@@ -254,6 +254,8 @@ export interface RecordFieldEvidenceResponse {
     confidence?: number | null
     confidence_details?: ConfidenceDetails | null
     confidenceDetails?: ConfidenceDetails | null
+    diffusion_standard_fields?: DiffusionStandardFields
+    diffusionStandardFields?: DiffusionStandardFields
     required_fields: string[]
     fields: Record<string, FieldEvidenceEntry>
 }
@@ -543,6 +545,38 @@ export interface DiffusionLibrarySummary {
     speciesCounts: Record<string, number>
 }
 
+export interface DiffusionStandardFields {
+    schema_version?: string
+    cation?: string | null
+    anion?: string | null
+    diffusing_ion?: string | null
+    diffusingIon?: string | null
+    side_chain_label?: string | null
+    sideChainLabel?: string | null
+    side_chain_carbons?: number | null
+    sideChainCarbons?: number | null
+    side_chain_name?: string | null
+    sideChainName?: string | null
+    water_uptake_value?: number | string | null
+    waterUptakeValue?: number | string | null
+    water_uptake_unit?: string | null
+    waterUptakeUnit?: string | null
+    water_uptake_label?: string | null
+    waterUptakeLabel?: string | null
+    coefficient_kind?: string | null
+    coefficientKind?: string | null
+    coefficient_value?: number | null
+    coefficientValue?: number | null
+    coefficient_unit?: string | null
+    coefficientUnit?: string | null
+    coefficient_m2_s?: number | null
+    coefficientM2S?: number | null
+    coefficient_a2_ps?: number | null
+    coefficientA2Ps?: number | null
+    data_type?: string | null
+    dataType?: string | null
+}
+
 export interface DiffusionLibraryRecord extends TribologyData {
     library_id?: string
     libraryId?: string
@@ -555,6 +589,8 @@ export interface DiffusionLibraryRecord extends TribologyData {
     literatureDoi?: string
     diffusing_species?: string
     diffusingSpecies?: string
+    diffusion_standard_fields?: DiffusionStandardFields
+    diffusionStandardFields?: DiffusionStandardFields
     reviewEntityType?: 'record' | 'candidate' | string
 }
 
@@ -935,6 +971,8 @@ export interface TribologyData {
     temperature_value?: number | null
     confinement_scale_value?: number | null
     confinement_scale_unit?: string
+    diffusion_standard_fields?: DiffusionStandardFields
+    diffusionStandardFields?: DiffusionStandardFields
     smiles?: string
     novel_features_json?: Record<string, any>
     rdkit_features_json?: Record<string, any>

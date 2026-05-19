@@ -61,6 +61,7 @@ from services.extraction_trace_service import (
     list_extraction_candidates,
 )
 from services.extraction_trace_service import get_latest_extraction_run_by_literature
+from services.diffusion.diffusion_postprocess_service import build_diffusion_standard_fields
 from services.agent_runtime_service import get_agent_runtime
 from services.activity_logging_service import log_activity
 from services.score_service import calculate_confidence_details
@@ -1066,7 +1067,49 @@ def _format_diffusion_numeric(value: Any) -> Any:
     return value
 
 
+def _diffusion_row_dict_from_record(record: Any) -> dict[str, Any]:
+    return {
+        "system_name": getattr(record, "system_name", None),
+        "confinement_material_class": getattr(record, "confinement_material_class", None),
+        "confinement_geometry_class": getattr(record, "confinement_geometry_class", None),
+        "surface_functional_groups": getattr(record, "surface_functional_groups", None),
+        "confinement_dimensionality": getattr(record, "confinement_dimensionality", None),
+        "ionic_liquid": getattr(record, "ionic_liquid", None),
+        "D_total": getattr(record, "d_total", None) or getattr(record, "D_total", None),
+        "D_cation": getattr(record, "d_cation", None) or getattr(record, "D_cation", None),
+        "D_anion": getattr(record, "d_anion", None) or getattr(record, "D_anion", None),
+        "D_unit": getattr(record, "d_unit", None) or getattr(record, "D_unit", None),
+        "temperature_value": getattr(record, "temperature_value", None),
+        "confinement_scale_value": getattr(record, "confinement_scale_value", None),
+        "confinement_scale_unit": getattr(record, "confinement_scale_unit", None),
+        "source": getattr(record, "source", None),
+        "source_page": getattr(record, "source_page", None),
+        "source_bbox": _parse_json_object(getattr(record, "source_bbox", None)),
+        "evidence": getattr(record, "evidence", None),
+        "confidence": getattr(record, "confidence", None),
+        "novel_features_json": _parse_json_object(getattr(record, "novel_features_json", None)),
+        "rdkit_features_json": _parse_json_object(getattr(record, "rdkit_features_json", None)),
+    }
+
+
+def _diffusion_standard_fields_from_record(record: Any) -> dict[str, Any]:
+    row = _diffusion_row_dict_from_record(record)
+    existing = _parse_json_object(row.get("novel_features_json")).get("standard_fields")
+    standard = existing if isinstance(existing, dict) else {}
+    return {**build_diffusion_standard_fields(row), **standard}
+
+
+def _diffusion_standard_value(standard_fields: dict[str, Any], field_key: str) -> Any:
+    if field_key == "side_chain":
+        return standard_fields.get("side_chain_label")
+    if field_key == "water_uptake":
+        return standard_fields.get("water_uptake_label")
+    return standard_fields.get(field_key)
+
+
 def _diffusion_field_value_from_record(record: Any, field_key: str) -> Any:
+    if field_key in {"cation", "anion", "diffusing_ion", "side_chain", "water_uptake"}:
+        return _diffusion_standard_value(_diffusion_standard_fields_from_record(record), field_key)
     if field_key == "system_name":
         return record.system_name
     if field_key == "confinement_material_class":
@@ -1134,6 +1177,7 @@ def _build_diffusion_conditions_entry(field_map: dict[str, Any], record: Any) ->
 
 def _build_diffusion_field_evidence_payload(record: Any) -> dict[str, Any]:
     field_map = _parse_field_evidence_map(getattr(record, "field_evidence_json", None))
+    standard_fields = _diffusion_standard_fields_from_record(record)
     normalized_fields: dict[str, Any] = {}
     ordered_keys = (
         "system_name",
@@ -1142,6 +1186,11 @@ def _build_diffusion_field_evidence_payload(record: Any) -> dict[str, Any]:
         "surface_functional_groups",
         "confinement_dimensionality",
         "ionic_liquid",
+        "cation",
+        "anion",
+        "diffusing_ion",
+        "side_chain",
+        "water_uptake",
         "d_total",
         "d_cation",
         "d_anion",
@@ -1151,8 +1200,25 @@ def _build_diffusion_field_evidence_payload(record: Any) -> dict[str, Any]:
         "confinement_scale_unit",
         "source_page",
     )
+    standard_field_keys = {"cation", "anion", "diffusing_ion", "side_chain", "water_uptake"}
+    inferred_evidence = {
+        "source_type": "text" if getattr(record, "source_page", None) else None,
+        "page": getattr(record, "source_page", None),
+        "source_label": getattr(record, "source", None),
+        "quote": getattr(record, "evidence", None),
+    }
     for key in ordered_keys:
         raw_entry = field_map.get(key) if isinstance(field_map.get(key), dict) else {}
+        if not raw_entry and key in standard_field_keys:
+            inferred_value = _diffusion_standard_value(standard_fields, key)
+            raw_entry = {
+                "value": inferred_value,
+                "confidence": getattr(record, "confidence", None),
+                "evidence": inferred_evidence,
+            }
+            if inferred_value not in (None, "", [], {}):
+                raw_entry["grounding_mode"] = "inferred"
+                raw_entry["grounding_note"] = "Derived by diffusion.standard.v1 from extracted system/evidence."
         normalized_fields[key] = {
             **raw_entry,
             "value": raw_entry.get("value", _diffusion_field_value_from_record(record, key)),
@@ -1177,6 +1243,7 @@ def _build_diffusion_field_evidence_payload(record: Any) -> dict[str, Any]:
             "d_unit": getattr(record, "d_unit", None) or getattr(record, "D_unit", None),
             "temperature_value": getattr(record, "temperature_value", None),
             "confinement_scale_value": getattr(record, "confinement_scale_value", None),
+            "diffusion_standard_fields": standard_fields,
             "field_evidence_json": normalized_fields,
             "review_status": getattr(record, "review_status", None),
             "model_confidence": getattr(record, "confidence", None),
@@ -1193,6 +1260,8 @@ def _build_diffusion_field_evidence_payload(record: Any) -> dict[str, Any]:
         "record_origin": record.record_origin,
         "assembly_notes": getattr(record, "assembly_notes", None),
         "required_fields": ["system_name", "ionic_liquid", "diffusion_coefficient"],
+        "diffusion_standard_fields": standard_fields,
+        "diffusionStandardFields": standard_fields,
         "fields": normalized_fields,
         "confidence": float(confidence_details.get("score") or 0.0),
         "confidence_details": confidence_details,

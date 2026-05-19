@@ -12,7 +12,7 @@ import {
   Search,
 } from 'lucide-vue-next'
 
-import { listDiffusionLibrary, type BatchFile, type DiffusionLibraryRecord, type DiffusionLibrarySummary, type TribologyData } from '@/lib/api'
+import { listDiffusionLibrary, type BatchFile, type DiffusionLibraryRecord, type DiffusionLibrarySummary, type DiffusionStandardFields, type TribologyData } from '@/lib/api'
 
 const props = defineProps<{
   currentSection: string
@@ -229,27 +229,33 @@ const ionMappingRows = computed<IonMappingRow[]>(() => {
   }))
 })
 
-const exportRows = computed(() => filteredRows.value.map((row) => ({
-  record_no: row.recordNo,
-  literature_id: row.literatureId,
-  literature_title: row.literatureTitle,
-  literature_doi: row.literatureDoi,
-  review_entity_type: row.reviewEntityType,
-  review_status_label: row.statusLabel,
-  system: row.materialSystem,
-  side_chain: row.sideChain,
-  water_uptake: row.waterUptake,
-  diffusing_species: row.diffusingSpecies,
-  D_A2_ps: row.dAngstrom,
-  D_m2_s: row.dMetric,
-  data_type: row.dataType,
-  method_conditions: row.method,
-  note: row.note,
-  source: row.source,
-  source_page: row.record.source_page ?? null,
-  evidence: row.record.evidence || '',
-  review_status: row.record.review_status || '',
-})))
+const exportRows = computed(() => filteredRows.value.map((row) => {
+  const standard = standardFields(row.record)
+  return {
+    record_no: row.recordNo,
+    literature_id: row.literatureId,
+    literature_title: row.literatureTitle,
+    literature_doi: row.literatureDoi,
+    review_entity_type: row.reviewEntityType,
+    review_status_label: row.statusLabel,
+    system: row.materialSystem,
+    cation: inferCation(row.record),
+    anion: inferAnion(row.record),
+    side_chain: row.sideChain,
+    side_chain_carbons: standard.side_chain_carbons ?? standard.sideChainCarbons ?? null,
+    water_uptake: row.waterUptake,
+    diffusing_species: row.diffusingSpecies,
+    D_A2_ps: row.dAngstrom,
+    D_m2_s: row.dMetric,
+    data_type: row.dataType,
+    method_conditions: row.method,
+    note: row.note,
+    source: row.source,
+    source_page: row.record.source_page ?? null,
+    evidence: row.record.evidence || '',
+    review_status: row.record.review_status || '',
+  }
+}))
 
 watch(
   () => props.externalExportRequest?.id,
@@ -350,6 +356,18 @@ function readFeatureObject(value: unknown): Record<string, unknown> {
   return {}
 }
 
+function standardFields(record: TribologyData): DiffusionStandardFields {
+  const features = readFeatureObject(record.novel_features_json)
+  const nested = readFeatureObject(features.standard_fields || features.standardFields)
+  const direct = readFeatureObject((record as any).diffusion_standard_fields || (record as any).diffusionStandardFields)
+  return { ...nested, ...direct } as DiffusionStandardFields
+}
+
+function standardText(record: TribologyData, ...keys: string[]) {
+  const standard = standardFields(record) as Record<string, unknown>
+  return keys.map((key) => String(standard[key] ?? '').trim()).find(Boolean) || ''
+}
+
 function baseSystemName(record: TribologyData) {
   return String(record.system_name || record.ionic_liquid || '--').trim() || '--'
 }
@@ -362,6 +380,8 @@ function materialSystemLabel(record: TribologyData) {
 }
 
 function inferSideChain(record: TribologyData) {
+  const standardized = standardText(record, 'side_chain_label', 'sideChainLabel')
+  if (standardized) return standardized
   const text = `${record.system_name || ''} ${record.ionic_liquid || ''}`.toLowerCase()
   if (text.includes('ethyl')) return '-C₂H₅'
   if (text.includes('butyl')) return '-C₄H₉'
@@ -372,6 +392,8 @@ function inferSideChain(record: TribologyData) {
 }
 
 function waterUptake(record: TribologyData) {
+  const standardized = standardText(record, 'water_uptake_label', 'waterUptakeLabel')
+  if (standardized) return standardized
   const features = readFeatureObject(record.novel_features_json)
   const value = features.water_uptake_value ?? features.waterUptakeValue ?? features.water_uptake ?? features.waterUptake
   const unit = String(features.water_uptake_unit ?? features.waterUptakeUnit ?? 'wt%').replace(/\s+/g, ' ').trim()
@@ -381,6 +403,8 @@ function waterUptake(record: TribologyData) {
 }
 
 function inferDiffusingSpecies(record: TribologyData) {
+  const standardized = standardText(record, 'diffusing_ion', 'diffusingIon') || String((record as any).diffusing_species || (record as any).diffusingSpecies || '').trim()
+  if (standardized) return standardized
   const text = `${record.evidence || ''} ${record.ionic_liquid || ''} ${record.system_name || ''}`
   if (record.D_anion != null && record.D_cation == null) {
     if (/cl[−-]?/i.test(text)) return 'Cl−'
@@ -393,6 +417,8 @@ function inferDiffusingSpecies(record: TribologyData) {
 }
 
 function inferCation(record: TribologyData) {
+  const standardized = standardText(record, 'cation')
+  if (standardized) return standardized
   const name = `${record.system_name || ''} ${record.ionic_liquid || ''}`.toLowerCase()
   if (name.includes('octyl')) return 'phosphonium, trioctyl-substituted'
   if (name.includes('butyl')) return 'phosphonium, tributyl-substituted'
@@ -402,6 +428,8 @@ function inferCation(record: TribologyData) {
 }
 
 function inferAnion(record: TribologyData) {
+  const standardized = standardText(record, 'anion')
+  if (standardized) return standardized
   const text = `${record.evidence || ''} ${record.ionic_liquid || ''}`.toLowerCase()
   const system = `${record.system_name || ''} ${record.ionic_liquid || ''}`.toLowerCase()
   if (system.includes('mpil')) return 'BF₄−'
@@ -412,6 +440,8 @@ function inferAnion(record: TribologyData) {
 }
 
 function dataType(record: TribologyData) {
+  const standardized = standardText(record, 'data_type', 'dataType')
+  if (standardized) return standardized
   const text = `${record.evidence || ''} ${record.source || ''}`.toLowerCase()
   if (/msd|einstein|molecular dynamics|\bmd\b|å²|a2|ps/.test(text)) return 'MD 计算值'
   if (/table|reported|experiment/.test(text)) return '文献报道值'
