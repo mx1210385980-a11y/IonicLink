@@ -248,6 +248,12 @@ export interface RecordFieldEvidenceResponse {
     sample_id?: string | null
     series_id?: string | null
     extractor_type?: ExtractorType | string | null
+    review_entity_type?: 'record' | 'candidate' | string | null
+    reviewEntityType?: 'record' | 'candidate' | string | null
+    promoted_record_id?: number | null
+    promotedRecordId?: number | null
+    promoted_at?: string | null
+    promotedAt?: string | null
     review_status?: string | null
     record_origin?: string | null
     assembly_notes?: string | null
@@ -955,6 +961,11 @@ export interface TribologyData {
     review_status?: string
     record_origin?: string
     review_entity_type?: 'record' | 'candidate' | string
+    reviewEntityType?: 'record' | 'candidate' | string
+    promoted_record_id?: number | null
+    promotedRecordId?: number | null
+    promoted_at?: string | null
+    promotedAt?: string | null
     assembly_notes?: string
     confidence?: number | null
     confidence_details?: ConfidenceDetails | null

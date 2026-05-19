@@ -811,7 +811,7 @@ function exportData(format: 'json' | 'csv' | 'ndjson') {
                     @click="openReviewForRow(row)"
                   >
                     <ExternalLink class="h-3 w-3" />
-                    审阅
+                    {{ row.reviewEntityType === 'candidate' ? '审阅入库' : '查看详情' }}
                   </button>
                 </td>
               </tr>

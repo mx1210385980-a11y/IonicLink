@@ -500,6 +500,23 @@ function reviewEntityType(record: TribologyData | null | undefined): ReviewRecor
   return reviewRecordEntityType(record)
 }
 
+function promotedDiffusionRecordId(record: TribologyData | null | undefined) {
+  if (recordExtractorType(record) !== 'diffusion') return null
+  const raw = (record as any)?.promoted_record_id ?? (record as any)?.promotedRecordId
+  const id = Number(raw)
+  return Number.isFinite(id) && id > 0 ? id : null
+}
+
+function isPromotedDiffusionCandidate(record: TribologyData | null | undefined) {
+  return promotedDiffusionRecordId(record) !== null
+}
+
+function diffusionStorageState(record: TribologyData | null | undefined) {
+  if (recordExtractorType(record) !== 'diffusion') return null
+  if (isPromotedDiffusionCandidate(record)) return 'promoted'
+  return reviewEntityType(record) === 'candidate' ? 'candidate' : 'record'
+}
+
 function reviewCacheKey(
   literatureId: number,
   recordId: number,
@@ -692,7 +709,14 @@ const activeFieldEvidenceEntry = computed(() => {
   const fieldMap = resolveRecordFieldEvidenceMap(activeRecord.value, activeRecordFieldEvidence.value?.fields)
   return fieldMap[activeField.value?.id || ''] || null
 })
-const canApproveAllVisible = computed(() => visibleRecordCount.value > 0 && visibleRecordItems.value.every((item) => recordCanApprove(item.record)))
+const canApproveAllVisible = computed(() => visibleRecordCount.value > 0 && visibleRecordItems.value.every((item) => recordCanApprove(item.record, remoteFieldsForRecord(item.record))))
+const approveAllLabel = computed(() => {
+  if (visibleRecordCount.value === 1) {
+    return approveActionLabel(visibleRecordItems.value[0]?.record || null)
+  }
+  if (activeExtractorType.value === 'diffusion') return '全部确认入库'
+  return '全部确认'
+})
 const isReextractingCurrentFile = computed(() => {
   const fileId = selectedReviewFile.value?.id || ''
   return Boolean(fileId && reextractingFileId.value === fileId) || selectedReviewFile.value?.status === 'processing'
@@ -1862,6 +1886,22 @@ function syncRecordReviewState(recordId: string, payload: RecordFieldEvidenceRes
     if (payload.extractor_type === 'diffusion') {
       record.extractor_type = 'diffusion'
       file.extractor_type = 'diffusion'
+      const entityType = payload.review_entity_type || payload.reviewEntityType || record.review_entity_type || record.reviewEntityType
+      if (entityType) {
+        record.review_entity_type = entityType
+        record.reviewEntityType = entityType
+      }
+      const promotedRecordId = Number(payload.promoted_record_id ?? payload.promotedRecordId ?? '')
+      if (Number.isFinite(promotedRecordId) && promotedRecordId > 0) {
+        record.promoted_record_id = promotedRecordId
+        record.promotedRecordId = promotedRecordId
+        record.record_origin = payload.record_origin || record.record_origin || 'review_promoted_candidate'
+      }
+      const promotedAt = payload.promoted_at || payload.promotedAt || null
+      if (promotedAt) {
+        record.promoted_at = promotedAt
+        record.promotedAt = promotedAt
+      }
     }
     record.field_evidence_json = payload.fields
     if (payload.diffusion_standard_fields || payload.diffusionStandardFields) {
@@ -3016,6 +3056,7 @@ function buildTribopairReviewParts(record: TribologyData | null | undefined, rem
 function recordCanApprove(record: TribologyData | null | undefined, remoteFields?: Record<string, FieldEvidenceEntry> | null) {
   if (!record) return false
   const extractorType = recordExtractorType(record)
+  if (extractorType === 'diffusion' && isPromotedDiffusionCandidate(record)) return false
   const fieldMap = resolveRecordFieldEvidenceMap(record, remoteFields)
   if (extractorType === 'diffusion') {
     const baseReady = ['system_name', 'ionic_liquid']
@@ -3053,6 +3094,7 @@ function missingRequiredFieldLabels(record: TribologyData | null | undefined, re
 }
 
 function recordApprovalBlockedReason(record: TribologyData | null | undefined, remoteFields?: Record<string, FieldEvidenceEntry> | null) {
+  if (isPromotedDiffusionCandidate(record)) return ''
   if (!record || recordCanApprove(record, remoteFields)) return ''
 
   const missingLabels = missingRequiredFieldLabels(record, remoteFields)
@@ -3076,6 +3118,31 @@ function recordApprovalBlockedReason(record: TribologyData | null | undefined, r
 const approvalBlockedReason = computed(() => {
   return recordApprovalBlockedReason(activeRecord.value, activeRecordFieldEvidence.value?.fields)
 })
+
+function remoteFieldsForRecord(record: TribologyData | null | undefined) {
+  if (!record || !activeRecord.value) return undefined
+  return String(record.id || '') === String(activeRecord.value.id || '')
+    ? activeRecordFieldEvidence.value?.fields
+    : undefined
+}
+
+function approveActionLabel(record: TribologyData | null | undefined) {
+  if (recordExtractorType(record) === 'diffusion') {
+    if (isPromotedDiffusionCandidate(record)) return '已入库'
+    if (reviewEntityType(record) === 'candidate') return '确认并入库'
+  }
+  return '确认本条'
+}
+
+function approveActionTitle(record: TribologyData | null | undefined, remoteFields?: Record<string, FieldEvidenceEntry> | null) {
+  const blockedReason = recordApprovalBlockedReason(record, remoteFields)
+  if (blockedReason) return blockedReason
+  if (recordExtractorType(record) === 'diffusion') {
+    if (isPromotedDiffusionCandidate(record)) return '这条扩散候选已生成正式入库记录'
+    if (reviewEntityType(record) === 'candidate') return '确认字段证据，并写入扩散库正式记录'
+  }
+  return '确认这条 Record 下所有字段'
+}
 
 function usesRecordReviewEndpoint(record: TribologyData | null | undefined) {
   return reviewEntityType(record) === 'record'
@@ -3537,6 +3604,19 @@ function recordBadge(status: RecordItem['status']) {
   return { label: '待审核', className: 'bg-[#edf2ff] text-[#3d56d2]' }
 }
 
+function recordBadgeForRecord(record: TribologyData, status: RecordItem['status']) {
+  if (recordExtractorType(record) === 'diffusion') {
+    const storageState = diffusionStorageState(record)
+    if (storageState === 'promoted') return { label: '已入库', className: 'bg-[#e8fff2] text-[#0b9d63]' }
+    if (storageState === 'candidate') {
+      if (status === 'warning') return { label: '需复核', className: 'bg-[#fff4da] text-[#c97a00]' }
+      return { label: '待入库', className: 'bg-[#edf2ff] text-[#3d56d2]' }
+    }
+    if (status === 'confirmed') return { label: '已入库', className: 'bg-[#e8fff2] text-[#0b9d63]' }
+  }
+  return recordBadge(status)
+}
+
 function fieldRowTone(field: ReviewField) {
   if (field.id === activeFieldId.value) return 'border-[#b8c1ff] bg-[#fbfcff] ring-1 ring-[#c5cbff]'
   if (field.status === 'low_conf') return 'border-[#f1ddbd] bg-white hover:border-[#dcc89e]'
@@ -3675,7 +3755,7 @@ function roughnessTextParts(value: string) {
         >
           <Loader2 v-if="reviewActionPending === 'approve-all'" class="h-3.5 w-3.5 animate-spin" />
           <CheckCheck v-else class="h-3.5 w-3.5" />
-          {{ visibleRecordCount === 1 ? '确认本条' : '全部确认' }}
+          {{ approveAllLabel }}
         </button>
 
         <button
@@ -3957,9 +4037,9 @@ function roughnessTextParts(value: string) {
                   <span class="text-[11px] font-bold uppercase tracking-[0.16em] text-[#7f90aa]">{{ item.label }}</span>
                   <span
                     class="rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
-                    :class="recordBadge(item.status).className"
+                    :class="recordBadgeForRecord(item.record, item.status).className"
                   >
-                    {{ recordBadge(item.status).label }}
+                    {{ recordBadgeForRecord(item.record, item.status).label }}
                   </span>
                 </div>
                 <div class="mt-1">
@@ -4042,8 +4122,8 @@ function roughnessTextParts(value: string) {
                   <button
                     type="button"
                     class="inline-flex h-7 shrink-0 items-center gap-1 rounded-md bg-[#5b56ea] px-2.5 text-[10px] font-bold normal-case tracking-normal text-white transition hover:bg-[#4c47d9] disabled:cursor-not-allowed disabled:bg-[#cfd2f3]"
-                    :disabled="!recordCanApprove(item.record, activeRecordFieldEvidence?.fields) || reviewActionPending === `approve:${Number(item.record.id || '')}`"
-                    :title="recordApprovalBlockedReason(item.record, activeRecordFieldEvidence?.fields) || '确认这条 Record 下所有字段'"
+                    :disabled="!recordCanApprove(item.record, remoteFieldsForRecord(item.record)) || reviewActionPending === `approve:${Number(item.record.id || '')}`"
+                    :title="approveActionTitle(item.record, remoteFieldsForRecord(item.record))"
                     @click.stop="handleApproveRecord(item.record)"
                   >
                     <Loader2
@@ -4051,7 +4131,7 @@ function roughnessTextParts(value: string) {
                       class="h-3 w-3 animate-spin"
                     />
                     <CheckCheck v-else class="h-3 w-3" />
-                    确认本条
+                    {{ approveActionLabel(item.record) }}
                   </button>
                   <ChevronDown
                     class="mt-1.5 h-4 w-4 shrink-0 text-slate-400 transition"

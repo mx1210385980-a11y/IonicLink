@@ -1178,6 +1178,10 @@ def _build_diffusion_conditions_entry(field_map: dict[str, Any], record: Any) ->
 def _build_diffusion_field_evidence_payload(record: Any) -> dict[str, Any]:
     field_map = _parse_field_evidence_map(getattr(record, "field_evidence_json", None))
     standard_fields = _diffusion_standard_fields_from_record(record)
+    review_entity_type = "candidate" if isinstance(record, DiffusionCandidate) else "record"
+    promoted_record_id = getattr(record, "promoted_record_id", None) if review_entity_type == "candidate" else None
+    promoted_at = getattr(record, "promoted_at", None) if review_entity_type == "candidate" else None
+    promoted_at_text = promoted_at.isoformat() if hasattr(promoted_at, "isoformat") else (str(promoted_at) if promoted_at else None)
     normalized_fields: dict[str, Any] = {}
     ordered_keys = (
         "system_name",
@@ -1256,6 +1260,12 @@ def _build_diffusion_field_evidence_payload(record: Any) -> dict[str, Any]:
         "sample_id": None,
         "series_id": None,
         "extractor_type": "diffusion",
+        "review_entity_type": review_entity_type,
+        "reviewEntityType": review_entity_type,
+        "promoted_record_id": promoted_record_id,
+        "promotedRecordId": promoted_record_id,
+        "promoted_at": promoted_at_text,
+        "promotedAt": promoted_at_text,
         "review_status": record.review_status,
         "record_origin": record.record_origin,
         "assembly_notes": getattr(record, "assembly_notes", None),
