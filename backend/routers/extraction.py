@@ -3976,8 +3976,10 @@ async def get_latest_extraction_run_detail(
     if literature and extractor_type != "diffusion" and await _normalize_legacy_no_data_state(db, literature):
         await db.commit()
     run = await get_latest_extraction_run_by_literature(db, literature_id, extractor_type=extractor_type)
+    literature_status = str(getattr(literature, "status", "") or "").strip().lower()
+    active_literature_statuses = {"queued", "extracting", "processing", "running"}
     if not run:
-        if literature and str(literature.status or "").strip().lower() in {"queued", "extracting", "processing", "running"}:
+        if literature and literature_status in active_literature_statuses:
             summary = _build_processing_summary(
                 extractor_type=extractor_type,
                 message=f"{extractor_type.title()} extraction is queued. The run log will appear shortly."
@@ -4001,6 +4003,7 @@ async def get_latest_extraction_run_detail(
             }
         return {
             "run_id": None,
+            "literature_id": literature_id,
             "extractor_type": extractor_type,
             "status": "not_started",
             "candidate_count": 0,
@@ -4010,6 +4013,31 @@ async def get_latest_extraction_run_detail(
             "page_candidate_counts": {},
             "progress_log": [],
             "summary": {},
+            "error_message": None,
+            "created_at": None,
+            "updated_at": None,
+        }
+
+    run_status = str(getattr(run, "status", "") or "").strip().lower()
+    if literature_status in active_literature_statuses and run_status not in active_literature_statuses:
+        summary = _build_processing_summary(
+            extractor_type=extractor_type,
+            message=f"{extractor_type.title()} extraction is queued. Waiting for the worker to create a fresh run log.",
+        )
+        summary["next_action"] = "wait_for_run_log"
+        return {
+            "run_id": None,
+            "literature_id": literature_id,
+            "extractor_type": extractor_type,
+            "profile": "high_accuracy",
+            "status": "processing",
+            "candidate_count": 0,
+            "final_count": 0,
+            "dropped_by_reason": summary["dropped_by_reason"],
+            "page_coverage": {},
+            "page_candidate_counts": {},
+            "progress_log": summary["progress_log"],
+            "summary": summary,
             "error_message": None,
             "created_at": None,
             "updated_at": None,

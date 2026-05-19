@@ -90,7 +90,17 @@ export async function getCurrentUser() {
 }
 
 // File Upload
-export async function uploadFile(file: File, extractorType: ExtractorType = 'tribology') {
+export type UploadProgressSnapshot = {
+    loaded: number
+    total: number | null
+    percent: number | null
+}
+
+export async function uploadFile(
+    file: File,
+    extractorType: ExtractorType = 'tribology',
+    onProgress?: (progress: UploadProgressSnapshot) => void,
+) {
     const formData = new FormData()
     formData.append('file', file)
 
@@ -99,6 +109,15 @@ export async function uploadFile(file: File, extractorType: ExtractorType = 'tri
     const response = await api.post(`/api/upload?${query.toString()}`, formData, {
         headers: {
             'Content-Type': 'multipart/form-data',
+        },
+        onUploadProgress: (event) => {
+            const total = event.total || file.size || null
+            const percent = total ? Math.round((event.loaded / total) * 100) : null
+            onProgress?.({
+                loaded: event.loaded,
+                total,
+                percent,
+            })
         },
         timeout: 180000,
     })
@@ -267,7 +286,7 @@ export interface RecordFieldEvidenceResponse {
 }
 
 export interface ExtractionRunDetail {
-    run_id: string
+    run_id: string | null
     literature_id: number
     extractor_type?: ExtractorType
     profile: string

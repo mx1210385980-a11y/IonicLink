@@ -124,7 +124,7 @@ export function useHomeSummary(options: UseHomeSummaryOptions) {
           try {
             const run = await getLatestExtractionRun(item.id)
             return {
-              runId: run.run_id,
+              runId: run.run_id || `literature-${item.id}`,
               literatureId: item.id,
               literatureTitle: item.title || item.doi || `Literature ${item.id}`,
               status: run.status,

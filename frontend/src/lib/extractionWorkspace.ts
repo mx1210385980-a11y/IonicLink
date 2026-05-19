@@ -45,6 +45,21 @@ export function setFileProcessing(batchFile: BatchFile | undefined, progress: nu
   batchFile.errorMessage = undefined
 }
 
+export function setFileUploadProgress(batchFile: BatchFile | undefined, percent: number | null | undefined, t: WorkspaceTranslator) {
+  if (!batchFile) return
+  const normalizedPercent = Number(percent)
+  const hasPercent = Number.isFinite(normalizedPercent)
+  const boundedPercent = hasPercent ? Math.max(0, Math.min(100, Math.round(normalizedPercent))) : null
+  batchFile.status = 'uploading'
+  batchFile.progress = boundedPercent == null
+    ? Math.max(batchFile.progress || 0, 10)
+    : Math.max(batchFile.progress || 0, Math.min(88, 6 + Math.round(boundedPercent * 0.82)))
+  batchFile.progressMessage = boundedPercent != null && boundedPercent >= 100
+    ? t('progress.upload_server_processing')
+    : t('progress.uploading_percent', { percent: boundedPercent ?? Math.round(batchFile.progress || 0) })
+  batchFile.errorMessage = undefined
+}
+
 export function setFileError(batchFile: BatchFile | undefined, message: string, t: WorkspaceTranslator) {
   if (!batchFile) return
   batchFile.status = 'error'

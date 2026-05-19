@@ -407,6 +407,7 @@ const inspectorDiagnostics = computed(() => {
       ]
   const readyForReview = reviewable > 0 || Boolean(file?.records.length)
   const noData = status === 'no_data' || (!readyForReview && ['success', 'completed'].includes(status))
+  const waitingForRunLog = status === 'processing' && (!run?.run_id || run?.summary?.next_action === 'wait_for_run_log')
 
   return {
     show: Boolean(file),
@@ -419,13 +420,17 @@ const inspectorDiagnostics = computed(() => {
           ? `已生成 ${reviewable} 条可审阅扩散记录，下一步进入 Review 确认。`
           : `${reviewable} diffusion rows are ready for review.`)
         : (currentMessage || (isChinese.value ? '结果已准备好，可以进入审阅。' : 'Records are ready for review.')))
-      : issue || currentMessage || (isChinese.value ? '等待运行日志返回。' : 'Waiting for run logs.'),
+      : waitingForRunLog
+        ? (isChinese.value ? '抽取已进入服务器队列，正在等待 worker 创建新的运行日志。' : 'Extraction is queued on the server while the worker creates a fresh run log.')
+        : issue || currentMessage || (isChinese.value ? '等待运行日志返回。' : 'Waiting for run logs.'),
     tone: readyForReview ? 'ready' : noData ? 'warning' : status === 'error' || status === 'failed' ? 'error' : 'neutral',
     chips,
     nextAction: readyForReview
       ? (isChinese.value ? '打开审阅，确认候选记录后再入库。' : 'Open Review and confirm candidates before promotion.')
       : noData
         ? (isChinese.value ? '建议重抽，或检查论文是否真的包含扩散系数表述。' : 'Re-run extraction or check whether the paper contains diffusion coefficients.')
+        : waitingForRunLog
+          ? (isChinese.value ? '保持本页打开即可；日志出现后进度会自动切到 PDF 解析、候选抽取和标准化阶段。' : 'Keep this page open; progress will switch to parsing, extraction, and standardization as soon as logs appear.')
         : (isChinese.value ? '保持本页打开，系统会继续刷新运行状态。' : 'Keep this page open while the run refreshes.'),
   }
 })

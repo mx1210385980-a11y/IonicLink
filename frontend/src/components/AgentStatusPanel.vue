@@ -415,7 +415,7 @@ onBeforeUnmount(() => {
             </div>
             <div class="rounded-2xl bg-slate-50 px-3 py-2 dark:bg-slate-800/80">
               <div class="text-[10px] uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Run</div>
-              <div class="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{{ liveRun.run_id.slice(0, 8) }}</div>
+              <div class="mt-1 truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{{ liveRun.run_id ? liveRun.run_id.slice(0, 8) : 'queued' }}</div>
             </div>
           </div>
         </div>

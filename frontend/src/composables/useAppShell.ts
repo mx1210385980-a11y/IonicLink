@@ -48,6 +48,7 @@ import {
   setFileNoData,
   setFileProcessing,
   setFileSuccess,
+  setFileUploadProgress,
   uploadErrorMessage,
 } from '@/lib/extractionWorkspace'
 import { useI18n } from '@/composables/useI18n'
@@ -918,7 +919,9 @@ export function useAppShell(
 
     try {
       fileUploadRef.value?.setUploading(true)
-      const response = await uploadFile(file, placeholder.extractor_type || defaultExtractorType.value)
+      const response = await uploadFile(file, placeholder.extractor_type || defaultExtractorType.value, (progress) => {
+        setFileUploadProgress(placeholder, progress.percent, t)
+      })
 
       if (response.success) {
         const previousId = replaceBatchFileId(placeholder, response.file_id)
@@ -979,7 +982,9 @@ export function useAppShell(
     for (const [index, file] of files.entries()) {
       const placeholder = placeholders[index]!
       try {
-        const response = await uploadFile(file, placeholder.extractor_type || defaultExtractorType.value)
+        const response = await uploadFile(file, placeholder.extractor_type || defaultExtractorType.value, (progress) => {
+          setFileUploadProgress(placeholder, progress.percent, t)
+        })
 
         if (response.success) {
           const batchFile = buildInitialFileState(response, {
