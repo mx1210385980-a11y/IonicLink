@@ -536,6 +536,51 @@ export async function searchRecords(filter: SearchFilter, skip: number = 0, limi
     return response.data
 }
 
+export interface DiffusionLibrarySummary {
+    finalRecordCount: number
+    candidateCount: number
+    literatureCount: number
+    speciesCounts: Record<string, number>
+}
+
+export interface DiffusionLibraryRecord extends TribologyData {
+    library_id?: string
+    libraryId?: string
+    literature_id?: number
+    literatureId?: number
+    literature?: Partial<Literature> | null
+    literature_title?: string
+    literatureTitle?: string
+    literature_doi?: string
+    literatureDoi?: string
+    diffusing_species?: string
+    diffusingSpecies?: string
+    reviewEntityType?: 'record' | 'candidate' | string
+}
+
+export interface DiffusionLibraryResponse {
+    total: number
+    skip: number
+    limit: number
+    items: DiffusionLibraryRecord[]
+    summary: DiffusionLibrarySummary
+}
+
+export async function listDiffusionLibrary(
+    query: string = '',
+    skip: number = 0,
+    limit: number = 500,
+): Promise<DiffusionLibraryResponse> {
+    const response = await api.get('/api/records/diffusion-library', {
+        params: {
+            q: query || undefined,
+            skip,
+            limit,
+        },
+    })
+    return response.data
+}
+
 export interface RelationshipGraphDimensionSummary {
     type: string
     label: string
@@ -2990,6 +3035,7 @@ export interface TribologyRecord {
 
 export interface LiteratureWithRecords extends Literature {
     tribologyData: TribologyRecord[]
+    diffusionData?: DiffusionLibraryRecord[]
 }
 
 // ============== Monitor API ==============

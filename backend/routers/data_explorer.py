@@ -4,7 +4,7 @@ API endpoints for searching and exploring tribology data.
 """
 
 import logging
-from typing import List, Optional, Literal
+from typing import Any, List, Optional, Literal
 import re
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -13,12 +13,13 @@ from sqlalchemy import select, and_, func, desc, or_
 from sqlalchemy.orm import selectinload
 
 from database import get_db_session
-from models.db_models import TribologyData, Literature
+from models.db_models import DiffusionCandidate, DiffusionRecord, TribologyData, Literature
 from security import (
     AuthPrincipal,
     RequestScope,
     get_current_principal,
     get_request_scope,
+    literature_scope_conditions,
     require_record_access,
     scope_filters,
 )
@@ -30,6 +31,7 @@ from services.il_resolver_service import ANION_DB, CATION_DB, resolve_il
 from services.insight_service import get_pattern_discovery, save_pattern_discovery_report
 from services.quality_service import get_quality_asset_summary
 from services.query_service import _ion_component_filter_terms
+from services.sync_facade_service import _diffusion_record_to_payload
 from services.relationship_graph_service import (
     build_relationship_graph,
     drilldown_relationship_graph,
@@ -228,6 +230,14 @@ class PaginatedRecordResponse(BaseModel):
     skip: int
     limit: int
     items: List[RecordResponse]
+
+
+class DiffusionLibraryResponse(BaseModel):
+    total: int
+    skip: int
+    limit: int
+    items: List[dict[str, Any]]
+    summary: dict[str, Any]
 
 
 class RelationshipGraphDimensionSummary(BaseModel):
@@ -710,6 +720,69 @@ def _record_to_response(r: TribologyData) -> RecordResponse:
     )
 
 
+def _diffusion_literature_payload(literature: Literature | None) -> dict[str, Any] | None:
+    if not literature:
+        return None
+    return {
+        "id": literature.id,
+        "doi": literature.doi or "",
+        "title": literature.title or "",
+        "authors": literature.authors or "",
+        "journal": literature.journal or "",
+        "year": literature.year,
+    }
+
+
+def _diffusion_search_text(payload: dict[str, Any]) -> str:
+    literature = payload.get("literature") or {}
+    values = [
+        payload.get("system_name"),
+        payload.get("ionic_liquid"),
+        payload.get("confinement_material_class"),
+        payload.get("confinement_geometry_class"),
+        payload.get("surface_functional_groups"),
+        payload.get("source"),
+        payload.get("evidence"),
+        literature.get("title"),
+        literature.get("doi"),
+        literature.get("journal"),
+    ]
+    return " ".join(str(value or "") for value in values).lower()
+
+
+def _diffusion_primary_species(record: DiffusionCandidate | DiffusionRecord) -> str:
+    text = f"{getattr(record, 'evidence', '') or ''} {getattr(record, 'ionic_liquid', '') or ''} {getattr(record, 'system_name', '') or ''}".lower()
+    if getattr(record, "d_anion", None) is not None and getattr(record, "d_cation", None) is None:
+        if "cl" in text:
+            return "Cl−"
+        if "bf4" in text or "bf 4" in text:
+            return "BF₄−"
+        return "anion"
+    if getattr(record, "d_cation", None) is not None and getattr(record, "d_anion", None) is None:
+        return "cation"
+    if getattr(record, "d_cation", None) is not None and getattr(record, "d_anion", None) is not None:
+        return "cation / anion"
+    return "overall"
+
+
+def _diffusion_library_item(record: DiffusionCandidate | DiffusionRecord) -> dict[str, Any]:
+    payload = _diffusion_record_to_payload(record)
+    entity_type = "candidate" if isinstance(record, DiffusionCandidate) else "record"
+    literature = _diffusion_literature_payload(getattr(record, "literature", None))
+    payload["library_id"] = f"{entity_type}:{record.id}"
+    payload["libraryId"] = payload["library_id"]
+    payload["review_entity_type"] = entity_type
+    payload["reviewEntityType"] = entity_type
+    payload["literature"] = literature
+    payload["literature_title"] = (literature or {}).get("title", "")
+    payload["literatureTitle"] = payload["literature_title"]
+    payload["literature_doi"] = (literature or {}).get("doi", "")
+    payload["literatureDoi"] = payload["literature_doi"]
+    payload["diffusing_species"] = _diffusion_primary_species(record)
+    payload["diffusingSpecies"] = payload["diffusing_species"]
+    return payload
+
+
 # --- API Endpoints ---
 
 @router.post("/search", response_model=PaginatedRecordResponse, response_model_by_alias=True)
@@ -751,6 +824,83 @@ async def search_records(
         raise
     except Exception as exc:
         _raise_internal_error("Search records", exc)
+
+
+@router.get("/diffusion-library", response_model=DiffusionLibraryResponse)
+async def list_diffusion_library(
+    q: str | None = Query(None, description="Optional text search over diffusion records and literature metadata"),
+    skip: int = Query(0, ge=0, description="Number of rows to skip"),
+    limit: int = Query(500, ge=1, le=1000, description="Max rows to return"),
+    session: AsyncSession = Depends(get_db_session),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """Return a unified diffusion library across final records and unpromoted review candidates."""
+    try:
+        filters = scope_filters(scope)
+        scope_conditions = literature_scope_conditions(filters)
+
+        record_result = await session.execute(
+            select(DiffusionRecord)
+            .options(selectinload(DiffusionRecord.literature))
+            .join(DiffusionRecord.literature)
+            .where(*scope_conditions)
+            .order_by(desc(DiffusionRecord.extracted_at), desc(DiffusionRecord.id))
+        )
+        final_records = list(record_result.scalars().all())
+
+        candidate_result = await session.execute(
+            select(DiffusionCandidate)
+            .options(selectinload(DiffusionCandidate.literature), selectinload(DiffusionCandidate.promoted_record))
+            .join(DiffusionCandidate.literature)
+            .where(*scope_conditions, DiffusionCandidate.promoted_record_id.is_(None))
+            .order_by(desc(DiffusionCandidate.extracted_at), desc(DiffusionCandidate.id))
+        )
+        candidate_records = list(candidate_result.scalars().all())
+
+        all_rows = [
+            *[_diffusion_library_item(record) for record in final_records],
+            *[_diffusion_library_item(candidate) for candidate in candidate_records],
+        ]
+        all_rows.sort(
+            key=lambda item: (
+                str(item.get("literature_id") or item.get("literatureId") or ""),
+                str(item.get("library_id") or ""),
+            ),
+            reverse=True,
+        )
+
+        normalized_query = str(q or "").strip().lower()
+        if normalized_query:
+            all_rows = [item for item in all_rows if normalized_query in _diffusion_search_text(item)]
+
+        literature_ids = {
+            int(item.get("literature_id") or item.get("literatureId") or 0)
+            for item in all_rows
+            if int(item.get("literature_id") or item.get("literatureId") or 0) > 0
+        }
+        species_counts: dict[str, int] = {}
+        for item in all_rows:
+            species = str(item.get("diffusing_species") or item.get("diffusingSpecies") or "unknown").strip() or "unknown"
+            species_counts[species] = species_counts.get(species, 0) + 1
+
+        total = len(all_rows)
+        items = all_rows[skip:skip + limit]
+        return DiffusionLibraryResponse(
+            total=total,
+            skip=skip,
+            limit=limit,
+            items=items,
+            summary={
+                "finalRecordCount": len(final_records),
+                "candidateCount": len(candidate_records),
+                "literatureCount": len(literature_ids),
+                "speciesCounts": species_counts,
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_internal_error("List diffusion library", exc)
 
 @router.get("/options", response_model=dict)
 async def get_filter_options(

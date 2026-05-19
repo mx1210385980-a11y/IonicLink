@@ -1674,22 +1674,21 @@ function formatDiffusionNumber(value: number | null | undefined) {
   return `${Number(value).toPrecision(4)}`.replace(/\.?0+e/, 'e').replace(/\.?0+$/, '')
 }
 
-const superscriptDigits: Record<string, string> = {
-  '0': '⁰',
-  '1': '¹',
-  '2': '²',
-  '3': '³',
-  '4': '⁴',
-  '5': '⁵',
-  '6': '⁶',
-  '7': '⁷',
-  '8': '⁸',
-  '9': '⁹',
-  '-': '⁻',
-  '+': '⁺',
-}
-
 function toSuperscript(value: string) {
+  const superscriptDigits: Record<string, string> = {
+    '0': '⁰',
+    '1': '¹',
+    '2': '²',
+    '3': '³',
+    '4': '⁴',
+    '5': '⁵',
+    '6': '⁶',
+    '7': '⁷',
+    '8': '⁸',
+    '9': '⁹',
+    '-': '⁻',
+    '+': '⁺',
+  }
   return Array.from(value).map((char) => superscriptDigits[char] || char).join('')
 }
 

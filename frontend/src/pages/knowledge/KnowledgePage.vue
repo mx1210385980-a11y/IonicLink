@@ -4,7 +4,7 @@ import { Atom, Gauge, GitBranch, TimerReset, Zap } from 'lucide-vue-next'
 
 import KnowledgeContextPanel from '@/components/knowledge/KnowledgeContextPanel.vue'
 import KnowledgeSidebar from '@/components/knowledge/KnowledgeSidebar.vue'
-import { backfillLiteratureMetadata, listLiterature, searchRecords, type Literature, type SearchFilter } from '@/lib/api'
+import { backfillLiteratureMetadata, listDiffusionLibrary, listLiterature, searchRecords, type Literature, type SearchFilter } from '@/lib/api'
 import { lazyComponent } from '@/lib/lazyComponent'
 
 const props = defineProps<{
@@ -61,9 +61,10 @@ const scopeLiterature = ref<Literature[]>([])
 const literatureLoading = ref(false)
 const literatureError = ref('')
 const activeKnowledgeLibraryKey = ref<KnowledgeLibraryKey>('tribology_macro')
-const knowledgeLibraryCounts = ref<{ macro: number | null; nano: number | null }>({
+const knowledgeLibraryCounts = ref<{ macro: number | null; nano: number | null; diffusion: number | null }>({
   macro: null,
   nano: null,
+  diffusion: null,
 })
 const metadataBackfillAttempted = new Set<number>()
 const metadataBackfillInFlight = new Set<number>()
@@ -128,12 +129,10 @@ const knowledgeLibraries = computed<KnowledgeLibrary[]>(() => [
     title: '扩散库',
     label: 'Diffusion',
     subtitle: '扩散系数、限域输运和分子动力学数据',
-    detail: isDiffusionScope.value
-      ? '当前选中文献为扩散数据，使用专属浏览和质量检查视图。'
-      : '已预留库入口；单篇扩散抽取可从 Extract 开始，整库视图后续接入。',
-    status: isDiffusionScope.value ? 'ready' : 'reserved',
-    statusLabel: isDiffusionScope.value ? '文件视图' : '预留',
-    count: null,
+    detail: '已接入全局扩散数据库，汇总已入库记录和待审阅候选记录。',
+    status: 'ready',
+    statusLabel: '已接入',
+    count: knowledgeLibraryCounts.value.diffusion,
     icon: GitBranch,
     tone: 'diffusion',
   },
@@ -178,6 +177,9 @@ const selectedLiterature = computed(() => {
 })
 
 const selectedRecordCount = computed(() => {
+  if (activeKnowledgeLibrary.value.key === 'diffusion' && !props.selectedFile?.records?.length) {
+    return knowledgeLibraryCounts.value.diffusion || 0
+  }
   if (props.selectedFile?.records?.length) return props.selectedFile.records.length
   if (selectedLiterature.value) {
     return Number(selectedLiterature.value.recordCount || selectedLiterature.value.candidateCount || 0)
@@ -216,6 +218,9 @@ const sidebarModes = computed(() => [
 ])
 
 const sourceLabel = computed(() => {
+  if (activeKnowledgeLibrary.value.key === 'diffusion' && !selectedLiterature.value) {
+    return '全局扩散库'
+  }
   if (selectedLiterature.value) {
     return selectedLiterature.value.title || selectedLiterature.value.doi || `Literature ${selectedLiterature.value.id}`
   }
@@ -324,13 +329,15 @@ async function loadScopeLiterature() {
 
 async function loadKnowledgeLibraryCounts() {
   try {
-    const [macro, nano] = await Promise.all([
+    const [macro, nano, diffusion] = await Promise.all([
       searchRecords({ experiment_scales: ['macroscale'] }, 0, 1),
       searchRecords({ experiment_scales: ['nanoscale'] }, 0, 1),
+      listDiffusionLibrary('', 0, 1),
     ])
     knowledgeLibraryCounts.value = {
       macro: macro.total,
       nano: nano.total,
+      diffusion: diffusion.total,
     }
   } catch (error) {
     console.warn('[Knowledge] Failed to load library counts:', error)
@@ -377,6 +384,7 @@ function libraryCountClass(library: KnowledgeLibrary, active: boolean) {
   if (library.status === 'reserved') return 'text-slate-400'
   if (active && library.tone === 'macro') return 'text-orange-700'
   if (active && library.tone === 'nano') return 'text-indigo-700'
+  if (active && library.tone === 'diffusion') return 'text-cyan-700'
   return 'text-slate-500 dark:text-slate-400'
 }
 
@@ -551,7 +559,7 @@ watch(
           </div>
 
           <div
-            v-else-if="isDiffusionScope && currentSection !== 'graph'"
+            v-else-if="activeKnowledgeLibrary.key === 'diffusion' && currentSection !== 'graph'"
             class="h-full min-h-0 overflow-hidden"
           >
             <DiffusionExplorerWorkspace
@@ -559,7 +567,7 @@ watch(
               :selected-file="selectedFile"
               :selected-file-name="selectedFileName"
               :external-export-request="externalExportRequest"
-              @open-review="emit('open-review')"
+              @open-review="emit('open-review', $event)"
             />
           </div>
 
@@ -568,7 +576,7 @@ watch(
             class="h-full min-h-0 overflow-hidden"
           >
             <div
-              v-if="isDiffusionScope"
+              v-if="activeKnowledgeLibrary.key === 'diffusion'"
               class="flex h-full min-h-[18rem] items-center justify-center bg-[#fbfdff] px-6 text-center"
             >
               <div class="max-w-xl">
@@ -622,7 +630,7 @@ watch(
         :active-scope-label="activeKnowledgeScopeLabel"
         :selected-record-count="selectedRecordCount"
         :explorer-doi="explorerDoi"
-        :extractor-type="isDiffusionScope ? 'diffusion' : 'tribology'"
+        :extractor-type="activeKnowledgeLibrary.key === 'diffusion' ? 'diffusion' : 'tribology'"
         :active-source-id="selectedFileId"
         :literature-items="scopeLiterature"
         :literature-loading="literatureLoading"

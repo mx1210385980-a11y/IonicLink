@@ -397,26 +397,37 @@ async def get_literature_detail_payload(db: AsyncSession, literature_id: int, *,
         records = list(candidate_result.scalars().all())
     detail_records_are_candidates = bool(records and isinstance(records[0], RecordCandidate))
 
-    diffusion_result = await db.execute(
+    diffusion_candidate_result = await db.execute(
         select(DiffusionCandidate)
         .where(DiffusionCandidate.literature_id == literature_id)
         .order_by(DiffusionCandidate.id.asc())
     )
-    diffusion_records = list(diffusion_result.scalars().all())
-    diffusion_rows_are_candidates = bool(diffusion_records)
-    if not diffusion_records:
-        diffusion_final_result = await db.execute(
-            select(DiffusionRecord)
-            .where(DiffusionRecord.literature_id == literature_id)
-            .order_by(DiffusionRecord.id.asc())
-        )
-        diffusion_records = list(diffusion_final_result.scalars().all())
-        diffusion_rows_are_candidates = False
+    diffusion_candidates = list(diffusion_candidate_result.scalars().all())
+    diffusion_final_result = await db.execute(
+        select(DiffusionRecord)
+        .where(DiffusionRecord.literature_id == literature_id)
+        .order_by(DiffusionRecord.id.asc())
+    )
+    diffusion_final_records = list(diffusion_final_result.scalars().all())
+    promoted_record_ids = {
+        candidate.promoted_record_id
+        for candidate in diffusion_candidates
+        if candidate.promoted_record_id is not None
+    }
+    diffusion_records = [
+        candidate
+        for candidate in diffusion_candidates
+        if candidate.promoted_record_id is None
+    ] + [
+        record
+        for record in diffusion_final_records
+        if record.id not in promoted_record_ids
+    ]
 
     payload = _literature_to_payload(
         literature,
-        record_count=(0 if detail_records_are_candidates else len(records)) + (0 if diffusion_rows_are_candidates else len(diffusion_records)),
-        candidate_count=(len(records) if detail_records_are_candidates else 0) + (len(diffusion_records) if diffusion_rows_are_candidates else 0),
+        record_count=(0 if detail_records_are_candidates else len(records)) + len(diffusion_final_records),
+        candidate_count=(len(records) if detail_records_are_candidates else 0) + len([candidate for candidate in diffusion_candidates if candidate.promoted_record_id is None]),
     )
     payload["tribologyData"] = [_record_to_payload(record) for record in records]
     payload["diffusionData"] = [_diffusion_record_to_payload(record) for record in diffusion_records]

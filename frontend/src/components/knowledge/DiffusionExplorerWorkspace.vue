@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import {
   ArrowDownUp,
   CheckCircle2,
@@ -8,11 +8,11 @@ import {
   ExternalLink,
   FileText,
   FlaskConical,
+  RefreshCw,
   Search,
-  Sigma,
 } from 'lucide-vue-next'
 
-import type { BatchFile, TribologyData } from '@/lib/api'
+import { listDiffusionLibrary, type BatchFile, type DiffusionLibraryRecord, type DiffusionLibrarySummary, type TribologyData } from '@/lib/api'
 
 const props = defineProps<{
   currentSection: string
@@ -22,7 +22,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  openReview: []
+  openReview: [payload?: { literatureId?: number | null, recordId?: number | null }]
 }>()
 
 type DiffusionRow = {
@@ -39,6 +39,11 @@ type DiffusionRow = {
   note: string
   coefficient: number | null
   source: string
+  literatureTitle: string
+  literatureDoi: string
+  literatureId: number | null
+  reviewEntityType: string
+  statusLabel: string
 }
 
 type IonMappingRow = {
@@ -51,14 +56,58 @@ type IonMappingRow = {
 const query = ref('')
 const speciesFilter = ref('all')
 const sourceFilter = ref('all')
-
-const selectedTitle = computed(() => {
-  return props.selectedFile?.metadata?.title || props.selectedFileName || props.selectedFile?.name || 'Diffusion Dataset'
+const libraryLoading = ref(false)
+const libraryError = ref('')
+const libraryItems = ref<DiffusionLibraryRecord[]>([])
+const librarySummary = ref<DiffusionLibrarySummary>({
+  finalRecordCount: 0,
+  candidateCount: 0,
+  literatureCount: 0,
+  speciesCounts: {},
 })
 
-const allRecords = computed(() => {
+const selectedTitle = computed(() => {
+  return props.selectedFile?.metadata?.title || props.selectedFileName || props.selectedFile?.name || ''
+})
+
+const localRecords = computed<DiffusionLibraryRecord[]>(() => {
   const records = props.selectedFile?.records || []
-  return records.filter((record) => record.system_name || record.D_total != null || record.D_cation != null || record.D_anion != null)
+  const literatureId = Number(props.selectedFile?.id || 0) || undefined
+  return records
+    .filter((record) => record.system_name || record.D_total != null || record.D_cation != null || record.D_anion != null)
+    .map((record) => {
+      const sourceRecord = record as DiffusionLibraryRecord
+      return {
+        ...sourceRecord,
+        literature_id: Number(sourceRecord.literature_id || sourceRecord.literatureId || literatureId || 0) || undefined,
+        literatureId: Number(sourceRecord.literatureId || sourceRecord.literature_id || literatureId || 0) || undefined,
+        literature: sourceRecord.literature || (literatureId ? {
+          id: literatureId,
+          title: props.selectedFile?.metadata?.title || props.selectedFile?.name || '',
+          doi: props.selectedFile?.metadata?.doi || '',
+          authors: props.selectedFile?.metadata?.authors || '',
+          journal: props.selectedFile?.metadata?.journal || '',
+          year: props.selectedFile?.metadata?.year || 0,
+        } : null),
+        literature_title: sourceRecord.literature_title || props.selectedFile?.metadata?.title || props.selectedFile?.name || '',
+        literatureTitle: sourceRecord.literatureTitle || props.selectedFile?.metadata?.title || props.selectedFile?.name || '',
+        literature_doi: sourceRecord.literature_doi || props.selectedFile?.metadata?.doi || '',
+        literatureDoi: sourceRecord.literatureDoi || props.selectedFile?.metadata?.doi || '',
+      }
+    })
+})
+
+const allRecords = computed<DiffusionLibraryRecord[]>(() => {
+  const remoteRows = libraryItems.value.filter((record) => record.system_name || record.D_total != null || record.D_cation != null || record.D_anion != null)
+  return remoteRows.length ? remoteRows : localRecords.value
+})
+
+const isUsingGlobalLibrary = computed(() => libraryItems.value.length > 0 || !selectedTitle.value)
+
+const libraryTitle = computed(() => isUsingGlobalLibrary.value ? '扩散库 / Global Diffusion Library' : selectedTitle.value)
+
+const selectedContextLabel = computed(() => {
+  return selectedTitle.value ? `当前文献：${selectedTitle.value}` : '全局扩散记录'
 })
 
 const tableRows = computed<DiffusionRow[]>(() => {
@@ -101,6 +150,9 @@ const filteredRows = computed(() => {
       row.dataType,
       row.method,
       row.note,
+      row.literatureTitle,
+      row.literatureDoi,
+      row.statusLabel,
       row.record.evidence,
     ].join(' ').toLowerCase()
     return haystack.includes(normalizedQuery)
@@ -137,12 +189,35 @@ const dominantSpecies = computed(() => {
 
 const qualityIssueCount = computed(() => tableRows.value.filter((row) => {
   const record = row.record
-  return !record.system_name || !record.ionic_liquid || !hasDiffusionCoefficient(record) || row.source === '--'
+  const reviewStatus = String(record.review_status || '').trim().toLowerCase()
+  return reviewStatus === 'needs_review'
+    || reviewStatus === 'flagged'
+    || row.reviewEntityType === 'candidate'
+    || !record.system_name
+    || !record.ionic_liquid
+    || !hasDiffusionCoefficient(record)
+    || row.source === '--'
 }).length)
 
 const sourceSummary = computed(() => {
   const sources = sourceOptions.value.filter((source) => source !== 'all')
   return sources.length ? sources.slice(0, 3).join(' / ') : '--'
+})
+
+const literatureCount = computed(() => {
+  const ids = new Set<number>()
+  tableRows.value.forEach((row) => {
+    if (row.literatureId) ids.add(row.literatureId)
+  })
+  return librarySummary.value.literatureCount || ids.size
+})
+
+const candidateCount = computed(() => {
+  return tableRows.value.filter((row) => row.reviewEntityType === 'candidate').length
+})
+
+const finalRecordCount = computed(() => {
+  return tableRows.value.filter((row) => row.reviewEntityType !== 'candidate').length
 })
 
 const ionMappingRows = computed<IonMappingRow[]>(() => {
@@ -156,6 +231,11 @@ const ionMappingRows = computed<IonMappingRow[]>(() => {
 
 const exportRows = computed(() => filteredRows.value.map((row) => ({
   record_no: row.recordNo,
+  literature_id: row.literatureId,
+  literature_title: row.literatureTitle,
+  literature_doi: row.literatureDoi,
+  review_entity_type: row.reviewEntityType,
+  review_status_label: row.statusLabel,
   system: row.materialSystem,
   side_chain: row.sideChain,
   water_uptake: row.waterUptake,
@@ -179,8 +259,76 @@ watch(
   },
 )
 
+onMounted(() => {
+  void loadDiffusionLibrary()
+})
+
+async function loadDiffusionLibrary() {
+  libraryLoading.value = true
+  libraryError.value = ''
+  try {
+    const payload = await listDiffusionLibrary('', 0, 500)
+    libraryItems.value = payload.items || []
+    librarySummary.value = payload.summary || {
+      finalRecordCount: 0,
+      candidateCount: 0,
+      literatureCount: 0,
+      speciesCounts: {},
+    }
+  } catch (error: any) {
+    libraryError.value = error?.message || '扩散库加载失败'
+    console.warn('[DiffusionExplorer] Failed to load global diffusion library:', error)
+  } finally {
+    libraryLoading.value = false
+  }
+}
+
+function openReviewForRow(row?: DiffusionRow | null) {
+  const target = row || filteredRows.value[0] || tableRows.value[0] || null
+  if (!target) {
+    emit('openReview')
+    return
+  }
+  const recordId = Number(target.record.id || 0)
+  emit('openReview', {
+    literatureId: target.literatureId,
+    recordId: Number.isFinite(recordId) && recordId > 0 ? recordId : null,
+  })
+}
+
 function hasDiffusionCoefficient(record: TribologyData) {
   return [record.D_total, record.D_cation, record.D_anion].some((value) => value !== null && value !== undefined)
+}
+
+function literatureForRecord(record: DiffusionLibraryRecord) {
+  return record.literature || null
+}
+
+function literatureIdForRecord(record: DiffusionLibraryRecord) {
+  const parsed = Number(record.literature_id || record.literatureId || literatureForRecord(record)?.id || 0)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+function literatureTitleForRecord(record: DiffusionLibraryRecord) {
+  return String(record.literature_title || record.literatureTitle || literatureForRecord(record)?.title || '').trim() || '未命名文献'
+}
+
+function literatureDoiForRecord(record: DiffusionLibraryRecord) {
+  return String(record.literature_doi || record.literatureDoi || literatureForRecord(record)?.doi || '').trim()
+}
+
+function reviewEntityType(record: DiffusionLibraryRecord) {
+  const explicit = String(record.review_entity_type || record.reviewEntityType || '').trim().toLowerCase()
+  return explicit === 'candidate' ? 'candidate' : 'record'
+}
+
+function reviewStatusLabel(record: DiffusionLibraryRecord) {
+  if (reviewEntityType(record) === 'candidate') return '待审阅'
+  const status = String(record.review_status || '').trim().toLowerCase()
+  if (status === 'approved' || status === 'verified') return '已入库'
+  if (status === 'flagged') return '需复核'
+  if (status === 'needs_review') return '待审阅'
+  return status ? status.replace(/_/g, ' ') : '已入库'
 }
 
 function primaryCoefficient(record: TribologyData) {
@@ -334,7 +482,7 @@ function diffusionDisplays(record: TribologyData) {
   }
 }
 
-function toDiffusionRow(record: TribologyData): DiffusionRow {
+function toDiffusionRow(record: DiffusionLibraryRecord): DiffusionRow {
   const displays = diffusionDisplays(record)
   const source = record.source ? String(record.source) : record.source_page ? `Page ${record.source_page}` : '--'
   return {
@@ -351,6 +499,11 @@ function toDiffusionRow(record: TribologyData): DiffusionRow {
     note: rowNote(record, displays.coefficientA2Ps),
     coefficient: displays.coefficientA2Ps,
     source,
+    literatureTitle: literatureTitleForRecord(record),
+    literatureDoi: literatureDoiForRecord(record),
+    literatureId: literatureIdForRecord(record),
+    reviewEntityType: reviewEntityType(record),
+    statusLabel: reviewStatusLabel(record),
   }
 }
 
@@ -452,10 +605,14 @@ function exportData(format: 'json' | 'csv' | 'ndjson') {
         <div class="min-w-0">
           <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-700 dark:text-cyan-300">Diffusion Knowledge</p>
           <h2 class="mt-1 truncate text-[1.08rem] font-semibold tracking-normal text-slate-950 dark:text-white">
-            {{ selectedTitle }}
+            {{ libraryTitle }}
           </h2>
           <p class="mt-1 max-w-5xl text-[12px] leading-5 text-slate-500 dark:text-slate-400">
-            当前可结构化记录 {{ tableRows.length }} 条；主要扩散物种 {{ dominantSpecies }}；证据来源 {{ sourceSummary }}。
+            整库可结构化记录 {{ tableRows.length }} 条；覆盖文献 {{ literatureCount }} 篇；候选待审 {{ candidateCount }} 条；主要扩散物种 {{ dominantSpecies }}。
+            <span v-if="selectedContextLabel" class="ml-1">{{ selectedContextLabel }}</span>
+          </p>
+          <p v-if="libraryError" class="mt-1 text-[12px] font-semibold text-amber-700 dark:text-amber-300">
+            {{ libraryError }}，当前回退显示已选文献数据。
           </p>
         </div>
 
@@ -463,7 +620,16 @@ function exportData(format: 'json' | 'csv' | 'ndjson') {
           <button
             type="button"
             class="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-            @click="emit('openReview')"
+            :disabled="libraryLoading"
+            @click="loadDiffusionLibrary"
+          >
+            <RefreshCw class="h-3.5 w-3.5" :class="libraryLoading ? 'animate-spin' : ''" />
+            Refresh
+          </button>
+          <button
+            type="button"
+            class="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            @click="openReviewForRow()"
           >
             <ExternalLink class="h-3.5 w-3.5" />
             Open Review
@@ -486,18 +652,20 @@ function exportData(format: 'json' | 'csv' | 'ndjson') {
             Records
           </div>
           <p class="mt-1 text-xl font-semibold tabular-nums">{{ filteredRows.length }}</p>
+          <p class="text-[11px] text-slate-500">{{ finalRecordCount }} 已入库 / {{ candidateCount }} 待审</p>
         </div>
         <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
           <div class="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-            <Sigma class="h-3.5 w-3.5" />
-            Trend
+            <FileText class="h-3.5 w-3.5" />
+            Literature
           </div>
-          <p class="mt-1 truncate text-sm font-semibold">{{ trendStatement }}</p>
+          <p class="mt-1 text-xl font-semibold tabular-nums">{{ literatureCount }}</p>
+          <p class="truncate text-[11px] text-slate-500">{{ sourceSummary }}</p>
         </div>
         <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
           <div class="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-slate-500">
             <CheckCircle2 class="h-3.5 w-3.5" />
-            Review Flags
+            Pending Review
           </div>
           <p class="mt-1 text-xl font-semibold tabular-nums">{{ qualityIssueCount }}</p>
         </div>
@@ -532,7 +700,7 @@ function exportData(format: 'json' | 'csv' | 'ndjson') {
     </header>
 
     <div class="min-h-0 flex-1 overflow-auto px-4 py-3">
-      <div v-if="filteredRows.length" class="min-w-[78rem]">
+      <div v-if="filteredRows.length" class="min-w-[98rem]">
         <div class="mb-3 grid gap-3 xl:grid-cols-[minmax(0,1.2fr)_minmax(21rem,0.8fr)]">
           <section class="rounded-lg border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
             <div class="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
@@ -563,6 +731,8 @@ function exportData(format: 'json' | 'csv' | 'ndjson') {
             <thead class="sticky top-0 z-10 bg-slate-50 text-[10.5px] font-semibold tracking-[0.08em] text-slate-500 dark:bg-slate-900 dark:text-slate-400">
               <tr>
                 <th class="w-[6.5rem] px-3 py-2.5">记录编号</th>
+                <th class="w-[15rem] px-3 py-2.5">文献来源</th>
+                <th class="w-[7rem] px-3 py-2.5">入库状态</th>
                 <th class="w-[12rem] px-3 py-2.5">材料体系</th>
                 <th class="w-[7rem] px-3 py-2.5">侧链类型</th>
                 <th class="w-[8rem] px-3 py-2.5">水吸收率 WU</th>
@@ -572,11 +742,26 @@ function exportData(format: 'json' | 'csv' | 'ndjson') {
                 <th class="w-[8rem] px-3 py-2.5">数据类型</th>
                 <th class="w-[16rem] px-3 py-2.5">方法与条件</th>
                 <th class="min-w-[18rem] px-3 py-2.5">备注</th>
+                <th class="w-[6rem] px-3 py-2.5">操作</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100 bg-white dark:divide-slate-800 dark:bg-slate-950">
-              <tr v-for="row in filteredRows" :key="row.record.id || row.recordNo" class="align-top hover:bg-slate-50 dark:hover:bg-slate-900">
+              <tr v-for="row in filteredRows" :key="`${row.reviewEntityType}-${row.record.id || row.recordNo}`" class="align-top hover:bg-slate-50 dark:hover:bg-slate-900">
                 <td class="px-3 py-3 font-mono text-[12px] font-semibold text-slate-800 dark:text-slate-100">{{ row.recordNo }}</td>
+                <td class="px-3 py-3">
+                  <p class="line-clamp-2 font-semibold leading-5 text-slate-900 dark:text-white">{{ row.literatureTitle }}</p>
+                  <p class="mt-1 truncate text-[11px] text-slate-500">{{ row.literatureDoi || `Literature ${row.literatureId || '--'}` }}</p>
+                </td>
+                <td class="px-3 py-3">
+                  <span
+                    class="inline-flex rounded-md px-2 py-1 text-[11px] font-semibold"
+                    :class="row.reviewEntityType === 'candidate'
+                      ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-900'
+                      : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-900'"
+                  >
+                    {{ row.statusLabel }}
+                  </span>
+                </td>
                 <td class="px-3 py-3">
                   <p class="font-semibold text-slate-900 dark:text-white">{{ row.materialSystem }}</p>
                   <p class="mt-1 text-[11px] leading-4 text-slate-500">{{ row.record.confinement_material_class || row.record.confinement_geometry_class || '--' }}</p>
@@ -589,6 +774,16 @@ function exportData(format: 'json' | 'csv' | 'ndjson') {
                 <td class="px-3 py-3 text-slate-700 dark:text-slate-200">{{ row.dataType }}</td>
                 <td class="px-3 py-3 leading-5 text-slate-700 dark:text-slate-300">{{ row.method }}</td>
                 <td class="px-3 py-3 leading-5 text-slate-600 dark:text-slate-400">{{ row.note }}</td>
+                <td class="px-3 py-3">
+                  <button
+                    type="button"
+                    class="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+                    @click="openReviewForRow(row)"
+                  >
+                    <ExternalLink class="h-3 w-3" />
+                    审阅
+                  </button>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -632,7 +827,7 @@ function exportData(format: 'json' | 'csv' | 'ndjson') {
         v-else
         class="flex h-full min-h-[18rem] items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-6 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400"
       >
-        No diffusion records are available for the current selection.
+        {{ libraryLoading ? '正在加载全局扩散库...' : 'No diffusion records are available for the current scope.' }}
       </div>
     </div>
   </div>
