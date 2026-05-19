@@ -149,28 +149,71 @@ const pageCopy = computed(() => ({
   groupedRuns: isChinese.value ? '批量运行' : 'Batch Runs',
 }))
 
+const READY_TO_EXTRACT_STATUSES = new Set(['uploaded', 'queued', 'pending', 'ready', 'staged', 'cancelled', 'no_data', 'error', 'failed', 'success', 'completed'])
+const RUNNING_STATUSES = new Set(['processing', 'running', 'extracting'])
+const FINISHED_STATUSES = new Set(['success', 'completed'])
+const FAILED_STATUSES = new Set(['error', 'failed'])
+
+function normalizedFileStatus(fileOrStatus?: BatchFile | string | null) {
+  const rawStatus = typeof fileOrStatus === 'string'
+    ? fileOrStatus
+    : fileOrStatus?.status
+  return String(rawStatus || '').trim().toLowerCase()
+}
+
+function hasReadyMessage(file?: BatchFile | null) {
+  const message = String(file?.progressMessage || '').trim().toLowerCase()
+  if (!message) return false
+  return message.includes('ready to extract')
+    || message.includes('ready to launch')
+    || message.includes('可以开始')
+    || message.includes('待抽取')
+}
+
+function isFileRunning(file?: BatchFile | null) {
+  if (!file) return false
+  return RUNNING_STATUSES.has(normalizedFileStatus(file))
+}
+
+function isFileReadyToExtract(file?: BatchFile | null) {
+  if (!file) return false
+  const status = normalizedFileStatus(file)
+  if (isFileRunning(file)) return false
+  return READY_TO_EXTRACT_STATUSES.has(status) || hasReadyMessage(file)
+}
+
+function displayStatusForFile(file: BatchFile) {
+  const status = normalizedFileStatus(file)
+  if (status === 'uploading' && hasReadyMessage(file)) return 'uploaded'
+  if (['queued', 'pending', 'ready', 'staged'].includes(status)) return 'uploaded'
+  if (status === 'running' || status === 'extracting') return 'processing'
+  if (status === 'completed') return 'success'
+  if (status === 'failed') return 'error'
+  return status || 'uploaded'
+}
+
 const extractionMetrics = computed(() => {
   const files = props.files
   return [
     {
       key: 'queued',
       label: isChinese.value ? '待抽取' : 'Ready',
-      value: files.filter((file) => ['uploaded', 'cancelled', 'no_data'].includes(String(file.status || '').toLowerCase())).length,
+      value: files.filter((file) => isFileReadyToExtract(file)).length,
     },
     {
       key: 'running',
       label: isChinese.value ? '运行中' : 'Running',
-      value: files.filter((file) => String(file.status || '').toLowerCase() === 'processing').length,
+      value: files.filter((file) => isFileRunning(file)).length,
     },
     {
       key: 'done',
       label: isChinese.value ? '已抽取' : 'Extracted',
-      value: files.filter((file) => String(file.status || '').toLowerCase() === 'success').length,
+      value: files.filter((file) => FINISHED_STATUSES.has(normalizedFileStatus(file))).length,
     },
     {
       key: 'failed',
       label: isChinese.value ? '待重试' : 'Retry',
-      value: files.filter((file) => String(file.status || '').toLowerCase() === 'error').length,
+      value: files.filter((file) => FAILED_STATUSES.has(normalizedFileStatus(file))).length,
     },
   ]
 })
@@ -195,8 +238,14 @@ const filteredFiles = computed(() => {
       if (query && !String(file.name || '').toLowerCase().includes(query)) {
         return false
       }
-      if (statusFilter.value !== 'all' && file.status !== statusFilter.value) {
-        return false
+      if (statusFilter.value === 'processing') {
+        return isFileRunning(file)
+      }
+      if (statusFilter.value === 'error') {
+        return FAILED_STATUSES.has(normalizedFileStatus(file))
+      }
+      if (statusFilter.value === 'success') {
+        return FINISHED_STATUSES.has(normalizedFileStatus(file))
       }
       return true
     })
@@ -204,10 +253,16 @@ const filteredFiles = computed(() => {
 })
 
 const selectedQueueFile = computed<BatchFile | null>(() => {
-  return props.files.find((file) => file.id === props.activeId)
-    || props.selectedFile
+  const activeId = props.activeId || props.selectedFileId
+  const activeFile = activeId ? props.files.find((file) => file.id === activeId) : null
+  const selectedFile = props.selectedFile?.id
+    ? props.files.find((file) => file.id === props.selectedFile?.id)
+    : null
+  return activeFile
+    || selectedFile
     || filteredFiles.value[0]
     || props.files[0]
+    || props.selectedFile
     || null
 })
 
@@ -216,27 +271,25 @@ const activeExtractorType = computed<ExtractorType>(() => selectedQueueFile.valu
 const activeExtractorOption = computed(() => extractorOptions.value.find((option) => option.key === activeExtractorType.value) || extractorOptions.value[0]!)
 
 const extractableFiles = computed(() => {
-  return props.files.filter((file) => ['uploaded', 'error', 'no_data', 'success'].includes(String(file.status || '').toLowerCase()))
+  return props.files.filter((file) => isFileReadyToExtract(file))
 })
 
 const canExtractSelected = computed(() => {
-  const file = selectedQueueFile.value
-  if (!file) return false
-  return !['uploading', 'processing'].includes(String(file.status || '').toLowerCase())
+  return isFileReadyToExtract(selectedQueueFile.value)
 })
 
 const canCancelSelected = computed(() => {
   const file = selectedQueueFile.value
   const run = activeInspectorRun.value
-  const fileStatus = String(file?.status || '').toLowerCase()
+  const fileStatus = normalizedFileStatus(file)
   const runStatus = String(run?.status || '').toLowerCase()
-  return fileStatus === 'processing' || ['running', 'processing'].includes(runStatus)
+  return RUNNING_STATUSES.has(fileStatus) || ['running', 'processing'].includes(runStatus)
 })
 
 const canOpenSelectedReview = computed(() => {
   const file = selectedQueueFile.value
   if (!file) return false
-  const status = String(file.status || '').toLowerCase()
+  const status = normalizedFileStatus(file)
   const run = activeInspectorRun.value
   const diffusionReviewableCount = activeExtractorType.value === 'diffusion' && run
     ? diffusionArtifactCounts(run).reviewable
@@ -245,7 +298,7 @@ const canOpenSelectedReview = computed(() => {
 })
 
 const selectedExtractLabel = computed(() => {
-  const status = String(selectedQueueFile.value?.status || '').toLowerCase()
+  const status = normalizedFileStatus(selectedQueueFile.value)
   if (isChinese.value) {
     if (status === 'error') return '重试抽取'
     if (status === 'no_data') return '重新抽取'
@@ -272,13 +325,13 @@ const activeInspectorRun = computed<ExtractionRunDetail | null>(() => {
 const queueItems = computed<QueueItem[]>(() => filteredFiles.value.map((file) => ({
   id: file.id,
   name: file.name,
-  status: file.status,
-  badge: statusBadge(file.status),
-  badgeClass: statusBadgeClass(file.status),
+  status: displayStatusForFile(file),
+  badge: statusBadge(file),
+  badgeClass: statusBadgeClass(file),
   meta: [
     `doc-${String(file.id || '').slice(0, 6)}`,
     file.scopeKey || props.operatorName || props.activeScopeLabel,
-    file.status === 'processing' ? `${Math.max(1, Math.round(file.progress || 0))}% complete` : detailLabel(file),
+    isFileRunning(file) ? `${Math.max(1, Math.round(file.progress || 0))}% complete` : detailLabel(file),
   ].join('  •  '),
   sublabel: file.errorMessage || file.progressMessage || stageLabelFromFile(file),
   progress: progressForFile(file),
@@ -290,15 +343,15 @@ const inspectorFileName = computed(() => props.activeFileName || selectedQueueFi
 
 const inspectorStatus = computed(() => {
   if (activeInspectorRun.value) return formatRunStatus(activeInspectorRun.value.status)
-  if (selectedQueueFile.value) return statusBadge(selectedQueueFile.value.status)
+  if (selectedQueueFile.value) return statusBadge(selectedQueueFile.value)
   return 'IDLE'
 })
 
 const inspectorSteps = computed<InspectorStep[]>(() => {
   const activeRun = activeInspectorRun.value
   const selectedFile = selectedQueueFile.value
-  const failed = isFailedRun(activeRun?.status) || selectedFile?.status === 'error'
-  const completed = isCompletedRun(activeRun?.status) || selectedFile?.status === 'success'
+  const failed = isFailedRun(activeRun?.status) || FAILED_STATUSES.has(normalizedFileStatus(selectedFile))
+  const completed = isCompletedRun(activeRun?.status) || FINISHED_STATUSES.has(normalizedFileStatus(selectedFile))
   const activeIndex = inferActiveStage(activeRun, selectedFile)
 
   const definitions = activeExtractorType.value === 'diffusion'
@@ -355,12 +408,13 @@ const inspectorLogs = computed<InspectorLog[]>(() => {
   }
 
   if (selectedQueueFile.value?.errorMessage || selectedQueueFile.value?.progressMessage) {
+    const selectedStatus = normalizedFileStatus(selectedQueueFile.value)
     return [
       {
         id: 'file-message',
-        prefix: selectedQueueFile.value.status === 'error' ? 'ISSUE' : selectedQueueFile.value.status === 'no_data' ? 'NO DATA' : 'INFO',
+        prefix: FAILED_STATUSES.has(selectedStatus) ? 'ISSUE' : selectedStatus === 'no_data' ? 'NO DATA' : 'INFO',
         message: selectedQueueFile.value.errorMessage || selectedQueueFile.value.progressMessage || 'Waiting for live logs.',
-        tone: selectedQueueFile.value.status === 'error' || selectedQueueFile.value.status === 'no_data' ? 'system' : 'info',
+        tone: FAILED_STATUSES.has(selectedStatus) || selectedStatus === 'no_data' ? 'system' : 'info',
       },
     ]
   }
@@ -380,7 +434,7 @@ const inspectorDiagnostics = computed(() => {
   const run = activeInspectorRun.value
   const isDiffusion = activeExtractorType.value === 'diffusion'
   const artifacts = diffusionArtifactCounts(run)
-  const status = String(run?.status || file?.status || '').toLowerCase()
+  const status = String(run?.status || normalizedFileStatus(file) || '').toLowerCase()
   const currentMessage = String(
     run?.summary?.current_message
     || run?.progress_log?.slice(-1)[0]?.message
@@ -423,7 +477,7 @@ const inspectorDiagnostics = computed(() => {
       : waitingForRunLog
         ? (isChinese.value ? '抽取已进入服务器队列，正在等待 worker 创建新的运行日志。' : 'Extraction is queued on the server while the worker creates a fresh run log.')
         : issue || currentMessage || (isChinese.value ? '等待运行日志返回。' : 'Waiting for run logs.'),
-    tone: readyForReview ? 'ready' : noData ? 'warning' : status === 'error' || status === 'failed' ? 'error' : 'neutral',
+    tone: readyForReview ? 'ready' : noData ? 'warning' : FAILED_STATUSES.has(status) ? 'error' : 'neutral',
     chips,
     nextAction: readyForReview
       ? (isChinese.value ? '打开审阅，确认候选记录后再入库。' : 'Open Review and confirm candidates before promotion.')
@@ -448,8 +502,8 @@ function triggerUpload() {
 function triggerSelectedExtract() {
   const file = selectedQueueFile.value
   if (!file || !canExtractSelected.value) return
-  const force = ['error', 'success', 'cancelled'].includes(String(file.status || '').toLowerCase())
-    || String(file.status || '').toLowerCase() === 'no_data'
+  const status = normalizedFileStatus(file)
+  const force = ['error', 'failed', 'success', 'completed', 'cancelled', 'no_data'].includes(status)
   emit('extract', file.id, force)
 }
 
@@ -510,47 +564,54 @@ function extractorBadgeClass(extractorType?: ExtractorType | string | null) {
 }
 
 function queueWeight(file: BatchFile) {
+  const status = normalizedFileStatus(file)
   if (file.id === props.activeId || file.id === props.selectedFileId) return 100
-  if (file.status === 'uploading') return 90
-  if (file.status === 'processing') return 80
-  if (file.status === 'no_data') return 70
-  if (file.status === 'error') return 60
-  if (file.status === 'uploaded') return 40
+  if (status === 'uploading' && !hasReadyMessage(file)) return 90
+  if (RUNNING_STATUSES.has(status)) return 80
+  if (status === 'no_data') return 70
+  if (FAILED_STATUSES.has(status)) return 60
+  if (isFileReadyToExtract(file)) return 40
   return 20
 }
 
 function progressForFile(file: BatchFile) {
-  if (file.status === 'success') return 100
-  if (file.status === 'no_data') return 100
-  if (file.status === 'uploading') return Math.max(6, Math.round(file.progress || 6))
-  if (file.status === 'cancelled') return Math.max(8, Math.round(file.progress || 18))
-  if (file.status === 'error') return Math.max(18, Math.round(file.progress || 35))
-  if (file.status === 'processing') return Math.max(12, Math.round(file.progress || 18))
+  const status = normalizedFileStatus(file)
+  if (FINISHED_STATUSES.has(status)) return 100
+  if (status === 'no_data') return 100
+  if (status === 'uploading' && !hasReadyMessage(file)) return Math.max(6, Math.round(file.progress || 6))
+  if (status === 'cancelled') return Math.max(8, Math.round(file.progress || 18))
+  if (FAILED_STATUSES.has(status)) return Math.max(18, Math.round(file.progress || 35))
+  if (RUNNING_STATUSES.has(status)) return Math.max(12, Math.round(file.progress || 18))
   return 8
 }
 
 function detailLabel(file: BatchFile) {
-  if (file.status === 'success') return `${file.records?.length || 0} records extracted`
-  if (file.status === 'no_data') return file.errorMessage || 'No extractable records found'
-  if (file.status === 'uploading') return isChinese.value ? '正在上传到服务器' : 'Uploading to server'
-  if (file.status === 'cancelled') return 'Stopped by user'
-  if (file.status === 'error') return 'Needs retry'
+  const status = normalizedFileStatus(file)
+  if (FINISHED_STATUSES.has(status)) return `${file.records?.length || 0} records extracted`
+  if (status === 'no_data') return file.errorMessage || 'No extractable records found'
+  if (status === 'uploading' && !hasReadyMessage(file)) return isChinese.value ? '正在上传到服务器' : 'Uploading to server'
+  if (status === 'cancelled') return 'Stopped by user'
+  if (FAILED_STATUSES.has(status)) return 'Needs retry'
   return 'Ready to launch'
 }
 
 function stageLabelFromFile(file: BatchFile) {
+  const status = normalizedFileStatus(file)
   if (file.errorMessage) return file.errorMessage
   if (file.progressMessage) return file.progressMessage
-  if (file.status === 'uploading') return isChinese.value ? '正在上传并登记论文' : 'Uploading and registering document'
-  if (file.status === 'processing') return 'Agent extraction in progress'
-  if (file.status === 'success') return 'Completed'
-  if (file.status === 'no_data') return 'No extractable records found'
-  if (file.status === 'cancelled') return 'Extraction stopped'
-  if (file.status === 'error') return 'Execution failed'
+  if (status === 'uploading' && !hasReadyMessage(file)) return isChinese.value ? '正在上传并登记论文' : 'Uploading and registering document'
+  if (RUNNING_STATUSES.has(status)) return 'Agent extraction in progress'
+  if (FINISHED_STATUSES.has(status)) return 'Completed'
+  if (status === 'no_data') return 'No extractable records found'
+  if (status === 'cancelled') return 'Extraction stopped'
+  if (FAILED_STATUSES.has(status)) return 'Execution failed'
   return 'Queued for extraction'
 }
 
-function statusBadge(status: string) {
+function statusBadge(fileOrStatus: BatchFile | string) {
+  const status = typeof fileOrStatus === 'string'
+    ? normalizedFileStatus(fileOrStatus)
+    : displayStatusForFile(fileOrStatus)
   if (status === 'uploading') return isChinese.value ? '上传中' : 'UPLOADING'
   if (status === 'processing') return 'RUNNING'
   if (status === 'success') return 'SUCCESS'
@@ -560,7 +621,10 @@ function statusBadge(status: string) {
   return 'QUEUED'
 }
 
-function statusBadgeClass(status: string) {
+function statusBadgeClass(fileOrStatus: BatchFile | string) {
+  const status = typeof fileOrStatus === 'string'
+    ? normalizedFileStatus(fileOrStatus)
+    : displayStatusForFile(fileOrStatus)
   if (status === 'uploading') return 'border-sky-200 bg-sky-50 text-sky-700'
   if (status === 'processing') return 'border-blue-200 bg-blue-50 text-blue-700'
   if (status === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
@@ -571,6 +635,7 @@ function statusBadgeClass(status: string) {
 }
 
 function progressTone(status: string) {
+  status = normalizedFileStatus(status)
   if (status === 'uploading') return 'bg-sky-500'
   if (status === 'processing') return 'bg-blue-600'
   if (status === 'success') return 'bg-emerald-500'
@@ -581,8 +646,9 @@ function progressTone(status: string) {
 }
 
 function inferActiveStage(activeRun: ExtractionRunDetail | null, file: BatchFile | null) {
-  if (isCompletedRun(activeRun?.status) || ['success', 'no_data'].includes(String(file?.status || '').toLowerCase())) return 4
-  if (isFailedRun(activeRun?.status) || file?.status === 'error') {
+  const fileStatus = normalizedFileStatus(file)
+  if (isCompletedRun(activeRun?.status) || ['success', 'completed', 'no_data'].includes(fileStatus)) return 4
+  if (isFailedRun(activeRun?.status) || FAILED_STATUSES.has(fileStatus)) {
     const stage = String(activeRun?.summary?.current_stage || activeRun?.progress_log?.slice(-1)[0]?.stage || '').toLowerCase()
     if (stage.includes('stage_e') || stage.includes('validation')) return 3
     if (stage.includes('stage_c') || stage.includes('stage_d') || stage.includes('extract')) return 2
@@ -615,7 +681,7 @@ function stepMeta(id: string, state: InspectorStep['state'], activeRun: Extracti
     return `${activeRun.final_count || 0} records`
   }
   if (id === 'layout') {
-    return file?.status === 'processing' ? `${Math.max(1, Math.round(file.progress || 0))}%` : 'active'
+    return file && isFileRunning(file) ? `${Math.max(1, Math.round(file.progress || 0))}%` : 'active'
   }
   return 'active'
 }

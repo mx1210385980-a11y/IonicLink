@@ -47,6 +47,11 @@ export function setFileProcessing(batchFile: BatchFile | undefined, progress: nu
 
 export function setFileUploadProgress(batchFile: BatchFile | undefined, percent: number | null | undefined, t: WorkspaceTranslator) {
   if (!batchFile) return
+  const currentStatus = String(batchFile.status || '').toLowerCase()
+  const isUploadPlaceholder = String(batchFile.id || '').startsWith('uploading-')
+  if (currentStatus && currentStatus !== 'uploading' && !isUploadPlaceholder) {
+    return
+  }
   const normalizedPercent = Number(percent)
   const hasPercent = Number.isFinite(normalizedPercent)
   const boundedPercent = hasPercent ? Math.max(0, Math.min(100, Math.round(normalizedPercent))) : null
