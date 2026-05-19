@@ -796,10 +796,10 @@ function logToneClass(tone: InspectorLog['tone']) {
       @change="handleFileInput"
     >
 
-    <section class="shell-surface px-4 py-4 sm:px-5">
+    <section class="shell-surface-strong px-4 py-4 sm:px-5">
       <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_28rem] xl:items-center">
         <div class="min-w-0">
-          <div class="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-slate-500">
+          <div class="section-eyebrow">
             {{ pageCopy.eyebrow }}
           </div>
           <div class="mt-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -816,7 +816,7 @@ function logToneClass(tone: InspectorLog['tone']) {
               <article
                 v-for="metric in extractionMetrics"
                 :key="metric.key"
-                class="rounded-md border border-slate-200 bg-white px-3 py-2.5"
+                class="metric-tile px-3 py-2.5"
               >
                 <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-400">{{ metric.label }}</p>
                 <p class="mt-1 text-2xl font-semibold leading-none text-slate-950">{{ metric.value }}</p>
@@ -827,7 +827,7 @@ function logToneClass(tone: InspectorLog['tone']) {
           <div class="mt-4 flex flex-wrap items-center gap-2.5">
             <button
               type="button"
-              class="inline-flex items-center gap-2 rounded-md bg-slate-950 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800"
+              class="action-primary px-5 py-2.5 text-sm"
               @click="triggerUpload"
             >
               <Upload class="h-4 w-4" />
@@ -836,10 +836,10 @@ function logToneClass(tone: InspectorLog['tone']) {
 
             <button
               type="button"
-              class="inline-flex items-center gap-2 rounded-md px-5 py-2.5 text-sm font-medium transition"
+              class="px-5 py-2.5 text-sm"
               :class="canExtractSelected
-                ? 'bg-blue-600 text-white hover:bg-blue-700'
-                : 'cursor-not-allowed bg-slate-100 text-slate-400'"
+                ? 'action-primary'
+                : 'action-muted'"
               :disabled="!canExtractSelected"
               @click="triggerSelectedExtract"
             >
@@ -849,10 +849,10 @@ function logToneClass(tone: InspectorLog['tone']) {
 
             <button
               type="button"
-              class="inline-flex items-center gap-2 rounded-md px-5 py-2.5 text-sm font-medium transition"
+              class="px-5 py-2.5 text-sm"
               :class="canBatchExtract
-                ? 'bg-slate-100 text-slate-900 hover:bg-slate-200'
-                : 'cursor-not-allowed bg-slate-50 text-slate-400'"
+                ? 'action-secondary'
+                : 'action-muted'"
               :disabled="!canBatchExtract"
               @click="triggerBatchExtract"
             >
@@ -883,7 +883,7 @@ function logToneClass(tone: InspectorLog['tone']) {
                 v-for="option in extractorOptions"
                 :key="option.key"
                 type="button"
-                class="rounded-md border px-3.5 py-3 text-left transition"
+                class="rounded-md border px-3.5 py-3 text-left transition hover:shadow-sm"
                 :class="activeExtractorType === option.key ? option.activeClass : option.inactiveClass"
                 @click="setActiveExtractor(option.key)"
               >
@@ -917,7 +917,7 @@ function logToneClass(tone: InspectorLog['tone']) {
 
             <button
               type="button"
-              class="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              class="action-secondary h-10 px-3.5 text-sm"
               :title="`${pageCopy.filter}: ${filterLabel()}`"
               @click="cycleFilter"
             >
@@ -947,9 +947,9 @@ function logToneClass(tone: InspectorLog['tone']) {
           <div class="flex flex-wrap items-center justify-end gap-3">
             <button
               type="button"
-              class="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium transition"
+              class="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium transition"
               :class="currentSection === 'batch'
-                ? 'border-indigo-200 bg-indigo-50 text-indigo-700'
+                ? 'border-cyan-200 bg-cyan-50 text-cyan-700'
                 : 'border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50'"
               @click="emit('change-section', currentSection === 'batch' ? 'runs' : 'batch')"
             >
@@ -969,9 +969,9 @@ function logToneClass(tone: InspectorLog['tone']) {
               v-for="item in queueItems"
               :key="item.id"
               type="button"
-              class="w-full rounded-md border px-4 py-4 text-left transition"
+              class="w-full rounded-md border px-4 py-4 text-left transition hover:shadow-sm"
               :class="item.isSelected
-                ? 'border-slate-300 bg-slate-50'
+                ? 'border-cyan-200 bg-cyan-50/35 ring-1 ring-cyan-100'
                 : 'border-slate-100 bg-white hover:border-slate-200 hover:bg-slate-50/50'"
               @click="emit('select-file', item.id)"
             >
@@ -1139,10 +1139,10 @@ function logToneClass(tone: InspectorLog['tone']) {
           <div class="mt-4 grid gap-2 sm:grid-cols-2">
             <button
               type="button"
-              class="inline-flex items-center justify-center rounded-md px-4 py-2.5 text-sm font-medium transition"
+              class="px-4 py-2.5 text-sm"
               :class="canExtractSelected
-                ? 'bg-slate-900 text-white shadow-sm hover:bg-slate-800'
-                : 'cursor-not-allowed bg-slate-100 text-slate-400'"
+                ? 'action-primary'
+                : 'action-muted'"
               :disabled="!canExtractSelected"
               @click="triggerSelectedExtract"
             >
@@ -1158,10 +1158,10 @@ function logToneClass(tone: InspectorLog['tone']) {
             </button>
             <button
               type="button"
-              class="inline-flex items-center justify-center rounded-md border px-4 py-2.5 text-sm font-medium transition"
+              class="px-4 py-2.5 text-sm"
               :class="canOpenSelectedReview
-                ? 'border-slate-200 bg-white text-slate-900 hover:bg-slate-50'
-                : 'cursor-not-allowed border-slate-100 bg-slate-50 text-slate-400'"
+                ? 'action-secondary'
+                : 'action-muted'"
               :disabled="!canOpenSelectedReview"
               :title="canOpenSelectedReview ? 'Open review workspace' : 'Review opens after extraction records are ready'"
               @click="emit('open-review', selectedQueueFile?.id || selectedFileId)"

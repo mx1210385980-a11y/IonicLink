@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { Github } from 'lucide-vue-next'
+import { Activity, Database, FileText, Github, PanelTop } from 'lucide-vue-next'
 
 import AppSidebar from '@/components/AppSidebar.vue'
 import LoginScreen from '@/components/LoginScreen.vue'
@@ -137,6 +137,36 @@ const viewTitle = computed(() => {
     review: 'Review',
   }
   return labels[currentView.value] || formatLabel(currentView.value)
+})
+
+const viewSubtitle = computed(() => {
+  if (isChinese.value) {
+    const labels: Record<AppView, string> = {
+      admin: '权限、运行和系统配置',
+      blog: '内容与文档中心',
+      help: '上手指南与协作说明',
+      home: '今日任务、风险和下一步',
+      knowledge: '分类数据资产与来源追踪',
+      modeling: '特征工程与建模准备',
+      pipeline: '上传、抽取、重试和审阅交接',
+      quality: '数据质量、缺失和异常监控',
+      review: '人工确认机器抽取结果',
+    }
+    return labels[currentView.value] || '科研数据工作台'
+  }
+
+  const labels: Record<AppView, string> = {
+    admin: 'Permissions, runtime, and system setup',
+    blog: 'Content and documentation center',
+    help: 'Guides for onboarding and collaboration',
+    home: 'Today, blockers, and next actions',
+    knowledge: 'Structured data assets and source traceability',
+    modeling: 'Feature engineering and modeling preparation',
+    pipeline: 'Upload, extract, retry, and hand off to review',
+    quality: 'Data quality, missing fields, and anomaly monitoring',
+    review: 'Human confirmation for extracted records',
+  }
+  return labels[currentView.value] || 'Research data workspace'
 })
 
 const queueSizeLabel = computed(() => {
@@ -530,7 +560,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
     @exit="navigateTo('help', 'content')"
   />
 
-  <div v-else class="app-shell flex h-screen overflow-hidden bg-slate-100 text-foreground dark:bg-slate-950">
+  <div v-else class="app-shell flex h-screen overflow-hidden text-foreground">
     <!-- Left sidebar -->
     <AppSidebar
       :current-view="currentView"
@@ -552,17 +582,40 @@ function handleHomeAction(action: HomeSuggestedAction) {
 
     <!-- Right content column -->
     <div class="flex min-h-0 min-w-0 flex-1 flex-col">
-      <!-- Minimal top bar -->
-      <header class="flex h-12 shrink-0 items-center gap-3 border-b border-slate-200 bg-white px-4 dark:border-slate-800 dark:bg-slate-900">
-        <h2 class="text-sm font-semibold capitalize text-slate-800 dark:text-slate-100">
-          {{ viewTitle }}
-        </h2>
-        <div class="ml-auto flex items-center gap-1.5">
+      <!-- Workspace top bar -->
+      <header class="app-topbar flex h-14 shrink-0 items-center gap-3 px-4">
+        <div class="flex min-w-0 items-center gap-2.5">
+          <span class="hidden h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400 sm:flex">
+            <PanelTop class="h-4 w-4" />
+          </span>
+          <div class="min-w-0">
+            <h2 class="truncate text-sm font-semibold text-slate-950 dark:text-slate-50">
+              {{ viewTitle }}
+            </h2>
+            <p class="hidden truncate text-xs text-slate-500 dark:text-slate-400 md:block">
+              {{ viewSubtitle }}
+            </p>
+          </div>
+        </div>
+
+        <div class="ml-auto flex min-w-0 items-center gap-2">
+          <span class="topbar-chip hidden max-w-[16rem] lg:inline-flex">
+            <Database class="h-3.5 w-3.5 shrink-0" />
+            <span class="truncate">{{ activeScopeLabel }}</span>
+          </span>
+          <span v-if="selectedFile" class="topbar-chip hidden max-w-[20rem] xl:inline-flex">
+            <FileText class="h-3.5 w-3.5 shrink-0" />
+            <span class="truncate">{{ selectedFileName }}</span>
+          </span>
+          <span class="topbar-chip hidden max-w-[14rem] sm:inline-flex">
+            <Activity class="h-3.5 w-3.5 shrink-0" />
+            <span class="truncate">{{ runStateLabel }}</span>
+          </span>
           <a
             href="https://github.com/mx1210385980-a11y/IonicLink/tree/main"
             target="_blank"
             rel="noreferrer"
-            class="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+            class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"
             title="GitHub"
           >
             <Github class="h-4 w-4" />
@@ -572,7 +625,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
 
       <!-- Page workspace -->
       <main class="flex-1 min-h-0 overflow-hidden">
-        <div class="flex h-full min-h-0 flex-col gap-3 px-3 py-3 sm:px-4 sm:py-4">
+        <div class="app-workspace flex h-full min-h-0 flex-col gap-3 px-3 py-3 sm:px-4 sm:py-4">
           <HomePage
             v-if="currentView === 'home'"
             :active-scope-label="activeScopeLabel"

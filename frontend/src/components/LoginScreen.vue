@@ -55,11 +55,11 @@ function handleSubmit() {
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-100 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+  <div class="app-shell min-h-screen text-slate-900 dark:text-slate-100">
     <div class="mx-auto flex min-h-screen max-w-6xl flex-col px-5 py-6 lg:px-8">
       <div class="mb-5 flex items-center justify-between">
         <div>
-          <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">
+          <p class="section-eyebrow">
             {{ t('login.lab_eyebrow') }}
           </p>
           <h1 class="mt-1 text-xl font-semibold text-slate-950 dark:text-white">IonicLink</h1>
@@ -67,10 +67,10 @@ function handleSubmit() {
         <LanguageToggle />
       </div>
 
-      <div class="grid min-h-0 flex-1 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:grid-cols-[minmax(0,1fr)_24rem]">
+      <div class="shell-surface-strong grid min-h-0 flex-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_24rem]">
         <section class="border-b border-slate-200 px-6 py-7 dark:border-slate-800 lg:border-b-0 lg:border-r lg:px-8 lg:py-8">
           <div class="max-w-2xl">
-            <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">
+            <p class="section-eyebrow">
               {{ t('login.secure_sign_in') }}
             </p>
             <h2 class="mt-3 text-2xl font-semibold text-slate-950 dark:text-white">{{ t('login.enter_surface') }}</h2>
@@ -134,8 +134,8 @@ function handleSubmit() {
           </div>
         </section>
 
-        <section class="px-6 py-7 lg:px-6 lg:py-8">
-          <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400">
+        <section class="bg-slate-50/70 px-6 py-7 dark:bg-slate-950/35 lg:px-6 lg:py-8">
+          <p class="section-eyebrow">
             {{ t('login.hero_subtitle') }}
           </p>
           <p class="mt-3 text-sm leading-6 text-slate-600 dark:text-slate-300">

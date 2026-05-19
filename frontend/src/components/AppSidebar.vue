@@ -198,7 +198,7 @@ onBeforeUnmount(() => {
 
 <template>
   <aside
-    class="relative z-50 flex h-screen shrink-0 flex-col overflow-hidden border-r border-slate-800 bg-slate-950 text-slate-300 transition-[width] duration-300"
+    class="sidebar-shell relative z-50 flex h-screen shrink-0 flex-col overflow-hidden transition-[width] duration-300"
     :class="isCollapsed ? 'w-[4.75rem]' : 'w-[224px]'"
   >
     <button
@@ -218,7 +218,7 @@ onBeforeUnmount(() => {
     >
       <button
         type="button"
-        class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-white/10 text-slate-100 transition hover:bg-white/15"
+        class="sidebar-brand-mark flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition"
         :title="isChinese ? '打开内容中心' : 'Open Content Center'"
         @click="emit('navigate', 'blog', 'articles')"
       >
@@ -240,10 +240,12 @@ onBeforeUnmount(() => {
         v-for="item in primaryNav"
         :key="item.key"
         type="button"
-        class="group relative flex rounded-md text-[13.5px] font-medium transition"
-        :class="currentView === item.key
-          ? (isCollapsed ? 'justify-center bg-white/10 px-0 py-2.5 text-white' : 'items-center gap-2.5 bg-white/10 px-2.5 py-2 text-white')
-          : (isCollapsed ? 'justify-center px-0 py-2.5 text-slate-400 hover:bg-white/6 hover:text-slate-100' : 'items-center gap-2.5 px-2.5 py-2 text-slate-400 hover:bg-white/6 hover:text-slate-100')"
+        class="sidebar-nav-item group relative flex rounded-md text-[13.5px] font-medium transition"
+        :class="[
+          currentView === item.key ? 'is-active' : '',
+          isCollapsed ? 'justify-center px-0 py-2.5' : 'items-center gap-2.5 px-2.5 py-2',
+          currentView === item.key ? 'text-white' : 'text-slate-400',
+        ]"
         :title="navLabel(item)"
         @click="emit('navigate', item.key)"
       >
@@ -264,7 +266,7 @@ onBeforeUnmount(() => {
     <!-- Papers section -->
     <div class="mt-3 flex flex-col min-h-0 flex-1">
       <div v-if="!isCollapsed" class="mb-1.5 flex items-center justify-between px-4">
-        <p class="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-600">
+        <p class="sidebar-section-title">
           {{ isChinese ? '论文' : 'Papers' }}
           <span v-if="batchFiles.length" class="ml-1 text-slate-500">{{ batchFiles.length }}</span>
         </p>
@@ -284,10 +286,8 @@ onBeforeUnmount(() => {
       >
         <button
           type="button"
-          class="group mb-1 flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition"
-          :class="selectedFileId === null
-            ? 'bg-white/10 text-slate-100'
-            : 'text-slate-400 hover:bg-white/6 hover:text-slate-200'"
+          class="sidebar-paper-row group mb-1 flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition"
+          :class="selectedFileId === null ? 'is-active' : 'text-slate-400'"
           @click="openScopeLibrary"
         >
           <Database class="h-3.5 w-3.5 shrink-0 text-slate-600 group-hover:text-slate-400" />
@@ -307,10 +307,8 @@ onBeforeUnmount(() => {
           v-for="file in batchFiles"
           :key="file.id"
           type="button"
-          class="group flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition"
-          :class="selectedFileId === file.id
-            ? 'bg-white/10 text-slate-100'
-            : 'text-slate-400 hover:bg-white/6 hover:text-slate-200'"
+          class="sidebar-paper-row group flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition"
+          :class="selectedFileId === file.id ? 'is-active' : 'text-slate-400'"
           @click="handlePaperClick(file)"
         >
           <FileText class="h-3.5 w-3.5 shrink-0 text-slate-600 group-hover:text-slate-400" />
@@ -334,10 +332,8 @@ onBeforeUnmount(() => {
       >
         <button
           type="button"
-          class="group flex h-10 w-10 items-center justify-center rounded-md transition"
-          :class="selectedFileId === null
-            ? 'bg-white/10 text-slate-100'
-            : 'text-slate-400 hover:bg-white/6 hover:text-slate-200'"
+          class="sidebar-paper-row group flex h-10 w-10 items-center justify-center rounded-md transition"
+          :class="selectedFileId === null ? 'is-active' : 'text-slate-400'"
           :title="isChinese ? '课题组文献库' : 'Group Library'"
           @click="openScopeLibrary"
         >
@@ -359,10 +355,8 @@ onBeforeUnmount(() => {
           v-for="file in collapsedPaperItems"
           :key="file.id"
           type="button"
-          class="relative flex h-10 w-10 items-center justify-center rounded-md transition"
-          :class="selectedFileId === file.id
-            ? 'bg-white/10 text-slate-100'
-            : 'text-slate-400 hover:bg-white/6 hover:text-slate-200'"
+          class="sidebar-paper-row relative flex h-10 w-10 items-center justify-center rounded-md transition"
+          :class="selectedFileId === file.id ? 'is-active' : 'text-slate-400'"
           :title="truncateName(file.name, 36)"
           @click="handlePaperClick(file)"
         >
@@ -381,10 +375,12 @@ onBeforeUnmount(() => {
         v-for="item in visibleSecondaryNav"
         :key="item.key"
         type="button"
-        class="group flex rounded-md text-[13px] font-medium transition"
-        :class="currentView === item.key
-          ? (isCollapsed ? 'justify-center bg-white/10 px-0 py-2 text-white' : 'items-center gap-2.5 bg-white/10 px-2.5 py-1.5 text-white')
-          : (isCollapsed ? 'justify-center px-0 py-2 text-slate-500 hover:bg-white/6 hover:text-slate-300' : 'items-center gap-2.5 px-2.5 py-1.5 text-slate-500 hover:bg-white/6 hover:text-slate-300')"
+        class="sidebar-nav-item group flex rounded-md text-[13px] font-medium transition"
+        :class="[
+          currentView === item.key ? 'is-active' : '',
+          isCollapsed ? 'justify-center px-0 py-2' : 'items-center gap-2.5 px-2.5 py-1.5',
+          currentView === item.key ? 'text-white' : 'text-slate-500',
+        ]"
         :title="navLabel(item)"
         @click="emit('navigate', item.key)"
       >

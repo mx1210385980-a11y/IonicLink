@@ -415,9 +415,9 @@ watch(
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col bg-slate-100 p-2.5 dark:bg-slate-950">
-    <section class="mb-2 shrink-0 rounded-lg border border-slate-200 bg-white px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900">
-      <div class="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+  <div class="flex h-full min-h-0 flex-col">
+    <section class="shell-surface-strong mb-3 shrink-0 px-4 py-3">
+      <div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div class="flex min-w-0 items-center gap-2.5">
           <span
             class="flex h-10 w-10 shrink-0 items-center justify-center rounded-md"
@@ -427,7 +427,7 @@ watch(
           </span>
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
-              <p class="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+              <p class="section-eyebrow">
                 Knowledge
               </p>
               <span
@@ -451,7 +451,7 @@ watch(
           v-for="library in knowledgeLibraries"
           :key="library.key"
           type="button"
-          class="flex h-[4.6rem] min-w-0 items-center gap-2 rounded-lg border px-2.5 py-2 text-left transition"
+          class="flex h-[4.6rem] min-w-0 items-center gap-2 rounded-md border px-2.5 py-2 text-left transition hover:shadow-sm"
           :class="libraryToneClass(library, library.key === effectiveKnowledgeLibraryKey)"
           @click="selectKnowledgeLibrary(library)"
         >
@@ -474,7 +474,7 @@ watch(
         </div>
       </div>
 
-      <div class="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+      <div class="mt-3 flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400">
         <span class="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 dark:border-slate-800 dark:bg-slate-950/40">
           {{ activeScopeLabel }}
         </span>
@@ -505,7 +505,7 @@ watch(
       />
 
       <main class="flex min-h-0 flex-col gap-3 overflow-hidden">
-        <section class="min-h-0 flex-1 overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <section class="shell-surface min-h-0 flex-1 overflow-hidden">
           <div
             v-if="isReservedKnowledgeLibrary"
             class="flex h-full min-h-[22rem] items-center justify-center bg-slate-50 px-6 text-center dark:bg-slate-950/40"
