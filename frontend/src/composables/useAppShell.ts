@@ -392,6 +392,7 @@ export function useAppShell(
     if (status === 'cancelled') return false
     if (status === 'no_data') return true
     if (!['completed', 'success', 'failed', 'error', 'cancelled'].includes(status)) return false
+    if (run.extractor_type === 'diffusion' && Number(run.candidate_count || 0) > 0) return false
     return Number(run.final_count || 0) === 0
   }
 
