@@ -29,7 +29,6 @@ sync_frontend() {
   rsync -az --delete --progress \
     --exclude "node_modules/" \
     --exclude "dist/" \
-    --exclude "public/guide.mp4" \
     frontend/ "${TARGET}:${REMOTE_DIR}/frontend/"
 }
 
@@ -53,6 +52,17 @@ sync_scripts() {
   echo "==> Syncing helper scripts"
   rsync -az --delete --progress \
     scripts/ "${TARGET}:${REMOTE_DIR}/scripts/"
+}
+
+build_frontend_dist() {
+  echo "==> Building frontend dist locally"
+  VITE_API_URL="${VITE_API_URL:-/api}" npm --prefix frontend run build
+}
+
+sync_frontend_dist() {
+  echo "==> Syncing frontend dist"
+  rsync -az --delete --progress \
+    frontend/dist/ "${TARGET}:${REMOTE_DIR}/frontend/dist/"
 }
 
 sync_frontend_deploy() {
@@ -84,6 +94,12 @@ remote() {
 case "$ACTION" in
   frontend)
     sync_frontend_deploy
+    build_frontend_dist
+    sync_frontend_dist
+    remote "if sudo docker inspect ioniclink-frontend >/dev/null 2>&1; then sudo docker compose up -d --no-deps frontend && sudo docker exec ioniclink-frontend sh -lc 'rm -rf /usr/share/nginx/html/*' && sudo docker cp frontend/dist/. ioniclink-frontend:/usr/share/nginx/html/ && sudo docker cp frontend/nginx.conf ioniclink-frontend:/etc/nginx/conf.d/default.conf && sudo docker compose exec -T frontend nginx -s reload; else sudo docker build -f frontend/Dockerfile --build-arg VITE_API_URL=/api -t repo-frontend . && sudo docker compose up -d --no-deps --no-build frontend; fi"
+    ;;
+  frontend-image)
+    sync_frontend_deploy
     remote "sudo docker build -f frontend/Dockerfile --build-arg VITE_API_URL=/api -t repo-frontend . && sudo docker compose up -d --no-deps --no-build frontend"
     ;;
   backend)
@@ -109,7 +125,11 @@ case "$ACTION" in
     ;;
   *)
     cat >&2 <<'USAGE'
-Usage: scripts/deploy-server.sh [frontend|backend|all|nginx|restart|status|logs]
+Usage: scripts/deploy-server.sh [frontend|frontend-image|backend|all|nginx|restart|status|logs]
+
+Notes:
+  frontend       Build locally and hot-swap nginx static assets on the server.
+  frontend-image Rebuild the frontend Docker image on the server.
 
 Environment overrides:
   IONICLINK_HOST=47.82.82.215

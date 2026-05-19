@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import type { ECharts, EChartsCoreOption } from 'echarts'
+import type { GraphSeriesOption } from 'echarts/charts'
+import type { TooltipComponentOption } from 'echarts/components'
+import type { ComposeOption, EChartsType } from 'echarts/core'
 import { AlertTriangle, BookOpen, Database, Loader2, RefreshCw } from 'lucide-vue-next'
 
 import {
@@ -33,9 +35,12 @@ const drilldown = ref<RelationshipGraphDrilldownResponse | null>(null)
 const drilldownLoading = ref(false)
 const drilldownError = ref('')
 
-let chart: ECharts | null = null
-let echartsModule: typeof import('echarts') | null = null
-let echartsPromise: Promise<typeof import('echarts')> | null = null
+type RelationshipChartOption = ComposeOption<GraphSeriesOption | TooltipComponentOption>
+type EChartsCoreModule = typeof import('echarts/core')
+
+let chart: EChartsType | null = null
+let echartsModule: EChartsCoreModule | null = null
+let echartsPromise: Promise<EChartsCoreModule> | null = null
 let resizeObserver: ResizeObserver | null = null
 let lastLoadedRefreshKey: number | null = null
 
@@ -145,10 +150,16 @@ function disposeChart() {
 async function loadECharts() {
   if (echartsModule) return echartsModule
   if (!echartsPromise) {
-    echartsPromise = import('echarts')
-      .then((module) => {
-        echartsModule = module
-        return module
+    echartsPromise = Promise.all([
+      import('echarts/core'),
+      import('echarts/lib/chart/graph'),
+      import('echarts/lib/component/tooltip'),
+      import('echarts/lib/renderer/installCanvasRenderer'),
+    ])
+      .then(([core, , , canvasRenderer]) => {
+        core.use([canvasRenderer.install])
+        echartsModule = core
+        return core
       })
       .catch((error) => {
         echartsPromise = null
@@ -184,7 +195,7 @@ function edgeWidth(edge: RelationshipGraphEdge, maxCount: number): number {
   return Number((1.8 + ratio * 5.2).toFixed(2))
 }
 
-function buildChartOption(data: RelationshipGraphResponse): EChartsCoreOption {
+function buildChartOption(data: RelationshipGraphResponse): RelationshipChartOption {
   const isDark = document.documentElement.classList.contains('dark')
   const categories = Array.from(new Set(data.nodes.map((node) => node.type))).map((type) => ({
     name: typeLabel(type),
@@ -261,7 +272,7 @@ function buildChartOption(data: RelationshipGraphResponse): EChartsCoreOption {
             shadowBlur: 14,
             shadowColor: `${nodeColor(node.type)}44`,
           },
-        })),
+        })) as any,
         links: data.edges.map((edge) => ({
           ...edge,
           lineStyle: {
@@ -269,7 +280,7 @@ function buildChartOption(data: RelationshipGraphResponse): EChartsCoreOption {
             color: edgeColor(edge.avgCof),
             opacity: 0.82,
           },
-        })),
+        })) as any,
       },
     ],
   }

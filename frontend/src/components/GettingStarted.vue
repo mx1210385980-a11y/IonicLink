@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import {
   BarChart3,
   BookOpen,
-  CirclePause,
-  CirclePlay,
   Database,
   KeyRound,
   MessageSquare,
@@ -17,19 +15,7 @@ import {
 
 import { useI18n } from '@/composables/useI18n'
 
-const guideVideoRef = ref<HTMLVideoElement | null>(null)
-const isPlaying = ref(false)
-const currentTime = ref(0)
-const duration = ref(0)
 const { t } = useI18n()
-const guideVideoSrc = '/guide.mp4'
-
-const progressPercent = computed(() => {
-  if (duration.value <= 0) {
-    return 0
-  }
-  return Math.min(100, (currentTime.value / duration.value) * 100)
-})
 
 const howItWorks = computed<Array<{
   title: string
@@ -125,68 +111,6 @@ const systemRequirements = computed<Array<{
   },
 ])
 
-const toggleVideo = () => {
-  const video = guideVideoRef.value
-  if (!video) {
-    return
-  }
-
-  if (video.paused) {
-    void video.play()
-    return
-  }
-
-  video.pause()
-}
-
-const onLoadedMetadata = () => {
-  const video = guideVideoRef.value
-  if (!video) {
-    return
-  }
-
-  duration.value = Number.isFinite(video.duration) ? video.duration : 0
-}
-
-const onTimeUpdate = () => {
-  const video = guideVideoRef.value
-  if (!video) {
-    return
-  }
-
-  currentTime.value = video.currentTime
-  if (!duration.value && Number.isFinite(video.duration)) {
-    duration.value = video.duration
-  }
-}
-
-const onSeek = (event: Event) => {
-  const target = event.target as HTMLInputElement
-  const nextTime = Number(target.value)
-  if (!Number.isFinite(nextTime)) {
-    return
-  }
-
-  const video = guideVideoRef.value
-  if (!video) {
-    return
-  }
-
-  video.currentTime = nextTime
-  currentTime.value = nextTime
-}
-
-const formatTime = (timeInSeconds: number) => {
-  if (!Number.isFinite(timeInSeconds) || timeInSeconds <= 0) {
-    return '0:00'
-  }
-
-  const minutes = Math.floor(timeInSeconds / 60)
-  const seconds = Math.floor(timeInSeconds % 60)
-    .toString()
-    .padStart(2, '0')
-  return `${minutes}:${seconds}`
-}
 </script>
 
 <template>
@@ -203,85 +127,6 @@ const formatTime = (timeInSeconds: number) => {
           {{ t('guide.hero_description') }}
         </p>
       </header>
-
-      <section class="mb-12 lg:mb-14">
-        <div class="group/video relative overflow-hidden rounded-3xl bg-slate-900 shadow-[0_24px_56px_-24px_rgba(15,23,42,0.65)]">
-          <video
-            ref="guideVideoRef"
-            class="aspect-[16/9] w-full object-cover"
-            :src="guideVideoSrc"
-            preload="metadata"
-            playsinline
-            @click="toggleVideo"
-            @play="isPlaying = true"
-            @pause="isPlaying = false"
-            @ended="isPlaying = false"
-            @loadedmetadata="onLoadedMetadata"
-            @timeupdate="onTimeUpdate"
-          />
-
-          <div
-            class="pointer-events-none absolute inset-0 bg-gradient-to-r from-slate-900/85 via-slate-900/70 to-indigo-950/80 transition-opacity duration-300"
-            :class="isPlaying ? 'opacity-0' : 'opacity-100'"
-          />
-
-          <div
-            v-if="!isPlaying"
-            class="pointer-events-none absolute inset-0 flex items-center justify-center px-4 text-center"
-          >
-            <button
-              type="button"
-              class="pointer-events-auto flex flex-col items-center"
-              @click="toggleVideo"
-            >
-              <span class="mb-5 inline-flex h-20 w-20 items-center justify-center rounded-full bg-indigo-500/95 text-white shadow-[0_0_28px_rgba(99,102,241,0.55)]">
-                <CirclePlay class="h-10 w-10" />
-              </span>
-              <p class="text-4xl font-semibold text-white sm:text-[2.2rem]">
-                {{ t('guide.video_title') }}
-              </p>
-              <p class="mt-2 text-base text-slate-300 sm:text-lg">
-                {{ t('guide.video_subtitle') }}
-              </p>
-            </button>
-          </div>
-
-          <div
-            class="pointer-events-none absolute inset-x-4 bottom-4 z-20 translate-y-3 opacity-0 transition-all duration-200 group-hover/video:pointer-events-auto group-hover/video:translate-y-0 group-hover/video:opacity-100 group-focus-within/video:pointer-events-auto group-focus-within/video:translate-y-0 group-focus-within/video:opacity-100 sm:inset-x-6"
-            @click.stop
-          >
-            <div class="flex items-center gap-3 rounded-full bg-slate-950/75 px-3 py-2 backdrop-blur-md sm:px-4">
-              <button
-                type="button"
-                class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-indigo-500 text-white transition hover:bg-indigo-400"
-                @click="toggleVideo"
-              >
-                <CirclePause v-if="isPlaying" class="h-4 w-4" />
-                <CirclePlay v-else class="h-4 w-4" />
-              </button>
-              <span class="w-11 shrink-0 text-right text-xs font-medium text-slate-200">
-                {{ formatTime(currentTime) }}
-              </span>
-              <input
-                class="video-progress h-1.5 w-full cursor-pointer rounded-full"
-                type="range"
-                min="0"
-                :max="duration || 0"
-                step="0.1"
-                :value="currentTime"
-                :disabled="duration <= 0"
-                :style="{
-                  background: `linear-gradient(to right, #818cf8 0%, #818cf8 ${progressPercent}%, rgba(148,163,184,0.45) ${progressPercent}%, rgba(148,163,184,0.45) 100%)`,
-                }"
-                @input="onSeek"
-              />
-              <span class="w-11 shrink-0 text-xs font-medium text-slate-200">
-                {{ formatTime(duration) }}
-              </span>
-            </div>
-          </div>
-        </div>
-      </section>
 
       <section class="mb-12 lg:mb-14">
         <h2 class="mb-6 text-center text-[2.35rem] font-semibold text-slate-900 sm:mb-8">
@@ -367,30 +212,3 @@ const formatTime = (timeInSeconds: number) => {
     </div>
   </div>
 </template>
-
-<style scoped>
-.video-progress {
-  -webkit-appearance: none;
-  appearance: none;
-}
-
-.video-progress::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  height: 14px;
-  width: 14px;
-  border-radius: 9999px;
-  background: #ffffff;
-  border: 2px solid #6366f1;
-  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.35);
-}
-
-.video-progress::-moz-range-thumb {
-  height: 14px;
-  width: 14px;
-  border-radius: 9999px;
-  background: #ffffff;
-  border: 2px solid #6366f1;
-  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.35);
-}
-</style>

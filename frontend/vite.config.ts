@@ -17,7 +17,7 @@ function gzipCompressionPlugin(): Plugin {
     },
     writeBundle(_, bundle) {
       for (const fileName of Object.keys(bundle)) {
-        if (!/\.(js|mjs|css|html|json|svg|txt|xml)$/.test(fileName)) {
+        if (!/\.(js|mjs|css|html|json|svg|txt|xml|wasm)$/.test(fileName)) {
           continue
         }
 
@@ -39,6 +39,25 @@ function gzipCompressionPlugin(): Plugin {
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [vue(), gzipCompressionPlugin()],
+  build: {
+    chunkSizeWarningLimit: 900,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('/@vue/') || id.includes('/vue/') || id.includes('/vue-router/')) return 'vendor-vue'
+          if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/lucide-react/')) return 'vendor-react'
+          if (id.includes('/axios/')) return 'vendor-http'
+          if (id.includes('/echarts/') || id.includes('/zrender/')) return 'vendor-echarts'
+          if (id.includes('/chart.js/') || id.includes('/vue-chartjs/')) return 'vendor-charts'
+          if (id.includes('/pdfjs-dist/')) return 'vendor-pdf'
+          if (id.includes('/@rdkit/rdkit/')) return 'vendor-rdkit'
+          if (id.includes('/@tanstack/vue-virtual/')) return 'vendor-virtual'
+          return undefined
+        },
+      },
+    },
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
