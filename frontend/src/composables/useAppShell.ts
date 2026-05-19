@@ -41,7 +41,6 @@ import {
   hasExtractionWarnings,
   isNoDataResponse,
   normalizeExtractionPayload,
-  replaceBatchFileId,
   resetFileForExtractorChange,
   setFileCancelled,
   setFileError,
@@ -329,6 +328,15 @@ export function useAppShell(
 
   function findBatchFile(fileId: string) {
     return batchFiles.value.find((file) => file.id === fileId)
+  }
+
+  function replaceUploadPlaceholder(placeholder: BatchFile, nextFile: BatchFile) {
+    const index = batchFiles.value.findIndex((file) => file === placeholder || file.id === placeholder.id)
+    if (index === -1) {
+      batchFiles.value.push(nextFile)
+      return
+    }
+    batchFiles.value.splice(index, 1, nextFile)
   }
 
   function isTerminalRunStatus(status?: string | null): boolean {
@@ -928,7 +936,7 @@ export function useAppShell(
       })
 
       if (response.success) {
-        const previousId = replaceBatchFileId(placeholder, response.file_id)
+        const previousId = placeholder.id
         if (selectedFileId.value === previousId || !selectedFileId.value) {
           selectedFileId.value = response.file_id
         }
@@ -937,7 +945,7 @@ export function useAppShell(
           defaultExtractorType: defaultExtractorType.value,
           t,
         })
-        Object.assign(placeholder, batchFile)
+        replaceUploadPlaceholder(placeholder, batchFile)
         selectedFileId.value = response.file_id
 
         if (String(response.status || '').toLowerCase() === 'processing') {
@@ -945,7 +953,7 @@ export function useAppShell(
         }
 
         if (['completed', 'no_data'].includes(String(response.status || '').toLowerCase())) {
-          await hydrateCompletedUpload(placeholder)
+          await hydrateCompletedUpload(batchFile)
         }
 
         chatPanelRef.value?.addMessage(
@@ -996,18 +1004,18 @@ export function useAppShell(
             defaultExtractorType: defaultExtractorType.value,
             t,
           })
-          const previousId = replaceBatchFileId(placeholder, response.file_id)
+          const previousId = placeholder.id
           if (selectedFileId.value === previousId || !selectedFileId.value) {
             selectedFileId.value = response.file_id
           }
-          Object.assign(placeholder, batchFile)
+          replaceUploadPlaceholder(placeholder, batchFile)
 
           if (String(response.status || '').toLowerCase() === 'processing') {
             startExtractionTracking(response.file_id)
           }
 
           if (['completed', 'no_data'].includes(String(response.status || '').toLowerCase())) {
-            await hydrateCompletedUpload(placeholder)
+            await hydrateCompletedUpload(batchFile)
           }
 
           successCount++
