@@ -23,7 +23,7 @@ from sqlalchemy import delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from utils.pdf_utils import extract_pdf_text_fitz
+from utils.pdf_utils import extract_pdf_text_fitz, validate_pdf_bytes
 from database import async_session_maker
 from models.db_models import ExtractionRun, Literature, RecordCandidate, TribologyData
 from services.llm_service import llm_service
@@ -85,6 +85,10 @@ EXTRACTED_REFERENCE_DIR = os.path.join("Reference", "Extracted")
 ENABLE_CACHED_PDF_EVIDENCE_RELOCATION = os.getenv("ENABLE_CACHED_PDF_EVIDENCE_RELOCATION", "false").lower() == "true"
 DEFAULT_TEMPERATURE_VALUE = "298.15 K"
 logger = logging.getLogger(__name__)
+
+
+class InvalidUploadError(ValueError):
+    """Raised when an uploaded file is readable enough to identify but not usable."""
 _SOURCE_ANCHOR_CACHE: dict[tuple[str, str, int, str], Optional[dict[str, Any]]] = {}
 
 
@@ -3671,10 +3675,15 @@ async def save_upload_entry(
         content_bytes = await file.read()
         await file.seek(0)
         file_hash = hashlib.sha256(content_bytes).hexdigest() if content_bytes else None
+        is_pdf_upload = file.filename.lower().endswith('.pdf')
+        if is_pdf_upload:
+            validation_error = validate_pdf_bytes(content_bytes, file.filename)
+            if validation_error:
+                raise InvalidUploadError(validation_error)
         
         # 2. Extract Text & DOI Check
         text_content = ""
-        if file.filename.lower().endswith('.pdf'):
+        if is_pdf_upload:
             from utils.pdf_utils import extract_pdf_text_fitz
             text_content = extract_pdf_text_fitz(content_bytes)
         else:
@@ -3700,7 +3709,7 @@ async def save_upload_entry(
                 existing_hash_match.content = text_content or existing_hash_match.content
                 if not existing_hash_match.file_hash:
                     existing_hash_match.file_hash = file_hash
-                if file.filename.lower().endswith('.pdf') and (not existing_hash_match.file_path or not os.path.exists(existing_hash_match.file_path)):
+                if is_pdf_upload and (not existing_hash_match.file_path or not os.path.exists(existing_hash_match.file_path)):
                     pdf_dir = os.path.join(TEMP_UPLOAD_DIR, "pdfs")
                     os.makedirs(pdf_dir, exist_ok=True)
                     pdf_path = os.path.join(pdf_dir, f"{existing_hash_match.id}.pdf")
@@ -3738,7 +3747,7 @@ async def save_upload_entry(
                 existing_doi_match.content = text_content or existing_doi_match.content
                 if file_hash and not existing_doi_match.file_hash:
                     existing_doi_match.file_hash = file_hash
-                if file.filename.lower().endswith('.pdf') and (not existing_doi_match.file_path or not os.path.exists(existing_doi_match.file_path)):
+                if is_pdf_upload and (not existing_doi_match.file_path or not os.path.exists(existing_doi_match.file_path)):
                     pdf_dir = os.path.join(TEMP_UPLOAD_DIR, "pdfs")
                     os.makedirs(pdf_dir, exist_ok=True)
                     pdf_path = os.path.join(pdf_dir, f"{existing_doi_match.id}.pdf")
@@ -3764,7 +3773,7 @@ async def save_upload_entry(
                 fallback_match.content = text_content or fallback_match.content
                 if file_hash and not fallback_match.file_hash:
                     fallback_match.file_hash = file_hash
-                if file.filename.lower().endswith('.pdf') and (not fallback_match.file_path or not os.path.exists(fallback_match.file_path)):
+                if is_pdf_upload and (not fallback_match.file_path or not os.path.exists(fallback_match.file_path)):
                     pdf_dir = os.path.join(TEMP_UPLOAD_DIR, "pdfs")
                     os.makedirs(pdf_dir, exist_ok=True)
                     pdf_path = os.path.join(pdf_dir, f"{fallback_match.id}.pdf")
@@ -3808,7 +3817,7 @@ async def save_upload_entry(
         logger.info("Created literature upload entry literature_id=%s", new_lit.id)
 
         # Save PDF file to disk for later serving (Source Grounding viewer)
-        if file.filename.lower().endswith('.pdf'):
+        if is_pdf_upload:
             pdf_dir = os.path.join(TEMP_UPLOAD_DIR, "pdfs")
             os.makedirs(pdf_dir, exist_ok=True)
             pdf_path = os.path.join(pdf_dir, f"{new_lit.id}.pdf")

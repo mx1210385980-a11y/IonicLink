@@ -2,7 +2,7 @@ import os
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, List
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Request
 import base64
@@ -51,12 +51,14 @@ from services.file_service import (
     _refine_potential_evidence_from_metric_context_with_pdf,
     _temperature_default_evidence_entry,
     _text_explicitly_matches_field_value,
+    InvalidUploadError,
     save_upload_entry,
 )
 from services.extraction_queue_service import get_extraction_queue
 from services.extraction_trace_service import (
     CANCELLED_EXTRACTION_MESSAGE,
     cancel_latest_extraction_run,
+    finalize_extraction_run,
     get_extraction_run,
     list_extraction_candidates,
 )
@@ -3606,6 +3608,9 @@ async def upload_file(
         }
     except HTTPException:
         raise
+    except InvalidUploadError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         await db.rollback()
         _raise_internal_error("Upload file", exc)
@@ -3728,7 +3733,43 @@ async def extract_data(
         lane_status = await _upload_status_for_extractor(db, literature, extractor_type)
         latest_run = await get_latest_extraction_run_by_literature(db, lit_id, extractor_type=extractor_type)
         run_status = str(getattr(latest_run, "status", "") or "").strip().lower()
-        if lane_status == "processing" or run_status in {"queued", "running", "processing", "extracting"}:
+        active_run_statuses = {"queued", "running", "processing", "extracting"}
+        if force and latest_run and run_status in active_run_statuses:
+            last_touch = latest_run.updated_at or latest_run.created_at
+            if last_touch and (datetime.utcnow() - last_touch) > timedelta(minutes=10):
+                stale_message = "Previous extraction run stalled before finishing; retrying with a fresh run."
+                stale_summary = {
+                    "run_id": latest_run.run_id,
+                    "extractor_type": extractor_type,
+                    "profile": latest_run.profile or profile,
+                    "status": "failed",
+                    "candidate_count": int(latest_run.candidate_count or 0),
+                    "final_count": int(latest_run.final_count or 0),
+                    "dropped_by_reason": {"stalled_run": 1},
+                    "page_coverage": {},
+                    "page_candidate_counts": {},
+                    "current_stage": "failed",
+                    "current_message": stale_message,
+                    "progress_log": [{"stage": "failed", "message": stale_message}],
+                }
+                await finalize_extraction_run(
+                    db,
+                    run_id=latest_run.run_id,
+                    status="failed",
+                    candidate_count=int(latest_run.candidate_count or 0),
+                    final_count=int(latest_run.final_count or 0),
+                    dropped_by_reason=stale_summary["dropped_by_reason"],
+                    summary=stale_summary,
+                    error_message=stale_message,
+                )
+                literature.status = "failed"
+                literature.error_message = stale_message
+                await db.commit()
+                lane_status = await _upload_status_for_extractor(db, literature, extractor_type)
+                latest_run = await get_latest_extraction_run_by_literature(db, lit_id, extractor_type=extractor_type)
+                run_status = str(getattr(latest_run, "status", "") or "").strip().lower()
+
+        if lane_status == "processing" or run_status in active_run_statuses:
             summary = _build_processing_summary(
                 extractor_type=extractor_type,
                 profile=profile,

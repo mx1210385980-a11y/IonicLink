@@ -401,7 +401,8 @@ export function useAppShell(
     const status = String(run.status || '').toLowerCase()
     if (status === 'cancelled') return false
     if (status === 'no_data') return true
-    if (!['completed', 'success', 'failed', 'error', 'cancelled'].includes(status)) return false
+    if (['failed', 'error'].includes(status)) return false
+    if (!['completed', 'success'].includes(status)) return false
     if (run.extractor_type === 'diffusion' && Number(run.candidate_count || 0) > 0) return false
     return Number(run.final_count || 0) === 0
   }
@@ -501,13 +502,16 @@ export function useAppShell(
       ? Number(run.candidate_count || 0) + Number(run.final_count || 0)
       : Number(run.final_count || 0)
 
-    if (run.status === 'running' || run.status === 'processing') {
+    const status = String(run.status || '').toLowerCase()
+    if (status === 'running' || status === 'processing' || status === 'queued' || status === 'extracting') {
       setFileProcessing(batchFile, snapshot.progress, snapshot.message)
-    } else if (String(run.status || '').toLowerCase() === 'cancelled') {
+    } else if (status === 'cancelled') {
       setFileCancelled(batchFile, run.error_message || snapshot.message || 'Extraction stopped.')
+    } else if (['failed', 'error'].includes(status)) {
+      setFileError(batchFile, run.error_message || snapshot.message || t('progress.background_failed'), t)
     } else if (isNoDataRun(run)) {
       setFileNoData(batchFile, snapshot.message || 'No extractable records found.')
-    } else if (['completed', 'success'].includes(String(run.status || '').toLowerCase())) {
+    } else if (['completed', 'success'].includes(status)) {
       setFileSuccess(
         batchFile,
         run.extractor_type === 'diffusion' && reviewableCount > 0

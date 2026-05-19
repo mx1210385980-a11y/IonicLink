@@ -4,6 +4,7 @@ from typing import List, Optional
 
 import base64
 import io
+import re
 from PIL import Image, ImageDraw
 
 # Figure/table detection keywords (case-insensitive)
@@ -13,6 +14,65 @@ _TABLE_KEYWORDS  = {'table', 'tab.'}
 
 # Min fraction of page area that image blocks must cover to count as a "visual page"
 _IMAGE_AREA_THRESHOLD = 0.03  # 3% of page area
+
+
+def _format_byte_size(byte_count: int) -> str:
+    value = float(max(0, byte_count))
+    for unit in ("B", "KB", "MB", "GB"):
+        if value < 1024 or unit == "GB":
+            return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} B"
+        value /= 1024
+    return f"{int(byte_count)} B"
+
+
+def _linearized_expected_size(content: bytes) -> Optional[int]:
+    head = content[:4096]
+    match = re.search(rb"/L\s+(\d+)", head)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except Exception:
+        return None
+
+
+def validate_pdf_bytes(content: bytes, filename: str = "PDF") -> Optional[str]:
+    """
+    Return a user-facing validation error when a PDF cannot be read.
+    Empty text is allowed because scanned PDFs can still be processed visually;
+    zero readable pages means the file is usually truncated or damaged.
+    """
+    if not content:
+        return f"{filename} is empty. Please upload the complete PDF file."
+
+    try:
+        with fitz.open(stream=content, filetype="pdf") as doc:
+            page_count = len(doc)
+    except Exception as exc:
+        return f"{filename} cannot be opened as a PDF ({exc}). Please re-download the full paper and upload it again."
+
+    if page_count > 0:
+        return None
+
+    expected_size = _linearized_expected_size(content)
+    size_hint = ""
+    if expected_size and expected_size > len(content):
+        size_hint = (
+            f" The file advertises about {_format_byte_size(expected_size)}, "
+            f"but only {_format_byte_size(len(content))} was received."
+        )
+    return (
+        f"{filename} appears incomplete or damaged: 0 readable pages were found."
+        f"{size_hint} Please re-download the full PDF and upload it again."
+    )
+
+
+def validate_pdf_file(pdf_path: str, filename: str | None = None) -> Optional[str]:
+    try:
+        with open(pdf_path, "rb") as handle:
+            return validate_pdf_bytes(handle.read(), filename or os.path.basename(pdf_path) or "PDF")
+    except Exception as exc:
+        return f"{filename or pdf_path} cannot be read from disk ({exc}). Please upload the PDF again."
 
 
 def classify_pdf_pages(pdf_path: str) -> dict:

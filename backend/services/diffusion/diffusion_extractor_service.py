@@ -45,6 +45,7 @@ from services.fallback_extraction_service import extract_metadata_fallback
 from services.file_service import _archive_completed_literature_pdf, _read_file_content, _safe_update_doi
 from services.llm.utils import clean_and_parse_json
 from utils.no_data_reason import build_no_data_reason
+from utils.pdf_utils import validate_pdf_file
 
 logger = logging.getLogger(__name__)
 
@@ -382,15 +383,49 @@ async def process_diffusion_file_safe(
             content = _read_file_content(resolved_file_path)
             literature.content = content
 
-        if not content:
+        existing_run = await get_extraction_run(db, run_id)
+
+        pdf_error = None
+        if not content and resolved_file_path and str(resolved_file_path).lower().endswith(".pdf"):
+            pdf_error = validate_pdf_file(resolved_file_path, literature.title or os.path.basename(resolved_file_path))
+
+        if not content and not (resolved_file_path and not pdf_error):
+            message = pdf_error or "No readable content or source PDF is available. Please upload the paper again."
+            summary = {
+                "run_id": run_id,
+                "extractor_type": EXTRACTOR_TYPE,
+                "profile": profile,
+                "status": "failed",
+                "candidate_count": 0,
+                "final_count": 0,
+                "dropped_by_reason": {"unreadable_pdf" if pdf_error else "missing_content": 1},
+                "page_coverage": {},
+                "page_candidate_counts": {},
+                "current_stage": "failed",
+                "current_message": message,
+                "progress_log": [{"stage": "failed", "message": message}],
+            }
             literature.status = "failed"
-            literature.error_message = "No content available"
+            literature.error_message = message
+            if existing_run:
+                await finalize_extraction_run(
+                    db,
+                    run_id=run_id,
+                    status="failed",
+                    candidate_count=0,
+                    final_count=0,
+                    dropped_by_reason=summary["dropped_by_reason"],
+                    summary=summary,
+                    error_message=message,
+                )
             await db.commit()
-            return {}, [], {}
+            return {}, [], summary
+
+        if not content:
+            content = ""
 
         literature.status = "extracting"
         await db.commit()
-        existing_run = await get_extraction_run(db, run_id)
         if existing_run:
             existing_run.status = "running"
             existing_run.profile = profile
