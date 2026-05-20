@@ -1092,8 +1092,14 @@ def _copy_candidate_to_final_record(candidate: RecordCandidate, record: Tribolog
     return target
 
 
-_DIFFUSION_REQUIRED_FIELD_KEYS = ("system_name", "ionic_liquid")
 _DIFFUSION_COEFFICIENT_FIELD_KEYS = ("d_total", "d_cation", "d_anion")
+_DIFFUSION_CORE_FACT_KEYS = (
+    "system_name",
+    "diffusing_ion",
+    "diffusion_coefficient",
+    "d_unit",
+    "source_evidence",
+)
 
 
 def _format_diffusion_numeric(value: Any) -> Any:
@@ -1304,7 +1310,7 @@ def _build_diffusion_field_evidence_payload(record: Any) -> dict[str, Any]:
         "review_status": record.review_status,
         "record_origin": record.record_origin,
         "assembly_notes": getattr(record, "assembly_notes", None),
-        "required_fields": ["system_name", "ionic_liquid", "diffusion_coefficient"],
+        "required_fields": list(_DIFFUSION_CORE_FACT_KEYS),
         "diffusion_standard_fields": standard_fields,
         "diffusionStandardFields": standard_fields,
         "fields": normalized_fields,
@@ -1313,28 +1319,54 @@ def _build_diffusion_field_evidence_payload(record: Any) -> dict[str, Any]:
     }
 
 
-def _diffusion_missing_required_fields(field_map: dict[str, Any]) -> list[str]:
-    missing = [
-        key
-        for key in _DIFFUSION_REQUIRED_FIELD_KEYS
-        if _field_grounding_status(field_map.get(key) or {}) != "grounded"
+def _field_has_review_value(entry: dict[str, Any]) -> bool:
+    return isinstance(entry, dict) and entry.get("value") not in (None, "", [], {})
+
+
+def _field_has_source_evidence(entry: dict[str, Any]) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    status = _field_grounding_status(entry)
+    return status in {"grounded", "partial"}
+
+
+def _diffusion_coefficient_entries(field_map: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        field_map.get(key) or {}
+        for key in _DIFFUSION_COEFFICIENT_FIELD_KEYS
+        if isinstance(field_map.get(key), dict)
     ]
-    if not any(_field_grounding_status(field_map.get(key) or {}) == "grounded" for key in _DIFFUSION_COEFFICIENT_FIELD_KEYS):
+
+
+def _diffusion_missing_required_fields(field_map: dict[str, Any]) -> list[str]:
+    missing: list[str] = []
+    if not _field_has_review_value(field_map.get("system_name") or {}):
+        missing.append("system_name")
+    if not _field_has_review_value(field_map.get("diffusing_ion") or {}):
+        missing.append("diffusing_ion")
+
+    coefficient_entries = _diffusion_coefficient_entries(field_map)
+    coefficient_value_entries = [entry for entry in coefficient_entries if _field_has_review_value(entry)]
+    if not coefficient_value_entries:
         missing.append("diffusion_coefficient")
+    if not _field_has_review_value(field_map.get("d_unit") or {}):
+        missing.append("d_unit")
+    if coefficient_value_entries and not any(_field_has_source_evidence(entry) for entry in coefficient_value_entries):
+        missing.append("source_evidence")
     return missing
 
 
 def _diffusion_has_blocking_flag(field_map: dict[str, Any]) -> bool:
     if any(
         str((field_map.get(key) or {}).get("review_state") or "").strip().lower() == "flagged"
-        for key in _DIFFUSION_REQUIRED_FIELD_KEYS
+        for key in ("system_name", "diffusing_ion", "d_unit")
     ):
         return True
-    coefficient_entries = [field_map.get(key) or {} for key in _DIFFUSION_COEFFICIENT_FIELD_KEYS]
+    coefficient_entries = _diffusion_coefficient_entries(field_map)
     coefficient_candidates = [
         entry
         for entry in coefficient_entries
-        if _field_grounding_status(entry) == "grounded"
+        if _field_has_review_value(entry)
     ]
     if not coefficient_candidates:
         return False
@@ -1342,12 +1374,13 @@ def _diffusion_has_blocking_flag(field_map: dict[str, Any]) -> bool:
 
 
 def _recompute_diffusion_review_status(record: Any, field_map: dict[str, Any], *, approved: bool = False) -> None:
-    missing_required = _diffusion_missing_required_fields(field_map)
+    review_field_map = _build_diffusion_field_evidence_payload(record)["fields"]
+    missing_required = _diffusion_missing_required_fields(review_field_map)
     if approved:
         record.review_status = "approved"
         record.assembly_notes = None
         return
-    if _diffusion_has_blocking_flag(field_map):
+    if _diffusion_has_blocking_flag(review_field_map):
         record.review_status = "flagged"
         record.assembly_notes = "Flagged fields require reviewer attention"
         return
@@ -3196,16 +3229,17 @@ async def confirm_diffusion_record_field_evidence(
     record = await require_diffusion_record_access(db, principal, record_id, write=True)
     normalized_key = _normalize_field_key(field_key)
     field_map = _parse_field_evidence_map(record.field_evidence_json)
-    target_keys = _target_field_keys_for_action(normalized_key, field_map)
+    review_field_map = _build_diffusion_field_evidence_payload(record)["fields"]
+    target_keys = _target_field_keys_for_action(normalized_key, review_field_map)
     if not target_keys:
         raise HTTPException(status_code=404, detail=f"Field evidence '{field_key}' not found")
-    if any(_field_grounding_status(field_map.get(key) or {}) != "grounded" for key in target_keys):
+    if any(_field_grounding_status(review_field_map.get(key) or {}) != "grounded" for key in target_keys):
         raise HTTPException(status_code=422, detail=f"Field '{field_key}' cannot be confirmed without evidence")
 
     for key in target_keys:
         entry = field_map.get(key)
         if not isinstance(entry, dict):
-            continue
+            entry = dict(review_field_map.get(key) or {})
         entry["review_state"] = "confirmed"
         if payload.note is not None:
             entry["review_note"] = payload.note
@@ -3323,16 +3357,17 @@ async def approve_diffusion_record_review(
 ):
     record = await require_diffusion_record_access(db, principal, record_id, write=True)
     field_map = _parse_field_evidence_map(record.field_evidence_json)
-    missing_required = _diffusion_missing_required_fields(field_map)
+    review_field_map = _build_diffusion_field_evidence_payload(record)["fields"]
+    missing_required = _diffusion_missing_required_fields(review_field_map)
     if missing_required:
         raise HTTPException(
             status_code=422,
-            detail=f"Record cannot be approved. Missing field evidence for: {', '.join(missing_required)}",
+            detail=f"Record cannot be approved. Missing core facts for: {', '.join(missing_required)}",
         )
-    if _diffusion_has_blocking_flag(field_map):
+    if _diffusion_has_blocking_flag(review_field_map):
         raise HTTPException(
             status_code=422,
-            detail="Record cannot be approved while flagged diffusion fields remain",
+            detail="Record cannot be approved while flagged core diffusion facts remain",
         )
 
     _recompute_diffusion_review_status(record, field_map, approved=True)
@@ -3401,16 +3436,17 @@ async def confirm_diffusion_candidate_field_evidence(
     candidate = await require_diffusion_candidate_access(db, principal, candidate_id, write=True)
     normalized_key = _normalize_field_key(field_key)
     field_map = _parse_field_evidence_map(candidate.field_evidence_json)
-    target_keys = _target_field_keys_for_action(normalized_key, field_map)
+    review_field_map = _build_diffusion_field_evidence_payload(candidate)["fields"]
+    target_keys = _target_field_keys_for_action(normalized_key, review_field_map)
     if not target_keys:
         raise HTTPException(status_code=404, detail=f"Field evidence '{field_key}' not found")
-    if any(_field_grounding_status(field_map.get(key) or {}) != "grounded" for key in target_keys):
+    if any(_field_grounding_status(review_field_map.get(key) or {}) != "grounded" for key in target_keys):
         raise HTTPException(status_code=422, detail=f"Field '{field_key}' cannot be confirmed without evidence")
 
     for key in target_keys:
         entry = field_map.get(key)
         if not isinstance(entry, dict):
-            continue
+            entry = dict(review_field_map.get(key) or {})
         entry["review_state"] = "confirmed"
         if payload.note is not None:
             entry["review_note"] = payload.note
@@ -3528,16 +3564,17 @@ async def approve_diffusion_candidate_review(
 ):
     candidate = await require_diffusion_candidate_access(db, principal, candidate_id, write=True)
     field_map = _parse_field_evidence_map(candidate.field_evidence_json)
-    missing_required = _diffusion_missing_required_fields(field_map)
+    review_field_map = _build_diffusion_field_evidence_payload(candidate)["fields"]
+    missing_required = _diffusion_missing_required_fields(review_field_map)
     if missing_required:
         raise HTTPException(
             status_code=422,
-            detail=f"Candidate cannot be approved. Missing field evidence for: {', '.join(missing_required)}",
+            detail=f"Candidate cannot be approved. Missing core facts for: {', '.join(missing_required)}",
         )
-    if _diffusion_has_blocking_flag(field_map):
+    if _diffusion_has_blocking_flag(review_field_map):
         raise HTTPException(
             status_code=422,
-            detail="Candidate cannot be approved while flagged diffusion fields remain",
+            detail="Candidate cannot be approved while flagged core diffusion facts remain",
         )
 
     _recompute_diffusion_review_status(candidate, field_map, approved=True)
