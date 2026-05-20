@@ -36,7 +36,9 @@ const roleLabelKeys = {
   group_admin: 'role.group_admin',
   member: 'role.member',
   principal_investigator: 'role.principal_investigator',
+  researcher: 'role.researcher',
   viewer: 'role.viewer',
+  workspace_researcher: 'role.workspace_researcher',
 } as const
 
 const statusLabelKeys = {

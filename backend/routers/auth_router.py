@@ -15,6 +15,7 @@ from security import (
     AuthPrincipal,
     ROLE_GROUP_ADMIN,
     ROLE_PRINCIPAL_INVESTIGATOR,
+    ROLE_WORKSPACE_RESEARCHER,
     create_access_token,
     ensure_personal_workspace,
     get_current_principal,
@@ -62,8 +63,11 @@ class ResetPasswordRequest(BaseModel):
 
 
 def _user_payload(principal: AuthPrincipal, _workspaces: list[Any]) -> dict[str, Any]:
-    available_scopes = [group_library_scope_summary(principal)]
-    seen_scope_keys = {available_scopes[0]["key"]}
+    available_scopes = []
+    if principal.user.role != ROLE_WORKSPACE_RESEARCHER:
+        available_scopes.append(group_library_scope_summary(principal))
+
+    seen_scope_keys = {scope["key"] for scope in available_scopes}
     for workspace in _workspaces:
         scope_summary = scope_summary_from_workspace(principal, workspace)
         if scope_summary["key"] in seen_scope_keys:
