@@ -197,17 +197,14 @@ type TribopairReviewPart = {
   highlight?: boolean
 }
 
-type DiffusionReviewGroup = {
+type DiffusionReviewTableCell = {
   id: string
   label: string
   value: string
-  meta: string
   fieldId: string
   status: ReviewField['evidenceStatus'] | 'Optional'
-  statusLabel: string
-  statusClass: string
-  items: StructuredTag[]
-  emphasis?: boolean
+  title: string
+  primary?: boolean
 }
 
 type EvidenceSearchMode = 'loose' | 'exact-token' | 'numeric'
@@ -3227,6 +3224,20 @@ function buildReviewFields(record: TribologyData | null, remoteFields?: Record<s
         '可选上下文：不确定时保留为空或标记存疑，不阻断本条 MVP 入库。',
       ))
     }
+    fields.push(
+      buildField('D_total', 'd_total', diffusionValue('d_total'), record, fieldMap.d_total, 'D_total 需要能定位到原文。'),
+      buildField('D_cation', 'd_cation', diffusionValue('d_cation'), record, fieldMap.d_cation, 'D_cation 需要能定位到原文。'),
+      buildField('D_anion', 'd_anion', diffusionValue('d_anion'), record, fieldMap.d_anion, 'D_anion 需要能定位到原文。'),
+      buildField('单位', 'd_unit', diffusionValue('d_unit'), record, fieldMap.d_unit, '扩散系数单位需要能定位到原文。'),
+      buildField('介质', 'ionic_liquid', diffusionValue('ionic_liquid'), record, fieldMap.ionic_liquid, '介质字段可作为原文上下文复核。'),
+      buildField('材料', 'confinement_material_class', diffusionValue('confinement_material_class'), record, fieldMap.confinement_material_class, '材料字段可作为原文上下文复核。'),
+      buildField('几何', 'confinement_geometry_class', diffusionValue('confinement_geometry_class'), record, fieldMap.confinement_geometry_class, '几何字段可作为原文上下文复核。'),
+      buildField('维度', 'confinement_dimensionality', diffusionValue('confinement_dimensionality'), record, fieldMap.confinement_dimensionality, '维度字段可作为原文上下文复核。'),
+      buildField('温度', 'temperature_value', diffusionValue('temperature_value'), record, fieldMap.temperature_value, '温度字段可作为原文上下文复核。'),
+      buildField('尺度', 'confinement_scale_value', diffusionValue('confinement_scale_value'), record, fieldMap.confinement_scale_value, '尺度字段可作为原文上下文复核。'),
+      buildField('尺度单位', 'confinement_scale_unit', diffusionValue('confinement_scale_unit'), record, fieldMap.confinement_scale_unit, '尺度单位字段可作为原文上下文复核。'),
+      buildField('来源', 'source_page', diffusionValue('source_page'), record, fieldMap.source_page, '来源页需要能定位到原文。'),
+    )
     return fields
   }
   const primaryMetricKey = resolvePrimaryTribologyMetricKey(record)
@@ -3471,138 +3482,77 @@ function buildTribopairReviewParts(record: TribologyData | null | undefined, rem
   ]
 }
 
-function diffusionGroupStatusLabel(status: DiffusionReviewGroup['status']) {
-  if (status === 'Grounded') return '已定位'
-  if (status === 'Partial') return '缺精确定位'
-  if (status === 'Optional') return '上下文'
-  return '待核验'
+function diffusionReviewCellStatus(
+  record: TribologyData,
+  fieldMap: Record<string, FieldEvidenceEntry>,
+  fieldId: string,
+  optional = false,
+): ReviewField['evidenceStatus'] | 'Optional' {
+  if (fieldId === 'diffusion_coefficient') {
+    return diffusionCoefficientSourceTraceable(record, fieldMap)
+      ? aggregateEvidenceStatus(fieldMap, diffusionCoefficientFieldKeys, record)
+      : 'Missing'
+  }
+  const value = fieldValueForKey(record, fieldId, 'diffusion')
+  if (value === 'Not captured yet') return optional ? 'Optional' : 'Missing'
+  const status = resolveFieldEvidenceStatus(fieldMap[fieldId], value)
+  return status === 'Missing' && optional ? 'Optional' : status
 }
 
-function diffusionGroupStatusClass(status: DiffusionReviewGroup['status'], emphasis = false) {
-  if (status === 'Grounded') return emphasis
-    ? 'border-[#99f6e4] bg-[#ecfdf5] text-[#047857]'
-    : 'border-[#bbf7d0] bg-[#f0fdf4] text-[#047857]'
-  if (status === 'Partial') return 'border-[#fed7aa] bg-[#fff7ed] text-[#c2410c]'
-  if (status === 'Optional') return 'border-[#dbe4ef] bg-white text-[#64748b]'
-  return 'border-[#fecdd3] bg-[#fff5f6] text-[#cf334f]'
+function diffusionReviewCellValue(record: TribologyData, fieldId: string) {
+  if (fieldId === 'source_page') return evidenceLocation(record)
+  if (fieldId === 'confinement_scale_value') {
+    const value = fieldValueForKey(record, 'confinement_scale_value', 'diffusion')
+    const unit = fieldValueForKey(record, 'confinement_scale_unit', 'diffusion')
+    if (value === 'Not captured yet') return value
+    return unit === 'Not captured yet' ? value : `${value} ${unit}`
+  }
+  return fieldValueForKey(record, fieldId, 'diffusion')
 }
 
-function buildDiffusionReviewGroups(
+function buildDiffusionReviewTableCells(
   record: TribologyData | null | undefined,
   remoteFields?: Record<string, FieldEvidenceEntry> | null,
-): DiffusionReviewGroup[] {
+): DiffusionReviewTableCell[] {
   if (!record || recordExtractorType(record) !== 'diffusion') return []
   const fieldMap = resolveRecordFieldEvidenceMap(record, remoteFields)
-  const systemValue = fieldValueForKey(record, 'system_name', 'diffusion')
-  const systemReady = diffusionFieldPresent(record, fieldMap, 'system_name')
-  const coefficientReady = diffusionCoefficientSourceTraceable(record, fieldMap)
-  const coefficientStatus = coefficientReady ? aggregateEvidenceStatus(fieldMap, diffusionCoefficientFieldKeys, record) : 'Missing'
-  const ionStatus = aggregateEvidenceStatus(fieldMap, diffusionIonIdentityFieldKeys, record)
-  const confinementStatus = aggregateEvidenceStatus(fieldMap, diffusionConfinementFieldKeys, record)
-  const conditionStatus = aggregateEvidenceStatus(fieldMap, diffusionConditionFieldKeys, record)
-  const groups: DiffusionReviewGroup[] = [
-    {
-      id: 'coefficient',
-      label: '扩散系数',
-      value: diffusionCoefficientSummary(record),
-      meta: coefficientReady ? '原文证据包含数字和单位' : '看不到数字+单位时不要入库',
-      fieldId: 'diffusion_coefficient',
-      status: coefficientStatus,
-      statusLabel: coefficientReady ? '证据可核' : '待核验',
-      statusClass: diffusionGroupStatusClass(coefficientStatus, true),
-      items: diffusionCoefficientTags(record),
-      emphasis: true,
-    },
-    {
-      id: 'source',
-      label: '原文证据',
-      value: evidenceLocation(record),
-      meta: 'MVP 只接受可回看原文的 D 值',
-      fieldId: 'diffusion_coefficient',
-      status: coefficientReady ? 'Grounded' : 'Missing',
-      statusLabel: coefficientReady ? '可追溯' : '缺数值证据',
-      statusClass: diffusionGroupStatusClass(coefficientReady ? 'Grounded' : 'Missing', true),
-      items: [
-        record.source_page ? { label: 'Page', value: String(record.source_page) } : null,
-        trim(record.source || record.source_figure) ? { label: 'Source', value: trim(record.source || record.source_figure) } : null,
-      ].filter(Boolean) as StructuredTag[],
-      emphasis: true,
-    },
-    {
-      id: 'system',
-      label: '体系名',
-      value: systemValue,
-      meta: '用于归属、检索和去重',
-      fieldId: 'system_name',
-      status: systemReady ? 'Grounded' : 'Missing',
-      statusLabel: systemReady ? '已捕获' : '待补齐',
-      statusClass: diffusionGroupStatusClass(systemReady ? 'Grounded' : 'Missing', true),
-      items: systemReady ? [{ label: 'System', value: systemValue }] : [],
-      emphasis: true,
-    },
+  const columns: Array<{ id: string; label: string; fieldId: string; optional?: boolean; primary?: boolean }> = [
+    { id: 'system_name', label: 'system_name', fieldId: 'system_name', primary: true },
+    { id: 'confinement_material_class', label: 'material', fieldId: 'confinement_material_class' },
+    { id: 'confinement_geometry_class', label: 'geometry', fieldId: 'confinement_geometry_class' },
+    { id: 'confinement_dimensionality', label: 'dimension', fieldId: 'confinement_dimensionality' },
+    { id: 'ionic_liquid', label: 'ionic_liquid', fieldId: 'ionic_liquid', primary: true },
+    { id: 'd_total', label: 'D_total', fieldId: 'd_total', optional: true, primary: true },
+    { id: 'd_cation', label: 'D_cation', fieldId: 'd_cation', optional: true, primary: true },
+    { id: 'd_anion', label: 'D_anion', fieldId: 'd_anion', optional: true, primary: true },
+    { id: 'd_unit', label: 'D_unit', fieldId: 'd_unit' },
+    { id: 'temperature_value', label: 'temperature', fieldId: 'temperature_value', optional: true },
+    { id: 'confinement_scale_value', label: 'scale', fieldId: 'confinement_scale_value', optional: true },
+    { id: 'source_page', label: 'source', fieldId: 'source_page', primary: true },
   ]
-
-  if (diffusionIonIdentityTags(record).length) {
-    const status = ionStatus === 'Missing' ? 'Optional' : ionStatus
-    groups.push({
-      id: 'identity',
-      label: '迁移物种',
-      value: diffusionIonIdentitySummary(record),
-      meta: '可选上下文：不确定不阻断',
-      fieldId: 'ion_identity',
+  return columns.map((column) => {
+    const value = diffusionReviewCellValue(record, column.fieldId)
+    const status = diffusionReviewCellStatus(record, fieldMap, column.fieldId, column.optional)
+    return {
+      id: column.id,
+      label: column.label,
+      value,
+      fieldId: column.fieldId,
       status,
-      statusLabel: diffusionGroupStatusLabel(status),
-      statusClass: diffusionGroupStatusClass(status),
-      items: diffusionIonIdentityTags(record),
-    })
-  }
+      primary: column.primary,
+      title: `${column.label}: ${presentZh(value)}`,
+    }
+  })
+}
 
-  if (diffusionFieldPresent(record, fieldMap, 'ionic_liquid')) {
-    const ionicStatus = resolveFieldEvidenceStatus(fieldMap.ionic_liquid, fieldValueForKey(record, 'ionic_liquid', 'diffusion'))
-    groups.push({
-      id: 'medium',
-      label: '介质 / 离子液体',
-      value: fieldValueForKey(record, 'ionic_liquid', 'diffusion'),
-      meta: '上下文字段：保留但不阻断入库',
-      fieldId: 'ionic_liquid',
-      status: ionicStatus === 'Missing' ? 'Optional' : ionicStatus,
-      statusLabel: diffusionGroupStatusLabel(ionicStatus === 'Missing' ? 'Optional' : ionicStatus),
-      statusClass: diffusionGroupStatusClass(ionicStatus === 'Missing' ? 'Optional' : ionicStatus),
-      items: [{ label: 'Medium', value: fieldValueForKey(record, 'ionic_liquid', 'diffusion') }],
-    })
-  }
-
-  if (diffusionConfinementTags(record).length) {
-    const status = confinementStatus === 'Missing' ? 'Optional' : confinementStatus
-    groups.push({
-      id: 'confinement',
-      label: '限域体系',
-      value: diffusionConfinementSummary(record),
-      meta: '材料、几何、表面基团与限域尺度',
-      fieldId: 'confinement_context',
-      status,
-      statusLabel: diffusionGroupStatusLabel(status),
-      statusClass: diffusionGroupStatusClass(status),
-      items: diffusionConfinementTags(record),
-    })
-  }
-
-  if (diffusionConditionTags(record).length) {
-    const status = conditionStatus === 'Missing' ? 'Optional' : conditionStatus
-    groups.push({
-      id: 'conditions',
-      label: '实验条件',
-      value: summarizeConditions(record, 'diffusion'),
-      meta: '温度与尺度用于后续建模过滤',
-      fieldId: 'conditions',
-      status,
-      statusLabel: diffusionGroupStatusLabel(status),
-      statusClass: diffusionGroupStatusClass(status),
-      items: diffusionConditionTags(record),
-    })
-  }
-
-  return groups
+function diffusionTableCellTone(cell: DiffusionReviewTableCell) {
+  if (cell.fieldId === activeFieldId.value) return 'border-[#22c7b8] bg-[#ecfffb] text-[#064e3b] ring-1 ring-[#7dd3c7]'
+  if (cell.status === 'Missing') return 'border-[#fecdd3] bg-[#fff8f9] text-[#be123c]'
+  if (cell.status === 'Partial') return 'border-[#fed7aa] bg-[#fffaf2] text-[#9a3412]'
+  if (cell.status === 'Optional') return 'border-[#e2e8f0] bg-white text-[#64748b]'
+  return cell.primary
+    ? 'border-[#cde7df] bg-[#fbfffd] text-[#123f37]'
+    : 'border-[#dbe4ef] bg-white text-[#334155]'
 }
 
 function recordCanApprove(record: TribologyData | null | undefined, remoteFields?: Record<string, FieldEvidenceEntry> | null) {
@@ -4716,58 +4666,50 @@ function roughnessTextParts(value: string) {
             <div v-if="isRecordExpanded(item.id)" class="rounded-b-md border-t border-[#eef2f6] bg-[#fbfcff] px-3 py-2.5">
               <div
                 v-if="recordExtractorType(item.record) === 'diffusion'"
-                class="mb-2 overflow-hidden rounded-[0.75rem] border border-[#dbe8e4] bg-[#f8fffc]"
+                class="mb-2 overflow-hidden rounded-[0.75rem] border border-[#dbe8e4] bg-white"
               >
                 <div class="flex items-center justify-between gap-2 border-b border-[#e2f1eb] px-3 py-2">
                   <div>
-                    <p class="text-[10px] font-black uppercase tracking-[0.16em] text-[#0f766e]">DIFFUSION MVP</p>
-                    <p class="mt-0.5 text-[11px] font-medium text-[#47645b]">只审体系、D 值和原文证据；其余字段先当备注。</p>
+                    <p class="text-[10px] font-black uppercase tracking-[0.16em] text-[#0f766e]">EXTRACTED TABLE</p>
                   </div>
-                  <span class="rounded-md bg-white px-2 py-1 text-[10px] font-bold text-[#0f766e] ring-1 ring-[#cce7dc]">
-                    证据优先
+                  <span class="rounded-md bg-[#f8fffc] px-2 py-1 text-[10px] font-bold text-[#0f766e] ring-1 ring-[#cce7dc]">
+                    Original
                   </span>
                 </div>
 
-                <div class="grid gap-[1px] bg-[#e2f1eb] md:grid-cols-2">
-                  <button
-                    v-for="group in buildDiffusionReviewGroups(item.record, activeRecordFieldEvidence?.fields)"
-                    :key="group.id"
-                    type="button"
-                    class="group min-h-[5.5rem] bg-white px-3 py-2.5 text-left transition hover:bg-[#fbfffd]"
-                    :class="group.fieldId === activeFieldId ? 'ring-2 ring-inset ring-[#7dd3c7]' : ''"
-                    :title="`${group.label}: ${group.value}`"
-                    @click="activeFieldId = group.fieldId"
-                  >
-                    <div class="flex items-start justify-between gap-2">
-                      <div class="min-w-0">
-                        <p class="text-[10px] font-black uppercase tracking-[0.13em] text-[#739088]">{{ group.label }}</p>
-                        <p
-                          class="mt-1 line-clamp-2 font-bold leading-snug"
-                          :class="group.emphasis ? 'text-[13px] text-[#064e3b]' : 'text-[12px] text-slate-900'"
+                <div class="overflow-x-auto">
+                  <table class="min-w-[920px] w-full border-separate border-spacing-0 text-left">
+                    <thead>
+                      <tr>
+                        <th
+                          v-for="cell in buildDiffusionReviewTableCells(item.record, activeRecordFieldEvidence?.fields)"
+                          :key="`head-${cell.id}`"
+                          class="border-b border-[#edf3f1] bg-[#fbfffd] px-2.5 py-2 text-[9.5px] font-black uppercase tracking-[0.12em] text-[#6f8580]"
                         >
-                          {{ presentZh(group.value) }}
-                        </p>
-                      </div>
-                      <span
-                        class="shrink-0 rounded-[4px] border px-1.5 py-0.5 text-[8.5px] font-bold leading-none"
-                        :class="group.statusClass"
-                      >
-                        {{ group.statusLabel }}
-                      </span>
-                    </div>
-
-                    <div v-if="group.items.length" class="mt-2 flex flex-wrap gap-1">
-                      <span
-                        v-for="tag in group.items.slice(0, 4)"
-                        :key="`${group.id}-${tag.label}`"
-                        class="inline-flex max-w-full items-center overflow-hidden rounded-[0.45rem] border border-[#d7e5e0] bg-[#f8fffc] text-[9px]"
-                      >
-                        <span class="shrink-0 bg-white px-1.5 py-[2px] font-black text-[#66837a]">{{ tag.label }}</span>
-                        <span class="truncate px-1.5 py-[2px] font-bold text-[#173b33]">{{ tag.value }}</span>
-                      </span>
-                    </div>
-                    <p class="mt-2 line-clamp-1 text-[9.5px] font-medium text-[#6b7f78]">{{ group.meta }}</p>
-                  </button>
+                          {{ cell.label }}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td
+                          v-for="cell in buildDiffusionReviewTableCells(item.record, activeRecordFieldEvidence?.fields)"
+                          :key="`cell-${cell.id}`"
+                          class="border-b border-[#f1f5f9] px-1.5 py-2 align-top"
+                        >
+                          <button
+                            type="button"
+                            class="min-h-10 w-full rounded-[0.55rem] border px-2 py-1.5 text-left text-[11px] font-bold leading-snug transition hover:border-[#22c7b8] hover:bg-[#f0fffb]"
+                            :class="diffusionTableCellTone(cell)"
+                            :title="cell.title"
+                            @click="activeFieldId = cell.fieldId"
+                          >
+                            <span class="line-clamp-2 break-words">{{ presentZh(cell.value) }}</span>
+                          </button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
               </div>
 
@@ -4875,12 +4817,12 @@ function roughnessTextParts(value: string) {
               </div>
 
               <p
-                v-if="!visibleReviewFields.length"
+                v-if="recordExtractorType(item.record) !== 'diffusion' && !visibleReviewFields.length"
                 class="rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-white px-3 py-3 text-xs text-slate-500"
               >
                 此记录暂无可审核字段。
               </p>
-              <div v-else class="space-y-1.5">
+              <div v-else-if="recordExtractorType(item.record) !== 'diffusion'" class="space-y-1.5">
                 <button
                   v-for="field in visibleReviewFields"
                   :key="field.id"
