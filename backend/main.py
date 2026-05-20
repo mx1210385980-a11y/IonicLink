@@ -90,6 +90,7 @@ _include_router_module(app, "routers.model_training", optional=True)
 _include_router_module(app, "routers.agent_system")
 _include_router_module(app, "routers.auth_router")
 _include_router_module(app, "routers.monitor_router")
+_include_router_module(app, "routers.collaboration_router")
 
 
 @app.get("/")

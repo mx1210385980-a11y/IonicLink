@@ -1326,6 +1326,12 @@ export interface BatchFile {
     disablePdfPreview?: boolean
     scopeKey?: string
     extractor_type?: ExtractorType
+    submissionStatus?: SubmissionStatus | string | null
+    submissionNote?: string | null
+    submittedAt?: string | null
+    reviewNote?: string | null
+    reviewedAt?: string | null
+    promotedLiteratureId?: number | null
     status: FileExtractionStatus
     progress: number // 0-100
     progressMessage?: string
@@ -1521,6 +1527,14 @@ export interface Literature {
     scopeType?: 'workspace' | 'group_library' | string | null
     status?: string | null
     errorMessage?: string | null
+    submissionStatus?: SubmissionStatus | string | null
+    submissionNote?: string | null
+    submittedAt?: string | null
+    submittedByUserId?: number | null
+    reviewedAt?: string | null
+    reviewedByUserId?: number | null
+    reviewNote?: string | null
+    promotedLiteratureId?: number | null
     recordCount?: number | null
     candidateCount?: number | null
     hasPdf?: boolean | null
@@ -1530,6 +1544,34 @@ export interface Literature {
     filePath?: string | null
     file_path?: string
     created_at: string
+}
+
+export type SubmissionStatus = 'draft' | 'submitted' | 'returned' | 'approved'
+
+export interface CollaborationSubmissionItem extends Literature {
+    scopeKey?: string | null
+    workspaceName?: string | null
+    ownerDisplayName?: string | null
+    ownerUsername?: string | null
+    submittedByDisplayName?: string | null
+    reviewedByDisplayName?: string | null
+    diffusionRecordCount?: number
+    diffusionCandidateCount?: number
+    tribologyRecordCount?: number
+    tribologyCandidateCount?: number
+    totalCount?: number
+    createdAt?: string | null
+}
+
+export interface CollaborationSubmissionResponse {
+    success: boolean
+    literature: CollaborationSubmissionItem
+    targetLiteratureId?: number | null
+    copied?: {
+        diffusion: number
+        tribology: number
+    }
+    message: string
 }
 
 export interface ReprocessResult {
@@ -1595,6 +1637,26 @@ export async function importLiteratureByDoi(payload: LiteratureDoiImportRequest)
 export async function getLiteratureDetails(literatureId: number) {
     const response = await api.get(`/api/sync/literature/${literatureId}`)
     return response.data as LiteratureWithRecords
+}
+
+export async function submitLiteratureForApproval(literatureId: number, note?: string) {
+    const response = await api.post(`/api/collaboration/literature/${literatureId}/submit`, { note: note || null })
+    return response.data as CollaborationSubmissionResponse
+}
+
+export async function listCollaborationSubmissions() {
+    const response = await api.get('/api/collaboration/submissions')
+    return response.data as { items: CollaborationSubmissionItem[] }
+}
+
+export async function approveCollaborationSubmission(literatureId: number, note?: string) {
+    const response = await api.post(`/api/collaboration/submissions/${literatureId}/approve`, { note: note || null })
+    return response.data as CollaborationSubmissionResponse
+}
+
+export async function returnCollaborationSubmission(literatureId: number, note?: string) {
+    const response = await api.post(`/api/collaboration/submissions/${literatureId}/return`, { note: note || null })
+    return response.data as CollaborationSubmissionResponse
 }
 
 // Re-extract literature data

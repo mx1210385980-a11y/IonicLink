@@ -17,6 +17,7 @@ import {
   Loader2,
   RefreshCw,
   Search,
+  Send,
 } from 'lucide-vue-next'
 
 import {
@@ -40,6 +41,7 @@ import {
   getCandidateFieldEvidence,
   getRecordEvidence,
   getRecordFieldEvidence,
+  submitLiteratureForApproval,
   updateReviewCandidateCofExtracted,
   updateReviewCandidateLoadConditions,
   updateReviewCandidateSpeedConditions,
@@ -256,6 +258,9 @@ const pdfViewerRef = ref<PdfViewerBridge | null>(null)
 const pdfPageInput = ref('')
 const pdfPageCount = ref(0)
 const pdfPageError = ref('')
+const submissionPending = ref(false)
+const submissionError = ref('')
+const submissionSuccess = ref('')
 
 const reviewFiles = computed<BatchFile[]>(() => Array.isArray(props.files) ? props.files.filter(Boolean) : [])
 const selectedReviewFile = computed<BatchFile | null>(() => props.selectedFile || reviewFiles.value[0] || null)
@@ -448,9 +453,55 @@ const recordItemCount = computed(() => recordItems.value.length)
 const visibleRecordCount = computed(() => visibleRecordItems.value.length)
 
 const activeLiteratureId = computed<number | null>(() => {
+  const fromFile = Number(selectedReviewFile.value?.id || '')
+  if (Number.isFinite(fromFile) && fromFile > 0) return fromFile
   const match = String(props.pdfUrl || '').match(/\/pdf\/(\d+)/)
   const parsed = Number(match?.[1] || '')
   return Number.isFinite(parsed) ? parsed : null
+})
+
+const selectedSubmissionStatus = computed(() => {
+  return String(selectedReviewFile.value?.submissionStatus || 'draft').trim().toLowerCase() || 'draft'
+})
+const reviewScopeKey = computed(() => String(props.scopeKey || selectedReviewFile.value?.scopeKey || ''))
+const isWorkspaceReview = computed(() => reviewScopeKey.value.startsWith('workspace:'))
+const canSubmitForGroupReview = computed(() => {
+  if (!isWorkspaceReview.value) return false
+  if (!activeLiteratureId.value) return false
+  if (submissionPending.value || isReextractingCurrentFile.value) return false
+  if (!documentTotal.value) return false
+  return !['submitted', 'approved'].includes(selectedSubmissionStatus.value)
+})
+const submissionStatusLabel = computed(() => {
+  switch (selectedSubmissionStatus.value) {
+    case 'submitted':
+      return '等待管理员审核'
+    case 'approved':
+      return '已进入课题组库'
+    case 'returned':
+      return '已退回，可修改后重交'
+    default:
+      return '个人工作区草稿'
+  }
+})
+const submissionStatusClass = computed(() => {
+  switch (selectedSubmissionStatus.value) {
+    case 'submitted':
+      return 'border-[#bdd7ff] bg-[#f1f6ff] text-[#315083]'
+    case 'approved':
+      return 'border-[#bdebd3] bg-[#effbf4] text-[#1f7a4d]'
+    case 'returned':
+      return 'border-[#f1ddbd] bg-[#fffaf0] text-[#9a5b00]'
+    default:
+      return 'border-[#dbe4ef] bg-white text-slate-600'
+  }
+})
+const submitForReviewTitle = computed(() => {
+  if (!isWorkspaceReview.value) return '只有个人工作区文献需要提交审核'
+  if (!documentTotal.value) return '当前文献还没有可提交的提取记录'
+  if (selectedSubmissionStatus.value === 'submitted') return '已经提交，等待管理员审核'
+  if (selectedSubmissionStatus.value === 'approved') return '已经进入课题组库'
+  return documentPending.value > 0 ? '仍有字段待审，也可以先提交给管理员复核' : '提交给管理员批准后进入课题组库'
 })
 
 watch(() => props.pdfUrl, () => {
@@ -932,6 +983,35 @@ async function handleReextractCurrentFile() {
     if (reviewActionPending.value === 'reextract') {
       reviewActionPending.value = null
     }
+  }
+}
+
+async function handleSubmitForGroupReview() {
+  const literatureId = activeLiteratureId.value
+  if (!literatureId || !canSubmitForGroupReview.value) return
+
+  submissionPending.value = true
+  submissionError.value = ''
+  submissionSuccess.value = ''
+  try {
+    const note = documentPending.value > 0
+      ? `提交管理员复核：仍有 ${documentPending.value} 个字段建议复查。`
+      : '字段已完成审阅，申请进入课题组库。'
+    const response = await submitLiteratureForApproval(literatureId, note)
+    const file = selectedReviewFile.value
+    if (file) {
+      file.submissionStatus = response.literature.submissionStatus || 'submitted'
+      file.submissionNote = response.literature.submissionNote || note
+      file.submittedAt = response.literature.submittedAt || new Date().toISOString()
+      file.reviewNote = response.literature.reviewNote || null
+      file.reviewedAt = response.literature.reviewedAt || null
+      file.promotedLiteratureId = response.literature.promotedLiteratureId || null
+    }
+    submissionSuccess.value = '已提交给管理员审核，通过后会复制到课题组库。'
+  } catch (error: any) {
+    submissionError.value = String(error?.response?.data?.detail || error?.message || '提交审核失败')
+  } finally {
+    submissionPending.value = false
   }
 }
 
@@ -4203,6 +4283,40 @@ function roughnessTextParts(value: string) {
       >
         {{ approvalBlockedReason }}
       </p>
+
+      <div
+        v-if="isWorkspaceReview && activeLiteratureId"
+        class="basis-full rounded-md border border-[#dbe4ef] bg-white px-3 py-2"
+      >
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex min-w-0 flex-wrap items-center gap-2">
+            <span class="text-[11px] font-bold uppercase tracking-[0.16em] text-[#8fa0ba]">工作区提交</span>
+            <span class="inline-flex rounded-md border px-2 py-0.5 text-[11px] font-semibold" :class="submissionStatusClass">
+              {{ submissionStatusLabel }}
+            </span>
+            <span class="text-xs text-slate-500">
+              管理员批准后复制到课题组库，原工作区记录会保留。
+            </span>
+          </div>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-md bg-[#0f172a] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#1e293b] disabled:cursor-not-allowed disabled:bg-[#cbd5e1]"
+            :disabled="!canSubmitForGroupReview"
+            :title="submitForReviewTitle"
+            @click="handleSubmitForGroupReview"
+          >
+            <Loader2 v-if="submissionPending" class="h-3.5 w-3.5 animate-spin" />
+            <Send v-else class="h-3.5 w-3.5" />
+            {{ selectedSubmissionStatus === 'returned' ? '重新提交审核' : '提交课题组审核' }}
+          </button>
+        </div>
+        <p v-if="submissionError" class="mt-2 rounded-md border border-[#ffd4da] bg-[#fff5f6] px-2.5 py-1.5 text-xs text-[#cf334f]">
+          {{ submissionError }}
+        </p>
+        <p v-else-if="submissionSuccess" class="mt-2 rounded-md border border-[#bdebd3] bg-[#effbf4] px-2.5 py-1.5 text-xs text-[#1f7a4d]">
+          {{ submissionSuccess }}
+        </p>
+      </div>
     </section>
 
     <!-- ─── 主区：左 文献列表 / 中 PDF / 右 数据卡片 ──────────── -->

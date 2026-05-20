@@ -56,7 +56,21 @@ class User(Base):
 
     group: Mapped["ResearchGroup"] = relationship("ResearchGroup", back_populates="users")
     workspaces: Mapped[List["Workspace"]] = relationship("Workspace", back_populates="owner")
-    created_literature: Mapped[List["Literature"]] = relationship("Literature", back_populates="created_by")
+    created_literature: Mapped[List["Literature"]] = relationship(
+        "Literature",
+        back_populates="created_by",
+        foreign_keys="Literature.created_by_user_id",
+    )
+    submitted_literature: Mapped[List["Literature"]] = relationship(
+        "Literature",
+        back_populates="submitted_by",
+        foreign_keys="Literature.submitted_by_user_id",
+    )
+    reviewed_literature: Mapped[List["Literature"]] = relationship(
+        "Literature",
+        back_populates="reviewed_by",
+        foreign_keys="Literature.reviewed_by_user_id",
+    )
     cleaned_datasets: Mapped[List["CleanedDataset"]] = relationship("CleanedDataset", back_populates="created_by")
     activity_logs: Mapped[List["UserActivityLog"]] = relationship(
         "UserActivityLog",
@@ -303,11 +317,35 @@ class Literature(Base):
     status: Mapped[str] = mapped_column(String(50), default="pending", index=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    submission_status: Mapped[Optional[str]] = mapped_column(String(32), default="draft", index=True, nullable=True)
+    submission_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    submitted_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    submitted_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), index=True, nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(nullable=True)
+    reviewed_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), index=True, nullable=True)
+    review_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    promoted_literature_id: Mapped[Optional[int]] = mapped_column(ForeignKey("literature.id"), index=True, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(default=func.now())
 
     group: Mapped[Optional["ResearchGroup"]] = relationship("ResearchGroup", back_populates="literature")
     workspace: Mapped[Optional["Workspace"]] = relationship("Workspace", back_populates="literature")
-    created_by: Mapped[Optional["User"]] = relationship("User", back_populates="created_literature")
+    created_by: Mapped[Optional["User"]] = relationship(
+        "User",
+        back_populates="created_literature",
+        foreign_keys=[created_by_user_id],
+    )
+    submitted_by: Mapped[Optional["User"]] = relationship(
+        "User",
+        back_populates="submitted_literature",
+        foreign_keys=[submitted_by_user_id],
+    )
+    reviewed_by: Mapped[Optional["User"]] = relationship(
+        "User",
+        back_populates="reviewed_literature",
+        foreign_keys=[reviewed_by_user_id],
+    )
+    promoted_literature: Mapped[Optional["Literature"]] = relationship("Literature", remote_side=[id])
     tribology_data: Mapped[List["TribologyData"]] = relationship(
         "TribologyData",
         back_populates="literature",

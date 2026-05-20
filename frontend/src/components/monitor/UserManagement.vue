@@ -2,6 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import {
   Activity,
+  CheckCircle2,
+  ClipboardCheck,
   Gauge,
   KeyRound,
   RefreshCw,
@@ -11,6 +13,7 @@ import {
   Trash2,
   UserCog,
   UserPlus,
+  Undo2,
 } from 'lucide-vue-next'
 
 import Button from '@/components/ui/Button.vue'
@@ -19,15 +22,19 @@ import CardContent from '@/components/ui/CardContent.vue'
 import Input from '@/components/ui/Input.vue'
 import Modal from '@/components/ui/Modal.vue'
 import {
+  approveCollaborationSubmission,
   createUser,
   deleteUser,
   getGroupActivitySummary,
   getMonitorUsers,
   getUserTimeline,
+  listCollaborationSubmissions,
+  returnCollaborationSubmission,
   resetUserPassword,
   toggleUserActive,
   updateUser,
   type ActivityLogEntry,
+  type CollaborationSubmissionItem,
   type GroupActivitySummary,
   type UserUsageStats,
 } from '@/lib/api'
@@ -47,8 +54,12 @@ const emit = defineEmits<{
 
 const users = ref<UserUsageStats[]>([])
 const groupSummary = ref<GroupActivitySummary | null>(null)
+const submissions = ref<CollaborationSubmissionItem[]>([])
 const loading = ref(false)
 const error = ref('')
+const submissionError = ref('')
+const submissionNotice = ref('')
+const submissionActionPending = ref<string | null>(null)
 const searchQuery = ref('')
 const highlightedUserId = ref<number | null>(null)
 
@@ -98,15 +109,22 @@ const filteredUsers = computed(() => {
 })
 
 const sidebarMembers = computed(() => users.value.slice(0, 8))
+const pendingSubmissions = computed(() => submissions.value.filter((item) => item.submissionStatus === 'submitted'))
 
 async function fetchData() {
   loading.value = true
   error.value = ''
+  submissionError.value = ''
 
   try {
-    const [usersRes, summaryRes] = await Promise.all([getMonitorUsers(), getGroupActivitySummary()])
+    const [usersRes, summaryRes, submissionsRes] = await Promise.all([
+      getMonitorUsers(),
+      getGroupActivitySummary(),
+      listCollaborationSubmissions(),
+    ])
     users.value = usersRes.items
     groupSummary.value = summaryRes
+    submissions.value = submissionsRes.items
     if (highlightedUserId.value != null && !users.value.some((user) => user.user_id === highlightedUserId.value)) {
       highlightedUserId.value = null
     }
@@ -114,6 +132,45 @@ async function fetchData() {
     error.value = e?.response?.data?.detail || e?.message || '加载成员数据失败。'
   } finally {
     loading.value = false
+  }
+}
+
+async function handleApproveSubmission(item: CollaborationSubmissionItem) {
+  const note = window.prompt('审核备注（可留空）', '同意进入课题组库。')
+  if (note === null) return
+
+  submissionActionPending.value = `approve:${item.id}`
+  submissionError.value = ''
+  submissionNotice.value = ''
+  try {
+    const response = await approveCollaborationSubmission(item.id, note)
+    const copied = response.copied || { diffusion: 0, tribology: 0 }
+    submissionNotice.value = `已批准「${submissionTitle(item)}」，入库 ${copied.diffusion + copied.tribology} 条记录。`
+    await fetchData()
+    emit('user-updated')
+  } catch (e: any) {
+    submissionError.value = e?.response?.data?.detail || e?.message || '批准入库失败。'
+  } finally {
+    submissionActionPending.value = null
+  }
+}
+
+async function handleReturnSubmission(item: CollaborationSubmissionItem) {
+  const note = window.prompt('退回原因', '请补充字段证据后重新提交。')
+  if (note === null) return
+
+  submissionActionPending.value = `return:${item.id}`
+  submissionError.value = ''
+  submissionNotice.value = ''
+  try {
+    await returnCollaborationSubmission(item.id, note)
+    submissionNotice.value = `已退回「${submissionTitle(item)}」。`
+    await fetchData()
+    emit('user-updated')
+  } catch (e: any) {
+    submissionError.value = e?.response?.data?.detail || e?.message || '退回提交失败。'
+  } finally {
+    submissionActionPending.value = null
   }
 }
 
@@ -323,6 +380,51 @@ function formatRelativeTime(dateStr: string | null) {
   return formatDate(dateStr)
 }
 
+function submissionTitle(item: CollaborationSubmissionItem) {
+  return item.title || item.doi || `Literature ${item.id}`
+}
+
+function submissionOwner(item: CollaborationSubmissionItem) {
+  if (item.ownerDisplayName) return item.ownerDisplayName
+  if (item.ownerUsername) return `@${item.ownerUsername}`
+  return '--'
+}
+
+function submissionCountLabel(item: CollaborationSubmissionItem) {
+  const diffusion = Number(item.diffusionRecordCount || item.diffusionCandidateCount || 0)
+  const tribology = Number(item.tribologyRecordCount || item.tribologyCandidateCount || 0)
+  const parts = []
+  if (diffusion) parts.push(`扩散 ${diffusion}`)
+  if (tribology) parts.push(`摩擦 ${tribology}`)
+  return parts.length ? parts.join(' / ') : `${item.totalCount || 0} 条`
+}
+
+function getSubmissionBadgeClass(status: string | null | undefined) {
+  switch (status) {
+    case 'submitted':
+      return 'border-sky-200 bg-sky-50 text-sky-700'
+    case 'approved':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    case 'returned':
+      return 'border-amber-200 bg-amber-50 text-amber-700'
+    default:
+      return 'border-slate-200 bg-slate-50 text-slate-600'
+  }
+}
+
+function getSubmissionStatusLabel(status: string | null | undefined) {
+  switch (status) {
+    case 'submitted':
+      return '待审核'
+    case 'approved':
+      return '已入库'
+    case 'returned':
+      return '已退回'
+    default:
+      return '草稿'
+  }
+}
+
 function getRoleBadgeClass(role: string) {
   switch (role) {
     case 'principal_investigator':
@@ -379,6 +481,13 @@ onMounted(() => {
                 <UserCog class="h-4 w-4" />
                 用户管理（开通台）
               </button>
+              <div class="flex items-center justify-between gap-3 rounded-xl px-3 py-3 text-sm text-slate-700">
+                <span class="inline-flex items-center gap-3">
+                  <ClipboardCheck class="h-4 w-4" />
+                  成果审核队列
+                </span>
+                <span class="rounded-full bg-sky-50 px-2 py-0.5 text-xs font-semibold text-sky-700">{{ pendingSubmissions.length }}</span>
+              </div>
               <div class="flex items-center gap-3 rounded-xl px-3 py-3 text-sm text-slate-700">
                 <Gauge class="h-4 w-4" />
                 系统全局监控
@@ -468,6 +577,85 @@ onMounted(() => {
               </CardContent>
             </Card>
           </div>
+
+          <Card class="mt-6 overflow-hidden rounded-[22px] border border-slate-200/80 bg-white shadow-sm">
+            <CardContent class="p-0">
+              <div class="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <div class="flex items-center gap-2">
+                    <ClipboardCheck class="h-5 w-5 text-sky-600" />
+                    <h2 class="text-[18px] font-bold text-slate-900">成果审核队列</h2>
+                  </div>
+                  <p class="mt-1 text-sm text-slate-500">个人工作区提交后，管理员批准才会复制进入课题组库。</p>
+                </div>
+                <span class="inline-flex rounded-full bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-700">
+                  {{ pendingSubmissions.length }} 个待处理
+                </span>
+              </div>
+
+              <div v-if="submissionNotice" class="border-b border-emerald-100 bg-emerald-50 px-5 py-3 text-sm text-emerald-700">
+                {{ submissionNotice }}
+              </div>
+              <div v-if="submissionError" class="border-b border-rose-100 bg-rose-50 px-5 py-3 text-sm text-rose-700">
+                {{ submissionError }}
+              </div>
+
+              <div v-if="submissions.length === 0 && !loading" class="px-5 py-8 text-center text-sm text-slate-500">
+                暂无待审核提交。
+              </div>
+              <div v-else class="divide-y divide-slate-100">
+                <div
+                  v-for="item in submissions"
+                  :key="item.id"
+                  class="grid gap-4 px-5 py-4 lg:grid-cols-[minmax(0,1fr)_11rem_13rem]"
+                >
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <p class="truncate text-sm font-semibold text-slate-950">{{ submissionTitle(item) }}</p>
+                      <span class="inline-flex rounded-full border px-2.5 py-0.5 text-[11px] font-semibold" :class="getSubmissionBadgeClass(item.submissionStatus)">
+                        {{ getSubmissionStatusLabel(item.submissionStatus) }}
+                      </span>
+                    </div>
+                    <p class="mt-1 truncate text-xs text-slate-500">
+                      {{ item.workspaceName || '个人工作区' }} · {{ submissionOwner(item) }} · {{ submissionCountLabel(item) }}
+                    </p>
+                    <p v-if="item.submissionNote" class="mt-2 line-clamp-2 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
+                      {{ item.submissionNote }}
+                    </p>
+                  </div>
+
+                  <div class="text-sm text-slate-500 lg:text-right">
+                    <p class="font-medium text-slate-700">{{ formatRelativeTime(item.submittedAt || null) }}</p>
+                    <p class="mt-1 text-xs">提交时间</p>
+                  </div>
+
+                  <div class="flex items-center justify-start gap-2 lg:justify-end">
+                    <Button
+                      size="sm"
+                      class="rounded-xl bg-emerald-600 text-white hover:bg-emerald-500"
+                      :disabled="item.submissionStatus !== 'submitted'"
+                      :loading="submissionActionPending === `approve:${item.id}`"
+                      @click="handleApproveSubmission(item)"
+                    >
+                      <CheckCircle2 class="h-4 w-4" />
+                      批准入库
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      class="rounded-xl border-slate-200 bg-white text-slate-700"
+                      :disabled="item.submissionStatus !== 'submitted'"
+                      :loading="submissionActionPending === `return:${item.id}`"
+                      @click="handleReturnSubmission(item)"
+                    >
+                      <Undo2 class="h-4 w-4" />
+                      退回
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
           <Card class="mt-6 overflow-hidden rounded-[22px] border border-slate-200/80 bg-white shadow-sm">
             <CardContent class="p-0">

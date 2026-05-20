@@ -386,6 +386,12 @@ async function ensureReviewFileForTarget(target: ReviewTarget) {
         issue: details.issue || null,
         pages: details.pages || null,
       },
+      submissionStatus: details.submissionStatus || 'draft',
+      submissionNote: details.submissionNote || null,
+      submittedAt: details.submittedAt || null,
+      reviewNote: details.reviewNote || null,
+      reviewedAt: details.reviewedAt || null,
+      promotedLiteratureId: details.promotedLiteratureId || null,
       records,
       hasWarnings: records.some((record) => record.validationStatus !== 'verified'),
     }

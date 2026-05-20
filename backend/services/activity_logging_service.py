@@ -33,6 +33,9 @@ ACTION_TYPES = {
     "create_user": "创建用户",
     "update_user": "更新用户",
     "delete_user": "删除用户",
+    "submit_literature": "提交文献审核",
+    "approve_literature_submission": "批准文献入库",
+    "return_literature_submission": "退回文献提交",
 }
 
 
