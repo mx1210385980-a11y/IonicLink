@@ -29,7 +29,8 @@ export interface UserListItem {
 }
 
 export const registrationRoleOptions = [
-  { value: 'researcher', label: '研究员', description: '可上传文献、运行提取并维护个人工作区。' },
+  { value: 'workspace_researcher', label: '独立工作区研究员', description: '适合学弟学长协作；只在自己的工作区上传、抽取和审阅。' },
+  { value: 'researcher', label: '课题组研究员', description: '可写入课题组文献库，也可维护个人工作区。' },
   { value: 'viewer', label: '查看者', description: '仅可查看组内数据，不可写入或发起处理。' },
   { value: 'group_admin', label: '组管理员', description: '可管理成员账号与共享资源。' },
 ] as const
@@ -37,7 +38,8 @@ export const registrationRoleOptions = [
 const roleLabels: Record<string, string> = {
   principal_investigator: '课题负责人',
   group_admin: '组管理员',
-  researcher: '研究员',
+  researcher: '课题组研究员',
+  workspace_researcher: '独立工作区研究员',
   viewer: '查看者',
 }
 
@@ -47,7 +49,7 @@ export function createEmptyRegistrationForm(): RegistrationFormState {
     displayName: '',
     password: '',
     confirmPassword: '',
-    role: 'researcher',
+    role: 'workspace_researcher',
   }
 }
 
@@ -91,7 +93,7 @@ export function normalizeRegistrationPayload(form: RegistrationFormState): Creat
     username: form.username.trim(),
     displayName: form.displayName.trim(),
     password: form.password,
-    role: form.role.trim() || 'researcher',
+    role: form.role.trim() || 'workspace_researcher',
   }
 }
 

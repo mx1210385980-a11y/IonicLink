@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { Activity, RefreshCw, Cpu, Database as DbIcon, ShieldCheck, CheckCircle2, Clock, Server, Users } from 'lucide-vue-next'
 import {
   Chart as ChartJS, Title, Tooltip, Legend, BarElement,
@@ -27,14 +27,17 @@ import {
   type UsageMetricEvent
 } from '@/lib/api'
 
-defineProps<{
+const props = withDefaults(defineProps<{
   workflow?: AgentWorkflow | null
   activeRun?: ExtractionRunDetail | null
   activeFileName?: string | null
-}>()
+  initialTab?: 'literature' | 'llm' | 'system' | 'users'
+}>(), {
+  initialTab: 'literature',
+})
 
 // Tab state
-const activeTab = ref<'literature' | 'llm' | 'system' | 'users'>('literature')
+const activeTab = ref<'literature' | 'llm' | 'system' | 'users'>(props.initialTab)
 
 const usageMetrics = ref<UsageMetricsResponse | null>(null)
 const usageLoading = ref(false)
@@ -251,6 +254,10 @@ function openBehaviorModal() {
 
 onMounted(() => {
   fetchUsageBehavior()
+})
+
+watch(() => props.initialTab, (tab) => {
+  activeTab.value = tab
 })
 </script>
 

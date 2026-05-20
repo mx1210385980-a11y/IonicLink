@@ -66,6 +66,8 @@ const registrationForm = ref(createEmptyRegistrationForm())
 const registrationLoading = ref(false)
 const registrationError = ref('')
 const registrationSuccess = ref<ReturnType<typeof buildRegistrationSuccessState> | null>(null)
+const registrationSuccessPassword = ref('')
+const resetPasswordSuccess = ref<{ displayName: string; username: string; password: string } | null>(null)
 
 const editForm = ref({
   displayName: '',
@@ -119,7 +121,31 @@ function openCreateModal() {
   registrationForm.value = createEmptyRegistrationForm()
   registrationError.value = ''
   modalError.value = ''
+  fillGeneratedPassword('registration')
   showCreateModal.value = true
+}
+
+function generatePassword(length = 16) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*'
+  const values = new Uint32Array(length)
+  if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+    window.crypto.getRandomValues(values)
+  } else {
+    for (let index = 0; index < values.length; index += 1) {
+      values[index] = Math.floor(Math.random() * chars.length)
+    }
+  }
+  return Array.from(values, (value) => chars[value % chars.length]).join('')
+}
+
+function fillGeneratedPassword(target: 'registration' | 'reset') {
+  const password = generatePassword()
+  if (target === 'registration') {
+    registrationForm.value.password = password
+    registrationForm.value.confirmPassword = password
+  } else {
+    newPassword.value = password
+  }
 }
 
 async function handleCreateUser() {
@@ -134,7 +160,9 @@ async function handleCreateUser() {
 
   try {
     const response = await createUser(normalizeRegistrationPayload(registrationForm.value))
+    registrationSuccessPassword.value = registrationForm.value.password
     registrationSuccess.value = buildRegistrationSuccessState(response.user)
+    resetPasswordSuccess.value = null
     highlightedUserId.value = response.user.id
     searchQuery.value = ''
     showCreateModal.value = false
@@ -208,6 +236,7 @@ function openResetPasswordModal(user: UserUsageStats) {
   selectedUser.value = user
   newPassword.value = ''
   modalError.value = ''
+  fillGeneratedPassword('reset')
   showResetPasswordModal.value = true
 }
 
@@ -222,6 +251,12 @@ async function handleResetPassword() {
   modalError.value = ''
   try {
     await resetUserPassword(selectedUser.value.user_id, newPassword.value)
+    resetPasswordSuccess.value = {
+      displayName: selectedUser.value.display_name,
+      username: selectedUser.value.username,
+      password: newPassword.value,
+    }
+    registrationSuccess.value = null
     showResetPasswordModal.value = false
   } catch (e: any) {
     modalError.value = e?.response?.data?.detail || e?.message || '重置密码失败。'
@@ -296,6 +331,8 @@ function getRoleBadgeClass(role: string) {
       return 'border-violet-300 bg-violet-50 text-violet-700'
     case 'researcher':
       return 'border-emerald-300 bg-emerald-50 text-emerald-700'
+    case 'workspace_researcher':
+      return 'border-cyan-300 bg-cyan-50 text-cyan-700'
     default:
       return 'border-slate-300 bg-slate-50 text-slate-600'
   }
@@ -309,6 +346,8 @@ function getSidebarDotClass(role: string) {
       return 'bg-emerald-400'
     case 'researcher':
       return 'bg-sky-400'
+    case 'workspace_researcher':
+      return 'bg-cyan-400'
     default:
       return 'bg-slate-300'
   }
@@ -387,6 +426,16 @@ onMounted(() => {
           <div v-if="registrationSuccess" class="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 shadow-sm">
             已成功创建成员 <span class="font-semibold">{{ registrationSuccess.displayName }}</span>（@{{ registrationSuccess.username }}），
             角色为 {{ getRoleLabel(registrationSuccess.role) }}，系统已自动创建个人工作区。
+            <span v-if="registrationSuccessPassword" class="ml-2 inline-flex rounded-md bg-white/70 px-2 py-0.5 font-mono text-xs text-emerald-900">
+              初始密码 {{ registrationSuccessPassword }}
+            </span>
+          </div>
+
+          <div v-if="resetPasswordSuccess" class="mt-5 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800 shadow-sm">
+            已重置 <span class="font-semibold">{{ resetPasswordSuccess.displayName }}</span>（@{{ resetPasswordSuccess.username }}）的密码。
+            <span class="ml-2 inline-flex rounded-md bg-white/70 px-2 py-0.5 font-mono text-xs text-sky-900">
+              新密码 {{ resetPasswordSuccess.password }}
+            </span>
           </div>
 
           <div class="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -551,7 +600,16 @@ onMounted(() => {
             <p v-if="registrationErrors.displayName" class="mt-2 text-xs text-rose-600">{{ registrationErrors.displayName }}</p>
           </div>
           <div>
-            <label class="mb-2 block text-sm font-medium text-slate-700">初始密码</label>
+            <div class="mb-2 flex items-center justify-between gap-3">
+              <label class="block text-sm font-medium text-slate-700">初始密码</label>
+              <button
+                type="button"
+                class="text-xs font-semibold text-slate-500 transition hover:text-violet-700"
+                @click="fillGeneratedPassword('registration')"
+              >
+                生成强密码
+              </button>
+            </div>
             <Input v-model="registrationForm.password" type="password" placeholder="至少 8 位" />
             <p v-if="registrationErrors.password" class="mt-2 text-xs text-rose-600">{{ registrationErrors.password }}</p>
           </div>
@@ -656,7 +714,16 @@ onMounted(() => {
       <div class="space-y-4">
         <p class="text-sm text-slate-600">为 <span class="font-semibold text-slate-900">{{ selectedUser?.display_name }}</span> 设置新的登录密码。</p>
         <div>
-          <label class="mb-2 block text-sm font-medium text-slate-700">新密码</label>
+          <div class="mb-2 flex items-center justify-between gap-3">
+            <label class="block text-sm font-medium text-slate-700">新密码</label>
+            <button
+              type="button"
+              class="text-xs font-semibold text-slate-500 transition hover:text-violet-700"
+              @click="fillGeneratedPassword('reset')"
+            >
+              生成强密码
+            </button>
+          </div>
           <Input v-model="newPassword" type="password" placeholder="至少 8 位" />
         </div>
         <div v-if="modalError" class="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{{ modalError }}</div>

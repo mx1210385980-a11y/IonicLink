@@ -3,6 +3,7 @@ import { computed } from 'vue'
 
 import GettingStarted from '@/components/GettingStarted.vue'
 import MonitorView from '@/components/MonitorView.vue'
+import UserManagement from '@/components/monitor/UserManagement.vue'
 import PlatformSectionHeader from '@/components/shell/PlatformSectionHeader.vue'
 import { useI18n } from '@/composables/useI18n'
 
@@ -61,12 +62,19 @@ const signals = computed(() => [
     />
 
     <div class="shell-surface min-h-0 flex-1 overflow-hidden">
-      <MonitorView
-        v-if="canAccessMonitor"
-        :workflow="latestAgentWorkflow"
-        :active-run="activeRun"
-        :active-file-name="activeFileName"
-      />
+      <template v-if="canAccessMonitor">
+        <UserManagement
+          v-if="currentSection === 'users'"
+          class="h-full"
+        />
+        <MonitorView
+          v-else
+          :initial-tab="currentSection === 'metrics' ? 'system' : 'literature'"
+          :workflow="latestAgentWorkflow"
+          :active-run="activeRun"
+          :active-file-name="activeFileName"
+        />
+      </template>
       <GettingStarted v-else />
     </div>
   </div>
