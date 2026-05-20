@@ -67,12 +67,6 @@ const currentScale = ref(1)
 const isLoading = ref(true)
 const errorMsg = ref('')
 const authenticatedPdfBlobUrl = ref('')
-const renderedPages = ref<Set<number>>(new Set())
-const renderingPages = ref<Set<number>>(new Set())
-const pageRenderErrors = ref<Record<number, string>>({})
-const renderTasks = new Map<number, Promise<void>>()
-let pageObserver: IntersectionObserver | null = null
-let loadGeneration = 0
 
 // Per-page metadata: store each page's native size (in PDF points)
 interface PageMeta {
@@ -121,115 +115,12 @@ function getPageMeta(pageNum: number): PageMeta {
   return pageMetas.value[pageNum - 1] ?? { width: 612, height: 792 }
 }
 
-function updatePageSet(target: typeof renderedPages, pageNum: number, include: boolean) {
-  const next = new Set(target.value)
-  if (include) next.add(pageNum)
-  else next.delete(pageNum)
-  target.value = next
-}
-
-function clampPage(pageNum: number): number {
-  if (!Number.isFinite(pageNum) || pageCount.value < 1) return 1
-  return Math.min(pageCount.value, Math.max(1, Math.trunc(pageNum)))
-}
-
-function pageForHighlight(id?: string | null): number | null {
-  if (!id) return null
-  const target = props.highlights.find((item) => item.id === id)
-  return target?.page ? Number(target.page) : null
-}
-
-function preferredInitialPage(): number {
-  return clampPage(pageForHighlight(props.activeId) ?? props.highlights[0]?.page ?? 1)
-}
-
-function scaleForMeta(meta: PageMeta): number {
-  const explicitScale = Number(props.scale || 0)
-  if (explicitScale > 0) return explicitScale
-  const containerWidth = props.width || containerRef.value?.clientWidth || 0
-  if (!containerWidth || !meta.width) return 1
-  return Math.max(0.45, Math.min(2.1, (containerWidth - 28) / meta.width))
-}
-
-function pageSize(pageNum: number) {
-  const meta = getPageMeta(pageNum)
-  const scale = scaleForMeta(meta)
-  return {
-    width: Math.max(1, Math.floor(meta.width * scale)),
-    height: Math.max(1, Math.floor(meta.height * scale)),
-  }
-}
-
-function pageStyle(pageNum: number) {
-  const size = pageSize(pageNum)
-  return {
-    width: `${size.width}px`,
-    minHeight: `${size.height}px`,
-  }
-}
-
-function isPageRendered(pageNum: number): boolean {
-  return renderedPages.value.has(pageNum)
-}
-
-function isPageRendering(pageNum: number): boolean {
-  return renderingPages.value.has(pageNum)
-}
-
-function pageError(pageNum: number): string {
-  return pageRenderErrors.value[pageNum] || ''
-}
-
-function setPageRef(el: any, pageNum: number) {
-  if (!el) return
-  pagesRef.value[pageNum - 1] = el as HTMLDivElement
-}
-
-function teardownPageObserver() {
-  pageObserver?.disconnect()
-  pageObserver = null
-}
-
-function setupPageObserver() {
-  teardownPageObserver()
-  if (!containerRef.value || !pageCount.value) return
-
-  if (typeof IntersectionObserver === 'undefined') {
-    const initial = preferredInitialPage()
-    ;[initial, 1, 2, 3].forEach((pageNum) => {
-      if (pageNum >= 1 && pageNum <= pageCount.value) void renderPage(pageNum)
-    })
-    return
-  }
-
-  pageObserver = new IntersectionObserver(
-    (entries) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) continue
-        const pageNum = Number((entry.target as HTMLElement).dataset.page || 0)
-        if (pageNum) void renderPage(pageNum)
-      }
-    },
-    {
-      root: containerRef.value,
-      rootMargin: '900px 0px',
-      threshold: 0.01,
-    },
-  )
-
-  for (const pageEl of pagesRef.value) {
-    if (pageEl) pageObserver.observe(pageEl)
-  }
-}
-
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 onMounted(() => {
   loadPdf()
 })
 
 onBeforeUnmount(() => {
-  loadGeneration += 1
-  teardownPageObserver()
   if (pdfDoc.value) {
     pdfDoc.value.destroy()
     pdfDoc.value = null
@@ -310,16 +201,8 @@ async function openPdfInNewTab() {
 async function loadPdf() {
   if (!props.src) return
 
-  const generation = loadGeneration + 1
-  loadGeneration = generation
   isLoading.value = true
   errorMsg.value = ''
-  pageRenderErrors.value = {}
-  renderedPages.value = new Set()
-  renderingPages.value = new Set()
-  renderTasks.clear()
-  pagesRef.value = []
-  teardownPageObserver()
 
   // Destroy previous doc
   if (pdfDoc.value) {
@@ -333,117 +216,92 @@ async function loadPdf() {
     // to stream/parse an HTML error page and then blowing up with obscure
     // messages like “a.toHex is not a function”.
     const data = await fetchPdfBytes()
-    if (generation !== loadGeneration) return
     const loadingTask = pdfjsLib.getDocument({ data })
 
     const pdf = await loadingTask.promise
-    if (generation !== loadGeneration) {
-      pdf.destroy?.()
-      return
-    }
     pdfDoc.value = pdf
     pageCount.value = pdf.numPages
 
-    // Read the first page only for initial layout. Individual page metas are
-    // refined lazily when each page is rendered.
-    const firstPage = await pdf.getPage(1)
-    const firstViewport = firstPage.getViewport({ scale: 1 })
-    const firstMeta = { width: firstViewport.width, height: firstViewport.height }
-    pageMetas.value = Array.from({ length: pdf.numPages }, () => ({ ...firstMeta }))
-    currentScale.value = scaleForMeta(firstMeta)
+    // Collect page metas
+    const metas: PageMeta[] = []
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i)
+      const vp = page.getViewport({ scale: 1 })
+      metas.push({ width: vp.width, height: vp.height })
+    }
+    pageMetas.value = metas
 
     emit('loaded', pdf.numPages)
 
+    // Render all pages
     await nextTick()
-    setupPageObserver()
-    const initialPage = preferredInitialPage()
-    await renderPage(initialPage, generation)
-    if (initialPage !== 1) void renderPage(1, generation)
+    await renderAllPages(pdf)
     if (props.activeId) {
       await scrollToHighlightWhenReady(props.activeId)
     }
   } catch (err: any) {
-    if (generation !== loadGeneration) return
     errorMsg.value = err?.message || 'Failed to load PDF'
     emit('error', errorMsg.value)
     console.error('[PdfViewer] Load error:', err)
   } finally {
-    if (generation === loadGeneration) {
-      isLoading.value = false
-    }
+    isLoading.value = false
   }
 }
 
 // ─── Render pages to canvas ──────────────────────────────────────────────────
-async function renderPage(pageNum: number, generation = loadGeneration) {
-  const targetPage = clampPage(pageNum)
-  if (!pdfDoc.value || !targetPage || renderedPages.value.has(targetPage)) return
-  const existingTask = renderTasks.get(targetPage)
-  if (existingTask) return existingTask
-
-  const task = (async () => {
-    updatePageSet(renderingPages, targetPage, true)
+async function renderAllPages(pdf: any) {
+  for (let i = 1; i <= pdf.numPages; i++) {
     try {
-      const pdf = pdfDoc.value
-      if (!pdf || generation !== loadGeneration) return
+      const page = await pdf.getPage(i)
 
-      const page = await pdf.getPage(targetPage)
-      if (generation !== loadGeneration) return
-
-      const nativeViewport = page.getViewport({ scale: 1 })
-      const meta = { width: nativeViewport.width, height: nativeViewport.height }
-      pageMetas.value[targetPage - 1] = meta
-
-      const scale = scaleForMeta(meta)
+      // Determine scale
+      let scale = props.scale || 0
+      if (scale <= 0 && containerRef.value) {
+        const containerWidth = props.width || containerRef.value.clientWidth
+        const vp1 = page.getViewport({ scale: 1 })
+        scale = (containerWidth - 4) / vp1.width // slight padding
+      }
+      if (scale <= 0) scale = 1
       currentScale.value = scale
-      const viewport = page.getViewport({ scale })
-      const outputScale = Math.min(2, Math.max(1, window.devicePixelRatio || 1))
 
-      await nextTick()
-      const pageEl = pagesRef.value?.[targetPage - 1]
+      const viewport = page.getViewport({ scale })
+      const outputScale = Math.min(2.5, Math.max(1, window.devicePixelRatio || 1))
+
+      // Get the canvas inside the page wrapper
+      const pageEl = pagesRef.value?.[i - 1]
+      if (!pageEl) continue
+
       const canvas = pageEl?.querySelector('canvas') as HTMLCanvasElement | null
-      if (!pageEl || !canvas) return
+      if (!canvas) continue
+
+      const ctx = canvas.getContext('2d')
+      if (!ctx) continue
 
       canvas.width = Math.floor(viewport.width * outputScale)
       canvas.height = Math.floor(viewport.height * outputScale)
       canvas.style.width = `${viewport.width}px`
       canvas.style.height = `${viewport.height}px`
+
+      // Set the wrapper size to match
       pageEl.style.width = `${viewport.width}px`
-      pageEl.style.minHeight = `${viewport.height}px`
+      pageEl.style.height = `${viewport.height}px`
 
       await page.render({
-        canvas,
+        canvasContext: ctx,
         viewport,
         transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined,
       }).promise
-
-      if (generation !== loadGeneration) return
-      updatePageSet(renderedPages, targetPage, true)
-      const nextErrors = { ...pageRenderErrors.value }
-      delete nextErrors[targetPage]
-      pageRenderErrors.value = nextErrors
     } catch (e: any) {
-      if (generation !== loadGeneration) return
-      const message = e?.message || 'render failure'
-      console.error(`[PdfViewer] failed to render page ${targetPage}:`, e)
-      pageRenderErrors.value = { ...pageRenderErrors.value, [targetPage]: message }
-      emit('error', `Page ${targetPage}: ${message}`)
-    } finally {
-      updatePageSet(renderingPages, targetPage, false)
-      renderTasks.delete(targetPage)
+      console.error(`[PdfViewer] failed to render page ${i}:`, e)
+      // stop further rendering and show user-facing error
+      errorMsg.value = `Page ${i}: ${e?.message || 'render failure'}`
+      emit('error', errorMsg.value)
+      break
     }
-  })()
-
-  renderTasks.set(targetPage, task)
-  return task
+  }
 }
 
 async function scrollToHighlightWhenReady(id: string, retries = 12) {
-  const targetPage = pageForHighlight(id)
-  if (targetPage) {
-    await scrollToPage(targetPage, 'auto')
-    await renderPage(targetPage)
-  }
   await nextTick()
   for (let i = 0; i < retries; i++) {
     const el = containerRef.value?.querySelector(`[data-highlight-id="${id}"]`) as HTMLElement | null
@@ -457,14 +315,13 @@ async function scrollToHighlightWhenReady(id: string, retries = 12) {
 
 async function scrollToPage(pageNum: number, behavior: ScrollBehavior = 'smooth') {
   if (!Number.isFinite(pageNum) || pageCount.value < 1) return
-  const targetPage = clampPage(pageNum)
+  const targetPage = Math.min(pageCount.value, Math.max(1, Math.trunc(pageNum)))
   await nextTick()
   const pageEl = pagesRef.value?.[targetPage - 1]
     || containerRef.value?.querySelector(`[data-page="${targetPage}"]`) as HTMLElement | null
   if (pageEl) {
     pageEl.scrollIntoView({ behavior, block: 'start' })
   }
-  void renderPage(targetPage)
 }
 
 watch(
@@ -478,11 +335,6 @@ watch(
 
 // ─── Scroll to a specific highlight ──────────────────────────────────────────
 function scrollToHighlight(id: string) {
-  const targetPage = pageForHighlight(id)
-  if (targetPage) {
-    void scrollToHighlightWhenReady(id)
-    return
-  }
   const el = containerRef.value?.querySelector(`[data-highlight-id="${id}"]`) as HTMLElement | null
   if (el) {
     el.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -502,31 +354,31 @@ defineExpose({ scrollToHighlight, scrollToPage })
   <!-- Container with scroll -->
   <div
     ref="containerRef"
-    class="relative h-full w-full overflow-auto bg-slate-100 dark:bg-slate-950"
+    class="relative w-full h-full overflow-auto bg-gray-100 dark:bg-gray-900"
   >
     <!-- Loading Spinner -->
     <div
       v-if="isLoading"
-      class="absolute inset-0 z-20 flex items-center justify-center bg-white/78 backdrop-blur-sm dark:bg-slate-950/78"
+      class="absolute inset-0 flex items-center justify-center z-20 bg-background/80 backdrop-blur-sm"
     >
       <div class="flex flex-col items-center gap-3">
-        <div class="h-8 w-8 animate-spin rounded-full border-2 border-slate-300 border-t-slate-900 dark:border-slate-700 dark:border-t-white" />
-        <span class="text-sm font-medium text-slate-500 dark:text-slate-400">Loading PDF…</span>
+        <div class="w-8 h-8 border-3 border-primary/30 border-t-primary rounded-full animate-spin" />
+        <span class="text-sm text-muted-foreground">Loading PDF…</span>
       </div>
     </div>
 
     <!-- Error State -->
     <div
       v-if="errorMsg && !isLoading"
-      class="absolute inset-0 z-20 flex flex-col items-center justify-center"
+      class="absolute inset-0 flex flex-col items-center justify-center z-20"
     >
-      <div class="max-w-md rounded-md border border-rose-200 bg-rose-50 p-6 text-center dark:border-rose-500/30 dark:bg-rose-500/10">
-        <p class="text-sm font-semibold text-rose-700 dark:text-rose-300">{{ errorMsg }}</p>
+      <div class="text-center p-6 rounded-lg bg-destructive/10 border border-destructive/30 max-w-md">
+        <p class="text-sm font-medium text-destructive">{{ errorMsg }}</p>
         <div class="mt-2 text-xs">
           <button
             v-if="typeof props.src === 'string'"
             type="button"
-            class="font-semibold text-slate-700 underline underline-offset-4 dark:text-slate-200"
+            class="underline"
             @click="openPdfInNewTab"
           >Open PDF in new tab</button>
         </div>
@@ -534,37 +386,20 @@ defineExpose({ scrollToHighlight, scrollToPage })
     </div>
 
     <!-- Pages -->
-    <div class="flex flex-col items-center gap-3 py-4">
+    <div class="flex flex-col items-center gap-2 py-4">
       <div
         v-for="pageNum in pageCount"
         :key="pageNum"
-        :ref="(el: any) => setPageRef(el, pageNum)"
-        class="relative overflow-hidden rounded-sm bg-white shadow-[0_12px_34px_-26px_rgba(15,23,42,0.58)] ring-1 ring-slate-200/80 dark:bg-slate-900 dark:ring-slate-800"
+        :ref="(el: any) => { if (el) pagesRef[pageNum - 1] = el }"
+        class="relative shadow-md bg-white"
         :data-page="pageNum"
-        :style="pageStyle(pageNum)"
       >
         <!-- PDF canvas -->
-        <canvas
-          class="block transition-opacity duration-200"
-          :class="isPageRendered(pageNum) ? 'opacity-100' : 'opacity-0'"
-        />
-
-        <div
-          v-if="!isPageRendered(pageNum)"
-          class="absolute inset-0 flex items-center justify-center bg-white text-xs font-semibold text-slate-400 dark:bg-slate-900 dark:text-slate-500"
-        >
-          <div class="flex items-center gap-2">
-            <span
-              v-if="isPageRendering(pageNum) && !pageError(pageNum)"
-              class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-slate-200 border-t-slate-500 dark:border-slate-700 dark:border-t-slate-300"
-            />
-            <span>{{ pageError(pageNum) ? `Page ${pageNum}: ${pageError(pageNum)}` : `Page ${pageNum}` }}</span>
-          </div>
-        </div>
+        <canvas />
 
         <!-- Highlight Overlay (delegated to PdfHighlightOverlay) -->
         <PdfHighlightOverlay
-          v-if="isPageRendered(pageNum) && highlightsByPage[pageNum] && pageMetas[pageNum - 1]"
+          v-if="highlightsByPage[pageNum] && pageMetas[pageNum - 1]"
           :page-width="getPageMeta(pageNum).width"
           :page-height="getPageMeta(pageNum).height"
           :highlights="highlightsByPage[pageNum] ?? []"
