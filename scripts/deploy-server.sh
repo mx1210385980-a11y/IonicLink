@@ -61,7 +61,7 @@ build_frontend_dist() {
 
 sync_frontend_dist() {
   echo "==> Syncing frontend dist"
-  rsync -az --delete --progress \
+  rsync -az --progress \
     frontend/dist/ "${TARGET}:${REMOTE_DIR}/frontend/dist/"
 }
 
@@ -96,7 +96,7 @@ case "$ACTION" in
     sync_frontend_deploy
     build_frontend_dist
     sync_frontend_dist
-    remote "if sudo docker inspect ioniclink-frontend >/dev/null 2>&1; then sudo docker compose up -d --no-deps frontend && sudo docker exec ioniclink-frontend sh -lc 'rm -rf /usr/share/nginx/html/*' && sudo docker cp frontend/dist/. ioniclink-frontend:/usr/share/nginx/html/ && sudo docker cp frontend/nginx.conf ioniclink-frontend:/etc/nginx/conf.d/default.conf && sudo docker compose exec -T frontend nginx -s reload; else sudo docker build -f frontend/Dockerfile --build-arg VITE_API_URL=/api -t repo-frontend . && sudo docker compose up -d --no-deps --no-build frontend; fi"
+    remote "if sudo docker inspect ioniclink-frontend >/dev/null 2>&1; then sudo docker compose up -d --no-deps frontend && sudo docker exec ioniclink-frontend sh -lc 'mkdir -p /usr/share/nginx/html' && sudo docker cp frontend/dist/. ioniclink-frontend:/usr/share/nginx/html/ && sudo docker cp frontend/nginx.conf ioniclink-frontend:/etc/nginx/conf.d/default.conf && sudo docker compose exec -T frontend nginx -s reload; else sudo docker build -f frontend/Dockerfile --build-arg VITE_API_URL=/api -t repo-frontend . && sudo docker compose up -d --no-deps --no-build frontend; fi"
     ;;
   frontend-image)
     sync_frontend_deploy
