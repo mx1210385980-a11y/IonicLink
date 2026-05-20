@@ -262,6 +262,19 @@ const selectedReviewFile = computed<BatchFile | null>(() => props.selectedFile |
 const activeDocumentName = computed(() => selectedReviewFile.value?.name || props.selectedFileName || 'No review document selected')
 const allRecords = computed(() => Array.isArray(selectedReviewFile.value?.records) ? selectedReviewFile.value.records : [])
 
+const diffusionCoefficientFieldKeys = ['d_total', 'd_cation', 'd_anion'] as const
+const diffusionIonIdentityFieldKeys = ['diffusing_ion', 'cation', 'anion'] as const
+const diffusionConfinementFieldKeys = [
+  'confinement_material_class',
+  'confinement_geometry_class',
+  'surface_functional_groups',
+  'confinement_dimensionality',
+  'confinement_scale_value',
+  'confinement_scale_unit',
+] as const
+const diffusionConditionFieldKeys = ['temperature_value', 'confinement_scale_value', 'confinement_scale_unit'] as const
+const diffusionCoreFactKeys = ['system_name', 'diffusing_ion', 'diffusion_coefficient', 'd_unit', 'source_evidence'] as const
+
 const queueItems = computed<QueueItem[]>(() => {
   const base = reviewFiles.value.length
     ? reviewFiles.value.map((file) => {
@@ -1793,19 +1806,6 @@ function diffusionMetric(record: TribologyData | null | undefined) {
   if (record.D_anion != null) return { label: 'D_anion', value: formatDiffusionNumber(record.D_anion) }
   return { label: 'Diffusion', value: 'Not captured yet' }
 }
-
-const diffusionCoefficientFieldKeys = ['d_total', 'd_cation', 'd_anion'] as const
-const diffusionIonIdentityFieldKeys = ['diffusing_ion', 'cation', 'anion'] as const
-const diffusionConfinementFieldKeys = [
-  'confinement_material_class',
-  'confinement_geometry_class',
-  'surface_functional_groups',
-  'confinement_dimensionality',
-  'confinement_scale_value',
-  'confinement_scale_unit',
-] as const
-const diffusionConditionFieldKeys = ['temperature_value', 'confinement_scale_value', 'confinement_scale_unit'] as const
-const diffusionCoreFactKeys = ['system_name', 'diffusing_ion', 'diffusion_coefficient', 'd_unit', 'source_evidence'] as const
 
 function diffusionFieldPresent(
   record: TribologyData | null | undefined,
