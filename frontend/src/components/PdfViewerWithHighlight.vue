@@ -351,7 +351,6 @@ async function loadPdf() {
     const firstMeta = { width: firstViewport.width, height: firstViewport.height }
     pageMetas.value = Array.from({ length: pdf.numPages }, () => ({ ...firstMeta }))
     currentScale.value = scaleForMeta(firstMeta)
-    firstPage.cleanup?.()
 
     emit('loaded', pdf.numPages)
 
@@ -424,7 +423,6 @@ async function renderPage(pageNum: number, generation = loadGeneration) {
       const nextErrors = { ...pageRenderErrors.value }
       delete nextErrors[targetPage]
       pageRenderErrors.value = nextErrors
-      page.cleanup?.()
     } catch (e: any) {
       if (generation !== loadGeneration) return
       const message = e?.message || 'render failure'
