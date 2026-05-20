@@ -195,6 +195,19 @@ type TribopairReviewPart = {
   highlight?: boolean
 }
 
+type DiffusionReviewGroup = {
+  id: string
+  label: string
+  value: string
+  meta: string
+  fieldId: string
+  status: ReviewField['evidenceStatus'] | 'Optional'
+  statusLabel: string
+  statusClass: string
+  items: StructuredTag[]
+  emphasis?: boolean
+}
+
 type EvidenceSearchMode = 'loose' | 'exact-token' | 'numeric'
 
 type EvidenceSearchSpec = {
@@ -332,7 +345,7 @@ const recordItems = computed<RecordItem[]>(() => {
       substrate: substrateRaw,
       metricLabel: metric.label,
       metricValue: metric.value,
-      metricTags: extractorType === 'diffusion' ? [] : cofStructuredTags(record),
+      metricTags: extractorType === 'diffusion' ? diffusionRecordTags(record) : cofStructuredTags(record),
       confidence,
       status,
       lowConfidence,
@@ -707,7 +720,14 @@ watch(
 const activeField = computed(() => reviewFields.value.find((field) => field.id === activeFieldId.value) || reviewFields.value[0] || null)
 const activeFieldEvidenceEntry = computed(() => {
   const fieldMap = resolveRecordFieldEvidenceMap(activeRecord.value, activeRecordFieldEvidence.value?.fields)
-  return fieldMap[activeField.value?.id || ''] || null
+  const fieldId = activeField.value?.id || ''
+  if (activeExtractorType.value === 'diffusion') {
+    if (fieldId === 'diffusion_coefficient') return bestFieldEvidenceEntry(fieldMap, diffusionCoefficientFieldKeys)
+    if (fieldId === 'ion_identity') return bestFieldEvidenceEntry(fieldMap, diffusionIonIdentityFieldKeys)
+    if (fieldId === 'confinement_context') return bestFieldEvidenceEntry(fieldMap, diffusionConfinementFieldKeys)
+    if (fieldId === 'conditions') return bestFieldEvidenceEntry(fieldMap, diffusionConditionFieldKeys) || fieldMap.conditions || null
+  }
+  return fieldMap[fieldId] || null
 })
 const canApproveAllVisible = computed(() => visibleRecordCount.value > 0 && visibleRecordItems.value.every((item) => recordCanApprove(item.record, remoteFieldsForRecord(item.record))))
 const approveAllLabel = computed(() => {
@@ -1524,6 +1544,12 @@ function structuredTagsForField(field: ReviewField, record: TribologyData | null
 }
 
 function structuredTagsForFieldId(fieldId: string, record: TribologyData | null | undefined): StructuredTag[] {
+  if (recordExtractorType(record) === 'diffusion') {
+    if (fieldId === 'diffusion_coefficient') return diffusionCoefficientTags(record)
+    if (fieldId === 'ion_identity') return diffusionIonIdentityTags(record)
+    if (fieldId === 'confinement_context') return diffusionConfinementTags(record)
+    if (fieldId === 'conditions') return diffusionConditionTags(record)
+  }
   if (fieldId === 'cof') return cofStructuredTags(record)
   if (fieldId === 'load') return loadStructuredTags(record)
   if (fieldId === 'speed') return speedStructuredTags(record)
@@ -1768,6 +1794,191 @@ function diffusionMetric(record: TribologyData | null | undefined) {
   return { label: 'Diffusion', value: 'Not captured yet' }
 }
 
+const diffusionCoefficientFieldKeys = ['d_total', 'd_cation', 'd_anion'] as const
+const diffusionIonIdentityFieldKeys = ['diffusing_ion', 'cation', 'anion'] as const
+const diffusionConfinementFieldKeys = [
+  'confinement_material_class',
+  'confinement_geometry_class',
+  'surface_functional_groups',
+  'confinement_dimensionality',
+  'confinement_scale_value',
+  'confinement_scale_unit',
+] as const
+const diffusionConditionFieldKeys = ['temperature_value', 'confinement_scale_value', 'confinement_scale_unit'] as const
+
+function diffusionCoefficientTags(record: TribologyData | null | undefined): StructuredTag[] {
+  if (!record) return []
+  const tags: StructuredTag[] = []
+  if (record.D_total != null) tags.push({ label: 'Total', value: formatDiffusionNumber(record.D_total) })
+  if (record.D_cation != null) tags.push({ label: 'Cation', value: formatDiffusionNumber(record.D_cation) })
+  if (record.D_anion != null) tags.push({ label: 'Anion', value: formatDiffusionNumber(record.D_anion) })
+  const unit = formatScientificUnit(record.D_unit)
+  if (unit !== 'Not captured yet' && tags.length) tags.push({ label: 'Unit', value: unit })
+  return tags
+}
+
+function diffusionCoefficientSummary(record: TribologyData | null | undefined) {
+  const tags = diffusionCoefficientTags(record).filter((tag) => tag.label !== 'Unit')
+  if (!tags.length) return 'Not captured yet'
+  const unit = formatScientificUnit(record?.D_unit)
+  const suffix = unit !== 'Not captured yet' ? ` ${unit}` : ''
+  return tags.map((tag) => `${tag.label} ${tag.value}`).join(' · ') + suffix
+}
+
+function diffusionIonIdentityTags(record: TribologyData | null | undefined): StructuredTag[] {
+  if (!record) return []
+  const standard = diffusionStandardFields(record)
+  const tagConfig: Array<[string, string[]]> = [
+    ['Diffusing', ['diffusing_ion', 'diffusingIon']],
+    ['Cation', ['cation']],
+    ['Anion', ['anion']],
+    ['Side chain', ['side_chain_label', 'sideChainLabel']],
+    ['Water uptake', ['water_uptake_label', 'waterUptakeLabel']],
+  ]
+  return tagConfig
+    .map(([label, keys]) => ({
+      label,
+      value: keys.map((key) => trim((standard as Record<string, unknown>)[key])).find(Boolean) || '',
+    }))
+    .filter((tag) => tag.value)
+}
+
+function diffusionIonIdentitySummary(record: TribologyData | null | undefined) {
+  const tags = diffusionIonIdentityTags(record)
+  if (!tags.length) return 'Not captured yet'
+  const moving = tags.find((tag) => tag.label === 'Diffusing')?.value
+  const cation = tags.find((tag) => tag.label === 'Cation')?.value
+  const anion = tags.find((tag) => tag.label === 'Anion')?.value
+  return [moving ? `moving ${moving}` : '', cation ? `cation ${cation}` : '', anion ? `anion ${anion}` : '']
+    .filter(Boolean)
+    .join(' · ') || tags.map((tag) => `${tag.label} ${tag.value}`).join(' · ')
+}
+
+function diffusionConfinementTags(record: TribologyData | null | undefined): StructuredTag[] {
+  if (!record) return []
+  const tags: StructuredTag[] = []
+  if (trim(record.confinement_material_class)) tags.push({ label: 'Material', value: trim(record.confinement_material_class) })
+  if (trim(record.confinement_geometry_class)) tags.push({ label: 'Geometry', value: trim(record.confinement_geometry_class) })
+  if (trim(record.confinement_dimensionality)) tags.push({ label: 'Dimension', value: trim(record.confinement_dimensionality) })
+  if (trim(record.surface_functional_groups)) tags.push({ label: 'Surface', value: trim(record.surface_functional_groups) })
+  if (record.confinement_scale_value != null) {
+    const unit = formatScientificUnit(record.confinement_scale_unit)
+    tags.push({
+      label: 'Scale',
+      value: `${formatDiffusionNumber(record.confinement_scale_value)}${unit !== 'Not captured yet' ? ` ${unit}` : ''}`,
+    })
+  }
+  return tags
+}
+
+function diffusionConfinementSummary(record: TribologyData | null | undefined) {
+  const tags = diffusionConfinementTags(record)
+  if (!tags.length) return 'Not captured yet'
+  return tags.slice(0, 3).map((tag) => tag.value).join(' · ')
+}
+
+function diffusionConditionTags(record: TribologyData | null | undefined): StructuredTag[] {
+  if (!record) return []
+  const tags: StructuredTag[] = []
+  if (record.temperature_value != null) tags.push({ label: 'T', value: formatDiffusionNumber(record.temperature_value) })
+  if (record.confinement_scale_value != null) {
+    const unit = formatScientificUnit(record.confinement_scale_unit)
+    tags.push({
+      label: 'Scale',
+      value: `${formatDiffusionNumber(record.confinement_scale_value)}${unit !== 'Not captured yet' ? ` ${unit}` : ''}`,
+    })
+  }
+  return tags
+}
+
+function diffusionRecordTags(record: TribologyData | null | undefined): StructuredTag[] {
+  const coefficient = diffusionCoefficientTags(record).slice(0, 2)
+  const ion = diffusionIonIdentityTags(record).find((tag) => tag.label === 'Diffusing')
+  const temperature = diffusionConditionTags(record).find((tag) => tag.label === 'T')
+  return [...coefficient, ...(ion ? [ion] : []), ...(temperature ? [temperature] : [])].slice(0, 4)
+}
+
+function bestFieldEvidenceEntry(
+  fieldMap: Record<string, FieldEvidenceEntry>,
+  keys: readonly string[],
+): FieldEvidenceEntry | null {
+  const entries = keys.map((key) => fieldMap[key]).filter(Boolean) as FieldEvidenceEntry[]
+  return entries.find((entry) => resolveFieldEvidenceStatus(entry, present(entry.value), Boolean(entry.value)) === 'Grounded')
+    || entries.find((entry) => resolveFieldEvidenceStatus(entry, present(entry.value), Boolean(entry.value)) === 'Partial')
+    || entries[0]
+    || null
+}
+
+function aggregateEvidenceStatus(
+  fieldMap: Record<string, FieldEvidenceEntry>,
+  keys: readonly string[],
+  record: TribologyData,
+): ReviewField['evidenceStatus'] {
+  const statuses = keys
+    .filter((key) => hasRecordValue(record, key, 'diffusion') || hasFieldEntry(fieldMap, key))
+    .map((key) => resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, 'diffusion')))
+  if (!statuses.length) return 'Missing'
+  if (statuses.every((status) => status === 'Grounded')) return 'Grounded'
+  if (statuses.some((status) => status === 'Partial')) return 'Partial'
+  if (statuses.some((status) => status === 'Grounded')) return 'Partial'
+  return 'Missing'
+}
+
+function aggregateFieldStatus(
+  record: TribologyData,
+  evidence: ReviewField['evidenceStatus'],
+  entry: FieldEvidenceEntry | null | undefined,
+): ReviewField['status'] {
+  const reviewState = String(entry?.review_state || '').trim().toLowerCase()
+  if (reviewState === 'flagged') return 'low_conf'
+  if (reviewState === 'confirmed' && evidence === 'Grounded') return 'confirmed'
+  if (record.validationStatus === 'verified' && evidence === 'Grounded') return 'confirmed'
+  if (evidence === 'Missing') return 'low_conf'
+  return 'review'
+}
+
+function buildAggregateDiffusionField(
+  label: string,
+  id: string,
+  value: string,
+  record: TribologyData,
+  fieldMap: Record<string, FieldEvidenceEntry>,
+  keys: readonly string[],
+  issueMessage: string,
+): ReviewField {
+  const entry = bestFieldEvidenceEntry(fieldMap, keys)
+  const evidence = aggregateEvidenceStatus(fieldMap, keys, record)
+  const groundingMode = resolveFieldGroundingMode(entry, value)
+  const locationMode = resolveFieldLocationMode(entry, record, groundingMode)
+  const reviewExempt = groundingMode === 'inferred'
+  const hasCapturedValue = trim(value) !== '' && value !== 'Not captured yet'
+  const canConfirm = !reviewExempt && hasCapturedValue && evidence === 'Grounded'
+  const reviewState = String(entry?.review_state || '').trim().toLowerCase()
+  const reviewNote = trim(entry?.review_note)
+
+  return {
+    id,
+    label,
+    value,
+    status: reviewExempt ? 'confirmed' : aggregateFieldStatus(record, evidence, entry),
+    confidence: reviewExempt ? 'High' : confidenceLabel(record.validationStatus, value, hasCapturedValue),
+    evidenceStatus: evidence,
+    groundingMode,
+    groundingNote: resolveFieldGroundingNote(entry),
+    sourceType: resolveFieldSourceType(entry, record),
+    location: resolveFieldLocation(entry, record),
+    locationMode,
+    reviewState: reviewState || null,
+    reviewNote,
+    canConfirm,
+    issue: reviewExempt
+      ? undefined
+      : reviewState === 'flagged'
+        ? (reviewNote || issueMessage)
+        : (!canConfirm ? issueMessage : undefined),
+  }
+}
+
 function resolveRecordFieldEvidenceMap(
   record: TribologyData | null | undefined,
   remoteFields?: Record<string, FieldEvidenceEntry> | null,
@@ -1817,7 +2028,7 @@ function fieldEntryHasEvidence(entry: FieldEvidenceEntry | null | undefined) {
   const groundingMode = trim(entry?.grounding_mode).toLowerCase()
   const matchedText = trim(evidence?.matched_text ?? (evidence as Record<string, unknown> | undefined)?.matchedText)
   const bbox = normalizeResolvedBBox(evidence?.bbox)
-  if (sourceType === 'table' && !matchedText && groundingMode !== 'explicit') return false
+  if (sourceType === 'table' && !matchedText && groundingMode !== 'explicit' && entry?.status !== 'grounded') return false
   return Boolean(evidence?.page && bbox)
 }
 
@@ -2166,6 +2377,10 @@ function fieldValueForKey(record: TribologyData, key: string, extractorType: Ext
   }
   if (extractorType === 'diffusion') {
     if (key === 'system_name') return present(record.system_name)
+    if (key === 'diffusion_coefficient') return diffusionCoefficientSummary(record)
+    if (key === 'ion_identity') return diffusionIonIdentitySummary(record)
+    if (key === 'confinement_context') return diffusionConfinementSummary(record)
+    if (key === 'conditions') return summarizeConditions(record, extractorType)
     if (key === 'confinement_material_class') return present(record.confinement_material_class)
     if (key === 'confinement_geometry_class') return present(record.confinement_geometry_class)
     if (key === 'surface_functional_groups') return present(record.surface_functional_groups)
@@ -2263,6 +2478,39 @@ function fieldEvidenceSpecs(field: ReviewField | null, record: TribologyData | n
   if (field.id === 'system_name') {
     const systemName = trim(record.system_name)
     if (systemName) addEvidenceSpec(specs, systemName, 'loose')
+  }
+
+  if (field.id === 'diffusion_coefficient') {
+    ;[
+      record.D_total,
+      record.D_cation,
+      record.D_anion,
+    ].forEach((value) => {
+      if (value == null) return
+      const label = formatDiffusionNumber(value)
+      addEvidenceSpec(specs, label, 'numeric')
+      addEvidenceSpec(specs, `diffusion coefficient ${label}`, 'loose')
+    })
+    const unit = trim(record.D_unit)
+    if (unit) addEvidenceSpec(specs, unit, 'loose')
+  }
+
+  if (field.id === 'ion_identity') {
+    diffusionIonIdentityTags(record).forEach((tag) => {
+      addEvidenceSpec(specs, tag.value, tag.label === 'Diffusing' ? 'exact-token' : 'loose')
+    })
+  }
+
+  if (field.id === 'confinement_context') {
+    diffusionConfinementTags(record).forEach((tag) => {
+      addEvidenceSpec(specs, tag.value, tag.label === 'Scale' ? 'numeric' : 'loose')
+    })
+  }
+
+  if (field.id === 'conditions' && extractorType === 'diffusion') {
+    diffusionConditionTags(record).forEach((tag) => {
+      addEvidenceSpec(specs, tag.value, tag.label === 'T' || tag.label === 'Scale' ? 'numeric' : 'loose')
+    })
   }
 
   if (['confinement_material_class', 'confinement_geometry_class', 'surface_functional_groups', 'confinement_dimensionality'].includes(field.id)) {
@@ -2789,36 +3037,53 @@ function buildReviewFields(record: TribologyData | null, remoteFields?: Record<s
       const value = fieldValueForKey(record, key, extractorType)
       return value !== 'Not captured yet' ? value : present(fieldMap[key]?.value)
     }
-    return [
-      buildField('System', 'system_name', diffusionValue('system_name'), record, fieldMap.system_name, 'System name still needs grounding confirmation.'),
-      buildField('Ionic Liquid', 'ionic_liquid', diffusionValue('ionic_liquid'), record, fieldMap.ionic_liquid, 'Ionic liquid still needs grounding confirmation.'),
-      buildField('Cation', 'cation', diffusionValue('cation'), record, fieldMap.cation, 'Cation still needs grounding confirmation.'),
-      buildField('Anion', 'anion', diffusionValue('anion'), record, fieldMap.anion, 'Anion still needs grounding confirmation.'),
-      buildField('Diffusing Ion', 'diffusing_ion', diffusionValue('diffusing_ion'), record, fieldMap.diffusing_ion, 'Diffusing ion still needs grounding confirmation.'),
-      ...(shouldShowOptionalField(record, fieldMap, 'side_chain', extractorType)
-        ? [buildField('Side Chain', 'side_chain', diffusionValue('side_chain'), record, fieldMap.side_chain, 'Side chain still needs confirmation.')]
-        : []),
-      ...(shouldShowOptionalField(record, fieldMap, 'water_uptake', extractorType)
-        ? [buildField('Water Uptake', 'water_uptake', diffusionValue('water_uptake'), record, fieldMap.water_uptake, 'Water uptake still needs confirmation.')]
-        : []),
-      buildField('D_total', 'd_total', formatDiffusionNumber(record.D_total), record, fieldMap.d_total, 'Total diffusion coefficient still needs grounding confirmation.'),
-      buildField('D_cation', 'd_cation', formatDiffusionNumber(record.D_cation), record, fieldMap.d_cation, 'Cation diffusion coefficient still needs grounding confirmation.'),
-      buildField('D_anion', 'd_anion', formatDiffusionNumber(record.D_anion), record, fieldMap.d_anion, 'Anion diffusion coefficient still needs grounding confirmation.'),
-      buildField('D Unit', 'd_unit', formatScientificUnit(record.D_unit), record, fieldMap.d_unit, 'Diffusion unit still needs grounding confirmation.'),
-      buildField('Confinement Material', 'confinement_material_class', present(record.confinement_material_class), record, fieldMap.confinement_material_class, 'Confinement material still needs confirmation.'),
-      buildField('Geometry', 'confinement_geometry_class', present(record.confinement_geometry_class), record, fieldMap.confinement_geometry_class, 'Confinement geometry still needs confirmation.'),
-      buildField('Surface Groups', 'surface_functional_groups', present(record.surface_functional_groups), record, fieldMap.surface_functional_groups, 'Surface functional groups still need confirmation.'),
-      buildField('Dimensionality', 'confinement_dimensionality', present(record.confinement_dimensionality), record, fieldMap.confinement_dimensionality, 'Confinement dimensionality still needs confirmation.'),
-      ...(shouldShowOptionalField(record, fieldMap, 'temperature_value', extractorType)
-        ? [buildField('Temperature', 'temperature_value', formatDiffusionNumber(record.temperature_value), record, fieldMap.temperature_value, 'Temperature still needs confirmation.')]
-        : []),
-      ...(shouldShowOptionalField(record, fieldMap, 'confinement_scale_value', extractorType)
-        ? [buildField('Confinement Scale', 'confinement_scale_value', formatDiffusionNumber(record.confinement_scale_value), record, fieldMap.confinement_scale_value, 'Confinement scale still needs confirmation.')]
-        : []),
-      ...(shouldShowOptionalField(record, fieldMap, 'confinement_scale_unit', extractorType)
-        ? [buildField('Confinement Unit', 'confinement_scale_unit', formatScientificUnit(record.confinement_scale_unit), record, fieldMap.confinement_scale_unit, 'Confinement unit still needs confirmation.')]
-        : []),
+    const fields: ReviewField[] = [
+      buildField('体系', 'system_name', diffusionValue('system_name'), record, fieldMap.system_name, '体系名称仍需确认原文来源。'),
+      buildField('离子液体', 'ionic_liquid', diffusionValue('ionic_liquid'), record, fieldMap.ionic_liquid, '离子液体仍需确认原文来源。'),
+      buildAggregateDiffusionField(
+        '扩散系数',
+        'diffusion_coefficient',
+        diffusionCoefficientSummary(record),
+        record,
+        fieldMap,
+        diffusionCoefficientFieldKeys,
+        '至少需要确认一个扩散系数来源。优先核对 D_anion / D_cation / D_total 中实际报道的那一项。',
+      ),
     ]
+    if (diffusionIonIdentityTags(record).length) {
+      fields.push(buildAggregateDiffusionField(
+        '离子身份',
+        'ion_identity',
+        diffusionIonIdentitySummary(record),
+        record,
+        fieldMap,
+        diffusionIonIdentityFieldKeys,
+        '离子身份来自标准化推断或原文描述，可作为上下文核对。',
+      ))
+    }
+    if (diffusionConfinementTags(record).length) {
+      fields.push(buildAggregateDiffusionField(
+        '限域体系',
+        'confinement_context',
+        diffusionConfinementSummary(record),
+        record,
+        fieldMap,
+        diffusionConfinementFieldKeys,
+        '限域材料、几何或尺度缺少可定位来源时，可标记后续复核。',
+      ))
+    }
+    if (diffusionConditionTags(record).length) {
+      fields.push(buildAggregateDiffusionField(
+        '实验条件',
+        'conditions',
+        summarizeConditions(record, extractorType),
+        record,
+        fieldMap,
+        diffusionConditionFieldKeys,
+        '温度或限域条件仍需确认。',
+      ))
+    }
+    return fields
   }
   const primaryMetricKey = resolvePrimaryTribologyMetricKey(record)
   return [
@@ -3051,6 +3316,91 @@ function buildTribopairReviewParts(record: TribologyData | null | undefined, rem
       optional: true,
     }),
   ]
+}
+
+function diffusionGroupStatusLabel(status: DiffusionReviewGroup['status']) {
+  if (status === 'Grounded') return '已定位'
+  if (status === 'Partial') return '缺精确定位'
+  if (status === 'Optional') return '上下文'
+  return '待核验'
+}
+
+function diffusionGroupStatusClass(status: DiffusionReviewGroup['status'], emphasis = false) {
+  if (status === 'Grounded') return emphasis
+    ? 'border-[#99f6e4] bg-[#ecfdf5] text-[#047857]'
+    : 'border-[#bbf7d0] bg-[#f0fdf4] text-[#047857]'
+  if (status === 'Partial') return 'border-[#fed7aa] bg-[#fff7ed] text-[#c2410c]'
+  if (status === 'Optional') return 'border-[#dbe4ef] bg-white text-[#64748b]'
+  return 'border-[#fecdd3] bg-[#fff5f6] text-[#cf334f]'
+}
+
+function buildDiffusionReviewGroups(
+  record: TribologyData | null | undefined,
+  remoteFields?: Record<string, FieldEvidenceEntry> | null,
+): DiffusionReviewGroup[] {
+  if (!record || recordExtractorType(record) !== 'diffusion') return []
+  const fieldMap = resolveRecordFieldEvidenceMap(record, remoteFields)
+  const coefficientStatus = aggregateEvidenceStatus(fieldMap, diffusionCoefficientFieldKeys, record)
+  const ionStatus = aggregateEvidenceStatus(fieldMap, diffusionIonIdentityFieldKeys, record)
+  const confinementStatus = aggregateEvidenceStatus(fieldMap, diffusionConfinementFieldKeys, record)
+  const conditionStatus = aggregateEvidenceStatus(fieldMap, diffusionConditionFieldKeys, record)
+  const groups: DiffusionReviewGroup[] = [
+    {
+      id: 'coefficient',
+      label: '扩散系数',
+      value: diffusionCoefficientSummary(record),
+      meta: formatScientificUnit(record.D_unit) !== 'Not captured yet' ? `Unit ${formatScientificUnit(record.D_unit)}` : '优先核对论文直接报道的 D 值',
+      fieldId: 'diffusion_coefficient',
+      status: coefficientStatus,
+      statusLabel: diffusionGroupStatusLabel(coefficientStatus),
+      statusClass: diffusionGroupStatusClass(coefficientStatus, true),
+      items: diffusionCoefficientTags(record),
+      emphasis: true,
+    },
+    {
+      id: 'identity',
+      label: '离子身份',
+      value: diffusionIonIdentitySummary(record),
+      meta: '区分真正迁移物种与反离子/背景盐',
+      fieldId: 'ion_identity',
+      status: ionStatus === 'Missing' ? 'Optional' : ionStatus,
+      statusLabel: diffusionGroupStatusLabel(ionStatus === 'Missing' ? 'Optional' : ionStatus),
+      statusClass: diffusionGroupStatusClass(ionStatus === 'Missing' ? 'Optional' : ionStatus),
+      items: diffusionIonIdentityTags(record),
+    },
+  ]
+
+  if (diffusionConfinementTags(record).length) {
+    const status = confinementStatus === 'Missing' ? 'Optional' : confinementStatus
+    groups.push({
+      id: 'confinement',
+      label: '限域体系',
+      value: diffusionConfinementSummary(record),
+      meta: '材料、几何、表面基团与限域尺度',
+      fieldId: 'confinement_context',
+      status,
+      statusLabel: diffusionGroupStatusLabel(status),
+      statusClass: diffusionGroupStatusClass(status),
+      items: diffusionConfinementTags(record),
+    })
+  }
+
+  if (diffusionConditionTags(record).length) {
+    const status = conditionStatus === 'Missing' ? 'Optional' : conditionStatus
+    groups.push({
+      id: 'conditions',
+      label: '实验条件',
+      value: summarizeConditions(record, 'diffusion'),
+      meta: '温度与尺度用于后续建模过滤',
+      fieldId: 'conditions',
+      status,
+      statusLabel: diffusionGroupStatusLabel(status),
+      statusClass: diffusionGroupStatusClass(status),
+      items: diffusionConditionTags(record),
+    })
+  }
+
+  return groups
 }
 
 function recordCanApprove(record: TribologyData | null | undefined, remoteFields?: Record<string, FieldEvidenceEntry> | null) {
@@ -4143,6 +4493,63 @@ function roughnessTextParts(value: string) {
 
             <!-- 展开：字段列表 -->
             <div v-if="isRecordExpanded(item.id)" class="rounded-b-md border-t border-[#eef2f6] bg-[#fbfcff] px-3 py-2.5">
+              <div
+                v-if="recordExtractorType(item.record) === 'diffusion'"
+                class="mb-2 overflow-hidden rounded-[0.75rem] border border-[#dbe8e4] bg-[#f8fffc]"
+              >
+                <div class="flex items-center justify-between gap-2 border-b border-[#e2f1eb] px-3 py-2">
+                  <div>
+                    <p class="text-[10px] font-black uppercase tracking-[0.16em] text-[#0f766e]">DIFFUSION REVIEW</p>
+                    <p class="mt-0.5 text-[11px] font-medium text-[#47645b]">先确认能否入库，再按需展开上下文。</p>
+                  </div>
+                  <span class="rounded-md bg-white px-2 py-1 text-[10px] font-bold text-[#0f766e] ring-1 ring-[#cce7dc]">
+                    3 个核心判断
+                  </span>
+                </div>
+
+                <div class="grid gap-[1px] bg-[#e2f1eb] md:grid-cols-2">
+                  <button
+                    v-for="group in buildDiffusionReviewGroups(item.record, activeRecordFieldEvidence?.fields)"
+                    :key="group.id"
+                    type="button"
+                    class="group min-h-[5.5rem] bg-white px-3 py-2.5 text-left transition hover:bg-[#fbfffd]"
+                    :class="group.fieldId === activeFieldId ? 'ring-2 ring-inset ring-[#7dd3c7]' : ''"
+                    :title="`${group.label}: ${group.value}`"
+                    @click="activeFieldId = group.fieldId"
+                  >
+                    <div class="flex items-start justify-between gap-2">
+                      <div class="min-w-0">
+                        <p class="text-[10px] font-black uppercase tracking-[0.13em] text-[#739088]">{{ group.label }}</p>
+                        <p
+                          class="mt-1 line-clamp-2 font-bold leading-snug"
+                          :class="group.emphasis ? 'text-[13px] text-[#064e3b]' : 'text-[12px] text-slate-900'"
+                        >
+                          {{ presentZh(group.value) }}
+                        </p>
+                      </div>
+                      <span
+                        class="shrink-0 rounded-[4px] border px-1.5 py-0.5 text-[8.5px] font-bold leading-none"
+                        :class="group.statusClass"
+                      >
+                        {{ group.statusLabel }}
+                      </span>
+                    </div>
+
+                    <div v-if="group.items.length" class="mt-2 flex flex-wrap gap-1">
+                      <span
+                        v-for="tag in group.items.slice(0, 4)"
+                        :key="`${group.id}-${tag.label}`"
+                        class="inline-flex max-w-full items-center overflow-hidden rounded-[0.45rem] border border-[#d7e5e0] bg-[#f8fffc] text-[9px]"
+                      >
+                        <span class="shrink-0 bg-white px-1.5 py-[2px] font-black text-[#66837a]">{{ tag.label }}</span>
+                        <span class="truncate px-1.5 py-[2px] font-bold text-[#173b33]">{{ tag.value }}</span>
+                      </span>
+                    </div>
+                    <p class="mt-2 line-clamp-1 text-[9.5px] font-medium text-[#6b7f78]">{{ group.meta }}</p>
+                  </button>
+                </div>
+              </div>
+
               <div
                 v-if="recordExtractorType(item.record) === 'tribology'"
                 class="mb-2"

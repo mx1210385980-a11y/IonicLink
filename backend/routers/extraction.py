@@ -959,9 +959,41 @@ def _target_field_keys_for_action(field_key: str, field_map: dict[str, Any]) -> 
                 "confinement_scale_value",
                 "confinement_scale_unit",
             )
-            if isinstance(field_map.get(key), dict) and field_map.get(key)
+            if isinstance(field_map.get(key), dict)
+            and (field_map.get(key) or {}).get("value") not in (None, "", [])
         ]
         return keys or ["load", "speed", "shear_rate", "temperature"]
+    if field_key == "diffusion_coefficient":
+        keys = [
+            key
+            for key in _DIFFUSION_COEFFICIENT_FIELD_KEYS
+            if isinstance(field_map.get(key), dict)
+            and (field_map.get(key) or {}).get("value") not in (None, "", [])
+        ]
+        return keys or list(_DIFFUSION_COEFFICIENT_FIELD_KEYS)
+    if field_key == "ion_identity":
+        keys = [
+            key
+            for key in ("diffusing_ion", "cation", "anion")
+            if isinstance(field_map.get(key), dict)
+            and (field_map.get(key) or {}).get("value") not in (None, "", [])
+        ]
+        return keys or ["diffusing_ion", "cation", "anion"]
+    if field_key == "confinement_context":
+        keys = [
+            key
+            for key in (
+                "confinement_material_class",
+                "confinement_geometry_class",
+                "surface_functional_groups",
+                "confinement_dimensionality",
+                "confinement_scale_value",
+                "confinement_scale_unit",
+            )
+            if isinstance(field_map.get(key), dict)
+            and (field_map.get(key) or {}).get("value") not in (None, "", [])
+        ]
+        return keys or ["confinement_material_class", "confinement_geometry_class"]
     return [field_key]
 
 
