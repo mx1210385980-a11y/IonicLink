@@ -278,7 +278,7 @@ const diffusionConfinementFieldKeys = [
   'confinement_scale_unit',
 ] as const
 const diffusionConditionFieldKeys = ['temperature_value', 'confinement_scale_value', 'confinement_scale_unit'] as const
-const diffusionCoreFactKeys = ['system_name', 'diffusing_ion', 'diffusion_coefficient', 'd_unit', 'source_evidence'] as const
+const diffusionCoreFactKeys = ['system_name', 'diffusion_coefficient', 'source_evidence'] as const
 
 const queueItems = computed<QueueItem[]>(() => {
   const base = reviewFiles.value.length
@@ -1904,12 +1904,46 @@ function diffusionCoefficientValueKeys(
   return diffusionCoefficientFieldKeys.filter((key) => diffusionFieldPresent(record, fieldMap, key))
 }
 
+function diffusionEvidenceHasExplicitNumericMeasure(value: unknown) {
+  const text = normalizePdfEvidenceText(String(value || ''))
+    .replace(/[×⋅]/g, 'x')
+    .replace(/[⁰₀]/g, '0')
+    .replace(/[¹₁]/g, '1')
+    .replace(/[²₂]/g, '2')
+    .replace(/[³₃]/g, '3')
+    .replace(/[⁴₄]/g, '4')
+    .replace(/[⁵₅]/g, '5')
+    .replace(/[⁶₆]/g, '6')
+    .replace(/[⁷₇]/g, '7')
+    .replace(/[⁸₈]/g, '8')
+    .replace(/[⁹₉]/g, '9')
+    .replace(/[⁻₋]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!text) return false
+  const unitPattern = String.raw`(?:10\s*\^?\s*-?\d+\s*)?(?:m|cm|a|A|Å|å|angstrom|Angstrom)\s*(?:\^?2|2)\s*(?:\/\s*(?:s|ps|ns)|(?:s|ps|ns)\s*-?1|\/?s\s*-?1?)`
+  const scientific = new RegExp(String.raw`\d+(?:\.\d+)?(?:\s*(?:±|\+\/-)\s*\d+(?:\.\d+)?)?\s*(?:x|\*)\s*10\s*\^?\s*-?\d+\s*${unitPattern}`, 'i')
+  const plain = new RegExp(String.raw`\d+(?:\.\d+)?(?:[eE][-+]?\d+)?\s*${unitPattern}`, 'i')
+  return scientific.test(text) || plain.test(text)
+}
+
 function diffusionCoefficientSourceTraceable(
   record: TribologyData | null | undefined,
   fieldMap: Record<string, FieldEvidenceEntry>,
 ) {
   if (!record) return false
-  return diffusionCoefficientValueKeys(record, fieldMap).some((key) => {
+  const coefficientKeys = diffusionCoefficientValueKeys(record, fieldMap)
+  const evidenceText = [
+    record.evidence,
+    fieldMap.diffusion_coefficient?.evidence?.quote,
+    fieldMap.diffusion_coefficient?.evidence?.matched_text,
+    ...coefficientKeys.flatMap((key) => [
+      fieldMap[key]?.evidence?.quote,
+      fieldMap[key]?.evidence?.matched_text,
+    ]),
+  ].filter(Boolean).join(' ')
+  if (!diffusionEvidenceHasExplicitNumericMeasure(evidenceText)) return false
+  return coefficientKeys.some((key) => {
     const status = resolveFieldEvidenceStatus(fieldMap[key], fieldValueForKey(record, key, 'diffusion'))
     return status === 'Grounded' || status === 'Partial'
   })
@@ -1923,9 +1957,7 @@ function diffusionCoreMissingKeys(
   const fieldMap = resolveRecordFieldEvidenceMap(record, remoteFields)
   const missing: string[] = []
   if (!diffusionFieldPresent(record, fieldMap, 'system_name')) missing.push('system_name')
-  if (!diffusionFieldPresent(record, fieldMap, 'diffusing_ion')) missing.push('diffusing_ion')
   if (!diffusionCoefficientValueKeys(record, fieldMap).length) missing.push('diffusion_coefficient')
-  if (!diffusionFieldPresent(record, fieldMap, 'd_unit')) missing.push('d_unit')
   if (diffusionCoefficientValueKeys(record, fieldMap).length && !diffusionCoefficientSourceTraceable(record, fieldMap)) {
     missing.push('source_evidence')
   }
@@ -2081,7 +2113,7 @@ function buildAggregateDiffusionField(
   keys: readonly string[],
   issueMessage: string,
 ): ReviewField {
-  const entry = bestFieldEvidenceEntry(fieldMap, keys)
+  const entry = fieldMap[id] || bestFieldEvidenceEntry(fieldMap, keys)
   const evidence = aggregateEvidenceStatus(fieldMap, keys, record)
   const groundingMode = resolveFieldGroundingMode(entry, value)
   const locationMode = resolveFieldLocationMode(entry, record, groundingMode)
@@ -2455,13 +2487,16 @@ function flaggedRequiredFieldKeys(
   const extractorType = recordExtractorType(record)
   const fieldMap = resolveRecordFieldEvidenceMap(record, remoteFields)
   if (extractorType === 'diffusion') {
-    const flagged: string[] = ['system_name', 'diffusing_ion', 'd_unit']
+    const flagged: string[] = ['system_name']
       .filter((key) => String(fieldMap[key]?.review_state || '').trim().toLowerCase() === 'flagged')
+    if (String(fieldMap.diffusion_coefficient?.review_state || '').trim().toLowerCase() === 'flagged') {
+      flagged.push('diffusion_coefficient')
+    }
     const coefficientKeys = diffusionCoefficientValueKeys(record, fieldMap)
     if (coefficientKeys.length && coefficientKeys.every((key) => String(fieldMap[key]?.review_state || '').trim().toLowerCase() === 'flagged')) {
       flagged.push('diffusion_coefficient')
     }
-    return flagged
+    return Array.from(new Set(flagged))
   }
   return requiredTribologyFieldKeys(record)
     .filter((key) => String(fieldMap[key]?.review_state || '').trim().toLowerCase() === 'flagged')
@@ -3168,17 +3203,9 @@ function buildReviewFields(record: TribologyData | null, remoteFields?: Record<s
       const value = fieldValueForKey(record, key, extractorType)
       return value !== 'Not captured yet' ? value : present(fieldMap[key]?.value)
     }
+    const ionSummary = diffusionIonIdentitySummary(record)
     const fields: ReviewField[] = [
       buildField('体系', 'system_name', diffusionValue('system_name'), record, fieldMap.system_name, '体系名称仍需确认原文来源。'),
-      buildAggregateDiffusionField(
-        '迁移物种',
-        'ion_identity',
-        diffusionIonIdentitySummary(record),
-        record,
-        fieldMap,
-        diffusionIonIdentityFieldKeys,
-        '至少需要知道这条扩散系数对应哪个迁移物种。',
-      ),
       buildAggregateDiffusionField(
         '扩散系数',
         'diffusion_coefficient',
@@ -3186,33 +3213,18 @@ function buildReviewFields(record: TribologyData | null, remoteFields?: Record<s
         record,
         fieldMap,
         diffusionCoefficientFieldKeys,
-        '至少需要确认一个扩散系数来源。优先核对 D_anion / D_cation / D_total 中实际报道的那一项。',
+        '必须能在原文证据中看到扩散系数的数字和单位；看不到就标记存疑。',
       ),
-      buildField('单位', 'd_unit', diffusionValue('d_unit'), record, fieldMap.d_unit, '扩散系数单位仍需确认；没有单位无法可靠比较。'),
     ]
-    if (shouldShowOptionalField(record, fieldMap, 'ionic_liquid', extractorType)) {
-      fields.push(buildField('介质 / 离子液体', 'ionic_liquid', diffusionValue('ionic_liquid'), record, fieldMap.ionic_liquid, '该字段作为上下文保留，不阻断入库。'))
-    }
-    if (diffusionConfinementTags(record).length) {
+    if (ionSummary !== 'Not captured yet') {
       fields.push(buildAggregateDiffusionField(
-        '限域体系',
-        'confinement_context',
-        diffusionConfinementSummary(record),
+        '迁移物种',
+        'ion_identity',
+        ionSummary,
         record,
         fieldMap,
-        diffusionConfinementFieldKeys,
-        '限域材料、几何或尺度缺少可定位来源时，可标记后续复核。',
-      ))
-    }
-    if (diffusionConditionTags(record).length) {
-      fields.push(buildAggregateDiffusionField(
-        '实验条件',
-        'conditions',
-        summarizeConditions(record, extractorType),
-        record,
-        fieldMap,
-        diffusionConditionFieldKeys,
-        '温度或限域条件仍需确认。',
+        diffusionIonIdentityFieldKeys,
+        '可选上下文：不确定时保留为空或标记存疑，不阻断本条 MVP 入库。',
       ))
     }
     return fields
@@ -3292,6 +3304,15 @@ function hasStructuredTribopair(record: TribologyData | null | undefined) {
 }
 
 function filterVisibleReviewFields(record: TribologyData | null | undefined, fields: ReviewField[]) {
+  if (recordExtractorType(record) === 'diffusion') {
+    const priorityIds = new Set(['diffusion_coefficient', 'system_name', 'ion_identity'])
+    const mvpFields = fields.filter((field) => priorityIds.has(field.id))
+    const unresolved = mvpFields.filter((field) => {
+      if (field.id === 'diffusion_coefficient') return true
+      return field.evidenceStatus !== 'Grounded' || isFieldFlagged(field) || field.id === activeFieldId.value
+    })
+    return unresolved.length ? unresolved : mvpFields.slice(0, 1)
+  }
   if (!hasStructuredTribopair(record)) return fields
   return fields.filter((field) => {
     if (field.id === 'material') return field.evidenceStatus !== 'Grounded'
@@ -3474,16 +3495,44 @@ function buildDiffusionReviewGroups(
   const fieldMap = resolveRecordFieldEvidenceMap(record, remoteFields)
   const systemValue = fieldValueForKey(record, 'system_name', 'diffusion')
   const systemReady = diffusionFieldPresent(record, fieldMap, 'system_name')
-  const coefficientStatus = aggregateEvidenceStatus(fieldMap, diffusionCoefficientFieldKeys, record)
+  const coefficientReady = diffusionCoefficientSourceTraceable(record, fieldMap)
+  const coefficientStatus = coefficientReady ? aggregateEvidenceStatus(fieldMap, diffusionCoefficientFieldKeys, record) : 'Missing'
   const ionStatus = aggregateEvidenceStatus(fieldMap, diffusionIonIdentityFieldKeys, record)
   const confinementStatus = aggregateEvidenceStatus(fieldMap, diffusionConfinementFieldKeys, record)
   const conditionStatus = aggregateEvidenceStatus(fieldMap, diffusionConditionFieldKeys, record)
   const groups: DiffusionReviewGroup[] = [
     {
+      id: 'coefficient',
+      label: '扩散系数',
+      value: diffusionCoefficientSummary(record),
+      meta: coefficientReady ? '原文证据包含数字和单位' : '看不到数字+单位时不要入库',
+      fieldId: 'diffusion_coefficient',
+      status: coefficientStatus,
+      statusLabel: coefficientReady ? '证据可核' : '待核验',
+      statusClass: diffusionGroupStatusClass(coefficientStatus, true),
+      items: diffusionCoefficientTags(record),
+      emphasis: true,
+    },
+    {
+      id: 'source',
+      label: '原文证据',
+      value: evidenceLocation(record),
+      meta: 'MVP 只接受可回看原文的 D 值',
+      fieldId: 'diffusion_coefficient',
+      status: coefficientReady ? 'Grounded' : 'Missing',
+      statusLabel: coefficientReady ? '可追溯' : '缺数值证据',
+      statusClass: diffusionGroupStatusClass(coefficientReady ? 'Grounded' : 'Missing', true),
+      items: [
+        record.source_page ? { label: 'Page', value: String(record.source_page) } : null,
+        trim(record.source || record.source_figure) ? { label: 'Source', value: trim(record.source || record.source_figure) } : null,
+      ].filter(Boolean) as StructuredTag[],
+      emphasis: true,
+    },
+    {
       id: 'system',
       label: '体系名',
       value: systemValue,
-      meta: '记录归属和后续去重的最小标识',
+      meta: '用于归属、检索和去重',
       fieldId: 'system_name',
       status: systemReady ? 'Grounded' : 'Missing',
       statusLabel: systemReady ? '已捕获' : '待补齐',
@@ -3491,31 +3540,22 @@ function buildDiffusionReviewGroups(
       items: systemReady ? [{ label: 'System', value: systemValue }] : [],
       emphasis: true,
     },
-    {
+  ]
+
+  if (diffusionIonIdentityTags(record).length) {
+    const status = ionStatus === 'Missing' ? 'Optional' : ionStatus
+    groups.push({
       id: 'identity',
       label: '迁移物种',
       value: diffusionIonIdentitySummary(record),
-      meta: '这条 D 值对应的真实扩散对象',
+      meta: '可选上下文：不确定不阻断',
       fieldId: 'ion_identity',
-      status: ionStatus,
-      statusLabel: diffusionGroupStatusLabel(ionStatus),
-      statusClass: diffusionGroupStatusClass(ionStatus, true),
+      status,
+      statusLabel: diffusionGroupStatusLabel(status),
+      statusClass: diffusionGroupStatusClass(status),
       items: diffusionIonIdentityTags(record),
-      emphasis: true,
-    },
-    {
-      id: 'coefficient',
-      label: '扩散系数',
-      value: diffusionCoefficientSummary(record),
-      meta: formatScientificUnit(record.D_unit) !== 'Not captured yet' ? `Unit ${formatScientificUnit(record.D_unit)}` : '优先核对论文直接报道的 D 值',
-      fieldId: 'diffusion_coefficient',
-      status: coefficientStatus,
-      statusLabel: diffusionGroupStatusLabel(coefficientStatus),
-      statusClass: diffusionGroupStatusClass(coefficientStatus, true),
-      items: diffusionCoefficientTags(record),
-      emphasis: true,
-    },
-  ]
+    })
+  }
 
   if (diffusionFieldPresent(record, fieldMap, 'ionic_liquid')) {
     const ionicStatus = resolveFieldEvidenceStatus(fieldMap.ionic_liquid, fieldValueForKey(record, 'ionic_liquid', 'diffusion'))
@@ -4680,11 +4720,11 @@ function roughnessTextParts(value: string) {
               >
                 <div class="flex items-center justify-between gap-2 border-b border-[#e2f1eb] px-3 py-2">
                   <div>
-                    <p class="text-[10px] font-black uppercase tracking-[0.16em] text-[#0f766e]">DIFFUSION REVIEW</p>
-                    <p class="mt-0.5 text-[11px] font-medium text-[#47645b]">核心事实决定入库，上下文字段只保留不拦截。</p>
+                    <p class="text-[10px] font-black uppercase tracking-[0.16em] text-[#0f766e]">DIFFUSION MVP</p>
+                    <p class="mt-0.5 text-[11px] font-medium text-[#47645b]">只审体系、D 值和原文证据；其余字段先当备注。</p>
                   </div>
                   <span class="rounded-md bg-white px-2 py-1 text-[10px] font-bold text-[#0f766e] ring-1 ring-[#cce7dc]">
-                    最小核心事实
+                    证据优先
                   </span>
                 </div>
 

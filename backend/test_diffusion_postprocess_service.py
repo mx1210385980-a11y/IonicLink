@@ -89,3 +89,40 @@ def test_normalizes_general_scientific_diffusion_units():
     assert len(normalized) == 1
     assert normalized[0]["D_total"] == 1250
     assert normalized[0]["D_unit"] == "10\u207b\u00b9\u00b2 m\u00b2/s"
+
+
+def test_mvp_rejects_model_value_without_numeric_evidence():
+    row = {
+        "system_name": "COF nanochannel",
+        "ionic_liquid": "[EMIM][TFSI]",
+        "D_total": 2.3,
+        "D_unit": "10^-12 m2/s",
+        "source": "Table 1",
+        "source_page": 3,
+        "evidence": "Table 1 reports the diffusion coefficient of the confined ionic liquid.",
+    }
+
+    assert diffusion_drop_reason(row, require_evidence_measure=True) == "no_numeric_diffusion_in_evidence"
+    assert _normalize([row]) == []
+
+
+def test_mvp_keeps_only_coefficients_supported_by_evidence_quote():
+    rows = [
+        {
+            "system_name": "COF nanochannel",
+            "ionic_liquid": "[EMIM][TFSI]",
+            "D_total": 2.3,
+            "D_cation": 9.9,
+            "D_unit": "10^-12 m2/s",
+            "source": "Table 1",
+            "source_page": 3,
+            "evidence": "Table 1 reports D = 2.3 10^-12 m2/s for [EMIM][TFSI] in the COF channel.",
+        }
+    ]
+
+    normalized = _normalize(rows)
+
+    assert len(normalized) == 1
+    assert normalized[0]["D_total"] == 2.3
+    assert normalized[0]["D_cation"] is None
+    assert normalized[0]["D_unit"] == "10\u207b\u00b9\u00b2 m\u00b2/s"

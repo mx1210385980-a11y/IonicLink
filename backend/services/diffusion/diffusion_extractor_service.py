@@ -529,7 +529,7 @@ async def process_diffusion_file_safe(
         trace_candidates: list[dict[str, Any]] = []
         raw_drop_reasons: dict[str, int] = {}
         for row in raw_rows:
-            drop_reason = diffusion_drop_reason(row)
+            drop_reason = diffusion_drop_reason(row, require_evidence_measure=True)
             if drop_reason:
                 raw_drop_reasons[drop_reason] = raw_drop_reasons.get(drop_reason, 0) + 1
             trace_candidates.append(

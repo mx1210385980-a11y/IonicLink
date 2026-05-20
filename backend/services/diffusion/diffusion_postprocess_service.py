@@ -150,6 +150,15 @@ def _normalize_diffusion_unit_and_value(value: Any, unit: Any) -> tuple[float | 
     return round(float(numeric) * scale, 12), _CANONICAL_DIFFUSION_UNIT
 
 
+def _diffusion_values_close(left: Any, right: Any) -> bool:
+    left_num = _to_float(left)
+    right_num = _to_float(right)
+    if left_num is None or right_num is None:
+        return False
+    tolerance = max(1e-9, abs(float(right_num)) * 0.015)
+    return abs(float(left_num) - float(right_num)) <= tolerance
+
+
 def _extract_diffusion_measure_from_text(text: Any) -> tuple[float | None, str | None]:
     measures = _extract_diffusion_measures_from_text(text)
     if not measures:
@@ -510,16 +519,23 @@ def apply_diffusion_standard_fields(row: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def diffusion_drop_reason(record: dict[str, Any]) -> str | None:
+def diffusion_drop_reason(record: dict[str, Any], *, require_evidence_measure: bool = False) -> str | None:
     if not isinstance(record, dict):
         return "invalid_payload"
     if not record_has_diffusion_value(record):
         return "no_diffusion_value"
     if _is_non_ionic_liquid_solute(record.get("ionic_liquid")):
         return "non_ionic_liquid_solute"
+    evidence_text = str(record.get("evidence") or "").strip()
+    evidence_measures = _extract_diffusion_measures_from_text(evidence_text)
     unit = record.get("D_unit")
-    if unit and not _is_supported_diffusion_unit(unit) and not _extract_diffusion_measures_from_text(record.get("evidence")):
+    if unit and not _is_supported_diffusion_unit(unit) and not evidence_measures:
         return "unsupported_diffusion_unit"
+    if require_evidence_measure:
+        if not evidence_text:
+            return "missing_evidence_quote"
+        if not evidence_measures:
+            return "no_numeric_diffusion_in_evidence"
     return None
 
 
@@ -542,15 +558,17 @@ def _resolve_source_bbox(pdf_path: str | None, row: dict[str, Any]) -> tuple[int
 
 
 def _confidence_from_row(row: dict[str, Any]) -> float:
-    score = 0.5
+    score = 0.35
     if record_has_diffusion_value(row):
         score += 0.2
+    if _extract_diffusion_measures_from_text(row.get("evidence")):
+        score += 0.25
     if row.get("source"):
-        score += 0.1
+        score += 0.05
     if row.get("source_page"):
         score += 0.1
     if row.get("evidence"):
-        score += 0.1
+        score += 0.05
     return round(min(score, 0.95), 3)
 
 
@@ -646,27 +664,48 @@ def normalize_diffusion_records(
         if not isinstance(raw, dict):
             continue
         row = dict(raw)
-        if diffusion_drop_reason(row):
+        if diffusion_drop_reason(row, require_evidence_measure=True):
             continue
 
         d_unit = row.get("D_unit")
         evidence_measures = _extract_diffusion_measures_from_text(row.get("evidence"))
+        if not evidence_measures:
+            continue
         row["D_total"], d_unit = _normalize_diffusion_unit_and_value(row.get("D_total"), d_unit)
         row["D_cation"], d_unit = _normalize_diffusion_unit_and_value(row.get("D_cation"), d_unit)
         row["D_anion"], d_unit = _normalize_diffusion_unit_and_value(row.get("D_anion"), d_unit)
         row["D_unit"] = d_unit
 
+        supported_coefficient_keys: set[str] = set()
         for key in ("D_total", "D_cation", "D_anion"):
             evidence_measure = _pick_evidence_measure_for_field(evidence_measures, key)
             if evidence_measure:
                 row[key] = evidence_measure["value"]
                 row["D_unit"] = evidence_measure["unit"]
+                supported_coefficient_keys.add(key)
 
-        if not row.get("D_unit") and len(evidence_measures) == 1:
-            populated_fields = [key for key in ("D_total", "D_cation", "D_anion") if row.get(key) is not None]
-            if len(populated_fields) == 1:
-                row[populated_fields[0]] = evidence_measures[0]["value"]
-                row["D_unit"] = evidence_measures[0]["unit"]
+        populated_fields = [key for key in ("D_total", "D_cation", "D_anion") if row.get(key) is not None]
+        for key in populated_fields:
+            if key in supported_coefficient_keys:
+                continue
+            matching_measure = next(
+                (measure for measure in evidence_measures if _diffusion_values_close(row.get(key), measure.get("value"))),
+                None,
+            )
+            if matching_measure:
+                row[key] = matching_measure["value"]
+                row["D_unit"] = matching_measure["unit"]
+                supported_coefficient_keys.add(key)
+
+        if len(evidence_measures) == 1 and len(supported_coefficient_keys) == 0:
+            target_key = populated_fields[0] if len(populated_fields) == 1 else "D_total"
+            row[target_key] = evidence_measures[0]["value"]
+            row["D_unit"] = evidence_measures[0]["unit"]
+            supported_coefficient_keys.add(target_key)
+
+        for key in ("D_total", "D_cation", "D_anion"):
+            if key not in supported_coefficient_keys:
+                row[key] = None
 
         if not row.get("D_unit") or not record_has_diffusion_value(row):
             continue
@@ -688,6 +727,9 @@ def normalize_diffusion_records(
         row["raw_model_output"] = raw_model_output
         row["review_status"] = row.get("review_status") or "pending_review"
         row["record_origin"] = row.get("record_origin") or "diffusion_llm_extraction"
+        row["assembly_notes"] = row.get("assembly_notes") or (
+            "MVP verified: retained only because the evidence quote contains an explicit numeric diffusion coefficient and unit."
+        )
 
         bbox_page, bbox = _resolve_source_bbox(pdf_path, row)
         if bbox_page and not row.get("source_page"):
@@ -697,7 +739,6 @@ def normalize_diffusion_records(
         row = enrich_diffusion_record(row)
         row = apply_diffusion_standard_fields(row)
         row["field_evidence_json"] = build_diffusion_field_evidence_map(row)
-        row["assembly_notes"] = row.get("assembly_notes")
 
         model = DiffusionRecord.model_validate(row)
         normalized.append(

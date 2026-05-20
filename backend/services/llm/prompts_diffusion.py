@@ -14,7 +14,7 @@ If a field is missing, use null. Do not estimate numeric values visually.
 """
 
 
-PROMPT_VERSION = "diffusion.v2"
+PROMPT_VERSION = "diffusion.mvp.v1"
 
 
 DIFFUSION_EXTRACTION_PROMPT = JSON_ENFORCEMENT_PROMPT + """
@@ -58,9 +58,12 @@ Hard rules:
 - Skip bulk, neat, unconfined, or free-liquid records entirely.
 - Only emit a record when at least one explicit diffusion coefficient exists:
   D_total or D_cation or D_anion.
+- MVP evidence rule: every emitted record must include an evidence quote that contains the exact numeric diffusion coefficient and its unit. If the quote cannot include the exact number and unit, do not emit the record.
+- Prefer fewer high-confidence records over broad coverage. It is better to return no rows than to infer a diffusion coefficient.
 - Never emit records with unit-only mentions and no numeric value.
 - Never convert conductivity, permeability, flux, selectivity, capacitance, or other non-diffusion metrics into diffusion records.
 - If a diffusion value would require visual estimation from a curve, leave it null and do not emit the record unless another explicit diffusion value exists.
+- Do not infer cation, anion, diffusing ion, water uptake, side chain, or confinement details unless the same local text/table evidence explicitly supports them. Use null for uncertain context fields.
 
 Completeness rules:
 - If one table contains multiple rows, temperatures, pore sizes, ionic liquids, or confinement conditions, emit one record per explicit condition.
@@ -91,7 +94,7 @@ Normalization rules:
 - Normalize temperature_value to kelvin when explicit.
 - Normalize confinement_scale_value to nanometers when explicit.
 - Keep source as the explicit figure/table/text label when available.
-- source_page and evidence are mandatory for each emitted row.
+- source_page and evidence are mandatory for each emitted row; evidence must quote the coefficient number and unit.
 
 Novel feature whitelist:
 - Allowed in novel_features only when explicit numeric values are present:
