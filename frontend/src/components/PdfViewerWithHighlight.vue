@@ -402,8 +402,7 @@ async function renderPage(pageNum: number, generation = loadGeneration) {
       await nextTick()
       const pageEl = pagesRef.value?.[targetPage - 1]
       const canvas = pageEl?.querySelector('canvas') as HTMLCanvasElement | null
-      const ctx = canvas?.getContext('2d')
-      if (!pageEl || !canvas || !ctx) return
+      if (!pageEl || !canvas) return
 
       canvas.width = Math.floor(viewport.width * outputScale)
       canvas.height = Math.floor(viewport.height * outputScale)
@@ -413,7 +412,7 @@ async function renderPage(pageNum: number, generation = loadGeneration) {
       pageEl.style.minHeight = `${viewport.height}px`
 
       await page.render({
-        canvasContext: ctx,
+        canvas,
         viewport,
         transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined,
       }).promise
