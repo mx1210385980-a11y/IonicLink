@@ -30,6 +30,7 @@ export interface AuthUser {
 
 const TOKEN_STORAGE_KEY = 'ioniclink-access-token'
 const SCOPE_KEY_STORAGE_KEY = 'ioniclink-scope-key'
+const ADMIN_ROLES = new Set(['principal_investigator', 'group_admin'])
 
 function loadStoredToken(): string {
   try {
@@ -85,11 +86,15 @@ export function getSessionToken(): string {
 export function getActiveScope(user: AuthUser | null = sessionState.user): ScopeSummary | null {
   if (!user?.availableScopes?.length) return null
   const explicit = user.availableScopes.find((scope) => scope.key === sessionState.activeScopeKey)
-  const groupLibrary = user.availableScopes.find((scope) => scope.type === 'group_library')
-  if (explicit?.type === 'group_library') return explicit
-  if (groupLibrary) return groupLibrary
   if (explicit) return explicit
-  return groupLibrary || user.availableScopes[0] || null
+  const groupLibrary = user.availableScopes.find((scope) => scope.type === 'group_library')
+  const personalWorkspace = user.availableScopes.find((scope) =>
+    scope.type === 'workspace' && scope.isPersonal,
+  )
+  if (ADMIN_ROLES.has(user.role)) {
+    return groupLibrary || personalWorkspace || user.availableScopes[0] || null
+  }
+  return personalWorkspace || groupLibrary || user.availableScopes[0] || null
 }
 
 export function getAuthHeaders(): Record<string, string> {
@@ -117,6 +122,7 @@ export function setSession(token: string, user: AuthUser) {
   sessionState.token = token
   sessionState.user = user
   persistToken(token)
+  sessionState.activeScopeKey = ''
   setActiveScope(getActiveScope(user))
 }
 
