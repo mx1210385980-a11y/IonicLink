@@ -851,6 +851,12 @@ function toggleRecordItem(item: RecordItem) {
   collapsedRecordIds.value = next
 }
 
+function activateDiffusionReviewCell(item: RecordItem, fieldId: string) {
+  activeRecordId.value = item.id
+  collapsedRecordIds.value = discardCollapsedRecord(item.id)
+  activeFieldId.value = fieldId
+}
+
 function quoteMatchesFieldSpecs(quote: string, specs: EvidenceSearchSpec[]) {
   if (!quote) return false
   return specs.some((spec) => matchesEvidenceSpecText(quote, spec))
@@ -863,18 +869,21 @@ function fieldEvidenceTextMatchesSpecs(matchedText: string, quote: string, specs
 const activeFieldResolvedEvidence = computed(() => {
   const fieldEntry = activeFieldEvidenceEntry.value
   const specs = fieldEvidenceContext.value.specs
+  const record = activeRecord.value
+  const isDiffusionField = activeExtractorType.value === 'diffusion'
   const entryBbox = normalizeResolvedBBox(fieldEntry?.evidence?.bbox)
-  const entryPage = Number(fieldEntry?.evidence?.page || 0)
-  const directQuote = trim(fieldEntry?.evidence?.quote)
+    || (isDiffusionField ? normalizeResolvedBBox(record?.source_bbox) : null)
+  const entryPage = Number(fieldEntry?.evidence?.page || record?.source_page || 0)
+  const directQuote = trim(fieldEntry?.evidence?.quote) || (isDiffusionField ? getRecordEvidenceText(record) : '')
   const directMatchedText = trim(fieldEntry?.evidence?.matched_text ?? (fieldEntry?.evidence as Record<string, unknown> | undefined)?.matchedText)
   const sourceType = trim(fieldEntry?.evidence?.source_type).toLowerCase()
   const isExplicitField = trim(fieldEntry?.grounding_mode).toLowerCase() === 'explicit'
   const isDerivedField = trim(fieldEntry?.grounding_mode).toLowerCase() === 'derived'
   const isFigureAnchor = sourceType.includes('figure') || trim(fieldEntry?.evidence?.source_label).toLowerCase().startsWith('fig')
   const fieldTextMatches = fieldEvidenceTextMatchesSpecs(directMatchedText, directQuote, specs)
-  const canUseStoredBBox = sourceType !== 'table' || Boolean(directMatchedText) || isExplicitField
+  const canUseStoredBBox = sourceType !== 'table' || Boolean(directMatchedText) || isExplicitField || isDiffusionField
 
-  if (entryBbox && entryPage > 0 && canUseStoredBBox && (fieldTextMatches || isDerivedField || isExplicitField || isFigureAnchor)) {
+  if (entryBbox && entryPage > 0 && canUseStoredBBox && (fieldTextMatches || isDerivedField || isExplicitField || isFigureAnchor || isDiffusionField)) {
     return {
       page: entryPage,
       bbox: entryBbox,
@@ -887,6 +896,25 @@ const activeFieldResolvedEvidence = computed(() => {
   }
 
   return null
+})
+
+const activeEvidencePage = computed(() => {
+  const resolvedPage = activeFieldResolvedEvidence.value?.page
+  if (resolvedPage) return resolvedPage
+  const fieldPage = Number(activeFieldEvidenceEntry.value?.evidence?.page || 0)
+  if (Number.isFinite(fieldPage) && fieldPage > 0) return fieldPage
+  const sourcePage = Number(activeRecord.value?.source_page || 0)
+  return Number.isFinite(sourcePage) && sourcePage > 0 ? sourcePage : null
+})
+
+watch([activeEvidencePage, pdfPageCount, () => props.pdfUrl], ([page]) => {
+  if (!page || page < 1 || !props.pdfUrl) return
+  const targetPage = Math.min(Math.max(1, page), Math.max(1, pdfPageCount.value || page))
+  pdfPageInput.value = String(targetPage)
+  pdfPageError.value = ''
+  requestAnimationFrame(() => {
+    pdfViewerRef.value?.scrollToPage(targetPage)
+  })
 })
 
 const evidenceImageUrl = computed(() => {
@@ -2922,11 +2950,18 @@ function buildFieldEvidence(
   const directMatchedText = trim(fieldEntry?.evidence?.matched_text)
   const isDerivedField = trim(fieldEntry?.grounding_mode).toLowerCase() === 'derived'
   const isInferredField = trim(fieldEntry?.grounding_mode).toLowerCase() === 'inferred'
+  const isDiffusionField = recordExtractorType(record) === 'diffusion'
   if (directQuote && (fieldEvidenceTextMatchesSpecs(directMatchedText, directQuote, specs) || isDerivedField || isInferredField)) {
     const excerptSpecs = directMatchedText ? [{ text: directMatchedText, mode: 'exact-token' as const }] : specs
     return {
       excerpt: extractEvidenceExcerpt(directQuote, excerptSpecs, { contextBefore: 72, contextAfter: 96 }),
       specs: excerptSpecs,
+    }
+  }
+  if (directQuote && isDiffusionField) {
+    return {
+      excerpt: extractEvidenceExcerpt(directQuote, specs, { contextBefore: 72, contextAfter: 96 }),
+      specs,
     }
   }
 
@@ -3499,8 +3534,41 @@ function diffusionReviewCellStatus(
   return status === 'Missing' && optional ? 'Optional' : status
 }
 
+function diffusionSourceValues(record: TribologyData | null | undefined): Record<string, any> {
+  const payload = record?.novel_features_json || {}
+  const sourceValues = payload.source_values || payload.sourceValues
+  return sourceValues && typeof sourceValues === 'object' ? sourceValues : {}
+}
+
+function diffusionSourceValue(record: TribologyData | null | undefined, fieldId: string): Record<string, any> | null {
+  const sourceValues = diffusionSourceValues(record)
+  const keyMap: Record<string, string> = {
+    d_total: 'D_total',
+    d_cation: 'D_cation',
+    d_anion: 'D_anion',
+  }
+  const key = keyMap[fieldId] || fieldId
+  const value = sourceValues[key]
+  return value && typeof value === 'object' ? value : null
+}
+
+function firstDiffusionSourceValue(record: TribologyData | null | undefined): Record<string, any> | null {
+  const sourceValues = diffusionSourceValues(record)
+  return ['D_total', 'D_cation', 'D_anion']
+    .map((key) => sourceValues[key])
+    .find((value) => value && typeof value === 'object') || null
+}
+
 function diffusionReviewCellValue(record: TribologyData, fieldId: string) {
   if (fieldId === 'source_page') return evidenceLocation(record)
+  if (['d_total', 'd_cation', 'd_anion'].includes(fieldId)) {
+    const sourceValue = diffusionSourceValue(record, fieldId)
+    return trim(sourceValue?.raw_value) || trim(sourceValue?.raw_text) || fieldValueForKey(record, fieldId, 'diffusion')
+  }
+  if (fieldId === 'd_unit') {
+    const sourceValue = firstDiffusionSourceValue(record)
+    return trim(sourceValue?.raw_unit) || fieldValueForKey(record, fieldId, 'diffusion')
+  }
   if (fieldId === 'confinement_scale_value') {
     const value = fieldValueForKey(record, 'confinement_scale_value', 'diffusion')
     const unit = fieldValueForKey(record, 'confinement_scale_unit', 'diffusion')
@@ -3533,6 +3601,10 @@ function buildDiffusionReviewTableCells(
   return columns.map((column) => {
     const value = diffusionReviewCellValue(record, column.fieldId)
     const status = diffusionReviewCellStatus(record, fieldMap, column.fieldId, column.optional)
+    const sourceValue = diffusionSourceValue(record, column.fieldId)
+    const canonical = sourceValue?.canonical_value != null
+      ? ` | normalized: ${formatDiffusionNumber(sourceValue.canonical_value)} ${formatScientificUnit(sourceValue.canonical_unit)}`
+      : ''
     return {
       id: column.id,
       label: column.label,
@@ -3540,13 +3612,13 @@ function buildDiffusionReviewTableCells(
       fieldId: column.fieldId,
       status,
       primary: column.primary,
-      title: `${column.label}: ${presentZh(value)}`,
+      title: `${column.label}: ${presentZh(value)}${canonical}`,
     }
   })
 }
 
-function diffusionTableCellTone(cell: DiffusionReviewTableCell) {
-  if (cell.fieldId === activeFieldId.value) return 'border-[#22c7b8] bg-[#ecfffb] text-[#064e3b] ring-1 ring-[#7dd3c7]'
+function diffusionTableCellTone(cell: DiffusionReviewTableCell, activeRecordCell = false) {
+  if (activeRecordCell && cell.fieldId === activeFieldId.value) return 'border-[#22c7b8] bg-[#ecfffb] text-[#064e3b] ring-1 ring-[#7dd3c7]'
   if (cell.status === 'Missing') return 'border-[#fecdd3] bg-[#fff8f9] text-[#be123c]'
   if (cell.status === 'Partial') return 'border-[#fed7aa] bg-[#fffaf2] text-[#9a3412]'
   if (cell.status === 'Optional') return 'border-[#e2e8f0] bg-white text-[#64748b]'
@@ -4313,8 +4385,8 @@ function roughnessTextParts(value: string) {
     <div
       class="grid min-h-0 flex-1 gap-3"
       :class="inboxCollapsed
-        ? 'xl:grid-cols-[3rem_minmax(0,1fr)_24rem]'
-        : 'xl:grid-cols-[15rem_minmax(0,1fr)_24rem]'"
+        ? (activeExtractorType === 'diffusion' ? 'xl:grid-cols-[3rem_minmax(0,0.95fr)_minmax(34rem,42rem)]' : 'xl:grid-cols-[3rem_minmax(0,1fr)_24rem]')
+        : (activeExtractorType === 'diffusion' ? 'xl:grid-cols-[12rem_minmax(0,0.95fr)_minmax(34rem,42rem)]' : 'xl:grid-cols-[15rem_minmax(0,1fr)_24rem]')"
     >
       <!-- ── 左：文献列表 ──────────────────────────────── -->
       <aside
@@ -4537,7 +4609,100 @@ function roughnessTextParts(value: string) {
           </div>
         </div>
 
-        <div class="min-h-0 flex-1 space-y-2 overflow-y-auto custom-scrollbar p-3">
+        <div v-if="activeExtractorType === 'diffusion'" class="min-h-0 flex-1 overflow-y-auto custom-scrollbar bg-[#fbfcff] p-3">
+          <section class="overflow-hidden rounded-[0.85rem] border border-[#dbe8e4] bg-white shadow-[0_16px_38px_-32px_rgba(15,23,42,0.35)]">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[#e7efec] px-3.5 py-2.5">
+              <div>
+                <p class="text-[10px] font-black uppercase tracking-[0.18em] text-[#0f766e]">Source Table</p>
+                <p class="mt-0.5 text-[11px] font-semibold text-[#64748b]">单元格即字段，点击定位原文。</p>
+              </div>
+              <span class="rounded-md bg-[#ecfffb] px-2 py-1 text-[10px] font-bold text-[#0f766e] ring-1 ring-[#bce9df]">
+                {{ visibleRecordCount }} rows
+              </span>
+            </div>
+
+            <div class="overflow-x-auto">
+              <table class="min-w-[980px] w-full border-separate border-spacing-0 text-left">
+                <thead>
+                  <tr>
+                    <th class="sticky left-0 z-10 border-b border-r border-[#edf3f1] bg-[#fbfffd] px-2.5 py-2 text-[9.5px] font-black uppercase tracking-[0.12em] text-[#6f8580]">
+                      record
+                    </th>
+                    <th
+                      v-for="cell in buildDiffusionReviewTableCells(activeRecord || visibleRecordItems[0]?.record, activeRecordFieldEvidence?.fields)"
+                      :key="`diffusion-head-${cell.id}`"
+                      class="border-b border-[#edf3f1] bg-[#fbfffd] px-2.5 py-2 text-[9.5px] font-black uppercase tracking-[0.12em] text-[#6f8580]"
+                    >
+                      {{ cell.label }}
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="item in visibleRecordItems"
+                    :key="`diffusion-row-${item.id}`"
+                    class="group"
+                    :class="item.id === activeRecordId ? 'bg-[#f3fffb]' : 'bg-white hover:bg-[#fbfffd]'"
+                  >
+                    <td class="sticky left-0 z-10 border-b border-r border-[#edf3f1] bg-inherit px-2.5 py-2 align-top">
+                      <button
+                        type="button"
+                        class="flex min-w-[5.5rem] flex-col items-start rounded-[0.55rem] px-2 py-1.5 text-left transition"
+                        :class="item.id === activeRecordId ? 'bg-[#0f766e] text-white' : 'bg-[#f1f5f9] text-slate-600 group-hover:bg-[#e8f7f2]'"
+                        @click="activateDiffusionReviewCell(item, activeFieldId)"
+                      >
+                        <span class="text-[10px] font-black uppercase tracking-[0.12em]">{{ item.label }}</span>
+                        <span class="mt-0.5 text-[9.5px] font-semibold opacity-80">{{ recordBadgeForRecord(item.record, item.status).label }}</span>
+                      </button>
+                    </td>
+                    <td
+                      v-for="cell in buildDiffusionReviewTableCells(item.record, remoteFieldsForRecord(item.record))"
+                      :key="`diffusion-cell-${item.id}-${cell.id}`"
+                      class="border-b border-[#f1f5f9] px-1.5 py-2 align-top"
+                    >
+                      <button
+                        type="button"
+                        class="min-h-10 w-full rounded-[0.55rem] border px-2 py-1.5 text-left text-[11px] font-bold leading-snug transition hover:border-[#22c7b8] hover:bg-[#f0fffb]"
+                        :class="diffusionTableCellTone(cell, item.id === activeRecordId)"
+                        :title="cell.title"
+                        @click="activateDiffusionReviewCell(item, cell.fieldId)"
+                      >
+                        <span class="line-clamp-2 break-words">{{ presentZh(cell.value) }}</span>
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section v-if="evidenceExcerpt" class="mt-3 overflow-hidden rounded-[0.85rem] border border-[#f2e5bf] bg-[#fffdf7]">
+            <div class="flex items-center justify-between gap-2 border-b border-[#f6ebc8] px-3.5 py-2">
+              <p class="text-[10px] font-black uppercase tracking-[0.18em] text-[#a16207]">Source Evidence · {{ activeField?.label }}</p>
+              <span v-if="activeField?.location" class="rounded-md bg-white px-2 py-0.5 text-[10px] font-bold text-[#8a5a0a] ring-1 ring-[#f2e5bf]">
+                {{ activeField.location }}
+              </span>
+            </div>
+            <div class="px-3.5 py-3">
+              <p class="font-serif text-[12.5px] leading-6 text-[#4a5568]" v-html="highlightedExcerpt" />
+              <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500">
+                <span v-if="activeFieldSourceLabel">Source {{ activeFieldSourceLabel }}</span>
+                <span v-if="evidenceSecondaryValue !== '尚未关联'">{{ evidenceSecondaryLabel }} {{ evidenceSecondaryValue }}</span>
+              </div>
+            </div>
+          </section>
+
+          <div
+            v-if="!visibleRecordCount"
+            class="mt-3 flex min-h-[12rem] flex-col items-center justify-center gap-2 rounded-[0.85rem] border border-dashed border-[#dbe4f2] bg-white px-4 text-center"
+          >
+            <FileText class="h-8 w-8 text-slate-300" />
+            <p class="text-sm font-semibold text-slate-700">当前筛选下无记录</p>
+            <p class="text-xs text-slate-500">关闭筛选条件，或切换其他文献。</p>
+          </div>
+        </div>
+
+        <div v-else class="min-h-0 flex-1 space-y-2 overflow-y-auto custom-scrollbar p-3">
           <article
             v-for="item in visibleRecordItems"
             :key="item.id"

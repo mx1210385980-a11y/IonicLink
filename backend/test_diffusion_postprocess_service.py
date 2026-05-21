@@ -89,6 +89,10 @@ def test_normalizes_general_scientific_diffusion_units():
     assert len(normalized) == 1
     assert normalized[0]["D_total"] == 1250
     assert normalized[0]["D_unit"] == "10\u207b\u00b9\u00b2 m\u00b2/s"
+    source_value = normalized[0]["novel_features_json"]["source_values"]["D_total"]
+    assert source_value["raw_value"] == "1.25 x 10^-9"
+    assert source_value["raw_unit"] == "m2/s"
+    assert source_value["canonical_value"] == 1250
 
 
 def test_mvp_rejects_model_value_without_numeric_evidence():
@@ -126,3 +130,6 @@ def test_mvp_keeps_only_coefficients_supported_by_evidence_quote():
     assert normalized[0]["D_total"] == 2.3
     assert normalized[0]["D_cation"] is None
     assert normalized[0]["D_unit"] == "10\u207b\u00b9\u00b2 m\u00b2/s"
+    source_value = normalized[0]["novel_features_json"]["source_values"]["D_total"]
+    assert source_value["raw_value"] == "2.3"
+    assert source_value["raw_unit"] == "10^-12 m2/s"

@@ -193,6 +193,9 @@ def _extract_diffusion_measures_from_text(text: Any) -> list[dict[str, Any]]:
             {
                 "value": normalized_value,
                 "unit": normalized_unit,
+                "raw_text": match.group(0).strip(),
+                "raw_value_label": f"{match.group(1)} x 10^{match.group(2)}",
+                "raw_unit": unit,
                 "start": match.start(),
                 "end": match.end(),
                 "context": normalized[max(0, match.start() - 90): min(len(normalized), match.end() + 90)].lower(),
@@ -216,6 +219,9 @@ def _extract_diffusion_measures_from_text(text: Any) -> list[dict[str, Any]]:
             {
                 "value": normalized_value,
                 "unit": normalized_unit,
+                "raw_text": match.group(0).strip(),
+                "raw_value_label": match.group(1).strip(),
+                "raw_unit": match.group(2).strip(),
                 "start": match.start(),
                 "end": match.end(),
                 "context": normalized[max(0, match.start() - 90): min(len(normalized), match.end() + 90)].lower(),
@@ -252,6 +258,16 @@ def _pick_evidence_measure_for_field(measures: list[dict[str, Any]], field_key: 
         if best is None or score > best[0]:
             best = (score, -index, measure)
     return best[2] if best else None
+
+
+def _source_value_payload(measure: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "raw_text": measure.get("raw_text"),
+        "raw_value": measure.get("raw_value_label"),
+        "raw_unit": measure.get("raw_unit"),
+        "canonical_value": measure.get("value"),
+        "canonical_unit": measure.get("unit"),
+    }
 
 
 def _looks_like_ionic_liquid(value: Any) -> bool:
@@ -677,12 +693,14 @@ def normalize_diffusion_records(
         row["D_unit"] = d_unit
 
         supported_coefficient_keys: set[str] = set()
+        source_values: dict[str, dict[str, Any]] = {}
         for key in ("D_total", "D_cation", "D_anion"):
             evidence_measure = _pick_evidence_measure_for_field(evidence_measures, key)
             if evidence_measure:
                 row[key] = evidence_measure["value"]
                 row["D_unit"] = evidence_measure["unit"]
                 supported_coefficient_keys.add(key)
+                source_values[key] = _source_value_payload(evidence_measure)
 
         populated_fields = [key for key in ("D_total", "D_cation", "D_anion") if row.get(key) is not None]
         for key in populated_fields:
@@ -696,12 +714,14 @@ def normalize_diffusion_records(
                 row[key] = matching_measure["value"]
                 row["D_unit"] = matching_measure["unit"]
                 supported_coefficient_keys.add(key)
+                source_values[key] = _source_value_payload(matching_measure)
 
         if len(evidence_measures) == 1 and len(supported_coefficient_keys) == 0:
             target_key = populated_fields[0] if len(populated_fields) == 1 else "D_total"
             row[target_key] = evidence_measures[0]["value"]
             row["D_unit"] = evidence_measures[0]["unit"]
             supported_coefficient_keys.add(target_key)
+            source_values[target_key] = _source_value_payload(evidence_measures[0])
 
         for key in ("D_total", "D_cation", "D_anion"):
             if key not in supported_coefficient_keys:
@@ -722,6 +742,8 @@ def normalize_diffusion_records(
 
         novel_features = row.pop("novel_features", None)
         row["novel_features_json"] = novel_features if isinstance(novel_features, dict) else {}
+        if source_values:
+            row["novel_features_json"]["source_values"] = source_values
         row["provider"] = provider
         row["prompt_version"] = prompt_version
         row["raw_model_output"] = raw_model_output
