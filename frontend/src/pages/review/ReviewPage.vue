@@ -260,14 +260,28 @@ const evidenceZoomImageUrl = ref('')
 const evidenceZoomStatus = ref<'idle' | 'loading' | 'ready' | 'unavailable'>('idle')
 const evidenceZoomMatchedText = ref('')
 const evidenceZoomPrecise = ref(false)
+const activeEvidenceRequestKey = ref('')
 const submissionPending = ref(false)
 const submissionError = ref('')
 const submissionSuccess = ref('')
+let evidenceZoomCaptureSequence = 0
+
+function resetEvidenceZoomState() {
+  evidenceZoomCaptureSequence += 1
+  evidenceZoomImageUrl.value = ''
+  evidenceZoomMatchedText.value = ''
+  evidenceZoomPrecise.value = false
+  evidenceZoomStatus.value = 'idle'
+}
 
 const reviewFiles = computed<BatchFile[]>(() => Array.isArray(props.files) ? props.files.filter(Boolean) : [])
 const selectedReviewFile = computed<BatchFile | null>(() => props.selectedFile || reviewFiles.value[0] || null)
 const activeDocumentName = computed(() => selectedReviewFile.value?.name || props.selectedFileName || 'No review document selected')
 const allRecords = computed(() => Array.isArray(selectedReviewFile.value?.records) ? selectedReviewFile.value.records : [])
+const reviewRecordIdSignature = computed(() => allRecords.value
+  .map((record, index) => String(record.id || `record-${index + 1}`))
+  .join('|'))
+const appliedInitialRecordKey = ref('')
 
 const diffusionCoefficientFieldKeys = ['d_total', 'd_cation', 'd_anion'] as const
 const diffusionIonIdentityFieldKeys = ['diffusing_ion', 'cation', 'anion'] as const
@@ -285,19 +299,19 @@ const diffusionReviewLensOptions: DiffusionReviewLensOption[] = [
   {
     id: 'coefficients',
     label: '扩散值',
-    description: 'D total / D+ / D- / unit',
+    description: '总扩散 / 阳离子 / 阴离子 / 单位',
     fieldIds: ['d_total', 'd_cation', 'd_anion', 'd_unit'],
   },
   {
     id: 'core',
     label: '体系',
-    description: 'system / IL / material',
+    description: '体系名 / 离子液体 / 限域材料',
     fieldIds: ['system_name', 'ionic_liquid', 'confinement_material_class', 'confinement_geometry_class'],
   },
   {
     id: 'context',
     label: '限域',
-    description: 'geometry / dimension / scale / T',
+    description: '几何 / 维度 / 尺度 / 温度',
     fieldIds: ['confinement_geometry_class', 'confinement_dimensionality', 'confinement_scale_value', 'temperature_value'],
   },
 ]
@@ -405,12 +419,16 @@ watch(
 )
 
 watch(
-  [recordItems, () => props.initialRecordId],
-  ([items, targetId]) => {
+  [reviewRecordIdSignature, () => props.initialRecordId],
+  ([signature, targetId]) => {
     if (!targetId) return
-    if (items.some((item) => item.id === targetId)) {
+    const ids = signature.split('|').filter(Boolean)
+    const applyKey = `${signature}:${targetId}`
+    if (appliedInitialRecordKey.value === applyKey) return
+    if (ids.includes(targetId)) {
       activeRecordId.value = targetId
       collapsedRecordIds.value = discardCollapsedRecord(targetId)
+      appliedInitialRecordKey.value = applyKey
     }
   },
   { immediate: true },
@@ -732,46 +750,59 @@ watch(
 )
 
 watch(
-	  [activeRecord, activeLiteratureId, activeExtractorType],
-	  async ([record, literatureId, extractorType]) => {
-	    const recordId = Number(record?.id || '')
-	    if (!record || !literatureId || !Number.isFinite(recordId)) {
-	      activeRecordEvidence.value = null
-	      activeRecordFieldEvidence.value = null
-	      return
-	    }
+  [activeRecord, activeLiteratureId, activeExtractorType],
+  async ([record, literatureId, extractorType]) => {
+    const recordId = Number(record?.id || '')
+    if (!record || !literatureId || !Number.isFinite(recordId)) {
+      activeEvidenceRequestKey.value = ''
+      activeRecordEvidence.value = null
+      activeRecordFieldEvidence.value = null
+      resetEvidenceZoomState()
+      return
+    }
 
-	    const entityType = reviewEntityType(record)
-	    const cacheKey = reviewCacheKey(literatureId, recordId, extractorType, entityType)
-    const cachedEvidence = evidenceCache.value[cacheKey]
-    if (cachedEvidence) {
-      activeRecordEvidence.value = cachedEvidence
-    } else {
+    const entityType = reviewEntityType(record)
+    const cacheKey = reviewCacheKey(literatureId, recordId, extractorType, entityType)
+    const requestKey = `${cacheKey}:${activeRecordId.value}`
+    activeEvidenceRequestKey.value = requestKey
+    resetEvidenceZoomState()
+
+    const hasCachedEvidence = Object.prototype.hasOwnProperty.call(evidenceCache.value, cacheKey)
+    const hasCachedFieldEvidence = Object.prototype.hasOwnProperty.call(fieldEvidenceCache.value, cacheKey)
+    activeRecordEvidence.value = hasCachedEvidence ? (evidenceCache.value[cacheKey] ?? null) : null
+    activeRecordFieldEvidence.value = hasCachedFieldEvidence ? (fieldEvidenceCache.value[cacheKey] ?? null) : null
+
+    if (!hasCachedEvidence) {
       try {
         const evidence = extractorType === 'diffusion'
-	          ? await fetchDiffusionEvidence(record, literatureId, entityType)
-	          : await fetchTribologyEvidence(record, literatureId, entityType)
-	        evidenceCache.value[cacheKey] = evidence
-	        activeRecordEvidence.value = evidence
-	      } catch {
-	        evidenceCache.value[cacheKey] = null
-	        activeRecordEvidence.value = null
+          ? await fetchDiffusionEvidence(record, literatureId, entityType)
+          : await fetchTribologyEvidence(record, literatureId, entityType)
+        evidenceCache.value[cacheKey] = evidence
+        if (activeEvidenceRequestKey.value === requestKey) {
+          activeRecordEvidence.value = evidence
+        }
+      } catch {
+        evidenceCache.value[cacheKey] = null
+        if (activeEvidenceRequestKey.value === requestKey) {
+          activeRecordEvidence.value = null
+        }
       }
     }
 
-    const cachedFieldEvidence = fieldEvidenceCache.value[cacheKey]
-    if (cachedFieldEvidence) {
-      activeRecordFieldEvidence.value = cachedFieldEvidence
-	    } else {
-	      try {
-	        const fieldEvidence = extractorType === 'diffusion'
-	          ? await fetchDiffusionFieldEvidence(record, literatureId, entityType)
-	          : await fetchTribologyFieldEvidence(record, literatureId, entityType)
-	        fieldEvidenceCache.value[cacheKey] = fieldEvidence
-	        activeRecordFieldEvidence.value = fieldEvidence
-	      } catch {
-	        fieldEvidenceCache.value[cacheKey] = null
-        activeRecordFieldEvidence.value = null
+    if (!hasCachedFieldEvidence) {
+      try {
+        const fieldEvidence = extractorType === 'diffusion'
+          ? await fetchDiffusionFieldEvidence(record, literatureId, entityType)
+          : await fetchTribologyFieldEvidence(record, literatureId, entityType)
+        fieldEvidenceCache.value[cacheKey] = fieldEvidence
+        if (activeEvidenceRequestKey.value === requestKey) {
+          activeRecordFieldEvidence.value = fieldEvidence
+        }
+      } catch {
+        fieldEvidenceCache.value[cacheKey] = null
+        if (activeEvidenceRequestKey.value === requestKey) {
+          activeRecordFieldEvidence.value = null
+        }
       }
     }
   },
@@ -950,8 +981,23 @@ const hasEvidenceFocusPanel = computed(() => {
 
 const evidenceZoomModeLabel = computed(() => {
   if (evidenceZoomStatus.value === 'loading') return '定位中'
-  if (evidenceZoomStatus.value === 'unavailable') return '页级定位'
-  return evidenceZoomPrecise.value ? '精确匹配' : '区域定位'
+  if (evidenceZoomStatus.value === 'unavailable') return '页级'
+  return evidenceZoomPrecise.value ? '精确' : '区域'
+})
+
+const evidenceFocusValue = computed(() => (
+  evidenceZoomMatchedText.value
+  || activeField.value?.value
+  || activeField.value?.location
+  || '待定位'
+))
+
+const evidenceZoomBadgeClass = computed(() => {
+  if (evidenceZoomStatus.value === 'loading') return 'border-sky-200 bg-sky-50 text-sky-700'
+  if (evidenceZoomStatus.value === 'unavailable') return 'border-slate-200 bg-slate-100 text-slate-600'
+  return evidenceZoomPrecise.value
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+    : 'border-cyan-200 bg-cyan-50 text-cyan-700'
 })
 
 watch([activeEvidencePage, pdfPageCount, () => props.pdfUrl], ([page]) => {
@@ -1014,6 +1060,7 @@ const activeEvidenceTargetSignature = computed(() => {
   const bbox = activeFieldResolvedEvidence.value?.bbox?.join(',') || ''
   const terms = evidenceZoomTerms.value.join('~')
   return [
+    activeEvidenceRequestKey.value,
     activeRecordId.value,
     activeFieldId.value,
     page,
@@ -1022,8 +1069,6 @@ const activeEvidenceTargetSignature = computed(() => {
     props.pdfUrl || '',
   ].join('|')
 })
-
-let evidenceZoomCaptureSequence = 0
 
 async function refreshEvidenceZoomImage(highlightId: string | null) {
   const sequence = ++evidenceZoomCaptureSequence
@@ -3846,12 +3891,12 @@ function setDiffusionReviewLens(lens: DiffusionReviewLens) {
 }
 
 function diffusionTableCellTone(cell: DiffusionReviewTableCell, activeRecordCell = false) {
-  if (activeRecordCell && cell.fieldId === activeFieldId.value) return 'border-[#22c7b8] bg-[#ecfffb] text-[#064e3b] ring-1 ring-[#7dd3c7]'
+  if (activeRecordCell && cell.fieldId === activeFieldId.value) return 'border-[#14b8a6] bg-[#eafffb] text-[#063f3b] ring-1 ring-[#99f6e4] shadow-[0_8px_20px_-18px_rgba(20,184,166,0.85)]'
   if (cell.status === 'Missing') return 'border-[#fecdd3] bg-[#fff8f9] text-[#be123c]'
-  if (cell.status === 'Partial') return 'border-[#fed7aa] bg-[#fffaf2] text-[#9a3412]'
-  if (cell.status === 'Optional') return 'border-[#e2e8f0] bg-white text-[#64748b]'
+  if (cell.status === 'Partial') return 'border-[#dbe4ef] bg-[#fffefa] text-[#334155]'
+  if (cell.status === 'Optional') return 'border-[#e2e8f0] bg-[#f8fafc] text-[#64748b]'
   return cell.primary
-    ? 'border-[#cde7df] bg-[#fbfffd] text-[#123f37]'
+    ? 'border-[#cfdce8] bg-white text-[#0f172a]'
     : 'border-[#dbe4ef] bg-white text-[#334155]'
 }
 
@@ -4733,27 +4778,27 @@ function roughnessTextParts(value: string) {
           </div>
         </div>
 
-        <div v-if="activeExtractorType === 'diffusion'" class="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden bg-[#fbfcff] p-3">
-          <section class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[0.85rem] border border-[#dbe8e4] bg-white shadow-[0_16px_38px_-32px_rgba(15,23,42,0.35)]">
-            <div class="shrink-0 border-b border-[#e7efec] px-3.5 py-2.5">
+        <div v-if="activeExtractorType === 'diffusion'" class="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden bg-[#f7f9fc] p-3">
+          <section class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[0.85rem] border border-[#dce7f2] bg-white shadow-[0_16px_38px_-32px_rgba(15,23,42,0.35)]">
+            <div class="shrink-0 border-b border-[#e6edf5] px-3.5 py-2.5">
               <div class="flex items-center justify-between gap-2">
                 <div>
-                  <p class="text-[10px] font-black uppercase tracking-[0.18em] text-[#0f766e]">Review Lens</p>
-                  <p class="mt-0.5 text-[11px] font-semibold text-[#64748b]">{{ activeDiffusionReviewLensOption.description }}</p>
+                  <p class="text-[10px] font-black uppercase tracking-[0.18em] text-[#25636a]">审阅视图</p>
+                  <p class="mt-0.5 text-[11px] font-semibold text-[#667085]">{{ activeDiffusionReviewLensOption.description }}</p>
                 </div>
-                <span class="rounded-md bg-[#ecfffb] px-2 py-1 text-[10px] font-bold text-[#0f766e] ring-1 ring-[#bce9df]">
-                  {{ visibleRecordCount }} rows
+                <span class="rounded-md bg-[#f2fbfa] px-2 py-1 text-[10px] font-bold text-[#0f766e] ring-1 ring-[#c8ebe5]">
+                  {{ visibleRecordCount }} 条
                 </span>
               </div>
-              <div class="mt-2 grid grid-cols-3 gap-1 rounded-[0.65rem] bg-[#f2f7f5] p-1 ring-1 ring-[#d9e9e4]">
+              <div class="mt-2 grid grid-cols-3 gap-1 rounded-[0.65rem] bg-[#f1f5f9] p-1 ring-1 ring-[#dbe4ef]">
                 <button
                   v-for="option in diffusionReviewLensOptions"
                   :key="option.id"
                   type="button"
                   class="min-w-0 rounded-[0.5rem] px-2 py-1.5 text-[11px] font-black transition"
                   :class="diffusionReviewLens === option.id
-                    ? 'bg-white text-[#0f766e] shadow-[0_6px_18px_-14px_rgba(15,118,110,0.9)] ring-1 ring-[#c8e6dc]'
-                    : 'text-[#6f8580] hover:bg-white/70 hover:text-[#123f37]'"
+                    ? 'bg-white text-[#0f766e] shadow-[0_8px_20px_-16px_rgba(15,23,42,0.45)] ring-1 ring-[#d8e2ef]'
+                    : 'text-[#667085] hover:bg-white/70 hover:text-[#1f2937]'"
                   :title="option.description"
                   @click="setDiffusionReviewLens(option.id)"
                 >
@@ -4773,13 +4818,13 @@ function roughnessTextParts(value: string) {
                 </colgroup>
                 <thead>
                   <tr>
-                    <th class="sticky left-0 top-0 z-30 border-b border-r border-[#edf3f1] bg-[#fbfffd] px-2 py-1.5 text-[9px] font-black uppercase tracking-[0.1em] text-[#6f8580]">
-                      record
+                    <th class="sticky left-0 top-0 z-30 border-b border-r border-[#e8eef5] bg-[#fbfdff] px-2 py-1.5 text-[9px] font-black uppercase tracking-[0.1em] text-[#667085]">
+                      记录
                     </th>
                     <th
                       v-for="cell in visibleDiffusionReviewTableCells(activeRecord || visibleRecordItems[0]?.record, activeRecordFieldEvidence?.fields)"
                       :key="`diffusion-head-${cell.id}`"
-                      class="sticky top-0 z-20 border-b border-[#edf3f1] bg-[#fbfffd] px-1.5 py-1.5 text-[9px] font-black uppercase tracking-[0.1em] text-[#6f8580]"
+                      class="sticky top-0 z-20 border-b border-[#e8eef5] bg-[#fbfdff] px-1.5 py-1.5 text-[9px] font-black uppercase tracking-[0.1em] text-[#667085]"
                     >
                       {{ cell.label }}
                     </th>
@@ -4790,13 +4835,13 @@ function roughnessTextParts(value: string) {
                     v-for="item in visibleRecordItems"
                     :key="`diffusion-row-${item.id}`"
                     class="group"
-                    :class="item.id === activeRecordId ? 'bg-[#f3fffb]' : 'bg-white hover:bg-[#fbfffd]'"
+                    :class="item.id === activeRecordId ? 'bg-[#f2fffb]' : 'bg-white hover:bg-[#fbfdff]'"
                   >
-                    <td class="sticky left-0 z-10 border-b border-r border-[#edf3f1] bg-inherit px-1.5 py-1.5 align-top shadow-[8px_0_14px_-16px_rgba(15,23,42,0.7)]">
+                    <td class="sticky left-0 z-10 border-b border-r border-[#e8eef5] bg-inherit px-1.5 py-1.5 align-top shadow-[8px_0_14px_-16px_rgba(15,23,42,0.7)]">
                       <button
                         type="button"
                         class="flex w-full flex-col items-start rounded-[0.5rem] px-1.5 py-1 text-left transition"
-                        :class="item.id === activeRecordId ? 'bg-[#0f766e] text-white' : 'bg-[#f1f5f9] text-slate-600 group-hover:bg-[#e8f7f2]'"
+                        :class="item.id === activeRecordId ? 'bg-[#0f766e] text-white' : 'bg-[#f1f5f9] text-slate-600 group-hover:bg-[#e7f5f2]'"
                         @click="activateDiffusionReviewCell(item, activeFieldId)"
                       >
                         <span class="text-[9.5px] font-black uppercase tracking-[0.1em]">{{ item.label }}</span>
@@ -4824,44 +4869,52 @@ function roughnessTextParts(value: string) {
             </div>
           </section>
 
-          <section v-if="hasEvidenceFocusPanel" class="shrink-0 overflow-hidden rounded-[0.85rem] border border-[#f2e5bf] bg-[#fffdf7]">
-            <div class="flex items-center justify-between gap-2 border-b border-[#f6ebc8] px-3.5 py-2">
-              <p class="text-[10px] font-black uppercase tracking-[0.18em] text-[#a16207]">证据聚焦 · {{ activeField?.label }}</p>
-              <div class="flex min-w-0 items-center gap-1.5">
-                <span class="shrink-0 rounded-md bg-[#fff2c7] px-2 py-0.5 text-[10px] font-bold text-[#8a5a0a] ring-1 ring-[#f2e5bf]">
+          <section v-if="hasEvidenceFocusPanel" class="shrink-0 overflow-hidden rounded-[0.85rem] border border-[#dce7f2] bg-white shadow-[0_16px_34px_-30px_rgba(15,23,42,0.45)]">
+            <div class="flex items-center justify-between gap-3 border-b border-[#dce7f2] bg-[#0f172a] px-3.5 py-2.5 text-white">
+              <div class="min-w-0">
+                <p class="text-[9.5px] font-black uppercase tracking-[0.2em] text-[#67e8f9]">证据焦点</p>
+                <div class="mt-0.5 flex min-w-0 items-center gap-1.5">
+                  <span class="shrink-0 text-[12px] font-black text-white">{{ activeField?.label }}</span>
+                  <span class="truncate text-[12px] font-semibold text-slate-200">{{ evidenceFocusValue }}</span>
+                </div>
+              </div>
+              <div class="flex min-w-0 shrink-0 items-center gap-1.5">
+                <span class="rounded-md border px-2 py-0.5 text-[10px] font-black" :class="evidenceZoomBadgeClass">
                   {{ evidenceZoomModeLabel }}
                 </span>
-                <span v-if="activeField?.location" class="truncate rounded-md bg-white px-2 py-0.5 text-[10px] font-bold text-[#8a5a0a] ring-1 ring-[#f2e5bf]">
+                <span v-if="activeField?.location" class="max-w-[7.5rem] truncate rounded-md border border-white/10 bg-white/10 px-2 py-0.5 text-[10px] font-bold text-slate-100">
                   {{ activeField.location }}
                 </span>
               </div>
             </div>
-            <div class="max-h-56 overflow-y-auto custom-scrollbar px-3.5 py-2.5">
+            <div class="max-h-72 overflow-y-auto custom-scrollbar p-2.5">
               <div
                 v-if="evidenceZoomImageUrl || evidenceZoomStatus === 'loading' || evidenceZoomStatus === 'unavailable'"
-                class="mb-2 overflow-hidden rounded-[0.75rem] border border-[#f4d88a] bg-white shadow-[0_12px_26px_-24px_rgba(146,64,14,0.5)]"
+                class="relative mb-2 overflow-hidden rounded-[0.75rem] border border-[#dbe4ef] bg-[#f8fafc]"
               >
-                <div class="flex items-center justify-between border-b border-[#f7ebc8] bg-[#fff9e8] px-2.5 py-1.5">
-                  <span class="text-[9.5px] font-black uppercase tracking-[0.16em] text-[#9a5b00]">定位放大</span>
-                  <span class="truncate text-[10px] font-semibold text-[#b45309]">
-                    {{ evidenceZoomMatchedText || activeField?.value || activeField?.location }}
-                  </span>
+                <div
+                  v-if="evidenceZoomImageUrl"
+                  class="absolute right-2 top-2 z-10 max-w-[55%] truncate rounded-md border border-white/70 bg-white/90 px-2 py-1 text-[10px] font-black text-[#0f172a] shadow-[0_8px_18px_-12px_rgba(15,23,42,0.55)] backdrop-blur"
+                >
+                  {{ evidenceFocusValue }}
                 </div>
-                <div class="flex min-h-[5.5rem] items-center justify-center bg-[#fffef8] p-2">
-                  <div v-if="evidenceZoomStatus === 'loading'" class="text-[11px] font-semibold text-[#a16207]">正在截取定位区域...</div>
-                  <div v-else-if="evidenceZoomStatus === 'unavailable'" class="text-[11px] font-semibold text-[#a16207]">暂未找到可放大的文本区域</div>
+                <div class="flex min-h-[6.75rem] items-center justify-center bg-white p-2">
+                  <div v-if="evidenceZoomStatus === 'loading'" class="text-[11px] font-semibold text-slate-500">正在定位...</div>
+                  <div v-else-if="evidenceZoomStatus === 'unavailable'" class="text-[11px] font-semibold text-slate-500">未找到可放大区域</div>
                   <img
                     v-else
                     :src="evidenceZoomImageUrl"
                     alt="定位区域放大截图"
-                    class="max-h-40 w-full rounded-[0.45rem] object-contain"
+                    class="max-h-52 w-full rounded-[0.45rem] object-contain"
                   >
                 </div>
               </div>
-              <p v-if="evidenceExcerpt" class="font-serif text-[12px] leading-5 text-[#4a5568]" v-html="highlightedExcerpt" />
-              <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500">
-                <span v-if="activeFieldSourceLabel">Source {{ activeFieldSourceLabel }}</span>
-                <span v-if="evidenceSecondaryValue !== '尚未关联'">{{ evidenceSecondaryLabel }} {{ evidenceSecondaryValue }}</span>
+              <div v-if="evidenceExcerpt" class="rounded-[0.65rem] border border-[#e6edf5] bg-[#fbfdff] px-2.5 py-2">
+                <p class="font-serif text-[12px] leading-5 text-[#3f4a5a]" v-html="highlightedExcerpt" />
+              </div>
+              <div class="mt-2 flex flex-wrap items-center gap-1.5 text-[10px] font-semibold text-slate-500">
+                <span v-if="activeFieldSourceLabel" class="rounded-md bg-[#f1f5f9] px-2 py-0.5">Source {{ activeFieldSourceLabel }}</span>
+                <span v-if="evidenceSecondaryValue !== '尚未关联'" class="rounded-md bg-[#f1f5f9] px-2 py-0.5">{{ evidenceSecondaryLabel }} {{ evidenceSecondaryValue }}</span>
               </div>
             </div>
           </section>
