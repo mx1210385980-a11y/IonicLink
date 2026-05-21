@@ -346,16 +346,17 @@ const recordItems = computed<RecordItem[]>(() => {
 
 const visibleRecordItems = computed(() => {
   let rows = recordItems.value
+  const filtersEnabled = activeExtractorType.value !== 'diffusion'
 
-  if (onlyTrainingBlockers.value) {
+  if (filtersEnabled && onlyTrainingBlockers.value) {
     rows = rows.filter((item) => item.trainingBlocker)
   }
 
-  if (onlyPendingRecords.value) {
+  if (filtersEnabled && onlyPendingRecords.value) {
     rows = rows.filter((item) => item.status !== 'confirmed')
   }
 
-  if (onlyLowConfidenceRecords.value) {
+  if (filtersEnabled && onlyLowConfidenceRecords.value) {
     rows = rows.filter((item) => item.lowConfidence)
   }
 
@@ -4438,7 +4439,7 @@ function roughnessTextParts(value: string) {
             <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">提取记录</p>
             <span class="text-[11px] font-medium text-slate-500">{{ visibleRecordCount }} / {{ recordItemCount }}</span>
           </div>
-          <div class="mt-2 flex flex-wrap items-center gap-1">
+          <div v-if="activeExtractorType !== 'diffusion'" class="mt-2 flex flex-wrap items-center gap-1">
             <button
               type="button"
               class="inline-flex items-center gap-1 rounded-[0.5rem] px-2 py-1 text-[11px] font-semibold transition"
@@ -4466,7 +4467,7 @@ function roughnessTextParts(value: string) {
           </div>
 
           <div
-            v-if="onlyTrainingBlockers"
+            v-if="activeExtractorType !== 'diffusion' && onlyTrainingBlockers"
             class="mt-2 rounded-[0.7rem] border px-3 py-2 text-[11px] leading-4"
             :class="trainingBlockerCount > 0
               ? 'border-rose-200 bg-rose-50 text-rose-800'
