@@ -4227,7 +4227,10 @@ function roughnessTextParts(value: string) {
 
 
 <template>
-  <div class="flex h-full min-h-0 flex-col gap-3 overflow-hidden bg-[#f4f7fb] p-3">
+  <div
+    class="flex h-full min-h-0 flex-col gap-3 bg-[#f4f7fb] p-3"
+    :class="activeExtractorType === 'diffusion' ? 'overflow-y-auto custom-scrollbar' : 'overflow-hidden'"
+  >
     <!-- ─── 顶部状态条 ─────────────────────────────────────────────── -->
     <section class="shell-surface flex flex-wrap items-center gap-3 px-4 py-2.5 sm:px-5">
       <button
