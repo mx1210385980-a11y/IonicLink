@@ -462,10 +462,10 @@ function capturePageRegion(
   const hw = targetW * xScale
   const hh = targetH * yScale
   ctx.save()
-  ctx.fillStyle = options.precise === false ? 'rgba(251, 191, 36, 0.18)' : 'rgba(251, 191, 36, 0.30)'
-  ctx.strokeStyle = options.precise === false ? 'rgba(217, 119, 6, 0.82)' : 'rgba(180, 83, 9, 0.98)'
-  ctx.lineWidth = Math.max(4, Math.min(8, output.width * 0.009))
-  ctx.setLineDash(options.precise === false ? [10, 7] : [])
+  ctx.fillStyle = options.precise === false ? 'rgba(14, 165, 233, 0.10)' : 'rgba(20, 184, 166, 0.16)'
+  ctx.strokeStyle = options.precise === false ? 'rgba(2, 132, 199, 0.62)' : 'rgba(13, 148, 136, 0.74)'
+  ctx.lineWidth = Math.max(1.5, Math.min(3, output.width * 0.0038))
+  ctx.setLineDash(options.precise === false ? [6, 5] : [])
   ctx.fillRect(hx, hy, hw, hh)
   ctx.strokeRect(hx, hy, hw, hh)
   ctx.restore()

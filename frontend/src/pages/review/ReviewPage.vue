@@ -986,7 +986,9 @@ const evidenceZoomModeLabel = computed(() => {
 })
 
 const evidenceFocusValue = computed(() => (
-  evidenceZoomMatchedText.value
+  activeExtractorType.value === 'diffusion' && activeField.value?.value && activeField.value.value !== 'Not captured yet'
+    ? activeField.value.value
+    : evidenceZoomMatchedText.value
   || activeField.value?.value
   || activeField.value?.location
   || '待定位'
@@ -1043,7 +1045,7 @@ const recordHighlights = computed<HighlightRect[]>(() => {
         id: `field:${normalizeFieldKey(activeFieldId.value)}`,
         page: resolved.page,
         coords: { x: x0, y: y0, w, h },
-        color: 'rgba(245, 158, 11, 0.36)',
+        color: 'rgba(14, 165, 233, 0.14)',
       }]
     }
   }
@@ -2066,6 +2068,65 @@ function formatScientificUnit(value: string | null | undefined) {
     .replace(/s-1/g, 's⁻¹')
 }
 
+function normalizeScientificExponent(value: string) {
+  return trim(value)
+    .replace(/[−–—]/g, '-')
+    .replace(/[⁺₊]/g, '+')
+    .replace(/[⁻₋]/g, '-')
+    .replace(/[⁰₀]/g, '0')
+    .replace(/[¹₁]/g, '1')
+    .replace(/[²₂]/g, '2')
+    .replace(/[³₃]/g, '3')
+    .replace(/[⁴₄]/g, '4')
+    .replace(/[⁵₅]/g, '5')
+    .replace(/[⁶₆]/g, '6')
+    .replace(/[⁷₇]/g, '7')
+    .replace(/[⁸₈]/g, '8')
+    .replace(/[⁹₉]/g, '9')
+}
+
+type OriginalDiffusionEvidenceValue = {
+  value: string
+  unit: string
+  mantissa: string
+  uncertainty: string
+}
+
+function normalizeDiffusionSourceText(value: string) {
+  return trim(value)
+    .replace(/[−–—]/g, '-')
+    .replace(/\s+/g, ' ')
+}
+
+function originalDiffusionValueFromText(value: unknown): OriginalDiffusionEvidenceValue | null {
+  const text = normalizeDiffusionSourceText(String(value || ''))
+  if (!text) return null
+
+  const focused = text.match(/\bas\b(.+?)(?:\bat\b|\bin\b|;|$)/i)?.[1] || text
+  const pattern = /\(?\s*([-+]?\d+(?:\.\d+)?)\s*(?:±\s*([-+]?\d+(?:\.\d+)?))?\s*\)?\s*(?:[×x*]\s*10\s*([−–—+\-]?\d+|[⁺⁻]?[⁰¹²³⁴⁵⁶⁷⁸⁹]+))?\s*([A-Za-zÅμµ²^0-9·./⁻¹\-]+)?/g
+  const candidates: Array<OriginalDiffusionEvidenceValue & { score: number }> = []
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(focused)) !== null) {
+    const mantissa = trim(match[1])
+    if (!mantissa) continue
+    const unit = formatScientificUnit(trim(match[4] || ''))
+    const exponent = normalizeScientificExponent(match[3] || '')
+    const valueText = exponent ? `${mantissa} × 10${toSuperscript(exponent)}` : mantissa
+    const score = (exponent ? 4 : 0)
+      + (match[2] ? 3 : 0)
+      + (unit !== 'Not captured yet' ? 2 : 0)
+      + (mantissa.includes('.') ? 1 : 0)
+    candidates.push({
+      value: valueText,
+      unit,
+      mantissa,
+      uncertainty: trim(match[2] || ''),
+      score,
+    })
+  }
+  return candidates.sort((left, right) => right.score - left.score)[0] || null
+}
+
 function hasAnyDiffusionCoefficient(record: TribologyData | null | undefined) {
   if (!record) return false
   return [record.D_total, record.D_cation, record.D_anion].some((value) => value !== null && value !== undefined)
@@ -2839,15 +2900,13 @@ function fieldEvidenceSpecs(field: ReviewField | null, record: TribologyData | n
   }
 
   if (field.id === 'diffusion_coefficient') {
-    ;[
-      record.D_total,
-      record.D_cation,
-      record.D_anion,
-    ].forEach((value) => {
-      if (value == null) return
-      const label = formatDiffusionNumber(value)
-      addEvidenceSpec(specs, label, 'numeric')
-      addEvidenceSpec(specs, `diffusion coefficient ${label}`, 'loose')
+    const fieldMap = resolveRecordFieldEvidenceMap(record, activeRecordFieldEvidence.value?.fields)
+    ;['d_total', 'd_cation', 'd_anion'].forEach((key) => {
+      const original = originalDiffusionEvidenceForField(record, key, fieldMap)
+      if (!original) return
+      addEvidenceSpec(specs, original.mantissa, 'numeric')
+      addEvidenceSpec(specs, original.value, 'numeric')
+      addEvidenceSpec(specs, `diffusion coefficient ${original.mantissa}`, 'loose')
     })
     const unit = trim(record.D_unit)
     if (unit) addEvidenceSpec(specs, unit, 'loose')
@@ -2997,6 +3056,13 @@ function fieldEvidenceSpecs(field: ReviewField | null, record: TribologyData | n
   }
 
   if (['d_total', 'd_cation', 'd_anion'].includes(field.id)) {
+    const fieldMap = resolveRecordFieldEvidenceMap(record, activeRecordFieldEvidence.value?.fields)
+    const original = originalDiffusionEvidenceForField(record, field.id, fieldMap)
+    if (original) {
+      addEvidenceSpec(specs, original.mantissa, 'numeric')
+      addEvidenceSpec(specs, original.value, 'numeric')
+      if (original.unit !== 'Not captured yet') addEvidenceSpec(specs, original.unit, 'loose')
+    }
     const numeric = cleanValue.match(/[0-9]+(?:\.[0-9]+)?(?:e[-+]?\d+)?/i)?.[0]
     if (numeric) {
       addEvidenceSpec(specs, numeric, 'numeric')
@@ -3109,12 +3175,24 @@ function buildEvidenceZoomTerms(
   diffusionQuoteTermsForField(field.id, quote).forEach((term) => pushEvidenceZoomTerm(terms, term))
 
   if (recordExtractorType(record) === 'diffusion') {
+    const fieldMap = resolveRecordFieldEvidenceMap(record, activeRecordFieldEvidence.value?.fields)
     if (field.id === 'diffusion_coefficient') {
-      ;[record.D_total, record.D_cation, record.D_anion].forEach((value) => addNumericZoomVariants(terms, value))
+      ;['d_total', 'd_cation', 'd_anion'].forEach((key) => {
+        const original = originalDiffusionEvidenceForField(record, key, fieldMap)
+        if (!original) return
+        pushEvidenceZoomTerm(terms, original.mantissa)
+        pushEvidenceZoomTerm(terms, original.value)
+      })
     }
     if (['d_total', 'd_cation', 'd_anion', 'temperature_value', 'confinement_scale_value'].includes(field.id)) {
-      addNumericZoomVariants(terms, field.value)
-      addNumericZoomVariants(terms, fieldEntry?.value)
+      const original = originalDiffusionEvidenceForField(record, field.id, fieldMap)
+      if (original) {
+        pushEvidenceZoomTerm(terms, original.mantissa)
+        pushEvidenceZoomTerm(terms, original.value)
+      } else {
+        addNumericZoomVariants(terms, field.value)
+        addNumericZoomVariants(terms, fieldEntry?.value)
+      }
     }
     if (field.id === 'ion_identity') {
       diffusionIonIdentityTags(record).forEach((tag) => pushEvidenceZoomTerm(terms, tag.value))
@@ -3256,7 +3334,7 @@ function highlightTerms(text: string, specs: EvidenceSearchSpec[]) {
       const matcher = buildEvidenceMatcher(spec)
       output = output.replace(
         matcher,
-        (match) => `<mark class="rounded-[0.28rem] bg-[#fde7a8] px-1 py-0.5 font-medium text-[#8c5a05]">${match}</mark>`,
+        (match) => `<mark class="rounded-[0.28rem] bg-[#e6fbf7] px-1 py-0.5 font-semibold text-[#0f766e]">${match}</mark>`,
       )
     })
 
@@ -3490,7 +3568,7 @@ function buildReviewFields(record: TribologyData | null, remoteFields?: Record<s
   const fieldMap = resolveRecordFieldEvidenceMap(record, remoteFields)
   if (extractorType === 'diffusion') {
     const diffusionValue = (key: string) => {
-      const value = fieldValueForKey(record, key, extractorType)
+      const value = diffusionReviewValueForField(record, key, fieldMap)
       return value !== 'Not captured yet' ? value : present(fieldMap[key]?.value)
     }
     const ionSummary = diffusionIonIdentitySummary(record)
@@ -3499,7 +3577,7 @@ function buildReviewFields(record: TribologyData | null, remoteFields?: Record<s
       buildAggregateDiffusionField(
         '扩散系数',
         'diffusion_coefficient',
-        diffusionCoefficientSummary(record),
+        diffusionCoefficientReviewSummary(record, fieldMap),
         record,
         fieldMap,
         diffusionCoefficientFieldKeys,
@@ -3816,14 +3894,37 @@ function firstDiffusionSourceValue(record: TribologyData | null | undefined): Re
     .find((value) => value && typeof value === 'object') || null
 }
 
-function diffusionReviewCellValue(record: TribologyData, fieldId: string) {
+function originalDiffusionEvidenceForField(
+  record: TribologyData | null | undefined,
+  fieldId: string,
+  fieldMap?: Record<string, FieldEvidenceEntry> | null,
+) {
+  const sourceValue = diffusionSourceValue(record, fieldId)
+  const fieldEntry = fieldMap?.[fieldId]
+  return originalDiffusionValueFromText(fieldEntry?.evidence?.matched_text)
+    || originalDiffusionValueFromText((fieldEntry?.evidence as Record<string, unknown> | undefined)?.matchedText)
+    || originalDiffusionValueFromText(fieldEntry?.evidence?.quote)
+    || originalDiffusionValueFromText(sourceValue?.raw_text)
+    || originalDiffusionValueFromText(sourceValue?.raw_value)
+}
+
+function diffusionReviewValueForField(
+  record: TribologyData,
+  fieldId: string,
+  fieldMap?: Record<string, FieldEvidenceEntry> | null,
+) {
   if (fieldId === 'source_page') return evidenceLocation(record)
   if (['d_total', 'd_cation', 'd_anion'].includes(fieldId)) {
     const sourceValue = diffusionSourceValue(record, fieldId)
-    return trim(sourceValue?.raw_value) || trim(sourceValue?.raw_text) || fieldValueForKey(record, fieldId, 'diffusion')
+    const original = originalDiffusionEvidenceForField(record, fieldId, fieldMap)
+    return original?.value || trim(sourceValue?.raw_value) || trim(sourceValue?.raw_text) || fieldValueForKey(record, fieldId, 'diffusion')
   }
   if (fieldId === 'd_unit') {
     const sourceValue = firstDiffusionSourceValue(record)
+    const original = originalDiffusionEvidenceForField(record, 'd_total', fieldMap)
+      || originalDiffusionEvidenceForField(record, 'd_anion', fieldMap)
+      || originalDiffusionEvidenceForField(record, 'd_cation', fieldMap)
+    if (original?.unit && original.unit !== 'Not captured yet') return original.unit
     return trim(sourceValue?.raw_unit) || fieldValueForKey(record, fieldId, 'diffusion')
   }
   if (fieldId === 'confinement_scale_value') {
@@ -3833,6 +3934,24 @@ function diffusionReviewCellValue(record: TribologyData, fieldId: string) {
     return unit === 'Not captured yet' ? value : `${value} ${unit}`
   }
   return fieldValueForKey(record, fieldId, 'diffusion')
+}
+
+function diffusionCoefficientReviewSummary(
+  record: TribologyData,
+  fieldMap?: Record<string, FieldEvidenceEntry> | null,
+) {
+  const fields = [
+    ['D all', 'd_total'],
+    ['D+', 'd_cation'],
+    ['D-', 'd_anion'],
+  ] as const
+  const parts = fields
+    .map(([label, key]) => {
+      const value = diffusionReviewValueForField(record, key, fieldMap)
+      return value !== 'Not captured yet' ? `${label} ${value}` : ''
+    })
+    .filter(Boolean)
+  return parts.length ? parts.join(' · ') : diffusionCoefficientSummary(record)
 }
 
 function buildDiffusionReviewTableCells(
@@ -3855,7 +3974,7 @@ function buildDiffusionReviewTableCells(
     { id: 'confinement_scale_value', label: 'scale', fieldId: 'confinement_scale_value', optional: true },
   ]
   return columns.map((column) => {
-    const value = diffusionReviewCellValue(record, column.fieldId)
+    const value = diffusionReviewValueForField(record, column.fieldId, fieldMap)
     const status = diffusionReviewCellStatus(record, fieldMap, column.fieldId, column.optional)
     const sourceValue = diffusionSourceValue(record, column.fieldId)
     const canonical = sourceValue?.canonical_value != null
@@ -3891,7 +4010,7 @@ function setDiffusionReviewLens(lens: DiffusionReviewLens) {
 }
 
 function diffusionTableCellTone(cell: DiffusionReviewTableCell, activeRecordCell = false) {
-  if (activeRecordCell && cell.fieldId === activeFieldId.value) return 'border-[#14b8a6] bg-[#eafffb] text-[#063f3b] ring-1 ring-[#99f6e4] shadow-[0_8px_20px_-18px_rgba(20,184,166,0.85)]'
+  if (activeRecordCell && cell.fieldId === activeFieldId.value) return 'border-[#8bd6ce] bg-[#f4fffc] text-[#123f3b] shadow-[inset_0_0_0_1px_rgba(20,184,166,0.18)]'
   if (cell.status === 'Missing') return 'border-[#fecdd3] bg-[#fff8f9] text-[#be123c]'
   if (cell.status === 'Partial') return 'border-[#dbe4ef] bg-[#fffefa] text-[#334155]'
   if (cell.status === 'Optional') return 'border-[#e2e8f0] bg-[#f8fafc] text-[#64748b]'

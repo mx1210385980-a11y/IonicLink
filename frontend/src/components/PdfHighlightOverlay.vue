@@ -21,7 +21,7 @@ export interface HighlightItem {
   y: number
   w?: number   // defaults to 20 PDF points if missing
   h?: number   // defaults to 10 PDF points if missing
-  color?: string // CSS color, defaults to yellow
+  color?: string // CSS color, defaults to cyan
 }
 
 const props = withDefaults(defineProps<{
@@ -78,10 +78,10 @@ const styledHighlights = computed(() => {
     const height = (h    / props.pageHeight)  * 100
 
     // Resolve color
-    const color = hl.color || 'rgba(250, 204, 21, 0.35)' // yellow-400/35
+    const color = hl.color || 'rgba(14, 165, 233, 0.14)'
     const borderColor = hl.color
-      ? hl.color.replace(/[\d.]+\)$/, '0.8)') // increase opacity for border
-      : 'rgba(202, 138, 4, 0.7)' // yellow-600/70
+      ? hl.color.replace(/[\d.]+\)$/, '0.48)')
+      : 'rgba(8, 145, 178, 0.46)'
 
     return {
       id: hl.id,
@@ -92,8 +92,8 @@ const styledHighlights = computed(() => {
         width:  `${width}%`,
         height: `${height}%`,
         backgroundColor: color,
-        border: `1.5px solid ${borderColor}`,
-        borderRadius: '2px',
+        border: `1px solid ${borderColor}`,
+        borderRadius: '1px',
         cursor: 'pointer',
         pointerEvents: 'auto' as const,
         transition: 'all 0.25s ease',
@@ -116,7 +116,7 @@ const styledHighlights = computed(() => {
       :title="hl.title"
       :class="[
         hl.isActive
-          ? 'ring-4 ring-amber-500 shadow-xl shadow-amber-500/40 animate-pulse-hl'
+          ? 'ring-1 ring-cyan-500/60 shadow-[0_0_0_2px_rgba(8,145,178,0.10)] animate-pulse-hl'
           : 'hover:brightness-110 hover:shadow-md'
       ]"
       @click="emit('click', hl.id)"
@@ -126,8 +126,8 @@ const styledHighlights = computed(() => {
 
 <style scoped>
 @keyframes pulse-hl {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(234, 179, 8, 0.4); }
-  50%      { box-shadow: 0 0 10px 3px rgba(234, 179, 8, 0.25); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(8, 145, 178, 0.18); }
+  50%      { box-shadow: 0 0 0 3px rgba(8, 145, 178, 0.08); }
 }
 .animate-pulse-hl {
   animation: pulse-hl 2s ease-in-out infinite;
