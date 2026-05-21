@@ -3585,16 +3585,16 @@ function buildDiffusionReviewTableCells(
   if (!record || recordExtractorType(record) !== 'diffusion') return []
   const fieldMap = resolveRecordFieldEvidenceMap(record, remoteFields)
   const columns: Array<{ id: string; label: string; fieldId: string; optional?: boolean; primary?: boolean }> = [
-    { id: 'system_name', label: 'system_name', fieldId: 'system_name', primary: true },
-    { id: 'confinement_material_class', label: 'material', fieldId: 'confinement_material_class' },
-    { id: 'confinement_geometry_class', label: 'geometry', fieldId: 'confinement_geometry_class' },
-    { id: 'confinement_dimensionality', label: 'dimension', fieldId: 'confinement_dimensionality' },
-    { id: 'ionic_liquid', label: 'ionic_liquid', fieldId: 'ionic_liquid', primary: true },
-    { id: 'd_total', label: 'D_total', fieldId: 'd_total', optional: true, primary: true },
-    { id: 'd_cation', label: 'D_cation', fieldId: 'd_cation', optional: true, primary: true },
-    { id: 'd_anion', label: 'D_anion', fieldId: 'd_anion', optional: true, primary: true },
-    { id: 'd_unit', label: 'D_unit', fieldId: 'd_unit' },
-    { id: 'temperature_value', label: 'temperature', fieldId: 'temperature_value', optional: true },
+    { id: 'system_name', label: 'system', fieldId: 'system_name', primary: true },
+    { id: 'confinement_material_class', label: 'mat.', fieldId: 'confinement_material_class' },
+    { id: 'confinement_geometry_class', label: 'geo.', fieldId: 'confinement_geometry_class' },
+    { id: 'confinement_dimensionality', label: 'dim.', fieldId: 'confinement_dimensionality' },
+    { id: 'ionic_liquid', label: 'IL', fieldId: 'ionic_liquid', primary: true },
+    { id: 'd_total', label: 'D all', fieldId: 'd_total', optional: true, primary: true },
+    { id: 'd_cation', label: 'D+', fieldId: 'd_cation', optional: true, primary: true },
+    { id: 'd_anion', label: 'D-', fieldId: 'd_anion', optional: true, primary: true },
+    { id: 'd_unit', label: 'unit', fieldId: 'd_unit' },
+    { id: 'temperature_value', label: 'T', fieldId: 'temperature_value', optional: true },
     { id: 'confinement_scale_value', label: 'scale', fieldId: 'confinement_scale_value', optional: true },
     { id: 'source_page', label: 'source', fieldId: 'source_page', primary: true },
   ]
@@ -4384,14 +4384,19 @@ function roughnessTextParts(value: string) {
     <!-- ─── 主区：左 文献列表 / 中 PDF / 右 数据卡片 ──────────── -->
     <div
       class="grid min-h-0 flex-1 gap-3"
-      :class="inboxCollapsed
-        ? (activeExtractorType === 'diffusion' ? 'xl:grid-cols-[3rem_minmax(0,0.95fr)_minmax(34rem,42rem)]' : 'xl:grid-cols-[3rem_minmax(0,1fr)_24rem]')
-        : (activeExtractorType === 'diffusion' ? 'xl:grid-cols-[12rem_minmax(0,0.95fr)_minmax(34rem,42rem)]' : 'xl:grid-cols-[15rem_minmax(0,1fr)_24rem]')"
+      :class="activeExtractorType === 'diffusion'
+        ? (inboxCollapsed
+            ? 'xl:grid-cols-[3rem_minmax(0,1fr)] xl:grid-rows-[minmax(32rem,1fr)_auto]'
+            : 'xl:grid-cols-[12rem_minmax(0,1fr)] xl:grid-rows-[minmax(32rem,1fr)_auto]')
+        : (inboxCollapsed
+            ? 'xl:grid-cols-[3rem_minmax(0,1fr)_24rem]'
+            : 'xl:grid-cols-[15rem_minmax(0,1fr)_24rem]')"
     >
       <!-- ── 左：文献列表 ──────────────────────────────── -->
       <aside
         v-if="!inboxCollapsed"
         class="flex min-h-0 flex-col overflow-hidden rounded-md border border-[#dbe4ef] bg-white shadow-[0_16px_36px_-30px_rgba(15,23,42,0.35)]"
+        :class="activeExtractorType === 'diffusion' ? 'xl:row-span-2' : ''"
       >
         <div class="border-b border-[#eef2f6] px-3 py-3">
           <div class="flex items-center justify-between gap-2">
@@ -4461,6 +4466,7 @@ function roughnessTextParts(value: string) {
       <aside
         v-else
         class="flex min-h-0 flex-col items-center gap-1.5 overflow-y-auto rounded-md border border-[#dbe4ef] bg-white py-3 shadow-[0_16px_36px_-30px_rgba(15,23,42,0.35)]"
+        :class="activeExtractorType === 'diffusion' ? 'xl:row-span-2' : ''"
       >
         <button
           v-for="item in queueItems"
@@ -4482,7 +4488,10 @@ function roughnessTextParts(value: string) {
       </aside>
 
       <!-- ── 中：PDF 内联预览 ──────────────────────── -->
-      <section class="flex min-h-0 flex-col overflow-hidden rounded-md border border-[#dbe4ef] bg-white shadow-[0_16px_36px_-30px_rgba(15,23,42,0.35)]">
+      <section
+        class="flex min-h-0 flex-col overflow-hidden rounded-md border border-[#dbe4ef] bg-white shadow-[0_16px_36px_-30px_rgba(15,23,42,0.35)]"
+        :class="activeExtractorType === 'diffusion' ? 'min-h-[34rem] xl:col-start-2 xl:row-start-1' : ''"
+      >
         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[#eef2f6] px-4 py-2.5">
           <div class="flex min-w-0 items-center gap-2">
             <FileText class="h-4 w-4 text-[#7d8eaa]" />
@@ -4549,7 +4558,12 @@ function roughnessTextParts(value: string) {
       </section>
 
       <!-- ── 右：数据卡片 ──────────────────────────── -->
-      <aside class="flex min-h-0 flex-col overflow-hidden rounded-md border border-[#dbe4ef] bg-white shadow-[0_16px_36px_-30px_rgba(15,23,42,0.35)]">
+      <aside
+        class="flex min-h-0 flex-col rounded-md border border-[#dbe4ef] bg-white shadow-[0_16px_36px_-30px_rgba(15,23,42,0.35)]"
+        :class="activeExtractorType === 'diffusion'
+          ? 'overflow-visible xl:col-start-2 xl:row-start-2'
+          : 'overflow-hidden'"
+      >
         <div class="border-b border-[#eef2f6] px-4 py-2.5">
           <div class="flex items-center justify-between gap-2">
             <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">提取记录</p>
@@ -4609,7 +4623,7 @@ function roughnessTextParts(value: string) {
           </div>
         </div>
 
-        <div v-if="activeExtractorType === 'diffusion'" class="min-h-0 flex-1 overflow-y-auto custom-scrollbar bg-[#fbfcff] p-3">
+        <div v-if="activeExtractorType === 'diffusion'" class="min-h-0 flex-1 overflow-visible bg-[#fbfcff] p-3">
           <section class="overflow-hidden rounded-[0.85rem] border border-[#dbe8e4] bg-white shadow-[0_16px_38px_-32px_rgba(15,23,42,0.35)]">
             <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[#e7efec] px-3.5 py-2.5">
               <div>
@@ -4621,17 +4635,32 @@ function roughnessTextParts(value: string) {
               </span>
             </div>
 
-            <div class="overflow-x-auto">
-              <table class="min-w-[980px] w-full border-separate border-spacing-0 text-left">
+            <div class="overflow-hidden">
+              <table class="w-full table-fixed border-separate border-spacing-0 text-left">
+                <colgroup>
+                  <col style="width: 5.25rem">
+                  <col style="width: 13%">
+                  <col style="width: 8%">
+                  <col style="width: 7%">
+                  <col style="width: 6%">
+                  <col style="width: 10%">
+                  <col style="width: 8%">
+                  <col style="width: 8%">
+                  <col style="width: 8%">
+                  <col style="width: 7%">
+                  <col style="width: 6%">
+                  <col style="width: 7%">
+                  <col style="width: 8%">
+                </colgroup>
                 <thead>
                   <tr>
-                    <th class="sticky left-0 z-10 border-b border-r border-[#edf3f1] bg-[#fbfffd] px-2.5 py-2 text-[9.5px] font-black uppercase tracking-[0.12em] text-[#6f8580]">
+                    <th class="border-b border-r border-[#edf3f1] bg-[#fbfffd] px-2 py-1.5 text-[9px] font-black uppercase tracking-[0.1em] text-[#6f8580]">
                       record
                     </th>
                     <th
                       v-for="cell in buildDiffusionReviewTableCells(activeRecord || visibleRecordItems[0]?.record, activeRecordFieldEvidence?.fields)"
                       :key="`diffusion-head-${cell.id}`"
-                      class="border-b border-[#edf3f1] bg-[#fbfffd] px-2.5 py-2 text-[9.5px] font-black uppercase tracking-[0.12em] text-[#6f8580]"
+                      class="border-b border-[#edf3f1] bg-[#fbfffd] px-1.5 py-1.5 text-[9px] font-black uppercase tracking-[0.1em] text-[#6f8580]"
                     >
                       {{ cell.label }}
                     </th>
@@ -4644,25 +4673,25 @@ function roughnessTextParts(value: string) {
                     class="group"
                     :class="item.id === activeRecordId ? 'bg-[#f3fffb]' : 'bg-white hover:bg-[#fbfffd]'"
                   >
-                    <td class="sticky left-0 z-10 border-b border-r border-[#edf3f1] bg-inherit px-2.5 py-2 align-top">
+                    <td class="border-b border-r border-[#edf3f1] bg-inherit px-1.5 py-1.5 align-top">
                       <button
                         type="button"
-                        class="flex min-w-[5.5rem] flex-col items-start rounded-[0.55rem] px-2 py-1.5 text-left transition"
+                        class="flex w-full flex-col items-start rounded-[0.5rem] px-1.5 py-1 text-left transition"
                         :class="item.id === activeRecordId ? 'bg-[#0f766e] text-white' : 'bg-[#f1f5f9] text-slate-600 group-hover:bg-[#e8f7f2]'"
                         @click="activateDiffusionReviewCell(item, activeFieldId)"
                       >
-                        <span class="text-[10px] font-black uppercase tracking-[0.12em]">{{ item.label }}</span>
-                        <span class="mt-0.5 text-[9.5px] font-semibold opacity-80">{{ recordBadgeForRecord(item.record, item.status).label }}</span>
+                        <span class="text-[9.5px] font-black uppercase tracking-[0.1em]">{{ item.label }}</span>
+                        <span class="mt-0.5 truncate text-[9px] font-semibold opacity-80">{{ recordBadgeForRecord(item.record, item.status).label }}</span>
                       </button>
                     </td>
                     <td
                       v-for="cell in buildDiffusionReviewTableCells(item.record, remoteFieldsForRecord(item.record))"
                       :key="`diffusion-cell-${item.id}-${cell.id}`"
-                      class="border-b border-[#f1f5f9] px-1.5 py-2 align-top"
+                      class="border-b border-[#f1f5f9] px-1 py-1.5 align-top"
                     >
                       <button
                         type="button"
-                        class="min-h-10 w-full rounded-[0.55rem] border px-2 py-1.5 text-left text-[11px] font-bold leading-snug transition hover:border-[#22c7b8] hover:bg-[#f0fffb]"
+                        class="min-h-8 w-full rounded-[0.5rem] border px-1.5 py-1 text-left text-[10px] font-bold leading-snug transition hover:border-[#22c7b8] hover:bg-[#f0fffb]"
                         :class="diffusionTableCellTone(cell, item.id === activeRecordId)"
                         :title="cell.title"
                         @click="activateDiffusionReviewCell(item, cell.fieldId)"
