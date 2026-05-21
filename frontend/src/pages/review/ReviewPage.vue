@@ -4148,8 +4148,7 @@ function roughnessTextParts(value: string) {
 
 <template>
   <div
-    class="flex h-full min-h-0 flex-col gap-3 bg-[#f4f7fb] p-3"
-    :class="activeExtractorType === 'diffusion' ? 'overflow-y-auto custom-scrollbar' : 'overflow-hidden'"
+    class="flex h-full min-h-0 flex-col gap-3 overflow-hidden bg-[#f4f7fb] p-3"
   >
     <!-- ─── 顶部状态条 ─────────────────────────────────────────────── -->
     <section class="shell-surface flex flex-wrap items-center gap-3 px-4 py-2.5 sm:px-5">
@@ -4298,13 +4297,13 @@ function roughnessTextParts(value: string) {
     <div
       class="grid min-h-0 flex-1 gap-3"
       :class="activeExtractorType === 'diffusion'
-        ? 'xl:grid-cols-[minmax(0,1fr)] xl:grid-rows-[minmax(32rem,1fr)_auto]'
+        ? 'xl:grid-cols-[minmax(0,1fr)_minmax(32rem,40rem)]'
         : 'xl:grid-cols-[minmax(0,1fr)_24rem]'"
     >
       <!-- ── 中：PDF 内联预览 ──────────────────────── -->
       <section
         class="flex min-h-0 flex-col overflow-hidden rounded-md border border-[#dbe4ef] bg-white shadow-[0_16px_36px_-30px_rgba(15,23,42,0.35)]"
-        :class="activeExtractorType === 'diffusion' ? 'min-h-[34rem] xl:col-start-1 xl:row-start-1' : ''"
+        :class="activeExtractorType === 'diffusion' ? 'xl:col-start-1 xl:row-start-1' : ''"
       >
         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[#eef2f6] px-4 py-2.5">
           <div class="flex min-w-0 items-center gap-2">
@@ -4375,7 +4374,7 @@ function roughnessTextParts(value: string) {
       <aside
         class="flex min-h-0 flex-col rounded-md border border-[#dbe4ef] bg-white shadow-[0_16px_36px_-30px_rgba(15,23,42,0.35)]"
         :class="activeExtractorType === 'diffusion'
-          ? 'overflow-visible xl:col-start-1 xl:row-start-2'
+          ? 'overflow-hidden xl:col-start-2 xl:row-start-1'
           : 'overflow-hidden'"
       >
         <div class="border-b border-[#eef2f6] px-4 py-2.5">
@@ -4437,9 +4436,9 @@ function roughnessTextParts(value: string) {
           </div>
         </div>
 
-        <div v-if="activeExtractorType === 'diffusion'" class="min-h-0 flex-1 overflow-visible bg-[#fbfcff] p-3">
-          <section class="overflow-hidden rounded-[0.85rem] border border-[#dbe8e4] bg-white shadow-[0_16px_38px_-32px_rgba(15,23,42,0.35)]">
-            <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[#e7efec] px-3.5 py-2.5">
+        <div v-if="activeExtractorType === 'diffusion'" class="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden bg-[#fbfcff] p-3">
+          <section class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[0.85rem] border border-[#dbe8e4] bg-white shadow-[0_16px_38px_-32px_rgba(15,23,42,0.35)]">
+            <div class="shrink-0 flex flex-wrap items-center justify-between gap-2 border-b border-[#e7efec] px-3.5 py-2.5">
               <div>
                 <p class="text-[10px] font-black uppercase tracking-[0.18em] text-[#0f766e]">Source Table</p>
                 <p class="mt-0.5 text-[11px] font-semibold text-[#64748b]">单元格即字段，点击定位原文。</p>
@@ -4449,8 +4448,8 @@ function roughnessTextParts(value: string) {
               </span>
             </div>
 
-            <div class="overflow-hidden">
-              <table class="w-full table-fixed border-separate border-spacing-0 text-left">
+            <div class="min-h-0 flex-1 overflow-auto custom-scrollbar">
+              <table class="min-w-[980px] w-full table-fixed border-separate border-spacing-0 text-left">
                 <colgroup>
                   <col style="width: 5.25rem">
                   <col style="width: 13%">
@@ -4468,13 +4467,13 @@ function roughnessTextParts(value: string) {
                 </colgroup>
                 <thead>
                   <tr>
-                    <th class="border-b border-r border-[#edf3f1] bg-[#fbfffd] px-2 py-1.5 text-[9px] font-black uppercase tracking-[0.1em] text-[#6f8580]">
+                    <th class="sticky left-0 top-0 z-30 border-b border-r border-[#edf3f1] bg-[#fbfffd] px-2 py-1.5 text-[9px] font-black uppercase tracking-[0.1em] text-[#6f8580]">
                       record
                     </th>
                     <th
                       v-for="cell in buildDiffusionReviewTableCells(activeRecord || visibleRecordItems[0]?.record, activeRecordFieldEvidence?.fields)"
                       :key="`diffusion-head-${cell.id}`"
-                      class="border-b border-[#edf3f1] bg-[#fbfffd] px-1.5 py-1.5 text-[9px] font-black uppercase tracking-[0.1em] text-[#6f8580]"
+                      class="sticky top-0 z-20 border-b border-[#edf3f1] bg-[#fbfffd] px-1.5 py-1.5 text-[9px] font-black uppercase tracking-[0.1em] text-[#6f8580]"
                     >
                       {{ cell.label }}
                     </th>
@@ -4487,7 +4486,7 @@ function roughnessTextParts(value: string) {
                     class="group"
                     :class="item.id === activeRecordId ? 'bg-[#f3fffb]' : 'bg-white hover:bg-[#fbfffd]'"
                   >
-                    <td class="border-b border-r border-[#edf3f1] bg-inherit px-1.5 py-1.5 align-top">
+                    <td class="sticky left-0 z-10 border-b border-r border-[#edf3f1] bg-inherit px-1.5 py-1.5 align-top shadow-[8px_0_14px_-16px_rgba(15,23,42,0.7)]">
                       <button
                         type="button"
                         class="flex w-full flex-col items-start rounded-[0.5rem] px-1.5 py-1 text-left transition"
@@ -4519,15 +4518,15 @@ function roughnessTextParts(value: string) {
             </div>
           </section>
 
-          <section v-if="evidenceExcerpt" class="mt-3 overflow-hidden rounded-[0.85rem] border border-[#f2e5bf] bg-[#fffdf7]">
+          <section v-if="evidenceExcerpt" class="shrink-0 overflow-hidden rounded-[0.85rem] border border-[#f2e5bf] bg-[#fffdf7]">
             <div class="flex items-center justify-between gap-2 border-b border-[#f6ebc8] px-3.5 py-2">
               <p class="text-[10px] font-black uppercase tracking-[0.18em] text-[#a16207]">Source Evidence · {{ activeField?.label }}</p>
               <span v-if="activeField?.location" class="rounded-md bg-white px-2 py-0.5 text-[10px] font-bold text-[#8a5a0a] ring-1 ring-[#f2e5bf]">
                 {{ activeField.location }}
               </span>
             </div>
-            <div class="px-3.5 py-3">
-              <p class="font-serif text-[12.5px] leading-6 text-[#4a5568]" v-html="highlightedExcerpt" />
+            <div class="max-h-32 overflow-y-auto custom-scrollbar px-3.5 py-2.5">
+              <p class="font-serif text-[12px] leading-5 text-[#4a5568]" v-html="highlightedExcerpt" />
               <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500">
                 <span v-if="activeFieldSourceLabel">Source {{ activeFieldSourceLabel }}</span>
                 <span v-if="evidenceSecondaryValue !== '尚未关联'">{{ evidenceSecondaryLabel }} {{ evidenceSecondaryValue }}</span>
@@ -4537,7 +4536,7 @@ function roughnessTextParts(value: string) {
 
           <div
             v-if="!visibleRecordCount"
-            class="mt-3 flex min-h-[12rem] flex-col items-center justify-center gap-2 rounded-[0.85rem] border border-dashed border-[#dbe4f2] bg-white px-4 text-center"
+            class="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 rounded-[0.85rem] border border-dashed border-[#dbe4f2] bg-white px-4 text-center"
           >
             <FileText class="h-8 w-8 text-slate-300" />
             <p class="text-sm font-semibold text-slate-700">当前筛选下无记录</p>
