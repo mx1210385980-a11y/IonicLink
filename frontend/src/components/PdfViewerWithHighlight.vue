@@ -10,7 +10,7 @@
  * ✅  Supports bottom-left origin for PDFMiner-style backends
  * ✅  Exposes scrollToHighlight(id) for programmatic scroll
  */
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { ref, shallowRef, computed, watch, onMounted, onBeforeUnmount, nextTick, markRaw } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import PdfHighlightOverlay from './PdfHighlightOverlay.vue'
 import type { HighlightRect } from '@/types/pdf-highlight'
@@ -62,7 +62,7 @@ const containerRef = ref<HTMLDivElement>()
 const pagesRef = ref<HTMLDivElement[]>([])
 
 // PDF internal state
-const pdfDoc = ref<any>(null)
+const pdfDoc = shallowRef<any>(null)
 const pageCount = ref(0)
 const currentScale = ref(1)
 const isLoading = ref(true)
@@ -75,6 +75,28 @@ interface PageMeta {
   height: number  // in PDF points
 }
 const pageMetas = ref<PageMeta[]>([])
+
+type PdfCropBox = [number, number, number, number]
+
+type EvidenceCaptureRequest = {
+  page?: number | null
+  terms?: string[]
+  fallbackId?: string | null
+  padding?: number
+  minWidth?: number
+  minHeight?: number
+}
+
+type EvidenceCaptureResult = {
+  imageUrl: string
+  matchedText?: string
+  precise: boolean
+}
+
+type TextBox = {
+  text: string
+  bbox: PdfCropBox
+}
 
 // ─── Computed: group highlights by page ──────────────────────────────────────
 /** Group HighlightRect → HighlightItem[] per page for the overlay component */
@@ -220,7 +242,7 @@ async function loadPdf() {
     const loadingTask = pdfjsLib.getDocument({ data })
 
     const pdf = await loadingTask.promise
-    pdfDoc.value = pdf
+    pdfDoc.value = markRaw(pdf)
     pageCount.value = pdf.numPages
 
     // Collect page metas
@@ -343,31 +365,83 @@ function scrollToHighlight(id: string) {
   }
 }
 
-async function captureHighlight(id: string, padding = 42): Promise<string | null> {
-  await nextTick()
-  const highlight = (props.highlights || []).find((item) => item.id === id)
-  if (!highlight) return null
-  const pageEl = pagesRef.value?.[highlight.page - 1]
-    || containerRef.value?.querySelector(`[data-page="${highlight.page}"]`) as HTMLElement | null
+function normalizeCaptureText(value: string) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\u00b5/g, 'μ')
+    .replace(/[−–—]/g, '-')
+    .replace(/[⁰₀]/g, '0')
+    .replace(/[¹₁]/g, '1')
+    .replace(/[²₂]/g, '2')
+    .replace(/[³₃]/g, '3')
+    .replace(/[⁴₄]/g, '4')
+    .replace(/[⁵₅]/g, '5')
+    .replace(/[⁶₆]/g, '6')
+    .replace(/[⁷₇]/g, '7')
+    .replace(/[⁸₈]/g, '8')
+    .replace(/[⁹₉]/g, '9')
+    .replace(/[⁻₋]/g, '-')
+    .replace(/[＋]/g, '+')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function normalizeLooseCaptureText(value: string) {
+  return normalizeCaptureText(value).replace(/[^a-z0-9.+-]+/g, '')
+}
+
+function captureTermMatches(text: string, term: string) {
+  const normalizedText = normalizeCaptureText(text)
+  const normalizedTerm = normalizeCaptureText(term)
+  if (!normalizedText || !normalizedTerm) return false
+  if (normalizedText.includes(normalizedTerm)) return true
+  const looseTerm = normalizeLooseCaptureText(normalizedTerm)
+  return looseTerm.length >= 2 && normalizeLooseCaptureText(normalizedText).includes(looseTerm)
+}
+
+function unionBoxes(boxes: PdfCropBox[]): PdfCropBox | null {
+  if (!boxes.length) return null
+  return [
+    Math.min(...boxes.map((box) => box[0])),
+    Math.min(...boxes.map((box) => box[1])),
+    Math.max(...boxes.map((box) => box[2])),
+    Math.max(...boxes.map((box) => box[3])),
+  ]
+}
+
+function capturePageRegion(
+  pageNum: number,
+  bbox: PdfCropBox,
+  options: {
+    padding?: number
+    minWidth?: number
+    minHeight?: number
+    precise?: boolean
+    matchedText?: string
+  } = {},
+): EvidenceCaptureResult | null {
+  const pageEl = pagesRef.value?.[pageNum - 1]
+    || containerRef.value?.querySelector(`[data-page="${pageNum}"]`) as HTMLElement | null
   const canvas = pageEl?.querySelector('canvas') as HTMLCanvasElement | null
   if (!pageEl || !canvas || !canvas.width || !canvas.height) return null
 
-  const meta = getPageMeta(highlight.page)
-  const sourceX = Number(highlight.coords.x)
-  const sourceY = Number(highlight.coords.y)
-  const sourceW = Math.max(1, Number(highlight.coords.w))
-  const sourceH = Math.max(1, Number(highlight.coords.h))
-  if (![sourceX, sourceY, sourceW, sourceH].every(Number.isFinite)) return null
+  const meta = getPageMeta(pageNum)
+  const [rawX0, rawY0, rawX1, rawY1] = bbox.map((value) => Number(value)) as PdfCropBox
+  if (![rawX0, rawY0, rawX1, rawY1].every(Number.isFinite)) return null
 
-  const yTop = props.origin === 'bottom-left'
-    ? meta.height - sourceY - sourceH
-    : sourceY
-  const centerX = sourceX + sourceW / 2
-  const centerY = yTop + sourceH / 2
-  const cropWpt = Math.max(sourceW + padding * 2, 190)
-  const cropHpt = Math.max(sourceH + padding * 1.6, 82)
-  const x0pt = Math.max(0, Math.min(meta.width - cropWpt, centerX - cropWpt / 2))
-  const y0pt = Math.max(0, Math.min(meta.height - cropHpt, centerY - cropHpt / 2))
+  const targetX0 = Math.max(0, Math.min(rawX0, rawX1))
+  const targetY0 = Math.max(0, Math.min(rawY0, rawY1))
+  const targetW = Math.max(1, Math.abs(rawX1 - rawX0))
+  const targetH = Math.max(1, Math.abs(rawY1 - rawY0))
+  const padding = options.padding ?? 42
+  const minWidth = options.minWidth ?? 190
+  const minHeight = options.minHeight ?? 82
+  const centerX = targetX0 + targetW / 2
+  const centerY = targetY0 + targetH / 2
+  const cropWpt = Math.min(meta.width, Math.max(targetW + padding * 2, minWidth))
+  const cropHpt = Math.min(meta.height, Math.max(targetH + padding * 1.7, minHeight))
+  const x0pt = Math.max(0, Math.min(Math.max(0, meta.width - cropWpt), centerX - cropWpt / 2))
+  const y0pt = Math.max(0, Math.min(Math.max(0, meta.height - cropHpt), centerY - cropHpt / 2))
   const xScale = canvas.width / meta.width
   const yScale = canvas.height / meta.height
   const sx = Math.max(0, Math.floor(x0pt * xScale))
@@ -383,18 +457,139 @@ async function captureHighlight(id: string, padding = 42): Promise<string | null
   if (!ctx) return null
   ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh)
 
-  const hx = (sourceX - x0pt) * xScale
-  const hy = (yTop - y0pt) * yScale
-  const hw = sourceW * xScale
-  const hh = sourceH * yScale
+  const hx = (targetX0 - x0pt) * xScale
+  const hy = (targetY0 - y0pt) * yScale
+  const hw = targetW * xScale
+  const hh = targetH * yScale
   ctx.save()
-  ctx.fillStyle = 'rgba(251, 191, 36, 0.24)'
-  ctx.strokeStyle = 'rgba(217, 119, 6, 0.95)'
-  ctx.lineWidth = Math.max(3, Math.min(7, output.width * 0.008))
+  ctx.fillStyle = options.precise === false ? 'rgba(251, 191, 36, 0.18)' : 'rgba(251, 191, 36, 0.30)'
+  ctx.strokeStyle = options.precise === false ? 'rgba(217, 119, 6, 0.82)' : 'rgba(180, 83, 9, 0.98)'
+  ctx.lineWidth = Math.max(4, Math.min(8, output.width * 0.009))
+  ctx.setLineDash(options.precise === false ? [10, 7] : [])
   ctx.fillRect(hx, hy, hw, hh)
   ctx.strokeRect(hx, hy, hw, hh)
   ctx.restore()
-  return output.toDataURL('image/png')
+
+  return {
+    imageUrl: output.toDataURL('image/png'),
+    matchedText: options.matchedText,
+    precise: options.precise !== false,
+  }
+}
+
+async function findTextEvidenceBox(pageNum: number, rawTerms: string[]): Promise<{ bbox: PdfCropBox; matchedText: string } | null> {
+  const page = await pdfDoc.value?.getPage?.(pageNum)
+  if (!page) return null
+  const terms = [...new Set(rawTerms.map((term) => String(term || '').trim()).filter((term) => term.length >= 2))]
+    .sort((left, right) => right.length - left.length)
+    .slice(0, 24)
+  if (!terms.length) return null
+
+  const viewport = page.getViewport({ scale: 1 })
+  const textContent = await page.getTextContent()
+  const items: TextBox[] = (textContent?.items || [])
+    .map((item: any): TextBox | null => {
+      const text = String(item?.str || '').trim()
+      if (!text) return null
+      const tx = (pdfjsLib as any).Util.transform(viewport.transform, item.transform)
+      const x = Number(tx[4])
+      const baselineY = Number(tx[5])
+      const height = Math.max(
+        5,
+        Number(item.height || 0),
+        Math.abs(Number(tx[3] || 0)),
+        Math.abs(Number(tx[2] || 0)),
+      )
+      const width = Math.max(3, Number(item.width || 0), text.length * height * 0.42)
+      if (![x, baselineY, height, width].every(Number.isFinite)) return null
+      return {
+        text,
+        bbox: [x, Math.max(0, baselineY - height), x + width, baselineY + Math.max(2, height * 0.18)],
+      }
+    })
+    .filter(Boolean) as TextBox[]
+
+  for (const term of terms) {
+    const item = items.find((entry) => captureTermMatches(entry.text, term))
+    if (item) return { bbox: item.bbox, matchedText: item.text }
+  }
+
+  const sorted = [...items].sort((a, b) => {
+    const dy = a.bbox[1] - b.bbox[1]
+    return Math.abs(dy) > 3 ? dy : a.bbox[0] - b.bbox[0]
+  })
+  const lines: TextBox[] = []
+  for (const item of sorted) {
+    const centerY = (item.bbox[1] + item.bbox[3]) / 2
+    const line = lines.find((candidate) => Math.abs(((candidate.bbox[1] + candidate.bbox[3]) / 2) - centerY) < 4)
+    if (!line) {
+      lines.push({ text: item.text, bbox: item.bbox })
+      continue
+    }
+    line.text = `${line.text} ${item.text}`.trim()
+    line.bbox = unionBoxes([line.bbox, item.bbox]) || line.bbox
+  }
+
+  for (const term of terms) {
+    const line = lines.find((entry) => captureTermMatches(entry.text, term))
+    if (line) return { bbox: line.bbox, matchedText: line.text }
+  }
+
+  return null
+}
+
+async function captureHighlight(id: string, padding = 42, minWidth = 190, minHeight = 82): Promise<string | null> {
+  await nextTick()
+  const highlight = (props.highlights || []).find((item) => item.id === id)
+  if (!highlight) return null
+
+  const meta = getPageMeta(highlight.page)
+  const sourceX = Number(highlight.coords.x)
+  const sourceY = Number(highlight.coords.y)
+  const sourceW = Math.max(1, Number(highlight.coords.w))
+  const sourceH = Math.max(1, Number(highlight.coords.h))
+  if (![sourceX, sourceY, sourceW, sourceH].every(Number.isFinite)) return null
+
+  const yTop = props.origin === 'bottom-left'
+    ? meta.height - sourceY - sourceH
+    : sourceY
+  return capturePageRegion(
+    highlight.page,
+    [sourceX, yTop, sourceX + sourceW, yTop + sourceH],
+    { padding, minWidth, minHeight, precise: false },
+  )?.imageUrl || null
+}
+
+async function captureEvidenceTarget(request: EvidenceCaptureRequest): Promise<EvidenceCaptureResult | null> {
+  await nextTick()
+  const pageNum = Number(request.page || 0)
+  if (Number.isFinite(pageNum) && pageNum > 0 && request.terms?.length) {
+    const textHit = await findTextEvidenceBox(Math.trunc(pageNum), request.terms).catch((error) => {
+      console.warn('[PdfViewer] text evidence lookup failed; falling back to bbox crop.', error)
+      return null
+    })
+    if (textHit) {
+      return capturePageRegion(Math.trunc(pageNum), textHit.bbox, {
+        padding: request.padding ?? 62,
+        minWidth: request.minWidth ?? 360,
+        minHeight: request.minHeight ?? 150,
+        precise: true,
+        matchedText: textHit.matchedText,
+      })
+    }
+  }
+
+  if (request.fallbackId) {
+    const imageUrl = await captureHighlight(
+      request.fallbackId,
+      request.padding ?? 62,
+      request.minWidth ?? 360,
+      request.minHeight ?? 150,
+    )
+    return imageUrl ? { imageUrl, precise: false } : null
+  }
+
+  return null
 }
 
 // ─── Highlight click handler ─────────────────────────────────────────────────
@@ -403,7 +598,7 @@ function onOverlayClick(id: string) {
 }
 
 // ─── Expose for parent usage ─────────────────────────────────────────────────
-defineExpose({ captureHighlight, scrollToHighlight, scrollToPage })
+defineExpose({ captureEvidenceTarget, captureHighlight, scrollToHighlight, scrollToPage })
 </script>
 
 <template>

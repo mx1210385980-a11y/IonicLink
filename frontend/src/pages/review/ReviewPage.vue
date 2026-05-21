@@ -81,6 +81,14 @@ type PdfViewerBridge = {
   scrollToPage: (page: number) => void
   scrollToHighlight: (id: string) => void
   captureHighlight: (id: string, padding?: number) => Promise<string | null>
+  captureEvidenceTarget: (request: {
+    page?: number | null
+    terms?: string[]
+    fallbackId?: string | null
+    padding?: number
+    minWidth?: number
+    minHeight?: number
+  }) => Promise<{ imageUrl: string; matchedText?: string; precise: boolean } | null>
 }
 
 const PdfViewerWithHighlight = lazyComponent(() => import('@/components/PdfViewerWithHighlight.vue'))
@@ -250,6 +258,8 @@ const pdfPageCount = ref(0)
 const pdfPageError = ref('')
 const evidenceZoomImageUrl = ref('')
 const evidenceZoomStatus = ref<'idle' | 'loading' | 'ready' | 'unavailable'>('idle')
+const evidenceZoomMatchedText = ref('')
+const evidenceZoomPrecise = ref(false)
 const submissionPending = ref(false)
 const submissionError = ref('')
 const submissionSuccess = ref('')
@@ -808,6 +818,13 @@ const highlightedExcerpt = computed(() => {
   return highlightTerms(evidenceExcerpt.value, fieldEvidenceContext.value.specs)
 })
 
+const evidenceZoomTerms = computed(() => buildEvidenceZoomTerms(
+  activeRecord.value,
+  activeField.value,
+  activeFieldEvidenceEntry.value,
+  fieldEvidenceContext.value.specs,
+))
+
 function normalizeResolvedBBox(value: unknown): [number, number, number, number] | null {
   if (typeof value === 'string' && value.trim()) {
     const text = value.trim()
@@ -919,6 +936,24 @@ const activeEvidencePage = computed(() => {
   return Number.isFinite(sourcePage) && sourcePage > 0 ? sourcePage : null
 })
 
+const hasEvidenceFocusPanel = computed(() => {
+  if (activeExtractorType.value !== 'diffusion') return Boolean(evidenceExcerpt.value)
+  return Boolean(
+    activeRecord.value
+    && (
+      evidenceExcerpt.value
+      || activeEvidencePage.value
+      || evidenceZoomStatus.value !== 'idle'
+    ),
+  )
+})
+
+const evidenceZoomModeLabel = computed(() => {
+  if (evidenceZoomStatus.value === 'loading') return '定位中'
+  if (evidenceZoomStatus.value === 'unavailable') return '页级定位'
+  return evidenceZoomPrecise.value ? '精确匹配' : '区域定位'
+})
+
 watch([activeEvidencePage, pdfPageCount, () => props.pdfUrl], ([page]) => {
   if (!page || page < 1 || !props.pdfUrl) return
   const targetPage = Math.min(Math.max(1, page), Math.max(1, pdfPageCount.value || page))
@@ -977,11 +1012,13 @@ const activeHighlightId = computed(() => {
 const activeEvidenceTargetSignature = computed(() => {
   const page = activeEvidencePage.value || ''
   const bbox = activeFieldResolvedEvidence.value?.bbox?.join(',') || ''
+  const terms = evidenceZoomTerms.value.join('~')
   return [
     activeRecordId.value,
     activeFieldId.value,
     page,
     bbox,
+    terms,
     props.pdfUrl || '',
   ].join('|')
 })
@@ -991,17 +1028,30 @@ let evidenceZoomCaptureSequence = 0
 async function refreshEvidenceZoomImage(highlightId: string | null) {
   const sequence = ++evidenceZoomCaptureSequence
   evidenceZoomImageUrl.value = ''
-  if (!highlightId || !props.pdfUrl) {
+  evidenceZoomMatchedText.value = ''
+  evidenceZoomPrecise.value = false
+  const targetPage = activeFieldResolvedEvidence.value?.page || activeEvidencePage.value
+  const terms = evidenceZoomTerms.value
+  if (!props.pdfUrl || (!highlightId && (!targetPage || !terms.length))) {
     evidenceZoomStatus.value = 'idle'
     return
   }
   evidenceZoomStatus.value = 'loading'
   for (let attempt = 0; attempt < 24; attempt += 1) {
     await nextTick()
-    const imageUrl = await pdfViewerRef.value?.captureHighlight(highlightId, 46)
+    const result = await pdfViewerRef.value?.captureEvidenceTarget({
+      page: targetPage,
+      terms,
+      fallbackId: highlightId,
+      padding: 68,
+      minWidth: 420,
+      minHeight: 168,
+    })
     if (sequence !== evidenceZoomCaptureSequence) return
-    if (imageUrl) {
-      evidenceZoomImageUrl.value = imageUrl
+    if (result?.imageUrl) {
+      evidenceZoomImageUrl.value = result.imageUrl
+      evidenceZoomMatchedText.value = result.matchedText || ''
+      evidenceZoomPrecise.value = result.precise
       evidenceZoomStatus.value = 'ready'
       return
     }
@@ -2945,6 +2995,97 @@ function fieldEvidenceSpecs(field: ReviewField | null, record: TribologyData | n
   return [...specs.values()]
 }
 
+function pushEvidenceZoomTerm(store: Set<string>, value: unknown) {
+  const text = trim(value)
+  if (!text || text === 'Not captured yet') return
+  if (text.length < 2) return
+  store.add(text)
+}
+
+function compactNumberTerm(value: number) {
+  if (!Number.isFinite(value)) return ''
+  return String(Number(value.toPrecision(6))).replace(/\.0+$/, '')
+}
+
+function addNumericZoomVariants(store: Set<string>, value: unknown) {
+  const match = trim(value).match(/[-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?/i)
+  if (!match) return
+  const numeric = Number(match[0])
+  if (!Number.isFinite(numeric)) return
+  ;[numeric, numeric / 100, numeric / 10, numeric * 10, numeric * 100]
+    .map(compactNumberTerm)
+    .filter(Boolean)
+    .forEach((term) => pushEvidenceZoomTerm(store, term))
+}
+
+function diffusionQuoteTermsForField(fieldId: string, quote: string) {
+  const text = normalizePdfEvidenceText(quote)
+  const terms: string[] = []
+  const patterns: RegExp[] = []
+  if (fieldId === 'd_total' || fieldId === 'diffusion_coefficient') {
+    patterns.push(/D[\s_-]*(?:tot|total)[^0-9]{0,80}([-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?)/i)
+  }
+  if (fieldId === 'd_cation' || fieldId === 'diffusion_coefficient') {
+    patterns.push(/D[\s_-]*cation[^0-9]{0,80}([-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?)/i)
+  }
+  if (fieldId === 'd_anion' || fieldId === 'diffusion_coefficient') {
+    patterns.push(/D[\s_-]*anion[^0-9]{0,80}([-+]?\d+(?:\.\d+)?(?:e[-+]?\d+)?)/i)
+  }
+  if (fieldId === 'temperature_value' || fieldId === 'conditions') {
+    patterns.push(/([-+]?\d+(?:\.\d+)?)\s*K\b/i)
+  }
+  if (fieldId === 'confinement_scale_value' || fieldId === 'confinement_context') {
+    patterns.push(/([-+]?\d+(?:\.\d+)?)\s*nm\b/i)
+  }
+  for (const pattern of patterns) {
+    const match = text.match(pattern)
+    if (match?.[1]) terms.push(match[1])
+  }
+  return terms
+}
+
+function buildEvidenceZoomTerms(
+  record: TribologyData | null,
+  field: ReviewField | null,
+  fieldEntry: FieldEvidenceEntry | null | undefined,
+  specs: EvidenceSearchSpec[],
+) {
+  const terms = new Set<string>()
+  if (!record || !field) return []
+
+  pushEvidenceZoomTerm(terms, field.value)
+  pushEvidenceZoomTerm(terms, fieldEntry?.value)
+  pushEvidenceZoomTerm(terms, fieldEntry?.evidence?.matched_text)
+  pushEvidenceZoomTerm(terms, (fieldEntry?.evidence as Record<string, unknown> | null | undefined)?.matchedText)
+  specs.forEach((spec) => pushEvidenceZoomTerm(terms, spec.text))
+  structuredTagsForField(field, record).forEach((tag) => pushEvidenceZoomTerm(terms, tag.value))
+
+  const quote = trim(fieldEntry?.evidence?.quote)
+  diffusionQuoteTermsForField(field.id, quote).forEach((term) => pushEvidenceZoomTerm(terms, term))
+
+  if (recordExtractorType(record) === 'diffusion') {
+    if (field.id === 'diffusion_coefficient') {
+      ;[record.D_total, record.D_cation, record.D_anion].forEach((value) => addNumericZoomVariants(terms, value))
+    }
+    if (['d_total', 'd_cation', 'd_anion', 'temperature_value', 'confinement_scale_value'].includes(field.id)) {
+      addNumericZoomVariants(terms, field.value)
+      addNumericZoomVariants(terms, fieldEntry?.value)
+    }
+    if (field.id === 'ion_identity') {
+      diffusionIonIdentityTags(record).forEach((tag) => pushEvidenceZoomTerm(terms, tag.value))
+    }
+    if (field.id === 'confinement_context') {
+      diffusionConfinementTags(record).forEach((tag) => pushEvidenceZoomTerm(terms, tag.value))
+    }
+  }
+
+  return [...terms]
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 2)
+    .sort((left, right) => right.length - left.length)
+    .slice(0, 24)
+}
+
 function extractEvidenceExcerpt(
   text: string,
   specs: EvidenceSearchSpec[],
@@ -4683,33 +4824,41 @@ function roughnessTextParts(value: string) {
             </div>
           </section>
 
-          <section v-if="evidenceExcerpt" class="shrink-0 overflow-hidden rounded-[0.85rem] border border-[#f2e5bf] bg-[#fffdf7]">
+          <section v-if="hasEvidenceFocusPanel" class="shrink-0 overflow-hidden rounded-[0.85rem] border border-[#f2e5bf] bg-[#fffdf7]">
             <div class="flex items-center justify-between gap-2 border-b border-[#f6ebc8] px-3.5 py-2">
-              <p class="text-[10px] font-black uppercase tracking-[0.18em] text-[#a16207]">Source Evidence · {{ activeField?.label }}</p>
-              <span v-if="activeField?.location" class="rounded-md bg-white px-2 py-0.5 text-[10px] font-bold text-[#8a5a0a] ring-1 ring-[#f2e5bf]">
-                {{ activeField.location }}
-              </span>
+              <p class="text-[10px] font-black uppercase tracking-[0.18em] text-[#a16207]">证据聚焦 · {{ activeField?.label }}</p>
+              <div class="flex min-w-0 items-center gap-1.5">
+                <span class="shrink-0 rounded-md bg-[#fff2c7] px-2 py-0.5 text-[10px] font-bold text-[#8a5a0a] ring-1 ring-[#f2e5bf]">
+                  {{ evidenceZoomModeLabel }}
+                </span>
+                <span v-if="activeField?.location" class="truncate rounded-md bg-white px-2 py-0.5 text-[10px] font-bold text-[#8a5a0a] ring-1 ring-[#f2e5bf]">
+                  {{ activeField.location }}
+                </span>
+              </div>
             </div>
             <div class="max-h-56 overflow-y-auto custom-scrollbar px-3.5 py-2.5">
               <div
-                v-if="evidenceZoomImageUrl || evidenceZoomStatus === 'loading'"
+                v-if="evidenceZoomImageUrl || evidenceZoomStatus === 'loading' || evidenceZoomStatus === 'unavailable'"
                 class="mb-2 overflow-hidden rounded-[0.75rem] border border-[#f4d88a] bg-white shadow-[0_12px_26px_-24px_rgba(146,64,14,0.5)]"
               >
                 <div class="flex items-center justify-between border-b border-[#f7ebc8] bg-[#fff9e8] px-2.5 py-1.5">
                   <span class="text-[9.5px] font-black uppercase tracking-[0.16em] text-[#9a5b00]">定位放大</span>
-                  <span class="text-[10px] font-semibold text-[#b45309]">{{ activeField?.location }}</span>
+                  <span class="truncate text-[10px] font-semibold text-[#b45309]">
+                    {{ evidenceZoomMatchedText || activeField?.value || activeField?.location }}
+                  </span>
                 </div>
                 <div class="flex min-h-[5.5rem] items-center justify-center bg-[#fffef8] p-2">
                   <div v-if="evidenceZoomStatus === 'loading'" class="text-[11px] font-semibold text-[#a16207]">正在截取定位区域...</div>
+                  <div v-else-if="evidenceZoomStatus === 'unavailable'" class="text-[11px] font-semibold text-[#a16207]">暂未找到可放大的文本区域</div>
                   <img
                     v-else
                     :src="evidenceZoomImageUrl"
                     alt="定位区域放大截图"
-                    class="max-h-32 w-full rounded-[0.45rem] object-contain"
+                    class="max-h-40 w-full rounded-[0.45rem] object-contain"
                   >
                 </div>
               </div>
-              <p class="font-serif text-[12px] leading-5 text-[#4a5568]" v-html="highlightedExcerpt" />
+              <p v-if="evidenceExcerpt" class="font-serif text-[12px] leading-5 text-[#4a5568]" v-html="highlightedExcerpt" />
               <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500">
                 <span v-if="activeFieldSourceLabel">Source {{ activeFieldSourceLabel }}</span>
                 <span v-if="evidenceSecondaryValue !== '尚未关联'">{{ evidenceSecondaryLabel }} {{ evidenceSecondaryValue }}</span>
