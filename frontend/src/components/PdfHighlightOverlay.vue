@@ -116,7 +116,7 @@ const styledHighlights = computed(() => {
       :title="hl.title"
       :class="[
         hl.isActive
-          ? 'ring-2 ring-yellow-500 shadow-lg shadow-yellow-500/30 animate-pulse-hl'
+          ? 'ring-4 ring-amber-500 shadow-xl shadow-amber-500/40 animate-pulse-hl'
           : 'hover:brightness-110 hover:shadow-md'
       ]"
       @click="emit('click', hl.id)"

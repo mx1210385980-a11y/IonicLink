@@ -52,6 +52,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   (e: 'loaded', pageCount: number): void
+  (e: 'rendered'): void
   (e: 'highlight-click', id: string): void
   (e: 'error', message: string): void
 }>()
@@ -236,6 +237,7 @@ async function loadPdf() {
     // Render all pages
     await nextTick()
     await renderAllPages(pdf)
+    emit('rendered')
     if (props.activeId) {
       await scrollToHighlightWhenReady(props.activeId)
     }
@@ -341,13 +343,67 @@ function scrollToHighlight(id: string) {
   }
 }
 
+async function captureHighlight(id: string, padding = 42): Promise<string | null> {
+  await nextTick()
+  const highlight = (props.highlights || []).find((item) => item.id === id)
+  if (!highlight) return null
+  const pageEl = pagesRef.value?.[highlight.page - 1]
+    || containerRef.value?.querySelector(`[data-page="${highlight.page}"]`) as HTMLElement | null
+  const canvas = pageEl?.querySelector('canvas') as HTMLCanvasElement | null
+  if (!pageEl || !canvas || !canvas.width || !canvas.height) return null
+
+  const meta = getPageMeta(highlight.page)
+  const sourceX = Number(highlight.coords.x)
+  const sourceY = Number(highlight.coords.y)
+  const sourceW = Math.max(1, Number(highlight.coords.w))
+  const sourceH = Math.max(1, Number(highlight.coords.h))
+  if (![sourceX, sourceY, sourceW, sourceH].every(Number.isFinite)) return null
+
+  const yTop = props.origin === 'bottom-left'
+    ? meta.height - sourceY - sourceH
+    : sourceY
+  const centerX = sourceX + sourceW / 2
+  const centerY = yTop + sourceH / 2
+  const cropWpt = Math.max(sourceW + padding * 2, 190)
+  const cropHpt = Math.max(sourceH + padding * 1.6, 82)
+  const x0pt = Math.max(0, Math.min(meta.width - cropWpt, centerX - cropWpt / 2))
+  const y0pt = Math.max(0, Math.min(meta.height - cropHpt, centerY - cropHpt / 2))
+  const xScale = canvas.width / meta.width
+  const yScale = canvas.height / meta.height
+  const sx = Math.max(0, Math.floor(x0pt * xScale))
+  const sy = Math.max(0, Math.floor(y0pt * yScale))
+  const sw = Math.min(canvas.width - sx, Math.ceil(cropWpt * xScale))
+  const sh = Math.min(canvas.height - sy, Math.ceil(cropHpt * yScale))
+  if (sw < 2 || sh < 2) return null
+
+  const output = document.createElement('canvas')
+  output.width = sw
+  output.height = sh
+  const ctx = output.getContext('2d')
+  if (!ctx) return null
+  ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh)
+
+  const hx = (sourceX - x0pt) * xScale
+  const hy = (yTop - y0pt) * yScale
+  const hw = sourceW * xScale
+  const hh = sourceH * yScale
+  ctx.save()
+  ctx.fillStyle = 'rgba(251, 191, 36, 0.24)'
+  ctx.strokeStyle = 'rgba(217, 119, 6, 0.95)'
+  ctx.lineWidth = Math.max(3, Math.min(7, output.width * 0.008))
+  ctx.fillRect(hx, hy, hw, hh)
+  ctx.strokeRect(hx, hy, hw, hh)
+  ctx.restore()
+  return output.toDataURL('image/png')
+}
+
 // ─── Highlight click handler ─────────────────────────────────────────────────
 function onOverlayClick(id: string) {
   emit('highlight-click', id)
 }
 
 // ─── Expose for parent usage ─────────────────────────────────────────────────
-defineExpose({ scrollToHighlight, scrollToPage })
+defineExpose({ captureHighlight, scrollToHighlight, scrollToPage })
 </script>
 
 <template>

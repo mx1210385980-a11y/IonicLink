@@ -80,6 +80,7 @@ import type { HighlightRect } from '@/types/pdf-highlight'
 type PdfViewerBridge = {
   scrollToPage: (page: number) => void
   scrollToHighlight: (id: string) => void
+  captureHighlight: (id: string, padding?: number) => Promise<string | null>
 }
 
 const PdfViewerWithHighlight = lazyComponent(() => import('@/components/PdfViewerWithHighlight.vue'))
@@ -192,7 +193,7 @@ type DiffusionReviewTableCell = {
   primary?: boolean
 }
 
-type DiffusionReviewLens = 'coefficients' | 'core' | 'context' | 'source'
+type DiffusionReviewLens = 'coefficients' | 'core' | 'context'
 
 type DiffusionReviewLensOption = {
   id: DiffusionReviewLens
@@ -247,6 +248,8 @@ const pdfViewerRef = ref<PdfViewerBridge | null>(null)
 const pdfPageInput = ref('')
 const pdfPageCount = ref(0)
 const pdfPageError = ref('')
+const evidenceZoomImageUrl = ref('')
+const evidenceZoomStatus = ref<'idle' | 'loading' | 'ready' | 'unavailable'>('idle')
 const submissionPending = ref(false)
 const submissionError = ref('')
 const submissionSuccess = ref('')
@@ -286,12 +289,6 @@ const diffusionReviewLensOptions: DiffusionReviewLensOption[] = [
     label: '限域',
     description: 'geometry / dimension / scale / T',
     fieldIds: ['confinement_geometry_class', 'confinement_dimensionality', 'confinement_scale_value', 'temperature_value'],
-  },
-  {
-    id: 'source',
-    label: '溯源',
-    description: 'source / D values',
-    fieldIds: ['source_page', 'd_total', 'd_cation', 'd_anion'],
   },
 ]
 const activeDiffusionReviewLensOption = computed<DiffusionReviewLensOption>(() => (
@@ -496,6 +493,13 @@ watch(() => props.pdfUrl, () => {
 function handlePdfLoaded(pageCount: number) {
   pdfPageCount.value = pageCount
   pdfPageError.value = ''
+}
+
+function handlePdfRendered() {
+  const highlightId = activeHighlightId.value
+  if (highlightId) {
+    void refreshEvidenceZoomImage(highlightId)
+  }
 }
 
 function jumpToPdfPage() {
@@ -958,7 +962,7 @@ const recordHighlights = computed<HighlightRect[]>(() => {
         id: `field:${normalizeFieldKey(activeFieldId.value)}`,
         page: resolved.page,
         coords: { x: x0, y: y0, w, h },
-        color: 'rgba(91, 86, 234, 0.24)',
+        color: 'rgba(245, 158, 11, 0.36)',
       }]
     }
   }
@@ -982,20 +986,51 @@ const activeEvidenceTargetSignature = computed(() => {
   ].join('|')
 })
 
+let evidenceZoomCaptureSequence = 0
+
+async function refreshEvidenceZoomImage(highlightId: string | null) {
+  const sequence = ++evidenceZoomCaptureSequence
+  evidenceZoomImageUrl.value = ''
+  if (!highlightId || !props.pdfUrl) {
+    evidenceZoomStatus.value = 'idle'
+    return
+  }
+  evidenceZoomStatus.value = 'loading'
+  for (let attempt = 0; attempt < 24; attempt += 1) {
+    await nextTick()
+    const imageUrl = await pdfViewerRef.value?.captureHighlight(highlightId, 46)
+    if (sequence !== evidenceZoomCaptureSequence) return
+    if (imageUrl) {
+      evidenceZoomImageUrl.value = imageUrl
+      evidenceZoomStatus.value = 'ready'
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 110))
+  }
+  if (sequence === evidenceZoomCaptureSequence) {
+    evidenceZoomStatus.value = 'unavailable'
+  }
+}
+
 watch(
   activeEvidenceTargetSignature,
   async () => {
-    if (!props.pdfUrl) return
+    if (!props.pdfUrl) {
+      await refreshEvidenceZoomImage(null)
+      return
+    }
     await nextTick()
     const highlightId = activeHighlightId.value
     if (highlightId) {
       pdfViewerRef.value?.scrollToHighlight(highlightId)
+      await refreshEvidenceZoomImage(highlightId)
       return
     }
     const page = activeEvidencePage.value
     if (page && page > 0) {
       pdfViewerRef.value?.scrollToPage(page)
     }
+    await refreshEvidenceZoomImage(null)
   },
 )
 
@@ -3308,7 +3343,6 @@ function buildReviewFields(record: TribologyData | null, remoteFields?: Record<s
       buildField('温度', 'temperature_value', diffusionValue('temperature_value'), record, fieldMap.temperature_value, '温度字段可作为原文上下文复核。'),
       buildField('尺度', 'confinement_scale_value', diffusionValue('confinement_scale_value'), record, fieldMap.confinement_scale_value, '尺度字段可作为原文上下文复核。'),
       buildField('尺度单位', 'confinement_scale_unit', diffusionValue('confinement_scale_unit'), record, fieldMap.confinement_scale_unit, '尺度单位字段可作为原文上下文复核。'),
-      buildField('来源', 'source_page', diffusionValue('source_page'), record, fieldMap.source_page, '来源页需要能定位到原文。'),
     )
     return fields
   }
@@ -3633,7 +3667,6 @@ function buildDiffusionReviewTableCells(
     { id: 'd_unit', label: 'unit', fieldId: 'd_unit' },
     { id: 'temperature_value', label: 'T', fieldId: 'temperature_value', optional: true },
     { id: 'confinement_scale_value', label: 'scale', fieldId: 'confinement_scale_value', optional: true },
-    { id: 'source_page', label: 'source', fieldId: 'source_page', primary: true },
   ]
   return columns.map((column) => {
     const value = diffusionReviewCellValue(record, column.fieldId)
@@ -4482,6 +4515,7 @@ function roughnessTextParts(value: string) {
             :highlights="recordHighlights"
             :active-id="activeHighlightId"
             @loaded="handlePdfLoaded"
+            @rendered="handlePdfRendered"
             @highlight-click="handleHighlightClick"
           />
           <div v-else class="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
@@ -4570,7 +4604,7 @@ function roughnessTextParts(value: string) {
                   {{ visibleRecordCount }} rows
                 </span>
               </div>
-              <div class="mt-2 grid grid-cols-4 gap-1 rounded-[0.65rem] bg-[#f2f7f5] p-1 ring-1 ring-[#d9e9e4]">
+              <div class="mt-2 grid grid-cols-3 gap-1 rounded-[0.65rem] bg-[#f2f7f5] p-1 ring-1 ring-[#d9e9e4]">
                 <button
                   v-for="option in diffusionReviewLensOptions"
                   :key="option.id"
@@ -4656,7 +4690,25 @@ function roughnessTextParts(value: string) {
                 {{ activeField.location }}
               </span>
             </div>
-            <div class="max-h-32 overflow-y-auto custom-scrollbar px-3.5 py-2.5">
+            <div class="max-h-56 overflow-y-auto custom-scrollbar px-3.5 py-2.5">
+              <div
+                v-if="evidenceZoomImageUrl || evidenceZoomStatus === 'loading'"
+                class="mb-2 overflow-hidden rounded-[0.75rem] border border-[#f4d88a] bg-white shadow-[0_12px_26px_-24px_rgba(146,64,14,0.5)]"
+              >
+                <div class="flex items-center justify-between border-b border-[#f7ebc8] bg-[#fff9e8] px-2.5 py-1.5">
+                  <span class="text-[9.5px] font-black uppercase tracking-[0.16em] text-[#9a5b00]">定位放大</span>
+                  <span class="text-[10px] font-semibold text-[#b45309]">{{ activeField?.location }}</span>
+                </div>
+                <div class="flex min-h-[5.5rem] items-center justify-center bg-[#fffef8] p-2">
+                  <div v-if="evidenceZoomStatus === 'loading'" class="text-[11px] font-semibold text-[#a16207]">正在截取定位区域...</div>
+                  <img
+                    v-else
+                    :src="evidenceZoomImageUrl"
+                    alt="定位区域放大截图"
+                    class="max-h-32 w-full rounded-[0.45rem] object-contain"
+                  >
+                </div>
+              </div>
               <p class="font-serif text-[12px] leading-5 text-[#4a5568]" v-html="highlightedExcerpt" />
               <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-500">
                 <span v-if="activeFieldSourceLabel">Source {{ activeFieldSourceLabel }}</span>
@@ -5204,10 +5256,16 @@ function roughnessTextParts(value: string) {
               </div>
 
               <div
-                v-if="evidenceImageUrl || evidencePagePreviewUrl"
+                v-if="evidenceZoomImageUrl || evidenceImageUrl || evidencePagePreviewUrl"
                 class="mt-2.5 grid gap-2"
-                :class="evidenceImageUrl && evidencePagePreviewUrl ? 'grid-cols-2' : 'grid-cols-1'"
+                :class="[evidenceZoomImageUrl && (evidenceImageUrl || evidencePagePreviewUrl) ? 'grid-cols-2' : 'grid-cols-1']"
               >
+                <img
+                  v-if="evidenceZoomImageUrl"
+                  :src="evidenceZoomImageUrl"
+                  alt="定位区域放大截图"
+                  class="max-h-[10rem] w-full rounded-[0.6rem] border border-[#f1d58b] bg-white object-contain"
+                >
                 <img
                   v-if="evidenceImageUrl"
                   :src="evidenceImageUrl"
