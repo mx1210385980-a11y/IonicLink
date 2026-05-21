@@ -191,6 +191,15 @@ type DiffusionReviewTableCell = {
   primary?: boolean
 }
 
+type DiffusionReviewLens = 'coefficients' | 'core' | 'context' | 'source'
+
+type DiffusionReviewLensOption = {
+  id: DiffusionReviewLens
+  label: string
+  description: string
+  fieldIds: string[]
+}
+
 type EvidenceSearchMode = 'loose' | 'exact-token' | 'numeric'
 
 type EvidenceSearchSpec = {
@@ -201,6 +210,7 @@ type EvidenceSearchSpec = {
 const onlyPendingRecords = ref(false)
 const onlyLowConfidenceRecords = ref(false)
 const onlyTrainingBlockers = ref(props.initialMode === 'training-blockers')
+const diffusionReviewLens = ref<DiffusionReviewLens>('coefficients')
 const activeFieldId = ref('material')
 const activeRecordId = ref('')
 const collapsedRecordIds = ref<Set<string>>(new Set())
@@ -257,6 +267,35 @@ const diffusionConfinementFieldKeys = [
 ] as const
 const diffusionConditionFieldKeys = ['temperature_value', 'confinement_scale_value', 'confinement_scale_unit'] as const
 const diffusionCoreFactKeys = ['system_name', 'diffusion_coefficient', 'source_evidence'] as const
+const diffusionReviewLensOptions: DiffusionReviewLensOption[] = [
+  {
+    id: 'coefficients',
+    label: '扩散值',
+    description: 'D total / D+ / D- / unit',
+    fieldIds: ['d_total', 'd_cation', 'd_anion', 'd_unit'],
+  },
+  {
+    id: 'core',
+    label: '体系',
+    description: 'system / IL / material',
+    fieldIds: ['system_name', 'ionic_liquid', 'confinement_material_class', 'confinement_geometry_class'],
+  },
+  {
+    id: 'context',
+    label: '限域',
+    description: 'geometry / dimension / scale / T',
+    fieldIds: ['confinement_geometry_class', 'confinement_dimensionality', 'confinement_scale_value', 'temperature_value'],
+  },
+  {
+    id: 'source',
+    label: '溯源',
+    description: 'source / D values',
+    fieldIds: ['source_page', 'd_total', 'd_cation', 'd_anion'],
+  },
+]
+const activeDiffusionReviewLensOption = computed<DiffusionReviewLensOption>(() => (
+  diffusionReviewLensOptions.find((option) => option.id === diffusionReviewLens.value) ?? diffusionReviewLensOptions[0]!
+))
 
 const recordItems = computed<RecordItem[]>(() => {
   return allRecords.value.map((record, index) => {
@@ -3549,6 +3588,23 @@ function buildDiffusionReviewTableCells(
   })
 }
 
+function visibleDiffusionReviewTableCells(
+  record: TribologyData | null | undefined,
+  remoteFields?: Record<string, FieldEvidenceEntry> | null,
+) {
+  const cells = buildDiffusionReviewTableCells(record, remoteFields)
+  const wanted = activeDiffusionReviewLensOption.value.fieldIds
+  return wanted
+    .map((fieldId) => cells.find((cell) => cell.id === fieldId))
+    .filter((cell): cell is DiffusionReviewTableCell => Boolean(cell))
+}
+
+function setDiffusionReviewLens(lens: DiffusionReviewLens) {
+  diffusionReviewLens.value = lens
+  const firstVisibleCell = visibleDiffusionReviewTableCells(activeRecord.value, activeRecordFieldEvidence.value?.fields)[0]
+  if (firstVisibleCell) activeFieldId.value = firstVisibleCell.fieldId
+}
+
 function diffusionTableCellTone(cell: DiffusionReviewTableCell, activeRecordCell = false) {
   if (activeRecordCell && cell.fieldId === activeFieldId.value) return 'border-[#22c7b8] bg-[#ecfffb] text-[#064e3b] ring-1 ring-[#7dd3c7]'
   if (cell.status === 'Missing') return 'border-[#fecdd3] bg-[#fff8f9] text-[#be123c]'
@@ -4438,32 +4494,41 @@ function roughnessTextParts(value: string) {
 
         <div v-if="activeExtractorType === 'diffusion'" class="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden bg-[#fbfcff] p-3">
           <section class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[0.85rem] border border-[#dbe8e4] bg-white shadow-[0_16px_38px_-32px_rgba(15,23,42,0.35)]">
-            <div class="shrink-0 flex flex-wrap items-center justify-between gap-2 border-b border-[#e7efec] px-3.5 py-2.5">
-              <div>
-                <p class="text-[10px] font-black uppercase tracking-[0.18em] text-[#0f766e]">Source Table</p>
-                <p class="mt-0.5 text-[11px] font-semibold text-[#64748b]">单元格即字段，点击定位原文。</p>
+            <div class="shrink-0 border-b border-[#e7efec] px-3.5 py-2.5">
+              <div class="flex items-center justify-between gap-2">
+                <div>
+                  <p class="text-[10px] font-black uppercase tracking-[0.18em] text-[#0f766e]">Review Lens</p>
+                  <p class="mt-0.5 text-[11px] font-semibold text-[#64748b]">{{ activeDiffusionReviewLensOption.description }}</p>
+                </div>
+                <span class="rounded-md bg-[#ecfffb] px-2 py-1 text-[10px] font-bold text-[#0f766e] ring-1 ring-[#bce9df]">
+                  {{ visibleRecordCount }} rows
+                </span>
               </div>
-              <span class="rounded-md bg-[#ecfffb] px-2 py-1 text-[10px] font-bold text-[#0f766e] ring-1 ring-[#bce9df]">
-                {{ visibleRecordCount }} rows
-              </span>
+              <div class="mt-2 grid grid-cols-4 gap-1 rounded-[0.65rem] bg-[#f2f7f5] p-1 ring-1 ring-[#d9e9e4]">
+                <button
+                  v-for="option in diffusionReviewLensOptions"
+                  :key="option.id"
+                  type="button"
+                  class="min-w-0 rounded-[0.5rem] px-2 py-1.5 text-[11px] font-black transition"
+                  :class="diffusionReviewLens === option.id
+                    ? 'bg-white text-[#0f766e] shadow-[0_6px_18px_-14px_rgba(15,118,110,0.9)] ring-1 ring-[#c8e6dc]'
+                    : 'text-[#6f8580] hover:bg-white/70 hover:text-[#123f37]'"
+                  :title="option.description"
+                  @click="setDiffusionReviewLens(option.id)"
+                >
+                  {{ option.label }}
+                </button>
+              </div>
             </div>
 
-            <div class="min-h-0 flex-1 overflow-auto custom-scrollbar">
-              <table class="min-w-[980px] w-full table-fixed border-separate border-spacing-0 text-left">
+            <div class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar">
+              <table class="w-full table-fixed border-separate border-spacing-0 text-left">
                 <colgroup>
                   <col style="width: 5.25rem">
-                  <col style="width: 13%">
-                  <col style="width: 8%">
-                  <col style="width: 7%">
-                  <col style="width: 6%">
-                  <col style="width: 10%">
-                  <col style="width: 8%">
-                  <col style="width: 8%">
-                  <col style="width: 8%">
-                  <col style="width: 7%">
-                  <col style="width: 6%">
-                  <col style="width: 7%">
-                  <col style="width: 8%">
+                  <col
+                    v-for="cell in visibleDiffusionReviewTableCells(activeRecord || visibleRecordItems[0]?.record, activeRecordFieldEvidence?.fields)"
+                    :key="`diffusion-col-${cell.id}`"
+                  >
                 </colgroup>
                 <thead>
                   <tr>
@@ -4471,7 +4536,7 @@ function roughnessTextParts(value: string) {
                       record
                     </th>
                     <th
-                      v-for="cell in buildDiffusionReviewTableCells(activeRecord || visibleRecordItems[0]?.record, activeRecordFieldEvidence?.fields)"
+                      v-for="cell in visibleDiffusionReviewTableCells(activeRecord || visibleRecordItems[0]?.record, activeRecordFieldEvidence?.fields)"
                       :key="`diffusion-head-${cell.id}`"
                       class="sticky top-0 z-20 border-b border-[#edf3f1] bg-[#fbfffd] px-1.5 py-1.5 text-[9px] font-black uppercase tracking-[0.1em] text-[#6f8580]"
                     >
@@ -4498,7 +4563,7 @@ function roughnessTextParts(value: string) {
                       </button>
                     </td>
                     <td
-                      v-for="cell in buildDiffusionReviewTableCells(item.record, remoteFieldsForRecord(item.record))"
+                      v-for="cell in visibleDiffusionReviewTableCells(item.record, remoteFieldsForRecord(item.record))"
                       :key="`diffusion-cell-${item.id}-${cell.id}`"
                       class="border-b border-[#f1f5f9] px-1 py-1.5 align-top"
                     >
