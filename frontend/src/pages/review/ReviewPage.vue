@@ -345,9 +345,22 @@ const recordItems = computed<RecordItem[]>(() => {
   })
 })
 
+const selectedReviewExtractorType = computed<ExtractorType>(() => {
+  if (selectedReviewFile.value?.extractor_type === 'diffusion') return 'diffusion'
+  return allRecords.value.some((record) => (
+    record?.extractor_type === 'diffusion'
+    || Boolean(record?.system_name)
+    || record?.D_total != null
+    || record?.D_cation != null
+    || record?.D_anion != null
+  ))
+    ? 'diffusion'
+    : 'tribology'
+})
+
 const visibleRecordItems = computed(() => {
   let rows = recordItems.value
-  const filtersEnabled = activeExtractorType.value !== 'diffusion'
+  const filtersEnabled = selectedReviewExtractorType.value !== 'diffusion'
 
   if (filtersEnabled && onlyTrainingBlockers.value) {
     rows = rows.filter((item) => item.trainingBlocker)
