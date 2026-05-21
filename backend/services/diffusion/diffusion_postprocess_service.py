@@ -56,6 +56,7 @@ _COMMON_NON_IL_SOLUTES_RE = re.compile(
 )
 
 _STANDARD_FIELDS_VERSION = "diffusion.standard.v1"
+_NORMALIZATION_VERSION = "diffusion.normalization.v1"
 
 
 def _normalize_unicode_text(value: Any) -> str:
@@ -524,14 +525,150 @@ def build_diffusion_standard_fields(row: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in standard.items() if value not in (None, "", [], {})}
 
 
+def _canonical_metric_values(value: Any) -> dict[str, float] | None:
+    numeric = _to_float(value)
+    if numeric is None:
+        return None
+    return {
+        "value_10e12_m2_s": round(float(numeric), 12),
+        "value_m2_s": float(f"{float(numeric) * 1e-12:.12g}"),
+        "value_a2_ps": float(f"{float(numeric) * 1e-4:.12g}"),
+    }
+
+
+def _original_diffusion_label(raw_value: Any, raw_unit: Any) -> str | None:
+    value_text = str(raw_value or "").strip()
+    unit_text = str(raw_unit or "").strip()
+    if value_text and unit_text:
+        return f"{value_text} {unit_text}"
+    return value_text or unit_text or None
+
+
+def _source_values_payload(row: dict[str, Any]) -> dict[str, Any]:
+    novel_features = _json_dict(row.get("novel_features_json"))
+    return _json_dict(novel_features.get("source_values"))
+
+
+def _normalization_coeff_payload(
+    row: dict[str, Any],
+    *,
+    field_key: str,
+    response_key: str,
+    label: str,
+    source_values: dict[str, Any],
+) -> dict[str, Any]:
+    source_payload = _json_dict(source_values.get(field_key))
+    stored_value = row.get(field_key)
+    stored_unit = row.get("D_unit")
+    canonical_value = _to_float(source_payload.get("canonical_value"))
+    canonical_unit = str(source_payload.get("canonical_unit") or "").strip()
+
+    if canonical_value is None:
+        canonical_value, normalized_unit = _normalize_diffusion_unit_and_value(stored_value, stored_unit)
+        canonical_unit = canonical_unit or str(normalized_unit or "").strip()
+
+    raw_value = _first_present(source_payload.get("raw_value"), source_payload.get("raw_value_label"))
+    raw_unit = source_payload.get("raw_unit")
+    original_label = _original_diffusion_label(raw_value, raw_unit)
+    if not original_label and stored_value not in (None, ""):
+        original_label = _original_diffusion_label(stored_value, stored_unit)
+
+    metric_values = _canonical_metric_values(canonical_value)
+    status = "normalized" if metric_values and canonical_unit else "missing"
+    if metric_values and not canonical_unit:
+        status = "unit_warning"
+
+    payload: dict[str, Any] = {
+        "field": response_key,
+        "source_field": field_key,
+        "label": label,
+        "status": status,
+        "source": "evidence" if source_payload else "stored_value",
+        "original_value": str(raw_value).strip() if raw_value not in (None, "") else stored_value,
+        "original_unit": str(raw_unit).strip() if raw_unit not in (None, "") else stored_unit,
+        "original_label": original_label,
+        "canonical_unit": canonical_unit or None,
+        "canonical_label": None,
+        "note": None,
+    }
+    if metric_values:
+        payload.update(metric_values)
+        payload["canonical_value"] = metric_values["value_10e12_m2_s"]
+        payload["canonical_label"] = f"{metric_values['value_10e12_m2_s']:g} {_CANONICAL_DIFFUSION_UNIT}"
+    if not source_payload:
+        payload["note"] = "No source_values payload; normalized from stored value and unit."
+    if status == "unit_warning":
+        payload["note"] = "Value parsed, but the source unit could not be confirmed."
+    if status == "missing":
+        payload["note"] = "No normalizable diffusion coefficient is available."
+    return {key: value for key, value in payload.items() if value not in (None, "", [], {})}
+
+
+def build_diffusion_normalization_payload(row: dict[str, Any]) -> dict[str, Any]:
+    source_values = _source_values_payload(row)
+    coefficients = {
+        "d_total": _normalization_coeff_payload(
+            row,
+            field_key="D_total",
+            response_key="d_total",
+            label="D total",
+            source_values=source_values,
+        ),
+        "d_cation": _normalization_coeff_payload(
+            row,
+            field_key="D_cation",
+            response_key="d_cation",
+            label="D+",
+            source_values=source_values,
+        ),
+        "d_anion": _normalization_coeff_payload(
+            row,
+            field_key="D_anion",
+            response_key="d_anion",
+            label="D-",
+            source_values=source_values,
+        ),
+    }
+    populated = {
+        key: value
+        for key, value in coefficients.items()
+        if value.get("status") in {"normalized", "unit_warning"}
+    }
+    warnings = [
+        f"{value.get('label')}: {value.get('note')}"
+        for value in coefficients.values()
+        if value.get("status") == "unit_warning" and value.get("note")
+    ]
+    primary_key = next((key for key in ("d_total", "d_anion", "d_cation") if key in populated), None)
+    status = "ready" if populated and not any(value.get("status") == "unit_warning" for value in populated.values()) else "partial"
+    if not populated:
+        status = "missing"
+
+    return {
+        "schema_version": _NORMALIZATION_VERSION,
+        "status": status,
+        "canonical_unit": _CANONICAL_DIFFUSION_UNIT,
+        "canonical_unit_si": "m²/s",
+        "coefficients": coefficients,
+        "primary_field": primary_key,
+        "primary": populated.get(primary_key) if primary_key else None,
+        "ready_count": len([value for value in coefficients.values() if value.get("status") == "normalized"]),
+        "warning_count": len([value for value in coefficients.values() if value.get("status") == "unit_warning"]),
+        "warnings": warnings,
+    }
+
+
 def apply_diffusion_standard_fields(row: dict[str, Any]) -> dict[str, Any]:
     payload = dict(row)
     novel_features = _json_dict(payload.get("novel_features_json"))
     standard_fields = build_diffusion_standard_fields({**payload, "novel_features_json": novel_features})
+    normalization = build_diffusion_normalization_payload({**payload, "novel_features_json": novel_features})
     novel_features["standard_fields"] = standard_fields
     payload["novel_features_json"] = novel_features
     payload["diffusion_standard_fields"] = standard_fields
     payload["diffusionStandardFields"] = standard_fields
+    payload["diffusion_normalization"] = normalization
+    payload["diffusionNormalization"] = normalization
     return payload
 
 

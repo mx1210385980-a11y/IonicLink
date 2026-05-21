@@ -577,6 +577,53 @@ export interface DiffusionLibrarySummary {
     speciesCounts: Record<string, number>
 }
 
+export interface DiffusionNormalizationCoefficient {
+    field?: 'd_total' | 'd_cation' | 'd_anion' | string
+    source_field?: string
+    sourceField?: string
+    label?: string
+    status?: 'normalized' | 'unit_warning' | 'missing' | string
+    source?: 'evidence' | 'stored_value' | string
+    original_value?: string | number | null
+    originalValue?: string | number | null
+    original_unit?: string | null
+    originalUnit?: string | null
+    original_label?: string | null
+    originalLabel?: string | null
+    canonical_value?: number | null
+    canonicalValue?: number | null
+    canonical_unit?: string | null
+    canonicalUnit?: string | null
+    canonical_label?: string | null
+    canonicalLabel?: string | null
+    value_10e12_m2_s?: number | null
+    value10e12M2S?: number | null
+    value_m2_s?: number | null
+    valueM2S?: number | null
+    value_a2_ps?: number | null
+    valueA2Ps?: number | null
+    note?: string | null
+}
+
+export interface DiffusionNormalizationPayload {
+    schema_version?: string
+    schemaVersion?: string
+    status?: 'ready' | 'partial' | 'missing' | string
+    canonical_unit?: string
+    canonicalUnit?: string
+    canonical_unit_si?: string
+    canonicalUnitSi?: string
+    coefficients?: Record<string, DiffusionNormalizationCoefficient>
+    primary_field?: string | null
+    primaryField?: string | null
+    primary?: DiffusionNormalizationCoefficient | null
+    ready_count?: number
+    readyCount?: number
+    warning_count?: number
+    warningCount?: number
+    warnings?: string[]
+}
+
 export interface DiffusionStandardFields {
     schema_version?: string
     cation?: string | null
@@ -1010,6 +1057,8 @@ export interface TribologyData {
     confinement_scale_unit?: string
     diffusion_standard_fields?: DiffusionStandardFields
     diffusionStandardFields?: DiffusionStandardFields
+    diffusion_normalization?: DiffusionNormalizationPayload
+    diffusionNormalization?: DiffusionNormalizationPayload
     smiles?: string
     novel_features_json?: Record<string, any>
     rdkit_features_json?: Record<string, any>

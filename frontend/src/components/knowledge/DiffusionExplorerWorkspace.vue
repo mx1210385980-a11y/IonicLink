@@ -12,7 +12,16 @@ import {
   Search,
 } from 'lucide-vue-next'
 
-import { listDiffusionLibrary, type BatchFile, type DiffusionLibraryRecord, type DiffusionLibrarySummary, type DiffusionStandardFields, type TribologyData } from '@/lib/api'
+import {
+  listDiffusionLibrary,
+  type BatchFile,
+  type DiffusionLibraryRecord,
+  type DiffusionLibrarySummary,
+  type DiffusionNormalizationCoefficient,
+  type DiffusionNormalizationPayload,
+  type DiffusionStandardFields,
+  type TribologyData,
+} from '@/lib/api'
 
 const props = defineProps<{
   currentSection: string
@@ -34,6 +43,10 @@ type DiffusionRow = {
   diffusingSpecies: string
   dAngstrom: string
   dMetric: string
+  dOriginal: string
+  dCanonical: string
+  normalizationStatus: string
+  normalizationNote: string
   dataType: string
   method: string
   note: string
@@ -51,6 +64,17 @@ type IonMappingRow = {
   cation: string
   anion: string
   diffusingIon: string
+}
+
+type NormalizationTableRow = {
+  recordNo: string
+  system: string
+  original: string
+  canonical: string
+  si: string
+  status: string
+  source: string
+  note: string
 }
 
 const query = ref('')
@@ -229,6 +253,21 @@ const ionMappingRows = computed<IonMappingRow[]>(() => {
   }))
 })
 
+const normalizationRows = computed<NormalizationTableRow[]>(() => filteredRows.value.map((row) => ({
+  recordNo: row.recordNo,
+  system: baseSystemName(row.record),
+  original: row.dOriginal,
+  canonical: row.dCanonical,
+  si: row.dMetric === '--' ? '--' : `${row.dMetric} m²/s`,
+  status: row.normalizationStatus,
+  source: primaryNormalizationCoefficient(row.record)?.source === 'evidence' ? '原文证据' : '存储值',
+  note: row.normalizationNote,
+})))
+
+const normalizationReadyCount = computed(() => normalizationRows.value.filter((row) => row.status === 'normalized').length)
+
+const normalizationWarningCount = computed(() => normalizationRows.value.filter((row) => row.status !== 'normalized').length)
+
 const exportRows = computed(() => filteredRows.value.map((row) => {
   const standard = standardFields(row.record)
   return {
@@ -245,8 +284,12 @@ const exportRows = computed(() => filteredRows.value.map((row) => {
     side_chain_carbons: standard.side_chain_carbons ?? standard.sideChainCarbons ?? null,
     water_uptake: row.waterUptake,
     diffusing_species: row.diffusingSpecies,
+    D_original: row.dOriginal,
+    D_normalized_10e12_m2_s: row.dCanonical,
     D_A2_ps: row.dAngstrom,
     D_m2_s: row.dMetric,
+    normalization_status: row.normalizationStatus,
+    normalization_note: row.normalizationNote,
     data_type: row.dataType,
     method_conditions: row.method,
     note: row.note,
@@ -361,6 +404,72 @@ function standardFields(record: TribologyData): DiffusionStandardFields {
   const nested = readFeatureObject(features.standard_fields || features.standardFields)
   const direct = readFeatureObject((record as any).diffusion_standard_fields || (record as any).diffusionStandardFields)
   return { ...nested, ...direct } as DiffusionStandardFields
+}
+
+function diffusionNormalization(record: TribologyData): DiffusionNormalizationPayload {
+  const features = readFeatureObject(record.novel_features_json)
+  const nested = readFeatureObject(features.diffusion_normalization || features.diffusionNormalization)
+  const direct = readFeatureObject((record as any).diffusion_normalization || (record as any).diffusionNormalization)
+  return { ...nested, ...direct } as DiffusionNormalizationPayload
+}
+
+function normalizationCoefficient(record: TribologyData, key: 'd_total' | 'd_cation' | 'd_anion') {
+  const payload = diffusionNormalization(record)
+  const coefficients = readFeatureObject(payload.coefficients)
+  return readFeatureObject(coefficients[key]) as DiffusionNormalizationCoefficient
+}
+
+function coefficientStatus(coefficient: DiffusionNormalizationCoefficient | null | undefined) {
+  return String(coefficient?.status || '').trim().toLowerCase()
+}
+
+function primaryNormalizationCoefficient(record: TribologyData): DiffusionNormalizationCoefficient | null {
+  const payload = diffusionNormalization(record)
+  const direct = readFeatureObject(payload.primary)
+  if (coefficientStatus(direct as DiffusionNormalizationCoefficient)) return direct as DiffusionNormalizationCoefficient
+  for (const key of ['d_total', 'd_anion', 'd_cation'] as const) {
+    const coefficient = normalizationCoefficient(record, key)
+    if (['normalized', 'unit_warning'].includes(coefficientStatus(coefficient))) return coefficient
+  }
+  return null
+}
+
+function coefficientNumber(coefficient: DiffusionNormalizationCoefficient | null | undefined, ...keys: string[]) {
+  const source = coefficient as Record<string, unknown> | null | undefined
+  if (!source) return null
+  for (const key of keys) {
+    const value = source[key]
+    if (value === null || value === undefined || value === '') continue
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return null
+}
+
+function prettifyScientificLabel(value: string) {
+  return value
+    .replace(/\s*x\s*/gi, ' × ')
+    .replace(/10\^?([+\-−]?\d+)/g, (_, exponent: string) => `10${toSuperscriptInt(Number(String(exponent).replace('−', '-')))}`)
+    .replace(/A2|Å2|A\^2|Å\^2/g, 'Å²')
+    .replace(/m2|m\^2/g, 'm²')
+    .replace(/ps-1|ps\^-1|ps⁻1/g, 'ps⁻¹')
+    .replace(/s-1|s\^-1|s⁻1/g, 's⁻¹')
+}
+
+function originalDiffusionLabel(record: TribologyData, coefficient: DiffusionNormalizationCoefficient | null) {
+  const label = String(coefficient?.original_label || coefficient?.originalLabel || '').trim()
+  if (label) return prettifyScientificLabel(label)
+  const parsed = parseEvidenceScientific(record)
+  if (parsed) return `(${parsed.coefficientText} ± ${parsed.uncertaintyText}) × 10${toSuperscriptInt(parsed.exponent)} Å²·ps⁻¹`
+  const value = primaryCoefficient(record)
+  return value == null ? '--' : prettifyScientificLabel(`${formatPlainNumber(value)} ${record.D_unit || ''}`.trim())
+}
+
+function canonicalDiffusionLabel(coefficient: DiffusionNormalizationCoefficient | null, fallbackValue: number | null) {
+  const value = coefficientNumber(coefficient, 'value_10e12_m2_s', 'value10e12M2S', 'canonical_value', 'canonicalValue')
+  const canonicalValue = value ?? (fallbackValue == null ? null : fallbackValue * 1e12)
+  if (canonicalValue == null || !Number.isFinite(canonicalValue)) return '--'
+  return `${formatPlainNumber(canonicalValue)} × 10⁻¹² m²/s`
 }
 
 function standardText(record: TribologyData, ...keys: string[]) {
@@ -484,12 +593,36 @@ function parseEvidenceScientific(record: TribologyData) {
 }
 
 function diffusionDisplays(record: TribologyData) {
+  const coefficient = primaryNormalizationCoefficient(record)
+  if (coefficient) {
+    const a2Ps = coefficientNumber(coefficient, 'value_a2_ps', 'valueA2Ps')
+    const m2s = coefficientNumber(coefficient, 'value_m2_s', 'valueM2S')
+    const canonical = coefficientNumber(coefficient, 'value_10e12_m2_s', 'value10e12M2S', 'canonical_value', 'canonicalValue')
+    return {
+      coefficientA2Ps: a2Ps,
+      angstrom: a2Ps == null ? '--' : formatScientificValue(a2Ps),
+      metric: m2s == null ? '--' : formatScientificValue(m2s),
+      original: originalDiffusionLabel(record, coefficient),
+      canonical: canonicalDiffusionLabel(coefficient, m2s),
+      normalizationStatus: coefficientStatus(coefficient) || 'missing',
+      normalizationNote: coefficient.note || '',
+      canonicalValue: canonical,
+    }
+  }
+
   const parsed = parseEvidenceScientific(record)
   if (parsed) {
+    const a2Ps = parsed.coefficient * Math.pow(10, parsed.exponent)
+    const m2s = parsed.coefficient * Math.pow(10, parsed.exponent - 8)
     return {
-      coefficientA2Ps: parsed.coefficient * Math.pow(10, parsed.exponent),
+      coefficientA2Ps: a2Ps,
       angstrom: `(${parsed.coefficientText} ± ${parsed.uncertaintyText}) × 10${toSuperscriptInt(parsed.exponent)}`,
-      metric: `(${parsed.coefficientText} ± ${parsed.uncertaintyText}) × 10${toSuperscriptInt(parsed.exponent - 8)}`,
+      metric: formatScientificValue(m2s),
+      original: `(${parsed.coefficientText} ± ${parsed.uncertaintyText}) × 10${toSuperscriptInt(parsed.exponent)} Å²·ps⁻¹`,
+      canonical: `${formatPlainNumber(a2Ps * 1e4)} × 10⁻¹² m²/s`,
+      normalizationStatus: 'normalized',
+      normalizationNote: '由原文科学计数法换算。',
+      canonicalValue: a2Ps * 1e4,
     }
   }
 
@@ -499,6 +632,11 @@ function diffusionDisplays(record: TribologyData) {
       coefficientA2Ps: null,
       angstrom: '--',
       metric: '--',
+      original: '--',
+      canonical: '--',
+      normalizationStatus: 'missing',
+      normalizationNote: '缺少可换算扩散系数。',
+      canonicalValue: null,
     }
   }
 
@@ -509,6 +647,11 @@ function diffusionDisplays(record: TribologyData) {
     coefficientA2Ps: a2PsValue,
     angstrom: formatScientificValue(a2PsValue),
     metric: formatScientificValue(metricValue),
+    original: prettifyScientificLabel(`${formatPlainNumber(value)} ${record.D_unit || ''}`.trim()),
+    canonical: `${formatPlainNumber(metricValue * 1e12)} × 10⁻¹² m²/s`,
+    normalizationStatus: unit ? 'normalized' : 'unit_warning',
+    normalizationNote: unit ? '由存储值换算。' : '缺少单位，标准值需要复核。',
+    canonicalValue: metricValue * 1e12,
   }
 }
 
@@ -524,6 +667,10 @@ function toDiffusionRow(record: DiffusionLibraryRecord): DiffusionRow {
     diffusingSpecies: inferDiffusingSpecies(record),
     dAngstrom: displays.angstrom,
     dMetric: displays.metric,
+    dOriginal: displays.original,
+    dCanonical: displays.canonical,
+    normalizationStatus: displays.normalizationStatus,
+    normalizationNote: displays.normalizationNote,
     dataType: dataType(record),
     method: methodConditions(record),
     note: rowNote(record, displays.coefficientA2Ps),
@@ -730,8 +877,8 @@ function exportData(format: 'json' | 'csv' | 'ndjson') {
     </header>
 
     <div class="min-h-0 flex-1 overflow-auto px-4 py-3">
-      <div v-if="filteredRows.length" class="min-w-[98rem]">
-        <div class="mb-3 grid gap-3 xl:grid-cols-[minmax(0,1.2fr)_minmax(21rem,0.8fr)]">
+      <div v-if="filteredRows.length" class="space-y-3">
+        <div class="grid gap-3 xl:grid-cols-[minmax(0,1.2fr)_minmax(21rem,0.8fr)]">
           <section class="rounded-lg border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
             <div class="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
               <ArrowDownUp class="h-3.5 w-3.5" />
@@ -756,8 +903,55 @@ function exportData(format: 'json' | 'csv' | 'ndjson') {
           </section>
         </div>
 
-        <div class="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800">
-          <table class="min-w-full divide-y divide-slate-200 text-left text-[12px] dark:divide-slate-800">
+        <section class="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+          <div class="grid gap-0 border-b border-slate-200 bg-slate-50/70 md:grid-cols-[minmax(0,1fr)_11rem_11rem_12rem] dark:border-slate-800 dark:bg-slate-950/60">
+            <div class="px-4 py-3">
+              <div class="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                <ArrowDownUp class="h-3.5 w-3.5" />
+                归一化模块
+              </div>
+              <p class="mt-1 text-sm font-semibold text-slate-950 dark:text-white">
+                Review 保留原文值，知识库统一换算为标准单位。
+              </p>
+            </div>
+            <div class="border-t border-slate-200 px-4 py-3 md:border-l md:border-t-0 dark:border-slate-800">
+              <p class="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-slate-500">标准单位</p>
+              <p class="mt-1 font-mono text-[13px] font-semibold text-slate-900 dark:text-slate-100">10⁻¹² m²/s</p>
+            </div>
+            <div class="border-t border-slate-200 px-4 py-3 md:border-l md:border-t-0 dark:border-slate-800">
+              <p class="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-slate-500">已归一化</p>
+              <p class="mt-1 text-lg font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">{{ normalizationReadyCount }}</p>
+            </div>
+            <div class="border-t border-slate-200 px-4 py-3 md:border-l md:border-t-0 dark:border-slate-800">
+              <p class="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-slate-500">待复核</p>
+              <p class="mt-1 text-lg font-semibold tabular-nums" :class="normalizationWarningCount ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500'">{{ normalizationWarningCount }}</p>
+            </div>
+          </div>
+
+          <div class="divide-y divide-slate-100 bg-white text-[12px] dark:divide-slate-800 dark:bg-slate-950">
+            <div class="grid grid-cols-[4.6rem_minmax(9rem,1fr)_11rem_11rem_10rem] bg-white text-[10.5px] font-semibold tracking-[0.08em] text-slate-500 dark:bg-slate-900">
+              <div class="px-3 py-2.5">记录</div>
+              <div class="px-3 py-2.5">体系</div>
+              <div class="px-3 py-2.5">原文值</div>
+              <div class="px-3 py-2.5">标准值</div>
+              <div class="px-3 py-2.5">SI 值</div>
+            </div>
+            <div
+              v-for="row in normalizationRows"
+              :key="`norm-${row.recordNo}`"
+              class="grid grid-cols-[4.6rem_minmax(9rem,1fr)_11rem_11rem_10rem] items-center"
+            >
+              <div class="px-3 py-2.5 font-mono font-semibold text-slate-700 dark:text-slate-200">{{ row.recordNo }}</div>
+              <div class="truncate px-3 py-2.5 font-semibold text-slate-900 dark:text-white">{{ row.system }}</div>
+              <div class="truncate px-3 py-2.5 font-mono text-slate-700 dark:text-slate-200">{{ row.original }}</div>
+              <div class="truncate px-3 py-2.5 font-mono font-semibold text-slate-950 dark:text-white">{{ row.canonical }}</div>
+              <div class="truncate px-3 py-2.5 font-mono text-slate-700 dark:text-slate-200">{{ row.si }}</div>
+            </div>
+          </div>
+        </section>
+
+        <div class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
+          <table class="min-w-[116rem] divide-y divide-slate-200 text-left text-[12px] dark:divide-slate-800">
             <thead class="sticky top-0 z-10 bg-slate-50 text-[10.5px] font-semibold tracking-[0.08em] text-slate-500 dark:bg-slate-900 dark:text-slate-400">
               <tr>
                 <th class="w-[6.5rem] px-3 py-2.5">记录编号</th>
@@ -767,6 +961,8 @@ function exportData(format: 'json' | 'csv' | 'ndjson') {
                 <th class="w-[7rem] px-3 py-2.5">侧链类型</th>
                 <th class="w-[8rem] px-3 py-2.5">水吸收率 WU</th>
                 <th class="w-[7rem] px-3 py-2.5">扩散物种</th>
+                <th class="w-[13rem] px-3 py-2.5">原文 D</th>
+                <th class="w-[13rem] px-3 py-2.5">标准 D</th>
                 <th class="w-[12rem] px-3 py-2.5">D / Å²·ps⁻¹</th>
                 <th class="w-[12rem] px-3 py-2.5">D / m²·s⁻¹</th>
                 <th class="w-[8rem] px-3 py-2.5">数据类型</th>
@@ -799,6 +995,8 @@ function exportData(format: 'json' | 'csv' | 'ndjson') {
                 <td class="px-3 py-3 font-mono text-slate-700 dark:text-slate-200">{{ row.sideChain }}</td>
                 <td class="px-3 py-3 font-semibold tabular-nums text-slate-700 dark:text-slate-200">{{ row.waterUptake }}</td>
                 <td class="px-3 py-3 font-semibold text-slate-800 dark:text-slate-100">{{ row.diffusingSpecies }}</td>
+                <td class="px-3 py-3 font-mono leading-5 text-slate-700 dark:text-slate-200">{{ row.dOriginal }}</td>
+                <td class="px-3 py-3 font-mono font-semibold leading-5 text-slate-900 dark:text-slate-100">{{ row.dCanonical }}</td>
                 <td class="px-3 py-3 font-mono leading-5 text-slate-800 dark:text-slate-100">{{ row.dAngstrom }}</td>
                 <td class="px-3 py-3 font-mono leading-5 text-slate-800 dark:text-slate-100">{{ row.dMetric }}</td>
                 <td class="px-3 py-3 text-slate-700 dark:text-slate-200">{{ row.dataType }}</td>
@@ -819,7 +1017,7 @@ function exportData(format: 'json' | 'csv' | 'ndjson') {
           </table>
         </div>
 
-        <section class="mt-3 rounded-lg border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+        <section class="rounded-lg border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
           <div class="flex items-center justify-between gap-3">
             <div>
               <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">离子字段归一化</p>

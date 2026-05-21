@@ -1,4 +1,5 @@
 from services.diffusion.diffusion_postprocess_service import (
+    build_diffusion_normalization_payload,
     diffusion_drop_reason,
     normalize_diffusion_records,
 )
@@ -133,3 +134,28 @@ def test_mvp_keeps_only_coefficients_supported_by_evidence_quote():
     source_value = normalized[0]["novel_features_json"]["source_values"]["D_total"]
     assert source_value["raw_value"] == "2.3"
     assert source_value["raw_unit"] == "10^-12 m2/s"
+
+
+def test_builds_post_review_normalization_payload_from_source_values():
+    rows = [
+        {
+            "system_name": "MPIL_ethyl membrane",
+            "ionic_liquid": "MPIL_ethyl",
+            "D_anion": 5.5,
+            "D_unit": "A2 ps-1",
+            "source": "Table 3",
+            "source_page": 5,
+            "evidence": "Table 3 reports Cl- diffusion coefficient as (5.50 ± 1.20) x 10^-1 A2 ps-1.",
+        }
+    ]
+
+    normalized = _normalize(rows)
+    payload = build_diffusion_normalization_payload(normalized[0])
+
+    assert payload["status"] == "ready"
+    assert payload["canonical_unit"] == "10\u207b\u00b9\u00b2 m\u00b2/s"
+    assert payload["primary_field"] == "d_total"
+    assert payload["primary"]["original_label"] == "5.50 x 10^-1 A2 ps-1"
+    assert payload["primary"]["value_10e12_m2_s"] == 5500
+    assert payload["primary"]["value_m2_s"] == 5.5e-09
+    assert payload["primary"]["value_a2_ps"] == 0.55
