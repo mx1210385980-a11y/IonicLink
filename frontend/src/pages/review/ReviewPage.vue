@@ -1,14 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import {
-  AlertTriangle,
   Check,
   CheckCheck,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  ChevronsLeft,
-  ChevronsRight,
   ExternalLink,
   Flag,
   FileText,
@@ -16,7 +13,6 @@ import {
   Layers,
   Loader2,
   RefreshCw,
-  Search,
   Send,
 } from 'lucide-vue-next'
 
@@ -110,18 +106,6 @@ const emit = defineEmits<{
   'select-file': [fileId: string]
 }>()
 
-type QueueItem = {
-  id: string
-  name: string
-  recordCount: number
-  pendingCount: number
-  lowConfidenceCount: number
-  missingEvidenceCount: number
-  status: 'pending' | 'in_progress' | 'confirmed'
-  alert: boolean
-  selected: boolean
-}
-
 type RecordItem = {
   id: string
   label: string
@@ -214,15 +198,12 @@ type EvidenceSearchSpec = {
   mode: EvidenceSearchMode
 }
 
-const query = ref('')
-const prioritizeLowConfidence = ref(true)
 const onlyPendingRecords = ref(false)
 const onlyLowConfidenceRecords = ref(false)
 const onlyTrainingBlockers = ref(props.initialMode === 'training-blockers')
 const activeFieldId = ref('material')
 const activeRecordId = ref('')
 const collapsedRecordIds = ref<Set<string>>(new Set())
-const inboxCollapsed = ref(false)
 const activeRecordEvidence = ref<EvidenceResult | null>(null)
 const evidenceCache = ref<Record<string, EvidenceResult | null>>({})
 const activeRecordFieldEvidence = ref<RecordFieldEvidenceResponse | null>(null)
@@ -276,54 +257,6 @@ const diffusionConfinementFieldKeys = [
 ] as const
 const diffusionConditionFieldKeys = ['temperature_value', 'confinement_scale_value', 'confinement_scale_unit'] as const
 const diffusionCoreFactKeys = ['system_name', 'diffusion_coefficient', 'source_evidence'] as const
-
-const queueItems = computed<QueueItem[]>(() => {
-  const base = reviewFiles.value.length
-    ? reviewFiles.value.map((file) => {
-        const records = Array.isArray(file.records) ? file.records : []
-        const pendingCount = records.filter(recordNeedsReview).length
-        const lowConfidenceCount = records.filter(recordLowConfidence).length
-        const missingEvidenceCount = records.filter(recordNeedsEvidence).length
-        const status: QueueItem['status'] = file.status === 'success'
-          ? (pendingCount || lowConfidenceCount || missingEvidenceCount ? 'pending' : 'confirmed')
-          : file.status === 'processing'
-              ? 'in_progress'
-              : 'pending'
-
-        return {
-          id: file.id,
-          name: file.name,
-          recordCount: records.length,
-          pendingCount,
-          lowConfidenceCount,
-          missingEvidenceCount,
-          status,
-          alert: Boolean(file.hasWarnings || file.status === 'error' || lowConfidenceCount || missingEvidenceCount),
-          selected: file.id === selectedReviewFile.value?.id,
-        }
-      })
-    : [{
-        id: 'empty',
-        name: activeDocumentName.value,
-        recordCount: 0,
-        pendingCount: 0,
-        lowConfidenceCount: 0,
-        missingEvidenceCount: 0,
-        status: 'pending' as const,
-        alert: false,
-        selected: true,
-      }]
-
-  const q = query.value.trim().toLowerCase()
-  const filtered = q ? base.filter((item) => item.name.toLowerCase().includes(q)) : base
-
-  if (!prioritizeLowConfidence.value) return filtered
-  return [...filtered].sort((left, right) => {
-    const rightPressure = right.lowConfidenceCount + right.missingEvidenceCount
-    const leftPressure = left.lowConfidenceCount + left.missingEvidenceCount
-    return rightPressure - leftPressure
-  })
-})
 
 const recordItems = computed<RecordItem[]>(() => {
   return allRecords.value.map((record, index) => {
@@ -445,7 +378,6 @@ const documentTotal = computed(() => allRecords.value.length)
 const documentPending = computed(() => allRecords.value.filter(recordNeedsReview).length)
 const documentLowConfidence = computed(() => allRecords.value.filter(recordLowConfidence).length)
 const documentMissingEvidence = computed(() => allRecords.value.filter(recordNeedsEvidence).length)
-const queueItemCount = computed(() => queueItems.value.length)
 const recordItemCount = computed(() => recordItems.value.length)
 const visibleRecordCount = computed(() => visibleRecordItems.value.length)
 
@@ -4145,18 +4077,6 @@ async function handleApproveAll() {
   }
 }
 
-function queueTone(status: QueueItem['status']) {
-  if (status === 'confirmed') return 'bg-[#e8fff2] text-[#0b9d63]'
-  if (status === 'in_progress') return 'bg-[#edf2ff] text-[#3d56d2]'
-  return 'bg-[#fff4da] text-[#c97a00]'
-}
-
-function queueLabel(status: QueueItem['status']) {
-  if (status === 'confirmed') return '已完成'
-  if (status === 'in_progress') return '处理中'
-  return '待审'
-}
-
 function recordBadge(status: RecordItem['status']) {
   if (status === 'confirmed') return { label: '已确认', className: 'bg-[#e8fff2] text-[#0b9d63]' }
   if (status === 'warning') return { label: '需关注', className: 'bg-[#fff4da] text-[#c97a00]' }
@@ -4233,16 +4153,6 @@ function roughnessTextParts(value: string) {
   >
     <!-- ─── 顶部状态条 ─────────────────────────────────────────────── -->
     <section class="shell-surface flex flex-wrap items-center gap-3 px-4 py-2.5 sm:px-5">
-      <button
-        type="button"
-        class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[#dbe4ef] bg-white text-slate-500 transition hover:bg-[#f8fafc] hover:text-slate-800"
-        :title="inboxCollapsed ? '展开文献列表' : '收起文献列表'"
-        @click="inboxCollapsed = !inboxCollapsed"
-      >
-        <ChevronsRight v-if="inboxCollapsed" class="h-4 w-4" />
-        <ChevronsLeft v-else class="h-4 w-4" />
-      </button>
-
       <div class="min-w-0 flex-1">
         <div class="flex items-center gap-2">
           <FileText class="h-4 w-4 shrink-0 text-[#7d8eaa]" />
@@ -4384,116 +4294,17 @@ function roughnessTextParts(value: string) {
       </div>
     </section>
 
-    <!-- ─── 主区：左 文献列表 / 中 PDF / 右 数据卡片 ──────────── -->
+    <!-- ─── 主区：PDF / 数据记录 ──────────── -->
     <div
       class="grid min-h-0 flex-1 gap-3"
       :class="activeExtractorType === 'diffusion'
-        ? (inboxCollapsed
-            ? 'xl:grid-cols-[3rem_minmax(0,1fr)] xl:grid-rows-[minmax(32rem,1fr)_auto]'
-            : 'xl:grid-cols-[12rem_minmax(0,1fr)] xl:grid-rows-[minmax(32rem,1fr)_auto]')
-        : (inboxCollapsed
-            ? 'xl:grid-cols-[3rem_minmax(0,1fr)_24rem]'
-            : 'xl:grid-cols-[15rem_minmax(0,1fr)_24rem]')"
+        ? 'xl:grid-cols-[minmax(0,1fr)] xl:grid-rows-[minmax(32rem,1fr)_auto]'
+        : 'xl:grid-cols-[minmax(0,1fr)_24rem]'"
     >
-      <!-- ── 左：文献列表 ──────────────────────────────── -->
-      <aside
-        v-if="!inboxCollapsed"
-        class="flex min-h-0 flex-col overflow-hidden rounded-md border border-[#dbe4ef] bg-white shadow-[0_16px_36px_-30px_rgba(15,23,42,0.35)]"
-        :class="activeExtractorType === 'diffusion' ? 'xl:row-span-2' : ''"
-      >
-        <div class="border-b border-[#eef2f6] px-3 py-3">
-          <div class="flex items-center justify-between gap-2">
-            <p class="text-[11px] font-bold uppercase tracking-[0.18em] text-[#8fa0ba]">文献列表</p>
-            <span class="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-md bg-[#eef2ff] px-1.5 text-[11px] font-semibold text-[#5061d1]">
-              {{ queueItemCount }}
-            </span>
-          </div>
-          <div class="relative mt-2">
-            <Search class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-            <input
-              v-model="query"
-              type="text"
-              class="h-8 w-full rounded-md border border-[#dbe4ef] bg-white pl-7 pr-2 text-xs text-slate-700 outline-none placeholder:text-slate-400 focus:border-[#8aa0bd] focus:ring-2 focus:ring-[#dbe4ef]"
-              placeholder="搜索文献..."
-            >
-          </div>
-          <label class="mt-2 inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-600">
-            <input
-              v-model="prioritizeLowConfidence"
-              type="checkbox"
-              class="h-3.5 w-3.5 rounded border-slate-300 text-[#0f172a] focus:ring-[#64748b]"
-            >
-            优先显示低置信度
-          </label>
-        </div>
-
-        <div class="min-h-0 flex-1 space-y-1.5 overflow-y-auto custom-scrollbar p-2">
-          <button
-            v-for="item in queueItems"
-            :key="item.id"
-            type="button"
-              class="w-full rounded-md border px-2.5 py-2 text-left transition"
-              :class="item.selected
-              ? 'border-[#9db1c8] bg-[#f8fafc] ring-1 ring-[#cbd9e8]'
-              : 'border-[#eef2f6] bg-white hover:border-[#cbd9e8] hover:bg-[#f8fafc]'"
-            @click="item.id !== 'empty' && emit('select-file', item.id)"
-          >
-            <div class="flex items-start justify-between gap-1.5">
-              <p
-                class="line-clamp-2 text-xs font-semibold leading-snug"
-                :class="item.selected ? 'text-[#0f172a]' : 'text-slate-800'"
-              >
-                {{ item.name }}
-              </p>
-              <AlertTriangle v-if="item.alert" class="mt-0.5 h-3 w-3 shrink-0 text-[#f5a623]" />
-            </div>
-            <div class="mt-1.5 flex flex-wrap items-center gap-1">
-              <span
-                class="inline-flex rounded-md px-1.5 py-0.5 text-[10px] font-semibold"
-                :class="queueTone(item.status)"
-              >
-                {{ queueLabel(item.status) }}
-              </span>
-              <span class="text-[10px] text-slate-500">{{ item.recordCount }} 条</span>
-              <span
-                v-if="item.lowConfidenceCount + item.missingEvidenceCount"
-                class="text-[10px] font-semibold text-[#cf334f]"
-              >
-                {{ item.lowConfidenceCount + item.missingEvidenceCount }} 待处理
-              </span>
-            </div>
-          </button>
-        </div>
-      </aside>
-
-      <aside
-        v-else
-        class="flex min-h-0 flex-col items-center gap-1.5 overflow-y-auto rounded-md border border-[#dbe4ef] bg-white py-3 shadow-[0_16px_36px_-30px_rgba(15,23,42,0.35)]"
-        :class="activeExtractorType === 'diffusion' ? 'xl:row-span-2' : ''"
-      >
-        <button
-          v-for="item in queueItems"
-          :key="item.id"
-          type="button"
-          class="relative flex h-8 w-8 items-center justify-center rounded-[0.55rem] text-[10px] font-bold uppercase transition"
-          :class="item.selected
-            ? 'bg-[#0f172a] text-white'
-            : 'bg-[#f1f5f9] text-slate-500 hover:bg-[#e2e8f0]'"
-          :title="item.name"
-          @click="item.id !== 'empty' && emit('select-file', item.id)"
-        >
-          {{ item.name.slice(0, 2) }}
-          <span
-            v-if="item.alert"
-            class="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-[#f5a623] ring-2 ring-white"
-          />
-        </button>
-      </aside>
-
       <!-- ── 中：PDF 内联预览 ──────────────────────── -->
       <section
         class="flex min-h-0 flex-col overflow-hidden rounded-md border border-[#dbe4ef] bg-white shadow-[0_16px_36px_-30px_rgba(15,23,42,0.35)]"
-        :class="activeExtractorType === 'diffusion' ? 'min-h-[34rem] xl:col-start-2 xl:row-start-1' : ''"
+        :class="activeExtractorType === 'diffusion' ? 'min-h-[34rem] xl:col-start-1 xl:row-start-1' : ''"
       >
         <div class="flex flex-wrap items-center justify-between gap-2 border-b border-[#eef2f6] px-4 py-2.5">
           <div class="flex min-w-0 items-center gap-2">
@@ -4555,7 +4366,7 @@ function roughnessTextParts(value: string) {
           <div v-else class="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
             <FileText class="h-12 w-12 text-slate-300" />
             <p class="text-sm font-semibold text-slate-700">暂无可预览的 PDF</p>
-            <p class="text-xs text-slate-500">从左侧文献列表选择一篇已提取的论文，即可在此查看原文与高亮。</p>
+            <p class="text-xs text-slate-500">从左侧 Papers 选择一篇已提取的论文，即可在此查看原文与高亮。</p>
           </div>
         </div>
       </section>
@@ -4564,7 +4375,7 @@ function roughnessTextParts(value: string) {
       <aside
         class="flex min-h-0 flex-col rounded-md border border-[#dbe4ef] bg-white shadow-[0_16px_36px_-30px_rgba(15,23,42,0.35)]"
         :class="activeExtractorType === 'diffusion'
-          ? 'overflow-visible xl:col-start-2 xl:row-start-2'
+          ? 'overflow-visible xl:col-start-1 xl:row-start-2'
           : 'overflow-hidden'"
       >
         <div class="border-b border-[#eef2f6] px-4 py-2.5">
