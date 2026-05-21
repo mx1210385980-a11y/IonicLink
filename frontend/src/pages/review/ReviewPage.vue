@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import {
   Check,
   CheckCheck,
@@ -79,6 +79,7 @@ import type { HighlightRect } from '@/types/pdf-highlight'
 
 type PdfViewerBridge = {
   scrollToPage: (page: number) => void
+  scrollToHighlight: (id: string) => void
 }
 
 const PdfViewerWithHighlight = lazyComponent(() => import('@/components/PdfViewerWithHighlight.vue'))
@@ -790,7 +791,29 @@ const highlightedExcerpt = computed(() => {
   return highlightTerms(evidenceExcerpt.value, fieldEvidenceContext.value.specs)
 })
 
-function normalizeResolvedBBox(value: unknown) {
+function normalizeResolvedBBox(value: unknown): [number, number, number, number] | null {
+  if (typeof value === 'string' && value.trim()) {
+    const text = value.trim()
+    try {
+      return normalizeResolvedBBox(JSON.parse(text))
+    } catch {
+      const parts = text.split(/[,\s]+/).map((item) => Number(item)).filter(Number.isFinite)
+      return parts.length >= 4 ? normalizeResolvedBBox(parts) : null
+    }
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const source = value as Record<string, unknown>
+    if ('x0' in source || 'y0' in source || 'x1' in source || 'y1' in source) {
+      return normalizeResolvedBBox([source.x0, source.y0, source.x1, source.y1])
+    }
+    if ('x' in source || 'y' in source || 'w' in source || 'h' in source) {
+      const x = Number(source.x)
+      const y = Number(source.y)
+      const w = Number(source.w)
+      const h = Number(source.h)
+      if ([x, y, w, h].every(Number.isFinite)) return normalizeResolvedBBox([x, y, x + w, y + h])
+    }
+  }
   if (!Array.isArray(value) || value.length < 4) return null
   const coords = value.slice(0, 4).map((item) => Number(item))
   if (!coords.every(Number.isFinite)) return null
@@ -933,6 +956,35 @@ const activeHighlightId = computed(() => {
   const id = `field:${normalizeFieldKey(activeFieldId.value)}`
   return recordHighlights.value.some((h) => h.id === id) ? id : null
 })
+
+const activeEvidenceTargetSignature = computed(() => {
+  const page = activeEvidencePage.value || ''
+  const bbox = activeFieldResolvedEvidence.value?.bbox?.join(',') || ''
+  return [
+    activeRecordId.value,
+    activeFieldId.value,
+    page,
+    bbox,
+    props.pdfUrl || '',
+  ].join('|')
+})
+
+watch(
+  activeEvidenceTargetSignature,
+  async () => {
+    if (!props.pdfUrl) return
+    await nextTick()
+    const highlightId = activeHighlightId.value
+    if (highlightId) {
+      pdfViewerRef.value?.scrollToHighlight(highlightId)
+      return
+    }
+    const page = activeEvidencePage.value
+    if (page && page > 0) {
+      pdfViewerRef.value?.scrollToPage(page)
+    }
+  },
+)
 
 function handleHighlightClick(highlightId: string) {
   const match = highlightId.startsWith('field:') ? highlightId.slice(6) : ''
@@ -4775,7 +4827,7 @@ function roughnessTextParts(value: string) {
                             class="min-h-10 w-full rounded-[0.55rem] border px-2 py-1.5 text-left text-[11px] font-bold leading-snug transition hover:border-[#22c7b8] hover:bg-[#f0fffb]"
                             :class="diffusionTableCellTone(cell)"
                             :title="cell.title"
-                            @click="activeFieldId = cell.fieldId"
+                            @click="activateDiffusionReviewCell(item, cell.fieldId)"
                           >
                             <span class="line-clamp-2 break-words">{{ presentZh(cell.value) }}</span>
                           </button>
