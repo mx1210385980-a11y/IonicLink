@@ -871,6 +871,29 @@ def _dump_manual_diffusion_payload(payload: ManualDiffusionCandidatePayload) -> 
     return payload.dict(by_alias=True, exclude_none=True)
 
 
+def _build_manual_diffusion_source_values(payload: ManualDiffusionCandidatePayload) -> dict[str, Any]:
+    source_values: dict[str, Any] = {}
+    for key, value in {
+        "D_total": payload.d_total,
+        "D_cation": payload.d_cation,
+        "D_anion": payload.d_anion,
+    }.items():
+        if value is None:
+            continue
+        source_values[key] = {
+            "raw_value": value,
+            "raw_unit": payload.d_unit,
+        }
+        evidence = str(payload.evidence or "").strip()
+        if evidence:
+            source_values[key]["raw_text"] = evidence
+        if payload.source_figure:
+            source_values[key]["source_label"] = payload.source_figure
+        if payload.source_page:
+            source_values[key]["source_page"] = payload.source_page
+    return source_values
+
+
 class CofExtractedUpdatePayload(BaseModel):
     cof_extracted: dict[str, Any] | None = Field(None, alias="cofExtracted")
 
@@ -3598,20 +3621,7 @@ async def create_manual_diffusion_candidate(
             {
                 "manual_estimate": True,
                 "source_kind": "figure",
-                "source_values": {
-                    key: {
-                        "raw_value": value,
-                        "raw_unit": payload.d_unit,
-                        "canonical_value": value,
-                        "canonical_unit": payload.d_unit,
-                    }
-                    for key, value in {
-                        "D_total": payload.d_total,
-                        "D_cation": payload.d_cation,
-                        "D_anion": payload.d_anion,
-                    }.items()
-                    if value is not None
-                },
+                "source_values": _build_manual_diffusion_source_values(payload),
             },
             ensure_ascii=False,
         ),

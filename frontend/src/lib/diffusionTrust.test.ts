@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildDiffusionNormalizationWorkbench,
   classifyDiffusionNormalizationState,
   classifyDiffusionSourceTier,
 } from '@/lib/diffusionTrust'
@@ -71,5 +72,62 @@ describe('diffusion trust classification', () => {
       id: 'model_candidate',
       label: '模型候选',
     })
+  })
+
+  it('builds a normalization workbench from backend canonical values without overwriting originals', () => {
+    const record = {
+      D_cation: 1.2,
+      D_unit: '10^-10 m2/s',
+    }
+    const remotePayload = {
+      diffusion_normalization: {
+        status: 'ready',
+        canonical_unit: '10⁻¹² m²/s',
+        canonical_unit_si: 'm²/s',
+        primary_field: 'd_cation',
+        primary: {
+          field: 'd_cation',
+          label: 'D+',
+          status: 'normalized',
+          original_label: '1.2 10^-10 m2/s',
+          value_10e12_m2_s: 120,
+          value_m2_s: 1.2e-10,
+          value_a2_ps: 0.012,
+        },
+        coefficients: {
+          d_cation: {
+            field: 'd_cation',
+            label: 'D+',
+            status: 'normalized',
+            original_label: '1.2 10^-10 m2/s',
+            value_10e12_m2_s: 120,
+            value_m2_s: 1.2e-10,
+            value_a2_ps: 0.012,
+          },
+        },
+      },
+    }
+
+    const workbench = buildDiffusionNormalizationWorkbench(record, remotePayload)
+
+    expect(workbench.state.id).toBe('ready')
+    expect(workbench.primary?.original).toBe('1.2 10⁻¹⁰ m²/s')
+    expect(workbench.primary?.canonical).toBe('120 × 10⁻¹² m²/s')
+    expect(workbench.primary?.si).toBe('1.2 × 10⁻¹⁰ m²/s')
+    expect(workbench.rows).toHaveLength(1)
+    expect(workbench.blockers).toEqual([])
+  })
+
+  it('keeps rows pending when a coefficient has no normalization payload yet', () => {
+    const workbench = buildDiffusionNormalizationWorkbench({
+      record_origin: 'manual_figure_estimate',
+      D_total: 55,
+      D_unit: '10^-12 m2/s',
+    })
+
+    expect(workbench.state.id).toBe('pending')
+    expect(workbench.primary?.original).toBe('55 10⁻¹² m²/s')
+    expect(workbench.primary?.canonical).toBe('--')
+    expect(workbench.blockers.join(' ')).toContain('等待归一化')
   })
 })

@@ -81,8 +81,10 @@ import { normalizePotentialDisplayText } from '@/lib/potential'
 import { lazyComponent } from '@/lib/lazyComponent'
 import { formatScientificUnit, originalDiffusionValueFromText } from '@/lib/diffusionReview'
 import {
+  buildDiffusionNormalizationWorkbench,
   classifyDiffusionNormalizationState,
   classifyDiffusionSourceTier,
+  type DiffusionNormalizationWorkbenchRow,
   type DiffusionNormalizationState,
   type DiffusionSourceTier,
 } from '@/lib/diffusionTrust'
@@ -626,6 +628,11 @@ const activeDiffusionSourceTier = computed(() => {
 const activeDiffusionNormalizationState = computed(() => {
   if (activeExtractorType.value !== 'diffusion' || !activeRecord.value) return null
   return classifyDiffusionNormalizationState(activeRecord.value, activeRecordFieldEvidence.value)
+})
+
+const activeDiffusionNormalizationWorkbench = computed(() => {
+  if (activeExtractorType.value !== 'diffusion' || !activeRecord.value) return null
+  return buildDiffusionNormalizationWorkbench(activeRecord.value, activeRecordFieldEvidence.value)
 })
 
 type ReviewRecordEntityType = 'candidate' | 'record'
@@ -4873,6 +4880,27 @@ function diffusionNormalizationStateClass(state: DiffusionNormalizationState | n
   return 'border-[#d7e0ea] bg-[#f8fafc] text-[#536276]'
 }
 
+function normalizationWorkbenchClass(state: DiffusionNormalizationState | null | undefined) {
+  if (state?.id === 'ready') return 'border-[#cfd8f6] bg-[#f7f8ff]'
+  if (state?.id === 'warning') return 'border-[#f1d8b7] bg-[#fffaf2]'
+  if (state?.id === 'missing') return 'border-[#ecd4d8] bg-[#fff8f9]'
+  return 'border-[#dbe4ef] bg-[#fbfdff]'
+}
+
+function normalizationRowClass(row: DiffusionNormalizationWorkbenchRow) {
+  if (row.status === 'normalized') return 'border-[#dce6f7] bg-white'
+  if (row.status === 'unit_warning') return 'border-[#f1d8b7] bg-[#fffaf2]'
+  if (row.status === 'pending') return 'border-[#dbe4ef] bg-[#f8fafc]'
+  return 'border-[#ecd4d8] bg-[#fff8f9]'
+}
+
+function normalizationStatusPillClass(row: DiffusionNormalizationWorkbenchRow) {
+  if (row.status === 'normalized') return 'bg-[#eef4ff] text-[#354ac4]'
+  if (row.status === 'unit_warning') return 'bg-[#fff0d6] text-[#9a5b00]'
+  if (row.status === 'pending') return 'bg-[#eef2f7] text-[#536276]'
+  return 'bg-[#fff0f2] text-[#a43d51]'
+}
+
 function fieldRowTone(field: ReviewField) {
   if (field.id === activeFieldId.value) return 'border-[#9db1c8] bg-[#f8fafc] ring-1 ring-[#cbd9e8]'
   if (field.status === 'low_conf') return 'border-[#f1ddbd] bg-white hover:border-[#dcc89e]'
@@ -5337,6 +5365,90 @@ function roughnessTextParts(value: string) {
                   </tr>
                 </tbody>
               </table>
+            </div>
+          </section>
+
+          <section
+            v-if="activeDiffusionNormalizationWorkbench"
+            class="shrink-0 overflow-hidden rounded-[0.85rem] border shadow-[0_14px_32px_-30px_rgba(15,23,42,0.45)]"
+            :class="normalizationWorkbenchClass(activeDiffusionNormalizationWorkbench.state)"
+          >
+            <div class="flex items-start justify-between gap-3 border-b border-[#e2e8f0]/80 px-3.5 py-2.5">
+              <div class="min-w-0">
+                <p class="text-[9.5px] font-black uppercase tracking-[0.2em] text-[#536276]">归一化工作台</p>
+                <p class="mt-0.5 truncate text-[12px] font-black text-[#101828]">
+                  {{ activeDiffusionNormalizationWorkbench.title }}
+                </p>
+              </div>
+              <span
+                class="shrink-0 rounded-md border px-2 py-1 text-[10px] font-black"
+                :class="diffusionNormalizationStateClass(activeDiffusionNormalizationWorkbench.state)"
+                :title="activeDiffusionNormalizationWorkbench.state.description"
+              >
+                {{ activeDiffusionNormalizationWorkbench.state.label }}
+              </span>
+            </div>
+
+            <div class="space-y-2 px-3.5 py-2.5">
+              <div
+                v-if="activeDiffusionNormalizationWorkbench.primary"
+                class="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 rounded-[0.7rem] border border-[#dbe4ef] bg-white px-3 py-2"
+              >
+                <div class="min-w-0">
+                  <p class="text-[9px] font-black uppercase tracking-[0.16em] text-[#8fa0ba]">原文值</p>
+                  <p class="mt-0.5 truncate text-[12px] font-black tabular-nums text-[#111827]">
+                    {{ activeDiffusionNormalizationWorkbench.primary.original }}
+                  </p>
+                </div>
+                <div class="flex h-7 w-7 items-center justify-center rounded-full border border-[#dbe4ef] bg-[#f8fafc] text-[12px] font-black text-[#64748b]">
+                  →
+                </div>
+                <div class="min-w-0 text-right">
+                  <p class="text-[9px] font-black uppercase tracking-[0.16em] text-[#8fa0ba]">统一值</p>
+                  <p class="mt-0.5 truncate text-[12px] font-black tabular-nums text-[#0f766e]">
+                    {{ activeDiffusionNormalizationWorkbench.primary.canonical }}
+                  </p>
+                </div>
+              </div>
+
+              <div class="grid gap-1.5">
+                <div
+                  v-for="row in activeDiffusionNormalizationWorkbench.rows"
+                  :key="`normalization-${row.id}`"
+                  class="grid grid-cols-[3.5rem_minmax(0,1fr)_minmax(0,1fr)_4.5rem] items-center gap-2 rounded-[0.55rem] border px-2.5 py-1.5"
+                  :class="normalizationRowClass(row)"
+                >
+                  <div class="text-[10px] font-black text-[#475467]">
+                    {{ row.label }}
+                  </div>
+                  <div class="min-w-0">
+                    <p class="truncate text-[10px] font-bold tabular-nums text-[#334155]">{{ row.original }}</p>
+                  </div>
+                  <div class="min-w-0">
+                    <p class="truncate text-[10px] font-black tabular-nums text-[#0f766e]">{{ row.canonical }}</p>
+                  </div>
+                  <span
+                    class="justify-self-end rounded px-1.5 py-0.5 text-[9px] font-black"
+                    :class="normalizationStatusPillClass(row)"
+                    :title="row.note || row.si"
+                  >
+                    {{ row.statusLabel }}
+                  </span>
+                </div>
+              </div>
+
+              <div
+                v-if="activeDiffusionNormalizationWorkbench.blockers.length"
+                class="rounded-[0.6rem] border border-[#f1d8b7] bg-[#fffaf2] px-2.5 py-1.5"
+              >
+                <p
+                  v-for="blocker in activeDiffusionNormalizationWorkbench.blockers"
+                  :key="blocker"
+                  class="text-[10.5px] font-semibold leading-4 text-[#9a5b00]"
+                >
+                  {{ blocker }}
+                </p>
+              </div>
             </div>
           </section>
 

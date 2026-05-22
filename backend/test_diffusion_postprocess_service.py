@@ -207,6 +207,32 @@ def test_builds_post_review_normalization_payload_from_source_values():
     assert payload["primary"]["value_a2_ps"] == 0.55
 
 
+def test_normalization_uses_raw_source_value_and_unit_when_canonical_is_missing():
+    row = {
+        "system_name": "Graphene slit pore",
+        "ionic_liquid": "[BuPy][NTf2]",
+        "D_cation": 1.2,
+        "D_unit": "10^-10 m2/s",
+        "novel_features_json": {
+            "source_values": {
+                "D_cation": {
+                    "raw_value": 1.2,
+                    "raw_unit": "10^-10 m2/s",
+                    "raw_text": "Estimated from cation curve.",
+                }
+            }
+        },
+    }
+
+    payload = build_diffusion_normalization_payload(row)
+
+    assert payload["status"] == "ready"
+    assert payload["primary_field"] == "d_cation"
+    assert payload["primary"]["original_label"] == "1.2 10^-10 m2/s"
+    assert payload["primary"]["value_10e12_m2_s"] == 120
+    assert payload["primary"]["value_m2_s"] == 1.2e-10
+
+
 def test_diffusion_approval_blockers_require_unit_and_confidence():
     unsupported_unit_row = {
         "system_name": "Graphene slit pore",

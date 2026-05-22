@@ -1,6 +1,7 @@
 from routers.extraction import (
     ManualDiffusionCandidatePayload,
     _build_manual_diffusion_candidate_field_map,
+    _build_manual_diffusion_source_values,
     _no_data_message_for_run,
     _should_wait_for_fresh_extractor_run,
 )
@@ -45,3 +46,19 @@ def test_manual_diffusion_candidate_field_map_marks_graph_estimates_as_figure_ev
     assert field_map["d_cation"]["evidence"]["source_label"] == "Fig. 10"
     assert field_map["d_unit"]["value"] == "10^-10 m2/s"
     assert field_map["diffusing_ion"]["value"] == "cation"
+
+
+def test_manual_diffusion_source_values_keep_raw_value_separate_from_canonical_value():
+    payload = ManualDiffusionCandidatePayload(
+        systemName="[BuPy][NTf2] in graphene slit",
+        dCation=1.2,
+        dUnit="10^-10 m2/s",
+        sourceFigure="Fig. 4",
+    )
+
+    source_values = _build_manual_diffusion_source_values(payload)
+
+    assert source_values["D_cation"]["raw_value"] == 1.2
+    assert source_values["D_cation"]["raw_unit"] == "10^-10 m2/s"
+    assert "canonical_value" not in source_values["D_cation"]
+    assert "canonical_unit" not in source_values["D_cation"]
