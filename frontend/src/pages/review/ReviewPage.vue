@@ -12,6 +12,7 @@ import {
   Gauge,
   Layers,
   Loader2,
+  Plus,
   RefreshCw,
   Send,
 } from 'lucide-vue-next'
@@ -25,6 +26,7 @@ import {
   confirmDiffusionRecordFieldEvidence,
   confirmCandidateFieldEvidence,
   confirmRecordFieldEvidence,
+  createManualDiffusionCandidate,
   flagDiffusionCandidateFieldEvidence,
   flagDiffusionRecordFieldEvidence,
   flagCandidateFieldEvidence,
@@ -78,6 +80,10 @@ import { getIonicLiquidEvidenceParts, getIonicLiquidEvidenceTerms } from '@/lib/
 import { normalizePotentialDisplayText } from '@/lib/potential'
 import { lazyComponent } from '@/lib/lazyComponent'
 import { formatScientificUnit, originalDiffusionValueFromText } from '@/lib/diffusionReview'
+import {
+  buildManualDiffusionCandidatePayload,
+  type ManualDiffusionCoefficientField,
+} from '@/lib/manualDiffusionEstimate'
 import { reviewNoDataDiagnostic } from '@/lib/reviewNoData'
 import type { HighlightRect } from '@/types/pdf-highlight'
 
@@ -272,6 +278,21 @@ const systemEditFrictionRegime = ref('unstated')
 const systemEditContactGeometry = ref('')
 const systemEditScale = ref('')
 const systemEditError = ref('')
+const manualEstimateOpen = ref(false)
+const manualEstimateSaving = ref(false)
+const manualEstimateError = ref('')
+const manualEstimateSystemName = ref('')
+const manualEstimateIonicLiquid = ref('')
+const manualEstimateDiffusingIon = ref('')
+const manualEstimateCoefficientField = ref<ManualDiffusionCoefficientField>('d_total')
+const manualEstimateCoefficientValue = ref('')
+const manualEstimateUnit = ref('10^-10 m2/s')
+const manualEstimatePage = ref('')
+const manualEstimateFigure = ref('')
+const manualEstimateEvidence = ref('')
+const manualEstimateTemperature = ref('')
+const manualEstimateScaleValue = ref('')
+const manualEstimateScaleUnit = ref('')
 const pdfViewerRef = ref<PdfViewerBridge | null>(null)
 const pdfPageInput = ref('')
 const pdfPageCount = ref(0)
@@ -866,6 +887,11 @@ const canReextractCurrentFile = computed(() => {
   const file = selectedReviewFile.value
   return Boolean(file?.id && file.id !== 'empty' && props.reextractFile && !isReextractingCurrentFile.value)
 })
+const canCreateManualDiffusionCandidate = computed(() => Boolean(
+  activeLiteratureId.value
+  && selectedReviewExtractorType.value === 'diffusion'
+  && !manualEstimateSaving.value,
+))
 
 const activeRecordIndex = computed(() => visibleRecordItems.value.findIndex((item) => item.id === activeRecordId.value))
 const hasPrevRecord = computed(() => activeRecordIndex.value > 0)
@@ -1235,6 +1261,69 @@ async function handleSubmitForGroupReview() {
     submissionError.value = String(error?.response?.data?.detail || error?.message || '提交审核失败')
   } finally {
     submissionPending.value = false
+  }
+}
+
+function openManualEstimateDialog() {
+  if (!activeLiteratureId.value || selectedReviewExtractorType.value !== 'diffusion') return
+  manualEstimateError.value = ''
+  manualEstimateOpen.value = true
+  manualEstimateSystemName.value = trim(manualEstimateSystemName.value) || activeDocumentName.value.replace(/\.pdf$/i, '')
+  manualEstimateIonicLiquid.value = trim(manualEstimateIonicLiquid.value)
+  manualEstimateDiffusingIon.value = trim(manualEstimateDiffusingIon.value)
+  manualEstimateCoefficientField.value = manualEstimateCoefficientField.value || 'd_total'
+  manualEstimateUnit.value = trim(manualEstimateUnit.value) || '10^-10 m2/s'
+  manualEstimatePage.value = trim(manualEstimatePage.value) || trim(pdfPageInput.value)
+}
+
+function closeManualEstimateDialog() {
+  if (manualEstimateSaving.value) return
+  manualEstimateOpen.value = false
+  manualEstimateError.value = ''
+}
+
+async function saveManualEstimate() {
+  const literatureId = activeLiteratureId.value
+  if (!literatureId || manualEstimateSaving.value) return
+
+  manualEstimateSaving.value = true
+  manualEstimateError.value = ''
+  try {
+    const payload = buildManualDiffusionCandidatePayload({
+      systemName: manualEstimateSystemName.value,
+      ionicLiquid: manualEstimateIonicLiquid.value,
+      diffusingIon: manualEstimateDiffusingIon.value,
+      coefficientField: manualEstimateCoefficientField.value,
+      coefficientValue: manualEstimateCoefficientValue.value,
+      dUnit: manualEstimateUnit.value,
+      sourcePage: manualEstimatePage.value,
+      sourceFigure: manualEstimateFigure.value,
+      evidence: manualEstimateEvidence.value,
+      temperatureValue: manualEstimateTemperature.value,
+      confinementScaleValue: manualEstimateScaleValue.value,
+      confinementScaleUnit: manualEstimateScaleUnit.value,
+    })
+    const record = await createManualDiffusionCandidate(literatureId, payload)
+    const file = selectedReviewFile.value
+    if (file) {
+      if (!Array.isArray(file.records)) file.records = []
+      file.records.push(record)
+      file.status = 'success'
+      file.progress = 100
+      file.extractor_type = 'diffusion'
+      file.errorMessage = undefined
+      file.progressMessage = '已添加图表估读候选记录'
+    }
+    activeRecordId.value = String(record.id || '')
+    activeFieldId.value = manualEstimateCoefficientField.value
+    activeRecordEvidence.value = null
+    activeRecordFieldEvidence.value = null
+    reviewActionError.value = ''
+    manualEstimateOpen.value = false
+  } catch (error: any) {
+    manualEstimateError.value = String(error?.response?.data?.detail || error?.message || '图表估读记录保存失败')
+  } finally {
+    manualEstimateSaving.value = false
   }
 }
 
@@ -3983,11 +4072,12 @@ function originalDiffusionEvidenceForField(
 ) {
   const sourceValue = diffusionSourceValue(record, fieldId)
   const fieldEntry = fieldMap?.[fieldId]
-  return originalDiffusionValueFromText(fieldEntry?.evidence?.matched_text)
-    || originalDiffusionValueFromText((fieldEntry?.evidence as Record<string, unknown> | undefined)?.matchedText)
-    || originalDiffusionValueFromText(fieldEntry?.evidence?.quote)
-    || originalDiffusionValueFromText(sourceValue?.raw_text)
+  return originalDiffusionValueFromText(sourceValue?.raw_text)
     || originalDiffusionValueFromText(sourceValue?.raw_value)
+    || originalDiffusionValueFromText(fieldEntry?.evidence?.matched_text)
+    || originalDiffusionValueFromText((fieldEntry?.evidence as Record<string, unknown> | undefined)?.matchedText)
+    || originalDiffusionValueFromText(fieldEntry?.value)
+    || originalDiffusionValueFromText(fieldEntry?.evidence?.quote)
 }
 
 function diffusionReviewValueForField(
@@ -5223,6 +5313,16 @@ function roughnessTextParts(value: string) {
               <p class="max-w-[26rem] text-xs font-medium leading-relaxed text-[#63748d]">
                 {{ emptyReviewDiagnostic.message }}
               </p>
+              <button
+                v-if="selectedReviewExtractorType === 'diffusion'"
+                type="button"
+                class="mt-2 inline-flex items-center gap-1.5 rounded-md border border-[#bfdbd4] bg-[#f2fffb] px-3 py-2 text-xs font-black text-[#0f766e] transition hover:border-[#8bd6c8] hover:bg-[#e7fbf6] disabled:cursor-not-allowed disabled:opacity-60"
+                :disabled="!canCreateManualDiffusionCandidate"
+                @click="openManualEstimateDialog"
+              >
+                <Plus class="h-3.5 w-3.5" />
+                图表估读录入
+              </button>
             </template>
             <template v-else>
               <FileText class="h-8 w-8 text-slate-300" />
@@ -5806,6 +5906,16 @@ function roughnessTextParts(value: string) {
                   {{ hint }}
                 </span>
               </div>
+              <button
+                v-if="selectedReviewExtractorType === 'diffusion'"
+                type="button"
+                class="mt-2 inline-flex items-center gap-1.5 rounded-md border border-[#bfdbd4] bg-white px-3 py-2 text-xs font-black text-[#0f766e] transition hover:border-[#8bd6c8] hover:bg-[#f2fffb] disabled:cursor-not-allowed disabled:opacity-60"
+                :disabled="!canCreateManualDiffusionCandidate"
+                @click="openManualEstimateDialog"
+              >
+                <Plus class="h-3.5 w-3.5" />
+                图表估读录入
+              </button>
             </template>
             <template v-else>
               <FileText class="h-8 w-8 text-slate-300" />
@@ -5929,6 +6039,163 @@ function roughnessTextParts(value: string) {
             <Loader2 v-if="reviewActionPending === 'approve-all' || reviewActionPending?.startsWith('approve:')" class="h-3.5 w-3.5 animate-spin" />
             <CheckCheck v-else class="h-3.5 w-3.5" />
             确认入库
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div
+      v-if="manualEstimateOpen"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4"
+      @click.self="closeManualEstimateDialog"
+    >
+      <section class="w-full max-w-3xl overflow-hidden rounded-lg border border-[#dbe4f2] bg-white shadow-xl">
+        <div class="border-b border-[#eef2f6] px-5 py-4">
+          <p class="text-[11px] font-black uppercase tracking-[0.18em] text-[#0f766e]">Figure Estimate</p>
+          <p class="mt-1 text-base font-black text-slate-950">图表估读录入</p>
+          <p class="mt-1 max-w-2xl text-xs font-semibold leading-5 text-slate-500">
+            只记录原文坐标读出的值；归一化留到后续模块处理。
+          </p>
+        </div>
+        <div class="grid gap-4 p-5">
+          <div class="grid gap-3 md:grid-cols-[1.1fr_0.9fr]">
+            <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+              体系名
+              <input
+                v-model="manualEstimateSystemName"
+                class="h-10 rounded-lg border border-[#dbe4f2] bg-[#fbfcff] px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-[#7ccfbe] focus:ring-2 focus:ring-[#d8f5ed]"
+                placeholder="[BuPy][NTf2] in graphene slit"
+              >
+            </label>
+            <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+              离子液体
+              <input
+                v-model="manualEstimateIonicLiquid"
+                class="h-10 rounded-lg border border-[#dbe4f2] bg-[#fbfcff] px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-[#7ccfbe] focus:ring-2 focus:ring-[#d8f5ed]"
+                placeholder="[BuPy][NTf2]"
+              >
+            </label>
+          </div>
+
+          <div class="grid gap-3 md:grid-cols-[0.8fr_1fr_1fr]">
+            <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+              物种
+              <input
+                v-model="manualEstimateDiffusingIon"
+                class="h-10 rounded-lg border border-[#dbe4f2] bg-[#fbfcff] px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-[#7ccfbe] focus:ring-2 focus:ring-[#d8f5ed]"
+                placeholder="cation / anion / overall"
+              >
+            </label>
+            <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+              字段
+              <select
+                v-model="manualEstimateCoefficientField"
+                class="h-10 rounded-lg border border-[#dbe4f2] bg-[#fbfcff] px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-[#7ccfbe] focus:ring-2 focus:ring-[#d8f5ed]"
+              >
+                <option value="d_total">D total</option>
+                <option value="d_cation">D+</option>
+                <option value="d_anion">D-</option>
+              </select>
+            </label>
+            <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+              扩散值
+              <input
+                v-model="manualEstimateCoefficientValue"
+                inputmode="decimal"
+                class="h-10 rounded-lg border border-[#dbe4f2] bg-[#fbfcff] px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-[#7ccfbe] focus:ring-2 focus:ring-[#d8f5ed]"
+                placeholder="1.2"
+              >
+            </label>
+          </div>
+
+          <div class="grid gap-3 md:grid-cols-[1fr_0.7fr_1fr]">
+            <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+              单位
+              <input
+                v-model="manualEstimateUnit"
+                class="h-10 rounded-lg border border-[#dbe4f2] bg-[#fbfcff] px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-[#7ccfbe] focus:ring-2 focus:ring-[#d8f5ed]"
+                placeholder="10^-10 m2/s"
+              >
+            </label>
+            <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+              页码
+              <input
+                v-model="manualEstimatePage"
+                inputmode="numeric"
+                class="h-10 rounded-lg border border-[#dbe4f2] bg-[#fbfcff] px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-[#7ccfbe] focus:ring-2 focus:ring-[#d8f5ed]"
+                placeholder="6"
+              >
+            </label>
+            <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+              图号
+              <input
+                v-model="manualEstimateFigure"
+                class="h-10 rounded-lg border border-[#dbe4f2] bg-[#fbfcff] px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-[#7ccfbe] focus:ring-2 focus:ring-[#d8f5ed]"
+                placeholder="Fig. 10"
+              >
+            </label>
+          </div>
+
+          <div class="grid gap-3 md:grid-cols-[0.8fr_0.8fr_0.8fr]">
+            <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+              温度
+              <input
+                v-model="manualEstimateTemperature"
+                inputmode="decimal"
+                class="h-10 rounded-lg border border-[#dbe4f2] bg-[#fbfcff] px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-[#7ccfbe] focus:ring-2 focus:ring-[#d8f5ed]"
+                placeholder="298"
+              >
+            </label>
+            <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+              限域尺度
+              <input
+                v-model="manualEstimateScaleValue"
+                inputmode="decimal"
+                class="h-10 rounded-lg border border-[#dbe4f2] bg-[#fbfcff] px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-[#7ccfbe] focus:ring-2 focus:ring-[#d8f5ed]"
+                placeholder="4.09"
+              >
+            </label>
+            <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+              尺度单位
+              <input
+                v-model="manualEstimateScaleUnit"
+                class="h-10 rounded-lg border border-[#dbe4f2] bg-[#fbfcff] px-3 text-sm font-semibold text-slate-800 outline-none transition focus:border-[#7ccfbe] focus:ring-2 focus:ring-[#d8f5ed]"
+                placeholder="nm"
+              >
+            </label>
+          </div>
+
+          <label class="grid gap-1.5 text-xs font-bold text-slate-600">
+            证据备注
+            <textarea
+              v-model="manualEstimateEvidence"
+              class="min-h-20 rounded-lg border border-[#dbe4f2] bg-[#fbfcff] px-3 py-2 text-sm font-semibold leading-5 text-slate-800 outline-none transition focus:border-[#7ccfbe] focus:ring-2 focus:ring-[#d8f5ed]"
+              placeholder="Estimated from the cation curve at d = 4 nm."
+            />
+          </label>
+
+          <p v-if="manualEstimateError" class="rounded-lg border border-[#fecdd3] bg-[#fff8f9] px-3 py-2 text-xs font-semibold text-[#be123c]">
+            {{ manualEstimateError }}
+          </p>
+        </div>
+        <div class="flex items-center justify-end gap-2 border-t border-[#eef2f6] bg-[#fbfdff] px-5 py-3">
+          <button
+            type="button"
+            class="rounded-lg border border-[#dbe4f2] px-3 py-2 text-xs font-bold text-slate-600 transition hover:bg-white"
+            :disabled="manualEstimateSaving"
+            @click="closeManualEstimateDialog"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-md bg-[#0f766e] px-3.5 py-2 text-xs font-black text-white transition hover:bg-[#115e59] disabled:cursor-not-allowed disabled:bg-[#cbd5e1]"
+            :disabled="manualEstimateSaving"
+            @click="saveManualEstimate"
+          >
+            <Loader2 v-if="manualEstimateSaving" class="h-3.5 w-3.5 animate-spin" />
+            <Plus v-else class="h-3.5 w-3.5" />
+            加入审阅
           </button>
         </div>
       </section>

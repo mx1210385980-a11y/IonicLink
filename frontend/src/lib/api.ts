@@ -7,6 +7,7 @@ import {
     getSessionToken,
     type AuthUser,
 } from './session'
+import type { ManualDiffusionCandidatePayload } from './manualDiffusionEstimate'
 
 export const API_BASE_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
 export type ExtractorType = 'tribology' | 'diffusion'
@@ -485,6 +486,14 @@ export async function approveDiffusionReviewCandidate(candidateId: number): Prom
 
 export async function approveDiffusionReviewRecord(recordId: number): Promise<RecordFieldEvidenceResponse> {
     const response = await api.post(`/api/review/diffusion-records/${recordId}/approve`)
+    return response.data
+}
+
+export async function createManualDiffusionCandidate(
+    literatureId: number,
+    payload: ManualDiffusionCandidatePayload,
+): Promise<TribologyData> {
+    const response = await api.post(`/api/review/literature/${literatureId}/diffusion-candidates/manual`, payload)
     return response.data
 }
 

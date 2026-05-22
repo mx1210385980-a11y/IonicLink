@@ -5,6 +5,7 @@ import re
 from datetime import datetime, timedelta
 from time import perf_counter
 from typing import Any, List
+from uuid import uuid4
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, Request
 import base64
 from fastapi.responses import FileResponse
@@ -18,6 +19,7 @@ from models.db_models import (
     DiffusionCandidate,
     DiffusionFeatureSet,
     DiffusionRecord,
+    ExtractionRun,
     Literature,
     RecordCandidate,
     TribologyData as TribologyDataDB,
@@ -68,6 +70,7 @@ from services.diffusion.diffusion_postprocess_service import (
     build_diffusion_normalization_payload,
     build_diffusion_standard_fields,
     diffusion_normalization_blockers,
+    serialize_diffusion_row_for_response,
 )
 from services.agent_runtime_service import get_agent_runtime
 from services.activity_logging_service import log_activity
@@ -841,6 +844,33 @@ class ReviewFieldActionPayload(BaseModel):
     note: str | None = None
 
 
+class ManualDiffusionCandidatePayload(BaseModel):
+    system_name: str | None = Field(None, alias="systemName")
+    ionic_liquid: str | None = Field(None, alias="ionicLiquid")
+    diffusing_ion: str | None = Field(None, alias="diffusingIon")
+    d_total: float | None = Field(None, alias="dTotal")
+    d_cation: float | None = Field(None, alias="dCation")
+    d_anion: float | None = Field(None, alias="dAnion")
+    d_unit: str | None = Field(None, alias="dUnit")
+    temperature_value: float | None = Field(None, alias="temperatureValue")
+    confinement_scale_value: float | None = Field(None, alias="confinementScaleValue")
+    confinement_scale_unit: str | None = Field(None, alias="confinementScaleUnit")
+    source_page: int | None = Field(None, alias="sourcePage")
+    source_figure: str | None = Field(None, alias="sourceFigure")
+    evidence: str | None = None
+    note: str | None = None
+    confidence: float | None = None
+
+    class Config:
+        populate_by_name = True
+
+
+def _dump_manual_diffusion_payload(payload: ManualDiffusionCandidatePayload) -> dict[str, Any]:
+    if hasattr(payload, "model_dump"):
+        return payload.model_dump(by_alias=True, exclude_none=True)
+    return payload.dict(by_alias=True, exclude_none=True)
+
+
 class CofExtractedUpdatePayload(BaseModel):
     cof_extracted: dict[str, Any] | None = Field(None, alias="cofExtracted")
 
@@ -1140,6 +1170,54 @@ def _format_diffusion_numeric(value: Any) -> Any:
     return value
 
 
+def _manual_diffusion_note(payload: ManualDiffusionCandidatePayload) -> str:
+    return (payload.evidence or payload.note or "Manual figure estimate").strip()
+
+
+def _manual_diffusion_source_label(payload: ManualDiffusionCandidatePayload) -> str:
+    return (payload.source_figure or "Figure estimate").strip()
+
+
+def _manual_diffusion_evidence(payload: ManualDiffusionCandidatePayload) -> dict[str, Any]:
+    return {
+        "source_type": "figure",
+        "page": payload.source_page,
+        "source_label": _manual_diffusion_source_label(payload),
+        "quote": _manual_diffusion_note(payload),
+    }
+
+
+def _build_manual_diffusion_candidate_field_map(payload: ManualDiffusionCandidatePayload) -> dict[str, Any]:
+    evidence = _manual_diffusion_evidence(payload)
+    confidence = float(payload.confidence if payload.confidence is not None else 0.62)
+    field_map: dict[str, Any] = {}
+
+    def add_entry(field_key: str, value: Any, *, mode: str = "explicit") -> None:
+        if value in (None, "", [], {}):
+            return
+        field_map[field_key] = {
+            "value": value,
+            "confidence": confidence,
+            "evidence": evidence,
+            "grounding_mode": mode,
+            "grounding_note": "Manual graph estimate; verify against the figure before approval.",
+            "review_state": "pending",
+        }
+
+    add_entry("system_name", payload.system_name)
+    add_entry("ionic_liquid", payload.ionic_liquid)
+    add_entry("diffusing_ion", payload.diffusing_ion)
+    add_entry("d_total", payload.d_total, mode="derived")
+    add_entry("d_cation", payload.d_cation, mode="derived")
+    add_entry("d_anion", payload.d_anion, mode="derived")
+    add_entry("d_unit", payload.d_unit)
+    add_entry("temperature_value", payload.temperature_value)
+    add_entry("confinement_scale_value", payload.confinement_scale_value)
+    add_entry("confinement_scale_unit", payload.confinement_scale_unit)
+    add_entry("source_page", f"Page {payload.source_page}" if payload.source_page else None)
+    return field_map
+
+
 def _diffusion_row_dict_from_record(record: Any) -> dict[str, Any]:
     return {
         "system_name": getattr(record, "system_name", None),
@@ -1356,6 +1434,33 @@ def _build_diffusion_field_evidence_payload(record: Any) -> dict[str, Any]:
         "confidence": float(confidence_details.get("score") or 0.0),
         "confidence_details": confidence_details,
     }
+
+
+def _diffusion_record_response_payload(record: Any) -> dict[str, Any]:
+    response = serialize_diffusion_row_for_response(
+        {
+            **_diffusion_row_dict_from_record(record),
+            "provider": getattr(record, "provider", None),
+            "prompt_version": getattr(record, "prompt_version", None),
+            "raw_model_output": getattr(record, "raw_model_output", None),
+            "field_evidence_json": _parse_field_evidence_map(getattr(record, "field_evidence_json", None)),
+            "review_status": getattr(record, "review_status", None),
+            "record_origin": getattr(record, "record_origin", None),
+            "assembly_notes": getattr(record, "assembly_notes", None),
+        },
+        row_id=getattr(record, "id", None),
+    )
+    review_entity_type = "candidate" if isinstance(record, DiffusionCandidate) else "record"
+    response["literature_id"] = getattr(record, "literature_id", None)
+    response["literatureId"] = getattr(record, "literature_id", None)
+    response["extractor_type"] = "diffusion"
+    response["review_entity_type"] = review_entity_type
+    response["reviewEntityType"] = review_entity_type
+    promoted_record_id = getattr(record, "promoted_record_id", None)
+    if promoted_record_id:
+        response["promoted_record_id"] = promoted_record_id
+        response["promotedRecordId"] = promoted_record_id
+    return response
 
 
 def _field_has_review_value(entry: dict[str, Any]) -> bool:
@@ -3450,6 +3555,116 @@ async def get_diffusion_candidate_field_evidence(
 ):
     candidate = await require_diffusion_candidate_access(db, principal, candidate_id)
     return _build_diffusion_field_evidence_payload(candidate)
+
+
+@router.post("/review/literature/{literature_id}/diffusion-candidates/manual")
+async def create_manual_diffusion_candidate(
+    literature_id: int,
+    payload: ManualDiffusionCandidatePayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    literature = await require_literature_access(db, principal, literature_id, write=True)
+    if not any(value is not None for value in (payload.d_total, payload.d_cation, payload.d_anion)):
+        raise HTTPException(status_code=422, detail="At least one diffusion coefficient value is required.")
+    if not (payload.d_unit or "").strip():
+        raise HTTPException(status_code=422, detail="Diffusion unit is required.")
+
+    field_map = _build_manual_diffusion_candidate_field_map(payload)
+    confidence = float(payload.confidence if payload.confidence is not None else 0.62)
+    candidate = DiffusionCandidate(
+        literature_id=literature.id,
+        system_name=payload.system_name,
+        ionic_liquid=payload.ionic_liquid,
+        d_total=payload.d_total,
+        d_cation=payload.d_cation,
+        d_anion=payload.d_anion,
+        d_unit=payload.d_unit,
+        temperature_value=payload.temperature_value,
+        confinement_scale_value=payload.confinement_scale_value,
+        confinement_scale_unit=payload.confinement_scale_unit,
+        source=_manual_diffusion_source_label(payload),
+        source_page=payload.source_page,
+        evidence=_manual_diffusion_note(payload),
+        provider="human_review",
+        prompt_version="manual.figure_estimate.v1",
+        raw_model_output=json.dumps(_dump_manual_diffusion_payload(payload), ensure_ascii=False),
+        field_evidence_json=json.dumps(field_map, ensure_ascii=False),
+        review_status="pending_review",
+        record_origin="manual_figure_estimate",
+        confidence=confidence,
+        novel_features_json=json.dumps(
+            {
+                "manual_estimate": True,
+                "source_kind": "figure",
+                "source_values": {
+                    key: {
+                        "raw_value": value,
+                        "raw_unit": payload.d_unit,
+                        "canonical_value": value,
+                        "canonical_unit": payload.d_unit,
+                    }
+                    for key, value in {
+                        "D_total": payload.d_total,
+                        "D_cation": payload.d_cation,
+                        "D_anion": payload.d_anion,
+                    }.items()
+                    if value is not None
+                },
+            },
+            ensure_ascii=False,
+        ),
+    )
+    _recompute_diffusion_review_status(candidate, field_map)
+    db.add(candidate)
+    await db.flush()
+
+    literature.status = "completed"
+    literature.error_message = None
+    db.add(
+        ExtractionRun(
+            run_id=f"manual-diffusion-{uuid4().hex[:12]}",
+            literature_id=literature.id,
+            extractor_type="diffusion",
+            profile="manual_figure_estimate",
+            status="completed",
+            candidate_count=1,
+            final_count=0,
+            dropped_by_reason=json.dumps({}, ensure_ascii=False),
+            page_coverage=json.dumps({"manual_entry": 1}, ensure_ascii=False),
+            summary_json=json.dumps(
+                {
+                    "current_message": "Manual figure estimate added for review.",
+                    "progress_log": [
+                        {
+                            "stage": "manual.figure_estimate",
+                            "message": "Reviewer added a graph-estimated diffusion candidate.",
+                            "page": payload.source_page,
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        )
+    )
+    await db.commit()
+    await db.refresh(candidate)
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="edit_record",
+        action_detail={
+            "candidate_id": candidate.id,
+            "literature_id": literature.id,
+            "review_action": "create_manual_diffusion_candidate",
+        },
+        resource_type="diffusion_candidate",
+        resource_id=candidate.id,
+        request=request,
+    )
+    return _diffusion_record_response_payload(candidate)
 
 
 @router.get("/review/diffusion-candidates/{candidate_id}/field-evidence/{field_key}")
