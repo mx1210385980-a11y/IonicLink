@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   Bot,
   CheckCircle2,
@@ -15,7 +15,24 @@ import {
 } from 'lucide-vue-next'
 
 import { useI18n } from '@/composables/useI18n'
-import type { AgentMessage, AgentWorkflow, BatchFile, ExtractionRunDetail, ExtractorType } from '@/lib/api'
+import {
+  listDiffusionLibrary,
+  listLiterature,
+  type AgentMessage,
+  type AgentWorkflow,
+  type BatchFile,
+  type DiffusionLibraryRecord,
+  type ExtractionRunDetail,
+  type ExtractorType,
+  type Literature,
+} from '@/lib/api'
+import {
+  extractionHistoryRecordCount,
+  recentDiffusionLiteratureHistory,
+  recentExtractionHistory,
+  recentLiteratureHistory,
+  type DiffusionLiteratureHistory,
+} from '@/lib/pipelineHistory'
 
 const props = defineProps<{
   currentSection: string
@@ -53,6 +70,7 @@ const emit = defineEmits([
   'send-chat',
   'update-sidebar-tab',
   'open-review',
+  'open-review-target',
   'clear-doi',
   'set-default-extractor-type',
   'set-file-extractor-type',
@@ -103,10 +121,30 @@ type ExtractorOption = {
   badgeClass: string
 }
 
+type ExtractionHistoryItem = {
+  id: string
+  literatureId?: number
+  name: string
+  badgeLabel: string
+  badgeClass: string
+  meta: string
+  isSelected: boolean
+  origin: 'session' | 'library'
+}
+
+const RECENT_EXTRACTION_HISTORY_LIMIT = 5
+const RECENT_EXTRACTION_LIBRARY_LOOKUP_LIMIT = 100
+const HISTORY_REFRESH_INTERVAL_MS = 60_000
+
 const searchQuery = ref('')
 const statusFilter = ref<PipelineFilter>('all')
 const fileInput = ref<HTMLInputElement | null>(null)
+const libraryExtractionHistory = ref<Literature[]>([])
+const diffusionExtractionHistory = ref<DiffusionLibraryRecord[]>([])
+const libraryHistoryLoading = ref(false)
+const libraryHistoryError = ref('')
 const { isChinese } = useI18n()
+let historyRefreshTimer: ReturnType<typeof setInterval> | null = null
 const extractorOptions = computed<ExtractorOption[]>(() => [
   {
     key: 'tribology',
@@ -498,6 +536,128 @@ const inspectorSummary = computed(() => ({
   scope: props.activeScopeLabel,
 }))
 
+const sessionExtractionHistoryItems = computed<ExtractionHistoryItem[]>(() => (
+  recentExtractionHistory(props.files, RECENT_EXTRACTION_HISTORY_LIMIT).map((file) => ({
+    id: file.id,
+    name: file.name,
+    badgeLabel: extractorLabel(file.extractor_type || props.defaultExtractorType),
+    badgeClass: extractorBadgeClass(file.extractor_type || props.defaultExtractorType),
+    meta: historyMeta(file),
+    isSelected: file.id === props.activeId || file.id === props.selectedFileId || file.id === selectedQueueFile.value?.id,
+    origin: 'session',
+  }))
+))
+
+const libraryExtractionHistoryItems = computed<ExtractionHistoryItem[]>(() => (
+  recentLiteratureHistory(
+    libraryExtractionHistory.value.filter(hasTribologyLiteratureRecords),
+    RECENT_EXTRACTION_HISTORY_LIMIT,
+  ).map((literature) => ({
+    id: `library-${literature.id}`,
+    literatureId: literature.id,
+    name: literature.title || literature.doi || `Literature ${literature.id}`,
+    badgeLabel: isChinese.value ? '润滑' : 'Tribology',
+    badgeClass: 'border-blue-100 bg-blue-50/60 text-blue-600',
+    meta: literatureHistoryMeta(literature, 'tribology'),
+    isSelected: String(literature.id) === props.selectedFileId,
+    origin: 'library',
+  }))
+))
+
+const literatureDiffusionHistoryItems = computed<ExtractionHistoryItem[]>(() => (
+  recentLiteratureHistory(
+    libraryExtractionHistory.value.filter(hasDiffusionLiteratureRecords),
+    RECENT_EXTRACTION_HISTORY_LIMIT,
+  ).map((literature) => ({
+    id: `literature-diffusion-${literature.id}`,
+    literatureId: literature.id,
+    name: literature.title || literature.doi || `Literature ${literature.id}`,
+    badgeLabel: isChinese.value ? '扩散' : 'Diffusion',
+    badgeClass: 'border-emerald-100 bg-emerald-50/70 text-emerald-700',
+    meta: literatureHistoryMeta(literature, 'diffusion'),
+    isSelected: String(literature.id) === props.selectedFileId,
+    origin: 'library',
+  }))
+))
+
+const diffusionExtractionHistoryItems = computed<ExtractionHistoryItem[]>(() => (
+  recentDiffusionLiteratureHistory(diffusionExtractionHistory.value, RECENT_EXTRACTION_HISTORY_LIMIT).map((item) => ({
+    id: `diffusion-${item.literatureId}`,
+    literatureId: item.literatureId,
+    name: item.title || item.doi || `Literature ${item.literatureId}`,
+    badgeLabel: isChinese.value ? '扩散' : 'Diffusion',
+    badgeClass: 'border-emerald-100 bg-emerald-50/70 text-emerald-700',
+    meta: diffusionHistoryMeta(item),
+    isSelected: String(item.literatureId) === props.selectedFileId,
+    origin: 'library',
+  }))
+))
+
+const extractionHistoryItems = computed<ExtractionHistoryItem[]>(() => {
+  const seen = new Set<string>()
+  const items: ExtractionHistoryItem[] = []
+  const addItems = (nextItems: ExtractionHistoryItem[], maxItems = RECENT_EXTRACTION_HISTORY_LIMIT) => {
+    let added = 0
+    for (const item of nextItems) {
+      const key = item.literatureId ? String(item.literatureId) : item.id
+      if (seen.has(key)) continue
+      seen.add(key)
+      items.push(item)
+      added += 1
+      if (added >= maxItems || items.length >= RECENT_EXTRACTION_HISTORY_LIMIT) break
+    }
+  }
+
+  const diffusionItems = [
+    ...diffusionExtractionHistoryItems.value,
+    ...literatureDiffusionHistoryItems.value,
+  ]
+
+  addItems(sessionExtractionHistoryItems.value)
+  addItems(diffusionItems, Math.min(2, RECENT_EXTRACTION_HISTORY_LIMIT))
+  addItems(libraryExtractionHistoryItems.value)
+  addItems(diffusionItems)
+  return items
+})
+
+async function refreshLibraryExtractionHistory() {
+  libraryHistoryLoading.value = true
+  libraryHistoryError.value = ''
+  const [literatureResult, diffusionResult] = await Promise.allSettled([
+    listLiterature(0, RECENT_EXTRACTION_LIBRARY_LOOKUP_LIMIT),
+    listDiffusionLibrary('', 0, RECENT_EXTRACTION_LIBRARY_LOOKUP_LIMIT),
+  ])
+
+  if (literatureResult.status === 'fulfilled') {
+    libraryExtractionHistory.value = literatureResult.value
+  }
+  if (diffusionResult.status === 'fulfilled') {
+    diffusionExtractionHistory.value = diffusionResult.value.items
+  }
+
+  const failed = [literatureResult, diffusionResult].find((result) => result.status === 'rejected') as PromiseRejectedResult | undefined
+  libraryHistoryError.value = failed?.reason?.message || ''
+  libraryHistoryLoading.value = false
+}
+
+onMounted(() => {
+  void refreshLibraryExtractionHistory()
+  historyRefreshTimer = setInterval(() => {
+    void refreshLibraryExtractionHistory()
+  }, HISTORY_REFRESH_INTERVAL_MS)
+})
+
+onBeforeUnmount(() => {
+  if (historyRefreshTimer) {
+    clearInterval(historyRefreshTimer)
+    historyRefreshTimer = null
+  }
+})
+
+watch(() => props.sessionScopeKey, () => {
+  void refreshLibraryExtractionHistory()
+})
+
 function triggerUpload() {
   fileInput.value?.click()
 }
@@ -514,6 +674,15 @@ function triggerCancelSelected() {
   const file = selectedQueueFile.value
   if (!file || !canCancelSelected.value) return
   emit('cancel-extraction', file.id)
+}
+
+function openHistoryItem(item: ExtractionHistoryItem) {
+  if (item.literatureId) {
+    emit('open-review-target', { literatureId: item.literatureId })
+    return
+  }
+  emit('select-file', item.id)
+  emit('open-review', item.id)
 }
 
 function setActiveExtractor(extractorType: ExtractorType) {
@@ -564,6 +733,67 @@ function extractorBadgeClass(extractorType?: ExtractorType | string | null) {
   const normalized = extractorType === 'diffusion' ? 'diffusion' : 'tribology'
   return extractorOptions.value.find((option) => option.key === normalized)?.badgeClass
     || 'border-slate-200 bg-slate-50 text-slate-600'
+}
+
+function historyMeta(file: BatchFile) {
+  const count = Array.isArray(file.records) ? file.records.length : 0
+  const recordText = count === 1
+    ? (isChinese.value ? '1 条记录' : '1 record')
+    : (isChinese.value ? `${count} 条记录` : `${count} records`)
+  const statusText = isChinese.value ? '已抽取' : 'extracted'
+  const message = String(file.progressMessage || '').trim()
+  return message && count === 0 ? `${statusText} · ${message}` : `${statusText} · ${recordText}`
+}
+
+function literatureCountForKind(literature: Literature, kind: 'tribology' | 'diffusion') {
+  if (kind === 'diffusion') {
+    return Math.max(0, Number(literature.diffusionRecordCount || 0))
+      + Math.max(0, Number(literature.diffusionCandidateCount || 0))
+  }
+  const explicitCount = Math.max(0, Number(literature.tribologyRecordCount || 0))
+    + Math.max(0, Number(literature.tribologyCandidateCount || 0))
+  return explicitCount || extractionHistoryRecordCount(literature)
+}
+
+function hasDiffusionLiteratureRecords(literature: Literature) {
+  return literatureCountForKind(literature, 'diffusion') > 0
+}
+
+function hasTribologyLiteratureRecords(literature: Literature) {
+  const hasTypedCounts = literature.tribologyRecordCount != null
+    || literature.tribologyCandidateCount != null
+    || literature.diffusionRecordCount != null
+    || literature.diffusionCandidateCount != null
+  if (hasTypedCounts) return literatureCountForKind(literature, 'tribology') > 0
+  return extractionHistoryRecordCount(literature) > 0
+}
+
+function literatureHistoryMeta(literature: Literature, kind: 'tribology' | 'diffusion') {
+  const count = literatureCountForKind(literature, kind)
+  const unit = kind === 'diffusion'
+    ? (isChinese.value ? '条扩散记录' : 'diffusion rows')
+    : (isChinese.value ? '条记录' : 'records')
+  const recordText = count === 1
+    ? (kind === 'diffusion' ? (isChinese.value ? '1 条扩散记录' : '1 diffusion row') : (isChinese.value ? '1 条记录' : '1 record'))
+    : `${count} ${unit}`
+  const dateText = shortHistoryDate(literature.reviewedAt || literature.submittedAt || (literature as any).createdAt || literature.created_at)
+  return dateText
+    ? `${isChinese.value ? '已抽取' : 'extracted'} · ${recordText} · ${dateText}`
+    : `${isChinese.value ? '已抽取' : 'extracted'} · ${recordText}`
+}
+
+function diffusionHistoryMeta(item: DiffusionLiteratureHistory) {
+  const recordText = item.recordCount === 1
+    ? (isChinese.value ? '1 条扩散记录' : '1 diffusion row')
+    : (isChinese.value ? `${item.recordCount} 条扩散记录` : `${item.recordCount} diffusion rows`)
+  return `${isChinese.value ? '已抽取' : 'extracted'} · ${recordText}`
+}
+
+function shortHistoryDate(value?: string | null) {
+  const parsed = value ? Date.parse(String(value)) : Number.NaN
+  if (!Number.isFinite(parsed)) return ''
+  const date = new Date(parsed)
+  return `${date.getMonth() + 1}/${date.getDate()}`
 }
 
 function queueWeight(file: BatchFile) {
@@ -864,6 +1094,38 @@ function logToneClass(tone: InspectorLog['tone']) {
               {{ pageCopy.selected }}:
               <span class="font-semibold text-slate-800">{{ selectedQueueFile?.name || pageCopy.noSelection }}</span>
             </span>
+          </div>
+
+          <div v-if="extractionHistoryItems.length" class="mt-4 border-t border-slate-100 pt-3">
+            <div class="flex items-center justify-between gap-3">
+              <p class="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                {{ isChinese ? '历史提取文献' : 'Recent Extractions' }}
+              </p>
+              <span class="shrink-0 text-[10px] font-semibold text-slate-400">
+                {{ isChinese ? '近 5 条' : 'Last 5' }}
+              </span>
+            </div>
+
+            <div class="mt-2 flex gap-2 overflow-x-auto pb-1">
+              <button
+                v-for="item in extractionHistoryItems"
+                :key="item.id"
+                type="button"
+                class="group flex min-w-[13rem] max-w-[15.5rem] items-center gap-2 rounded-md border border-slate-100 bg-white/70 px-2.5 py-2 text-left text-slate-500 transition hover:border-slate-200 hover:bg-white hover:text-slate-800"
+                :class="item.isSelected ? 'border-slate-200 bg-slate-50 text-slate-800' : ''"
+                :title="item.name"
+                @click="openHistoryItem(item)"
+              >
+                <FileText class="h-3.5 w-3.5 shrink-0 text-slate-300 transition group-hover:text-slate-500" />
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-xs font-semibold">{{ item.name }}</span>
+                  <span class="mt-0.5 block truncate text-[11px] text-slate-400">{{ item.meta }}</span>
+                </span>
+                <span class="shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold" :class="item.badgeClass">
+                  {{ item.badgeLabel }}
+                </span>
+              </button>
+            </div>
           </div>
         </div>
 

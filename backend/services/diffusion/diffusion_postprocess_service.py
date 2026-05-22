@@ -67,6 +67,10 @@ def _normalize_unicode_text(value: Any) -> str:
     return text
 
 
+def _normalize_exponent_label(value: Any) -> str:
+    return re.sub(r"\s+", "", _normalize_unicode_text(value))
+
+
 def _to_float(value: Any) -> float | None:
     if value in (None, ""):
         return None
@@ -75,13 +79,13 @@ def _to_float(value: Any) -> float | None:
 
     text = _normalize_unicode_text(value)
     sci_match = re.search(
-        r"([-+]?\d+(?:\.\d+)?)\s*(?:x|\*)\s*10\s*(?:\^)?\s*([-+]?\d+)",
+        r"([-+]?\d+(?:\.\d+)?)\s*(?:x|\*)\s*10\s*(?:\^\s*)?([-+]?\s*\d+)",
         text,
         flags=re.IGNORECASE,
     )
     if sci_match:
         try:
-            return float(sci_match.group(1)) * (10 ** int(sci_match.group(2)))
+            return float(sci_match.group(1)) * (10 ** int(_normalize_exponent_label(sci_match.group(2))))
         except Exception:
             pass
 
@@ -177,13 +181,14 @@ def _extract_diffusion_measures_from_text(text: Any) -> list[dict[str, Any]]:
     sci_pattern = re.compile(
         r"\(?\s*([-+]?\d+(?:\.\d+)?)"
         r"(?:\s*(?:±|\+/-)\s*[-+]?\d+(?:\.\d+)?)?"
-        r"\s*\)?\s*(?:x|\*)\s*10\s*(?:\^)?\s*([-+]?\d+)\s*"
-        r"((?:10\s*(?:\^)?\s*-?\d+\s*)?(?:m|cm|a|A|Å|å|angstrom|Angstrom)\s*(?:\^?2|2)\s*(?:/|/?s)?\s*(?:s|ps|ns)?\s*(?:-?1)?)",
+        r"\s*\)?\s*(?:x|\*)\s*10\s*(?:\^\s*)?([-+]?\s*\d+)\s*"
+        r"((?:10\s*(?:\^\s*)?[-+]?\s*\d+\s*)?(?:m|cm|a|A|Å|å|angstrom|Angstrom)\s*(?:\^?2|2)\s*(?:/|/?s)?\s*(?:s|ps|ns)?\s*(?:-?1)?)",
         flags=re.IGNORECASE,
     )
     for match in sci_pattern.finditer(normalized):
+        exponent = _normalize_exponent_label(match.group(2))
         try:
-            raw_value = float(match.group(1)) * (10 ** int(match.group(2)))
+            raw_value = float(match.group(1)) * (10 ** int(exponent))
         except Exception:
             continue
         unit = match.group(3).strip()
@@ -195,7 +200,7 @@ def _extract_diffusion_measures_from_text(text: Any) -> list[dict[str, Any]]:
                 "value": normalized_value,
                 "unit": normalized_unit,
                 "raw_text": match.group(0).strip(),
-                "raw_value_label": f"{match.group(1)} x 10^{match.group(2)}",
+                "raw_value_label": f"{match.group(1)} x 10^{exponent}",
                 "raw_unit": unit,
                 "start": match.start(),
                 "end": match.end(),
@@ -207,11 +212,14 @@ def _extract_diffusion_measures_from_text(text: Any) -> list[dict[str, Any]]:
 
     plain_pattern = re.compile(
         r"([-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*"
-        r"((?:10\s*(?:\^)?\s*-?\d+\s*)?(?:m|cm|a|A|Å|å|angstrom|Angstrom)\s*(?:\^?2|2)\s*(?:/|/?s)?\s*(?:s|ps|ns)?\s*(?:-?1)?)",
+        r"((?:10\s*(?:\^\s*)?[-+]?\s*\d+\s*)?(?:m|cm|a|A|Å|å|angstrom|Angstrom)\s*(?:\^?2|2)\s*(?:/|/?s)?\s*(?:s|ps|ns)?\s*(?:-?1)?)",
         flags=re.IGNORECASE,
     )
     for match in plain_pattern.finditer(normalized):
         if any(match.start() >= item["start"] and match.end() <= item["end"] for item in measures):
+            continue
+        numeric = _to_float(match.group(1))
+        if numeric is None or numeric <= 0:
             continue
         normalized_value, normalized_unit = _normalize_diffusion_unit_and_value(match.group(1), match.group(2))
         if normalized_value is None or not normalized_unit:
@@ -240,7 +248,7 @@ def _pick_evidence_measure_for_field(measures: list[dict[str, Any]], field_key: 
     field_terms = {
         "D_cation": ("cation", "cationic", "positive ion"),
         "D_anion": ("anion", "anionic", "negative ion", "cl-", "cl−"),
-        "D_total": ("total", "self-diffusion", "self diffusion", "diffusion coefficient"),
+        "D_total": ("total", "d_tot", "d tot", "self-diffusion", "self diffusion", "diffusion coefficient"),
     }.get(field_key, ())
     if not field_terms:
         return None
@@ -656,6 +664,30 @@ def build_diffusion_normalization_payload(row: dict[str, Any]) -> dict[str, Any]
         "warning_count": len([value for value in coefficients.values() if value.get("status") == "unit_warning"]),
         "warnings": warnings,
     }
+
+
+def diffusion_normalization_blockers(
+    row: dict[str, Any],
+    *,
+    confidence_score: Any = None,
+    low_confidence_threshold: float = 0.55,
+) -> list[str]:
+    normalization = build_diffusion_normalization_payload(row)
+    blockers: list[str] = []
+    status = str(normalization.get("status") or "").strip().lower()
+    primary = normalization.get("primary") if isinstance(normalization.get("primary"), dict) else {}
+    primary_status = str(primary.get("status") or "").strip().lower() if isinstance(primary, dict) else ""
+
+    if status == "missing" or not primary:
+        blockers.append("No normalizable diffusion coefficient is available.")
+    elif status != "ready" or primary_status != "normalized":
+        blockers.append("Diffusion coefficient unit must be confirmed before approval.")
+
+    score = _to_float(confidence_score)
+    if score is not None and float(score) < low_confidence_threshold:
+        blockers.append(f"Confidence score is below {low_confidence_threshold:.2f}.")
+
+    return blockers
 
 
 def apply_diffusion_standard_fields(row: dict[str, Any]) -> dict[str, Any]:

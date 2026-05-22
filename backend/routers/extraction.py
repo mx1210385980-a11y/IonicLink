@@ -64,7 +64,11 @@ from services.extraction_trace_service import (
     list_extraction_candidates,
 )
 from services.extraction_trace_service import get_latest_extraction_run_by_literature
-from services.diffusion.diffusion_postprocess_service import build_diffusion_standard_fields
+from services.diffusion.diffusion_postprocess_service import (
+    build_diffusion_normalization_payload,
+    build_diffusion_standard_fields,
+    diffusion_normalization_blockers,
+)
 from services.agent_runtime_service import get_agent_runtime
 from services.activity_logging_service import log_activity
 from services.score_service import calculate_confidence_details
@@ -1140,6 +1144,10 @@ def _diffusion_standard_fields_from_record(record: Any) -> dict[str, Any]:
     return {**build_diffusion_standard_fields(row), **standard}
 
 
+def _diffusion_normalization_from_record(record: Any) -> dict[str, Any]:
+    return build_diffusion_normalization_payload(_diffusion_row_dict_from_record(record))
+
+
 def _diffusion_standard_value(standard_fields: dict[str, Any], field_key: str) -> Any:
     if field_key == "side_chain":
         return standard_fields.get("side_chain_label")
@@ -1219,6 +1227,7 @@ def _build_diffusion_conditions_entry(field_map: dict[str, Any], record: Any) ->
 def _build_diffusion_field_evidence_payload(record: Any) -> dict[str, Any]:
     field_map = _parse_field_evidence_map(getattr(record, "field_evidence_json", None))
     standard_fields = _diffusion_standard_fields_from_record(record)
+    normalization = _diffusion_normalization_from_record(record)
     review_entity_type = "candidate" if isinstance(record, DiffusionCandidate) else "record"
     promoted_record_id = getattr(record, "promoted_record_id", None) if review_entity_type == "candidate" else None
     promoted_at = getattr(record, "promoted_at", None) if review_entity_type == "candidate" else None
@@ -1313,6 +1322,8 @@ def _build_diffusion_field_evidence_payload(record: Any) -> dict[str, Any]:
         "required_fields": list(_DIFFUSION_CORE_FACT_KEYS),
         "diffusion_standard_fields": standard_fields,
         "diffusionStandardFields": standard_fields,
+        "diffusion_normalization": normalization,
+        "diffusionNormalization": normalization,
         "fields": normalized_fields,
         "confidence": float(confidence_details.get("score") or 0.0),
         "confidence_details": confidence_details,
@@ -1371,6 +1382,13 @@ def _diffusion_has_blocking_flag(field_map: dict[str, Any]) -> bool:
     if not coefficient_candidates:
         return False
     return all(str((entry or {}).get("review_state") or "").strip().lower() == "flagged" for entry in coefficient_candidates)
+
+
+def _diffusion_approval_blockers(record: Any, review_payload: dict[str, Any]) -> list[str]:
+    return diffusion_normalization_blockers(
+        _diffusion_row_dict_from_record(record),
+        confidence_score=review_payload.get("confidence"),
+    )
 
 
 def _recompute_diffusion_review_status(record: Any, field_map: dict[str, Any], *, approved: bool = False) -> None:
@@ -1489,7 +1507,6 @@ async def serve_pdf(
         path=pdf_path,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": "inline",
             "X-Content-Type-Options": "nosniff",
         },
     )
@@ -3357,7 +3374,8 @@ async def approve_diffusion_record_review(
 ):
     record = await require_diffusion_record_access(db, principal, record_id, write=True)
     field_map = _parse_field_evidence_map(record.field_evidence_json)
-    review_field_map = _build_diffusion_field_evidence_payload(record)["fields"]
+    review_payload = _build_diffusion_field_evidence_payload(record)
+    review_field_map = review_payload["fields"]
     missing_required = _diffusion_missing_required_fields(review_field_map)
     if missing_required:
         raise HTTPException(
@@ -3368,6 +3386,12 @@ async def approve_diffusion_record_review(
         raise HTTPException(
             status_code=422,
             detail="Record cannot be approved while flagged core diffusion facts remain",
+        )
+    normalization_blockers = _diffusion_approval_blockers(record, review_payload)
+    if normalization_blockers:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Record cannot be approved. {' '.join(normalization_blockers)}",
         )
 
     _recompute_diffusion_review_status(record, field_map, approved=True)
@@ -3564,7 +3588,8 @@ async def approve_diffusion_candidate_review(
 ):
     candidate = await require_diffusion_candidate_access(db, principal, candidate_id, write=True)
     field_map = _parse_field_evidence_map(candidate.field_evidence_json)
-    review_field_map = _build_diffusion_field_evidence_payload(candidate)["fields"]
+    review_payload = _build_diffusion_field_evidence_payload(candidate)
+    review_field_map = review_payload["fields"]
     missing_required = _diffusion_missing_required_fields(review_field_map)
     if missing_required:
         raise HTTPException(
@@ -3575,6 +3600,12 @@ async def approve_diffusion_candidate_review(
         raise HTTPException(
             status_code=422,
             detail="Candidate cannot be approved while flagged core diffusion facts remain",
+        )
+    normalization_blockers = _diffusion_approval_blockers(candidate, review_payload)
+    if normalization_blockers:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Candidate cannot be approved. {' '.join(normalization_blockers)}",
         )
 
     _recompute_diffusion_review_status(candidate, field_map, approved=True)

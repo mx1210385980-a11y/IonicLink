@@ -35,6 +35,19 @@ The backend is a FastAPI application providing RESTful APIs.
 
 ## Common Development Tasks
 
+## Remote Synchronization
+
+All local code changes for this repository should be synchronized to the remote server after verification.
+
+- **Server**: `root@47.82.82.215`
+- **SSH alias/key**: use the local `ioniclink` SSH host alias, which points to `~/.ssh/ioniclink_deploy`.
+- **Remote directory**: `/opt/ioniclink/repo`
+- **Deploy command**:
+  ```bash
+  IONICLINK_HOST=ioniclink IONICLINK_REMOTE_DIR=/opt/ioniclink/repo scripts/deploy-server.sh all
+  ```
+- The deployment script intentionally excludes runtime data such as dependency folders, backend data, and temporary uploads.
+
 ### Frontend
 
 - **Install Dependencies**:

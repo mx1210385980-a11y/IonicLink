@@ -53,6 +53,8 @@ import {
   type BatchFile,
   type ConfidenceDetails,
   type CofExtracted,
+  type DiffusionNormalizationCoefficient,
+  type DiffusionNormalizationPayload,
   type DiffusionStandardFields,
   type EvidenceResult,
   type ExtractorType,
@@ -75,11 +77,13 @@ import { canonicalExperimentScaleValue, experimentScaleLabel } from '@/lib/exper
 import { getIonicLiquidEvidenceParts, getIonicLiquidEvidenceTerms } from '@/lib/ionicLiquidAliasKnowledge'
 import { normalizePotentialDisplayText } from '@/lib/potential'
 import { lazyComponent } from '@/lib/lazyComponent'
+import { formatScientificUnit, originalDiffusionValueFromText } from '@/lib/diffusionReview'
 import type { HighlightRect } from '@/types/pdf-highlight'
 
 type PdfViewerBridge = {
   scrollToPage: (page: number) => void
   scrollToHighlight: (id: string) => void
+  openPdfInNewTab: () => Promise<void>
   captureHighlight: (id: string, padding?: number) => Promise<string | null>
   captureEvidenceTarget: (request: {
     page?: number | null
@@ -210,6 +214,19 @@ type DiffusionReviewLensOption = {
   fieldIds: string[]
 }
 
+type DiffusionApprovalPreviewRow = {
+  id: string
+  recordLabel: string
+  system: string
+  original: string
+  normalized: string
+  si: string
+  status: 'ready' | 'blocked'
+  statusLabel: string
+  confidencePercent: number
+  blockers: string[]
+}
+
 type EvidenceSearchMode = 'loose' | 'exact-token' | 'numeric'
 
 type EvidenceSearchSpec = {
@@ -230,6 +247,8 @@ const activeRecordFieldEvidence = ref<RecordFieldEvidenceResponse | null>(null)
 const fieldEvidenceCache = ref<Record<string, RecordFieldEvidenceResponse | null>>({})
 const reviewActionPending = ref<string | null>(null)
 const reviewActionError = ref('')
+const approvalPreviewRecords = ref<TribologyData[]>([])
+const approvalPreviewError = ref('')
 const reextractingFileId = ref<string | null>(null)
 const cofEditRecord = ref<TribologyData | null>(null)
 const cofEditJson = ref('')
@@ -541,6 +560,10 @@ function jumpToPdfPage() {
   pdfPageInput.value = String(targetPage)
   pdfPageError.value = ''
   pdfViewerRef.value?.scrollToPage(targetPage)
+}
+
+function openPdfPreviewInNewTab() {
+  void pdfViewerRef.value?.openPdfInNewTab()
 }
 
 const activeExtractorType = computed<ExtractorType>(() => {
@@ -2038,7 +2061,7 @@ function formatDiffusionNumber(value: number | null | undefined) {
   return `${Number(value).toPrecision(4)}`.replace(/\.?0+e/, 'e').replace(/\.?0+$/, '')
 }
 
-function toSuperscript(value: string) {
+function toReviewSuperscript(value: string) {
   const superscriptDigits: Record<string, string> = {
     '0': '⁰',
     '1': '¹',
@@ -2056,75 +2079,10 @@ function toSuperscript(value: string) {
   return Array.from(value).map((char) => superscriptDigits[char] || char).join('')
 }
 
-function formatScientificUnit(value: string | null | undefined) {
-  const text = trim(value)
-  if (!text) return 'Not captured yet'
-
-  return text
-    .replace(/10\s*\^?\s*([+-]?\d+)/g, (_match, exponent: string) => `10${toSuperscript(exponent)}`)
-    .replace(/([A-Za-zÅμµ])2(?=\/)/g, '$1²')
-    .replace(/([A-Za-zÅμµ])\^2(?=\/)/g, '$1²')
-    .replace(/ps-1/g, 'ps⁻¹')
-    .replace(/s-1/g, 's⁻¹')
-}
-
-function normalizeScientificExponent(value: string) {
+function normalizeReviewExponent(value: string) {
   return trim(value)
     .replace(/[−–—]/g, '-')
-    .replace(/[⁺₊]/g, '+')
-    .replace(/[⁻₋]/g, '-')
-    .replace(/[⁰₀]/g, '0')
-    .replace(/[¹₁]/g, '1')
-    .replace(/[²₂]/g, '2')
-    .replace(/[³₃]/g, '3')
-    .replace(/[⁴₄]/g, '4')
-    .replace(/[⁵₅]/g, '5')
-    .replace(/[⁶₆]/g, '6')
-    .replace(/[⁷₇]/g, '7')
-    .replace(/[⁸₈]/g, '8')
-    .replace(/[⁹₉]/g, '9')
-}
-
-type OriginalDiffusionEvidenceValue = {
-  value: string
-  unit: string
-  mantissa: string
-  uncertainty: string
-}
-
-function normalizeDiffusionSourceText(value: string) {
-  return trim(value)
-    .replace(/[−–—]/g, '-')
-    .replace(/\s+/g, ' ')
-}
-
-function originalDiffusionValueFromText(value: unknown): OriginalDiffusionEvidenceValue | null {
-  const text = normalizeDiffusionSourceText(String(value || ''))
-  if (!text) return null
-
-  const focused = text.match(/\bas\b(.+?)(?:\bat\b|\bin\b|;|$)/i)?.[1] || text
-  const pattern = /\(?\s*([-+]?\d+(?:\.\d+)?)\s*(?:±\s*([-+]?\d+(?:\.\d+)?))?\s*\)?\s*(?:[×x*]\s*10\s*([−–—+\-]?\d+|[⁺⁻]?[⁰¹²³⁴⁵⁶⁷⁸⁹]+))?\s*([A-Za-zÅμµ²^0-9·./⁻¹\-]+)?/g
-  const candidates: Array<OriginalDiffusionEvidenceValue & { score: number }> = []
-  let match: RegExpExecArray | null
-  while ((match = pattern.exec(focused)) !== null) {
-    const mantissa = trim(match[1])
-    if (!mantissa) continue
-    const unit = formatScientificUnit(trim(match[4] || ''))
-    const exponent = normalizeScientificExponent(match[3] || '')
-    const valueText = exponent ? `${mantissa} × 10${toSuperscript(exponent)}` : mantissa
-    const score = (exponent ? 4 : 0)
-      + (match[2] ? 3 : 0)
-      + (unit !== 'Not captured yet' ? 2 : 0)
-      + (mantissa.includes('.') ? 1 : 0)
-    candidates.push({
-      value: valueText,
-      unit,
-      mantissa,
-      uncertainty: trim(match[2] || ''),
-      score,
-    })
-  }
-  return candidates.sort((left, right) => right.score - left.score)[0] || null
+    .replace(/\s+/g, '')
 }
 
 function hasAnyDiffusionCoefficient(record: TribologyData | null | undefined) {
@@ -2174,8 +2132,9 @@ function diffusionEvidenceHasExplicitNumericMeasure(value: unknown) {
     .replace(/\s+/g, ' ')
     .trim()
   if (!text) return false
-  const unitPattern = String.raw`(?:10\s*\^?\s*-?\d+\s*)?(?:m|cm|a|A|Å|å|angstrom|Angstrom)\s*(?:\^?2|2)\s*(?:\/\s*(?:s|ps|ns)|(?:s|ps|ns)\s*-?1|\/?s\s*-?1?)`
-  const scientific = new RegExp(String.raw`\d+(?:\.\d+)?(?:\s*(?:±|\+\/-)\s*\d+(?:\.\d+)?)?\s*(?:x|\*)\s*10\s*\^?\s*-?\d+\s*${unitPattern}`, 'i')
+  const exponentPattern = String.raw`(?:\^\s*)?[+-]?\s*\d+`
+  const unitPattern = String.raw`(?:10\s*${exponentPattern}\s*)?(?:m|cm|a|A|Å|å|angstrom|Angstrom)\s*(?:\^?2|2)\s*(?:\/\s*(?:s|ps|ns)|(?:s|ps|ns)\s*-?1|\/?s\s*-?1?)`
+  const scientific = new RegExp(String.raw`\d+(?:\.\d+)?(?:\s*(?:±|\+\/-)\s*\d+(?:\.\d+)?)?\s*(?:x|\*)\s*10\s*${exponentPattern}\s*${unitPattern}`, 'i')
   const plain = new RegExp(String.raw`\d+(?:\.\d+)?(?:[eE][-+]?\d+)?\s*${unitPattern}`, 'i')
   return scientific.test(text) || plain.test(text)
 }
@@ -2538,6 +2497,10 @@ function syncRecordReviewState(recordId: string, payload: RecordFieldEvidenceRes
     if (payload.diffusion_standard_fields || payload.diffusionStandardFields) {
       record.diffusion_standard_fields = payload.diffusion_standard_fields || payload.diffusionStandardFields
       record.diffusionStandardFields = payload.diffusionStandardFields || payload.diffusion_standard_fields
+    }
+    if (payload.diffusion_normalization || payload.diffusionNormalization) {
+      record.diffusion_normalization = payload.diffusion_normalization || payload.diffusionNormalization
+      record.diffusionNormalization = payload.diffusionNormalization || payload.diffusion_normalization
     }
     record.review_status = payload.review_status || undefined
     record.record_origin = payload.record_origin || record.record_origin
@@ -3894,6 +3857,119 @@ function firstDiffusionSourceValue(record: TribologyData | null | undefined): Re
     .find((value) => value && typeof value === 'object') || null
 }
 
+function plainObject(value: unknown): Record<string, any> {
+  if (!value) return {}
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value)
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+    } catch {
+      return {}
+    }
+  }
+  return typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {}
+}
+
+function diffusionNormalizationForRecord(
+  record: TribologyData | null | undefined,
+  remotePayload?: RecordFieldEvidenceResponse | null,
+): DiffusionNormalizationPayload {
+  const features = plainObject(record?.novel_features_json)
+  const nested = plainObject(features.diffusion_normalization || features.diffusionNormalization)
+  const direct = plainObject((record as any)?.diffusion_normalization || (record as any)?.diffusionNormalization)
+  const remote = plainObject(remotePayload?.diffusion_normalization || remotePayload?.diffusionNormalization)
+  return { ...nested, ...direct, ...remote } as DiffusionNormalizationPayload
+}
+
+function normalizationCoefficientForRecord(
+  record: TribologyData | null | undefined,
+  key: 'd_total' | 'd_cation' | 'd_anion',
+  remotePayload?: RecordFieldEvidenceResponse | null,
+) {
+  const payload = diffusionNormalizationForRecord(record, remotePayload)
+  const coefficients = plainObject(payload.coefficients)
+  return plainObject(coefficients[key]) as DiffusionNormalizationCoefficient
+}
+
+function coefficientStatus(coefficient: DiffusionNormalizationCoefficient | null | undefined) {
+  return trim(coefficient?.status).toLowerCase()
+}
+
+function primaryNormalizationCoefficientForRecord(
+  record: TribologyData | null | undefined,
+  remotePayload?: RecordFieldEvidenceResponse | null,
+): DiffusionNormalizationCoefficient | null {
+  const payload = diffusionNormalizationForRecord(record, remotePayload)
+  const direct = plainObject(payload.primary) as DiffusionNormalizationCoefficient
+  if (coefficientStatus(direct)) return direct
+  for (const key of ['d_total', 'd_anion', 'd_cation'] as const) {
+    const coefficient = normalizationCoefficientForRecord(record, key, remotePayload)
+    if (['normalized', 'unit_warning'].includes(coefficientStatus(coefficient))) return coefficient
+  }
+  return null
+}
+
+function coefficientNumber(coefficient: DiffusionNormalizationCoefficient | null | undefined, ...keys: string[]) {
+  const source = coefficient as Record<string, unknown> | null | undefined
+  if (!source) return null
+  for (const key of keys) {
+    const value = source[key]
+    if (value === null || value === undefined || value === '') continue
+    const parsed = Number(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return null
+}
+
+function prettifyDiffusionLabel(value: unknown) {
+  return trim(value)
+    .replace(/\s*[x*×]\s*10\s*(?:\^\s*)?([+\-−]?\s*\d+)/gi, (_match, exponent: string) => ` × 10${toReviewSuperscript(normalizeReviewExponent(exponent))}`)
+    .replace(/A2|Å2|A\^2|Å\^2/g, 'Å²')
+    .replace(/m2|m\^2/g, 'm²')
+    .replace(/ps-1|ps\^-1|ps⁻1/g, 'ps⁻¹')
+    .replace(/s-1|s\^-1|s⁻1/g, 's⁻¹')
+}
+
+function formatScientificScalar(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return '--'
+  const numeric = Number(value)
+  if (numeric === 0) return '0'
+  const exponent = Math.floor(Math.log10(Math.abs(numeric)))
+  const mantissa = numeric / Math.pow(10, exponent)
+  return `${formatDiffusionNumber(mantissa)} × 10${toReviewSuperscript(String(exponent))}`
+}
+
+function diffusionApprovalPreviewRow(
+  record: TribologyData,
+  remotePayload?: RecordFieldEvidenceResponse | null,
+  index = 0,
+): DiffusionApprovalPreviewRow {
+  const primary = primaryNormalizationCoefficientForRecord(record, remotePayload)
+  const confidence = recordConfidenceScore(record)
+  const confidencePercent = Math.round(confidence * 100)
+  const value10e12 = coefficientNumber(primary, 'value_10e12_m2_s', 'value10e12M2S', 'canonical_value', 'canonicalValue')
+  const valueSi = coefficientNumber(primary, 'value_m2_s', 'valueM2S')
+  const blockers = diffusionApprovalBlockers(record, remotePayload)
+  const originalLabel = prettifyDiffusionLabel(primary?.original_label || primary?.originalLabel)
+    || diffusionCoefficientReviewSummary(record, resolveRecordFieldEvidenceMap(record, remotePayload?.fields))
+  const normalizedLabel = value10e12 == null
+    ? prettifyDiffusionLabel(primary?.canonical_label || primary?.canonicalLabel) || '--'
+    : `${formatDiffusionNumber(value10e12)} × 10⁻¹² m²/s`
+
+  return {
+    id: String(record.id || `record-${index + 1}`),
+    recordLabel: `Record ${index + 1}`,
+    system: present(record.system_name),
+    original: originalLabel,
+    normalized: normalizedLabel,
+    si: valueSi == null ? '--' : `${formatScientificScalar(valueSi)} m²/s`,
+    status: blockers.length ? 'blocked' : 'ready',
+    statusLabel: blockers.length ? '已阻断' : '可入库',
+    confidencePercent,
+    blockers,
+  }
+}
+
 function originalDiffusionEvidenceForField(
   record: TribologyData | null | undefined,
   fieldId: string,
@@ -4066,9 +4142,62 @@ function recordApprovalBlockedReason(record: TribologyData | null | undefined, r
   return '当前记录仍有未完成的审核字段。'
 }
 
+function diffusionApprovalBlockers(record: TribologyData | null | undefined, remotePayload?: RecordFieldEvidenceResponse | null) {
+  if (!record || recordExtractorType(record) !== 'diffusion') return []
+
+  const blockers: string[] = []
+  const remoteFields = remotePayload?.fields || null
+  const coreBlocker = recordApprovalBlockedReason(record, remoteFields)
+  if (coreBlocker) blockers.push(coreBlocker)
+
+  const normalization = diffusionNormalizationForRecord(record, remotePayload)
+  const primary = primaryNormalizationCoefficientForRecord(record, remotePayload)
+  const normalizationStatus = trim(normalization.status).toLowerCase()
+  const primaryStatus = coefficientStatus(primary)
+  if (!primary || normalizationStatus === 'missing') {
+    blockers.push('没有可换算的扩散系数。')
+  } else if (normalizationStatus !== 'ready' || primaryStatus !== 'normalized') {
+    blockers.push('扩散系数单位未确认，先不要入库。')
+  }
+
+  const confidence = recordConfidenceScore(record)
+  if (confidence < 0.55) {
+    blockers.push(`置信度 ${Math.round(confidence * 100)}%，低于入库阈值 55%。`)
+  }
+
+  return Array.from(new Set(blockers.filter(Boolean)))
+}
+
 const approvalBlockedReason = computed(() => {
   return recordApprovalBlockedReason(activeRecord.value, activeRecordFieldEvidence.value?.fields)
 })
+
+const approvalPreviewRows = computed<DiffusionApprovalPreviewRow[]>(() => {
+  return approvalPreviewRecords.value.map((record, index) => {
+    const remotePayload = activeRecord.value && String(activeRecord.value.id || '') === String(record.id || '')
+      ? activeRecordFieldEvidence.value
+      : null
+    return diffusionApprovalPreviewRow(record, remotePayload, index)
+  })
+})
+
+const approvalPreviewBlockers = computed(() => {
+  return approvalPreviewRows.value.flatMap((row) => (
+    row.blockers.map((blocker) => `${row.recordLabel}: ${blocker}`)
+  ))
+})
+
+const approvalPreviewCanApprove = computed(() => (
+  approvalPreviewRecords.value.length > 0
+  && approvalPreviewBlockers.value.length === 0
+  && !reviewActionPending.value
+))
+
+const approvalPreviewTitle = computed(() => (
+  approvalPreviewRecords.value.length > 1
+    ? `确认 ${approvalPreviewRecords.value.length} 条扩散记录入库`
+    : '确认扩散记录入库'
+))
 
 function remoteFieldsForRecord(record: TribologyData | null | undefined) {
   if (!record || !activeRecord.value) return undefined
@@ -4145,6 +4274,38 @@ async function approveReviewRecordPayload(record: TribologyData) {
   return usesRecordReviewEndpoint(record)
     ? approveReviewRecord(recordId)
     : approveReviewCandidate(recordId)
+}
+
+function openApprovalPreview(records: TribologyData[]) {
+  const diffusionRecords = records.filter((record) => recordExtractorType(record) === 'diffusion')
+  approvalPreviewRecords.value = diffusionRecords
+  approvalPreviewError.value = ''
+}
+
+function closeApprovalPreview() {
+  approvalPreviewRecords.value = []
+  approvalPreviewError.value = ''
+}
+
+async function confirmApprovalPreview() {
+  const records = [...approvalPreviewRecords.value]
+  if (!records.length || approvalPreviewBlockers.value.length) return
+  reviewActionPending.value = records.length > 1 ? 'approve-all' : `approve:${Number(records[0]?.id || '')}`
+  approvalPreviewError.value = ''
+  reviewActionError.value = ''
+  try {
+    for (const record of records) {
+      const payload = await approveReviewRecordPayload(record)
+      applyReviewResponse(payload)
+    }
+    closeApprovalPreview()
+  } catch (error: any) {
+    const message = String(error?.response?.data?.detail || error?.message || '入库失败')
+    approvalPreviewError.value = message
+    reviewActionError.value = message
+  } finally {
+    reviewActionPending.value = null
+  }
 }
 
 function openCofEditor(record: TribologyData) {
@@ -4492,13 +4653,17 @@ async function handleUnflagActiveField(fieldId?: string, recordOverride?: Tribol
   }
 }
 
-async function handleApproveRecord(record?: TribologyData | null) {
+async function handleApproveRecord(record?: TribologyData | null, options: { skipPreview?: boolean } = {}) {
   const target = record || activeRecord.value
   const recordId = Number(target?.id || '')
   const remoteFields = target && activeRecord.value && String(target.id || '') === String(activeRecord.value.id || '')
     ? activeRecordFieldEvidence.value?.fields
     : undefined
   if (!target || !Number.isFinite(recordId) || !recordCanApprove(target, remoteFields)) return
+  if (recordExtractorType(target) === 'diffusion' && !options.skipPreview) {
+    openApprovalPreview([target])
+    return
+  }
 
   reviewActionPending.value = `approve:${recordId}`
   reviewActionError.value = ''
@@ -4514,6 +4679,11 @@ async function handleApproveRecord(record?: TribologyData | null) {
 
 async function handleApproveAll() {
   if (!canApproveAllVisible.value) return
+
+  if (activeExtractorType.value === 'diffusion') {
+    openApprovalPreview(visibleRecordItems.value.map((item) => item.record))
+    return
+  }
 
   if (visibleRecordCount.value === 1) {
     await handleApproveRecord(visibleRecordItems.value[0]?.record || null)
@@ -4798,16 +4968,15 @@ function roughnessTextParts(value: string) {
               >
               <span v-if="pdfPageCount" class="text-[11px] font-medium text-[#94a3b8]">/ {{ pdfPageCount }}</span>
             </form>
-            <a
+            <button
               v-if="pdfUrl"
-              :href="pdfUrl"
-              target="_blank"
-              rel="noreferrer"
+              type="button"
               class="inline-flex items-center gap-1 text-[11px] font-semibold text-[#315083] transition hover:text-[#0f172a]"
+              @click="openPdfPreviewInNewTab"
             >
               新窗口打开
               <ExternalLink class="h-3 w-3" />
-            </a>
+            </button>
           </div>
         </div>
 
@@ -5617,6 +5786,119 @@ function roughnessTextParts(value: string) {
           </div>
         </div>
       </aside>
+    </div>
+
+    <div
+      v-if="approvalPreviewRecords.length"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 px-4"
+      @click.self="closeApprovalPreview"
+    >
+      <section class="w-full max-w-5xl overflow-hidden rounded-lg border border-[#cfdce8] bg-white shadow-2xl">
+        <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[#e6edf5] bg-[#fbfdff] px-5 py-4">
+          <div class="min-w-0">
+            <p class="text-[11px] font-black uppercase tracking-[0.18em] text-[#64748b]">归一化预览</p>
+            <h2 class="mt-1 text-lg font-black text-[#0f172a]">{{ approvalPreviewTitle }}</h2>
+            <p class="mt-1 text-xs font-medium text-[#64748b]">原文值留作溯源，知识库写入统一标准值。</p>
+          </div>
+          <div class="flex shrink-0 items-center gap-2">
+            <span class="rounded-md border border-[#dbe4ef] bg-white px-2.5 py-1 text-[11px] font-black text-[#334155]">
+              标准单位 10⁻¹² m²/s
+            </span>
+            <span
+              class="rounded-md px-2.5 py-1 text-[11px] font-black"
+              :class="approvalPreviewBlockers.length ? 'bg-[#fff5f6] text-[#be123c]' : 'bg-[#ecfdf5] text-[#047857]'"
+            >
+              {{ approvalPreviewBlockers.length ? `${approvalPreviewBlockers.length} 个阻断` : '全部可入库' }}
+            </span>
+          </div>
+        </div>
+
+        <div class="max-h-[68vh] overflow-y-auto p-5 custom-scrollbar">
+          <div class="overflow-hidden rounded-lg border border-[#e2e8f0]">
+            <table class="w-full table-fixed border-separate border-spacing-0 text-left text-xs">
+              <thead class="bg-[#f8fafc] text-[10px] font-black uppercase tracking-[0.12em] text-[#64748b]">
+                <tr>
+                  <th class="w-[5.5rem] border-b border-[#e2e8f0] px-3 py-2.5">记录</th>
+                  <th class="border-b border-[#e2e8f0] px-3 py-2.5">体系</th>
+                  <th class="w-[13rem] border-b border-[#e2e8f0] px-3 py-2.5">原文 D</th>
+                  <th class="w-[13rem] border-b border-[#e2e8f0] px-3 py-2.5">标准 D</th>
+                  <th class="w-[12rem] border-b border-[#e2e8f0] px-3 py-2.5">SI 值</th>
+                  <th class="w-[8rem] border-b border-[#e2e8f0] px-3 py-2.5">置信度</th>
+                  <th class="w-[7rem] border-b border-[#e2e8f0] px-3 py-2.5">状态</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-[#edf2f7]">
+                <tr v-for="row in approvalPreviewRows" :key="`approval-preview-${row.id}`" class="align-top">
+                  <td class="px-3 py-3 font-mono font-black text-[#334155]">{{ row.recordLabel }}</td>
+                  <td class="px-3 py-3">
+                    <p class="line-clamp-2 font-black text-[#0f172a]">{{ row.system }}</p>
+                    <p v-if="row.blockers.length" class="mt-1 line-clamp-2 text-[11px] font-semibold text-[#be123c]">
+                      {{ row.blockers.join('；') }}
+                    </p>
+                  </td>
+                  <td class="px-3 py-3 font-mono font-semibold text-[#475569]">{{ row.original }}</td>
+                  <td class="px-3 py-3 font-mono font-black text-[#0f172a]">{{ row.normalized }}</td>
+                  <td class="px-3 py-3 font-mono font-semibold text-[#475569]">{{ row.si }}</td>
+                  <td class="px-3 py-3">
+                    <span
+                      class="inline-flex rounded-md px-2 py-1 text-[11px] font-black tabular-nums"
+                      :class="row.confidencePercent >= 80
+                        ? 'bg-[#ecfdf5] text-[#047857]'
+                        : row.confidencePercent >= 55
+                          ? 'bg-[#fff7ed] text-[#c2410c]'
+                          : 'bg-[#fff1f2] text-[#be123c]'"
+                    >
+                      {{ row.confidencePercent }}%
+                    </span>
+                  </td>
+                  <td class="px-3 py-3">
+                    <span
+                      class="inline-flex rounded-md px-2 py-1 text-[11px] font-black"
+                      :class="row.status === 'ready' ? 'bg-[#ecfdf5] text-[#047857]' : 'bg-[#fff5f6] text-[#be123c]'"
+                    >
+                      {{ row.statusLabel }}
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div
+            v-if="approvalPreviewBlockers.length"
+            class="mt-3 rounded-lg border border-[#fecdd3] bg-[#fff8f9] px-4 py-3"
+          >
+            <p class="text-[11px] font-black uppercase tracking-[0.16em] text-[#be123c]">暂不入库</p>
+            <ul class="mt-2 grid gap-1.5 text-xs font-semibold text-[#9f1239]">
+              <li v-for="blocker in approvalPreviewBlockers" :key="blocker">{{ blocker }}</li>
+            </ul>
+          </div>
+
+          <p v-if="approvalPreviewError" class="mt-3 rounded-lg border border-[#fecdd3] bg-[#fff8f9] px-4 py-2 text-xs font-semibold text-[#be123c]">
+            {{ approvalPreviewError }}
+          </p>
+        </div>
+
+        <div class="flex items-center justify-end gap-2 border-t border-[#e6edf5] bg-[#fbfdff] px-5 py-3">
+          <button
+            type="button"
+            class="rounded-md border border-[#dbe4ef] bg-white px-3 py-2 text-xs font-bold text-[#475569] transition hover:bg-[#f8fafc]"
+            @click="closeApprovalPreview"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-md bg-[#0f172a] px-3.5 py-2 text-xs font-black text-white transition hover:bg-[#1e293b] disabled:cursor-not-allowed disabled:bg-[#cbd5e1]"
+            :disabled="!approvalPreviewCanApprove"
+            @click="confirmApprovalPreview"
+          >
+            <Loader2 v-if="reviewActionPending === 'approve-all' || reviewActionPending?.startsWith('approve:')" class="h-3.5 w-3.5 animate-spin" />
+            <CheckCheck v-else class="h-3.5 w-3.5" />
+            确认入库
+          </button>
+        </div>
+      </section>
     </div>
 
     <div

@@ -25,7 +25,27 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerSrc
 
 function resolvePdfContentUrl(src: string): string {
   const normalized = String(src || '').trim()
-  return normalized
+  if (!normalized || normalized.startsWith('blob:') || normalized.startsWith('data:')) {
+    return normalized
+  }
+
+  const appendContent = (path: string) => (
+    /^\/api\/pdf\/\d+$/i.test(path) ? `${path}/content` : path
+  )
+
+  if (/^https?:\/\//i.test(normalized)) {
+    try {
+      const parsed = new URL(normalized)
+      parsed.pathname = appendContent(parsed.pathname)
+      return parsed.toString()
+    } catch {
+      return normalized
+    }
+  }
+
+  const [path, query = ''] = normalized.split('?', 2)
+  const contentPath = appendContent(path || '')
+  return query ? `${contentPath}?${query}` : contentPath
 }
 
 // ─── Props ───────────────────────────────────────────────────────────────────
@@ -175,6 +195,9 @@ async function fetchPdfBytes(): Promise<Uint8Array> {
   }
   if (resp.status === 403) {
     throw new Error('You do not have access to this PDF.')
+  }
+  if (resp.status === 404) {
+    throw new Error('No previewable PDF is available for this literature.')
   }
   if (!resp.ok) {
     throw new Error(`PDF fetch failed: ${resp.status} ${resp.statusText}`)
@@ -598,7 +621,7 @@ function onOverlayClick(id: string) {
 }
 
 // ─── Expose for parent usage ─────────────────────────────────────────────────
-defineExpose({ captureEvidenceTarget, captureHighlight, scrollToHighlight, scrollToPage })
+defineExpose({ captureEvidenceTarget, captureHighlight, openPdfInNewTab, scrollToHighlight, scrollToPage })
 </script>
 
 <template>

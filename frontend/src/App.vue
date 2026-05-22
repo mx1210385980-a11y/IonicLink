@@ -338,6 +338,10 @@ function normalizeReviewRecord(record: any): TribologyData {
     temperature_value: record.temperature_value ?? record.temperatureValue ?? null,
     confinement_scale_value: record.confinement_scale_value ?? record.confinementScaleValue ?? null,
     confinement_scale_unit: record.confinement_scale_unit ?? record.confinementScaleUnit ?? '',
+    diffusion_standard_fields: record.diffusion_standard_fields ?? record.diffusionStandardFields ?? {},
+    diffusionStandardFields: record.diffusionStandardFields ?? record.diffusion_standard_fields ?? {},
+    diffusion_normalization: record.diffusion_normalization ?? record.diffusionNormalization ?? {},
+    diffusionNormalization: record.diffusionNormalization ?? record.diffusion_normalization ?? {},
     smiles: record.smiles ?? '',
     novel_features_json: record.novel_features_json ?? record.novelFeaturesJson ?? {},
     rdkit_features_json: record.rdkit_features_json ?? record.rdkitFeaturesJson ?? {},
@@ -394,6 +398,7 @@ async function ensureReviewFileForTarget(target: ReviewTarget) {
       promotedLiteratureId: details.promotedLiteratureId || null,
       records,
       hasWarnings: records.some((record) => record.validationStatus !== 'verified'),
+      disablePdfPreview: details.hasPdf === false,
     }
     if (existingIndex >= 0) {
       batchFiles.value.splice(existingIndex, 1, batchFile)
@@ -680,6 +685,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
             @send-chat="handleChat"
             @update-sidebar-tab="setSidebarTab"
             @open-review="openReviewForCurrentFile"
+            @open-review-target="openReviewTarget"
             @open-knowledge="navigateTo('knowledge', 'explorer')"
             @clear-doi="clearExplorerDoi"
             @set-default-extractor-type="setDefaultExtractorType"

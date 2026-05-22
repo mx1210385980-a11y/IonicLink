@@ -121,6 +121,10 @@ def _literature_to_payload(
     *,
     record_count: int | None = None,
     candidate_count: int | None = None,
+    tribology_record_count: int | None = None,
+    tribology_candidate_count: int | None = None,
+    diffusion_record_count: int | None = None,
+    diffusion_candidate_count: int | None = None,
 ) -> dict[str, Any]:
     status = getattr(literature, "status", None)
     error_message = getattr(literature, "error_message", None)
@@ -158,7 +162,14 @@ def _literature_to_payload(
         "promotedLiteratureId": getattr(literature, "promoted_literature_id", None),
         "recordCount": record_count,
         "candidateCount": candidate_count,
-        "hasPdf": bool(getattr(literature, "file_path", None)),
+        "tribologyRecordCount": tribology_record_count,
+        "tribologyCandidateCount": tribology_candidate_count,
+        "diffusionRecordCount": diffusion_record_count,
+        "diffusionCandidateCount": diffusion_candidate_count,
+        "totalCount": int(record_count or 0) + int(candidate_count or 0)
+        if record_count is not None or candidate_count is not None
+        else None,
+        "hasPdf": bool(_resolve_existing_path(getattr(literature, "file_path", None))),
         "created_at": literature.created_at,
     }
 
@@ -383,6 +394,10 @@ async def list_literature_payload(
                 item,
                 record_count=int((record_count or 0) + (diffusion_record_count or 0)),
                 candidate_count=int((candidate_count or 0) + (diffusion_candidate_count or 0)),
+                tribology_record_count=int(record_count or 0),
+                tribology_candidate_count=int(candidate_count or 0),
+                diffusion_record_count=int(diffusion_record_count or 0),
+                diffusion_candidate_count=int(diffusion_candidate_count or 0),
             )
         )
     return payload

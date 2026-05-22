@@ -20,7 +20,7 @@ ensure_remote_dir() {
 sync_manifests() {
   echo "==> Syncing deploy manifests"
   rsync -az --progress \
-    docker-compose.yml .dockerignore .env.docker.example \
+    AGENTS.md docker-compose.yml .dockerignore .env.docker.example \
     "${TARGET}:${REMOTE_DIR}/"
 }
 

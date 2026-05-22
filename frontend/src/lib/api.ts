@@ -288,6 +288,8 @@ export interface RecordFieldEvidenceResponse {
     confidenceDetails?: ConfidenceDetails | null
     diffusion_standard_fields?: DiffusionStandardFields
     diffusionStandardFields?: DiffusionStandardFields
+    diffusion_normalization?: DiffusionNormalizationPayload
+    diffusionNormalization?: DiffusionNormalizationPayload
     required_fields: string[]
     fields: Record<string, FieldEvidenceEntry>
 }
@@ -1586,6 +1588,11 @@ export interface Literature {
     promotedLiteratureId?: number | null
     recordCount?: number | null
     candidateCount?: number | null
+    tribologyRecordCount?: number | null
+    tribologyCandidateCount?: number | null
+    diffusionRecordCount?: number | null
+    diffusionCandidateCount?: number | null
+    totalCount?: number | null
     hasPdf?: boolean | null
     volume?: string | null
     issue?: string | null

@@ -47,6 +47,11 @@ class LiteratureSchema(LiteratureBase):
     error_message: Optional[str] = Field(None, alias="errorMessage")
     record_count: Optional[int] = Field(None, alias="recordCount")
     candidate_count: Optional[int] = Field(None, alias="candidateCount")
+    tribology_record_count: Optional[int] = Field(None, alias="tribologyRecordCount")
+    tribology_candidate_count: Optional[int] = Field(None, alias="tribologyCandidateCount")
+    diffusion_record_count: Optional[int] = Field(None, alias="diffusionRecordCount")
+    diffusion_candidate_count: Optional[int] = Field(None, alias="diffusionCandidateCount")
+    total_count: Optional[int] = Field(None, alias="totalCount")
     has_pdf: Optional[bool] = Field(None, alias="hasPdf")
     created_at: datetime
 

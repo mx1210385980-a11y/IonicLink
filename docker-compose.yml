@@ -22,6 +22,7 @@ services:
       EXTRACTION_WORKER_COUNT: ${EXTRACTION_WORKER_COUNT:-1}
     volumes:
       - ./backend/data:/app/backend/data
+      - ./Reference:/app/backend/Reference
       - ./temp_uploads:/app/backend/temp_uploads
     ports:
       - "8000:8000"

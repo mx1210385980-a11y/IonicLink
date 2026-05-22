@@ -1,5 +1,6 @@
 from services.diffusion.diffusion_postprocess_service import (
     build_diffusion_normalization_payload,
+    diffusion_normalization_blockers,
     diffusion_drop_reason,
     normalize_diffusion_records,
 )
@@ -96,6 +97,51 @@ def test_normalizes_general_scientific_diffusion_units():
     assert source_value["canonical_value"] == 1250
 
 
+def test_normalizes_spaced_scientific_exponent_without_using_unit_base_as_value():
+    rows = [
+        {
+            "system_name": "Graphene slit pore",
+            "ionic_liquid": "[BuPy][NTf2]",
+            "D_total": 10,
+            "D_unit": "^-10",
+            "source": "Table II",
+            "source_page": 8,
+            "evidence": (
+                "Table II reports D_tot for BuPy+ as 1.506 × 10 ^ - 10 m2/s "
+                "in a 4.09 nm slit pore with polarizable surface."
+            ),
+        }
+    ]
+
+    normalized = _normalize(rows)
+
+    assert len(normalized) == 1
+    assert normalized[0]["D_total"] == 150.6
+    assert normalized[0]["D_unit"] == "10\u207b\u00b9\u00b2 m\u00b2/s"
+    source_value = normalized[0]["novel_features_json"]["source_values"]["D_total"]
+    assert source_value["raw_value"] == "1.506 x 10^-10"
+    assert source_value["raw_unit"] == "m2/s"
+
+
+def test_does_not_treat_table_unit_exponent_as_standalone_diffusion_value():
+    rows = [
+        {
+            "system_name": "Graphene slit pore",
+            "ionic_liquid": "[BuPy][NTf2]",
+            "D_total": 10,
+            "D_unit": "m2/s",
+            "source": "Table II",
+            "source_page": 8,
+            "evidence": (
+                "d (nm) D+ tot D- tot (10−10 m2 s−1) "
+                "Polarizable surface 4.09 1.506 1.176"
+            ),
+        }
+    ]
+
+    assert _normalize(rows) == []
+
+
 def test_mvp_rejects_model_value_without_numeric_evidence():
     row = {
         "system_name": "COF nanochannel",
@@ -159,3 +205,23 @@ def test_builds_post_review_normalization_payload_from_source_values():
     assert payload["primary"]["value_10e12_m2_s"] == 5500
     assert payload["primary"]["value_m2_s"] == 5.5e-09
     assert payload["primary"]["value_a2_ps"] == 0.55
+
+
+def test_diffusion_approval_blockers_require_unit_and_confidence():
+    unsupported_unit_row = {
+        "system_name": "Graphene slit pore",
+        "ionic_liquid": "[BuPy][NTf2]",
+        "D_total": 55,
+        "D_unit": "unknown",
+    }
+
+    assert "unit must be confirmed" in " ".join(diffusion_normalization_blockers(unsupported_unit_row)).lower()
+
+    ready_row = {
+        "system_name": "Graphene slit pore",
+        "ionic_liquid": "[BuPy][NTf2]",
+        "D_total": 55,
+        "D_unit": "10^-12 m2/s",
+    }
+    assert diffusion_normalization_blockers(ready_row, confidence_score=0.82) == []
+    assert "confidence score" in " ".join(diffusion_normalization_blockers(ready_row, confidence_score=0.4)).lower()
