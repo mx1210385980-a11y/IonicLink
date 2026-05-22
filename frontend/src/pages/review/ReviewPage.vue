@@ -81,6 +81,12 @@ import { normalizePotentialDisplayText } from '@/lib/potential'
 import { lazyComponent } from '@/lib/lazyComponent'
 import { formatScientificUnit, originalDiffusionValueFromText } from '@/lib/diffusionReview'
 import {
+  classifyDiffusionNormalizationState,
+  classifyDiffusionSourceTier,
+  type DiffusionNormalizationState,
+  type DiffusionSourceTier,
+} from '@/lib/diffusionTrust'
+import {
   buildManualDiffusionCandidatePayload,
   type ManualDiffusionCoefficientField,
 } from '@/lib/manualDiffusionEstimate'
@@ -140,6 +146,8 @@ type RecordItem = {
   metricLabel: string
   metricValue: string
   metricTags: StructuredTag[]
+  diffusionSourceTier?: DiffusionSourceTier
+  diffusionNormalizationState?: DiffusionNormalizationState
   confidence: RecordConfidenceView
   status: 'review' | 'confirmed' | 'warning'
   lowConfidence: boolean
@@ -373,6 +381,8 @@ const recordItems = computed<RecordItem[]>(() => {
     const subtitle = extractorType === 'diffusion' ? reviewIonicLiquidDisplay(record) : ''
     const dedupedSubtitle = trim(subtitle) === trim(title) ? '' : subtitle
     const confidence = recordConfidenceView(record)
+    const diffusionSourceTier = extractorType === 'diffusion' ? classifyDiffusionSourceTier(record) : undefined
+    const diffusionNormalizationState = extractorType === 'diffusion' ? classifyDiffusionNormalizationState(record) : undefined
     const lowConfidence = recordLowConfidence(record)
     const missingEvidence = recordNeedsEvidence(record)
     const trainingBlocker = recordIsTrainingBlocker(record)
@@ -396,6 +406,8 @@ const recordItems = computed<RecordItem[]>(() => {
       metricLabel: metric.label,
       metricValue: metric.value,
       metricTags: extractorType === 'diffusion' ? diffusionRecordTags(record) : cofStructuredTags(record),
+      diffusionSourceTier,
+      diffusionNormalizationState,
       confidence,
       status,
       lowConfidence,
@@ -604,6 +616,16 @@ const activeExtractorType = computed<ExtractorType>(() => {
     return 'diffusion'
   }
   return 'tribology'
+})
+
+const activeDiffusionSourceTier = computed(() => {
+  if (activeExtractorType.value !== 'diffusion' || !activeRecord.value) return null
+  return classifyDiffusionSourceTier(activeRecord.value, activeRecordFieldEvidence.value?.fields)
+})
+
+const activeDiffusionNormalizationState = computed(() => {
+  if (activeExtractorType.value !== 'diffusion' || !activeRecord.value) return null
+  return classifyDiffusionNormalizationState(activeRecord.value, activeRecordFieldEvidence.value)
 })
 
 type ReviewRecordEntityType = 'candidate' | 'record'
@@ -4302,6 +4324,21 @@ function remoteFieldsForRecord(record: TribologyData | null | undefined) {
     : undefined
 }
 
+function remotePayloadForRecord(record: TribologyData | null | undefined) {
+  if (!record || !activeRecord.value) return undefined
+  return String(record.id || '') === String(activeRecord.value.id || '')
+    ? activeRecordFieldEvidence.value
+    : undefined
+}
+
+function diffusionSourceTierForRecord(record: TribologyData | null | undefined, remoteFields?: Record<string, FieldEvidenceEntry> | null) {
+  return classifyDiffusionSourceTier(record, remoteFields)
+}
+
+function diffusionNormalizationStateForRecord(record: TribologyData | null | undefined, remotePayload?: RecordFieldEvidenceResponse | null) {
+  return classifyDiffusionNormalizationState(record, remotePayload)
+}
+
 function approveActionLabel(record: TribologyData | null | undefined) {
   if (recordExtractorType(record) === 'diffusion') {
     if (isPromotedDiffusionCandidate(record)) return '已入库'
@@ -4822,6 +4859,20 @@ function recordBadgeForRecord(record: TribologyData, status: RecordItem['status'
   return recordBadge(status)
 }
 
+function diffusionSourceTierClass(tier: DiffusionSourceTier | null | undefined) {
+  if (tier?.id === 'original_source') return 'border-[#b8d8c6] bg-[#f3fbf6] text-[#176043]'
+  if (tier?.id === 'figure_estimate') return 'border-[#d8c9a5] bg-[#fff9e8] text-[#8a5a00]'
+  if (tier?.id === 'model_candidate') return 'border-[#cbd7eb] bg-[#f5f7fb] text-[#40516d]'
+  return 'border-[#ead0d5] bg-[#fff6f7] text-[#a43d51]'
+}
+
+function diffusionNormalizationStateClass(state: DiffusionNormalizationState | null | undefined) {
+  if (state?.id === 'ready') return 'border-[#c7d2fe] bg-[#f4f6ff] text-[#354ac4]'
+  if (state?.id === 'warning') return 'border-[#f5cda8] bg-[#fff7ed] text-[#b75c13]'
+  if (state?.id === 'missing') return 'border-[#ead0d5] bg-[#fff6f7] text-[#a43d51]'
+  return 'border-[#d7e0ea] bg-[#f8fafc] text-[#536276]'
+}
+
 function fieldRowTone(field: ReviewField) {
   if (field.id === activeFieldId.value) return 'border-[#9db1c8] bg-[#f8fafc] ring-1 ring-[#cbd9e8]'
   if (field.status === 'low_conf') return 'border-[#f1ddbd] bg-white hover:border-[#dcc89e]'
@@ -4901,6 +4952,22 @@ function roughnessTextParts(value: string) {
             class="shrink-0 rounded-full bg-[#fff5f6] px-2.5 py-0.5 text-xs font-semibold text-[#cf334f]"
           >
             缺证据 {{ documentMissingEvidence }}
+          </span>
+          <span
+            v-if="activeExtractorType === 'diffusion' && activeDiffusionSourceTier"
+            class="shrink-0 rounded-md border px-2 py-0.5 text-[11px] font-bold"
+            :class="diffusionSourceTierClass(activeDiffusionSourceTier)"
+            :title="activeDiffusionSourceTier.description"
+          >
+            来源 {{ activeDiffusionSourceTier.label }}
+          </span>
+          <span
+            v-if="activeExtractorType === 'diffusion' && activeDiffusionNormalizationState"
+            class="shrink-0 rounded-md border px-2 py-0.5 text-[11px] font-bold"
+            :class="diffusionNormalizationStateClass(activeDiffusionNormalizationState)"
+            :title="activeDiffusionNormalizationState.description"
+          >
+            单位 {{ activeDiffusionNormalizationState.label }}
           </span>
         </div>
       </div>
@@ -5194,7 +5261,7 @@ function roughnessTextParts(value: string) {
             <div class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden custom-scrollbar">
               <table class="w-full table-fixed border-separate border-spacing-0 text-left">
                 <colgroup>
-                  <col style="width: 5.25rem">
+                  <col style="width: 7.35rem">
                   <col
                     v-for="cell in visibleDiffusionReviewTableCells(activeRecord || visibleRecordItems[0]?.record, activeRecordFieldEvidence?.fields)"
                     :key="`diffusion-col-${cell.id}`"
@@ -5224,12 +5291,32 @@ function roughnessTextParts(value: string) {
                     <td class="sticky left-0 z-10 border-b border-r border-[#e8eef5] bg-inherit px-1.5 py-1.5 align-top shadow-[8px_0_14px_-16px_rgba(15,23,42,0.7)]">
                       <button
                         type="button"
-                        class="flex w-full flex-col items-start rounded-[0.5rem] px-1.5 py-1 text-left transition"
+                        class="flex w-full flex-col items-start rounded-[0.5rem] px-1.5 py-1.5 text-left transition"
                         :class="item.id === activeRecordId ? 'bg-[#0f766e] text-white' : 'bg-[#f1f5f9] text-slate-600 group-hover:bg-[#e7f5f2]'"
                         @click="activateDiffusionReviewCell(item, activeFieldId)"
                       >
                         <span class="text-[9.5px] font-black uppercase tracking-[0.1em]">{{ item.label }}</span>
                         <span class="mt-0.5 truncate text-[9px] font-semibold opacity-80">{{ recordBadgeForRecord(item.record, item.status).label }}</span>
+                        <span class="mt-1 flex max-w-full flex-wrap gap-1">
+                          <span
+                            class="rounded border px-1 py-[1px] text-[8.5px] font-black leading-none"
+                            :class="item.id === activeRecordId
+                              ? 'border-white/30 bg-white/15 text-white'
+                              : diffusionSourceTierClass(diffusionSourceTierForRecord(item.record, remoteFieldsForRecord(item.record)))"
+                            :title="diffusionSourceTierForRecord(item.record, remoteFieldsForRecord(item.record)).description"
+                          >
+                            {{ diffusionSourceTierForRecord(item.record, remoteFieldsForRecord(item.record)).shortLabel }}
+                          </span>
+                          <span
+                            class="rounded border px-1 py-[1px] text-[8.5px] font-black leading-none"
+                            :class="item.id === activeRecordId
+                              ? 'border-white/30 bg-white/15 text-white'
+                              : diffusionNormalizationStateClass(diffusionNormalizationStateForRecord(item.record, remotePayloadForRecord(item.record)))"
+                            :title="diffusionNormalizationStateForRecord(item.record, remotePayloadForRecord(item.record)).description"
+                          >
+                            {{ diffusionNormalizationStateForRecord(item.record, remotePayloadForRecord(item.record)).shortLabel }}
+                          </span>
+                        </span>
                       </button>
                     </td>
                     <td
@@ -5263,6 +5350,22 @@ function roughnessTextParts(value: string) {
                 </div>
               </div>
               <div class="flex min-w-0 shrink-0 items-center gap-1.5">
+                <span
+                  v-if="activeDiffusionSourceTier"
+                  class="rounded-md border px-2 py-0.5 text-[10px] font-black"
+                  :class="diffusionSourceTierClass(activeDiffusionSourceTier)"
+                  :title="activeDiffusionSourceTier.description"
+                >
+                  {{ activeDiffusionSourceTier.label }}
+                </span>
+                <span
+                  v-if="activeDiffusionNormalizationState"
+                  class="rounded-md border px-2 py-0.5 text-[10px] font-black"
+                  :class="diffusionNormalizationStateClass(activeDiffusionNormalizationState)"
+                  :title="activeDiffusionNormalizationState.description"
+                >
+                  {{ activeDiffusionNormalizationState.label }}
+                </span>
                 <span class="rounded-md border px-2 py-0.5 text-[10px] font-black" :class="evidenceZoomBadgeClass">
                   {{ evidenceZoomModeLabel }}
                 </span>
