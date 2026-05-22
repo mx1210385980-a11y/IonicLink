@@ -50,6 +50,7 @@ import {
   setFileUploadProgress,
   uploadErrorMessage,
 } from '@/lib/extractionWorkspace'
+import { shouldHydrateReviewFile } from '@/lib/reviewNoData'
 import { useI18n } from '@/composables/useI18n'
 import type { HighlightRect } from '@/types/pdf-highlight'
 type SidebarTab = 'chat' | 'agents'
@@ -183,8 +184,7 @@ export function useAppShell(
     const batchFile = batchFiles.value.find((file) => file.id === fileId)
     const shouldHydrateCachedRecords = (
       batchFile
-      && ['success', 'no_data'].includes(String(batchFile.status || '').toLowerCase())
-      && batchFile.records.length === 0
+      && shouldHydrateReviewFile(batchFile)
       && !hydratingFileIds.has(fileId)
     )
     const shouldHydrateStaleReviewRecords = (
@@ -593,7 +593,7 @@ export function useAppShell(
       const batchFile = findBatchFile(fileId)
       const status = String(run.status || '').toLowerCase()
       const canHydrateTerminalRun = batchFile
-        && ['completed', 'success', 'no_data'].includes(status)
+        && ['completed', 'success'].includes(status)
         && !hydratingFileIds.has(fileId)
         && (batchFile.records.length === 0 || batchFile.status === 'processing')
       if (canHydrateTerminalRun && batchFile) {
@@ -931,9 +931,7 @@ export function useAppShell(
     if (!batchFile) return false
 
     selectedFileId.value = batchFile.id
-    const status = String(batchFile.status || '').toLowerCase()
-    const canHydrateCachedResult = ['success', 'no_data'].includes(status)
-      && batchFile.records.length === 0
+    const canHydrateCachedResult = shouldHydrateReviewFile(batchFile)
       && !hydratingFileIds.has(batchFile.id)
 
     if (canHydrateCachedResult) {

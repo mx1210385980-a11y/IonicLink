@@ -446,11 +446,19 @@ async def get_literature_detail_payload(db: AsyncSession, literature_id: int, *,
         for record in diffusion_final_records
         if record.id not in promoted_record_ids
     ]
+    tribology_record_count = 0 if detail_records_are_candidates else len(records)
+    tribology_candidate_count = len(records) if detail_records_are_candidates else 0
+    diffusion_candidate_count = len([candidate for candidate in diffusion_candidates if candidate.promoted_record_id is None])
+    diffusion_record_count = len(diffusion_final_records)
 
     payload = _literature_to_payload(
         literature,
-        record_count=(0 if detail_records_are_candidates else len(records)) + len(diffusion_final_records),
-        candidate_count=(len(records) if detail_records_are_candidates else 0) + len([candidate for candidate in diffusion_candidates if candidate.promoted_record_id is None]),
+        record_count=tribology_record_count + diffusion_record_count,
+        candidate_count=tribology_candidate_count + diffusion_candidate_count,
+        tribology_record_count=tribology_record_count,
+        tribology_candidate_count=tribology_candidate_count,
+        diffusion_record_count=diffusion_record_count,
+        diffusion_candidate_count=diffusion_candidate_count,
     )
     payload["tribologyData"] = [_record_to_payload(record) for record in records]
     payload["diffusionData"] = [_diffusion_record_to_payload(record) for record in diffusion_records]

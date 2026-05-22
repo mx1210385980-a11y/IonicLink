@@ -8,7 +8,15 @@ import LoginScreen from '@/components/LoginScreen.vue'
 import type { HomeSuggestedAction } from '@/composables/useHomeSummary'
 import { useAppShell } from '@/composables/useAppShell'
 import { useI18n } from '@/composables/useI18n'
-import { getLiteratureDetails, type BatchFile, type TribologyData, type ValidationStatus } from '@/lib/api'
+import {
+  getLatestExtractionRun,
+  getLiteratureDetails,
+  type BatchFile,
+  type ExtractionRunDetail,
+  type ExtractorType,
+  type TribologyData,
+  type ValidationStatus,
+} from '@/lib/api'
 import { lazyComponent } from '@/lib/lazyComponent'
 import type { AppSection, AppView } from '@/lib/platform'
 
@@ -349,6 +357,32 @@ function normalizeReviewRecord(record: any): TribologyData {
   }
 }
 
+const REVIEW_ROUTE_TERMINAL_STATUSES = new Set(['no_data', 'failed', 'error', 'cancelled'])
+
+function runMessage(run: ExtractionRunDetail | null | undefined) {
+  const summary = (run?.summary || {}) as Record<string, any>
+  return String(
+    summary.no_data_reason
+      || summary.current_message
+      || run?.error_message
+      || '',
+  ).trim()
+}
+
+function fileStatusFromTerminalRun(status: string): BatchFile['status'] | null {
+  if (status === 'no_data' || status === 'cancelled') return status
+  if (status === 'failed' || status === 'error') return 'error'
+  return null
+}
+
+async function fetchLatestRunForReview(literatureId: number, extractorType: ExtractorType) {
+  try {
+    return await getLatestExtractionRun(literatureId, extractorType)
+  } catch {
+    return null
+  }
+}
+
 async function ensureReviewFileForTarget(target: ReviewTarget) {
   const literatureId = Number(target.literatureId || 0)
   if (!Number.isFinite(literatureId) || literatureId <= 0) return
@@ -372,13 +406,30 @@ async function ensureReviewFileForTarget(target: ReviewTarget) {
     const tribologyRows = Array.isArray(details.tribologyData) ? details.tribologyData : []
     const rows = diffusionRows.length ? diffusionRows : tribologyRows
     const records: TribologyData[] = rows.map(normalizeReviewRecord)
-    const extractorType = (diffusionRows.length ? 'diffusion' : (records[0]?.extractor_type || 'tribology')) as 'tribology' | 'diffusion'
+    const latestDiffusionRun = diffusionRows.length || tribologyRows.length
+      ? null
+      : await fetchLatestRunForReview(literatureId, 'diffusion')
+    const latestRunStatus = String(latestDiffusionRun?.status || '').trim().toLowerCase()
+    const hasDiffusionHistory = diffusionRows.length > 0
+      || Number(details.diffusionRecordCount || 0) > 0
+      || Number(details.diffusionCandidateCount || 0) > 0
+      || Boolean(latestDiffusionRun && latestRunStatus !== 'not_started')
+    const extractorType = (hasDiffusionHistory ? 'diffusion' : (records[0]?.extractor_type || 'tribology')) as 'tribology' | 'diffusion'
+    const latestTerminalStatus = REVIEW_ROUTE_TERMINAL_STATUSES.has(latestRunStatus)
+      ? fileStatusFromTerminalRun(latestRunStatus)
+      : null
+    const emptyStatus = records.length
+      ? 'success'
+      : (latestTerminalStatus || (String(details.status || '').trim().toLowerCase() === 'no_data' ? 'no_data' : 'success'))
+    const noDataMessage = extractorType === 'diffusion'
+      ? runMessage(latestDiffusionRun) || details.errorMessage || '未找到带有明确数值和单位、可直接入库的扩散系数记录。'
+      : details.errorMessage || '未找到可直接入库的提取记录。'
     const batchFile: BatchFile = {
       id: String(literatureId),
       name: details.title || details.doi || `Literature ${literatureId}`,
-      status: 'success',
+      status: emptyStatus as BatchFile['status'],
       progress: 100,
-      progressMessage: 'Loaded from literature library',
+      progressMessage: emptyStatus === 'no_data' ? noDataMessage : 'Loaded from literature library',
       extractor_type: extractorType,
       metadata: {
         title: details.title || '',
@@ -397,6 +448,7 @@ async function ensureReviewFileForTarget(target: ReviewTarget) {
       reviewedAt: details.reviewedAt || null,
       promotedLiteratureId: details.promotedLiteratureId || null,
       records,
+      errorMessage: emptyStatus === 'no_data' ? noDataMessage : undefined,
       hasWarnings: records.some((record) => record.validationStatus !== 'verified'),
       disablePdfPreview: details.hasPdf === false,
     }

@@ -78,6 +78,7 @@ import { getIonicLiquidEvidenceParts, getIonicLiquidEvidenceTerms } from '@/lib/
 import { normalizePotentialDisplayText } from '@/lib/potential'
 import { lazyComponent } from '@/lib/lazyComponent'
 import { formatScientificUnit, originalDiffusionValueFromText } from '@/lib/diffusionReview'
+import { reviewNoDataDiagnostic } from '@/lib/reviewNoData'
 import type { HighlightRect } from '@/types/pdf-highlight'
 
 type PdfViewerBridge = {
@@ -478,6 +479,11 @@ const documentLowConfidence = computed(() => allRecords.value.filter(recordLowCo
 const documentMissingEvidence = computed(() => allRecords.value.filter(recordNeedsEvidence).length)
 const recordItemCount = computed(() => recordItems.value.length)
 const visibleRecordCount = computed(() => visibleRecordItems.value.length)
+const emptyReviewDiagnostic = computed(() => {
+  const file = selectedReviewFile.value
+  if (!file || visibleRecordCount.value || allRecords.value.length > 0) return null
+  return reviewNoDataDiagnostic(file)
+})
 
 const activeLiteratureId = computed<number | null>(() => {
   const fromFile = Number(selectedReviewFile.value?.id || '')
@@ -5211,9 +5217,18 @@ function roughnessTextParts(value: string) {
             v-if="!visibleRecordCount"
             class="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 rounded-[0.85rem] border border-dashed border-[#dbe4f2] bg-white px-4 text-center"
           >
-            <FileText class="h-8 w-8 text-slate-300" />
-            <p class="text-sm font-semibold text-slate-700">当前筛选下无记录</p>
-            <p class="text-xs text-slate-500">关闭筛选条件，或切换其他文献。</p>
+            <template v-if="emptyReviewDiagnostic">
+              <FileText class="h-8 w-8 text-[#8aa0bb]" />
+              <p class="text-sm font-black text-[#132033]">{{ emptyReviewDiagnostic.title }}</p>
+              <p class="max-w-[26rem] text-xs font-medium leading-relaxed text-[#63748d]">
+                {{ emptyReviewDiagnostic.message }}
+              </p>
+            </template>
+            <template v-else>
+              <FileText class="h-8 w-8 text-slate-300" />
+              <p class="text-sm font-semibold text-slate-700">当前筛选下无记录</p>
+              <p class="text-xs text-slate-500">关闭筛选条件，或切换其他文献。</p>
+            </template>
           </div>
         </div>
 
@@ -5776,13 +5791,31 @@ function roughnessTextParts(value: string) {
             v-if="!visibleRecordCount"
             class="flex min-h-[12rem] flex-col items-center justify-center gap-2 rounded-[0.85rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] px-4 text-center"
           >
-            <FileText class="h-8 w-8 text-slate-300" />
-            <p class="text-sm font-semibold text-slate-700">
-              {{ recordItemCount ? '当前筛选下无记录' : '尚未选择文献' }}
-            </p>
-            <p class="text-xs text-slate-500">
-              {{ recordItemCount ? '试试关闭筛选条件，或切换其他文献。' : '从左侧选择一篇文献开始审核。' }}
-            </p>
+            <template v-if="emptyReviewDiagnostic">
+              <FileText class="h-8 w-8 text-[#8aa0bb]" />
+              <p class="text-sm font-black text-[#132033]">{{ emptyReviewDiagnostic.title }}</p>
+              <p class="max-w-[26rem] text-xs font-medium leading-relaxed text-[#63748d]">
+                {{ emptyReviewDiagnostic.message }}
+              </p>
+              <div class="mt-1 flex flex-wrap justify-center gap-1.5">
+                <span
+                  v-for="hint in emptyReviewDiagnostic.hints"
+                  :key="hint"
+                  class="rounded-md border border-[#dfe7f1] bg-white px-2 py-1 text-[11px] font-bold text-[#53657d]"
+                >
+                  {{ hint }}
+                </span>
+              </div>
+            </template>
+            <template v-else>
+              <FileText class="h-8 w-8 text-slate-300" />
+              <p class="text-sm font-semibold text-slate-700">
+                {{ recordItemCount ? '当前筛选下无记录' : '尚未选择文献' }}
+              </p>
+              <p class="text-xs text-slate-500">
+                {{ recordItemCount ? '试试关闭筛选条件，或切换其他文献。' : '从左侧选择一篇文献开始审核。' }}
+              </p>
+            </template>
           </div>
         </div>
       </aside>

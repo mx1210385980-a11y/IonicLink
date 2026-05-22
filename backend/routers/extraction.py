@@ -242,6 +242,34 @@ async def _upload_status_for_extractor(db: AsyncSession, literature: Literature,
     return "pending"
 
 
+def _should_wait_for_fresh_extractor_run(literature_status: str | None, run_status: str | None) -> bool:
+    active_literature_statuses = {"queued", "extracting", "processing", "running"}
+    normalized_literature_status = str(literature_status or "").strip().lower()
+    normalized_run_status = str(run_status or "").strip().lower()
+    return normalized_literature_status in active_literature_statuses and not normalized_run_status
+
+
+def _no_data_message_for_run(
+    *,
+    literature_message: str | None = None,
+    run_message: str | None = None,
+    summary: dict[str, Any] | None = None,
+    fallback: str = "No extractable records found",
+) -> str:
+    summary = summary or {}
+    for value in (
+        run_message,
+        summary.get("no_data_reason"),
+        summary.get("current_message"),
+        literature_message,
+        fallback,
+    ):
+        message = str(value or "").strip()
+        if message:
+            return message
+    return fallback
+
+
 def _normalize_field_key(field_key: str) -> str:
     key = str(field_key or "").strip().lower().replace(" ", "_")
     return _FIELD_KEY_ALIASES.get(key, key)
@@ -4137,9 +4165,8 @@ async def get_latest_extraction_run_detail(
         await db.commit()
     run = await get_latest_extraction_run_by_literature(db, literature_id, extractor_type=extractor_type)
     literature_status = str(getattr(literature, "status", "") or "").strip().lower()
-    active_literature_statuses = {"queued", "extracting", "processing", "running"}
     if not run:
-        if literature and literature_status in active_literature_statuses:
+        if literature and _should_wait_for_fresh_extractor_run(literature_status, ""):
             summary = _build_processing_summary(
                 extractor_type=extractor_type,
                 message=f"{extractor_type.title()} extraction is queued. The run log will appear shortly."
@@ -4179,7 +4206,7 @@ async def get_latest_extraction_run_detail(
         }
 
     run_status = str(getattr(run, "status", "") or "").strip().lower()
-    if literature_status in active_literature_statuses and run_status not in active_literature_statuses:
+    if _should_wait_for_fresh_extractor_run(literature_status, run_status):
         summary = _build_processing_summary(
             extractor_type=extractor_type,
             message=f"{extractor_type.title()} extraction is queued. Waiting for the worker to create a fresh run log.",
@@ -4234,12 +4261,10 @@ async def get_latest_extraction_run_detail(
     response_error = run.error_message
     if literature and str(literature.status or "").strip().lower() == "no_data" and not (candidate_count or final_count):
         response_status = "no_data"
-        no_data_message = (
-            literature.error_message
-            or run.error_message
-            or summary.get("no_data_reason")
-            or summary.get("current_message")
-            or "No extractable records found"
+        no_data_message = _no_data_message_for_run(
+            literature_message=literature.error_message,
+            run_message=run.error_message,
+            summary=summary,
         )
         response_error = no_data_message
         progress_log = summary.get("progress_log")
