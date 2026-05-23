@@ -1,3 +1,5 @@
+import type { ModelTrainingStartPayload } from './api'
+
 export const FORBIDDEN_PUBLIC_TERMS = ['WFF'] as const
 
 export const NANOFriction_PUBLIC_COPY = {
@@ -31,4 +33,45 @@ export const NANOFriction_TARGET_METRICS = {
 
 export function containsForbiddenPublicTerm(value: string): boolean {
   return FORBIDDEN_PUBLIC_TERMS.some((term) => value.includes(term))
+}
+
+export function buildNanofrictionStartPayload(
+  cleanedDatasetId: number,
+  target = 'μ',
+): ModelTrainingStartPayload {
+  return {
+    target,
+    algorithm: 'high_cof_segmented',
+    cleaned_dataset_id: cleanedDatasetId,
+    tune: false,
+    hyperparameters: {
+      n_estimators: 300,
+      learning_rate: 0.08,
+      max_depth: 3,
+      l2_leaf_reg: 2.0,
+      random_strength: 1.0,
+      q1: 0.3,
+      q2: 0.8,
+      high_blend: 0,
+      base_models: ['catboost', 'random_forest', 'xgboost'],
+      meta_model: 'catboost',
+      thesis_profile: true,
+      min_segment_size: 8,
+    },
+    data_options: {
+      validation_split: 0.2,
+      training_view: 'all',
+      min_confidence: 0,
+      max_records: null,
+      random_seed: 42,
+      split_strategy: 'wff_thesis',
+      cv_folds: 5,
+      reserve_external_validation: false,
+      target_aggregation_strategy: 'raw',
+      target_outlier_strategy: 'off',
+      target_outlier_iqr_multiplier: 3.0,
+      target_outlier_min: null,
+      target_outlier_max: null,
+    },
+  }
 }
