@@ -39,6 +39,7 @@ backend/data/literature_monitor_pdfs/
 # Local tool worktrees
 .claude/worktrees/
 .superpowers/
+.worktrees/
 
 # Backend runtime data
 backend/data/.idea/
