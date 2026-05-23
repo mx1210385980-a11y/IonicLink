@@ -2806,11 +2806,6 @@ export async function getModelTrainingRun(taskId: string) {
     return response.data as { task: ModelTrainingTaskSnapshot }
 }
 
-export async function getModelTrainingTask(taskId: string) {
-    const response = await api.get(`/api/model-training/tasks/${taskId}`)
-    return response.data as { task: ModelTrainingTaskSnapshot }
-}
-
 export async function registerModelTrainingRun(taskId: string, payload: { name?: string | null; description?: string | null; is_recommended?: boolean }) {
     const response = await api.post(`/api/model-training/runs/${taskId}/register`, payload)
     return response.data as { model: RegisteredModelListItem }

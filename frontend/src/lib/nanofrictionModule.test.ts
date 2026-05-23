@@ -4,6 +4,9 @@ import {
   FORBIDDEN_PUBLIC_TERMS,
   NANOFriction_PUBLIC_COPY,
   NANOFriction_TARGET_METRICS,
+  NANOFriction_CANDIDATE_MODELS,
+  NANOFriction_EXTERNAL_SAMPLES,
+  NANOFriction_FEATURE_INSIGHTS,
   buildNanofrictionStartPayload,
   containsForbiddenPublicTerm,
 } from './nanofrictionModule'
@@ -41,5 +44,12 @@ describe('nanofriction modeling public module', () => {
     expect(payload.data_options.target_outlier_strategy).toBe('off')
     expect(payload.hyperparameters.base_models).toEqual(['catboost', 'random_forest', 'xgboost'])
     expect(payload.hyperparameters.meta_model).toBe('catboost')
+  })
+
+  it('provides candidate, external validation, and feature insight content', () => {
+    expect(NANOFriction_CANDIDATE_MODELS).toHaveLength(3)
+    expect(NANOFriction_CANDIDATE_MODELS.find((item) => item.key === 'three_model_fusion')?.external.r2).toBe(0.985)
+    expect(NANOFriction_EXTERNAL_SAMPLES).toHaveLength(6)
+    expect(NANOFriction_FEATURE_INSIGHTS.map((item) => item.region)).toEqual(['低摩擦区间', '中摩擦区间', '高摩擦区间'])
   })
 })
