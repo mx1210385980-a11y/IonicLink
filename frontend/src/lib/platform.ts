@@ -41,6 +41,7 @@ export type AppSection =
   | 'datasets'
   | 'overview'
   | 'training'
+  | 'nanofriction'
   | 'evaluation'
   | 'registry'
   | 'runtime'
@@ -74,7 +75,7 @@ export const SECTION_OPTIONS_BY_VIEW: Record<AppView, AppSection[]> = {
   review: ['inbox', 'record-review', 'grounding', 'queue'],
   knowledge: ['explorer', 'snapshots', 'insights', 'sources', 'graph', 'cleaning', 'datasets'],
   quality: ['overview'],
-  modeling: ['training', 'evaluation', 'registry'],
+  modeling: ['training', 'nanofriction', 'evaluation', 'registry'],
   admin: ['runtime', 'users', 'metrics'],
   help: ['quick-start', 'workflow', 'content'],
   blog: ['articles'],
