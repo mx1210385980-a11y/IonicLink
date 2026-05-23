@@ -9,6 +9,7 @@ import {
   NANOFriction_FEATURE_INSIGHTS,
   buildNanofrictionStartPayload,
   containsForbiddenPublicTerm,
+  selectNanofrictionFilmDataset,
 } from './nanofrictionModule'
 import { normalizeSection, SECTION_OPTIONS_BY_VIEW } from './platform'
 
@@ -51,5 +52,34 @@ describe('nanofriction modeling public module', () => {
     expect(NANOFriction_CANDIDATE_MODELS.find((item) => item.key === 'three_model_fusion')?.external.r2).toBe(0.985)
     expect(NANOFriction_EXTERNAL_SAMPLES).toHaveLength(6)
     expect(NANOFriction_FEATURE_INSIGHTS.map((item) => item.region)).toEqual(['低摩擦区间', '中摩擦区间', '高摩擦区间'])
+  })
+
+  it('selects the film-thickness dataset when the no-film dataset is listed first', () => {
+    const selected = selectNanofrictionFilmDataset([
+      {
+        name: '论文复现数据集 A（不含膜厚）',
+        row_count: 265,
+        feature_columns: ['Potential', 'Rq'],
+        import_metadata: {
+          wff_dataset_key: 'dataset_a',
+          filename: 'no+film+dataset+0312.csv',
+          row_count: 265,
+          feature_columns: ['Potential', 'Rq'],
+        },
+      },
+      {
+        name: '论文复现数据集 B（含膜厚 h）',
+        row_count: 212,
+        feature_columns: ['h', 'Potential', 'Rq'],
+        import_metadata: {
+          wff_dataset_key: 'dataset_b',
+          filename: 'film+dataset0312.csv',
+          row_count: 212,
+          feature_columns: ['h', 'Potential', 'Rq'],
+        },
+      },
+    ])
+
+    expect(selected?.row_count).toBe(212)
   })
 })

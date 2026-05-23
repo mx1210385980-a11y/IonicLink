@@ -30,6 +30,7 @@ import {
   NANOFriction_PUBLIC_COPY,
   NANOFriction_TARGET_METRICS,
   buildNanofrictionStartPayload,
+  selectNanofrictionFilmDataset,
 } from '@/lib/nanofrictionModule'
 
 const props = defineProps<{
@@ -59,11 +60,7 @@ const message = ref('')
 const errorMessage = ref('')
 let pollTimer: number | null = null
 
-const thesisDataset = computed(() => savedDatasets.value.find((dataset) => {
-  return dataset.import_metadata?.wff_dataset_key === 'dataset_b'
-    || dataset.name.includes('Dataset-B')
-    || dataset.name.includes('含膜厚')
-}))
+const thesisDataset = computed(() => selectNanofrictionFilmDataset(savedDatasets.value))
 
 const latestCompletedRun = computed(() => trainingRuns.value.find((run) => {
   return run.status === 'completed'
@@ -177,9 +174,7 @@ async function ensureDataset() {
   try {
     const response = await importWffThesisDatasets()
     savedDatasets.value = response.items
-    const dataset = response.items.find((item) => item.import_metadata?.wff_dataset_key === 'dataset_b')
-      || response.items.find((item) => item.name.includes('含膜厚'))
-      || response.items[0]
+    const dataset = selectNanofrictionFilmDataset(response.items)
     if (!dataset) {
       throw new Error('未找到含膜厚数据集。')
     }

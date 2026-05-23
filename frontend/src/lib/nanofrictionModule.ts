@@ -92,8 +92,48 @@ export const NANOFriction_FEATURE_INSIGHTS = [
   },
 ] as const
 
+export interface NanofrictionDatasetCandidate {
+  name: string
+  row_count?: number
+  feature_columns?: string[]
+  matrix_columns?: string[]
+  import_metadata?: {
+    wff_dataset_key?: string
+    filename?: string
+    feature_columns?: string[]
+    row_count?: number
+    thesis_fixed_split?: boolean
+  } | null
+}
+
 export function containsForbiddenPublicTerm(value: string): boolean {
   return FORBIDDEN_PUBLIC_TERMS.some((term) => value.includes(term))
+}
+
+export function isNanofrictionFilmDataset(dataset: NanofrictionDatasetCandidate): boolean {
+  const metadata = dataset.import_metadata || {}
+  const datasetKey = String(metadata.wff_dataset_key || '').trim().toLowerCase()
+  if (datasetKey === 'dataset_b') return true
+  if (datasetKey === 'dataset_a') return false
+
+  const filename = String(metadata.filename || '').trim().toLowerCase()
+  if (filename.includes('no+film') || filename.includes('no-film')) return false
+  if (filename.includes('film+dataset0312')) return true
+
+  const name = String(dataset.name || '')
+  if (name.includes('不含膜厚')) return false
+
+  const featureColumns = [
+    ...(metadata.feature_columns || []),
+    ...(dataset.feature_columns || []),
+    ...(dataset.matrix_columns || []),
+  ].map((column) => String(column).trim())
+  const hasFilmThickness = featureColumns.includes('h') || featureColumns.includes('film_thickness')
+  return hasFilmThickness && (name.includes('Dataset-B') || name.includes('数据集 B') || name.includes('含膜厚'))
+}
+
+export function selectNanofrictionFilmDataset<T extends NanofrictionDatasetCandidate>(datasets: T[]): T | undefined {
+  return datasets.find(isNanofrictionFilmDataset)
 }
 
 export function buildNanofrictionStartPayload(
