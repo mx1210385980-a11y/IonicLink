@@ -63,7 +63,7 @@ DEFAULT_CLEANING_WORKBENCH_OPTIONS = {
 }
 
 IMPORTED_DATASET_KIND = "imported_csv"
-WFF_THESIS_DATASET_KIND = "wff_thesis_csv"
+THESIS_REPRODUCTION_DATASET_KIND = "wff_thesis_csv"
 IMPORTED_TARGET_ALIASES = {
     "cof",
     "mu",
@@ -86,19 +86,19 @@ IMPORT_RESERVED_METADATA_COLUMNS = {
     "errorflag",
 }
 
-WFF_DATASET_SPECS = [
+THESIS_REPRODUCTION_DATASET_SPECS = [
     {
         "key": "dataset_b",
         "filename": "film+dataset0312.csv",
-        "name": "WFF 论文复刻 Dataset-B（含膜厚 h）",
-        "description": "来自 backend/data/wff；保留论文 Dataset-B 的训练集、测试集和外部文献验证集固定划分。",
+        "name": "论文复现数据集 B（含膜厚 h）",
+        "description": "内置论文复现数据；保留训练集、检验集和外部文献验证集固定划分。",
         "target_column": "μ",
     },
     {
         "key": "dataset_a",
         "filename": "no+film+dataset+0312.csv",
-        "name": "WFF 论文复刻 Dataset-A（不含膜厚）",
-        "description": "来自 backend/data/wff；用于对照不含界面膜厚 h 的单模型复现实验。",
+        "name": "论文复现数据集 A（不含膜厚）",
+        "description": "内置论文复现数据；用于对照不含界面膜厚 h 的单模型复现实验。",
         "target_column": "μ",
     },
 ]
@@ -472,22 +472,22 @@ class ModelCleaningService:
         principal: AuthPrincipal,
         scope: RequestScope,
     ) -> list[CleanedDataset]:
-        logger.info("Importing built-in WFF thesis datasets scope=%s", scope.scope_key)
+        logger.info("Importing built-in thesis reproduction datasets scope=%s", scope.scope_key)
         ensure_scope_writable(principal, scope)
         data_dir = Path(__file__).resolve().parents[1] / "data" / "wff"
         if not data_dir.exists():
-            raise ValueError("WFF data directory was not found under backend/data/wff.")
+            raise ValueError("Built-in thesis reproduction data directory was not found.")
 
         imported: list[CleanedDataset] = []
-        for spec in WFF_DATASET_SPECS:
+        for spec in THESIS_REPRODUCTION_DATASET_SPECS:
             path = data_dir / spec["filename"]
             if not path.exists():
-                raise ValueError(f"WFF dataset file '{spec['filename']}' was not found.")
+                raise ValueError(f"Built-in thesis reproduction dataset file '{spec['filename']}' was not found.")
 
             existing = await self._find_existing_imported_dataset(
                 session,
                 scope=scope,
-                dataset_kind=WFF_THESIS_DATASET_KIND,
+                dataset_kind=THESIS_REPRODUCTION_DATASET_KIND,
                 filename=spec["filename"],
             )
             if existing is not None:
@@ -521,13 +521,13 @@ class ModelCleaningService:
                         target_column=payload["target_column"],
                         feature_columns=payload["feature_columns"],
                         identifier_columns=payload["import_metadata"]["identifier_columns"],
-                        dataset_kind=WFF_THESIS_DATASET_KIND,
+                        dataset_kind=THESIS_REPRODUCTION_DATASET_KIND,
                     ),
                     ensure_ascii=False,
                 ),
                 summary_json=json.dumps(
                     {
-                        "dataset_kind": WFF_THESIS_DATASET_KIND,
+                        "dataset_kind": THESIS_REPRODUCTION_DATASET_KIND,
                         "summary": payload["summary"],
                         "source_scope": payload["source_scope"],
                         "feature_coverage": payload["feature_coverage"],
@@ -549,7 +549,7 @@ class ModelCleaningService:
         await session.commit()
         for dataset in imported:
             await session.refresh(dataset)
-        logger.info("Imported WFF thesis datasets count=%s", len(imported))
+        logger.info("Imported thesis reproduction datasets count=%s", len(imported))
         return imported
 
     async def preview_cleaning(
@@ -737,7 +737,7 @@ class ModelCleaningService:
         logger.debug("Checking dataset upgrade requirements dataset_id=%s", dataset.id)
         config_payload = json.loads(dataset.config_json or "{}")
         summary_payload = json.loads(dataset.summary_json or "{}")
-        if self._dataset_kind(config_payload, summary_payload) in {IMPORTED_DATASET_KIND, WFF_THESIS_DATASET_KIND}:
+        if self._dataset_kind(config_payload, summary_payload) in {IMPORTED_DATASET_KIND, THESIS_REPRODUCTION_DATASET_KIND}:
             target_column = str(summary_payload.get("target_column") or "").strip()
             if target_column:
                 target_payload = self._build_import_target_payload(target_column)
@@ -1152,7 +1152,7 @@ class ModelCleaningService:
                 metadata["identifier_columns"].append(column)
         metadata.update(
             {
-                "dataset_kind": WFF_THESIS_DATASET_KIND,
+                "dataset_kind": THESIS_REPRODUCTION_DATASET_KIND,
                 "wff_dataset_key": dataset_key,
                 "filename": filename,
                 "thesis_fixed_split": True,
@@ -1167,8 +1167,8 @@ class ModelCleaningService:
         payload["summary"]["rules"]["training_view"] = "all"
         payload["summary"]["rules"]["thesis_fixed_split"] = True
         payload["summary"]["rules"]["thesis_split_counts"] = split_counts
-        payload["summary"]["rules"]["dataset_kind"] = WFF_THESIS_DATASET_KIND
-        payload["source_scope"]["label"] = "WFF thesis data"
+        payload["summary"]["rules"]["dataset_kind"] = THESIS_REPRODUCTION_DATASET_KIND
+        payload["source_scope"]["label"] = "论文复现数据"
 
     def _parse_import_float(self, value: Any) -> float | None:
         text = "" if value is None else str(value).strip()
@@ -2006,7 +2006,7 @@ class ModelCleaningService:
         ]
 
         return {
-            "source": "WFF thesis surface descriptor codebook, seeded from local paper backup datasets.",
+            "source": "Thesis reproduction surface descriptor codebook, seeded from local paper backup datasets.",
             "note": "Legacy backup columns appear gamma/sigma-swapped; generated fields follow Table 2.1 meanings.",
             "input_rows": len(source_rows),
             "matched_rows": matched_rows,

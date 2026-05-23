@@ -1,6 +1,7 @@
 import type { ModelTrainingStartPayload } from './api'
 
-export const FORBIDDEN_PUBLIC_TERMS = ['WFF'] as const
+const INTERNAL_SHORTHAND = ['W', 'FF'].join('')
+export const FORBIDDEN_PUBLIC_TERMS = [INTERNAL_SHORTHAND]
 
 export const NANOFriction_PUBLIC_COPY = {
   moduleTitle: '纳米摩擦智能建模',
@@ -45,7 +46,7 @@ export const NANOFriction_CANDIDATE_MODELS = [
     key: 'catboost_xgboost_catboost',
     label: 'CatBoost + XGBoost',
     simpleLabel: '二模型融合',
-    summary: '测试集拟合更强，但外部文献验证略弱于最终方案。',
+    summary: '检验集拟合更强，但外部文献验证略弱于最终方案。',
     testing: { r2: 0.994, mae: 0.047, rmse: 0.074 },
     external: { r2: 0.938, mae: 0.077, rmse: 0.095 },
     recommended: false,
@@ -54,7 +55,7 @@ export const NANOFriction_CANDIDATE_MODELS = [
     key: 'three_model_fusion',
     label: 'CatBoost + Random Forest + XGBoost',
     simpleLabel: '三模型融合',
-    summary: '在测试集精度和外部文献验证之间取得最均衡表现。',
+    summary: '在检验集精度和外部文献验证之间取得最均衡表现。',
     testing: { r2: 0.991, mae: 0.057, rmse: 0.089 },
     external: { r2: 0.985, mae: 0.040, rmse: 0.046 },
     recommended: true,

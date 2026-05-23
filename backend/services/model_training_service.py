@@ -108,10 +108,10 @@ class _ScaledRegressor:
 
 
 class _GatedSegmentedStackingRegressor:
-    """WFF thesis-style gated low/mid/high stacking regressor.
+    """Thesis reproduction-style gated low/mid/high stacking regressor.
 
     A CatBoost gate first estimates the friction regime from out-of-fold
-    predictions. For the small WFF thesis matrix the final prediction uses a
+    predictions. For the small thesis reproduction matrix the final prediction uses a
     calibrated global blend of the thesis base learners by default, while still
     preserving the low/mid/high partition summary and optional local stacks.
     """
@@ -825,7 +825,7 @@ TUNE_PARAM_GRIDS: dict[str, list[dict[str, Any]]] = {
         for train_threshold in (0.55, 0.60)
         for gate_threshold in (0.45, 0.50)
         for blend in (0.0, 0.08)
-    ],  # 后台 WFF 门控分区复刻入口使用；不展示在普通算法列表中
+    ],  # 后台 论文门控分区复刻入口使用；不展示在普通算法列表中
     "catboost": [
         {"iterations": it, "learning_rate": lr, "depth": d, "l2_leaf_reg": l2}
         for it in (160, 220, 300)
@@ -866,8 +866,8 @@ SPLIT_STRATEGY_DEFINITIONS: dict[str, dict[str, str]] = {
         "description": "按阳离子类型和摩擦系数分箱构建联合标签；单样本标签进入稀有组合外推验证集，多样本标签再按 8:2 分层切训练/测试。",
     },
     "wff_thesis": {
-        "label": "WFF 论文固定划分",
-        "description": "使用 WFF 论文数据文件内复刻的 Training / Testing / Exp in literature 固定划分；训练池内部再做 5 折交叉验证。",
+        "label": "论文固定划分",
+        "description": "使用内置论文复现数据的训练、检验和外部文献固定划分；训练池内部再做 5 折交叉验证。",
     },
     "k_fold": {
         "label": "5 折交叉验证（K-Fold CV）",
@@ -3191,7 +3191,7 @@ class ModelTrainingService:
         if split_strategy == "wff_thesis":
             split_labels = [str(row.get("__thesis_split") or "").strip().lower() for row in eligible_rows]
             if not any(split_labels):
-                raise ValueError("WFF thesis split requires rows with __thesis_split metadata. Use the built-in WFF import action.")
+                raise ValueError("Thesis reproduction split requires rows with __thesis_split metadata. Use the built-in thesis import action.")
             train_pool_idx = np.asarray(
                 [index for index, split in enumerate(split_labels) if split in {"train", "training", "train_pool"}],
                 dtype=int,
@@ -3205,7 +3205,7 @@ class ModelTrainingService:
                 dtype=int,
             )
             if len(train_pool_idx) < 10 or len(test_idx) < 2:
-                raise ValueError("WFF thesis split did not contain enough training/test rows.")
+                raise ValueError("Thesis reproduction split did not contain enough training or validation rows.")
         elif split_strategy == "joint_stratified":
             train_pool_idx, test_idx, external_idx = self._joint_stratified_holdout_indices(
                 joint_labels,
@@ -3306,7 +3306,7 @@ class ModelTrainingService:
             if not held_out_test_size:
                 warnings.append("Joint stratified split fell back to the full pool because too few rows remained for training.")
         if split_strategy == "wff_thesis":
-            warnings.append("Using WFF thesis fixed split: Training / Testing / Exp in literature are kept identical to the imported thesis matrix.")
+            warnings.append("Using thesis reproduction fixed split: training, validation, and external literature samples are kept identical to the imported thesis matrix.")
 
         metadata_target = metadata.get("target") if isinstance(metadata.get("target"), dict) else {}
         target_payload = target_display_payload(
@@ -3463,7 +3463,7 @@ class ModelTrainingService:
             splitter = KFold(n_splits=min(cv_folds, len(pool_idx)), shuffle=True, random_state=random_seed)
             return [
                 {
-                    "label": f"WFF Thesis Fold {fold_index}",
+                    "label": f"Thesis Reproduction Fold {fold_index}",
                     "train_idx": pool_idx[train_rel],
                     "val_idx": pool_idx[val_rel],
                 }

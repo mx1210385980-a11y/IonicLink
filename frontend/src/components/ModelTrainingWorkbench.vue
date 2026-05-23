@@ -523,7 +523,7 @@ const SEGMENT_MIX_RECIPES: SegmentMixRecipe[] = [
     shortLabel: 'CatBoost + XGBoost 融合',
     baseModels: ['catboost', 'xgboost'],
     metaModel: 'catboost',
-    purpose: '论文 4.3.2 的测试集强对照：测试集拟合高，但超低摩擦趋势不是最终最优。',
+    purpose: '论文 4.3.2 的检验集强对照：检验集拟合高，但超低摩擦趋势不是最终最优。',
     hyperparameters: {
       q1: 0.3,
       q2: 0.8,
@@ -701,7 +701,7 @@ const fitProgressLabel = computed(() => {
 })
 const fitModeTitle = computed(() => {
   if (activeAlgorithm.value === 'svr') return 'SVR 单次拟合结果'
-  if (activeAlgorithm.value === 'high_cof_segmented') return 'WFF 门控分区堆叠结果'
+  if (activeAlgorithm.value === 'high_cof_segmented') return '论文门控分区堆叠结果'
   return '线性回归单次拟合结果'
 })
 const fitModeDescription = computed(() => {
@@ -1272,7 +1272,7 @@ const paperFitScatterData = computed(() => {
       },
       {
         type: 'line' as const,
-        label: `Testing set · ${testSamples.value.length}`,
+        label: `检验集 · ${testSamples.value.length}`,
         data: testSamples.value.map((sample) => ({ x: sample.actual, y: sample.predicted })),
         backgroundColor: 'rgba(37, 99, 235, 0.82)',
         borderColor: 'rgba(255,255,255,0.9)',
@@ -1352,7 +1352,7 @@ const paperExternalLineData = computed(() => {
     datasets: [
       {
         type: 'line' as const,
-        label: 'Exp in literature',
+        label: '外部文献验证',
         data: externalSamples.value.map((sample, index) => ({ x: index + 1, y: sample.actual })),
         borderColor: 'rgba(15,23,42,0.92)',
         backgroundColor: 'rgba(15,23,42,0.92)',
@@ -1882,7 +1882,7 @@ function algorithmLabelZh(key: string | null | undefined) {
     case 'gradient_boosting': return '梯度提升（Gradient Boosting）'
     case 'random_forest': return '随机森林（Random Forest）'
     case 'catboost': return 'CatBoost'
-    case 'high_cof_segmented': return 'WFF 门控分区堆叠'
+    case 'high_cof_segmented': return '论文门控分区堆叠'
     case 'xgboost': return '极端梯度提升（XGBoost）'
     case 'svr': return '支持向量回归（SVR）'
     case 'mlp': return '多层感知机（MLP）'
@@ -2350,7 +2350,7 @@ async function handleImportWffThesisDatasets() {
       activeWorkbenchTab.value = 'experiments'
     }
   } catch (error: any) {
-    loadError.value = error?.response?.data?.detail || error?.message || 'Failed to import WFF thesis datasets.'
+    loadError.value = error?.response?.data?.detail || error?.message || '导入论文复现数据失败。'
   } finally {
     wffImporting.value = false
   }
@@ -3321,12 +3321,12 @@ watch(
                 type="button"
                 class="mt-2 inline-flex w-full items-center justify-center gap-1.5 rounded-[0.6rem] border border-[#bbf7d0] bg-[#f0fdfa] px-3 py-2 text-xs font-semibold text-[#0f766e] transition hover:bg-[#dcfce7] disabled:cursor-not-allowed disabled:opacity-60"
                 :disabled="wffImporting || activeTask?.status === 'running'"
-                title="从 backend/data/wff 导入 Dataset-A 和 Dataset-B，并保留论文固定划分"
+                title="导入内置论文复现数据，并保留论文固定划分"
                 @click="handleImportWffThesisDatasets"
               >
                 <Loader2 v-if="wffImporting" class="h-3.5 w-3.5 animate-spin" />
                 <Database v-else class="h-3.5 w-3.5" />
-                {{ wffImporting ? '导入 WFF 数据中' : '导入 WFF 论文数据' }}
+                {{ wffImporting ? '正在导入论文复现数据' : '导入论文复现数据' }}
               </button>
               <div v-if="hasSavedDatasets" class="mt-2.5 grid grid-cols-3 gap-2 text-xs">
                 <div class="rounded-[0.55rem] bg-[#f8fafc] px-2 py-2">
@@ -4118,10 +4118,10 @@ watch(
               <div>
                 <p class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#0f766e]">
                   <Layers class="h-3.5 w-3.5" />
-                  WFF 论文门控分区复刻
+                  论文门控分区复刻
                 </p>
                 <p class="mt-1 max-w-3xl text-xs leading-5 text-slate-600">
-                  按论文第 4 章执行：CatBoost 门控低/中/高摩擦区间，并用 CatBoost、RF、XGBoost 的稳定融合复刻固定划分下的测试和外部文献验证效果。
+                  按论文第 4 章执行：CatBoost 门控低/中/高摩擦区间，并用 CatBoost、RF、XGBoost 的稳定融合复刻固定划分下的检验和外部文献验证效果。
                 </p>
               </div>
               <div class="flex flex-wrap items-center gap-1.5 text-[11px] font-semibold">
@@ -4185,7 +4185,7 @@ watch(
                   <span class="text-[10px] text-slate-400">
                     <template v-if="segmentMixMode">运行中 {{ segmentMixProgressLabel }}</template>
                     <template v-else-if="segmentMixResults.length">已完成 {{ segmentMixCompleted.length }} / {{ segmentMixResults.length }}</template>
-                    <template v-else>固定 split / seed，独立复刻入口</template>
+                    <template v-else>固定划分与随机种子，独立复刻入口</template>
                   </span>
                 </div>
                 <div
@@ -4323,7 +4323,7 @@ watch(
                   <span class="text-[10px] text-slate-400">
                     <template v-if="featureGainMode">运行中 {{ featureGainProgressLabel }}</template>
                     <template v-else-if="featureGainResults.length">已完成 {{ featureGainCompleted.length }} / {{ featureGainResults.length }}</template>
-                    <template v-else>同一 split / seed</template>
+                    <template v-else>同一划分与随机种子</template>
                   </span>
                 </div>
                 <div
@@ -4876,13 +4876,13 @@ watch(
 
             <div v-if="!allScatterSamples.length" class="flex h-[260px] flex-col items-center justify-center gap-1 rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] text-center text-xs text-slate-500">
               <p>训练完成后在此显示论文式拟合图</p>
-              <p class="text-slate-400">WFF 论文固定划分会自动显示外部文献 6 点折线</p>
+              <p class="text-slate-400">论文固定划分会自动显示外部文献 6 点折线</p>
             </div>
             <div v-else class="space-y-3">
               <div class="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
                 <div class="min-w-0">
                   <div class="mb-1 flex items-center justify-between gap-2 text-[11px] font-semibold text-slate-600">
-                    <span>(a) Training / Testing predicted vs true</span>
+                    <span>(a) 训练与检验样本预测对照</span>
                     <span class="text-slate-400">Y = X</span>
                   </div>
                   <div class="h-[360px]">
@@ -4891,7 +4891,7 @@ watch(
                 </div>
                 <div class="min-w-0">
                   <div class="mb-1 flex items-center justify-between gap-2 text-[11px] font-semibold text-slate-600">
-                    <span>(b) Exp in literature</span>
+                    <span>(b) 外部文献验证</span>
                     <span class="text-slate-400">Pred-literature</span>
                   </div>
                   <div v-if="!externalSamples.length" class="flex h-[360px] items-center justify-center rounded-[0.6rem] border border-dashed border-[#dbe4f2] bg-[#fbfcff] text-xs text-slate-500">
