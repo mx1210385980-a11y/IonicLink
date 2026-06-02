@@ -13,12 +13,10 @@ const sourceSliceAfter = (start: string, end: string) => {
 }
 
 describe('App home shell', () => {
-  it('uses one Elicit shell for home, library, and monitor', () => {
+  it('uses one compact shell for home, library, and monitor', () => {
     expect(source).toContain("const elicitShellViews = ['home', 'library', 'admin']")
     expect(source).toContain("const chromeHiddenViews = ['home', 'library', 'admin']")
     expect(source).toContain('elicitShellViews.includes(currentView)')
-    expect(source).toContain('isElicitItemLocked')
-    expect(source).toContain('item.locked && !canAccessAdmin')
     expect(source).toContain('/ioniclink.png')
     expect(source).toContain("{ label: 'Home', icon: Clock3, view: 'home', section: 'today' }")
     expect(source).toContain("{ label: 'Extract', icon: Upload, modal: 'upload' }")
@@ -26,21 +24,23 @@ describe('App home shell', () => {
     expect(source).toContain('Library')
     expect(source).toContain('Monitor')
     expect(source).toContain("{ label: 'Monitor', icon: Activity, view: 'admin', section: 'runtime' }")
-    expect(source).toContain("{ label: 'Extraction workflow', icon: BookOpen, active: true, locked: false }")
-    expect(source).toContain("{ label: 'Research agent', icon: LayoutGrid, active: false, locked: false }")
     expect(source.indexOf("{ label: 'Extract', icon: Upload, modal: 'upload' }")).toBeLessThan(source.indexOf("{ label: 'Library', icon: BookOpen"))
     expect(source.indexOf("{ label: 'Database', icon: Database, modal: 'database' }")).toBeLessThan(source.indexOf("{ label: 'Library', icon: BookOpen"))
     expect(source).toContain('openElicitTopNavItem')
     expect(source).toContain('v-else-if="currentView === \'library\'"')
     expect(source).toContain('<AdminPage')
-    expect(source).toContain("{ label: 'Extract data', icon: Upload, modal: 'upload', locked: false }")
+    expect(source).not.toContain('elicitWorkflowItems')
+    expect(source).not.toContain('elicitToolItems')
+    expect(source).not.toContain('isElicitItemLocked')
+    expect(source).not.toContain("{ label: 'Research agent', icon: LayoutGrid, active: false, locked: false }")
+    expect(source).not.toContain("{ label: 'Extract data', icon: Upload, modal: 'upload', locked: false }")
     expect(source).not.toContain("{ label: 'Alerts', icon: Bell, view: 'review', section: 'inbox' }")
   })
 
-  it('opens the database tool as a table modal from the Elicit tools', () => {
+  it('opens the database tool as a table modal from the top navigation', () => {
     expect(source).toContain('DatabaseToolModal')
     expect(source).toContain("modal: 'database'")
-    expect(source).toContain('openElicitTool')
+    expect(source).toContain('openElicitTopNavItem')
     expect(source).toContain('databaseToolOpen')
     expect(source).toContain('databaseToolFocus')
     expect(source).toContain('databaseToolFocus.value = null')
@@ -66,6 +66,7 @@ describe('App home shell', () => {
     expect(source).toContain(':focus-entity-type="databaseToolFocus?.entityType || null"')
     expect(source).not.toContain(':selected-file-id="null"')
     expect(source).not.toContain(':explorer-doi="\'\'"')
+    expect(source).not.toContain('openElicitTool')
   })
 
   it('opens completed PDF upload extraction directly in Database instead of the results preview', () => {
@@ -277,11 +278,15 @@ describe('App home shell', () => {
     expect(resultsSource).not.toContain('Review status')
   })
 
-  it('slides the Elicit sidebar away when leaving home for library', () => {
-    expect(source).toContain('<Transition name="elicit-sidebar-slide">')
+  it('keeps the home shell unframed without the legacy Elicit sidebar', () => {
+    expect(source).toContain('<HomePage')
     expect(source).toContain('v-if="currentView === \'home\'"')
-    expect(source).toContain('elicit-sidebar-slide-leave-active')
-    expect(source).toContain('transform: translateX(-100%);')
+    expect(source).not.toContain('<Transition name="elicit-sidebar-slide">')
+    expect(source).not.toContain('elicit-sidebar-slide-leave-active')
+    expect(source).not.toContain('transform: translateX(-100%);')
+    expect(source).not.toContain('elicitWorkflowItems')
+    expect(source).not.toContain('elicitToolItems')
+    expect(source).not.toContain('No recent home searches yet.')
   })
 
   it('hands upload results to Database review instead of showing publish controls in the modal', () => {

@@ -12,13 +12,9 @@ import {
   FileText,
   Github,
   HelpCircle,
-  LayoutGrid,
   Loader2,
-  Lock,
   LogOut,
-  MessageCircle,
   PanelTop,
-  Search,
   Sparkles,
   UserCog,
   Upload,
@@ -162,31 +158,6 @@ const elicitTopNavItems: ElicitTopNavItem[] = [
   { label: 'Library', icon: BookOpen, view: 'library', section: 'explorer' },
   { label: 'Monitor', icon: Activity, view: 'admin', section: 'runtime' },
 ]
-const elicitWorkflowItems = [
-  { label: 'Extraction workflow', icon: BookOpen, active: true, locked: false },
-  { label: 'Research agent', icon: LayoutGrid, active: false, locked: false },
-  { label: 'Report', icon: FileText, active: false, locked: false },
-  { label: 'Systematic review', icon: LayoutGrid, active: false, locked: true },
-]
-type ElicitToolItem = {
-  label: string
-  icon: Component
-  view?: AppView
-  section?: AppSection
-  modal?: 'upload' | 'database'
-  locked: boolean
-}
-
-const elicitToolItems: ElicitToolItem[] = [
-  { label: 'Extract data', icon: Upload, modal: 'upload', locked: false },
-  { label: 'Database', icon: Database, modal: 'database', locked: false },
-  { label: 'Find papers', icon: Search, view: 'library', section: 'explorer', locked: false },
-  { label: 'Chat with papers', icon: MessageCircle, view: 'library', section: 'explorer', locked: false },
-]
-
-function isElicitItemLocked(item: { locked: boolean }) {
-  return item.locked && !canAccessAdmin.value
-}
 
 const viewTitle = computed(() => {
   if (isChinese.value) {
@@ -1890,21 +1861,6 @@ function handlePdfUploadDrop(event: DragEvent) {
   queuePdfUploadFiles(event.dataTransfer?.files)
 }
 
-function openElicitTool(item: ElicitToolItem) {
-  if (isElicitItemLocked(item)) return
-  if (item.modal === 'upload') {
-    openPdfUploadModal()
-    return
-  }
-  if (item.modal === 'database') {
-    openDatabaseTool()
-    return
-  }
-  if (item.view) {
-    navigateTo(item.view, item.section)
-  }
-}
-
 function openElicitTopNavItem(item: ElicitTopNavItem) {
   if (item.modal === 'upload') {
     openPdfUploadModal()
@@ -2132,54 +2088,6 @@ function handleHomeAction(action: HomeSuggestedAction) {
           </header>
 
           <div class="flex min-h-0 flex-1 overflow-hidden">
-            <Transition name="elicit-sidebar-slide">
-              <aside
-                v-if="currentView === 'home'"
-                class="hidden w-[20rem] shrink-0 border-r border-slate-200 bg-slate-50/70 xl:flex xl:flex-col"
-              >
-                <div class="flex-1 px-6 py-7">
-                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Workflows</p>
-                  <nav class="mt-5 space-y-1">
-                    <button
-                      v-for="item in elicitWorkflowItems"
-                      :key="item.label"
-                      type="button"
-                      class="flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm transition"
-                      :class="item.active ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-600 hover:bg-white hover:text-slate-950'"
-                    >
-                      <span class="flex items-center gap-3">
-                        <component :is="item.icon" class="h-4 w-4 text-slate-500" />
-                        {{ item.label }}
-                      </span>
-                      <Lock v-if="isElicitItemLocked(item)" class="h-3.5 w-3.5 text-slate-400" />
-                    </button>
-                  </nav>
-
-                  <p class="mt-9 text-xs font-semibold uppercase tracking-wide text-slate-400">Tools</p>
-                  <nav class="mt-5 space-y-1">
-                    <button
-                      v-for="item in elicitToolItems"
-                      :key="item.label"
-                      type="button"
-                      class="flex w-full items-center justify-between rounded-lg px-2 py-2 text-sm text-slate-600 transition hover:bg-white hover:text-slate-950"
-                      @click="openElicitTool(item)"
-                    >
-                      <span class="flex items-center gap-3">
-                        <component :is="item.icon" class="h-4 w-4 text-slate-500" />
-                        {{ item.label }}
-                      </span>
-                      <Lock v-if="isElicitItemLocked(item)" class="h-3.5 w-3.5 text-slate-400" />
-                    </button>
-                  </nav>
-                </div>
-
-                <div class="border-t border-slate-200 px-6 py-7">
-                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-400">Recents</p>
-                  <p class="mt-4 text-sm text-slate-500">No recent home searches yet.</p>
-                </div>
-              </aside>
-            </Transition>
-
             <main id="app-main" class="min-h-0 flex-1 overflow-hidden" tabindex="-1">
               <HomePage
                 v-if="currentView === 'home'"
@@ -3014,23 +2922,3 @@ function handleHomeAction(action: HomeSuggestedAction) {
     </div>
   </div>
 </template>
-
-<style>
-.elicit-sidebar-slide-enter-active,
-.elicit-sidebar-slide-leave-active {
-  overflow: hidden;
-  transition:
-    width 680ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform 680ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 680ms ease,
-    border-color 680ms ease;
-}
-
-.elicit-sidebar-slide-enter-from,
-.elicit-sidebar-slide-leave-to {
-  width: 0;
-  transform: translateX(-100%);
-  opacity: 0;
-  border-color: transparent;
-}
-</style>
