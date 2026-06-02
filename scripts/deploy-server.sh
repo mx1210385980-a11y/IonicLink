@@ -130,7 +130,7 @@ prune_remote_build_cache() {
 }
 
 hot_swap_frontend_dist_remote() {
-  remote "if sudo docker inspect ioniclink-frontend >/dev/null 2>&1; then sudo docker compose up -d --no-deps --no-build frontend >/dev/null 2>&1 || sudo docker compose up -d --no-deps frontend; sudo docker exec ioniclink-frontend sh -lc 'mkdir -p /usr/share/nginx/html && find /usr/share/nginx/html -mindepth 1 -maxdepth 1 -exec rm -rf {} +'; sudo docker cp frontend/dist/. ioniclink-frontend:/usr/share/nginx/html/; sudo docker cp frontend/nginx.conf ioniclink-frontend:/etc/nginx/conf.d/default.conf; sudo docker compose exec -T frontend nginx -s reload; else sudo docker build -f frontend/Dockerfile --build-arg VITE_API_URL=/api -t repo-frontend . && sudo docker compose up -d --no-deps --no-build frontend; fi"
+  remote "if sudo docker inspect ioniclink-frontend >/dev/null 2>&1; then sudo docker compose up -d --no-deps --no-build frontend >/dev/null 2>&1 || sudo docker compose up -d --no-deps frontend; for container in ioniclink-frontend ioniclink-preview-frontend; do if sudo docker inspect \"\$container\" >/dev/null 2>&1; then sudo docker exec \"\$container\" sh -lc 'mkdir -p /usr/share/nginx/html && find /usr/share/nginx/html -mindepth 1 -maxdepth 1 -exec rm -rf {} +'; sudo docker cp frontend/dist/. \"\$container\":/usr/share/nginx/html/; sudo docker cp frontend/nginx.conf \"\$container\":/etc/nginx/conf.d/default.conf; sudo docker exec \"\$container\" nginx -s reload; fi; done; else sudo docker build -f frontend/Dockerfile --build-arg VITE_API_URL=/api -t repo-frontend . && sudo docker compose up -d --no-deps --no-build frontend; fi"
 }
 
 hot_swap_backend_code_remote() {
