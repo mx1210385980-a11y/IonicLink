@@ -3,8 +3,14 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const source = readFileSync(resolve(__dirname, 'App.vue'), 'utf8')
-const sourceCount = (value: string) => (source.match(new RegExp(value, 'g')) || []).length
 const sourceSlice = (start: string, end: string) => source.slice(source.indexOf(start), source.indexOf(end))
+const sourceSliceAfter = (start: string, end: string) => {
+  const startIndex = source.indexOf(start)
+  expect(startIndex).toBeGreaterThanOrEqual(0)
+  const endIndex = source.indexOf(end, startIndex)
+  expect(endIndex).toBeGreaterThan(startIndex)
+  return source.slice(startIndex, endIndex)
+}
 
 describe('App home shell', () => {
   it('uses one Elicit shell for home, library, and monitor', () => {
@@ -72,6 +78,14 @@ describe('App home shell', () => {
     expect(source).toContain('databaseToolOpen.value = true')
   })
 
+  it('opens the Extract tool as a fresh upload entry after previous extraction results exist', () => {
+    const openModalSource = sourceSlice('function openPdfUploadModal()', 'function resetPdfUploadForFreshUpload()')
+
+    expect(openModalSource).toContain('resetPdfUploadForFreshUpload()')
+    expect(openModalSource).not.toContain('openCompletedPdfUploadItemsInDatabase')
+    expect(openModalSource).not.toContain("pdfUploadModalStep.value = 'results'")
+  })
+
   it('routes database evidence clicks into the source grounding overlay', () => {
     expect(source).toContain("mode?: 'training-blockers' | 'grounding' | null")
     expect(source).toContain('SourceGroundingView')
@@ -102,20 +116,20 @@ describe('App home shell', () => {
     expect(source).toContain('pdfUploadExtractionAbortRequested')
     expect(source).toContain('Stop extraction')
     expect(source).toContain('Continue in background')
-    expect(source).toContain('Stop and upload new PDF')
-    expect(source).toContain('stopPdfUploadExtractionAndUploadNew')
+    expect(source).not.toContain('Stop and upload new PDF')
+    expect(source).not.toContain('stopPdfUploadExtractionAndUploadNew')
     expect(source).toContain('resetPdfUploadForFreshUpload')
     expect(source).toContain('pdfUploadExtractionRunToken')
     expect(source).toContain('nextPdfUploadExtractionRunToken')
     expect(source).toContain('isCurrentPdfUploadExtractionRun')
     expect(source).toContain('if (!isCurrentPdfUploadExtractionRun(runToken)) return')
     expect(source).toContain('await trackPdfUploadExtractionRuns(uncachedSelections, runToken)')
-    expect(source).toContain('if (pdfUploadExtracting.value || pdfUploadExtractionItems.value.length > 0)')
+    expect(source).toContain('if (pdfUploadExtracting.value || activePdfUploadExtractionItems().length > 0)')
     expect(source).toContain('pdfUploadRecoverableExtractionItems')
     expect(source).toContain('retryPdfUploadRecoverableExtraction')
-    expect(source).toContain('Retry fresh run')
+    expect(source).toContain('Retry failed')
     expect(source).toContain('changePdfUploadExtractionType')
-    expect(source).not.toContain('Change extraction type')
+    expect(source).toContain('Change mode')
     expect(source).toContain('uploadAnotherPdfAfterExtraction')
     expect(source).toContain('Upload another PDF')
     expect(source).toContain('pdfUploadRecoverableSummaryLabel')
@@ -135,9 +149,15 @@ describe('App home shell', () => {
     expect(source).toContain('pdfUploadRunReviewableCount')
     expect(source).toContain('summary?.diffusion_artifacts?.reviewable_count')
     expect(source).toContain("preset === 'diffusion'")
-    expect(source).toContain("if (normalizedStage.startsWith('stage_c.fast_text_start')) return 34")
-    expect(source).toContain("if (normalizedStage.startsWith('stage_c.fast_text_done')) return 76")
+    expect(source).toContain("if (normalizedStage.startsWith('stage_c.fast_text_start')) return 36")
+    expect(source).toContain("if (normalizedStage.startsWith('stage_c.fast_text_done')) return 78")
+    expect(source).toContain("if (normalizedStage.startsWith('stage_b.fast_table_prepare')) return 22")
+    expect(source).toContain("if (normalizedStage.startsWith('stage_c.fast_table_wait'))")
+    expect(source).toContain("if (normalizedStage.startsWith('stage_d.fast_table_clean')) return 86")
     expect(source).toContain("if (normalizedStage.startsWith('stage_b.chunk') && chunkIndex > 0 && chunkTotal > 0)")
+    expect(source).toContain('friendlyPdfUploadExtractionMessage')
+    expect(source).toContain('Reading the paper text and figure captions.')
+    expect(source).not.toContain('sending document to')
     expect(source).toContain('pdfUploadExtractionLatestMessage(active)')
     expect(source).toContain('Latest: ${latestMessage}')
     expect(source).toContain("no_data: 'status.no_data'")
@@ -146,8 +166,6 @@ describe('App home shell', () => {
     expect(source).toContain("status: initialHasNoReviewableData ? 'no_data' : 'completed'")
     expect(source).toContain('Math.max(weakCandidateCount, candidateCount)')
     expect(source).toContain("status: records > 0 ? 'completed' : 'no_data'")
-    expect(source).toContain('pdfUploadEvidenceShouldSuppressBareEvidence')
-    expect(source).toContain('isBareMatchedNumber && (!quoteText || isBareQuoteNumber)')
     expect(source).toMatch(/if \(\['no_data', 'completed'\]\.includes\(normalizedStatus\) && !pdfUploadRunHasReviewableData\(run\)\)[\s\S]*summary\?\.no_data_reason/)
     expect(source).toContain(":role=\"item.status === 'completed' && item.records > 0 ? 'button' : undefined\"")
     expect(source).not.toContain('const result = await waitForPdfUploadExtractionRun')
@@ -207,7 +225,56 @@ describe('App home shell', () => {
     expect(source).toContain(":disabled=\"Boolean(option.disabled)\"")
     expect(source).toContain('pdfUploadSelectionHasUnsupportedPreset')
     expect(source).toContain("status: 'failed'")
-    expect(source).toContain('Choose Tribology or Diffusion')
+    expect(source).toContain('Choose Lubrication or Diffusion')
+  })
+
+  it('presents PDF extraction as a minimal add mode run review flow', () => {
+    const modalSource = sourceSliceAfter(
+      'v-if="pdfUploadModalOpen"',
+      '<!-- Workspace top bar -->',
+    )
+
+    expect(source).toContain("const pdfUploadStepLabels = ['Add papers', 'Choose mode', 'Extracting', 'Review']")
+    expect(source).toContain('const pdfUploadVisibleExtractionPresetOptions')
+    expect(source).toContain('const pdfUploadReviewSummaryStats')
+    expect(modalSource).toContain('Extract papers')
+    expect(modalSource).toContain('Add papers')
+    expect(modalSource).toContain('Choose mode')
+    expect(modalSource).toContain('Review')
+    expect(modalSource).toContain('Review in Database')
+    expect(modalSource).toContain('No reviewable data found')
+    expect(modalSource).not.toContain('Explore the scientific literature')
+    expect(modalSource).not.toContain('Find papers')
+    expect(modalSource).not.toContain('List of concepts')
+  })
+
+  it('only exposes supported extraction modes in the public PDF extraction flow', () => {
+    const modalSource = sourceSliceAfter(
+      'v-if="pdfUploadModalOpen"',
+      '<!-- Workspace top bar -->',
+    )
+
+    expect(source).toContain('pdfUploadVisibleExtractionPresetOptions = computed')
+    expect(source).toContain("option.value !== 'conductivity'")
+    expect(modalSource).toContain('pdfUploadVisibleExtractionPresetOptions')
+    expect(modalSource).not.toContain('Conductivity')
+    expect(modalSource).not.toContain('Coming soon')
+    expect(modalSource).not.toContain('Choose Lubrication or Diffusion')
+  })
+
+  it('keeps failed and empty extraction outcomes actionable without a table-first results page', () => {
+    const resultsSource = sourceSliceAfter(
+      'v-else-if="pdfUploadModalStep === \'results\'"',
+      '<!-- Workspace top bar -->',
+    )
+
+    expect(resultsSource).toContain('Review in Database')
+    expect(resultsSource).toContain('Retry failed')
+    expect(resultsSource).toContain('Change mode')
+    expect(resultsSource).toContain('Upload another PDF')
+    expect(resultsSource).not.toContain('<table')
+    expect(resultsSource).not.toContain('Extracted table')
+    expect(resultsSource).not.toContain('Review status')
   })
 
   it('slides the Elicit sidebar away when leaving home for library', () => {
@@ -217,100 +284,62 @@ describe('App home shell', () => {
     expect(source).toContain('transform: translateX(-100%);')
   })
 
-  it('shows extraction review publish controls in the upload results modal', () => {
-    expect(sourceCount('Publish ready records')).toBe(1)
-    expect(source).toContain('Confirm')
-    expect(source).toContain('Flag')
-    expect(source).toContain('Review status')
-    expect(source).toContain('approveReviewCandidate')
-    expect(source).toContain('publishLiteratureToGroupLibrary')
-    expect(source).toContain('publishReadyPdfUploadRecords')
-    expect(source).toContain('approveReviewRecord')
-    expect(source).toContain('approveDiffusionReviewRecord')
-    expect(source).toContain("target.entityType === 'record'")
-    expect(source).toContain('approveReviewRecord(target.entityId)')
-    expect(source).toContain('approveDiffusionReviewRecord(target.entityId)')
-    expect(source).toContain('confirmRecordFieldEvidence')
-    expect(source).toContain('confirmCandidateFieldEvidence')
-    expect(source).toContain('flagRecordFieldEvidence')
-    expect(source).toContain('flagCandidateFieldEvidence')
-    expect(source).toContain('confirmDiffusionCandidateFieldEvidence')
-    expect(source).toContain('confirmDiffusionRecordFieldEvidence')
-    expect(source).toContain('flagDiffusionCandidateFieldEvidence')
-    expect(source).toContain('flagDiffusionRecordFieldEvidence')
-    expect(source).toContain('pdfUploadFieldEvidenceEntityType')
-    expect(source).toContain('pdfUploadReviewTargetId')
-    expect(source).toContain('row.entity_id ?? row.entityId ?? row.id')
-    expect(source).toContain('pdfUploadPublishedReviewTargetKeys')
-    expect(source).toContain('row.promoted_record_id = response.promoted_record_id ?? response.promotedRecordId ?? row.promoted_record_id')
-    expect(source).toContain('markPdfUploadReviewTargetPublished(target)')
-    expect(source).toContain('reviewPublishTargetKey(target)')
-    expect(source).toContain("? confirmRecordFieldEvidence(targetId, fieldKey)")
-    expect(source).toContain("? flagRecordFieldEvidence(targetId, fieldKey)")
-    expect(source).toContain('pdfUploadEvidenceContextualHighlights')
-    expect(source).toContain('const fallbackHighlight = isMetricField ? pdfUploadResultMetric(row) : value')
-    expect(source).toContain('Publish')
-    expect(source).toContain('Review')
-    expect(source).not.toContain('Relevant quotes')
-    expect(source).toContain('Boolean(pdfUploadReviewActionPending)')
-    expect(source).not.toContain('@click="closePdfUploadModal"\n                    >\n                      Done')
+  it('hands upload results to Database review instead of showing publish controls in the modal', () => {
+    const resultsSource = sourceSliceAfter(
+      'v-else-if="pdfUploadModalStep === \'results\'"',
+      '<!-- Workspace top bar -->',
+    )
+
+    expect(resultsSource).toContain('Review in Database')
+    expect(resultsSource).toContain('pdfUploadReviewSummaryStats.records')
+    expect(resultsSource).toContain('openPdfUploadResultsInDatabase()')
+    expect(resultsSource).not.toContain('Publish ready records')
+    expect(resultsSource).not.toContain('Confirm')
+    expect(resultsSource).not.toContain('Flag')
+    expect(resultsSource).not.toContain('Review status')
+    expect(source).not.toContain('publishReadyPdfUploadRecords')
+    expect(source).not.toContain('approveReviewRecord')
+    expect(source).not.toContain('approveDiffusionReviewRecord')
+    expect(source).not.toContain('confirmRecordFieldEvidence')
+    expect(source).not.toContain('confirmCandidateFieldEvidence')
+    expect(source).not.toContain('flagRecordFieldEvidence')
+    expect(source).not.toContain('flagCandidateFieldEvidence')
+    expect(source).not.toContain('pdfUploadEvidenceContextualHighlights')
   })
 
-  it('keeps upload preview evidence split by real field instead of mixing composite cells', () => {
-    expect(source).toContain('type PdfUploadEvidenceSlide')
-    expect(source).toContain('pdfUploadEvidenceSlideIndex')
-    expect(source).toContain('pdfUploadEvidenceSlidesForField')
-    expect(source).toContain('pdfUploadEvidenceSemanticKey')
-    expect(source).toContain("material_name: 'substrate_material'")
-    expect(source).toContain("normal_load: 'load'")
-    expect(source).toContain('pdfUploadEvidenceSlideHasContent')
-    expect(source).toContain('pdfUploadBestEvidenceSlidesBySemanticKey')
-    expect(source).toContain('activePdfUploadEvidenceSlide')
-    expect(source).toContain('activePdfUploadEvidenceActionFieldKey')
-    expect(source).toContain('movePdfUploadEvidenceSlide')
-    expect(source).toContain('activePdfUploadEvidenceSlideCount')
-    expect(source).toContain('activePdfUploadEvidenceSlideIndexLabel')
-    expect(source).toContain('activePdfUploadEvidenceValue')
-    expect(source).toContain('getPdfBboxPreview')
-    expect(source).toContain('hydratePdfUploadEvidencePreviews')
-    expect(source).toContain('pdfUploadEvidenceShouldRenderPdfPreview')
-    expect(source).toContain('activePdfUploadEvidenceImageSrc()')
-    expect(source).toContain('Highlighted PDF evidence')
-    expect(source).toContain('fieldKeys: [fieldKey]')
-    expect(source).toContain('if (!pdfUploadEvidenceSlideHasContent(slide)) continue')
-    expect(source).toContain('return Boolean(slide.quotes.length || pdfUploadEvidenceSlideHasReliableLocator(slide))')
-    expect(source).not.toContain('return Boolean(pdfUploadResultValue(slide.value) || slide.quotes.length)')
-    expect(source).toContain('seenSemanticKeys')
-    expect(source).toContain('activePdfUploadEvidenceActionFieldKey()')
-    expect(source).toContain('aria-label="Previous upload evidence"')
-    expect(source).toContain('aria-label="Next upload evidence"')
-    expect(source).toContain('No field-level quote was stored for this value.')
+  it('removes the old upload-modal evidence popover from the compact results handoff', () => {
+    expect(source).not.toContain('type PdfUploadEvidenceSlide')
+    expect(source).not.toContain('openPdfUploadCellEvidence')
+    expect(source).not.toContain('getPdfBboxPreview')
+    expect(source).not.toContain('hydratePdfUploadEvidencePreviews')
+    expect(source).not.toContain('Highlighted PDF evidence')
+    expect(source).not.toContain('aria-label="Previous upload evidence"')
+    expect(source).not.toContain('aria-label="Next upload evidence"')
   })
 
-  it('does not show isolated numeric evidence for upload preview roughness or derived speed', () => {
-    expect(source).toContain('pdfUploadEvidenceShouldSuppressBareEvidence')
-    expect(source).toContain("fieldKey?.includes('roughness')")
-    expect(source).toContain("groundingMode === 'derived'")
-    expect(source).toContain('pdfUploadEvidenceHasDerivedScanContext')
-    expect(source).toContain('fieldKey: key')
-    expect(source).toContain('pdfUploadEvidenceHasReliableLocator')
-    expect(source).toContain('if (!pdfUploadEvidenceSlideHasReliableLocator(slide)) return false')
-    expect(source).toContain('if (pdfUploadEvidenceShouldSuppressBareEvidence(fieldKey, quote, matchedText, groundingMode)) return false')
-    expect(source).not.toContain('pdfUploadEvidenceQuoteFromText(matchedText, matchedText)')
+  it('uses Database focus to choose the official upload review destination', () => {
+    expect(source).toContain('function pdfUploadDatabaseFocusTarget')
+    expect(source).toContain('resolveCandidatePublishTarget(row, extractorType)')
+    expect(source).toContain("entityType: focusTarget.entityType")
+    expect(source).toContain("dataset: pdfUploadDatabaseFocusDataset(target)")
   })
 
-  it('surfaces backend validation details when publishing ready records fails', () => {
-    expect(source).toContain('pdfUploadReviewActionErrorMessage(error: unknown)')
-    expect(source).toContain('data?.detail')
-    expect(source).toContain('Candidate cannot be approved')
-    expect(source).toContain('database sync failed')
+  it('keeps upload results free of publish failure handling copy', () => {
+    expect(source).not.toContain('pdfUploadReviewActionErrorMessage(error: unknown)')
+    expect(source).not.toContain('Candidate cannot be approved')
+    expect(source).not.toContain('database sync failed')
   })
 
-  it('still syncs successfully approved extraction rows into the database when some ready rows fail', () => {
-    expect(source).toContain('if (publishedCount > 0) {')
-    expect(source).toContain('await syncPublishedPdfUploadRecordsToDatabase()')
-    expect(source).toContain('const publishIssueMessage = [...failures, ...skipped].join(\'; \')')
-    expect(source).toContain('Published ${publishedCount} of ${readyRows.length} ready records and synced the database.')
-    expect(source).toContain('Published ${publishedCount} of ${readyRows.length} approved records, but database sync failed:')
+  it('opens Review evidence as the candidate library while Database remains official records', () => {
+    expect(source).toContain('function openReviewQueue()')
+    expect(source).toContain("entityType: 'candidate'")
+    expect(source).toContain("if (action.target === 'review-evidence')")
+    expect(source).toContain(":entity-type-filter=\"databaseToolFocus?.entityType === 'candidate' ? 'candidate' : 'record'\"")
+  })
+
+  it('does not publish records directly from the upload results modal', () => {
+    expect(source).toContain('openPdfUploadResultsInDatabase')
+    expect(source).not.toContain('syncPublishedPdfUploadRecordsToDatabase')
+    expect(source).not.toContain('Published ${publishedCount} of ${readyRows.length}')
   })
 })

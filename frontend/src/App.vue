@@ -5,8 +5,6 @@ import {
   ArrowRight,
   BookOpen,
   ChevronDown,
-  ChevronLeft,
-  ChevronRight,
   Check,
   CloudUpload,
   Clock3,
@@ -28,33 +26,18 @@ import {
 } from 'lucide-vue-next'
 
 import AppSidebar from '@/components/AppSidebar.vue'
-import ChemicalText from '@/components/ChemicalText.vue'
 import LoginScreen from '@/components/LoginScreen.vue'
 import type { HomeSuggestedAction } from '@/composables/useHomeSummary'
 import { useAppShell } from '@/composables/useAppShell'
 import { useI18n } from '@/composables/useI18n'
 import {
-  approveDiffusionReviewCandidate,
-  approveDiffusionReviewRecord,
-  approveReviewCandidate,
-  approveReviewRecord,
   cancelExtraction,
-  confirmCandidateFieldEvidence,
-  confirmDiffusionCandidateFieldEvidence,
-  confirmDiffusionRecordFieldEvidence,
-  confirmRecordFieldEvidence,
   extractData,
-  flagCandidateFieldEvidence,
-  flagDiffusionCandidateFieldEvidence,
-  flagDiffusionRecordFieldEvidence,
-  flagRecordFieldEvidence,
   getData,
   getExtractionRunCandidates,
   getLatestExtractionRun,
   getLiteratureDetails,
-  getPdfBboxPreview,
   getPdfHighlights,
-  publishLiteratureToGroupLibrary,
   uploadFile,
   type BatchFile,
   type ExtractionProfile,
@@ -66,21 +49,9 @@ import {
   type UploadProgressSnapshot,
   type ValidationStatus,
 } from '@/lib/api'
-import { resolveCandidatePublishTarget, reviewPublishTargetKey } from '@/lib/extractionPublish'
+import { resolveCandidatePublishTarget } from '@/lib/extractionPublish'
 import { buildPdfUploadExtractionItems } from '@/lib/extractionWorkspace'
 import { lazyComponent } from '@/lib/lazyComponent'
-import {
-  confidenceTierLabel,
-  confidenceTierOf,
-  extractionReviewStatusClass,
-  extractionReviewStatusForRow,
-  extractionReviewStatusLabel,
-  extractionReviewSummary,
-  firstAvailablePdfUploadReviewFieldKey,
-  missingFieldLabels,
-  missingFieldsOf,
-  type ExtractionReviewStatus,
-} from '@/lib/extractionReview'
 import type { AppSection, AppView } from '@/lib/platform'
 import type { HighlightRect } from '@/types/pdf-highlight'
 
@@ -330,36 +301,6 @@ type PdfUploadExtractionItem = LiteratureMetadata & {
   resultError?: string
   progress: number
 }
-type PdfUploadEvidenceQuote = {
-  text: string
-  highlights?: string[]
-  highlightGroups?: string[][]
-}
-type PdfUploadEvidenceSlide = {
-  fieldKey: string
-  fieldKeys: string[]
-  actionFieldKey: string
-  label: string
-  value: string
-  quotes: PdfUploadEvidenceQuote[]
-  sourceType?: string
-  groundingMode?: string
-  hasReliableLocator?: boolean
-  page?: number | null
-  bbox?: number[] | null
-}
-type PdfUploadEvidencePopover = {
-  row: TribologyData
-  rowIndex: number
-  fieldLabel: string
-  fieldKeys: string[]
-  actionFieldKey: string
-  value: string
-  quotes: PdfUploadEvidenceQuote[]
-  slides: PdfUploadEvidenceSlide[]
-  page?: number | null
-  bbox?: number[] | null
-}
 const pdfUploadExtractionItems = ref<PdfUploadExtractionItem[]>([])
 const pdfUploadExtracting = ref(false)
 const pdfUploadExtractionAbortRequested = ref(false)
@@ -368,15 +309,6 @@ const pdfUploadExtractionRunToken = ref(0)
 const PDF_UPLOAD_CANCEL_TIMEOUT_MS = 8000
 const PDF_UPLOAD_STALLED_HEARTBEAT_MS = 10 * 60 * 1000
 const selectedPdfUploadResultPaperId = ref<string | null>(null)
-const activePdfUploadEvidence = ref<PdfUploadEvidencePopover | null>(null)
-const pdfUploadEvidencePosition = ref({ top: 0, left: 0 })
-const pdfUploadEvidenceSlideIndex = ref(0)
-const pdfUploadEvidencePreviewImages = ref<Record<string, string | null>>({})
-const pdfUploadEvidencePreviewLoading = ref<Record<string, boolean>>({})
-const pdfUploadEvidencePreviewError = ref<Record<string, string | null>>({})
-const pdfUploadReviewActionPending = ref('')
-const pdfUploadReviewActionError = ref('')
-const pdfUploadPublishedReviewTargetKeys = ref<Set<string>>(new Set())
 const pdfUploadCompletedExtractionItems = computed(() =>
   pdfUploadExtractionItems.value.filter((item) => item.status === 'completed' && item.records > 0),
 )
@@ -392,19 +324,6 @@ const selectedPdfUploadResultItem = computed(() => {
   return pdfUploadCompletedExtractionItems.value.find((item) => item.id === selectedPdfUploadResultPaperId.value)
     || pdfUploadCompletedExtractionItems.value[0]
     || null
-})
-const pdfUploadResultRows = computed(() => selectedPdfUploadResultItem.value?.extractedRows || [])
-const pdfUploadReviewStatuses = computed<ExtractionReviewStatus[]>(() =>
-  pdfUploadResultRows.value.map((row) => pdfUploadReviewStatus(row)),
-)
-const pdfUploadReviewSummary = computed(() => extractionReviewSummary(pdfUploadReviewStatuses.value))
-const pdfUploadReadyRows = computed(() =>
-  pdfUploadResultRows.value.filter((row) => pdfUploadReviewStatus(row) === 'ready'),
-)
-const pdfUploadNeedsReviewCount = computed(() => pdfUploadReviewSummary.value.needsReview)
-const selectedPdfUploadResultPreset = computed(() => {
-  const item = selectedPdfUploadResultItem.value
-  return item ? uploadedPdfPaperExtractionPresets.value[item.id] || inferPdfUploadExtractionPreset(item) : 'tribology'
 })
 const pdfUploadExtractionProgress = computed(() => {
   if (pdfUploadExtractionItems.value.length === 0) return 0
@@ -433,6 +352,36 @@ function clampPdfUploadProgress(value: number) {
 
 function pdfUploadFileKey(file: File) {
   return `${file.name}:${file.size}:${file.lastModified}`
+}
+
+function friendlyPdfUploadExtractionMessage(message?: string | null, stage?: string | null) {
+  const rawMessage = String(message || '').trim()
+  const normalizedStage = String(stage || '').trim().toLowerCase()
+  const normalizedMessage = rawMessage.toLowerCase()
+  const rowMatch = rawMessage.match(/(?:prepared|extracted)\s+(\d+)\s+(?:candidate\s+)?(?:table\s+)?row/i)
+  const rowCount = rowMatch ? Number(rowMatch[1]) : null
+
+  if (normalizedStage.startsWith('stage_a')) return 'Starting the extraction job.'
+  if (normalizedStage.startsWith('stage_b.fast_table_prepare')) return 'Reading the paper text and figure captions.'
+  if (normalizedStage.startsWith('stage_b.fast_table_figures')) return 'Checking figure pages that may contain chart values.'
+  if (normalizedStage.startsWith('stage_c.fast_table_submit')) return 'Building the extraction table from the paper.'
+  if (normalizedStage.startsWith('stage_c.fast_table_wait')) return 'Still building the data table. Larger PDFs can take a little longer.'
+  if (normalizedStage.startsWith('stage_c.fast_table_parse')) return 'Reading the extracted table rows.'
+  if (normalizedStage.startsWith('stage_d.fast_table_clean')) return 'Cleaning units and separating probe, coating, and substrate.'
+  if (normalizedStage.startsWith('stage_e.fast_table_ready')) {
+    return rowCount == null ? 'Candidate rows are ready for Database review.' : `${rowCount} candidate row${rowCount === 1 ? '' : 's'} ready for Database review.`
+  }
+  if (normalizedStage.startsWith('stage_e')) return rawMessage || 'Saving cleaned records for Database review.'
+
+  if (/sending\s+document\s+to|claude|gpt|gemini|model/i.test(rawMessage)) {
+    return rowCount == null ? 'Building the extraction table from the paper.' : `${rowCount} candidate row${rowCount === 1 ? '' : 's'} ready for Database review.`
+  }
+  if (/^(rows|chunk)=/i.test(rawMessage) || normalizedMessage.includes('raw_candidates=')) {
+    return 'Extracting and checking table rows.'
+  }
+  return rawMessage
+    .replace(/\s*progress_step=\d+\s*/gi, '')
+    .trim()
 }
 
 function updatePdfUploadUploadProgress(file: File, progress: UploadProgressSnapshot) {
@@ -469,10 +418,33 @@ function isCurrentPdfUploadExtractionRun(runToken: number) {
 }
 
 const pdfUploadExtractionPresetOptions: Array<{ value: UploadExtractionPreset, label: string, description: string, disabled?: boolean }> = [
-  { value: 'tribology', label: 'Tribology', description: 'Friction, COF, wear, surfaces' },
+  { value: 'tribology', label: 'Lubrication', description: 'Friction, COF, wear, surfaces' },
   { value: 'diffusion', label: 'Diffusion', description: 'Diffusion coefficients and confined transport' },
   { value: 'conductivity', label: 'Conductivity', description: 'Conductivity, EIS, transference number (coming soon)', disabled: true },
 ]
+
+const pdfUploadVisibleExtractionPresetOptions = computed(() =>
+  pdfUploadExtractionPresetOptions.filter((option) => option.value !== 'conductivity'),
+)
+
+const pdfUploadStepLabels = ['Add papers', 'Choose mode', 'Extracting', 'Review']
+
+const pdfUploadModalTitle = computed(() => 'Extract papers')
+
+const pdfUploadModalSubtitle = computed(() => {
+  if (pdfUploadModalStep.value === 'upload') return 'Add PDF papers and prepare them for extraction.'
+  if (pdfUploadModalStep.value === 'select' || pdfUploadModalStep.value === 'setup') return 'Choose what kind of data to extract from each paper.'
+  if (pdfUploadModalStep.value === 'extracting') return 'IonicLink is reading the papers and preparing rows for review.'
+  return 'Open the extracted rows in Database review.'
+})
+
+const pdfUploadReviewSummaryStats = computed(() => {
+  const processed = pdfUploadExtractionItems.value.length
+  const ready = pdfUploadExtractionItems.value.filter((item) => item.status === 'completed' && item.records > 0).length
+  const records = pdfUploadExtractionItems.value.reduce((sum, item) => sum + Math.max(0, Number(item.records || 0)), 0)
+  const recoverable = pdfUploadExtractionItems.value.filter((item) => ['no_data', 'failed', 'cancelled'].includes(item.status)).length
+  return { processed, ready, records, recoverable }
+})
 
 function uploadedPdfPaperText(paper: LiteratureMetadata & { id?: string }) {
   return [
@@ -529,7 +501,7 @@ function setPdfUploadedPaperExtractionPreset(paperId: string, event: Event | Upl
 }
 
 function pdfUploadPresetLabel(preset: UploadExtractionPreset) {
-  return pdfUploadExtractionPresetOptions.find((option) => option.value === preset)?.label || 'Tribology'
+  return pdfUploadExtractionPresetOptions.find((option) => option.value === preset)?.label || 'Lubrication'
 }
 
 function metadataFromUploadFallback(file: File, response: Awaited<ReturnType<typeof uploadFile>>): UploadedPdfPaper {
@@ -885,7 +857,14 @@ async function retryLatestFailedRun() {
 }
 
 function openReviewQueue() {
-  navigateTo('library', 'explorer')
+  databaseToolFocus.value = {
+    fileId: '',
+    doi: '',
+    dataset: 'tribology',
+    recordId: null,
+    entityType: 'candidate',
+  }
+  databaseToolOpen.value = true
 }
 
 function openDatasetBuilder() {
@@ -925,24 +904,13 @@ function openLibraryExtractionDatabase(payload?: DatabaseOpenTarget) {
 }
 
 function openPdfUploadModal() {
-  if (pdfUploadExtracting.value || pdfUploadExtractionItems.value.length > 0) {
-    if (!pdfUploadExtracting.value && pdfUploadCompletedExtractionItems.value.length > 0) {
-      void openCompletedPdfUploadItemsInDatabase(pdfUploadCompletedExtractionItems.value)
-      return
-    }
+  if (pdfUploadExtracting.value || activePdfUploadExtractionItems().length > 0) {
     pdfUploadDragging.value = false
     pdfUploadModalStep.value = 'extracting'
     pdfUploadModalOpen.value = true
     return
   }
-  pdfUploadStatusMessage.value = ''
-  pdfUploadDragging.value = false
-  pdfUploadModalStep.value = 'upload'
-  pdfUploadExtractionAbortRequested.value = false
-  pdfUploadExtractionCancelling.value = false
-  uploadedPdfPapers.value = []
-  uploadedPdfPaperExtractionPresets.value = {}
-  activePdfUploadEvidence.value = null
+  resetPdfUploadForFreshUpload()
   pdfUploadModalOpen.value = true
 }
 
@@ -959,7 +927,6 @@ function resetPdfUploadForFreshUpload() {
   pdfUploadExtractionAbortRequested.value = false
   pdfUploadExtractionCancelling.value = false
   selectedPdfUploadResultPaperId.value = null
-  activePdfUploadEvidence.value = null
   pdfUploadPendingFileNames.value = []
   pdfUploadBatchTotal.value = 0
   pdfUploadBatchFinished.value = 0
@@ -972,7 +939,6 @@ function closePdfUploadModal() {
   if (pdfUploadExtracting.value) {
     pdfUploadModalOpen.value = false
     pdfUploadDragging.value = false
-    activePdfUploadEvidence.value = null
     return
   }
   pdfUploadModalOpen.value = false
@@ -1006,16 +972,6 @@ function continueFromPdfUploadModal() {
   pdfUploadBatchTotal.value = 0
   pdfUploadBatchFinished.value = 0
   navigateTo('library', 'explorer')
-}
-
-async function openPdfUploadExtractionResults(item?: PdfUploadExtractionItem) {
-  if (pdfUploadExtracting.value) return
-  const target = item || pdfUploadCompletedExtractionItems.value[0]
-  if (!target || target.status !== 'completed' || target.records <= 0) return
-  selectedPdfUploadResultPaperId.value = target.id
-  activePdfUploadEvidence.value = null
-  pdfUploadModalStep.value = 'results'
-  await hydratePdfUploadExtractionRows([target])
 }
 
 async function hydratePdfUploadDiffusionRows(paper: LiteratureMetadata & { id: string }) {
@@ -1189,10 +1145,10 @@ async function cancelStalledPdfUploadExtractionItems(selected: UploadedPdfPaper[
 
 function pdfUploadExtractionStatusLabel(status: PdfUploadExtractionStatus) {
   if (status === 'extracting') return 'Extracting'
-  if (status === 'completed') return 'Completed'
-  if (status === 'no_data') return 'No data'
+  if (status === 'completed') return 'Ready for review'
+  if (status === 'no_data') return 'No reviewable data found'
   if (status === 'failed') return 'Failed'
-  if (status === 'cancelled') return 'Cancelled'
+  if (status === 'cancelled') return 'Stopped'
   return 'Queued'
 }
 
@@ -1215,864 +1171,8 @@ function pdfUploadResultValue(value: unknown) {
   return text && text.toLowerCase() !== 'not specified' && text.toLowerCase() !== 'n/a' ? text : ''
 }
 
-function compactIonPartText(value: unknown) {
-  return pdfUploadResultValue(value)
-    .replace(/\b([PN])([0-9]+(?:,[0-9]+)+)\b/gi, (_match, head, digits) => `${String(head).toUpperCase()}${String(digits).replace(/,/g, '')}`)
-}
-
-function pdfUploadIonPartLine(row: TribologyData) {
-  return [compactIonPartText(row.cation), compactIonPartText(row.anion)].filter(Boolean).join(' · ')
-}
-
-function isSpecificBmbSample(value: string) {
-  return /\[[^\]]+\]\s*\[A\d+BMB\]/i.test(value)
-}
-
-function withSpecificBmbSample(row: TribologyData, fallback: string) {
-  const raw = pdfUploadResultValue(row.ionic_liquid)
-  if (isSpecificBmbSample(raw)) return raw
-
-  const alias = pdfUploadResultValue(row.lubricant_alias) || pdfUploadResultValue(row.system_name)
-  const aliasMatch = alias.match(/\b(A\d+BMB)\b/i)
-  if (!aliasMatch) return fallback
-
-  const source = raw || fallback
-  const pairMatch = source.match(/\[([^\]]+)\]\s*\[(?:A\d+)?BMB\]/i)
-  const cation = pairMatch?.[1] || compactIonPartText(row.cation)
-  return cation ? `[${cation}][${aliasMatch[1]?.toUpperCase()}]` : fallback
-}
-
-function pdfUploadResultId(row: TribologyData, index: number) {
-  return pdfUploadResultValue(row.id) || String(index + 1)
-}
-
-function pdfUploadReviewTargetId(row: TribologyData) {
-  const id = Number(row.entity_id ?? row.entityId ?? row.id ?? 0)
-  return Number.isFinite(id) && id > 0 ? id : 0
-}
-
-function pdfUploadCandidateId(row: TribologyData) {
-  return pdfUploadReviewTargetId(row)
-}
-
-function pdfUploadReviewStatus(row: TribologyData): ExtractionReviewStatus {
-  const target = resolveCandidatePublishTarget(row, selectedPdfUploadResultPreset.value as ExtractorType)
-  if (target && pdfUploadPublishedReviewTargetKeys.value.has(reviewPublishTargetKey(target))) return 'published'
-  return extractionReviewStatusForRow(row)
-}
-
-function pdfUploadRowConfidenceLabel(row: TribologyData) {
-  const tier = row.confidence_tier ?? row.confidenceTier
-  if (!tier && (row.confidence === null || row.confidence === undefined)) return ''
-  return confidenceTierLabel(tier ?? confidenceTierOf(row))
-}
-
-function pdfUploadRowMissingLabels(row: TribologyData) {
-  return missingFieldLabels(missingFieldsOf(row))
-}
-
 function pdfUploadHasWeakCandidates(rows: TribologyData[]) {
   return rows.some((row) => String(row.record_origin || '').trim().toLowerCase() === 'weak_candidate')
-}
-
-function markPdfUploadReviewTargetPublished(target: NonNullable<ReturnType<typeof resolveCandidatePublishTarget>>) {
-  const next = new Set(pdfUploadPublishedReviewTargetKeys.value)
-  next.add(reviewPublishTargetKey(target))
-  pdfUploadPublishedReviewTargetKeys.value = next
-}
-
-function applyPdfUploadReviewResponse(
-  row: TribologyData,
-  response: Awaited<ReturnType<typeof approveReviewCandidate>>,
-) {
-  const responseRecord = response as Partial<TribologyData>
-  row.field_evidence_json = responseRecord.field_evidence_json || row.field_evidence_json
-  row.review_status = response.review_status || row.review_status
-  row.promoted_record_id = response.promoted_record_id ?? response.promotedRecordId ?? row.promoted_record_id
-  row.promotedRecordId = response.promotedRecordId ?? response.promoted_record_id ?? row.promotedRecordId
-  row.review_entity_type = responseRecord.review_entity_type || responseRecord.reviewEntityType || row.review_entity_type
-  row.reviewEntityType = responseRecord.reviewEntityType || responseRecord.review_entity_type || row.reviewEntityType
-}
-
-function pdfUploadReviewActionKey(action: string, candidateId: number, fieldKey = '') {
-  return `${action}:${candidateId}:${fieldKey}`
-}
-
-function pdfUploadReviewActionErrorMessage(error: unknown) {
-  const data = (error as { response?: { data?: { detail?: unknown } } } | null)?.response?.data
-  const detail = data?.detail
-  if (typeof detail === 'string' && detail.trim()) {
-    return detail
-  }
-  if (Array.isArray(detail) && detail.length) {
-    return detail.map((item) => {
-      if (typeof item === 'string') return item
-      if (item && typeof item === 'object' && 'msg' in item) {
-        return String((item as { msg?: unknown }).msg)
-      }
-      return JSON.stringify(item)
-    }).join('; ')
-  }
-  return error instanceof Error ? error.message : 'Candidate cannot be approved: unknown validation error'
-}
-
-async function syncPublishedPdfUploadRecordsToDatabase() {
-  const item = selectedPdfUploadResultItem.value
-  const literatureId = Number(item?.id || 0)
-  if (!Number.isFinite(literatureId) || literatureId <= 0) return
-  await publishLiteratureToGroupLibrary(literatureId, 'Published from extraction review')
-}
-
-function pdfUploadFieldEvidenceEntityType(row: TribologyData) {
-  return String(row.review_entity_type ?? row.reviewEntityType ?? 'candidate').trim().toLowerCase() === 'record'
-    ? 'record'
-    : 'candidate'
-}
-
-function pdfUploadFieldEvidenceExtractorType(row: TribologyData): ExtractorType {
-  return String(row.extractor_type || '').trim().toLowerCase() === 'diffusion' || selectedPdfUploadResultPreset.value === 'diffusion'
-    ? 'diffusion'
-    : 'tribology'
-}
-
-async function confirmPdfUploadEvidenceTarget(row: TribologyData, targetId: number, fieldKey: string) {
-  const entityType = pdfUploadFieldEvidenceEntityType(row)
-  if (pdfUploadFieldEvidenceExtractorType(row) === 'diffusion') {
-    return entityType === 'record'
-      ? confirmDiffusionRecordFieldEvidence(targetId, fieldKey)
-      : confirmDiffusionCandidateFieldEvidence(targetId, fieldKey)
-  }
-  return entityType === 'record'
-    ? confirmRecordFieldEvidence(targetId, fieldKey)
-    : confirmCandidateFieldEvidence(targetId, fieldKey)
-}
-
-async function flagPdfUploadEvidenceTarget(row: TribologyData, targetId: number, fieldKey: string) {
-  const entityType = pdfUploadFieldEvidenceEntityType(row)
-  if (pdfUploadFieldEvidenceExtractorType(row) === 'diffusion') {
-    return entityType === 'record'
-      ? flagDiffusionRecordFieldEvidence(targetId, fieldKey)
-      : flagDiffusionCandidateFieldEvidence(targetId, fieldKey)
-  }
-  return entityType === 'record'
-    ? flagRecordFieldEvidence(targetId, fieldKey)
-    : flagCandidateFieldEvidence(targetId, fieldKey)
-}
-
-async function publishReadyPdfUploadRecords() {
-  if (pdfUploadReviewActionPending.value) return
-  const readyRows = [...pdfUploadReadyRows.value]
-  if (readyRows.length === 0) return
-  pdfUploadReviewActionError.value = ''
-  pdfUploadReviewActionPending.value = 'publish'
-  const failures: string[] = []
-  const skipped: string[] = []
-  let publishedCount = 0
-
-  await Promise.all(readyRows.map(async (row, index) => {
-    const target = resolveCandidatePublishTarget(row, selectedPdfUploadResultPreset.value as ExtractorType)
-    if (!target) {
-      skipped.push(`${pdfUploadResultId(row, index)}: missing review target id`)
-      return
-    }
-
-    try {
-      const response = target.entityType === 'record'
-        ? target.extractorType === 'diffusion'
-          ? await approveDiffusionReviewRecord(target.entityId)
-          : await approveReviewRecord(target.entityId)
-        : target.extractorType === 'diffusion'
-          ? await approveDiffusionReviewCandidate(target.entityId)
-          : await approveReviewCandidate(target.entityId)
-      applyPdfUploadReviewResponse(row, response)
-      markPdfUploadReviewTargetPublished(target)
-      publishedCount += 1
-    } catch (error) {
-      failures.push(`${target.entityType} ${target.entityId}: ${pdfUploadReviewActionErrorMessage(error)}`)
-    }
-  }))
-
-  const publishIssueMessage = [...failures, ...skipped].join('; ')
-  if (publishedCount > 0) {
-    try {
-      await syncPublishedPdfUploadRecordsToDatabase()
-    } catch (error) {
-      const details = publishIssueMessage ? ` Remaining issues: ${publishIssueMessage}` : ''
-      pdfUploadReviewActionError.value = `Published ${publishedCount} of ${readyRows.length} approved records, but database sync failed: ${pdfUploadReviewActionErrorMessage(error)}${details}`
-    }
-  }
-  if (!pdfUploadReviewActionError.value && publishIssueMessage) {
-    pdfUploadReviewActionError.value = publishedCount > 0
-      ? `Published ${publishedCount} of ${readyRows.length} ready records and synced the database. ${publishIssueMessage}`
-      : `Published ${publishedCount} of ${readyRows.length} ready records. ${publishIssueMessage}`
-  }
-  pdfUploadReviewActionPending.value = ''
-}
-
-async function confirmPdfUploadEvidenceField() {
-  if (pdfUploadReviewActionPending.value) return
-  const evidence = activePdfUploadEvidence.value
-  if (!evidence) return
-  const candidateId = pdfUploadCandidateId(evidence.row)
-  const fieldKey = activePdfUploadEvidenceActionFieldKey()
-  if (!candidateId || !fieldKey) {
-    pdfUploadReviewActionError.value = 'This field cannot be confirmed from the upload preview.'
-    return
-  }
-
-  const actionKey = pdfUploadReviewActionKey('confirm', candidateId, fieldKey)
-  pdfUploadReviewActionError.value = ''
-  pdfUploadReviewActionPending.value = actionKey
-  try {
-    const response = await confirmPdfUploadEvidenceTarget(evidence.row, candidateId, fieldKey)
-    applyPdfUploadReviewResponse(evidence.row, response)
-  } catch (error) {
-    pdfUploadReviewActionError.value = pdfUploadReviewActionErrorMessage(error) || 'Unable to confirm field evidence'
-  } finally {
-    pdfUploadReviewActionPending.value = ''
-  }
-}
-
-async function flagPdfUploadEvidenceField() {
-  if (pdfUploadReviewActionPending.value) return
-  const evidence = activePdfUploadEvidence.value
-  if (!evidence) return
-  const candidateId = pdfUploadCandidateId(evidence.row)
-  const fieldKey = activePdfUploadEvidenceActionFieldKey()
-  if (!candidateId || !fieldKey) {
-    pdfUploadReviewActionError.value = 'This field cannot be flagged from the upload preview.'
-    return
-  }
-
-  const actionKey = pdfUploadReviewActionKey('flag', candidateId, fieldKey)
-  pdfUploadReviewActionError.value = ''
-  pdfUploadReviewActionPending.value = actionKey
-  try {
-    const response = await flagPdfUploadEvidenceTarget(evidence.row, candidateId, fieldKey)
-    applyPdfUploadReviewResponse(evidence.row, response)
-  } catch (error) {
-    pdfUploadReviewActionError.value = pdfUploadReviewActionErrorMessage(error) || 'Unable to flag field evidence'
-  } finally {
-    pdfUploadReviewActionPending.value = ''
-  }
-}
-
-function openPdfUploadReviewIssues() {
-  const item = selectedPdfUploadResultItem.value
-  const row = pdfUploadResultRows.value.find((candidate) => {
-    const status = pdfUploadReviewStatus(candidate)
-    return status === 'needs_review' || status === 'flagged'
-  })
-  if (!item) return
-  pdfUploadModalOpen.value = false
-  activePdfUploadEvidence.value = null
-  void openSourceGroundingTarget({
-    literatureId: Number(item.id),
-    recordId: row ? pdfUploadCandidateId(row) || null : null,
-  })
-}
-
-function pdfUploadResultIonicLiquid(row: TribologyData) {
-  const display = pdfUploadResultValue(row.ionic_liquid_display)
-    || pdfUploadResultValue(row.ionic_liquid)
-    || pdfUploadResultValue(row.lubricant_alias)
-    || pdfUploadResultValue(row.system_name)
-    || '--'
-  return withSpecificBmbSample(row, display)
-}
-
-function pdfUploadResultTribopair(row: TribologyData) {
-  const probe = pdfUploadResultValue(row.probe_material) || 'Probe N/A'
-  const substrate = pdfUploadResultValue(row.substrate_material) || pdfUploadResultValue(row.material_name) || 'Substrate N/A'
-  return `${probe} / ${substrate}`
-}
-
-function pdfUploadResultConditions(row: TribologyData) {
-  const entries = [
-    pdfUploadResultValue(row.temperature),
-    pdfUploadResultValue(row.load) || pdfUploadResultValue(row.normal_load),
-    pdfUploadResultValue(row.speed),
-    pdfUploadResultValue(row.potential),
-    pdfUploadResultValue(row.water_content),
-  ].filter(Boolean)
-  return entries.length ? entries.join(' · ') : '--'
-}
-
-function pdfUploadResultMetric(row: TribologyData) {
-  const preset = selectedPdfUploadResultPreset.value
-  if (preset === 'diffusion') {
-    const value = row.D_total ?? row.D_cation ?? row.D_anion
-    return value !== null && value !== undefined ? `${value}${row.D_unit ? ` ${row.D_unit}` : ''}` : '--'
-  }
-  const structuredCof = row.cof_extracted?.cof_average ?? row.cof_extracted?.cof_min ?? row.cof_extracted?.cof_max
-  return pdfUploadResultValue(row.cof) || pdfUploadResultValue(structuredCof) || '--'
-}
-
-function normalizePdfUploadEvidenceText(value: string) {
-  return value.toLowerCase().replace(/\s+/g, ' ').trim()
-}
-
-function quoteContainsPdfUploadHighlight(quote: string, highlight: string) {
-  const normalizedQuote = normalizePdfUploadEvidenceText(quote)
-  const normalizedHighlight = normalizePdfUploadEvidenceText(highlight)
-  return Boolean(normalizedHighlight) && normalizedQuote.includes(normalizedHighlight)
-}
-
-function equivalentPdfUploadHighlightTerms(term: string) {
-  const trimmed = pdfUploadResultValue(term)
-  if (!trimmed) return []
-  const variants = new Set([trimmed])
-  const bracketTokens = trimmed.match(/\[[^\]]+\]/g) || []
-  for (const token of bracketTokens) {
-    variants.add(token)
-    const bareToken = token.replace(/^\[|\]$/g, '')
-    if (bareToken) variants.add(bareToken)
-  }
-  const compactIonChains = trimmed.replace(/\b([PN])([0-9]+(?:,[0-9]+)+)\b/gi, (_match, head, digits) => `${String(head).toUpperCase()}${String(digits).replace(/,/g, '')}`)
-  variants.add(compactIonChains)
-  const compactBracketTokens = compactIonChains.match(/\[[^\]]+\]/g) || []
-  for (const token of compactBracketTokens) {
-    variants.add(token)
-    const bareToken = token.replace(/^\[|\]$/g, '')
-    if (bareToken) variants.add(bareToken)
-  }
-  const withoutBrackets = compactIonChains.replace(/^\[|\]$/g, '')
-  if (withoutBrackets && withoutBrackets !== compactIonChains) variants.add(withoutBrackets)
-  if (/^[A-Za-z][A-Za-z0-9(),]+$/.test(withoutBrackets)) variants.add(`[${withoutBrackets}]`)
-  return Array.from(variants).filter(Boolean)
-}
-
-function pdfUploadHighlightGroups(highlight?: string | string[]) {
-  const terms = Array.isArray(highlight) ? highlight : [highlight]
-  const groups: string[][] = []
-  for (const term of terms) {
-    const cleanTerm = pdfUploadResultValue(term)
-    if (!cleanTerm) continue
-    const bracketTokens = cleanTerm.match(/\[[^\]]+\]/g) || []
-    if (bracketTokens.length >= 2) {
-      const group = bracketTokens.flatMap((token) => equivalentPdfUploadHighlightTerms(token))
-      if (group.length) groups.push(group)
-    }
-  }
-  return groups
-}
-
-function pdfUploadHighlightTerms(highlight?: string | string[]) {
-  const terms = Array.isArray(highlight) ? highlight : [highlight]
-  const seen = new Set<string>()
-  return terms
-    .map((term) => pdfUploadResultValue(term))
-    .flatMap((term) => equivalentPdfUploadHighlightTerms(term))
-    .filter((term) => {
-      const key = normalizePdfUploadEvidenceText(term)
-      if (!key || seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
-}
-
-function pdfUploadEvidenceQuoteFromText(text: string, highlight?: string | string[]): PdfUploadEvidenceQuote | null {
-  const cleanText = pdfUploadResultValue(text)
-  if (!cleanText) return null
-  const highlightGroups = pdfUploadHighlightGroups(highlight).filter((group) => (
-    group.every((term) => quoteContainsPdfUploadHighlight(cleanText, term))
-  ))
-  const highlights = pdfUploadHighlightTerms(highlight)
-    .filter((term) => quoteContainsPdfUploadHighlight(cleanText, term))
-  return {
-    text: cleanText,
-    highlights: highlights.length ? highlights : undefined,
-    highlightGroups: highlightGroups.length ? highlightGroups : undefined,
-  }
-}
-
-function groupPdfUploadHighlightRanges(source: string, groups: string[][]) {
-  const normalizedSource = source.toLowerCase()
-  const ranges: Array<{ start: number; end: number }> = []
-  for (const group of groups) {
-    const tokenRanges = group
-      .map((term) => {
-        const normalizedTerm = term.toLowerCase()
-        const start = normalizedTerm ? normalizedSource.indexOf(normalizedTerm) : -1
-        return start >= 0 ? { start, end: start + term.length } : null
-      })
-      .filter((range): range is { start: number; end: number } => Boolean(range))
-      .sort((a, b) => a.start - b.start)
-    if (tokenRanges.length !== group.length) continue
-    const groupStart = tokenRanges[0]?.start ?? -1
-    const groupEnd = tokenRanges[tokenRanges.length - 1]?.end ?? -1
-    const span = source.slice(groupStart, groupEnd)
-    if (!/^\s*\[[^\]]+\]\s*\[[^\]]+\]/.test(span)) continue
-    ranges.push(...tokenRanges)
-  }
-  return ranges
-}
-
-function splitPdfUploadEvidenceQuote(quote: PdfUploadEvidenceQuote) {
-  const groupedRanges = groupPdfUploadHighlightRanges(quote.text, quote.highlightGroups || [])
-  const highlights = pdfUploadHighlightTerms(quote.highlights)
-    .sort((a, b) => b.length - a.length)
-  if (!highlights.length && !groupedRanges.length) return [{ text: quote.text, active: false }]
-  const source = quote.text
-  const normalizedSource = source.toLowerCase()
-  const ranges: Array<{ start: number; end: number }> = [...groupedRanges]
-  for (const highlight of highlights) {
-    const normalizedHighlight = highlight.toLowerCase()
-    let cursor = 0
-    while (normalizedHighlight && cursor < normalizedSource.length) {
-      const index = normalizedSource.indexOf(normalizedHighlight, cursor)
-      if (index < 0) break
-      const end = index + highlight.length
-      const overlaps = ranges.some((range) => index < range.end && end > range.start)
-      if (!overlaps) ranges.push({ start: index, end })
-      cursor = end
-    }
-  }
-  if (!ranges.length) return [{ text: source, active: false }]
-  ranges.sort((a, b) => a.start - b.start)
-  const parts: Array<{ text: string; active: boolean }> = []
-  let cursor = 0
-  for (const range of ranges) {
-    if (range.start > cursor) parts.push({ text: source.slice(cursor, range.start), active: false })
-    parts.push({ text: source.slice(range.start, range.end), active: true })
-    cursor = range.end
-  }
-  if (cursor < source.length) parts.push({ text: source.slice(cursor), active: false })
-  return parts.filter((part) => part.text)
-}
-
-function pdfUploadEvidenceTextFromEntry(
-  entry: NonNullable<TribologyData['field_evidence_json']>[string] | undefined,
-  options: { includeQuote?: boolean; allowMatchedOnly?: boolean; fieldKey?: string } = {},
-) {
-  const evidence = entry?.evidence
-  const matchedText = pdfUploadResultValue(evidence?.matched_text)
-    || pdfUploadResultValue(evidence?.matchedText)
-    || pdfUploadResultValue(entry?.value)
-  const quote = pdfUploadResultValue(evidence?.quote)
-  const groundingMode = pdfUploadResultValue(entry?.grounding_mode).toLowerCase()
-  const quotes: PdfUploadEvidenceQuote[] = []
-  const suppressBareEvidence = pdfUploadEvidenceShouldSuppressBareEvidence(options.fieldKey, quote, matchedText, groundingMode)
-  const contextualQuote = !suppressBareEvidence && quote && matchedText && quoteContainsPdfUploadHighlight(quote, matchedText)
-    ? pdfUploadEvidenceQuoteFromText(quote, matchedText)
-    : null
-  const contextHighlights = pdfUploadEvidenceContextualHighlights(quote || matchedText, matchedText, groundingMode)
-  if (contextualQuote) {
-    quotes.push(contextHighlights.length ? { ...contextualQuote, highlights: contextHighlights } : contextualQuote)
-  } else if (!suppressBareEvidence && options.includeQuote && quote) {
-    const metricQuote = pdfUploadEvidenceQuoteFromText(quote, contextHighlights.length ? contextHighlights : matchedText)
-    if (metricQuote) quotes.push(metricQuote)
-  } else if (!suppressBareEvidence && options.allowMatchedOnly && matchedText) {
-    const matchedOnly = pdfUploadEvidenceQuoteFromText(matchedText, [matchedText])
-    if (matchedOnly) quotes.push(matchedOnly)
-  }
-  const note = pdfUploadEvidenceQuoteFromText(pdfUploadResultValue(entry?.grounding_note))
-  if (note) quotes.push(note)
-  return quotes
-}
-
-function pdfUploadEvidenceHasDerivedScanContext(text: string) {
-  const normalized = pdfUploadResultValue(text).toLowerCase()
-  if (!normalized || !normalized.includes('scan')) return false
-  const hasScanLength = /scan\s*(?:size|length|range)|\b\d+(?:\.\d+)?\s*(?:nm|μm|um)\b/i.test(normalized)
-  const hasScanRate = /scan\s*(?:rate|frequency)|\b\d+(?:\.\d+)?\s*hz\b/i.test(normalized)
-  return hasScanLength && hasScanRate
-}
-
-function pdfUploadEvidenceShouldSuppressBareEvidence(fieldKey = '', quote = '', matchedText = '', groundingMode = '') {
-  const combined = `${pdfUploadResultValue(quote)} ${pdfUploadResultValue(matchedText)}`.trim()
-  const matched = pdfUploadResultValue(matchedText)
-  const quoteText = pdfUploadResultValue(quote)
-  const isBareMatchedNumber = /^\s*[-+]?\d+(?:\.\d+)?\s*$/.test(matched)
-  const isBareQuoteNumber = /^\s*[-+]?\d+(?:\.\d+)?\s*$/.test(quoteText)
-  if (groundingMode === 'derived' && !pdfUploadEvidenceHasDerivedScanContext(combined)) return true
-  if (isBareMatchedNumber && (!quoteText || isBareQuoteNumber)) return true
-  if (fieldKey?.includes('roughness')) {
-    const hasContext = /\b(?:nm|μm|um|rms|roughness|root[- ]mean[- ]square)\b/i.test(combined)
-    const isBareNumber = isBareMatchedNumber || isBareQuoteNumber
-    if (isBareNumber && !hasContext) return true
-  }
-  return false
-}
-
-function pdfUploadEvidenceHasReliableLocator(
-  fieldKey = '',
-  entry: NonNullable<TribologyData['field_evidence_json']>[string] | undefined,
-) {
-  const evidence = entry?.evidence
-  const location = pdfUploadEvidenceLocationFromEntry(entry)
-  if (!location.page || !location.bbox?.length) return false
-  const quote = pdfUploadResultValue(evidence?.quote)
-  const matchedText = pdfUploadResultValue(evidence?.matched_text)
-    || pdfUploadResultValue(evidence?.matchedText)
-    || pdfUploadResultValue(entry?.value)
-  const groundingMode = pdfUploadResultValue(entry?.grounding_mode).toLowerCase()
-  if (pdfUploadEvidenceShouldSuppressBareEvidence(fieldKey, quote, matchedText, groundingMode)) return false
-  return true
-}
-
-function pdfUploadEvidenceContextualHighlights(text: string, matchedText: string, groundingMode: string) {
-  const source = pdfUploadResultValue(text)
-  const matched = pdfUploadResultValue(matchedText)
-  if (!source || !matched) return []
-  if (groundingMode === 'derived') {
-    const derived = Array.from(source.matchAll(/\b(?:scan\s+(?:size|length|range|rate|frequency)\s+(?:was\s+)?)?\d+(?:\.\d+)?\s*(?:nm|μm|um|mm|hz)\b/gi))
-      .map((match) => normalizePdfUploadEvidenceText(match[0]))
-      .filter(Boolean)
-    return derived.length ? derived : [source]
-  }
-  if (!/^\s*[-+]?\d+(?:\.\d+)?\s*$/.test(matched)) return []
-  const escaped = matched.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\./g, '[.]')
-  const contextual = new RegExp(`(?:RMS\\s+|roughness\\s+|scan\\s+(?:size|rate)\\s+(?:was\\s+)?|velocity\\s+(?:of\\s+)?)?${escaped}\\s*(?:nm|μm|um|mm|cm|m|hz|n|mn|nn|v|mv|k|°c|c)\\b`, 'i').exec(source)
-  return contextual?.[0] ? [normalizePdfUploadEvidenceText(contextual[0])] : []
-}
-
-function pdfUploadEvidenceLocationFromEntry(entry: NonNullable<TribologyData['field_evidence_json']>[string] | undefined) {
-  return {
-    page: entry?.evidence?.page ?? null,
-    bbox: parseRecordBbox(entry?.evidence?.bbox),
-  }
-}
-
-function pdfUploadEvidencePreviewKey(literatureId: string, slide: PdfUploadEvidenceSlide) {
-  if (!slide.page || !slide.bbox?.length) return ''
-  return [
-    literatureId,
-    slide.page,
-    slide.fieldKey,
-    ...slide.bbox.map((value) => Number(value).toFixed(1)),
-  ].join(':')
-}
-
-function pdfUploadEvidenceShouldRenderPdfPreview(slide: PdfUploadEvidenceSlide) {
-  if (!pdfUploadEvidenceSlideHasReliableLocator(slide)) return false
-  if (String(slide.groundingMode || '').toLowerCase() === 'derived') return false
-  const sourceType = String(slide.sourceType || '').toLowerCase()
-  if (sourceType === 'text' && slide.quotes.length > 0) return false
-  return ['table', 'figure', 'visual', 'image'].includes(sourceType) || slide.quotes.length === 0
-}
-
-async function fetchPdfUploadEvidencePreview(literatureId: string, slide: PdfUploadEvidenceSlide) {
-  if (!pdfUploadEvidenceShouldRenderPdfPreview(slide)) return
-  const numericLiteratureId = Number(literatureId)
-  if (!Number.isFinite(numericLiteratureId) || !slide.page || !slide.bbox?.length) return
-  const key = pdfUploadEvidencePreviewKey(literatureId, slide)
-  if (!key || pdfUploadEvidencePreviewImages.value[key] || pdfUploadEvidencePreviewLoading.value[key]) return
-  pdfUploadEvidencePreviewLoading.value[key] = true
-  pdfUploadEvidencePreviewError.value[key] = null
-  try {
-    const response = await getPdfBboxPreview(numericLiteratureId, slide.page, slide.bbox, 'region', 'wide')
-    pdfUploadEvidencePreviewImages.value[key] = `data:image/png;base64,${response.image_b64}`
-  } catch (error: any) {
-    pdfUploadEvidencePreviewImages.value[key] = null
-    pdfUploadEvidencePreviewError.value[key] = error?.message || 'Unable to render PDF evidence preview'
-  } finally {
-    pdfUploadEvidencePreviewLoading.value[key] = false
-  }
-}
-
-async function hydratePdfUploadEvidencePreviews(slides: PdfUploadEvidenceSlide[]) {
-  const literatureId = selectedPdfUploadResultItem.value?.id
-  if (!literatureId) return
-  await Promise.allSettled(slides.map((slide) => fetchPdfUploadEvidencePreview(literatureId, slide)))
-}
-
-function enrichPdfUploadQuoteHighlights(quotes: PdfUploadEvidenceQuote[], value: string) {
-  const valueGroups = pdfUploadHighlightGroups(value)
-  const valueTerms = valueGroups.length ? [] : pdfUploadHighlightTerms(value)
-  if (!valueTerms.length && !valueGroups.length) return quotes
-  return quotes.map((quote) => {
-    const matchingTerms = valueTerms.filter((term) => quoteContainsPdfUploadHighlight(quote.text, term))
-    const matchingGroups = valueGroups.filter((group) => group.every((term) => quoteContainsPdfUploadHighlight(quote.text, term)))
-    if (!matchingTerms.length && !matchingGroups.length) return quote
-    return {
-      ...quote,
-      highlights: valueGroups.length ? undefined : pdfUploadHighlightTerms([...(quote.highlights || []), ...matchingTerms]),
-      highlightGroups: [...(quote.highlightGroups || []), ...matchingGroups],
-    }
-  })
-}
-
-function pdfUploadQuotesForField(row: TribologyData, fieldKeys: string[], value = '') {
-  const fieldEvidence = row.field_evidence_json || {}
-  const isMetricField = fieldKeys.some((key) => ['cof', 'cof_extracted', 'D_total', 'D_cation', 'D_anion'].includes(key))
-  const quotes = fieldKeys.flatMap((key) => pdfUploadEvidenceTextFromEntry(fieldEvidence[key], {
-    includeQuote: isMetricField,
-    allowMatchedOnly: isMetricField,
-    fieldKey: key,
-  }))
-  const fallbackHighlight = isMetricField ? pdfUploadResultMetric(row) : value
-  const fallback = [
-    pdfUploadEvidenceQuoteFromText(pdfUploadResultValue(row.evidence), fallbackHighlight),
-    pdfUploadEvidenceQuoteFromText(pdfUploadResultValue(row.notes), fallbackHighlight),
-  ].filter((quote): quote is PdfUploadEvidenceQuote => Boolean(quote))
-  const merged = new Map<string, PdfUploadEvidenceQuote>()
-  for (const quote of enrichPdfUploadQuoteHighlights([...quotes, ...fallback], value)) {
-    const key = normalizePdfUploadEvidenceText(quote.text)
-    if (!key) continue
-    const existing = merged.get(key)
-    if (!existing) {
-      merged.set(key, quote)
-      continue
-    }
-    existing.highlights = pdfUploadHighlightTerms([...(existing.highlights || []), ...(quote.highlights || [])])
-    existing.highlightGroups = [...(existing.highlightGroups || []), ...(quote.highlightGroups || [])]
-  }
-  return Array.from(merged.values()).slice(0, 4)
-}
-
-function pdfUploadEvidenceLocationForField(row: TribologyData, fieldKeys: string[]) {
-  const fieldEvidence = row.field_evidence_json || {}
-  for (const key of fieldKeys) {
-    const location = pdfUploadEvidenceLocationFromEntry(fieldEvidence[key])
-    if (location.page || location.bbox) return location
-  }
-  return {
-    page: row.source_page ?? null,
-    bbox: parseRecordBbox(row.source_bbox),
-  }
-}
-
-function normalizePdfUploadEvidenceFieldKey(fieldKey: string) {
-  return String(fieldKey || '').trim().toLowerCase().replace(/[\s-]+/g, '_')
-}
-
-function pdfUploadEvidenceSemanticKey(fieldKey: string) {
-  const normalized = normalizePdfUploadEvidenceFieldKey(fieldKey)
-  const aliases: Record<string, string> = {
-    ionic_liquid_display: 'ionic_liquid',
-    lubricant_alias: 'ionic_liquid',
-    lubricant: 'ionic_liquid',
-    material_name: 'substrate_material',
-    normal_load: 'load',
-    cof_extracted: 'cof',
-  }
-  return aliases[normalized] || normalized
-}
-
-function pdfUploadEvidenceFieldLabel(fieldKey: string, fallbackLabel = '') {
-  const normalized = normalizePdfUploadEvidenceFieldKey(fieldKey)
-  const labels: Record<string, string> = {
-    ionic_liquid: 'Ionic liquid',
-    ionic_liquid_display: 'Ionic liquid',
-    lubricant_alias: 'Ionic liquid',
-    cation: 'Cation',
-    anion: 'Anion',
-    probe_material: 'Probe',
-    substrate_material: 'Substrate',
-    material_name: 'Substrate',
-    tribological_system: 'Tribopair',
-    temperature: 'Temperature',
-    load: 'Load',
-    normal_load: 'Load',
-    speed: 'Sliding speed',
-    potential: 'Potential',
-    water_content: 'Water content',
-    cof: 'COF',
-    cof_extracted: 'COF',
-    d_total: 'D total',
-    d_cation: 'D cation',
-    d_anion: 'D anion',
-    diffusion_standard_fields: 'Diffusion',
-  }
-  return labels[normalized] || fallbackLabel || fieldKey
-}
-
-function pdfUploadEvidenceFieldValue(row: TribologyData, fieldKey: string, fallbackValue = '') {
-  const normalized = normalizePdfUploadEvidenceFieldKey(fieldKey)
-  const fieldEvidence = row.field_evidence_json || {}
-  const evidenceValue = pdfUploadResultValue(fieldEvidence[fieldKey]?.value)
-  if (evidenceValue) return evidenceValue
-
-  if (normalized === 'ionic_liquid' || normalized === 'ionic_liquid_display' || normalized === 'lubricant_alias') return pdfUploadResultIonicLiquid(row)
-  if (normalized === 'cation') return compactIonPartText(row.cation)
-  if (normalized === 'anion') return compactIonPartText(row.anion)
-  if (normalized === 'probe_material') return pdfUploadResultValue(row.probe_material)
-  if (normalized === 'substrate_material') return pdfUploadResultValue(row.substrate_material) || pdfUploadResultValue(row.material_name)
-  if (normalized === 'material_name') return pdfUploadResultValue(row.material_name) || pdfUploadResultValue(row.substrate_material)
-  if (normalized === 'tribological_system') return pdfUploadResultValue(row.tribological_system) || pdfUploadResultValue(row.system_name)
-  if (normalized === 'temperature') return pdfUploadResultValue(row.temperature)
-  if (normalized === 'load' || normalized === 'normal_load') return pdfUploadResultValue(row.load) || pdfUploadResultValue(row.normal_load)
-  if (normalized === 'speed') return pdfUploadResultValue(row.speed)
-  if (normalized === 'potential') return pdfUploadResultValue(row.potential)
-  if (normalized === 'water_content') return pdfUploadResultValue(row.water_content)
-  if (normalized === 'cof' || normalized === 'cof_extracted') return pdfUploadResultMetric(row)
-  if (normalized === 'd_total') return row.D_total !== null && row.D_total !== undefined ? `${row.D_total}${row.D_unit ? ` ${row.D_unit}` : ''}` : ''
-  if (normalized === 'd_cation') return row.D_cation !== null && row.D_cation !== undefined ? `${row.D_cation}${row.D_unit ? ` ${row.D_unit}` : ''}` : ''
-  if (normalized === 'd_anion') return row.D_anion !== null && row.D_anion !== undefined ? `${row.D_anion}${row.D_unit ? ` ${row.D_unit}` : ''}` : ''
-  if (normalized === 'diffusion_standard_fields') return fallbackValue
-  return fallbackValue === '--' ? '' : pdfUploadResultValue(fallbackValue)
-}
-
-function pdfUploadEvidenceSlideHasContent(slide: PdfUploadEvidenceSlide) {
-  return Boolean(slide.quotes.length || pdfUploadEvidenceSlideHasReliableLocator(slide))
-}
-
-function pdfUploadEvidenceSlideHasReliableLocator(slide: PdfUploadEvidenceSlide) {
-  return Boolean(slide.hasReliableLocator && slide.page && slide.bbox?.length)
-}
-
-function pdfUploadEvidenceSlideQualityScore(slide: PdfUploadEvidenceSlide) {
-  let score = 0
-  if (pdfUploadResultValue(slide.value)) score += 3
-  if (slide.quotes.length) score += 4 + slide.quotes.length
-  if (slide.page) score += 1
-  if (slide.bbox?.length) score += 1
-  if (slide.actionFieldKey) score += 1
-  return score
-}
-
-function pdfUploadBestEvidenceSlidesBySemanticKey(slides: PdfUploadEvidenceSlide[]) {
-  const bySemantic = new Map<string, PdfUploadEvidenceSlide>()
-  for (const slide of slides) {
-    const semanticKey = pdfUploadEvidenceSemanticKey(slide.fieldKey)
-    const existing = bySemantic.get(semanticKey)
-    if (!existing || pdfUploadEvidenceSlideQualityScore(slide) > pdfUploadEvidenceSlideQualityScore(existing)) {
-      bySemantic.set(semanticKey, slide)
-    }
-  }
-  return Array.from(bySemantic.values())
-}
-
-function pdfUploadEvidenceSlidesForField(row: TribologyData, fieldLabel: string, fieldKeys: string[], fallbackValue = '') {
-  const candidateSlides: PdfUploadEvidenceSlide[] = []
-  for (const fieldKey of fieldKeys) {
-    const evidenceEntry = row.field_evidence_json?.[fieldKey]
-    const value = pdfUploadEvidenceFieldValue(row, fieldKey, fallbackValue)
-    const quotes = pdfUploadQuotesForField(row, [fieldKey], value)
-    const location = pdfUploadEvidenceLocationForField(row, [fieldKey])
-    const slide: PdfUploadEvidenceSlide = {
-      fieldKey,
-      fieldKeys: [fieldKey],
-      actionFieldKey: firstAvailablePdfUploadReviewFieldKey(fieldLabel, [fieldKey], row.field_evidence_json),
-      label: pdfUploadEvidenceFieldLabel(fieldKey, fieldLabel),
-      value,
-      quotes,
-      sourceType: pdfUploadResultValue(evidenceEntry?.evidence?.source_type),
-      groundingMode: pdfUploadResultValue(evidenceEntry?.grounding_mode),
-      hasReliableLocator: pdfUploadEvidenceHasReliableLocator(fieldKey, evidenceEntry),
-      ...location,
-    }
-    if (!pdfUploadEvidenceSlideHasContent(slide)) continue
-    candidateSlides.push(slide)
-  }
-
-  const seenSemanticKeys = new Set<string>()
-  const slides: PdfUploadEvidenceSlide[] = []
-  for (const slide of pdfUploadBestEvidenceSlidesBySemanticKey(candidateSlides)) {
-    const semanticKey = pdfUploadEvidenceSemanticKey(slide.fieldKey)
-    if (seenSemanticKeys.has(semanticKey)) continue
-    seenSemanticKeys.add(semanticKey)
-    slides.push(slide)
-  }
-  return slides
-}
-
-function activePdfUploadEvidenceSlide() {
-  const evidence = activePdfUploadEvidence.value
-  if (!evidence?.slides.length) return null
-  const boundedIndex = Math.min(Math.max(0, pdfUploadEvidenceSlideIndex.value), evidence.slides.length - 1)
-  if (boundedIndex !== pdfUploadEvidenceSlideIndex.value) pdfUploadEvidenceSlideIndex.value = boundedIndex
-  return evidence.slides[boundedIndex] || null
-}
-
-function activePdfUploadEvidenceSlideCount() {
-  return activePdfUploadEvidence.value?.slides.length || 0
-}
-
-function activePdfUploadEvidenceSlideIndexLabel() {
-  const count = activePdfUploadEvidenceSlideCount()
-  if (count <= 0) return ''
-  return `${Math.min(pdfUploadEvidenceSlideIndex.value + 1, count)}/${count}`
-}
-
-function activePdfUploadEvidenceValue() {
-  return activePdfUploadEvidenceSlide()?.value || activePdfUploadEvidence.value?.value || '--'
-}
-
-function activePdfUploadEvidencePageLabel() {
-  const page = activePdfUploadEvidenceSlide()?.page ?? activePdfUploadEvidence.value?.page
-  return page ? `Page ${page}` : 'Source'
-}
-
-function activePdfUploadEvidenceQuotes() {
-  return activePdfUploadEvidenceSlide()?.quotes || activePdfUploadEvidence.value?.quotes || []
-}
-
-function activePdfUploadEvidencePreviewKey() {
-  const literatureId = selectedPdfUploadResultItem.value?.id
-  const slide = activePdfUploadEvidenceSlide()
-  return literatureId && slide ? pdfUploadEvidencePreviewKey(literatureId, slide) : ''
-}
-
-function activePdfUploadEvidenceImageSrc() {
-  const key = activePdfUploadEvidencePreviewKey()
-  return key ? pdfUploadEvidencePreviewImages.value[key] || null : null
-}
-
-function activePdfUploadEvidenceImageLoading() {
-  const key = activePdfUploadEvidencePreviewKey()
-  return key ? Boolean(pdfUploadEvidencePreviewLoading.value[key]) : false
-}
-
-function activePdfUploadEvidenceImageError() {
-  const key = activePdfUploadEvidencePreviewKey()
-  return key ? pdfUploadEvidencePreviewError.value[key] || '' : ''
-}
-
-function activePdfUploadEvidenceActionFieldKey() {
-  return activePdfUploadEvidenceSlide()?.actionFieldKey || activePdfUploadEvidence.value?.actionFieldKey || ''
-}
-
-function movePdfUploadEvidenceSlide(direction: -1 | 1) {
-  const count = activePdfUploadEvidenceSlideCount()
-  if (count <= 1) return
-  pdfUploadEvidenceSlideIndex.value = (pdfUploadEvidenceSlideIndex.value + direction + count) % count
-}
-
-function openPdfUploadCellEvidence(
-  row: TribologyData,
-  rowIndex: number,
-  fieldLabel: string,
-  value: string,
-  fieldKeys: string[],
-  event: MouseEvent,
-) {
-  const target = event.currentTarget as HTMLElement | null
-  const rect = target?.getBoundingClientRect()
-  const width = 430
-  pdfUploadEvidencePosition.value = rect
-    ? {
-        top: Math.min(window.innerHeight - 300, rect.bottom + 10),
-        left: Math.max(16, Math.min(window.innerWidth - width - 16, rect.left + rect.width / 2 - width / 2)),
-      }
-    : { top: 160, left: 160 }
-  const slides = pdfUploadEvidenceSlidesForField(row, fieldLabel, fieldKeys, value)
-  pdfUploadEvidenceSlideIndex.value = 0
-  activePdfUploadEvidence.value = {
-    row,
-    rowIndex,
-    fieldLabel,
-    fieldKeys,
-    actionFieldKey: slides[0]?.actionFieldKey || firstAvailablePdfUploadReviewFieldKey(fieldLabel, fieldKeys, row.field_evidence_json),
-    value,
-    quotes: pdfUploadQuotesForField(row, fieldKeys, value),
-    slides,
-    ...pdfUploadEvidenceLocationForField(row, fieldKeys),
-  }
-  void hydratePdfUploadEvidencePreviews(slides)
-}
-
-function openPdfUploadEvidencePaper() {
-  const item = selectedPdfUploadResultItem.value
-  const evidence = activePdfUploadEvidence.value
-  if (!item || !evidence) return
-  pdfUploadModalOpen.value = false
-  activePdfUploadEvidence.value = null
-  void openSourceGroundingTarget({
-    literatureId: Number(item.id),
-    recordId: Number(evidence.row.id || 0) || null,
-  })
 }
 
 function isPdfUploadRunActiveStatus(status: string) {
@@ -2127,23 +1227,27 @@ function pdfUploadRunMessage(run: ExtractionRunDetail | null | undefined) {
   const latestProgress = Array.isArray(run?.progress_log) && run.progress_log.length > 0
     ? run.progress_log[run.progress_log.length - 1]?.message
     : ''
+  const latestStage = Array.isArray(run?.progress_log) && run.progress_log.length > 0
+    ? run.progress_log[run.progress_log.length - 1]?.stage
+    : ''
+  const stage = String(summary?.current_stage || latestStage || '')
   const normalizedStatus = String(run?.status || '').toLowerCase()
   if (['no_data', 'completed'].includes(normalizedStatus) && !pdfUploadRunHasReviewableData(run)) {
-    return String(
+    return friendlyPdfUploadExtractionMessage(String(
       summary?.no_data_reason
       || run?.error_message
       || latestProgress
       || summary?.current_message
       || '',
-    )
+    ), stage)
   }
-  return String(
+  return friendlyPdfUploadExtractionMessage(String(
     summary?.current_message
     || run?.error_message
     || latestProgress
     || summary?.no_data_reason
     || '',
-  )
+  ), stage)
 }
 
 function pdfUploadStageProgress(stage?: string | null, status?: string | null, message?: string | null) {
@@ -2161,17 +1265,28 @@ function pdfUploadStageProgress(stage?: string | null, status?: string | null, m
   if (normalizedStage.startsWith('stage_b.chunk') && chunkIndex > 0 && chunkTotal > 0) {
     return 28 + (chunkIndex / Math.max(1, chunkTotal)) * 34
   }
+  if (normalizedStage.startsWith('stage_b.fast_table_prepare')) return 22
+  if (normalizedStage.startsWith('stage_b.fast_table_figures')) return 34
   if (normalizedStage.startsWith('stage_b.fast_text')) return 24
   if (normalizedStage.startsWith('stage_b')) return 24
   if (normalizedStage.startsWith('stage_c.fast_text_start') && chunkIndex > 0 && chunkTotal > 0) {
-    return 30 + ((chunkIndex - 1) / Math.max(1, chunkTotal)) * 42
+    return 32 + ((chunkIndex - 1) / Math.max(1, chunkTotal)) * 42
   }
   if (normalizedStage.startsWith('stage_c.fast_text_done') && chunkIndex > 0 && chunkTotal > 0) {
-    return 34 + (chunkIndex / Math.max(1, chunkTotal)) * 42
+    return 36 + (chunkIndex / Math.max(1, chunkTotal)) * 42
   }
-  if (normalizedStage.startsWith('stage_c.fast_text_start')) return 34
-  if (normalizedStage.startsWith('stage_c.fast_text_done')) return 76
+  if (normalizedStage.startsWith('stage_c.fast_text_start')) return 36
+  if (normalizedStage.startsWith('stage_c.fast_text_done')) return 78
   if (normalizedStage.startsWith('stage_c.fast_text')) return 52
+  if (normalizedStage.startsWith('stage_c.fast_table_submit')) return 54
+  if (normalizedStage.startsWith('stage_c.fast_table_wait')) {
+    const waitMatch = normalizedMessage.match(/progress_step=(\d+)/i)
+    const waitStep = waitMatch ? Number(waitMatch[1]) : 0
+    return Math.min(72, 58 + waitStep * 4)
+  }
+  if (normalizedStage.startsWith('stage_c.fast_table_parse')) return 76
+  if (normalizedStage.startsWith('stage_d.fast_table_clean')) return 86
+  if (normalizedStage.startsWith('stage_e.fast_table_ready')) return 94
   if (normalizedStage.startsWith('stage_c.figure_retry')) return 50
   if (normalizedStage.startsWith('stage_c.figure')) return 44
   if (normalizedStage.startsWith('stage_c.text')) return 62
@@ -2239,7 +1354,9 @@ function applyPdfUploadExtractionResponse(
   const initialStatus = String(initialResponse.status || '').toLowerCase()
   const initialRows = Array.isArray(initialResponse.data) ? initialResponse.data : []
   const initialRecords = pdfUploadInitialReviewableCount(initialResponse, preset)
-  const initialMessage = initialResponse.message || ''
+  const summary = initialResponse.extraction_summary as ExtractionSummary | undefined
+  const initialStage = String(summary?.current_stage || ((Array.isArray(summary?.progress_log) && summary.progress_log.length) ? summary.progress_log[summary.progress_log.length - 1]?.stage : '') || '')
+  const initialMessage = friendlyPdfUploadExtractionMessage(initialResponse.message || String(summary?.current_message || ''), initialStage)
   if ((initialStatus === 'failed' || initialStatus === 'error') && isRetryablePdfUploadRunMessage(initialMessage)) {
     updatePdfUploadExtractionItem(paperId, {
       status: 'extracting',
@@ -2273,7 +1390,6 @@ function applyPdfUploadExtractionResponse(
     return
   }
 
-  const summary = initialResponse.extraction_summary as ExtractionSummary | undefined
   const initialHasNoReviewableData = initialRecords === 0 && (initialStatus === 'no_data' || initialStatus === 'completed')
   updatePdfUploadExtractionItem(paperId, {
     status: initialHasNoReviewableData ? 'no_data' : 'completed',
@@ -2282,7 +1398,7 @@ function applyPdfUploadExtractionResponse(
     progress: 100,
 	    message: initialRecords > 0
 	      ? (preset === 'diffusion' || pdfUploadHasWeakCandidates(initialRows) ? `${initialRecords} candidates need review.` : `${initialRecords} ${label} records extracted.`)
-	      : (summary?.no_data_reason || initialResponse.message || `No extractable ${label.toLowerCase()} records found.`),
+	      : (friendlyPdfUploadExtractionMessage(summary?.no_data_reason || initialResponse.message, initialStage) || `No extractable ${label.toLowerCase()} records found.`),
 	  })
 }
 
@@ -2428,7 +1544,7 @@ async function submitPdfUploadExtractionJobs(
       updatePdfUploadExtractionItem(paper.id, {
         status: 'failed',
         progress: 100,
-        message: 'Conductivity extraction is not available yet. Choose Tribology or Diffusion.',
+        message: 'Conductivity extraction is not available yet. Choose Lubrication or Diffusion.',
       })
       return
     }
@@ -2596,16 +1712,6 @@ async function cancelPdfUploadExtraction() {
     : cancelTimedOut
     ? 'Stopping took too long locally. Before a fresh run starts, the server state will be checked again.'
     : 'Extraction stopped. You can retry or start a new upload.'
-}
-
-async function stopPdfUploadExtractionAndUploadNew() {
-  if (pdfUploadExtractionCancelling.value) return
-  if (pdfUploadExtracting.value) {
-    await cancelPdfUploadExtraction()
-  }
-  resetPdfUploadForFreshUpload()
-  pdfUploadModalOpen.value = true
-  pdfUploadStatusMessage.value = 'Add PDFs for a fresh extraction run.'
 }
 
 async function startPdfUploadExtraction() {
@@ -2853,6 +1959,10 @@ function handleHomeAction(action: HomeSuggestedAction) {
         }
         if (action.target === 'database') {
           openDatabaseTool()
+          return
+        }
+        if (action.target === 'review-evidence') {
+          openReviewQueue()
           return
         }
         const [viewPart, sectionPart] = String(action.target || '').split('/', 2)
@@ -3135,6 +2245,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
           :focus-dataset="databaseToolFocus?.dataset || null"
           :focus-record-id="databaseToolFocus?.recordId || null"
           :focus-entity-type="databaseToolFocus?.entityType || null"
+          :entity-type-filter="databaseToolFocus?.entityType === 'candidate' ? 'candidate' : 'record'"
           @close="databaseToolOpen = false"
           @open-literature="locateDatabaseLiterature"
           @clear-doi="clearExplorerDoi"
@@ -3189,10 +2300,16 @@ function handleHomeAction(action: HomeSuggestedAction) {
           @click.self="closePdfUploadModal"
         >
           <section class="w-full max-w-[72rem] rounded-xl border border-slate-200 bg-white p-4 shadow-2xl">
+            <!-- Extract papers -->
             <div class="flex items-center justify-between px-1 pb-3">
-              <h2 id="pdf-upload-modal-title" class="text-lg font-extrabold tracking-tight text-slate-900">
-                {{ pdfUploadModalStep === 'upload' ? 'Upload papers' : 'Explore the scientific literature' }}
-              </h2>
+              <div class="min-w-0">
+                <h2 id="pdf-upload-modal-title" class="truncate text-xl font-black tracking-[-0.03em] text-slate-950">
+                  {{ pdfUploadModalTitle }}
+                </h2>
+                <p class="mt-1 text-sm font-semibold text-slate-500">
+                  {{ pdfUploadModalSubtitle }}
+                </p>
+              </div>
               <button
                 type="button"
                 class="grid h-8 w-8 place-items-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50"
@@ -3202,6 +2319,33 @@ function handleHomeAction(action: HomeSuggestedAction) {
               >
                 <X class="h-5 w-5 stroke-[1.8]" />
               </button>
+            </div>
+
+            <div
+              class="mb-4 grid grid-cols-4 gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-1.5 text-xs font-black text-slate-500"
+              role="list"
+              aria-label="Extraction progress"
+            >
+              <span
+                v-for="label in pdfUploadStepLabels"
+                :key="label"
+                role="listitem"
+                class="rounded-xl px-3 py-2 text-center"
+                :aria-current="(
+                  (label === 'Add papers' && pdfUploadModalStep === 'upload')
+                  || (label === 'Choose mode' && ['select', 'setup'].includes(pdfUploadModalStep))
+                  || (label === 'Extracting' && pdfUploadModalStep === 'extracting')
+                  || (label === 'Review' && pdfUploadModalStep === 'results')
+                ) ? 'step' : undefined"
+                :class="(
+                  (label === 'Add papers' && pdfUploadModalStep === 'upload')
+                  || (label === 'Choose mode' && ['select', 'setup'].includes(pdfUploadModalStep))
+                  || (label === 'Extracting' && pdfUploadModalStep === 'extracting')
+                  || (label === 'Review' && pdfUploadModalStep === 'results')
+                ) ? 'bg-white text-[#0f7c82] shadow-sm' : 'text-slate-400'"
+              >
+                {{ label }}
+              </span>
             </div>
 
             <div v-if="pdfUploadModalStep === 'upload'">
@@ -3227,8 +2371,8 @@ function handleHomeAction(action: HomeSuggestedAction) {
               >
                 <div class="flex flex-col items-center">
                   <CloudUpload class="h-11 w-11 text-violet-500" />
-                  <p class="mt-4 text-base font-extrabold text-violet-600">Drag and drop PDFs</p>
-                  <p class="mt-1 text-sm font-semibold text-violet-500/80">Or click to browse files</p>
+                  <p class="mt-4 text-base font-extrabold text-slate-900">Add PDF papers</p>
+                  <p class="mt-1 text-sm font-semibold text-slate-500">Drop files here or click to browse.</p>
                   <p v-if="pdfUploadStatusMessage" class="mt-4 text-sm font-semibold text-slate-600">
                     {{ pdfUploadStatusMessage }}
                   </p>
@@ -3242,25 +2386,25 @@ function handleHomeAction(action: HomeSuggestedAction) {
                 <div
                   v-for="(file, index) in queuedPdfUploadFiles"
                   :key="`${file.name}-${file.size}-${file.lastModified}`"
-	                  class="flex items-center gap-3 rounded-md px-2 py-1.5 text-sm font-semibold text-slate-700"
-	                >
-	                  <FileText class="h-5 w-5 shrink-0 text-violet-500" />
-	                  <span class="min-w-0 flex-1">
-	                    <span class="block truncate">{{ file.name }}</span>
-	                    <span
-	                      v-if="pdfUploadUploadProgress[pdfUploadFileKey(file)]?.percent != null"
-	                      class="mt-1 block text-xs font-bold text-violet-500"
-	                    >
-	                      Upload progress {{ pdfUploadUploadProgress[pdfUploadFileKey(file)]?.percent }}%
-	                    </span>
-	                    <span
-	                      v-if="pdfUploadUploadErrors[pdfUploadFileKey(file)]"
-	                      class="mt-1 block text-xs font-bold text-rose-600"
-	                    >
-	                      Failed: {{ pdfUploadUploadErrors[pdfUploadFileKey(file)] }}
-	                    </span>
-	                  </span>
-	                  <button
+                  class="flex items-center gap-3 rounded-md px-2 py-1.5 text-sm font-semibold text-slate-700"
+                >
+                  <FileText class="h-5 w-5 shrink-0 text-violet-500" />
+                  <span class="min-w-0 flex-1">
+                    <span class="block truncate">{{ file.name }}</span>
+                    <span
+                      v-if="pdfUploadUploadProgress[pdfUploadFileKey(file)]?.percent != null"
+                      class="mt-1 block text-xs font-bold text-violet-500"
+                    >
+                      Upload progress {{ pdfUploadUploadProgress[pdfUploadFileKey(file)]?.percent }}%
+                    </span>
+                    <span
+                      v-if="pdfUploadUploadErrors[pdfUploadFileKey(file)]"
+                      class="mt-1 block text-xs font-bold text-rose-600"
+                    >
+                      Failed: {{ pdfUploadUploadErrors[pdfUploadFileKey(file)] }}
+                    </span>
+                  </span>
+                  <button
                     type="button"
                     class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
                     :aria-label="`Remove ${file.name}`"
@@ -3278,51 +2422,30 @@ function handleHomeAction(action: HomeSuggestedAction) {
                   :disabled="pdfUploadUploading || queuedPdfUploadFiles.length === 0"
                   @click="uploadQueuedPdfFiles"
                 >
-                  {{ pdfUploadUploading ? 'Uploading...' : 'Upload PDFs' }}
+                  {{ pdfUploadUploading ? 'Uploading...' : 'Upload selected PDFs' }}
                 </button>
               </div>
               <div class="mt-6 flex justify-end">
                 <button
                   type="button"
-                  class="grid h-11 w-11 place-items-center rounded-full bg-violet-400 text-white shadow-lg shadow-violet-200 transition hover:-translate-y-0.5 hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-55"
-                  aria-label="Continue to extraction setup"
+                  class="inline-flex h-11 items-center gap-2 rounded-xl bg-[#0f7c82] px-5 text-sm font-black text-white shadow-lg shadow-teal-100 transition hover:bg-[#0b6870] disabled:cursor-not-allowed disabled:opacity-55"
                   :disabled="pdfUploadUploading || !pdfUploadCanContinueFromUpload"
                   @click="continueFromPdfUploadModal"
                 >
-                  <ArrowRight class="h-5 w-5 stroke-[2.4]" />
+                  Continue
+                  <ArrowRight class="h-4 w-4 stroke-[2.4]" />
                 </button>
               </div>
             </div>
 
             <div v-else-if="pdfUploadModalStep === 'select'">
-              <div class="mb-4 flex overflow-hidden rounded-lg border border-slate-200 bg-slate-50 text-sm font-extrabold text-slate-500">
-                <button type="button" class="flex flex-1 items-center justify-center gap-2 px-4 py-3">
-                  <Search class="h-4 w-4" />
-                  Find papers
-                </button>
-                <button type="button" class="flex flex-1 items-center justify-center gap-2 bg-white px-4 py-3 text-violet-600 shadow-sm">
-                  <Upload class="h-4 w-4" />
-                  Extract data from PDFs
-                </button>
-                <button type="button" class="flex flex-1 items-center justify-center gap-2 px-4 py-3">
-                  <LayoutGrid class="h-4 w-4" />
-                  List of concepts
-                </button>
-              </div>
-
               <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-                <h3 class="text-xl font-extrabold text-slate-900">Select or upload papers</h3>
+                <h3 class="text-xl font-extrabold text-slate-900">Choose papers</h3>
                 <p class="mt-2 max-w-3xl text-sm font-medium leading-6 text-slate-500">
-                  Parsed metadata for {{ uploadedPdfPapers.length }} uploaded papers<span v-if="pdfUploadPendingFileNames.length">, {{ pdfUploadPendingFileNames.length }} still parsing</span>. Select papers to extract information or upload additional papers.
+                  {{ uploadedPdfPapers.length }} paper{{ uploadedPdfPapers.length === 1 ? '' : 's' }} ready<span v-if="pdfUploadPendingFileNames.length">, {{ pdfUploadPendingFileNames.length }} still parsing</span>. Select the papers to extract.
                 </p>
                 <div class="mt-5 flex flex-wrap items-center gap-3">
                   <div class="flex items-center gap-3">
-                    <button type="button" class="grid h-10 w-10 place-items-center rounded-full border border-slate-200 text-slate-400">
-                      <Search class="h-5 w-5" />
-                    </button>
-                    <button type="button" class="h-10 rounded-md border border-slate-200 px-5 text-sm font-extrabold text-slate-500">
-                      Sort
-                    </button>
                     <button
                       type="button"
                       class="h-10 rounded-md border border-slate-200 px-5 text-sm font-extrabold text-slate-600 transition hover:border-violet-300 hover:text-violet-600"
@@ -3418,35 +2541,20 @@ function handleHomeAction(action: HomeSuggestedAction) {
                     @click="openPdfUploadExtractionSetup"
                   >
                     <Upload class="h-4 w-4" />
-                    Start extraction
+                    Choose mode
                   </button>
                 </div>
               </div>
             </div>
 
             <div v-else-if="pdfUploadModalStep === 'setup'">
-              <div class="mb-4 flex overflow-hidden rounded-lg border border-slate-200 bg-slate-50 text-sm font-extrabold text-slate-500">
-                <button type="button" class="flex flex-1 items-center justify-center gap-2 px-4 py-3">
-                  <Search class="h-4 w-4" />
-                  Find papers
-                </button>
-                <button type="button" class="flex flex-1 items-center justify-center gap-2 bg-white px-4 py-3 text-violet-600 shadow-sm">
-                  <Upload class="h-4 w-4" />
-                  Extract data from PDFs
-                </button>
-                <button type="button" class="flex flex-1 items-center justify-center gap-2 px-4 py-3">
-                  <LayoutGrid class="h-4 w-4" />
-                  List of concepts
-                </button>
-              </div>
-
               <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                 <div class="flex flex-wrap items-start justify-between gap-4">
                   <div>
-                    <p class="text-xs font-black uppercase tracking-[0.18em] text-violet-500">Extraction mode</p>
-                    <h3 class="mt-1 text-xl font-extrabold text-slate-900">Start extraction</h3>
+                    <p class="text-xs font-black uppercase tracking-[0.18em] text-[#0f7c82]">Choose mode</p>
+                    <h3 class="mt-1 text-xl font-extrabold text-slate-900">What should IonicLink extract?</h3>
                     <p class="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-500">
-                      Choose how these newly added Library papers should be processed before extraction starts.
+                      Pick Lubrication for COF and tribological conditions, or Diffusion for confined transport values.
                     </p>
                   </div>
                   <span class="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-black uppercase tracking-[0.14em] text-slate-500">
@@ -3486,12 +2594,12 @@ function handleHomeAction(action: HomeSuggestedAction) {
                         @change="setPdfUploadedPaperExtractionPreset(paper.id, $event)"
                       >
                         <option
-                          v-for="option in pdfUploadExtractionPresetOptions"
+                          v-for="option in pdfUploadVisibleExtractionPresetOptions"
                           :key="option.value"
                           :value="option.value"
                           :disabled="Boolean(option.disabled)"
                         >
-                          {{ option.label }}{{ option.disabled ? ' · Coming soon' : '' }}
+                          {{ option.label }}
                         </option>
                       </select>
                     </label>
@@ -3520,62 +2628,37 @@ function handleHomeAction(action: HomeSuggestedAction) {
             </div>
 
             <div v-else-if="pdfUploadModalStep === 'extracting'">
-              <div class="mb-4 flex overflow-hidden rounded-lg border border-slate-200 bg-slate-50 text-sm font-extrabold text-slate-500">
-                <button type="button" class="flex flex-1 items-center justify-center gap-2 px-4 py-3">
-                  <Search class="h-4 w-4" />
-                  Find papers
-                </button>
-                <button type="button" class="flex flex-1 items-center justify-center gap-2 bg-white px-4 py-3 text-violet-600 shadow-sm">
-                  <Upload class="h-4 w-4" />
-                  Extract data from PDFs
-                </button>
-                <button type="button" class="flex flex-1 items-center justify-center gap-2 px-4 py-3">
-                  <LayoutGrid class="h-4 w-4" />
-                  List of concepts
-                </button>
-              </div>
-
               <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                 <div class="flex flex-wrap items-center justify-between gap-4">
-	                  <div>
-	                    <h3 class="text-xl font-extrabold text-slate-900">Extracting data</h3>
-	                    <p class="mt-2 text-sm font-medium text-slate-500">{{ pdfUploadStatusMessage }}</p>
-	                  </div>
-	                  <div class="flex items-center gap-3">
-		                    <button
-		                      v-if="pdfUploadExtracting"
-		                      type="button"
-	                      class="inline-flex h-10 items-center gap-2 rounded-md border border-rose-200 bg-white px-4 text-sm font-extrabold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
-	                      :disabled="pdfUploadExtractionCancelling"
-	                      @click="cancelPdfUploadExtraction"
-	                    >
-	                      <X class="h-4 w-4" />
-		                      {{ pdfUploadExtractionCancelling ? 'Stopping...' : 'Stop extraction' }}
-		                    </button>
-		                    <button
-		                      v-if="pdfUploadExtracting"
-		                      type="button"
-		                      class="inline-flex h-10 items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-4 text-sm font-extrabold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
-		                      :disabled="pdfUploadExtractionCancelling"
-		                      @click="stopPdfUploadExtractionAndUploadNew"
-		                    >
-		                      <Upload class="h-4 w-4" />
-		                      Stop and upload new PDF
-		                    </button>
-		                    <button
-		                      v-if="pdfUploadExtracting"
-		                      type="button"
-		                      class="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-extrabold text-slate-600 transition hover:border-violet-300 hover:text-violet-700"
-		                      @click="closePdfUploadModal"
-		                    >
-		                      Continue in background
-		                    </button>
-		                    <div class="text-right">
-	                      <strong class="block text-2xl font-black text-violet-600">{{ pdfUploadExtractionProgress }}%</strong>
-	                      <span class="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Progress</span>
-	                    </div>
-	                  </div>
-	                </div>
+                  <div>
+                    <h3 class="text-xl font-extrabold text-slate-900">Extracting data</h3>
+                    <p class="mt-2 text-sm font-medium text-slate-500">{{ pdfUploadStatusMessage }}</p>
+                  </div>
+                  <div class="flex items-center gap-3">
+                    <button
+                      v-if="pdfUploadExtracting"
+                      type="button"
+                      class="inline-flex h-10 items-center gap-2 rounded-md border border-rose-200 bg-white px-4 text-sm font-extrabold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      :disabled="pdfUploadExtractionCancelling"
+                      @click="cancelPdfUploadExtraction"
+                    >
+                      <X class="h-4 w-4" />
+                      {{ pdfUploadExtractionCancelling ? 'Stopping...' : 'Stop extraction' }}
+                    </button>
+                    <button
+                      v-if="pdfUploadExtracting"
+                      type="button"
+                      class="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-extrabold text-slate-600 transition hover:border-violet-300 hover:text-violet-700"
+                      @click="closePdfUploadModal"
+                    >
+                      Continue in background
+                    </button>
+                    <div class="text-right">
+                      <strong class="block text-2xl font-black text-violet-600">{{ pdfUploadExtractionProgress }}%</strong>
+                      <span class="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Progress</span>
+                    </div>
+                  </div>
+                </div>
                 <div class="mt-5 h-2.5 overflow-hidden rounded-full bg-slate-100 shadow-inner">
                   <div
                     class="h-full rounded-full bg-gradient-to-r from-violet-500 via-fuchsia-500 to-teal-500 shadow-[0_0_16px_rgba(124,58,237,0.25)] transition-all duration-700 ease-out"
@@ -3586,22 +2669,22 @@ function handleHomeAction(action: HomeSuggestedAction) {
                   <div
                     v-for="item in pdfUploadExtractionItems"
                     :key="item.id"
-	                    class="group flex items-start gap-4 rounded-lg border border-slate-200 bg-white p-4 transition"
-	                    :class="item.status === 'completed' && item.records > 0 ? 'cursor-pointer hover:border-teal-200 hover:bg-teal-50/35 hover:shadow-sm' : ''"
-	                    :role="item.status === 'completed' && item.records > 0 ? 'button' : undefined"
-	                    :tabindex="item.status === 'completed' && item.records > 0 ? 0 : -1"
+                    class="group flex items-start gap-4 rounded-lg border border-slate-200 bg-white p-4 transition"
+                    :class="item.status === 'completed' && item.records > 0 ? 'cursor-pointer hover:border-teal-200 hover:bg-teal-50/35 hover:shadow-sm' : ''"
+                    :role="item.status === 'completed' && item.records > 0 ? 'button' : undefined"
+                    :tabindex="item.status === 'completed' && item.records > 0 ? 0 : -1"
                     @click="openPdfUploadResultsInDatabase(item)"
                     @keydown.enter.prevent="openPdfUploadResultsInDatabase(item)"
                     @keydown.space.prevent="openPdfUploadResultsInDatabase(item)"
                   >
-	                    <span
-	                      class="mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-full"
-	                      :class="item.status === 'extracting' ? 'bg-violet-100 text-violet-600' : item.status === 'failed' || item.status === 'cancelled' ? 'bg-red-50 text-red-500' : item.status === 'no_data' ? 'bg-amber-50 text-amber-700' : item.status === 'queued' ? 'bg-slate-100 text-slate-400' : 'bg-teal-50 text-teal-700'"
-	                    >
-	                      <Loader2 v-if="item.status === 'extracting'" class="h-5 w-5 animate-spin" />
-	                      <X v-else-if="item.status === 'failed' || item.status === 'cancelled'" class="h-5 w-5" />
-	                      <HelpCircle v-else-if="item.status === 'no_data'" class="h-5 w-5" />
-	                      <Check v-else-if="item.status === 'completed'" class="h-5 w-5 stroke-[2.6]" />
+                    <span
+                      class="mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-full"
+                      :class="item.status === 'extracting' ? 'bg-violet-100 text-violet-600' : item.status === 'failed' || item.status === 'cancelled' ? 'bg-red-50 text-red-500' : item.status === 'no_data' ? 'bg-amber-50 text-amber-700' : item.status === 'queued' ? 'bg-slate-100 text-slate-400' : 'bg-teal-50 text-teal-700'"
+                    >
+                      <Loader2 v-if="item.status === 'extracting'" class="h-5 w-5 animate-spin" />
+                      <X v-else-if="item.status === 'failed' || item.status === 'cancelled'" class="h-5 w-5" />
+                      <HelpCircle v-else-if="item.status === 'no_data'" class="h-5 w-5" />
+                      <Check v-else-if="item.status === 'completed'" class="h-5 w-5 stroke-[2.6]" />
                       <FileText v-else class="h-5 w-5" />
                     </span>
                     <div class="min-w-0 flex-1">
@@ -3613,27 +2696,27 @@ function handleHomeAction(action: HomeSuggestedAction) {
                       </div>
                       <p class="mt-1 truncate text-sm font-semibold text-slate-500">{{ compactAuthorLine(item.authors) }}</p>
                       <p class="mt-2 text-sm font-medium text-slate-600">{{ item.message }}</p>
-	                      <p
-	                        v-if="item.status === 'completed' && item.records > 0"
-	                        class="mt-2 inline-flex items-center gap-1.5 text-sm font-extrabold text-[#0f7c82] opacity-90 transition group-hover:translate-x-0.5"
-	                      >
-	                        Open in Database
-	                        <ArrowRight class="h-4 w-4" />
-	                      </p>
-	                      <button
-	                        v-else-if="['no_data', 'failed', 'cancelled'].includes(item.status) && !pdfUploadExtracting"
-	                        type="button"
-	                        class="mt-3 inline-flex h-9 items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 text-sm font-extrabold text-amber-800 transition hover:bg-amber-100"
-	                        @click.stop="changePdfUploadExtractionType"
-	                      >
-	                        Review setup
-	                        <ArrowRight class="h-4 w-4" />
-	                      </button>
-	                    </div>
-	                  </div>
-	                </div>
-	                <div
-	                  v-if="pdfUploadCompletedExtractionItems.length > 0 && !pdfUploadExtracting"
+                      <p
+                        v-if="item.status === 'completed' && item.records > 0"
+                        class="mt-2 inline-flex items-center gap-1.5 text-sm font-extrabold text-[#0f7c82] opacity-90 transition group-hover:translate-x-0.5"
+                      >
+                        Ready for review
+                        <ArrowRight class="h-4 w-4" />
+                      </p>
+                      <button
+                        v-else-if="['no_data', 'failed', 'cancelled'].includes(item.status) && !pdfUploadExtracting"
+                        type="button"
+                        class="mt-3 inline-flex h-9 items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 text-sm font-extrabold text-amber-800 transition hover:bg-amber-100"
+                        @click.stop="changePdfUploadExtractionType"
+                      >
+                        Change mode
+                        <ArrowRight class="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div
+                  v-if="pdfUploadCompletedExtractionItems.length > 0 && !pdfUploadExtracting"
                   class="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4"
                 >
                   <p class="text-sm font-semibold text-slate-500">
@@ -3645,68 +2728,12 @@ function handleHomeAction(action: HomeSuggestedAction) {
                     @click="openPdfUploadResultsInDatabase()"
                   >
                     Open Database
-	                    <ArrowRight class="h-4 w-4" />
-	                  </button>
-	                </div>
-	                <div
-	                  v-else-if="pdfUploadRecoverableExtractionItems.length > 0 && !pdfUploadExtracting"
-	                  class="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-amber-100 bg-amber-50/60 px-4 py-3"
-	                >
-	                  <p class="text-sm font-semibold text-amber-800">
-	                    {{ pdfUploadRecoverableSummaryLabel }}
-	                  </p>
-	                  <div class="flex flex-wrap items-center gap-2">
-	                    <button
-	                      type="button"
-	                      class="inline-flex h-10 items-center gap-2 rounded-md bg-amber-600 px-4 text-sm font-extrabold text-white shadow-sm transition hover:bg-amber-700"
-	                      @click="retryPdfUploadRecoverableExtraction"
-	                    >
-	                      Retry fresh run
-	                      <ArrowRight class="h-4 w-4" />
-	                    </button>
-	                    <button
-	                      type="button"
-	                      class="inline-flex h-10 items-center gap-2 rounded-md border border-amber-200 bg-white px-4 text-sm font-extrabold text-amber-800 transition hover:bg-amber-50"
-	                      @click="changePdfUploadExtractionType"
-	                    >
-	                      Review setup
-	                      <ArrowRight class="h-4 w-4" />
-	                    </button>
-	                    <button
-	                      type="button"
-	                      class="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-extrabold text-slate-600 transition hover:border-violet-300 hover:text-violet-700"
-	                      @click="uploadAnotherPdfAfterExtraction"
-	                    >
-	                      Upload another PDF
-	                      <Upload class="h-4 w-4" />
-	                    </button>
-	                  </div>
-	                </div>
-	              </div>
-	            </div>
-
-            <div v-else-if="pdfUploadModalStep === 'results'">
-              <div class="rounded-xl border border-slate-200 bg-white shadow-sm">
-                <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4">
-                  <div>
-                    <p class="text-xs font-black uppercase tracking-[0.16em] text-[#0f7c82]">Extraction results</p>
-                    <h3 class="mt-1 text-xl font-black tracking-tight text-slate-950">Extracted table</h3>
-                  </div>
-                  <div class="flex flex-wrap items-center gap-2">
-                    <span class="rounded-full bg-teal-50 px-3 py-1.5 text-xs font-black uppercase tracking-[0.12em] text-[#0f7c82]">
-                      {{ selectedPdfUploadResultPreset }} · {{ pdfUploadResultRows.length }} records
-                    </span>
-                    <span class="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-black uppercase tracking-[0.12em] text-slate-600">
-                      {{ pdfUploadReviewSummary.label }}
-                    </span>
-                  </div>
+                    <ArrowRight class="h-4 w-4" />
+                  </button>
                 </div>
-                <p v-if="pdfUploadReviewActionError" class="border-b border-rose-100 bg-rose-50 px-4 py-2 text-sm font-bold leading-6 text-rose-700">
-                  {{ pdfUploadReviewActionError }}
-                </p>
                 <div
-                  v-if="pdfUploadRecoverableExtractionItems.length > 0"
-                  class="flex flex-wrap items-center justify-between gap-3 border-b border-amber-100 bg-amber-50/70 px-4 py-3"
+                  v-else-if="pdfUploadRecoverableExtractionItems.length > 0 && !pdfUploadExtracting"
+                  class="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-amber-100 bg-amber-50/60 px-4 py-3"
                 >
                   <p class="text-sm font-semibold text-amber-800">
                     {{ pdfUploadRecoverableSummaryLabel }}
@@ -3714,23 +2741,23 @@ function handleHomeAction(action: HomeSuggestedAction) {
                   <div class="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      class="inline-flex h-9 items-center gap-2 rounded-md bg-amber-600 px-3 text-sm font-extrabold text-white shadow-sm transition hover:bg-amber-700"
+                      class="inline-flex h-10 items-center gap-2 rounded-md bg-amber-600 px-4 text-sm font-extrabold text-white shadow-sm transition hover:bg-amber-700"
                       @click="retryPdfUploadRecoverableExtraction"
                     >
-                      Retry fresh run
+                      Retry failed
                       <ArrowRight class="h-4 w-4" />
                     </button>
                     <button
                       type="button"
-                      class="inline-flex h-9 items-center gap-2 rounded-md border border-amber-200 bg-white px-3 text-sm font-extrabold text-amber-800 transition hover:bg-amber-50"
+                      class="inline-flex h-10 items-center gap-2 rounded-md border border-amber-200 bg-white px-4 text-sm font-extrabold text-amber-800 transition hover:bg-amber-50"
                       @click="changePdfUploadExtractionType"
                     >
-                      Review setup
+                      Change mode
                       <ArrowRight class="h-4 w-4" />
                     </button>
                     <button
                       type="button"
-                      class="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-extrabold text-slate-600 transition hover:border-violet-300 hover:text-violet-700"
+                      class="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-extrabold text-slate-600 transition hover:border-violet-300 hover:text-violet-700"
                       @click="uploadAnotherPdfAfterExtraction"
                     >
                       Upload another PDF
@@ -3738,288 +2765,88 @@ function handleHomeAction(action: HomeSuggestedAction) {
                     </button>
                   </div>
                 </div>
+              </div>
+            </div>
 
-                <div
-                  v-if="pdfUploadCompletedExtractionItems.length > 1"
-                  class="flex gap-2 overflow-x-auto border-b border-slate-100 px-5 py-3"
-                >
-                  <button
-                    v-for="item in pdfUploadCompletedExtractionItems"
-                    :key="item.id"
-                    type="button"
-                    class="max-w-[18rem] shrink-0 rounded-lg border px-3 py-2 text-left transition"
-                    :class="selectedPdfUploadResultItem?.id === item.id ? 'border-teal-300 bg-teal-50 text-[#0f7c82]' : 'border-slate-200 bg-white text-slate-600 hover:border-teal-200 hover:bg-teal-50/40'"
-                    @click="openPdfUploadExtractionResults(item)"
-                  >
-                    <strong class="block truncate text-sm font-black">{{ item.title }}</strong>
-                    <span class="mt-1 block text-xs font-bold opacity-75">{{ item.records }} records</span>
-                  </button>
-                </div>
-
-                <div v-if="selectedPdfUploadResultItem?.resultLoading" class="grid min-h-[18rem] place-items-center">
-                  <div class="text-center">
-                    <Loader2 class="mx-auto h-6 w-6 animate-spin text-violet-500" />
-                    <p class="mt-3 text-sm font-bold text-slate-500">Loading extracted rows...</p>
-                  </div>
-                </div>
-                <div v-else-if="pdfUploadResultRows.length === 0" class="grid min-h-[18rem] place-items-center px-6 text-center">
+            <div v-else-if="pdfUploadModalStep === 'results'">
+              <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div class="flex flex-wrap items-start justify-between gap-4">
                   <div>
-                    <Database class="mx-auto h-8 w-8 text-slate-300" />
-                    <p class="mt-3 text-base font-extrabold text-slate-700">No rows loaded in this preview</p>
-                    <p class="mt-2 max-w-lg text-sm font-semibold leading-6 text-slate-500">
-                      {{ selectedPdfUploadResultItem?.resultError || 'The extraction finished, but the preview endpoint did not return rows for this paper yet.' }}
-                    </p>
-                    <button
-                      v-if="selectedPdfUploadResultItem"
-                      type="button"
-                      class="mt-4 inline-flex h-10 items-center rounded-lg border border-slate-200 px-4 text-sm font-extrabold text-slate-600 transition hover:border-teal-300 hover:text-[#0f7c82]"
-                      @click="openPdfUploadExtractionResults(selectedPdfUploadResultItem)"
-                    >
-                      Reload results
-                    </button>
-                  </div>
-                </div>
-                <div v-else class="max-h-[29rem] overflow-auto">
-                  <table class="min-w-full border-separate border-spacing-0 text-left">
-                    <thead class="sticky top-0 z-10 bg-slate-50">
-                      <tr class="text-xs font-black uppercase tracking-[0.16em] text-slate-500">
-                        <th class="w-20 border-b border-slate-200 px-5 py-4">ID</th>
-                        <th class="min-w-[9rem] border-b border-slate-200 px-5 py-4">Review status</th>
-                        <th class="min-w-[13rem] border-b border-slate-200 px-5 py-4">Ionic liquid</th>
-                        <th class="min-w-[14rem] border-b border-slate-200 px-5 py-4">Tribopair</th>
-                        <th class="min-w-[18rem] border-b border-slate-200 px-5 py-4">Conditions</th>
-                        <th class="min-w-[9rem] border-b border-slate-200 px-5 py-4 text-[#0f7c82]">
-                          {{ selectedPdfUploadResultPreset === 'diffusion' ? 'Diffusion' : 'COF' }}
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr
-                        v-for="(row, index) in pdfUploadResultRows"
-                        :key="`${selectedPdfUploadResultItem?.id || 'paper'}-${pdfUploadResultId(row, index)}-${index}`"
-                        class="align-top transition hover:bg-teal-50/35"
-                      >
-                        <td class="border-b border-slate-100 px-5 py-4 font-mono text-sm font-bold text-slate-500">
-                          {{ pdfUploadResultId(row, index) }}
-                        </td>
-                        <td class="border-b border-slate-100 px-5 py-4">
-                          <span
-                            class="inline-flex rounded-full border px-2.5 py-1 text-xs font-black uppercase tracking-[0.12em]"
-                            :class="extractionReviewStatusClass(pdfUploadReviewStatus(row))"
-                          >
-                            {{ extractionReviewStatusLabel(pdfUploadReviewStatus(row)) }}
-                          </span>
-                          <div class="mt-1 flex flex-wrap gap-1">
-                            <span
-                              v-if="pdfUploadRowConfidenceLabel(row)"
-                              class="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.1em] text-slate-500"
-                            >
-                              {{ pdfUploadRowConfidenceLabel(row) }}
-                            </span>
-                            <span
-                              v-for="label in pdfUploadRowMissingLabels(row)"
-                              :key="`${pdfUploadResultId(row, index)}-${label}`"
-                              class="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-black text-amber-700"
-                            >
-                              {{ label }}
-                            </span>
-                          </div>
-                        </td>
-                        <td class="border-b border-slate-100 px-5 py-4">
-                          <button
-                            type="button"
-                            class="block w-full rounded-md px-2 py-1 text-left transition hover:bg-white hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-100"
-                            @click.stop="openPdfUploadCellEvidence(row, index, 'Ionic liquid', pdfUploadResultIonicLiquid(row), ['ionic_liquid', 'ionic_liquid_display', 'lubricant_alias', 'cation', 'anion'], $event)"
-                          >
-                          <strong class="block text-sm font-black text-slate-900">
-                            <ChemicalText :text="pdfUploadResultIonicLiquid(row)" />
-                          </strong>
-                          <span v-if="pdfUploadIonPartLine(row)" class="mt-1 block text-xs font-semibold text-slate-500">
-                            {{ pdfUploadIonPartLine(row) }}
-                          </span>
-                          </button>
-                        </td>
-                        <td class="border-b border-slate-100 px-5 py-4 text-sm font-semibold text-slate-700">
-                          <button
-                            type="button"
-                            class="block w-full rounded-md px-2 py-1 text-left transition hover:bg-white hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-100"
-                            @click.stop="openPdfUploadCellEvidence(row, index, 'Tribopair', pdfUploadResultTribopair(row), ['probe_material', 'substrate_material', 'material_name', 'tribological_system'], $event)"
-                          >
-                            <ChemicalText :text="pdfUploadResultTribopair(row)" />
-                          </button>
-                        </td>
-                        <td class="border-b border-slate-100 px-5 py-4 text-sm font-semibold leading-6 text-slate-600">
-                          <button
-                            type="button"
-                            class="block w-full rounded-md px-2 py-1 text-left transition hover:bg-white hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-100"
-                            @click.stop="openPdfUploadCellEvidence(row, index, 'Conditions', pdfUploadResultConditions(row), ['temperature', 'load', 'normal_load', 'speed', 'potential', 'water_content'], $event)"
-                          >
-                            <ChemicalText :text="pdfUploadResultConditions(row)" />
-                          </button>
-                        </td>
-                        <td class="border-b border-slate-100 px-5 py-4 text-base font-black text-blue-600">
-                          <button
-                            type="button"
-                            class="block w-full rounded-md px-2 py-1 text-left transition hover:bg-white hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-teal-100"
-                            @click.stop="openPdfUploadCellEvidence(row, index, selectedPdfUploadResultPreset === 'diffusion' ? 'Diffusion' : 'COF', pdfUploadResultMetric(row), selectedPdfUploadResultPreset === 'diffusion' ? ['D_total', 'D_cation', 'D_anion', 'diffusion_standard_fields'] : ['cof', 'cof_extracted'], $event)"
-                          >
-                            <ChemicalText :text="pdfUploadResultMetric(row)" />
-                          </button>
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-
-                <div
-                  v-if="activePdfUploadEvidence"
-                  class="fixed z-[90] w-[22rem] max-w-[calc(100vw-2rem)] rounded-lg border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/15"
-                  :style="{ top: `${pdfUploadEvidencePosition.top}px`, left: `${pdfUploadEvidencePosition.left}px` }"
-                >
-                  <div class="flex items-center justify-between gap-3">
-                    <div class="min-w-0">
-                      <h4 class="truncate text-sm font-black text-slate-950">
-                        {{ activePdfUploadEvidenceSlide()?.label || activePdfUploadEvidence.fieldLabel }}
-                      </h4>
-                      <p class="mt-0.5 text-xs font-bold text-slate-400">
-                        {{ activePdfUploadEvidencePageLabel() }}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-800"
-                      aria-label="Close evidence"
-                      @click="activePdfUploadEvidence = null"
-                    >
-                      <X class="h-4 w-4" />
-                    </button>
-                  </div>
-                  <div class="mt-3 rounded-md bg-teal-50/70 px-3 py-2 text-sm font-extrabold text-[#0f7c82]">
-                    <ChemicalText :text="activePdfUploadEvidenceValue()" />
-                  </div>
-                  <div v-if="activePdfUploadEvidenceSlideCount() > 1" class="mt-2 flex items-center justify-between gap-2 rounded-md border border-slate-100 bg-slate-50 px-2 py-1">
-                    <button
-                      type="button"
-                      class="grid h-7 w-7 place-items-center rounded-md border border-slate-200 bg-white text-slate-500 transition hover:border-teal-200 hover:text-[#0f7c82]"
-                      aria-label="Previous upload evidence"
-                      @click="movePdfUploadEvidenceSlide(-1)"
-                    >
-                      <ChevronLeft class="h-4 w-4" />
-                    </button>
-                    <span class="min-w-10 text-center text-[11px] font-black text-slate-400">
-                      {{ activePdfUploadEvidenceSlideIndexLabel() }}
-                    </span>
-                    <button
-                      type="button"
-                      class="grid h-7 w-7 place-items-center rounded-md border border-slate-200 bg-white text-slate-500 transition hover:border-teal-200 hover:text-[#0f7c82]"
-                      aria-label="Next upload evidence"
-                      @click="movePdfUploadEvidenceSlide(1)"
-                    >
-                      <ChevronRight class="h-4 w-4" />
-                    </button>
-                  </div>
-                  <div
-                    v-if="activePdfUploadEvidenceImageSrc()"
-                    class="mt-3 overflow-hidden rounded-md border border-amber-100 bg-amber-50/60"
-                  >
-                    <img
-                      :src="activePdfUploadEvidenceImageSrc() || ''"
-                      alt="Highlighted PDF evidence"
-                      class="max-h-52 w-full object-contain"
-                    >
-                  </div>
-                  <div
-                    v-else-if="activePdfUploadEvidenceImageLoading()"
-                    class="mt-3 rounded-md border border-slate-100 bg-slate-50 px-3 py-3 text-sm font-semibold text-slate-500"
-                  >
-                    Rendering highlighted PDF evidence...
-                  </div>
-                  <div
-                    v-else-if="activePdfUploadEvidenceImageError()"
-                    class="mt-3 rounded-md border border-rose-100 bg-rose-50 px-3 py-3 text-sm font-semibold text-rose-700"
-                  >
-                    {{ activePdfUploadEvidenceImageError() }}
-                  </div>
-                  <div class="mt-3 max-h-44 space-y-2 overflow-y-auto pr-1">
-                    <p
-                      v-for="(quote, quoteIndex) in activePdfUploadEvidenceQuotes()"
-                      :key="`${activePdfUploadEvidence.rowIndex}-${quoteIndex}`"
-                      class="rounded-md border border-slate-100 bg-slate-50 px-3 py-2 text-sm font-medium leading-6 text-slate-600"
-                    >
-                      <template
-                        v-for="(part, partIndex) in splitPdfUploadEvidenceQuote(quote)"
-                        :key="`${activePdfUploadEvidence.rowIndex}-${quoteIndex}-${partIndex}`"
-                      >
-                        <mark
-                          v-if="part.active"
-                          class="rounded bg-violet-100 px-0.5 py-0 text-slate-900"
-                        >
-                          <ChemicalText :text="part.text" />
-                        </mark>
-                        <ChemicalText v-else :text="part.text" />
-                      </template>
-                    </p>
-                    <p v-if="activePdfUploadEvidenceQuotes().length === 0" class="rounded-md border border-dashed border-slate-200 px-3 py-3 text-sm font-semibold text-slate-400">
-                      No field-level quote was stored for this value.
+                    <p class="text-xs font-black uppercase tracking-[0.16em] text-[#0f7c82]">Review</p>
+                    <h3 class="mt-1 text-2xl font-black tracking-tight text-slate-950">Extraction is ready</h3>
+                    <p class="mt-2 max-w-2xl text-sm font-semibold leading-6 text-slate-500">
+                      Open Database to review extracted rows, confirm evidence, and publish clean records.
                     </p>
                   </div>
-                  <div class="mt-3 border-t border-slate-100 pt-3">
-                    <div class="grid grid-cols-3 gap-2">
-                      <button
-                        type="button"
-                        class="inline-flex h-8 items-center justify-center rounded-md border border-emerald-200 px-2 text-xs font-black text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-300"
-                        :disabled="!activePdfUploadEvidenceActionFieldKey() || Boolean(pdfUploadReviewActionPending)"
-                        @click="confirmPdfUploadEvidenceField"
-                      >
-                        Confirm
-                      </button>
-                      <button
-                        type="button"
-                        class="inline-flex h-8 items-center justify-center rounded-md border border-rose-200 px-2 text-xs font-black text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-300"
-                        :disabled="!activePdfUploadEvidenceActionFieldKey() || Boolean(pdfUploadReviewActionPending)"
-                        @click="flagPdfUploadEvidenceField"
-                      >
-                        Flag
-                      </button>
-                      <button
-                        type="button"
-                        class="inline-flex h-8 items-center justify-center rounded-md border border-slate-200 px-2 text-xs font-black text-slate-600 transition hover:border-teal-300 hover:text-[#0f7c82]"
-                        @click="openPdfUploadEvidencePaper"
-                      >
-                        Edit
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 p-3">
-                  <span class="rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-black uppercase tracking-[0.12em] text-slate-600">
-                    {{ pdfUploadReviewSummary.label }}
+                  <span class="rounded-full bg-teal-50 px-3 py-1.5 text-xs font-black uppercase tracking-[0.12em] text-[#0f7c82]">
+                    {{ pdfUploadReviewSummaryStats.records }} rows to review
                   </span>
+                </div>
+
+                <div class="mt-6 grid gap-3 sm:grid-cols-4">
+                  <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <span class="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Processed</span>
+                    <strong class="mt-1 block text-2xl font-black text-slate-950">{{ pdfUploadReviewSummaryStats.processed }}</strong>
+                  </div>
+                  <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <span class="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Ready</span>
+                    <strong class="mt-1 block text-2xl font-black text-slate-950">{{ pdfUploadReviewSummaryStats.ready }}</strong>
+                  </div>
+                  <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <span class="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Rows</span>
+                    <strong class="mt-1 block text-2xl font-black text-slate-950">{{ pdfUploadReviewSummaryStats.records }}</strong>
+                  </div>
+                  <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                    <span class="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Needs action</span>
+                    <strong class="mt-1 block text-2xl font-black text-slate-950">{{ pdfUploadReviewSummaryStats.recoverable }}</strong>
+                  </div>
+                </div>
+
+                <div v-if="pdfUploadRecoverableExtractionItems.length > 0" class="mt-5 rounded-2xl border border-amber-100 bg-amber-50/70 px-4 py-3">
+                  <p class="text-xs font-black uppercase tracking-[0.14em] text-amber-700">
+                    No reviewable data found
+                  </p>
+                  <p class="text-sm font-semibold text-amber-800">
+                    {{ pdfUploadRecoverableSummaryLabel }}
+                  </p>
+                </div>
+
+                <div class="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-5">
+                  <button
+                    type="button"
+                    class="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 text-sm font-extrabold text-slate-600 transition hover:border-teal-300 hover:text-[#0f7c82]"
+                    @click="uploadAnotherPdfAfterExtraction"
+                  >
+                    Upload another PDF
+                    <Upload class="h-4 w-4" />
+                  </button>
+
                   <div class="flex flex-wrap items-center gap-2">
                     <button
-                      v-if="pdfUploadNeedsReviewCount > 0"
+                      v-if="pdfUploadRecoverableExtractionItems.length > 0"
                       type="button"
-                      class="inline-flex h-9 items-center rounded-md border border-amber-200 px-3 text-sm font-extrabold text-amber-700 transition hover:bg-amber-50"
-                      @click="openPdfUploadReviewIssues"
+                      class="inline-flex h-11 items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-5 text-sm font-extrabold text-amber-800 transition hover:bg-amber-100"
+                      @click="changePdfUploadExtractionType"
                     >
-                      Review
+                      Change mode
+                      <ArrowRight class="h-4 w-4" />
+                    </button>
+                    <button
+                      v-if="pdfUploadRecoverableExtractionItems.length > 0"
+                      type="button"
+                      class="inline-flex h-11 items-center gap-2 rounded-xl bg-amber-600 px-5 text-sm font-extrabold text-white shadow-sm transition hover:bg-amber-700"
+                      @click="retryPdfUploadRecoverableExtraction"
+                    >
+                      Retry failed
+                      <ArrowRight class="h-4 w-4" />
                     </button>
                     <button
                       type="button"
-                      class="inline-flex h-9 items-center rounded-md border border-slate-200 px-3 text-sm font-extrabold text-slate-600 transition hover:border-teal-300 hover:text-[#0f7c82]"
+                      class="inline-flex h-11 items-center gap-2 rounded-xl bg-[#0f7c82] px-5 text-sm font-extrabold text-white shadow-lg shadow-teal-100 transition hover:bg-[#0b6870]"
                       @click="openPdfUploadResultsInDatabase()"
                     >
-                      Database
-                    </button>
-                    <button
-                      type="button"
-                      class="inline-flex h-9 items-center rounded-md bg-[#0f7c82] px-4 text-sm font-extrabold text-white shadow-sm shadow-teal-100 transition hover:bg-[#0b6870] disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
-                      :disabled="pdfUploadReadyRows.length === 0 || Boolean(pdfUploadReviewActionPending)"
-                      @click="publishReadyPdfUploadRecords"
-                    >
-                      <Loader2 v-if="pdfUploadReviewActionPending === 'publish'" class="mr-1.5 h-4 w-4 animate-spin" />
-                      {{ pdfUploadReadyRows.length > 0 ? 'Publish ready records' : 'Publish to database' }}
+                      Review in Database
+                      <ArrowRight class="h-4 w-4" />
                     </button>
                   </div>
                 </div>
