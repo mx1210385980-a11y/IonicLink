@@ -168,6 +168,22 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
         "alkyl_chain_length": 8,
         "aliases": ["P4,4,4,8", "p4448", "[P4448]", "[P4,4,4,8]"],
     },
+    "N88812": {
+        "smiles": "CCCCCCCCCCCC[N+](CCCCCCCC)(CCCCCCCC)CCCCCCCC",
+        "display_name": "N88812",
+        "full_name": "trioctyldodecylammonium",
+        "family": "ammonium",
+        "alkyl_chain_length": 12,
+        "aliases": [
+            "N88812",
+            "[N88812]",
+            "[N8,8,8,12]",
+            "N8,8,8,12",
+            "trioctyldodecylammonium",
+            "trioctyl(dodecyl)ammonium",
+            "trioctyldodecyl ammonium",
+        ],
+    },
     # Ammonium-based
     "N4444": {
         "smiles": "CCCC[N+](CCCC)(CCCC)CCCC",
@@ -202,7 +218,7 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
         "aliases": ["dmea", "dimethylethylammonium", "[DMEA]+"],
     },
     "Li(G4)": {
-        "smiles": "",
+        "smiles": "[Li+].COCCOCCOCCOCCOC",
         "display_name": "Li(G4)",
         "full_name": "lithium tetraglyme solvate",
         "family": "solvate_il",
@@ -228,7 +244,7 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
         "aliases": ["hc3c1c1"],
     },
     "BHPT": {
-        "smiles": "",
+        "smiles": "OCC[n+]1ccn(CCCCCn2cc[n+](CCO)c2)c1",
         "display_name": "BHPT",
         "full_name": "1,10-(pentane-1,5-diyl)bis(3-hydroxyethyl-1H-imidazolium-1-yl)",
         "family": "dicationic imidazolium",
@@ -241,7 +257,7 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
         ],
     },
     "BHPET": {
-        "smiles": "",
+        "smiles": "OCC[n+]1ccn(CCOCCOCCOCCOCCOCCn2cc[n+](CCO)c2)c1",
         "display_name": "BHPET",
         "full_name": "1,10-(3,6,9,12,15-pentaoxapentadecane-1,15-diyl)bis(3-hydroxyethyl-1H-imidazolium-1-yl)",
         "family": "dicationic imidazolium",
@@ -251,6 +267,21 @@ CATION_DB: Dict[str, Dict[str, Any]] = {
             "bhpet",
             "1,10-(3,6,9,12,15-pentaoxapentadecane-1,15-diyl)bis(3-hydroxyethyl-1H-imidazolium-1-yl)",
             "pentaoxapentadecane bis hydroxyethyl imidazolium",
+        ],
+    },
+    "C10(C1Im)2": {
+        "smiles": "C[n+]1ccn(CCCCCCCCCCn2cc[n+](C)c2)c1",
+        "display_name": "C10(C1Im)2",
+        "full_name": "1,10-bis(3-methylimidazolium-1-yl)decane",
+        "family": "dicationic imidazolium",
+        "alkyl_chain_length": 10,
+        "aliases": [
+            "C10(C1Im)2",
+            "[C10(C1Im)2]2+",
+            "C10C1Im2",
+            "C10MIm2",
+            "1,10-bis(3-methylimidazolium)decane",
+            "1,10-bis(3-methylimidazolium-1-yl)decane",
         ],
     },
 }
@@ -284,6 +315,21 @@ ANION_DB: Dict[str, Dict[str, Any]] = {
         "smiles": "[B-]1(OC(=O)CC(=O)O1)OC(=O)CC(=O)O",
         "full_name": "bis(malonato)borate",
         "aliases": ["bmb", "BMB-"],
+    },
+    "A4BMB": {
+        "smiles": None,
+        "full_name": "bis(4-butylmandelato)borate",
+        "aliases": ["a4bmb", "A4BMB-", "[A4BMB]-", "bis(4-butylmandelato)borate"],
+    },
+    "A8BMB": {
+        "smiles": None,
+        "full_name": "bis(4-octylmandelato)borate",
+        "aliases": ["a8bmb", "A8BMB-", "[A8BMB]-", "bis(4-octylmandelato)borate"],
+    },
+    "A12BMB": {
+        "smiles": None,
+        "full_name": "bis(4-dodecylmandelato)borate",
+        "aliases": ["a12bmb", "A12BMB-", "[A12BMB]-", "bis(4-dodecylmandelato)borate"],
     },
     "Cl": {
         "smiles": "[Cl-]",
@@ -454,6 +500,22 @@ _PALACIO_ALIAS_DB: list[Dict[str, Any]] = [
             "BHPET",
             "dicationic IL BHPET",
             "1,10-(3,6,9,12,15-pentaoxapentadecane-1,15-diyl)bis(3-hydroxyethyl-1H-imidazolium-1-yl)",
+        ],
+    },
+    {
+        "alias": "C10(C1Im)2",
+        "canonical_name": "[C10(C1Im)2][TFSI]2",
+        "cation": "C10(C1Im)2",
+        "anion": "TFSI",
+        "anion_stoichiometry": 2,
+        "full_name": "1,10-bis(3-methylimidazolium-1-yl)decane di[bis(trifluoromethylsulfonyl)imide]",
+        "aliases": [
+            "[C10(C1Im)2][NTf2]2",
+            "[C10(C1Im)2][TFSI]2",
+            "[C10(C1Im)2]2+ [TFSI]-",
+            "C10(C1Im)2 NTf2",
+            "C10C1Im2",
+            "1,10-bis(3-methylimidazolium)decane di- [bis(trifluoromethylsulfonyl)]imide",
         ],
     },
 ]

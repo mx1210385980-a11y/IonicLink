@@ -26,11 +26,11 @@ def test_repairs_invalid_unit_from_named_evidence_values():
             "D_unit": "shows",
             "temperature_value": 300,
             "confinement_scale_value": 1,
-            "source": "Figure 10",
+            "source": "Results text",
             "source_page": 6,
             "evidence": (
-                "Figure 10 shows the diffusion coefficient of anion and cation in nanochannels. "
-                "For d=1 nm, the cation diffusion coefficient is approximately 1.2 x 10^-9 m2/s "
+                "The text reports diffusion coefficient values in nanochannels. "
+                "For d=1 nm, the cation diffusion coefficient is 1.2 x 10^-9 m2/s "
                 "and anion is 0.8 x 10^-9 m2/s."
             ),
         }
@@ -42,6 +42,26 @@ def test_repairs_invalid_unit_from_named_evidence_values():
     assert normalized[0]["D_cation"] == 1200
     assert normalized[0]["D_anion"] == 800
     assert normalized[0]["D_unit"] == "10\u207b\u00b9\u00b2 m\u00b2/s"
+
+
+def test_rejects_figure_caption_number_misread_as_diffusion_unit():
+    row = {
+        "system_name": "Silica nanochannel",
+        "ionic_liquid": "[EMIM][BF4]",
+        "D_cation": 10,
+        "D_anion": 10,
+        "D_unit": "shows",
+        "source": "Figure 10",
+        "source_page": 6,
+        "evidence": (
+            "Figure 10 shows the diffusion coefficient of anion and cation in nanochannels. "
+            "For d=1 nm, the cation diffusion coefficient is approximately 1.2 x 10^-9 m2/s "
+            "and anion is 0.8 x 10^-9 m2/s."
+        ),
+    }
+
+    assert diffusion_drop_reason(row) == "figure_unit_requires_manual_review"
+    assert _normalize([row]) == []
 
 
 def test_rejects_invalid_unit_without_evidence_unit():
@@ -155,6 +175,40 @@ def test_mvp_rejects_model_value_without_numeric_evidence():
 
     assert diffusion_drop_reason(row, require_evidence_measure=True) == "no_numeric_diffusion_in_evidence"
     assert _normalize([row]) == []
+
+
+def test_rejects_nonpositive_diffusion_coefficients():
+    row = {
+        "system_name": "EAN in Vycor porous glass",
+        "ionic_liquid": "Ethylammonium nitrate",
+        "D_total": -500,
+        "D_unit": "10^-12 m2/s",
+        "source": "Figure 3 and text",
+        "source_page": 3,
+        "evidence": "Figure 3 reports D = -500 x 10^-12 m2/s for confined EAN.",
+    }
+
+    assert diffusion_drop_reason(row, require_evidence_measure=True) == "nonpositive_diffusion_value"
+    assert _normalize([row]) == []
+
+
+def test_rejects_diffusion_ranges_that_would_be_misread_as_negative_values():
+    rows = [
+        {
+            "system_name": "EAN in Vycor porous glass",
+            "ionic_liquid": "Ethylammonium nitrate",
+            "D_total": -500,
+            "D_unit": "10^-12 m2/s",
+            "source": "Figure 3 and text",
+            "source_page": 3,
+            "evidence": (
+                "Ds for confined EAN were not dependent on diffusion time and were "
+                "in the range of 5×10-11–5×10-10 m2/s."
+            ),
+        }
+    ]
+
+    assert _normalize(rows) == []
 
 
 def test_mvp_keeps_only_coefficients_supported_by_evidence_quote():

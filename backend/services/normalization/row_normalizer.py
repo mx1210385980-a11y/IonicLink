@@ -69,6 +69,37 @@ def _sanitize_thickness_fields(item: dict[str, Any]) -> None:
             item[field] = _normalize_quantitative_thickness(item.get(field))
 
 
+def _has_snl_silicon_nitride_probe(text: str) -> bool:
+    return bool(
+        re.search(
+            r"\bsnl\s+probes?\b[^.;]{0,80}\bsilicon\s+nitride\b|\bsilicon\s+nitride\b[^.;]{0,80}\b(?:snl\s+)?(?:probes?|tips?)\b",
+            text,
+        )
+    )
+
+
+def _has_explicit_tip_probe(text: str) -> bool:
+    return bool(
+        _has_snl_silicon_nitride_probe(text)
+        or re.search(
+            r"\bsnl\s+probes?\b|\b(?:nominal\s+)?tip radius\b|\bsharp\s+(?:si|silicon)\s+tips?\b|"
+            r"\bsharp[-\s]+(?:afm\s+)?tips?\b|\bradius\s+of\s+(?:the\s+)?tip\b|"
+            r"\bsharp\s+(?:si|silicon)\s+afm\s+probes?\b|"
+            r"\b(?:silicon|si|si3n4)\s+(?:afm\s+)?(?:cantilever\s+)?tips?\b|\bsilicon\s+nitride\s+afm\s+tips?\b",
+            text,
+        )
+    )
+
+
+def _has_symmetric_mica_surface_pair(text: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:between\s+(?:two\s+)?mica\s+surfaces|between\s+mica\s+sheets|mica\s+surfaces\s+separated)\b",
+            text,
+        )
+    )
+
+
 def _looks_like_shear_rate(value: Any) -> bool:
     text = str(value or "").strip().lower()
     if not text:
@@ -151,6 +182,41 @@ def _extract_panel_context(text: str, source_label: str) -> str:
         if hit:
             return re.sub(r"\s+", " ", hit.group(1)).strip()[:1800]
     return ""
+
+
+def _extract_source_figure_context(text: str, source_label: str) -> str:
+    if not text or not source_label:
+        return ""
+    label_match = re.search(r"\b(fig(?:ure)?|table)\.?\s*(\d+)", source_label.strip(), flags=re.IGNORECASE)
+    if not label_match:
+        return ""
+
+    target_kind = "table" if label_match.group(1).lower() == "table" else "figure"
+    target_number = label_match.group(2)
+    boundary_pattern = re.compile(
+        r"\b(?P<kind>fig(?:ure)?|table)\.?\s*(?P<number>\d+)[a-z]?\s*[\.:;)]",
+        flags=re.IGNORECASE,
+    )
+    boundaries = []
+    for hit in boundary_pattern.finditer(text):
+        kind = "table" if hit.group("kind").lower() == "table" else "figure"
+        boundaries.append((hit.start(), hit.end(), kind, hit.group("number")))
+
+    target_index = None
+    for index, (_start, _end, kind, number) in enumerate(boundaries):
+        if kind == target_kind and number == target_number:
+            target_index = index
+            break
+    if target_index is None:
+        return ""
+
+    start = boundaries[target_index][0]
+    end = min(len(text), start + 2600)
+    for next_start, _next_end, kind, number in boundaries[target_index + 1 :]:
+        if kind != target_kind or number != target_number:
+            end = next_start
+            break
+    return re.sub(r"\s+", " ", text[start:end]).strip()[:2600]
 
 
 def _collect_il_candidates(text: str) -> List[str]:
@@ -251,12 +317,60 @@ def _canonicalize_il(value: Any) -> str:
     return text
 
 
+def _coerce_llm_scalar(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, (int, float)):
+        return str(value).strip()
+    if isinstance(value, dict):
+        for key in (
+            "value",
+            "name",
+            "canonical_name",
+            "canonical",
+            "label",
+            "text",
+            "ionic_liquid",
+            "lubricant",
+            "compound",
+            "sample",
+        ):
+            text = _coerce_llm_scalar(value.get(key))
+            if text:
+                return text
+        cation = _coerce_llm_scalar(value.get("cation"))
+        anion = _coerce_llm_scalar(value.get("anion"))
+        if cation and anion:
+            return f"{cation} {anion}".strip()
+        return cation or anion
+    if isinstance(value, list):
+        parts = [_coerce_llm_scalar(part) for part in value]
+        return "; ".join(part for part in parts if part)
+    return str(value or "").strip()
+
+
+def _safe_normalize_ionic_liquid(value: Any) -> str:
+    text = _coerce_llm_scalar(value)
+    if not text:
+        return ""
+    try:
+        normalized = normalize_ionic_liquid(text)
+    except Exception:
+        normalized = text
+    return _coerce_llm_scalar(normalized)
+
+
 def normalize_extraction_row(
     row: dict[str, Any],
     fallback_page: Optional[int],
     page_context: Optional[str] = None,
 ) -> dict[str, Any]:
     item = dict(row or {})
+    for il_field in ("ionic_liquid", "il", "ionicLiquid", "ionic_liquid_name", "lubricant"):
+        if il_field in item:
+            item[il_field] = _safe_normalize_ionic_liquid(item.get(il_field))
     tribopair = item.get("tribopair") if isinstance(item.get("tribopair"), dict) else {}
     if not item.get("cof"):
         for alias in (
@@ -327,6 +441,7 @@ def normalize_extraction_row(
         source_tag = source_val
 
     panel_ctx = _extract_panel_context(page_ctx, source_tag)
+    source_ctx = _extract_source_figure_context(page_ctx, source_tag)
     if not item.get("ionic_liquid"):
         for direct_source in (
             item.get("sample_id"),
@@ -335,7 +450,7 @@ def normalize_extraction_row(
             item.get("condition"),
             tribopair.get("coating"),
         ):
-            inferred = _canonicalize_il(normalize_ionic_liquid(direct_source))
+            inferred = _canonicalize_il(_safe_normalize_ionic_liquid(direct_source))
             inferred_l = str(inferred or "").strip().lower()
             if inferred and inferred_l not in {"unknown", "unknown il", "n/a", "-", "--"}:
                 item["ionic_liquid"] = inferred
@@ -360,7 +475,7 @@ def normalize_extraction_row(
         if len(local_ils) == 1:
             item["ionic_liquid"] = local_ils[0]
         else:
-            panel_ils = _collect_il_candidates(f"{local_space} {panel_ctx}".strip())
+            panel_ils = _collect_il_candidates(f"{local_space} {panel_ctx} {source_ctx}".strip())
             if len(panel_ils) == 1:
                 item["ionic_liquid"] = panel_ils[0]
             all_ils = _collect_il_candidates(full_space)
@@ -378,12 +493,13 @@ def normalize_extraction_row(
             str(item.get("source") or ""),
             str(item.get("source_figure") or ""),
             panel_ctx,
+            source_ctx,
         ]
         for space in il_spaces:
             text = str(space or "").strip()
             if len(text) < 2:
                 continue
-            inferred = _canonicalize_il(normalize_ionic_liquid(text))
+            inferred = _canonicalize_il(_safe_normalize_ionic_liquid(text))
             inferred_l = str(inferred or "").strip().lower()
             if inferred and inferred_l not in {"unknown", "unknown il", "n/a", "-", "--"}:
                 item["ionic_liquid"] = inferred
@@ -400,7 +516,7 @@ def normalize_extraction_row(
                 str(item.get("source_figure") or ""),
             ]
         ).lower()
-        space_l = f"{local_space_l} {panel_ctx.lower()} {page_ctx.lower()}".strip()
+        space_l = f"{local_space_l} {panel_ctx.lower()} {source_ctx.lower()} {page_ctx.lower()}".strip()
         surface_patterns = [
             (r"\bsi\s*\(?100\)?\b|\bsilicon\s*\(?100\)?\b", "Si(100)"),
             (r"\bsilicon\b|\bsi\s+substrate\b|\bsi\s+surface\b", "Silicon"),
@@ -422,30 +538,70 @@ def normalize_extraction_row(
             str(item.get("source") or ""),
             str(item.get("source_figure") or ""),
             panel_ctx,
+            source_ctx,
             page_ctx[:2500],
         ]
     )
     tribo_space_norm = re.sub(r"\s+", " ", tribo_space).strip()
     tribo_l = tribo_space_norm.lower()
+    probe_space_parts = [
+        str(item.get("evidence") or ""),
+        str(item.get("notes") or ""),
+        str(item.get("source") or ""),
+        str(item.get("source_figure") or ""),
+        panel_ctx,
+        source_ctx,
+    ]
+    if not source_ctx:
+        probe_space_parts.append(page_ctx[:2500])
+    probe_space_norm = re.sub(r"\s+", " ", " ".join(probe_space_parts)).strip()
+    probe_l = probe_space_norm.lower()
 
     if not item.get("probe_material"):
-        if re.search(r"\bsilica\s+(?:colloid|sphere|probe)\b", tribo_l):
+        if _has_snl_silicon_nitride_probe(probe_l) or re.search(r"\bsi3n4\s+(?:cantilever\s+)?tips?\b", probe_l):
+            item["probe_material"] = "Silicon nitride"
+        elif re.search(r"\bborosilicate\s+glass\s+microspheres?\b", probe_l):
+            item["probe_material"] = "Borosilicate glass"
+        elif re.search(r"\b(?:afm\s+)?glass\s+colloid(?:al)?\s+probes?\b|\bglass\s+microspheres?\b", probe_l):
+            item["probe_material"] = "Glass"
+        elif re.search(r"\bsilica\s+(?:colloid|sphere|probe)\b", probe_l):
             item["probe_material"] = "Silica"
-        elif re.search(r"\bsteel\s+(?:ball|sphere|probe|pin)\b", tribo_l):
+        elif _has_explicit_tip_probe(probe_l) and re.search(
+            r"\b(?:si|silicon)\s+(?:afm\s+)?(?:tips?|probes?)\b",
+            tribo_l,
+        ):
+            item["probe_material"] = "Silicon"
+        elif re.search(
+            r"\bsharp\s+(?:si|silicon)\s+(?:afm\s+)?(?:tips?|probes?)\b|"
+            r"\b(?:si|silicon)\s+(?:afm\s+)?tips?\b",
+            probe_l,
+        ):
+            item["probe_material"] = "Silicon"
+        elif re.search(r"\bsteel\s+(?:ball|sphere|probe|pin)\b", probe_l):
             item["probe_material"] = "Steel"
+        elif _has_symmetric_mica_surface_pair(probe_l):
+            item["probe_material"] = "Mica"
 
     if not item.get("probe_geometry"):
-        if re.search(r"\bcolloid(?:al)?\s+probe\b", tribo_l):
+        if re.search(r"\bcolloid(?:al)?\s+probe\b|\bmicrospheres?\b|\bsilica\s+colloid\b", probe_l):
             item["probe_geometry"] = "Colloid probe"
-        elif re.search(r"\bsilica\s+sphere\b|\bsphere\b", tribo_l):
-            item["probe_geometry"] = "Sphere"
-        elif re.search(r"\btip\b", tribo_l):
+        elif _has_explicit_tip_probe(probe_l):
             item["probe_geometry"] = "Tip"
+        elif _has_symmetric_mica_surface_pair(probe_l):
+            item["probe_geometry"] = "Surface pair"
+        elif re.search(r"\bsilica\s+sphere\b|\bsphere\b", probe_l):
+            item["probe_geometry"] = "Sphere"
+        elif re.search(r"\btip\b", probe_l):
+            item["probe_geometry"] = "Tip"
+    elif str(item.get("probe_geometry") or "").strip().lower() == "colloid probe" and _has_snl_silicon_nitride_probe(probe_l):
+        item["probe_geometry"] = "Tip"
+    elif str(item.get("probe_geometry") or "").strip().lower() == "colloid probe" and _has_symmetric_mica_surface_pair(probe_l):
+        item["probe_geometry"] = "Surface pair"
 
     if not item.get("probe_radius"):
         radius_match = re.search(
             r"(\d+(?:\.\d+)?)\s*-\s*(?:µ|μ|u)m\s+(?:silica\s+)?sphere",
-            tribo_space_norm,
+            probe_space_norm,
             flags=re.IGNORECASE,
         )
         if radius_match:
@@ -453,11 +609,22 @@ def normalize_extraction_row(
         else:
             diameter_match = re.search(
                 r"(\d+(?:\.\d+)?)\s*(?:µ|μ|u)m\s+(?:silica\s+)?sphere",
-                tribo_space_norm,
+                probe_space_norm,
                 flags=re.IGNORECASE,
             )
             if diameter_match:
                 item["probe_radius"] = f"{diameter_match.group(1)} µm"
+            else:
+                tip_radius_match = re.search(
+                    r"radius\s+of\s+(?:the\s+)?tip\s*r?\s*(?:=|:)?\s*(\d+(?:\.\d+)?)\s*(nm|µm|μm|um|pm|angstrom|angstroms|a)\b|"
+                    r"radius(?:\s+[a-z])?(?:\s+of|\s*=|\s+was)?\s*(\d+(?:\.\d+)?)\s*(nm|µm|μm|um|pm|angstrom|angstroms|a)\b",
+                    probe_space_norm,
+                    flags=re.IGNORECASE,
+                )
+                if tip_radius_match:
+                    value = tip_radius_match.group(1) or tip_radius_match.group(3)
+                    unit = (tip_radius_match.group(2) or tip_radius_match.group(4)).lower().replace("um", "µm").replace("μm", "µm")
+                    item["probe_radius"] = f"{value} {unit}"
 
     if not item.get("substrate_material"):
         if re.search(r"\bmica\b", tribo_l):

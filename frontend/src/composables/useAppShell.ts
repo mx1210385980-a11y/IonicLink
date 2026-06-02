@@ -7,7 +7,6 @@ import {
   extractData,
   getLatestExtractionRun,
   getCurrentUser,
-  getPdfHighlights,
   login,
   syncBatchData,
   uploadFile,
@@ -131,13 +130,14 @@ export function useAppShell(
   }
 
   function navigateTo(view: AppView, section?: AppSection) {
-    const normalizedSection = normalizeSection(view, section)
+    const resolvedView: AppView = view === 'pipeline' ? 'library' : view
+    const normalizedSection = normalizeSection(resolvedView, section)
     const target = {
-      name: view,
-      params: normalizedSection === DEFAULT_SECTION_BY_VIEW[view]
+      name: resolvedView,
+      params: normalizedSection === DEFAULT_SECTION_BY_VIEW[resolvedView]
         ? {}
         : { section: normalizedSection },
-      query: view === 'blog' ? route.query : {},
+      query: resolvedView === 'blog' ? route.query : {},
     }
     void router.push(target)
   }
@@ -175,7 +175,7 @@ export function useAppShell(
     return batchFile.records.some((record) => recordNeedsReviewEvidenceHydration(record))
   }
 
-  watch([() => selectedFileId.value, () => currentView.value, () => currentSection.value], async ([fileId, view, section]) => {
+  watch([() => selectedFileId.value, () => currentView.value, () => currentSection.value], async ([fileId, _view, section]) => {
     if (!fileId) {
       explorerDoi.value = ''
       return
@@ -189,7 +189,6 @@ export function useAppShell(
     )
     const shouldHydrateStaleReviewRecords = (
       batchFile
-      && view === 'review'
       && ['success', 'no_data'].includes(String(batchFile.status || '').toLowerCase())
       && batchFile.records.length > 0
       && !reviewEvidenceHydratedFileIds.has(fileId)
@@ -228,30 +227,8 @@ export function useAppShell(
       explorerDoi.value = ''
     }
 
-    if (view !== 'review') {
-      groundingHighlightData.value = []
-      return
-    }
     void section
-    if (batchFile?.disablePdfPreview) {
-      groundingHighlightData.value = []
-      return
-    }
-
-    try {
-      const highlights = await getPdfHighlights(fileId)
-      groundingHighlightData.value = highlights
-        .filter((highlight) => highlight.w > 0 && highlight.h > 0)
-        .map((highlight) => ({
-          id: highlight.id,
-          page: highlight.page,
-          coords: { x: highlight.x, y: highlight.y, w: highlight.w, h: highlight.h },
-        }))
-      console.log(`[Grounding] Loaded ${groundingHighlightData.value.length} highlights`)
-    } catch (error) {
-      console.warn('[Grounding] Failed to fetch highlights:', error)
-      groundingHighlightData.value = []
-    }
+    groundingHighlightData.value = []
   }, { immediate: true })
 
   function toggleDarkMode() {
@@ -398,6 +375,7 @@ export function useAppShell(
     if (!normalized) return t('stage.queued')
     if (normalized.startsWith('stage_a')) return t('stage.profiling_document')
     if (normalized.startsWith('stage_b')) return t('stage.resolving_abbreviations')
+    if (normalized.startsWith('stage_c.fast_text')) return t('stage.mining_text_candidates')
     if (normalized.startsWith('stage_c.figure_retry')) return t('stage.retrying_figure_extraction')
     if (normalized.startsWith('stage_c.figure')) return t('stage.reading_figures_tables')
     if (normalized.startsWith('stage_c.text')) return t('stage.mining_text_candidates')
@@ -415,6 +393,7 @@ export function useAppShell(
     if (!normalized) return 8
     if (normalized.startsWith('stage_a')) return 14
     if (normalized.startsWith('stage_b')) return 24
+    if (normalized.startsWith('stage_c.fast_text')) return 62
     if (normalized.startsWith('stage_c.figure_retry')) return 50
     if (normalized.startsWith('stage_c.figure')) return 44
     if (normalized.startsWith('stage_c.text')) return 62
@@ -1287,7 +1266,7 @@ export function useAppShell(
 
   function handleLiteratureView() {
     console.log('[App] Switching to literature view')
-    navigateTo('review', 'inbox')
+    navigateTo('library', 'explorer')
   }
 
   function setDefaultExtractorType(extractorType: ExtractorType) {

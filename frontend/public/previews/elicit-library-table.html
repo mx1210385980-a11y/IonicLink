@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IonicLink Library Preview</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root {
+      --teal: #087f8c;
+      --ink: #1f2937;
+      --muted: #758195;
+      --line: #e5e7eb;
+      --soft: #f6f7f9;
+    }
+    body {
+      margin: 0;
+      background: #fff;
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 14px;
+    }
+    button { font: inherit; cursor: pointer; }
+    .app { min-height: 100vh; display: grid; grid-template-rows: 64px 1fr; }
+    .topbar { display: flex; align-items: center; gap: 26px; padding: 0 28px; }
+    .brand { display: flex; align-items: center; gap: 8px; color: var(--teal); font-weight: 850; font-size: 22px; }
+    .mark { width: 20px; height: 20px; border-radius: 5px; background: linear-gradient(135deg, #0f766e, #0891b2); transform: rotate(45deg); }
+    .nav { display: flex; align-items: center; gap: 18px; }
+    .nav-item { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 8px; font-weight: 720; color: #111827; }
+    .nav-item.active { background: #f1f2f5; }
+    .nav-icon { width: 18px; height: 18px; border: 2px solid #6b7280; border-radius: 5px; display: inline-block; opacity: .9; }
+    .top-actions { margin-left: auto; display: flex; align-items: center; gap: 18px; font-weight: 720; }
+    .upgrade { border: 0; background: var(--teal); color: #fff; border-radius: 7px; padding: 10px 17px; font-weight: 820; }
+    .avatar { width: 30px; height: 30px; border-radius: 999px; display: inline-grid; place-items: center; color: #fff; background: var(--teal); font-weight: 850; }
+    .page { padding: 24px 28px 28px; }
+    .page-head { display: flex; align-items: center; margin-bottom: 22px; }
+    .crumb { font-size: 23px; font-weight: 830; letter-spacing: -0.02em; }
+    .crumb span:first-child { color: #6b7280; }
+    .head-actions { margin-left: auto; display: flex; gap: 9px; align-items: center; }
+    .btn { border: 1px solid var(--line); background: #fff; color: #111827; border-radius: 7px; min-height: 40px; padding: 0 15px; font-weight: 760; }
+    .btn.teal { background: var(--teal); border-color: var(--teal); color: #fff; }
+    .icon-btn { width: 48px; padding: 0; display: inline-grid; place-items: center; color: #4b5563; }
+    .workspace { display: grid; grid-template-columns: 270px minmax(720px, 1fr) 462px; gap: 14px; min-height: calc(100vh - 150px); }
+    .panel { background: #fff; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .sidebar { padding: 10px; }
+    .side-row { display: flex; justify-content: space-between; align-items: center; border-radius: 8px; padding: 12px 10px; font-weight: 760; color: #111827; }
+    .side-row.active { background: #f0f1f4; }
+    .side-count { color: #788397; font-weight: 650; }
+    .deleted { padding: 8px 10px 20px; font-weight: 760; color: #111827; }
+    .divider { height: 1px; background: var(--line); margin: 16px 0; }
+    .collections-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px 10px; color: #667085; font-weight: 760; }
+    .plus { color: #788397; font-size: 24px; line-height: 1; font-weight: 300; }
+    .collection-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border-radius: 8px; color: #374151; font-weight: 720; }
+    .collection-dot { width: 8px; height: 8px; border-radius: 999px; background: #cbd5e1; margin-right: 8px; display: inline-block; }
+    .table-toolbar { display: flex; align-items: center; gap: 9px; height: 48px; }
+    .filter { height: 40px; border: 0; background: var(--teal); color: #fff; border-radius: 7px; padding: 0 16px; font-weight: 840; }
+    .tool { width: 44px; height: 40px; border: 1px solid var(--line); background: #f7f8fa; border-radius: 7px; color: #4b5563; font-weight: 780; }
+    .tool.wide { width: auto; padding: 0 15px; color: #9aa3b2; background: #fff; }
+    .search { margin-left: auto; width: 234px; height: 40px; border: 1px solid var(--line); border-radius: 7px; display: flex; align-items: center; padding: 0 12px; color: #7b8494; gap: 9px; }
+    .info { width: 40px; height: 40px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: #6b7280; font-weight: 820; }
+    .table-wrap { border: 1px solid var(--line); border-radius: 7px; overflow: hidden; min-height: 860px; background: #fff; }
+    .paper-table { display: grid; grid-template-columns: 44px minmax(430px, 1.55fr) minmax(230px, .75fr) 190px minmax(240px, .75fr); min-width: 1180px; font-size: 15px; }
+    .extract-table { display: grid; grid-template-columns: 44px minmax(360px, 1.3fr) 180px 180px 180px 190px; min-width: 1180px; font-size: 15px; }
+    .cell { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); min-height: 82px; padding: 17px 20px; display: flex; align-items: center; color: #374151; line-height: 1.45; }
+    .cell.head { min-height: 66px; background: #fbfbfc; color: #374151; font-weight: 850; align-items: center; }
+    .check { width: 22px; height: 22px; border: 1.5px solid #a8b1bf; border-radius: 5px; }
+    .check.on { background: var(--teal); border-color: var(--teal); }
+    .title-cell { font-weight: 800; color: #374151; }
+    .muted { color: var(--muted); font-weight: 500; }
+    .right-panel { display: grid; grid-template-rows: 68px 1fr; min-height: 860px; }
+    .right-head { display: flex; align-items: center; padding: 0 20px; border-bottom: 1px solid var(--line); font-size: 16px; font-weight: 850; }
+    .right-body { padding: 18px 16px; background: #fff; }
+    .selection-action { width: 100%; min-height: 49px; border: 1px solid var(--line); border-radius: 8px; background: #f8f9fb; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; margin-bottom: 10px; color: #737d8e; font-weight: 850; text-align: left; }
+    .selection-action strong { color: #374151; display: block; }
+    .selection-action small { display: block; margin-top: 4px; color: #8a94a6; font-weight: 600; }
+    .scrollbar { height: 14px; background: #fff; border-left: 1px solid var(--line); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); border-radius: 0 0 8px 8px; position: relative; }
+    .scrollbar::before { content: ""; position: absolute; left: 8px; right: 360px; top: 4px; height: 8px; background: #8b8b8b; border-radius: 999px; }
+    .view { display: none; }
+    .view.active { display: block; }
+    .extraction-shell { display: grid; grid-template-columns: minmax(860px, 1fr) 360px; gap: 14px; min-height: calc(100vh - 150px); }
+    .extract-headline { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+    .back { border: 0; background: transparent; color: #5f6b7c; font-weight: 850; padding: 0; }
+    .pill { border: 1px solid var(--line); border-radius: 999px; padding: 7px 11px; font-size: 13px; color: #667085; font-weight: 760; }
+    .column-card { border: 1px solid var(--line); border-radius: 8px; padding: 13px; margin-bottom: 10px; background: #fff; }
+    .column-card.active { border-color: #9bd4da; background: #f0fbfc; }
+    .column-card strong { display: block; margin-bottom: 4px; }
+    .column-card small { color: var(--muted); line-height: 1.4; }
+    .evidence { color: var(--teal); font-weight: 800; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand"><span class="mark"></span><span>IonicLink</span></div>
+      <nav class="nav">
+        <div class="nav-item active"><span class="nav-icon"></span>Recents</div>
+        <div class="nav-item"><span class="nav-icon"></span>Library</div>
+        <div class="nav-item"><span class="nav-icon"></span>Alerts</div>
+      </nav>
+      <div class="top-actions">
+        <button class="upgrade">Upgrade</button>
+        <span>Help</span>
+        <span class="avatar">W</span>
+        <span>weilan zhu</span>
+      </div>
+    </header>
+
+    <main class="page">
+      <div class="view active" id="libraryView">
+        <div class="page-head">
+          <div class="crumb"><span>Library</span> / All</div>
+          <div class="head-actions">
+            <button class="btn">Connect Zotero</button>
+            <button class="btn teal">Upload</button>
+            <button class="btn icon-btn">[]</button>
+            <button class="btn icon-btn">||</button>
+          </div>
+        </div>
+
+        <section class="workspace">
+          <aside class="panel sidebar">
+            <div class="side-row active"><span>All</span><span class="side-count">4</span></div>
+            <div class="deleted">Recently deleted</div>
+            <div class="divider"></div>
+            <div class="collections-head"><span>Collections</span><span class="plus">+</span></div>
+            <div class="collection-row"><span><span class="collection-dot"></span>Lubrication</span><span class="side-count">8</span></div>
+            <div class="collection-row"><span><span class="collection-dot"></span>Diffusion</span><span class="side-count">9</span></div>
+            <div class="collection-row"><span><span class="collection-dot"></span>Conductivity</span><span class="side-count">7</span></div>
+          </aside>
+
+          <section>
+            <div class="table-toolbar">
+              <button class="filter">Filters (1)</button>
+              <button class="tool">List</button>
+              <button class="tool">Grid</button>
+              <button class="tool wide">Collections</button>
+              <button class="tool">Tag</button>
+              <button class="tool">Del</button>
+              <div class="search">Search</div>
+              <button class="info">i</button>
+            </div>
+            <div class="table-wrap">
+              <div class="paper-table">
+                <div class="cell head"><span class="check"></span></div>
+                <div class="cell head">Title up</div>
+                <div class="cell head">Authors</div>
+                <div class="cell head">Full text</div>
+                <div class="cell head">Filename</div>
+                <div class="cell"><span class="check"></span></div>
+                <div class="cell title-cell">No title found</div>
+                <div class="cell muted"></div>
+                <div class="cell muted">Full text available</div>
+                <div class="cell muted">The charge of glass and silica surfaces.pdf</div>
+                <div class="cell"><span class="check"></span></div>
+                <div class="cell title-cell">Combined Nano-and Macrotribology Studies of Titania Lubrication Using the Oil-Ionic Liquid Mixtures</div>
+                <div class="cell muted">Hua Li, Anthony E Somers, Mark W Rutland, Patrick C ...</div>
+                <div class="cell muted">Full text available</div>
+                <div class="cell muted">P6,6,6,14(iC8)2PO2)-Ti-rutland-2016-support ...</div>
+                <div class="cell"><span class="check"></span></div>
+                <div class="cell title-cell">Nanotribology of Ionic liquids as Lubricant Additives for Alumina Surfaces</div>
+                <div class="cell muted">Stephen Cowie, Peter K Cooper, Rob Atkin, Hua Li</div>
+                <div class="cell muted">Full text available</div>
+                <div class="cell muted">P6,6,6,14 (iC8)2PO2-Alumina-atkin-2017.pdf</div>
+                <div class="cell"><span class="check on"></span></div>
+                <div class="cell title-cell">Conductivity and transference in confined ionic liquids</div>
+                <div class="cell muted">Zhang, Wang ...</div>
+                <div class="cell muted">Full text available</div>
+                <div class="cell muted">conductivity-eis.pdf</div>
+              </div>
+            </div>
+            <div class="scrollbar"></div>
+          </section>
+
+          <aside class="panel right-panel">
+            <div class="right-head">New from selection</div>
+            <div class="right-body">
+              <button class="selection-action"><span>Start systematic review</span><span>Open</span></button>
+              <button class="selection-action" id="extractAction"><span>Extract data</span><span>Open</span></button>
+            </div>
+          </aside>
+        </section>
+      </div>
+
+      <div class="view" id="extractView">
+        <div class="page-head">
+          <div>
+            <button class="back" id="backToLibrary">Back to Library</button>
+            <div class="crumb"><span>Library</span> / Extract data</div>
+          </div>
+          <div class="head-actions">
+            <span class="pill">4 selected papers</span>
+            <button class="btn">Add column</button>
+            <button class="btn teal">Run extraction</button>
+          </div>
+        </div>
+
+        <section class="extraction-shell">
+          <section>
+            <div class="table-toolbar">
+              <button class="filter">Columns (4)</button>
+              <button class="tool wide">Conductivity template</button>
+              <button class="tool wide">Evidence required</button>
+              <div class="search">Search within table</div>
+            </div>
+            <div class="table-wrap">
+              <div class="extract-table">
+                <div class="cell head"><span class="check on"></span></div>
+                <div class="cell head">Paper</div>
+                <div class="cell head">Material</div>
+                <div class="cell head">Conductivity</div>
+                <div class="cell head">Temperature</div>
+                <div class="cell head">Evidence</div>
+
+                <div class="cell"><span class="check on"></span></div>
+                <div class="cell title-cell">Conductivity and transference in confined ionic liquids</div>
+                <div class="cell muted">[BMIM][BF4]</div>
+                <div class="cell">1.8 mS/cm</div>
+                <div class="cell">298 K</div>
+                <div class="cell evidence">View evidence</div>
+
+                <div class="cell"><span class="check on"></span></div>
+                <div class="cell title-cell">Combined Nano-and Macrotribology Studies of Titania Lubrication</div>
+                <div class="cell muted">P6,6,6,14</div>
+                <div class="cell muted">Not found</div>
+                <div class="cell">293 K</div>
+                <div class="cell evidence">Needs review</div>
+
+                <div class="cell"><span class="check on"></span></div>
+                <div class="cell title-cell">Nanotribology of Ionic liquids as Lubricant Additives</div>
+                <div class="cell muted">Alumina / IL</div>
+                <div class="cell muted">Not applicable</div>
+                <div class="cell">Room temp</div>
+                <div class="cell evidence">View evidence</div>
+              </div>
+            </div>
+            <div class="scrollbar"></div>
+          </section>
+
+          <aside class="panel right-panel">
+            <div class="right-head">Extraction setup</div>
+            <div class="right-body">
+              <div class="column-card active">
+                <strong>Conductivity</strong>
+                <small>Extract ionic conductivity values, units, temperature, and source evidence.</small>
+              </div>
+              <div class="column-card">
+                <strong>Diffusion</strong>
+                <small>Extract D values, restricted domains, transport method, and temperature.</small>
+              </div>
+              <div class="column-card">
+                <strong>Lubrication</strong>
+                <small>Extract COF, load, sliding speed, wear data, and surface pair.</small>
+              </div>
+              <button class="selection-action"><strong>+ Add custom column</strong><small>Ask a specific question for every selected paper.</small></button>
+              <button class="selection-action"><strong>Save extraction table</strong><small>Keep this table in the Library workspace.</small></button>
+            </div>
+          </aside>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const libraryView = document.getElementById('libraryView');
+    const extractView = document.getElementById('extractView');
+    document.getElementById('extractAction').addEventListener('click', () => {
+      libraryView.classList.remove('active');
+      extractView.classList.add('active');
+    });
+    document.getElementById('backToLibrary').addEventListener('click', () => {
+      extractView.classList.remove('active');
+      libraryView.classList.add('active');
+    });
+  </script>
+</body>
+</html>

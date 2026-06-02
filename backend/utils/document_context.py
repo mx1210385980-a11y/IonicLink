@@ -226,6 +226,9 @@ def _select_experimental_text(page_texts: dict[int, str]) -> str:
                 "substrate",
                 "sharp si tip",
                 "silica sphere",
+                "snl probe",
+                "colloidal probe",
+                "glass microsphere",
                 "afm fluid cell",
             )
         )
@@ -254,6 +257,36 @@ def _infer_surface_material(text: str) -> str | None:
     return None
 
 
+def _has_snl_silicon_nitride_probe(text: str) -> bool:
+    return bool(
+        re.search(
+            r"\bsnl\s+probes?\b[^.;]{0,80}\bsilicon\s+nitride\b|\bsilicon\s+nitride\b[^.;]{0,80}\b(?:snl\s+)?(?:probes?|tips?)\b",
+            text,
+        )
+    )
+
+
+def _has_explicit_tip_probe(text: str) -> bool:
+    return bool(
+        _has_snl_silicon_nitride_probe(text)
+        or re.search(
+            r"\bsnl\s+probes?\b|\b(?:nominal\s+)?tip radius\b|\bsharp\s+(?:si|silicon)\s+tips?\b|"
+            r"\bsharp\s+(?:si|silicon)\s+afm\s+probes?\b|"
+            r"\b(?:silicon|si|si3n4)\s+(?:afm\s+)?(?:cantilever\s+)?tips?\b|\bsilicon\s+nitride\s+afm\s+tips?\b",
+            text,
+        )
+    )
+
+
+def _has_symmetric_mica_surface_pair(text: str) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:between\s+(?:two\s+)?mica\s+surfaces|between\s+mica\s+sheets|mica\s+surfaces\s+separated)\b",
+            text,
+        )
+    )
+
+
 def extract_experimental_document_context(page_texts: dict[int, str]) -> dict[str, Any]:
     text = _select_experimental_text(page_texts)
     if not text:
@@ -268,16 +301,32 @@ def extract_experimental_document_context(page_texts: dict[int, str]) -> dict[st
         context["material_name"] = substrate_material
 
     if not context.get("probe_material"):
-        if re.search(r"\bsharp\s+(?:si|silicon)\s+tips?\b|\b(?:si|silicon)\s+tip\b", lowered):
+        if _has_snl_silicon_nitride_probe(lowered) or re.search(r"\bsi3n4\s+(?:cantilever\s+)?tips?\b", lowered):
+            context["probe_material"] = "Silicon nitride"
+        elif re.search(r"\bborosilicate\s+glass\s+microspheres?\b", lowered):
+            context["probe_material"] = "Borosilicate glass"
+        elif re.search(r"\b(?:afm\s+)?glass\s+colloid(?:al)?\s+probes?\b|\bglass\s+microspheres?\b", lowered):
+            context["probe_material"] = "Glass"
+        elif re.search(
+            r"\bsharp\s+(?:si|silicon)\s+(?:afm\s+)?(?:tips?|probes?)\b|"
+            r"\b(?:si|silicon)\s+(?:afm\s+)?tips?\b",
+            lowered,
+        ):
             context["probe_material"] = "Silicon"
         elif re.search(r"\bsilica\s+(?:colloid|sphere|probe)\b", lowered):
             context["probe_material"] = "Silica"
         elif re.search(r"\bsteel\s+(?:ball|sphere|probe|pin|tip)\b", lowered):
             context["probe_material"] = "Steel"
+        elif _has_symmetric_mica_surface_pair(lowered):
+            context["probe_material"] = "Mica"
 
     if not context.get("probe_geometry"):
-        if re.search(r"\bcolloid(?:al)?\s+probe\b", lowered):
+        if _has_explicit_tip_probe(lowered):
+            context["probe_geometry"] = "Tip"
+        elif re.search(r"\bcolloid(?:al)?\s+probe\b|\bmicrospheres?\b", lowered):
             context["probe_geometry"] = "Colloid probe"
+        elif _has_symmetric_mica_surface_pair(lowered):
+            context["probe_geometry"] = "Surface pair"
         elif re.search(r"\b(?:tip radius|sharp si tips?|afm tip|silicon tip|si tip)\b", lowered):
             context["probe_geometry"] = "Tip"
         elif re.search(r"\bsilica\s+sphere\b|\bsphere\b", lowered):
@@ -290,12 +339,27 @@ def extract_experimental_document_context(page_texts: dict[int, str]) -> dict[st
     )
     if not radius_match:
         radius_match = re.search(
-            r"radius(?:\s+of|\s*=|\s+was)?\s*([0-9]+(?:\.[0-9]+)?)\s*(nm|um|pm|angstrom|angstroms|a)\b",
+            r"radius(?:\s+[a-z])?(?:\s+of|\s*=|\s+was)?\s*([0-9]+(?:\.[0-9]+)?)\s*(nm|um|pm|angstrom|angstroms|a)\b",
             lowered,
             flags=re.IGNORECASE,
         )
     if radius_match:
         context["probe_radius"] = _format_length(radius_match.group(1), radius_match.group(2))
+    elif str(context.get("probe_geometry") or "").strip().lower() == "colloid probe" and re.search(
+        r"\bcolloid(?:al)?\s+probe\b|\bmicrospheres?\b",
+        lowered,
+    ):
+        dimension_match = re.search(
+            r"([0-9]+(?:\.[0-9]+)?)\s*(nm|um|pm|angstrom|angstroms|a)\s+in\s+dimension",
+            lowered,
+            flags=re.IGNORECASE,
+        )
+        if dimension_match:
+            try:
+                radius_value = str(float(dimension_match.group(1)) / 2.0)
+            except Exception:
+                radius_value = dimension_match.group(1)
+            context["probe_radius"] = _format_length(radius_value, dimension_match.group(2))
 
     speed_match = re.search(
         r"(?:scan|sliding)\s+speed(?:\s+of|\s*=|\s+was)?\s*([0-9]+(?:\.[0-9]+)?)\s*(nm|um|mm|cm|m)\s*(?:/s|s-1)\b",
@@ -415,6 +479,8 @@ def apply_experimental_document_context(
 
     if normalized_surface_roughness:
         item["surface_roughness"] = normalized_surface_roughness
+    elif item.get("substrate_roughness") and _is_blank(item.get("surface_roughness")):
+        item["surface_roughness"] = item["substrate_roughness"]
 
     if not doc_context:
         return item
@@ -440,6 +506,19 @@ def apply_experimental_document_context(
     ):
         if _is_blank(item.get(field)) and not _is_blank(doc_context.get(field)):
             item[field] = doc_context[field]
+
+    if (
+        str(doc_context.get("probe_geometry") or "").strip().lower() == "tip"
+        and str(doc_context.get("probe_material") or "").strip().lower() == "silicon nitride"
+        and str(item.get("probe_geometry") or "").strip().lower() == "colloid probe"
+    ):
+        item["probe_geometry"] = doc_context["probe_geometry"]
+    if (
+        str(doc_context.get("probe_geometry") or "").strip().lower() == "surface pair"
+        and str(doc_context.get("probe_material") or "").strip().lower() == "mica"
+        and str(item.get("probe_geometry") or "").strip().lower() == "colloid probe"
+    ):
+        item["probe_geometry"] = doc_context["probe_geometry"]
 
     if _is_blank(item.get("load")) and not _is_blank(doc_context.get("load_value")):
         item["load"] = doc_context["load_value"]

@@ -58,13 +58,13 @@ function createViewRoute(view: AppView): RouteRecordRaw {
 }
 
 const legacyRedirects: Array<{ path: string; view: AppView }> = [
-  { path: '/dashboard', view: 'pipeline' },
-  { path: '/workspace', view: 'pipeline' },
+  { path: '/dashboard', view: 'library' },
+  { path: '/workspace', view: 'library' },
   { path: '/cleaning', view: 'knowledge' },
   { path: '/predict', view: 'modeling' },
   { path: '/monitor', view: 'admin' },
-  { path: '/literature', view: 'review' },
-  { path: '/grounding', view: 'review' },
+  { path: '/literature', view: 'library' },
+  { path: '/grounding', view: 'library' },
   { path: '/guide', view: 'help' },
   { path: '/mentor', view: 'home' },
 ]
@@ -89,9 +89,15 @@ const routes: RouteRecordRaw[] = [
     },
   },
   createViewRoute('home'),
-  createViewRoute('pipeline'),
-  createViewRoute('review'),
+  {
+    path: '/pipeline/:section?',
+    name: 'pipeline',
+    redirect: {
+      name: 'library',
+    },
+  },
   createViewRoute('knowledge'),
+  createViewRoute('library'),
   createViewRoute('quality'),
   createViewRoute('modeling'),
   createViewRoute('admin'),
@@ -106,7 +112,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/:pathMatch(.*)*',
     redirect: {
-      name: 'pipeline',
+      name: 'home',
     },
   },
 ]

@@ -2,7 +2,6 @@
 import { ref, computed } from 'vue'
 import { Download, ChevronDown, ChevronUp, Beaker, ThermometerSun, Gauge, Timer, Layers } from 'lucide-vue-next'
 import { formatTribopairLabel, type TribologyData } from '@/lib/api'
-import { normalizePotentialDisplayText } from '@/lib/potential'
 import Card from '@/components/ui/Card.vue'
 import CardHeader from '@/components/ui/CardHeader.vue'
 import CardTitle from '@/components/ui/CardTitle.vue'
@@ -198,7 +197,7 @@ function tribopairDisplay(item: TribologyData) {
               </div>
               <div v-if="item.potential">
                 <span class="text-muted-foreground">Potential:</span>
-                <span class="ml-2">{{ normalizePotentialDisplayText(item.potential) }}</span>
+                <span class="ml-2">{{ item.potential }}</span>
               </div>
               <div v-if="item.water_content">
                 <span class="text-muted-foreground">Water / Humidity:</span>

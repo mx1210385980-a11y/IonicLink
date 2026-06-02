@@ -16,10 +16,18 @@ from services.extraction_trace_service import (
     create_extraction_run,
     finalize_extraction_run,
     get_extraction_run,
+    mark_extraction_run_started,
 )
 from services.file_service import process_file_background
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_queue_profile(value: Any) -> str:
+    normalized = str(value or "auto").strip().lower()
+    if normalized in {"auto", "standard", "high_accuracy", "review_figure_estimate"}:
+        return "auto"
+    return "auto"
 
 
 @dataclass(slots=True)
@@ -45,6 +53,7 @@ class ExtractionQueueService:
         self._jobs_by_key: dict[tuple[int, str], ExtractionQueueJob] = {}
         self._queued_order: list[tuple[int, str]] = []
         self._active_keys: set[tuple[int, str]] = set()
+        self._active_tasks: dict[tuple[int, str], asyncio.Task[None]] = {}
         self._stopping = False
 
     async def start(self) -> None:
@@ -72,15 +81,11 @@ class ExtractionQueueService:
         literature_id: int,
         extractor_type: str = "tribology",
         force: bool = False,
-        profile: str = "high_accuracy",
+        profile: str = "auto",
         strict_cof_mode: bool | None = None,
     ) -> dict[str, Any]:
         extractor_type = "diffusion" if extractor_type == "diffusion" else "tribology"
-        profile = (profile or "high_accuracy").strip().lower()
-        if extractor_type == "diffusion" and profile not in {"high_accuracy", "standard"}:
-            profile = "high_accuracy"
-        elif extractor_type == "tribology" and profile not in {"high_accuracy", "standard", "review_figure_estimate"}:
-            profile = "high_accuracy"
+        profile = _normalize_queue_profile(profile)
 
         key = (literature_id, extractor_type)
         async with self._lock:
@@ -104,12 +109,44 @@ class ExtractionQueueService:
             await self._create_queued_run(job)
         except Exception:
             async with self._lock:
-                self._jobs_by_key.pop(key, None)
-                self._queued_order = [item for item in self._queued_order if item != key]
+                if self._jobs_by_key.get(key) is job:
+                    self._jobs_by_key.pop(key, None)
+                    self._queued_order = [item for item in self._queued_order if item != key]
             raise
 
         await self._queue.put(job)
         return self._snapshot(job, "queued")
+
+    async def cancel(self, *, literature_id: int, extractor_type: str = "tribology") -> dict[str, Any]:
+        extractor_type = "diffusion" if extractor_type == "diffusion" else "tribology"
+        key = (literature_id, extractor_type)
+        async with self._lock:
+            job = self._jobs_by_key.get(key)
+            was_queued = key in self._queued_order
+            was_active = key in self._active_keys
+            task = self._active_tasks.get(key)
+
+            if was_queued:
+                self._jobs_by_key.pop(key, None)
+                self._queued_order = [item for item in self._queued_order if item != key]
+            elif was_active and job:
+                if self._jobs_by_key.get(key) is job:
+                    self._jobs_by_key.pop(key, None)
+
+            cancelled_task = False
+            if task and not task.done():
+                task.cancel()
+                cancelled_task = True
+
+            return {
+                "cancelled": bool(job or was_queued or was_active or cancelled_task),
+                "literature_id": literature_id,
+                "extractor_type": extractor_type,
+                "run_id": getattr(job, "run_id", None),
+                "queued": was_queued,
+                "active": was_active,
+                "task_cancelled": cancelled_task,
+            }
 
     async def recover_pending_jobs(self) -> int:
         active_statuses = {"queued", "running", "processing", "extracting"}
@@ -132,7 +169,7 @@ class ExtractionQueueService:
                 literature_id=run.literature_id,
                 extractor_type="diffusion" if run.extractor_type == "diffusion" else "tribology",
                 force=True,
-                profile=run.profile or "high_accuracy",
+                profile=_normalize_queue_profile(run.profile),
                 strict_cof_mode=None,
                 run_id=run.run_id,
                 created_at=datetime.utcnow(),
@@ -228,10 +265,25 @@ class ExtractionQueueService:
     async def _worker(self, worker_id: int) -> None:
         while not self._stopping:
             job = await self._queue.get()
-            async with self._lock:
-                self._queued_order = [item for item in self._queued_order if item != job.key]
-                self._active_keys.add(job.key)
+            while not self._stopping:
+                async with self._lock:
+                    if self._jobs_by_key.get(job.key) is not job:
+                        self._queue.task_done()
+                        break
+                    if job.key not in self._active_keys:
+                        self._queued_order = [item for item in self._queued_order if item != job.key]
+                        self._active_keys.add(job.key)
+                        break
+                await asyncio.sleep(0.1)
+            else:
+                self._queue.task_done()
+                continue
 
+            async with self._lock:
+                if self._jobs_by_key.get(job.key) is not job or job.key not in self._active_keys:
+                    continue
+
+            process_task: asyncio.Task[None] | None = None
             try:
                 logger.info(
                     "Extraction worker %s starting literature_id=%s extractor=%s run_id=%s",
@@ -240,16 +292,40 @@ class ExtractionQueueService:
                     job.extractor_type,
                     job.run_id,
                 )
-                await process_file_background(
-                    job.literature_id,
-                    extractor_type=job.extractor_type,
-                    force=job.force,
-                    profile=job.profile,
-                    strict_cof_mode=job.strict_cof_mode,
-                    run_id=job.run_id,
+                async with async_session_maker() as db:
+                    await mark_extraction_run_started(
+                        db,
+                        run_id=job.run_id,
+                        extractor_type=job.extractor_type,
+                        profile=job.profile,
+                    )
+                    await db.commit()
+
+                process_task = asyncio.create_task(
+                    process_file_background(
+                        job.literature_id,
+                        extractor_type=job.extractor_type,
+                        force=job.force,
+                        profile=job.profile,
+                        strict_cof_mode=job.strict_cof_mode,
+                        run_id=job.run_id,
+                    )
                 )
+                async with self._lock:
+                    self._active_tasks[job.key] = process_task
+                await process_task
             except asyncio.CancelledError:
-                raise
+                if self._stopping:
+                    if process_task and not process_task.done():
+                        process_task.cancel()
+                    raise
+                logger.info(
+                    "Extraction worker %s cancelled active job literature_id=%s extractor=%s run_id=%s",
+                    worker_id,
+                    job.literature_id,
+                    job.extractor_type,
+                    job.run_id,
+                )
             except Exception as exc:
                 logger.exception(
                     "Extraction worker %s failed literature_id=%s extractor=%s run_id=%s",
@@ -262,7 +338,10 @@ class ExtractionQueueService:
             finally:
                 async with self._lock:
                     self._active_keys.discard(job.key)
-                    self._jobs_by_key.pop(job.key, None)
+                    if process_task and self._active_tasks.get(job.key) is process_task:
+                        self._active_tasks.pop(job.key, None)
+                    if self._jobs_by_key.get(job.key) is job:
+                        self._jobs_by_key.pop(job.key, None)
                 self._queue.task_done()
 
 

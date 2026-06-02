@@ -37,7 +37,7 @@ class AgentRuntimeService:
         *,
         file_id: int,
         force: bool = False,
-        profile: str = "high_accuracy",
+        profile: str = "auto",
         extractor_type: str = "tribology",
         strict_cof_mode: bool | None = None,
     ) -> dict[str, Any]:

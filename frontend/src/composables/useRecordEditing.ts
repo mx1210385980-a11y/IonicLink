@@ -9,6 +9,7 @@ import {
   type RecordResponse,
 } from '@/lib/api'
 import { applyLiveConfidence } from '@/lib/integratedExplorerHelpers'
+import { recordEvidenceCacheKey } from '@/composables/useEvidencePanel'
 
 export type EditableRecordValues = {
   lubricant: string
@@ -31,7 +32,7 @@ export type EditableRecordValues = {
 
 type UseRecordEditingOptions = {
   result: Ref<PaginatedRecordResponse>
-  evidenceData: Ref<Record<number, EvidenceResult | null>>
+  evidenceData: Ref<Record<string, EvidenceResult | null>>
   evidenceModalRecord: Ref<RecordResponse | null>
   markGraphDirty: () => void
 }
@@ -47,31 +48,29 @@ export function useRecordEditing(options: UseRecordEditingOptions) {
     return editingValues.value[editDrawerRecord.value.id] ?? null
   })
 
-  function ensureEditingValues(record: RecordResponse) {
-    if (!editingValues.value[record.id]) {
-      editingValues.value[record.id] = {
-        lubricant: record.lubricant ?? '',
-        temperature: record.temperature ?? '',
-        potential: record.potential ?? '',
-        waterContent: record.waterContent ?? '',
-        speedValue: record.speedValue ?? '',
-        shearRate: record.shearRate ?? '',
-        loadValue: record.loadValue ?? '',
-        probeMaterial: record.probeMaterial ?? '',
-        probeGeometry: record.probeGeometry ?? '',
-        probeRadius: record.probeRadius ?? '',
-        probeRoughness: record.probeRoughness ?? '',
-        substrateMaterial: record.substrateMaterial ?? record.materialName ?? '',
-        substrateCoating: record.substrateCoating ?? '',
-        substrateRoughness: record.substrateRoughness ?? record.surfaceRoughness ?? '',
-        filmThickness: record.filmThickness ?? '',
-        cof: record.cofRaw ?? (record.cofValue != null ? String(record.cofValue) : ''),
-      }
+  function resetEditingValues(record: RecordResponse) {
+    editingValues.value[record.id] = {
+      lubricant: record.lubricant ?? '',
+      temperature: record.temperature ?? '',
+      potential: record.potential ?? '',
+      waterContent: record.waterContent ?? '',
+      speedValue: record.speedValue ?? '',
+      shearRate: record.shearRate ?? '',
+      loadValue: record.loadValue ?? '',
+      probeMaterial: record.probeMaterial ?? '',
+      probeGeometry: record.probeGeometry ?? '',
+      probeRadius: record.probeRadius ?? '',
+      probeRoughness: record.probeRoughness ?? '',
+      substrateMaterial: record.substrateMaterial ?? record.materialName ?? '',
+      substrateCoating: record.substrateCoating ?? '',
+      substrateRoughness: record.substrateRoughness ?? record.surfaceRoughness ?? '',
+      filmThickness: record.filmThickness ?? '',
+      cof: record.cofRaw ?? (record.cofValue != null ? String(record.cofValue) : ''),
     }
   }
 
   function openEditModal(record: RecordResponse) {
-    ensureEditingValues(record)
+    resetEditingValues(record)
     editDrawerRecord.value = record
   }
 
@@ -167,8 +166,9 @@ export function useRecordEditing(options: UseRecordEditingOptions) {
       if (updated?.confidenceDetails) {
         record.confidenceDetails = updated.confidenceDetails
       }
-      if (options.evidenceData.value[record.id]) {
-        applyLiveConfidence(record, options.evidenceData.value[record.id])
+      const evidence = options.evidenceData.value[recordEvidenceCacheKey(record)]
+      if (evidence) {
+        applyLiveConfidence(record, evidence)
       }
       options.markGraphDirty()
       if (editDrawerRecord.value?.id === record.id) {
@@ -222,7 +222,7 @@ export function useRecordEditing(options: UseRecordEditingOptions) {
     editDrawerRecord,
     editingValues,
     activeEditValues,
-    ensureEditingValues,
+    resetEditingValues,
     openEditModal,
     closeEditDrawer,
     updateEditingField,

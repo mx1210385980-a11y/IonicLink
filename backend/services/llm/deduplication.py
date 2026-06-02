@@ -53,9 +53,6 @@ def _condition_signature(record: TribologyData) -> Tuple[str, ...]:
 def _entity_key(record: TribologyData) -> Tuple[str, ...]:
     sample_id = _norm_text(getattr(record, "sample_id", None))
     series_id = _norm_text(getattr(record, "series_id", None))
-    source_figure = _norm_text(getattr(record, "source_figure", None))
-    source_page = str(getattr(record, "source_page", None) or "")
-    source = _norm_text(getattr(record, "source", None))
 
     cof = _norm_cof(record.cof)
     friction = _norm_text(record.friction_force)
@@ -65,12 +62,11 @@ def _entity_key(record: TribologyData) -> Tuple[str, ...]:
     return (
         _norm_text(record.material_name),
         _norm_text(record.ionic_liquid),
+        _norm_text(record.probe_material),
+        _norm_text(record.substrate_material),
         sample_id,
         series_id,
         outcome,
-        source,
-        source_page,
-        source_figure,
     )
 
 

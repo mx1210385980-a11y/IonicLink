@@ -115,6 +115,7 @@ async def init_db():
             DiffusionRecord,
             ExtractionCandidate,
             ExtractionRun,
+            FigureCropOverride,
             Literature,
             ModelPredictionRun,
             ModelTrainingRun,

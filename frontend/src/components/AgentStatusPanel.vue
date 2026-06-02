@@ -151,6 +151,7 @@ function formatStageLabel(stage?: string | null): string {
   if (!normalized) return 'Queued'
   if (normalized.startsWith('stage_a')) return 'Profiling document'
   if (normalized.startsWith('stage_b')) return 'Resolving abbreviations'
+  if (normalized.startsWith('stage_c.fast_text')) return 'Mining text candidates'
   if (normalized.startsWith('stage_c.figure_retry')) return 'Retrying figure extraction'
   if (normalized.startsWith('stage_c.figure')) return 'Reading figures and tables'
   if (normalized.startsWith('stage_c.text')) return 'Mining text candidates'
@@ -167,6 +168,7 @@ function mapStageToProgress(stage?: string | null, status?: string | null): numb
   if (!normalized) return 8
   if (normalized.startsWith('stage_a')) return 14
   if (normalized.startsWith('stage_b')) return 24
+  if (normalized.startsWith('stage_c.fast_text')) return 62
   if (normalized.startsWith('stage_c.figure_retry')) return 50
   if (normalized.startsWith('stage_c.figure')) return 44
   if (normalized.startsWith('stage_c.text')) return 62

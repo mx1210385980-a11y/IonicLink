@@ -32,10 +32,18 @@ from services.llm.prompts import (
     ABBREV_MAPPING_PROMPT,
     ANTI_HALLUCINATION_PROMPT,
     CHAT_SYSTEM_PROMPT,
+    FAST_TABLE_TRIBOLOGY_PROMPT,
+    FAST_TABLE_TRIBOLOGY_SYSTEM_PROMPT,
     FIGURE_LEGEND_COF_PROMPT,
     FIGURE_TABLE_EXTRACTION_PROMPT,
     METADATA_EXTRACTION_PROMPT,
     TEXT_EXTRACTION_PROMPT,
+)
+from services.llm.fast_table_extractor import (
+    FAST_TABLE_RECORD_ORIGIN,
+    build_fast_table_document_text,
+    normalize_fast_table_rows,
+    parse_fast_table_response,
 )
 from services.normalization import normalize_extraction_row
 from services.llm.utils import (
@@ -63,6 +71,11 @@ DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_OPENROUTER_APP_NAME = "IonicLink"
 DEFAULT_TEXT_MODEL = "Pro/deepseek-ai/DeepSeek-V3.2"
 DEFAULT_VISION_MODEL = "Qwen/Qwen3-VL-32B-Instruct"
+DEFAULT_FAST_TABLE_MODEL = "claude-sonnet-4-6"
+DEFAULT_TEXT_PAGE_CONCURRENCY = 4
+DEFAULT_TEXT_PAGE_TIMEOUT_SECONDS = 120.0
+AUTO_EXTRACTION_PROFILE = "auto"
+LEGACY_EXTRACTION_PROFILES = {"standard", "high_accuracy", "review_figure_estimate", AUTO_EXTRACTION_PROFILE}
 
 
 def _normalize_runtime_string(value: Any) -> str:
@@ -74,6 +87,36 @@ def _serialize_llm_provider(value: Any) -> str:
     if normalized == "openrouter":
         return "openrouter"
     return DEFAULT_LLM_PROVIDER
+
+
+def normalize_extraction_profile(value: Any) -> str:
+    normalized = _normalize_runtime_string(value).lower()
+    if normalized in LEGACY_EXTRACTION_PROFILES:
+        return AUTO_EXTRACTION_PROFILE
+    return AUTO_EXTRACTION_PROFILE
+
+
+def _bounded_int_env(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)) or default)
+    except Exception:
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def _bounded_float_env(name: str, default: float, minimum: float, maximum: float) -> float:
+    try:
+        value = float(os.getenv(name, str(default)) or default)
+    except Exception:
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def _truthy_env(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() not in {"0", "false", "no", "off", ""}
 
 
 class LLMService:
@@ -124,6 +167,11 @@ class LLMService:
             "openrouter_app_name": _normalize_runtime_string(os.getenv("OPENROUTER_APP_NAME", DEFAULT_OPENROUTER_APP_NAME)) or DEFAULT_OPENROUTER_APP_NAME,
             "text_model": _normalize_runtime_string(os.getenv("LLM_TEXT_MODEL", DEFAULT_TEXT_MODEL)) or DEFAULT_TEXT_MODEL,
             "vision_model": _normalize_runtime_string(os.getenv("LLM_VISION_MODEL", DEFAULT_VISION_MODEL)) or DEFAULT_VISION_MODEL,
+            "fast_table_model": (
+                _normalize_runtime_string(os.getenv("LLM_FAST_TABLE_MODEL"))
+                or _normalize_runtime_string(os.getenv("GEMINI_FLASH_MODEL"))
+                or DEFAULT_FAST_TABLE_MODEL
+            ),
             "vision_api_key": _normalize_runtime_string(os.getenv("LLM_VISION_API_KEY", "")),
             "updated_at": None,
         }
@@ -160,6 +208,7 @@ class LLMService:
             "openrouter_app_name": _normalize_runtime_string(raw.get("openrouter_app_name", current.get("openrouter_app_name", DEFAULT_OPENROUTER_APP_NAME))) or DEFAULT_OPENROUTER_APP_NAME,
             "text_model": _normalize_runtime_string(raw.get("text_model", current.get("text_model", DEFAULT_TEXT_MODEL))) or DEFAULT_TEXT_MODEL,
             "vision_model": _normalize_runtime_string(raw.get("vision_model", current.get("vision_model", DEFAULT_VISION_MODEL))) or DEFAULT_VISION_MODEL,
+            "fast_table_model": _normalize_runtime_string(raw.get("fast_table_model", current.get("fast_table_model", DEFAULT_FAST_TABLE_MODEL))) or DEFAULT_FAST_TABLE_MODEL,
             "vision_api_key": vision_api_key,
             "updated_at": current.get("updated_at"),
         }
@@ -199,6 +248,7 @@ class LLMService:
 
         self.vision_model = _normalize_runtime_string(config.get("vision_model")) or DEFAULT_VISION_MODEL
         self.text_model = _normalize_runtime_string(config.get("text_model")) or DEFAULT_TEXT_MODEL
+        self.fast_table_model = _normalize_runtime_string(config.get("fast_table_model")) or DEFAULT_FAST_TABLE_MODEL
         self.vision_api_key = _normalize_runtime_string(config.get("vision_api_key")) or self.default_api_key
         self.default_headers = self._build_default_headers()
 
@@ -216,10 +266,11 @@ class LLMService:
         )
 
         logger.info(
-            "LLM service initialized provider=%s text_model=%s vision_model=%s base_url=%s",
+            "LLM service initialized provider=%s text_model=%s vision_model=%s fast_table_model=%s base_url=%s",
             self.provider,
             self.text_model,
             self.vision_model,
+            self.fast_table_model,
             self.base_url,
         )
 
@@ -235,6 +286,7 @@ class LLMService:
                 "openrouter_app_name": config.get("openrouter_app_name", DEFAULT_OPENROUTER_APP_NAME),
                 "text_model": config.get("text_model", DEFAULT_TEXT_MODEL),
                 "vision_model": config.get("vision_model", DEFAULT_VISION_MODEL),
+                "fast_table_model": config.get("fast_table_model", DEFAULT_FAST_TABLE_MODEL),
                 "has_openai_api_key": bool(config.get("openai_api_key")),
                 "has_openrouter_api_key": bool(config.get("openrouter_api_key")),
                 "has_vision_api_key": bool(config.get("vision_api_key")),
@@ -245,6 +297,7 @@ class LLMService:
                 "active_base_url": self.base_url,
                 "active_text_model": self.text_model,
                 "active_vision_model": self.vision_model,
+                "active_fast_table_model": self.fast_table_model,
                 "default_headers": copy.deepcopy(self.default_headers),
             },
             "notes": [
@@ -551,9 +604,27 @@ class LLMService:
         visual_idxs: List[int],
         page_texts: dict[int, str],
         high_accuracy: bool,
+        *,
+        profile: str = AUTO_EXTRACTION_PROFILE,
+        visual_page_hints: Optional[List[int]] = None,
     ) -> List[int]:
         if not visual_idxs:
             return []
+
+        normalized_profile = str(profile or "").strip().lower()
+        if normalized_profile == "review_figure_estimate" and visual_page_hints:
+            hinted_idxs: set[int] = set()
+            for raw in visual_page_hints:
+                try:
+                    page = int(raw)
+                except (TypeError, ValueError):
+                    continue
+                if page > 0:
+                    hinted_idxs.add(page - 1)
+            selected = [pidx for pidx in visual_idxs if pidx in hinted_idxs]
+            if selected:
+                limit = _bounded_int_env("LLM_VISUAL_FALLBACK_FOCUS_MAX_PAGES", 6, 1, 20)
+                return selected[:limit]
 
         limit = 18 if high_accuracy else 8
         if len(visual_idxs) <= limit:
@@ -622,13 +693,15 @@ class LLMService:
         images: Optional[List[str]] = None,
         pdf_path: Optional[str] = None,
         vision_concurrency: int = 2,
-        profile: str = "high_accuracy",
+        profile: str = AUTO_EXTRACTION_PROFILE,
         progress_callback: Optional[Callable[[dict[str, Any]], Awaitable[None]]] = None,
         strict_cof_mode: bool = False,
+        visual_page_hints: Optional[List[int]] = None,
     ) -> List[TribologyData]:
-        profile = (profile or "high_accuracy").lower()
-        allow_figure_estimates = profile == "review_figure_estimate"
-        high_accuracy = profile in {"high_accuracy", "review_figure_estimate"}
+        requested_profile = (profile or AUTO_EXTRACTION_PROFILE).lower()
+        profile = normalize_extraction_profile(requested_profile)
+        allow_figure_estimates = requested_profile == "review_figure_estimate"
+        high_accuracy = True
 
         candidates: List[dict[str, Any]] = []
         dropped_by_reason: Dict[str, int] = {}
@@ -714,9 +787,15 @@ class LLMService:
         if pdf_path and os.path.exists(pdf_path):
             cls = classify_pdf_pages(pdf_path)
             visual_idxs = sorted(cls.get("visual_pages", []))
-            text_idxs = sorted(cls.get("text_pages", []))
             page_texts = cls.get("page_texts", {}) or {}
-            selected_visual_idxs = self._select_visual_pages(visual_idxs, page_texts, high_accuracy)
+            text_idxs = sorted(set(cls.get("text_pages", [])) | set(visual_idxs) | set(page_texts.keys()))
+            selected_visual_idxs = self._select_visual_pages(
+                visual_idxs,
+                page_texts,
+                high_accuracy,
+                profile=requested_profile if requested_profile == "review_figure_estimate" else profile,
+                visual_page_hints=visual_page_hints,
+            )
 
             page_coverage = {
                 "total_pages": len(page_texts),
@@ -737,6 +816,132 @@ class LLMService:
                 )
             abbrev_map = await self._extract_abbrev_map(page_texts)
             await _log_progress("stage_b.abbrev", f"abbrev_map_count={len(abbrev_map)}")
+
+            # Text first: fast structured extraction decides whether targeted visual pages are worth paying for.
+            text_concurrency = _bounded_int_env(
+                "LLM_TEXT_PAGE_CONCURRENCY",
+                DEFAULT_TEXT_PAGE_CONCURRENCY,
+                1,
+                8,
+            )
+            text_page_timeout = _bounded_float_env(
+                "LLM_TEXT_PAGE_TIMEOUT_SECONDS",
+                DEFAULT_TEXT_PAGE_TIMEOUT_SECONDS,
+                0.01,
+                600.0,
+            )
+            text_page_total = len(text_idxs)
+            if text_page_total:
+                await _log_progress(
+                    "stage_c.fast_text_start",
+                    f"chunk=0/{text_page_total} text_pages={text_page_total} concurrency={text_concurrency}",
+                    force_emit=True,
+                )
+
+            async def _run_text_page(pidx: int) -> tuple[int, List[dict]]:
+                text = (page_texts.get(pidx, "") or "").strip()
+                if not text:
+                    return pidx, []
+                rows = await self._process_text(
+                    f"[Page {pidx + 1}]\\n{text[:9000]}",
+                    TEXT_EXTRACTION_PROMPT,
+                )
+                return pidx, rows or []
+
+            async def _run_text_page_guarded(pidx: int) -> tuple[int, List[dict]]:
+                try:
+                    return await asyncio.wait_for(_run_text_page(pidx), timeout=text_page_timeout)
+                except asyncio.TimeoutError:
+                    await _log_progress(
+                        "stage_c.fast_text_timeout",
+                        f"page_timeout_skipped timeout={text_page_timeout:g}s",
+                        page=pidx + 1,
+                        force_emit=True,
+                    )
+                    return pidx, []
+                except asyncio.CancelledError:
+                    raise
+                except Exception as page_err:
+                    await _log_progress(
+                        "stage_c.text_error",
+                        f"{type(page_err).__name__}: {page_err}",
+                        page=pidx + 1,
+                        force_emit=True,
+                    )
+                    return pidx, []
+
+            async def _run_text_pages() -> Dict[int, List[dict]]:
+                sem = asyncio.Semaphore(text_concurrency)
+                completed = 0
+
+                async def _run_with_limit(pidx: int) -> tuple[int, List[dict]]:
+                    async with sem:
+                        return await _run_text_page_guarded(pidx)
+
+                tasks = [asyncio.create_task(_run_with_limit(pidx)) for pidx in text_idxs]
+                results: Dict[int, List[dict]] = {}
+                try:
+                    for done in asyncio.as_completed(tasks):
+                        pidx, rows = await done
+                        results[pidx] = rows
+                        completed += 1
+                        await _log_progress(
+                            "stage_c.fast_text_done",
+                            f"chunk={completed}/{text_page_total} raw_candidates={len(rows or [])}",
+                            page=pidx + 1,
+                            force_emit=True,
+                        )
+                except asyncio.CancelledError:
+                    for task in tasks:
+                        task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    raise
+                return results
+
+            text_results = await _run_text_pages()
+            for pidx in text_idxs:
+                rows = text_results.get(pidx, [])
+                page_num = pidx + 1
+                await _log_progress("stage_c.text", f"raw_candidates={len(rows or [])}", page=page_num)
+                for row in rows:
+                    row = dict(row or {})
+                    row.setdefault("source_page", pidx + 1)
+                    _bump_page_count(page_num, "text")
+                    candidates.append({
+                        "stage": "stage_c",
+                        "modality": "text",
+                        "page": pidx + 1,
+                        "source_figure": row.get("source_figure"),
+                        "raw": row,
+                    })
+
+            visual_signal_re = re.compile(
+                r"\b(?:fig(?:ure)?\.?\s*\d+|table\s*\d+|cof|friction|wear|film thickness|roughness|diffusion)\b",
+                re.IGNORECASE,
+            )
+            visual_pages_have_signal = any(
+                visual_signal_re.search(page_texts.get(pidx, "") or "")
+                for pidx in selected_visual_idxs
+            )
+            text_candidate_count = len(candidates)
+            should_run_visual = bool(selected_visual_idxs) and (
+                text_candidate_count == 0
+                or visual_pages_have_signal
+                or bool(visual_page_hints)
+            )
+            if not should_run_visual:
+                selected_visual_idxs = []
+            page_coverage["selected_visual_pages"] = [p + 1 for p in selected_visual_idxs]
+            await _log_progress(
+                "stage_c.visual_route",
+                (
+                    f"text_candidates={text_candidate_count}, "
+                    f"visual_selected={len(selected_visual_idxs)}, "
+                    f"visual_signal={int(bool(visual_pages_have_signal))}"
+                ),
+                force_emit=True,
+            )
+            text_idxs = []
 
             # Stage C1: Figure/table extraction
             if selected_visual_idxs:
@@ -949,11 +1154,89 @@ class LLMService:
                 doc.close()
 
             # Stage C2: Text extraction
-            for pidx in text_idxs:
+            text_concurrency = _bounded_int_env(
+                "LLM_TEXT_PAGE_CONCURRENCY",
+                DEFAULT_TEXT_PAGE_CONCURRENCY,
+                1,
+                8,
+            )
+            text_page_timeout = _bounded_float_env(
+                "LLM_TEXT_PAGE_TIMEOUT_SECONDS",
+                DEFAULT_TEXT_PAGE_TIMEOUT_SECONDS,
+                0.01,
+                600.0,
+            )
+            text_page_total = len(text_idxs)
+            if text_page_total:
+                await _log_progress(
+                    "stage_c.fast_text_start",
+                    f"chunk=0/{text_page_total} text_pages={text_page_total} concurrency={text_concurrency}",
+                    force_emit=True,
+                )
+
+            async def _run_text_page(pidx: int) -> tuple[int, List[dict]]:
                 text = (page_texts.get(pidx, "") or "").strip()
                 if not text:
-                    continue
-                rows = await self._process_text(f"[Page {pidx + 1}]\\n{text[:9000]}", TEXT_EXTRACTION_PROMPT)
+                    return pidx, []
+                rows = await self._process_text(
+                    f"[Page {pidx + 1}]\\n{text[:9000]}",
+                    TEXT_EXTRACTION_PROMPT,
+                )
+                return pidx, rows or []
+
+            async def _run_text_page_guarded(pidx: int) -> tuple[int, List[dict]]:
+                try:
+                    return await asyncio.wait_for(_run_text_page(pidx), timeout=text_page_timeout)
+                except asyncio.TimeoutError:
+                    await _log_progress(
+                        "stage_c.fast_text_timeout",
+                        f"page_timeout_skipped timeout={text_page_timeout:g}s",
+                        page=pidx + 1,
+                        force_emit=True,
+                    )
+                    return pidx, []
+                except asyncio.CancelledError:
+                    raise
+                except Exception as page_err:
+                    await _log_progress(
+                        "stage_c.text_error",
+                        f"{type(page_err).__name__}: {page_err}",
+                        page=pidx + 1,
+                        force_emit=True,
+                    )
+                    return pidx, []
+
+            async def _run_text_pages() -> Dict[int, List[dict]]:
+                sem = asyncio.Semaphore(text_concurrency)
+                completed = 0
+
+                async def _run_with_limit(pidx: int) -> tuple[int, List[dict]]:
+                    async with sem:
+                        return await _run_text_page_guarded(pidx)
+
+                tasks = [asyncio.create_task(_run_with_limit(pidx)) for pidx in text_idxs]
+                results: Dict[int, List[dict]] = {}
+                try:
+                    for done in asyncio.as_completed(tasks):
+                        pidx, rows = await done
+                        results[pidx] = rows
+                        completed += 1
+                        await _log_progress(
+                            "stage_c.fast_text_done",
+                            f"chunk={completed}/{text_page_total} raw_candidates={len(rows or [])}",
+                            page=pidx + 1,
+                            force_emit=True,
+                        )
+                except asyncio.CancelledError:
+                    for task in tasks:
+                        task.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    raise
+                return results
+
+            text_results = await _run_text_pages()
+            for pidx in text_idxs:
+                rows = text_results.get(pidx, [])
                 page_num = pidx + 1
                 await _log_progress("stage_c.text", f"raw_candidates={len(rows or [])}", page=page_num)
                 for row in rows:
@@ -1146,6 +1429,7 @@ class LLMService:
             "progress_log": progress_log[-300:],
             "strict_cof_mode": bool(strict_cof_mode),
             "profile": profile,
+            "requested_profile": requested_profile,
             "figure_estimate_count": figure_estimate_count,
             "allow_figure_estimates": allow_figure_estimates,
         }
@@ -1201,15 +1485,179 @@ class LLMService:
             print(f"[Metadata] {e}")
             return default
 
+    def _fast_table_enabled(self) -> bool:
+        return _truthy_env("LLM_FAST_TABLE_ENABLED", True)
+
+    def _fast_table_legacy_fallback_enabled(self) -> bool:
+        return _truthy_env("LLM_FAST_TABLE_FALLBACK_LEGACY", False)
+
+    async def _call_fast_table_model(self, document_text: str) -> str:
+        max_tokens = _bounded_int_env("LLM_FAST_TABLE_MAX_TOKENS", 8192, 1024, 65536)
+        messages = [
+            {"role": "system", "content": FAST_TABLE_TRIBOLOGY_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": (
+                    f"{FAST_TABLE_TRIBOLOGY_PROMPT}\n\n"
+                    "文献全文如下，页码以 [Page N] 标记：\n"
+                    f"{document_text}"
+                ),
+            },
+        ]
+        base_kwargs: dict[str, Any] = {
+            "model": self.fast_table_model,
+            "messages": messages,
+            "temperature": 0,
+            "max_tokens": max_tokens,
+        }
+        use_json_mode = _truthy_env("LLM_FAST_TABLE_JSON_MODE", True)
+        attempts: list[dict[str, Any]] = []
+        if use_json_mode:
+            attempts.append({**base_kwargs, "response_format": {"type": "json_object"}})
+        attempts.append(dict(base_kwargs))
+        completion_token_kwargs = dict(base_kwargs)
+        completion_token_kwargs["max_completion_tokens"] = completion_token_kwargs.pop("max_tokens")
+        attempts.append(completion_token_kwargs)
+        no_temperature_kwargs = dict(completion_token_kwargs)
+        no_temperature_kwargs.pop("temperature", None)
+        attempts.append(no_temperature_kwargs)
+
+        last_error: Exception | None = None
+        for kwargs in attempts:
+            try:
+                resp = await self.text_client.chat.completions.create(**kwargs)
+                return resp.choices[0].message.content or ""
+            except Exception as exc:
+                last_error = exc
+                continue
+        if last_error:
+            raise last_error
+        raise RuntimeError("Fast table model call failed without an error")
+
+    async def _extract_fast_table_with_metadata(
+        self,
+        *,
+        content: str,
+        pdf_path: Optional[str],
+        progress_callback: Optional[Callable[[dict[str, Any]], Awaitable[None]]] = None,
+    ) -> dict:
+        progress_log: list[dict[str, Any]] = []
+
+        async def _emit(stage: str, message: str, *, candidate_count: int = 0, force: bool = False) -> None:
+            entry = {"stage": stage, "message": message}
+            progress_log.append(entry)
+            if not progress_callback:
+                return
+            await progress_callback(
+                {
+                    "stage": stage,
+                    "message": message,
+                    "candidate_count": candidate_count,
+                    "kept_count": candidate_count,
+                    "dropped_by_reason": {},
+                    "page_coverage": {},
+                    "page_candidate_counts": {},
+                    "progress_log": progress_log[-300:],
+                    "force": force,
+                }
+            )
+
+        document_text = build_fast_table_document_text(content=content, pdf_path=pdf_path)
+        if not document_text.strip():
+            return {
+                "metadata": {},
+                "data": [],
+                "extraction_summary": {
+                    "pipeline": "fast_table",
+                    "model": self.fast_table_model,
+                    "candidate_count": 0,
+                    "final_count": 0,
+                    "dropped_by_reason": {"empty_document_text": 1},
+                    "page_coverage": {},
+                    "page_candidate_counts": {},
+                    "progress_log": progress_log,
+                    "current_stage": "stage_c.fast_table",
+                    "current_message": "No document text available for fast table extraction.",
+                },
+                "trace_candidates": [],
+                "document_profile": {},
+            }
+
+        await _emit(
+            "stage_c.fast_table",
+            f"sending document to {self.fast_table_model}",
+            force=True,
+        )
+        timeout_s = _bounded_float_env("LLM_FAST_TABLE_TIMEOUT_SECONDS", 180.0, 15.0, 600.0)
+        raw_output = await asyncio.wait_for(self._call_fast_table_model(document_text), timeout=timeout_s)
+        raw_rows = parse_fast_table_response(raw_output)
+        rows = normalize_fast_table_rows(raw_rows, page_context=document_text)
+        await _emit("stage_c.fast_table", f"rows={len(rows)}", candidate_count=len(rows), force=True)
+
+        trace_candidates: list[dict[str, Any]] = []
+        for idx, row in enumerate(rows):
+            trace_candidates.append(
+                {
+                    "stage": "stage_c.fast_table",
+                    "modality": "text",
+                    "page": row.get("source_page"),
+                    "source_figure": row.get("source_figure"),
+                    "raw": raw_rows[idx] if idx < len(raw_rows) else row,
+                    "normalized": row,
+                    "drop_reason": None,
+                    "merged_into": None,
+                }
+            )
+
+        dropped_by_reason = {}
+        if not rows:
+            dropped_by_reason["no_records"] = 1
+        if len(raw_rows) > len(rows):
+            dropped_by_reason["missing_required_table_fields"] = len(raw_rows) - len(rows)
+
+        return {
+            "metadata": {},
+            "data": rows,
+            "extraction_summary": {
+                "pipeline": "fast_table",
+                "model": self.fast_table_model,
+                "record_origin": FAST_TABLE_RECORD_ORIGIN,
+                "candidate_count": max(len(raw_rows), len(rows)),
+                "final_count": len(rows),
+                "dropped_by_reason": dropped_by_reason,
+                "page_coverage": {},
+                "page_candidate_counts": {},
+                "progress_log": progress_log[-300:],
+                "current_stage": "stage_c.fast_table",
+                "current_message": f"Extracted {len(rows)} table row(s) with {self.fast_table_model}.",
+                "raw_output_chars": len(raw_output),
+            },
+            "trace_candidates": trace_candidates,
+            "document_profile": {},
+        }
+
     async def extract_with_metadata(
         self,
         content: str,
         images: Optional[List[str]] = None,
         pdf_path: Optional[str] = None,
-        extraction_profile: str = "high_accuracy",
+        extraction_profile: str = AUTO_EXTRACTION_PROFILE,
         progress_callback: Optional[Callable[[dict[str, Any]], Awaitable[None]]] = None,
         strict_cof_mode: bool = False,
+        visual_page_hints: Optional[List[int]] = None,
     ) -> dict:
+        if self._fast_table_enabled():
+            try:
+                return await self._extract_fast_table_with_metadata(
+                    content=content,
+                    pdf_path=pdf_path,
+                    progress_callback=progress_callback,
+                )
+            except Exception as exc:
+                logger.warning("Fast table extraction failed: %s", exc)
+                if not self._fast_table_legacy_fallback_enabled():
+                    raise
+
         metadata = await self._extract_metadata_only(content, images)
         final_metadata = metadata.copy()
 
@@ -1232,6 +1680,7 @@ class LLMService:
             except Exception as e:
                 print(f"[DOI Resolve] {e}")
 
+        normalized_profile = normalize_extraction_profile(extraction_profile)
         records = await self.extract_tribology_data(
             content=content,
             images=images,
@@ -1239,6 +1688,7 @@ class LLMService:
             profile=extraction_profile,
             progress_callback=progress_callback,
             strict_cof_mode=strict_cof_mode,
+            visual_page_hints=visual_page_hints,
         )
 
         data = []
@@ -1317,7 +1767,8 @@ class LLMService:
             "page_candidate_counts": debug.get("page_candidate_counts") or {},
             "progress_log": debug.get("progress_log") or [],
             "strict_cof_mode": bool(debug.get("strict_cof_mode")),
-            "profile": debug.get("profile") or extraction_profile,
+            "profile": debug.get("profile") or normalized_profile,
+            "requested_profile": debug.get("requested_profile") or extraction_profile,
             "figure_estimate_count": int(debug.get("figure_estimate_count") or 0),
             "allow_figure_estimates": bool(debug.get("allow_figure_estimates")),
         }
@@ -1329,6 +1780,25 @@ class LLMService:
             "trace_candidates": debug.get("candidates") or [],
             "document_profile": debug.get("document_profile") or {},
         }
+
+    async def extract_auto(
+        self,
+        content: str,
+        images: Optional[List[str]] = None,
+        pdf_path: Optional[str] = None,
+        progress_callback: Optional[Callable[[dict[str, Any]], Awaitable[None]]] = None,
+        strict_cof_mode: bool = False,
+        visual_page_hints: Optional[List[int]] = None,
+    ) -> dict:
+        return await self.extract_with_metadata(
+            content=content,
+            images=images,
+            pdf_path=pdf_path,
+            extraction_profile=AUTO_EXTRACTION_PROFILE,
+            progress_callback=progress_callback,
+            strict_cof_mode=strict_cof_mode,
+            visual_page_hints=visual_page_hints,
+        )
 
     async def chat(self, message: str, context: Optional[str] = None) -> str:
         messages = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]

@@ -13,7 +13,7 @@ from sqlalchemy import select, and_, func, desc, or_
 from sqlalchemy.orm import selectinload
 
 from database import get_db_session
-from models.db_models import DiffusionCandidate, DiffusionRecord, TribologyData, Literature
+from models.db_models import DiffusionCandidate, DiffusionRecord, RecordCandidate, TribologyData, Literature
 from security import (
     AuthPrincipal,
     RequestScope,
@@ -21,16 +21,22 @@ from security import (
     get_request_scope,
     literature_scope_conditions,
     require_record_access,
+    require_candidate_access,
     scope_filters,
 )
 from services.activity_logging_service import log_activity
 from services.score_service import calculate_confidence, calculate_confidence_details
 from services.agent_runtime_service import get_agent_runtime
-from services.file_service import _normalize_record_chemistry
+from services.file_service import (
+    _is_derived_speed_conditions,
+    _normalize_record_chemistry,
+    _parse_json_object,
+    _repair_response_field_evidence_map,
+)
 from services.il_resolver_service import ANION_DB, CATION_DB, resolve_il
 from services.insight_service import get_pattern_discovery, save_pattern_discovery_report
 from services.quality_service import get_quality_asset_summary
-from services.query_service import _ion_component_filter_terms
+from services.query_service import _ion_component_filter_terms, _record_to_payload, format_record_display_id
 from services.sync_facade_service import _diffusion_record_to_payload
 from services.relationship_graph_service import (
     build_relationship_graph,
@@ -111,6 +117,7 @@ def _json_text(path: str):
 class SearchFilter(BaseModel):
     """Filter parameters for searching tribology records"""
     record_id: Optional[int] = Field(None, alias="recordId", description="Exact record ID")
+    entity_type: Optional[Literal["record", "candidate"]] = Field(None, alias="entityType", description="Exact entity type for recordId")
     materials: List[str] = Field(default_factory=list, description="Probe/substrate/coating search terms")
     probe_materials: List[str] = Field(default_factory=list, alias="probeMaterials", description="Probe material terms")
     substrate_materials: List[str] = Field(default_factory=list, alias="substrateMaterials", description="Substrate material terms")
@@ -132,6 +139,7 @@ class SearchFilter(BaseModel):
     experiment_methods: List[str] = Field(default_factory=list, alias="experimentMethods", description="Experiment methods to include")
     measurement_types: List[str] = Field(default_factory=list, alias="measurementTypes", description="Measurement types to include")
     training_views: List[str] = Field(default_factory=list, alias="trainingViews", description="Training views to include")
+    query: Optional[str] = Field(None, alias="q", description="Broad text search over DOI, title, ions, surfaces, and lubricants")
     doi: Optional[str] = Field(None, description="Literature DOI")
     file_id: Optional[str] = Field(None, alias="fileId", description="File ID to filter by a specific uploaded file")
     
@@ -155,6 +163,13 @@ class LiteratureDTO(BaseModel):
 class RecordResponse(BaseModel):
     """Response model for tribology records"""
     id: int
+    display_id: Optional[str] = Field(None, alias="displayId")
+    entity_type: Optional[str] = Field(None, alias="entityType")
+    entity_id: Optional[int] = Field(None, alias="entityId")
+    review_entity_type: Optional[str] = Field(None, alias="reviewEntityType")
+    confidence_tier: Optional[str] = Field(None, alias="confidenceTier")
+    admission_reason: Optional[str] = Field(None, alias="admissionReason")
+    quality_notes: Optional[str] = Field(None, alias="qualityNotes")
     material_name: str = Field(..., alias="materialName")
     lubricant: str
     lubricant_components: List[dict] = Field(default_factory=list, alias="lubricantComponents")
@@ -212,10 +227,13 @@ class RecordResponse(BaseModel):
     source: Optional[str] = None
     source_page: Optional[int] = Field(None, alias="sourcePage")
     source_figure: Optional[str] = Field(None, alias="sourceFigure")
+    field_evidence_json: dict = Field(default_factory=dict, alias="fieldEvidenceJson")
     
     confidence: float
     confidence_details: dict = Field(default_factory=dict, alias="confidenceDetails")
     review_status: Optional[str] = Field(None, alias="reviewStatus")
+    record_origin: Optional[str] = Field(None, alias="recordOrigin")
+    assembly_notes: Optional[str] = Field(None, alias="assemblyNotes")
     literature_id: int = Field(..., alias="literatureId")
     literature: Optional[LiteratureDTO] = None
 
@@ -411,6 +429,30 @@ class ConfidencePromotePayload(BaseModel):
 
 # --- Helper: Build query conditions ---
 
+def _text_search_conditions(query: str):
+    term = str(query or "").strip().lower()
+    if not term:
+        return None
+    pattern = f"%{term}%"
+    fields = [
+        Literature.doi,
+        Literature.title,
+        Literature.authors,
+        Literature.journal,
+        TribologyData.lubricant,
+        TribologyData.lubricant_alias,
+        TribologyData.cation,
+        TribologyData.anion,
+        TribologyData.probe_material,
+        TribologyData.substrate_material,
+        TribologyData.substrate_coating,
+        TribologyData.material_name,
+    ]
+    return or_(*[
+        func.lower(func.coalesce(field, "")).like(pattern)
+        for field in fields
+    ])
+
 def _build_conditions(filter_params: SearchFilter):
     conditions = []
     if filter_params.materials:
@@ -490,6 +532,9 @@ def _build_conditions(filter_params: SearchFilter):
         conditions.append(_json_text("$.training_view").in_(training_views))
     if filter_params.doi:
         conditions.append(Literature.doi == filter_params.doi)
+    text_condition = _text_search_conditions(filter_params.query or "")
+    if text_condition is not None:
+        conditions.append(text_condition)
     if filter_params.file_id:
         # Try to filter by Literature.id directly (most reliable since file_id IS the lit id)
         try:
@@ -617,14 +662,18 @@ def _record_to_response(r: TribologyData) -> RecordResponse:
     runtime_confidence = float(runtime_details.get("score") or 0.0)
     lubricant_components = components_for_record(r)
     lubricant_alias = getattr(r, "lubricant_alias", None)
+    field_evidence_map = _parse_json_object(getattr(r, "field_evidence_json", None))
+    repaired_field_evidence_map, repaired_speed_conditions = _repair_response_field_evidence_map(r, field_evidence_map)
+    speed_conditions = repaired_speed_conditions or normalize_speed_conditions(getattr(r, "speed_conditions_json", None)) or derive_speed_conditions(r.speed_value)
+    speed_value = speed_value_from_conditions(speed_conditions) if _is_derived_speed_conditions(speed_conditions) else None
+    speed_value = speed_value or r.speed_value
     cof_extracted = normalize_cof_extracted(getattr(r, "cof_extracted_json", None)) or derive_cof_extracted(
         r.cof_raw,
         r.cof_value,
         load=r.load_raw or r.load_value,
-        speed=r.speed_value,
+        speed=speed_value,
     )
     load_conditions = normalize_load_conditions(getattr(r, "load_conditions_json", None)) or derive_load_conditions(r.load_raw or r.load_value)
-    speed_conditions = normalize_speed_conditions(getattr(r, "speed_conditions_json", None)) or derive_speed_conditions(r.speed_value)
     tribological_system = normalize_tribological_system(getattr(r, "tribological_system_json", None)) or derive_tribological_system(getattr(r, "regime", None))
     experiment_profile = build_experiment_profile(
         {
@@ -632,7 +681,7 @@ def _record_to_response(r: TribologyData) -> RecordResponse:
             "cof": r.cof_raw,
             "cof_value": r.cof_value,
             "load": r.load_raw or r.load_value,
-            "speed": r.speed_value,
+            "speed": speed_value,
             "probe_geometry": r.probe_geometry,
             "probe_radius": r.probe_radius,
             "regime": getattr(r, "regime", None),
@@ -646,6 +695,7 @@ def _record_to_response(r: TribologyData) -> RecordResponse:
 
     payload = {
         "id": r.id,
+        "display_id": format_record_display_id(None, r.id),
         "material_name": r.material_name,
         "lubricant": r.lubricant,
         "lubricant_components": lubricant_components,
@@ -659,7 +709,7 @@ def _record_to_response(r: TribologyData) -> RecordResponse:
         "load_value": r.load_value,
         "load_raw": r.load_raw,
         "load_conditions": load_conditions,
-        "speed_value": r.speed_value,
+        "speed_value": speed_value,
         "speed_conditions": speed_conditions,
         "shear_rate": getattr(r, "shear_rate", None),
         "temperature": r.temperature,
@@ -707,6 +757,7 @@ def _record_to_response(r: TribologyData) -> RecordResponse:
         "source": getattr(r, 'source', None),
         "source_page": getattr(r, 'source_page', None),
         "source_figure": getattr(r, 'source_figure', None),
+        "field_evidence_json": repaired_field_evidence_map,
         "confidence": runtime_confidence,
         "confidence_details": runtime_details,
         "review_status": getattr(r, "review_status", None),
@@ -714,10 +765,7 @@ def _record_to_response(r: TribologyData) -> RecordResponse:
         "literature": lit_dto.model_dump() if lit_dto else None,
     }
     _normalize_record_chemistry([payload])
-    return RecordResponse(
-        **payload,
-        literature=lit_dto
-    )
+    return RecordResponse(**payload)
 
 
 def _diffusion_literature_payload(literature: Literature | None) -> dict[str, Any] | None:
@@ -784,6 +832,60 @@ def _diffusion_library_item(record: DiffusionCandidate | DiffusionRecord) -> dic
     return payload
 
 
+def _diffusion_library_rows(
+    final_records: list[DiffusionRecord],
+    candidate_records: list[DiffusionCandidate],
+) -> list[dict[str, Any]]:
+    latest_candidates = sorted(candidate_records, key=lambda candidate: int(candidate.id or 0), reverse=True)
+    return [
+        *[_diffusion_library_item(candidate) for candidate in latest_candidates],
+        *[_diffusion_library_item(record) for record in final_records],
+    ]
+
+
+def _diffusion_library_sort_key(item: dict[str, Any]) -> tuple[int, int, int]:
+    entity_type = str(
+        item.get("review_entity_type")
+        or item.get("reviewEntityType")
+        or str(item.get("library_id") or "").split(":", 1)[0]
+        or "record"
+    ).strip().lower()
+    row_id = int(item.get("id") or 0)
+    literature_id = int(item.get("literature_id") or item.get("literatureId") or 0)
+    if entity_type == "candidate":
+        return (0, -row_id, -literature_id)
+    return (1, -literature_id, -row_id)
+
+
+def _diffusion_library_matches_focus(
+    item: dict[str, Any],
+    *,
+    literature_id: int | None = None,
+    record_id: int | None = None,
+    entity_type: Literal["record", "candidate"] | None = None,
+) -> bool:
+    if literature_id is not None:
+        item_literature_id = int(item.get("literature_id") or item.get("literatureId") or 0)
+        if item_literature_id != literature_id:
+            return False
+    if record_id is not None:
+        item_record_id = int(item.get("id") or 0)
+        if item_record_id != record_id:
+            return False
+    if entity_type is not None:
+        item_entity_type = str(
+            item.get("review_entity_type")
+            or item.get("reviewEntityType")
+            or item.get("entity_type")
+            or item.get("entityType")
+            or str(item.get("library_id") or "").split(":", 1)[0]
+            or "record"
+        ).strip().lower()
+        if item_entity_type != entity_type:
+            return False
+    return True
+
+
 # --- API Endpoints ---
 
 @router.post("/search", response_model=PaginatedRecordResponse, response_model_by_alias=True)
@@ -801,12 +903,17 @@ async def search_records(
     """
     try:
         if filter_params.record_id is not None:
-            record = await require_record_access(session, principal, filter_params.record_id)
+            if filter_params.entity_type == "candidate":
+                record = await require_candidate_access(session, principal, filter_params.record_id)
+                item = RecordResponse(**_record_to_payload(record))
+            else:
+                record = await require_record_access(session, principal, filter_params.record_id)
+                item = _record_to_response(record)
             return PaginatedRecordResponse(
                 total=1,
                 skip=0,
                 limit=limit,
-                items=[_record_to_response(record)],
+                items=[item],
             )
         result = await get_agent_runtime().search_records(
             session=session,
@@ -830,6 +937,9 @@ async def search_records(
 @router.get("/diffusion-library", response_model=DiffusionLibraryResponse)
 async def list_diffusion_library(
     q: str | None = Query(None, description="Optional text search over diffusion records and literature metadata"),
+    literature_id: int | None = Query(None, ge=1, description="Limit results to one literature item"),
+    record_id: int | None = Query(None, ge=1, description="Limit results to one diffusion record id"),
+    entity_type: Literal["record", "candidate"] | None = Query(None, description="Limit focus to a final record or review candidate"),
     skip: int = Query(0, ge=0, description="Number of rows to skip"),
     limit: int = Query(500, ge=1, le=1000, description="Max rows to return"),
     session: AsyncSession = Depends(get_db_session),
@@ -858,21 +968,18 @@ async def list_diffusion_library(
         )
         candidate_records = list(candidate_result.scalars().all())
 
-        all_rows = [
-            *[_diffusion_library_item(record) for record in final_records],
-            *[_diffusion_library_item(candidate) for candidate in candidate_records],
-        ]
-        all_rows.sort(
-            key=lambda item: (
-                str(item.get("literature_id") or item.get("literatureId") or ""),
-                str(item.get("library_id") or ""),
-            ),
-            reverse=True,
-        )
+        all_rows = _diffusion_library_rows(final_records, candidate_records)
+        all_rows.sort(key=_diffusion_library_sort_key)
 
         normalized_query = str(q or "").strip().lower()
         if normalized_query:
             all_rows = [item for item in all_rows if normalized_query in _diffusion_search_text(item)]
+        if literature_id is not None or record_id is not None or entity_type is not None:
+            all_rows = [
+                item
+                for item in all_rows
+                if _diffusion_library_matches_focus(item, literature_id=literature_id, record_id=record_id, entity_type=entity_type)
+            ]
 
         literature_ids = {
             int(item.get("literature_id") or item.get("literatureId") or 0)

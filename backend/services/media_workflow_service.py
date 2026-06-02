@@ -14,7 +14,7 @@ class MediaWorkflowService:
         *,
         file_id: int,
         force: bool = False,
-        profile: str = "high_accuracy",
+        profile: str = "auto",
         extractor_type: str = "tribology",
         strict_cof_mode: Optional[bool] = None,
     ) -> dict[str, Any]:

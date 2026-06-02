@@ -1,14 +1,20 @@
 <script setup lang="ts">
-import { computed, toRef } from 'vue'
-import { Activity, AlertTriangle, RefreshCw, ScanLine } from 'lucide-vue-next'
+import { computed, ref, toRef } from 'vue'
+import {
+  ArrowRight,
+  BookOpen,
+  ChevronDown,
+  LayoutGrid,
+  ListChecks,
+  Lock,
+  MessageCircle,
+  Search,
+  Square,
+  Table2,
+  Upload,
+} from 'lucide-vue-next'
 
-import HomeHealthSnapshot from '@/components/home/HomeHealthSnapshot.vue'
-import HomeLiteratureChat from '@/components/home/HomeLiteratureChat.vue'
-import HomeRecentRuns from '@/components/home/HomeRecentRuns.vue'
-import HomeSuggestedActions from '@/components/home/HomeSuggestedActions.vue'
-import HomeTodayPanel from '@/components/home/HomeTodayPanel.vue'
 import { useHomeSummary, type HomeSuggestedAction } from '@/composables/useHomeSummary'
-import { useI18n } from '@/composables/useI18n'
 import type { AgentWorkflow, BatchFile, ChatSource, ExtractionRunDetail } from '@/lib/api'
 
 const props = defineProps<{
@@ -18,6 +24,7 @@ const props = defineProps<{
   activeRun: ExtractionRunDetail | null
   latestWorkflow: AgentWorkflow | null
   preferredTrainingDatasetId: number | null
+  canAccessAdmin: boolean
 }>()
 
 const emit = defineEmits<{
@@ -25,162 +32,323 @@ const emit = defineEmits<{
   openSource: [source: ChatSource]
 }>()
 
-const { isChinese } = useI18n()
-const { summary, loading, error } = useHomeSummary({
+const { summary } = useHomeSummary({
   files: toRef(props, 'files'),
   activeRun: toRef(props, 'activeRun'),
   latestWorkflow: toRef(props, 'latestWorkflow'),
   preferredTrainingDatasetId: toRef(props, 'preferredTrainingDatasetId'),
 })
 
-const reviewQueueAction = computed(() => summary.value.suggestedActions.find((item) => item.id === 'open-review-queue') || null)
-const datasetBuilderAction = computed(() => summary.value.suggestedActions.find((item) => item.id === 'open-dataset-builder') || null)
-const pipelineAction = computed<HomeSuggestedAction>(() => ({
-  id: 'open-pipeline',
-  label: isChinese.value ? '打开 Pipeline' : 'Open Pipeline',
-  description: isChinese.value ? '回到抽取运行与重试队列。' : 'Return to extraction runs and retries.',
-  actionType: 'route',
-  target: 'pipeline/runs',
-  priority: 'medium',
-}))
+const queryText = ref('')
+const modeMenuOpen = ref(false)
+const activeModeLabel = ref('Extraction workflow')
 
-const commandStatus = computed(() => {
-  if (summary.value.today.failedRuns > 0) {
-    return {
-      badge: isChinese.value ? '阻塞优先' : 'Blockers First',
-      title: isChinese.value ? '现在最值得处理的是失败运行和待审积压。' : 'Failed runs and review backlog need attention first.',
-      body: isChinese.value
-        ? 'Home 只做推进：先清失败，再清待审，不在首页做图表过滤。'
-        : 'Home is for momentum only: clear failures first, then reduce review debt, without turning the page into an exploration surface.',
-    }
-  }
-
-  if (summary.value.today.reviewPending > 0) {
-    return {
-      badge: isChinese.value ? '审阅优先' : 'Review First',
-      title: isChinese.value ? '平台当前的关键动作是把机器结果推进到人工确认。' : 'The highest-value move now is turning machine output into reviewed records.',
-      body: isChinese.value
-        ? '继续审阅最近文献，或者直接打开待审队列，不要在 Home 里停留。'
-        : 'Continue reviewing the latest paper or jump straight into the review queue instead of lingering on Home.',
-    }
-  }
-
-  if (summary.value.today.runningRuns > 0) {
-    return {
-      badge: isChinese.value ? '流程进行中' : 'Pipeline Active',
-      title: isChinese.value ? '抽取管线正在推进，下一步是盯运行并准备审阅。' : 'The extraction pipeline is active. Watch runs and prepare for review.',
-      body: isChinese.value
-        ? '状态和下一步都已经给出，Home 不再承担探索和筛选工作。'
-        : 'The current state and next step are already visible here. Home no longer carries exploration or filtering.',
-    }
-  }
-
-  return {
-    badge: isChinese.value ? '平台稳定' : 'Platform Stable',
-    title: isChinese.value ? '当前可以继续把清洗结果推进到数据集构建。' : 'The platform is stable enough to push cleaned output into dataset building.',
-    body: isChinese.value
-      ? '当失败和待审压力不高时，直接把可用记录推进到下游建模准备。'
-      : 'When failure pressure and review debt are low, move ready records directly toward dataset preparation.',
-  }
-})
-
-const focusMetrics = computed(() => [
+const modeMenuSections = [
   {
-    key: 'failed',
-    label: isChinese.value ? '失败运行' : 'Failed Runs',
-    value: summary.value.today.failedRuns,
-    helper: isChinese.value ? '优先重试或排查' : 'Retry or inspect first',
-    icon: AlertTriangle,
+    label: 'WORKFLOWS',
+    items: [
+      { label: 'Extraction workflow', icon: BookOpen, target: 'upload-pdfs', locked: false },
+      { label: 'Research agent', icon: LayoutGrid, target: 'library/explorer', locked: false },
+      { label: 'Report', icon: Square, target: null, locked: false },
+      { label: 'Systematic review', icon: ListChecks, target: null, locked: true },
+    ],
   },
   {
-    key: 'review',
-    label: isChinese.value ? '待审记录' : 'Pending Review',
-    value: summary.value.today.reviewPending,
-    helper: isChinese.value ? '等待人工确认' : 'Awaiting human review',
-    icon: ScanLine,
+    label: 'TOOLS',
+    items: [
+      { label: 'Extract data', icon: BookOpen, target: 'upload-pdfs', locked: false },
+      { label: 'Database', icon: Table2, target: 'database', locked: false },
+      { label: 'Find papers', icon: Search, target: 'library/explorer', locked: false },
+      { label: 'Chat with papers', icon: MessageCircle, target: 'library/explorer', locked: false },
+    ],
+  },
+]
+
+const primaryWorkflowActions = [
+  {
+    label: 'Extraction workbench',
+    eyebrow: 'Upload and extract',
+    description: 'Run tribology or diffusion extraction with live worker status.',
+    metric: computed(() => `${summary.value.today.runningRuns} active`),
+    icon: BookOpen,
+    target: 'upload-pdfs',
+    tone: 'primary',
   },
   {
-    key: 'running',
-    label: isChinese.value ? '运行中' : 'Running Runs',
-    value: summary.value.today.runningRuns,
-    helper: isChinese.value ? '持续监控状态' : 'Keep an eye on status',
-    icon: Activity,
+    label: 'Database workspace',
+    eyebrow: 'Structured records',
+    description: 'Open the unified table for candidates, records, and evidence.',
+    metric: computed(() => `${summary.value.health.datasetReadyRecords} records`),
+    icon: Table2,
+    target: 'database',
+    tone: 'secondary',
+  },
+  {
+    label: 'Review evidence',
+    eyebrow: 'Grounding queue',
+    description: 'Check field-level evidence before publishing extracted data.',
+    metric: computed(() => `${summary.value.today.reviewPending} checks`),
+    icon: ListChecks,
+    target: 'library/explorer',
+    tone: 'review',
+  },
+]
+
+const extractionCommandMetrics = computed(() => [
+  { label: 'Active runs', value: summary.value.today.runningRuns },
+  { label: 'Structured records', value: summary.value.health.datasetReadyRecords },
+  { label: 'Evidence checks', value: summary.value.today.reviewPending },
+])
+
+const quickActions = [
+  { label: 'Open Database', icon: Table2, target: 'database' },
+  { label: 'Review evidence', icon: ListChecks, target: 'library/explorer' },
+  { label: 'Upload papers', icon: Upload, target: 'upload-pdfs' },
+]
+
+const suggestedCards = computed(() => [
+  {
+    title: 'Extract COF from selected PDFs',
+    body: `${summary.value.today.runningRuns} active runs in ${props.activeScopeLabel || 'Group Library'}.`,
+    target: 'upload-pdfs',
+  },
+  {
+    title: 'Review evidence for tables and figures',
+    body: `${summary.value.today.reviewPending} items waiting for evidence checks.`,
+    target: 'library/explorer',
+  },
+  {
+    title: 'Build a modeling dataset',
+    body: `${summary.value.health.datasetReadyRecords} records ready for downstream analysis.`,
+    target: 'library/datasets',
   },
 ])
 
-function emitAction(action: HomeSuggestedAction | null) {
-  if (action) {
-    emit('action', action)
+function routeAction(label: string, target: string): HomeSuggestedAction {
+  return {
+    id: `home-${target.replace(/[^\w]+/g, '-')}-${label.toLowerCase().replace(/[^\w]+/g, '-')}`,
+    label,
+    description: label,
+    actionType: 'route',
+    target,
+    priority: 'medium',
   }
+}
+
+function emitRoute(label: string, target: string) {
+  emit('action', routeAction(label, target))
+}
+
+function toggleModeMenu() {
+  modeMenuOpen.value = !modeMenuOpen.value
+}
+
+function closeModeMenu() {
+  modeMenuOpen.value = false
+}
+
+function isModeItemLocked(item: (typeof modeMenuSections)[number]['items'][number]) {
+  return item.locked && !props.canAccessAdmin
+}
+
+function selectMode(item: (typeof modeMenuSections)[number]['items'][number]) {
+  if (isModeItemLocked(item)) return
+  activeModeLabel.value = item.label
+  closeModeMenu()
+  if (item.target) {
+    emitRoute(item.label, item.target)
+  }
+}
+
+function submitResearchQuestion() {
+  const query = queryText.value.trim()
+  if (!query && activeModeLabel.value === 'Extraction workflow') {
+    emitRoute('Extraction workflow', 'upload-pdfs')
+    return
+  }
+  if (!query) return
+  emitRoute(query, 'library/explorer')
 }
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col gap-3 overflow-auto xl:overflow-hidden">
-    <section class="shell-surface px-5 py-4">
-      <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(26rem,0.78fr)] xl:items-start">
-        <div class="min-w-0">
-          <div class="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-slate-500 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
-            {{ isChinese ? '工作台概览' : 'Workspace Overview' }}
-          </div>
-          <h1 class="mt-3 max-w-3xl text-xl font-semibold leading-7 text-slate-950 dark:text-white sm:text-2xl">
-            {{ commandStatus.title }}
-          </h1>
-          <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-300">
-            {{ commandStatus.body }}
+  <section class="mx-auto flex h-full min-h-full w-full max-w-6xl flex-col items-center justify-start overflow-y-auto px-6 py-10 text-slate-950">
+    <div class="w-full max-w-[58rem]">
+      <p class="text-[11px] font-black uppercase tracking-[0.32em] text-[#0f7c82]">Extraction command center</p>
+      <div class="mt-2 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+        <div>
+          <h1 class="text-3xl font-black tracking-tight text-slate-950">Extract, verify, publish.</h1>
+          <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+            Start with a paper, finish in the database. The main workflow stays on extraction status and field evidence.
           </p>
-
-          <div class="mt-4 flex flex-wrap gap-2 text-xs">
-            <span class="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 font-semibold text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
-              <Activity class="h-3.5 w-3.5" />
-              {{ commandStatus.badge }}
-            </span>
-            <span class="inline-flex items-center rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
-              {{ activeScopeLabel }}
-            </span>
-            <span class="inline-flex items-center rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
-              {{ operatorName }}
-            </span>
+        </div>
+        <div class="grid min-w-[20rem] grid-cols-3 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div
+            v-for="metric in extractionCommandMetrics"
+            :key="metric.label"
+            class="border-r border-slate-200 px-3 py-3 last:border-r-0"
+          >
+            <p class="text-lg font-black tracking-tight text-slate-950">{{ metric.value }}</p>
+            <p class="mt-0.5 text-[10px] font-bold uppercase tracking-wide text-slate-400">{{ metric.label }}</p>
           </div>
         </div>
+      </div>
+    </div>
 
-        <div class="grid gap-2 sm:grid-cols-3">
-          <article
-            v-for="metric in focusMetrics"
-            :key="metric.key"
-            class="rounded-md border border-slate-200 bg-slate-50 px-3 py-3 dark:border-slate-800 dark:bg-slate-950"
+    <div class="mt-6 grid w-full max-w-[58rem] gap-3 lg:grid-cols-3">
+      <button
+        v-for="action in primaryWorkflowActions"
+        :key="action.label"
+        type="button"
+        class="group flex min-h-[7rem] flex-col justify-between rounded-xl border px-5 py-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+        :class="[
+          action.tone === 'primary'
+            ? 'border-[#0f7c82] bg-[#0f7c82] text-white shadow-[#0f7c82]/20 hover:bg-[#0b6c72]'
+            : action.tone === 'secondary'
+              ? 'border-[#39546a] bg-[#39546a] text-white shadow-slate-300/40 hover:bg-[#31495c]'
+              : 'border-slate-200 bg-white text-slate-950 hover:border-[#0f7c82]/50',
+        ]"
+        @click="emitRoute(action.label, action.target)"
+      >
+        <span class="flex w-full min-w-0 items-start justify-between gap-4">
+          <span>
+            <span class="text-[10px] font-black uppercase tracking-[0.22em]" :class="action.tone === 'review' ? 'text-[#0f7c82]' : 'text-white/70'">
+              {{ action.eyebrow }}
+            </span>
+            <span class="mt-2 block text-xl font-black tracking-tight">{{ action.label }}</span>
+          </span>
+          <span class="grid h-11 w-11 shrink-0 place-items-center rounded-lg" :class="action.tone === 'review' ? 'bg-[#e6f5f4] text-[#0f7c82]' : 'bg-white/15 text-white'">
+            <component :is="action.icon" class="h-5 w-5" />
+          </span>
+        </span>
+        <span class="mt-4 flex w-full items-end justify-between gap-3">
+          <span class="text-sm leading-5" :class="action.tone === 'review' ? 'text-slate-500' : 'text-white/78'">{{ action.description }}</span>
+          <span class="shrink-0 text-xs font-black uppercase tracking-wide" :class="action.tone === 'review' ? 'text-slate-500' : 'text-white/70'">{{ action.metric.value }}</span>
+        </span>
+      </button>
+    </div>
+
+    <div class="relative mt-5 w-full max-w-[58rem] rounded-xl border border-[#2e6c76] bg-white shadow-[0_10px_24px_rgba(15,80,90,0.12)]">
+      <div class="relative z-20 rounded-t-[1rem] bg-[#2e6c76] px-4 py-3">
+        <button
+          type="button"
+          class="inline-flex items-center gap-2 rounded-lg border border-white/20 bg-[#0f7c82]/70 px-4 py-2 text-sm font-semibold text-white shadow-sm"
+          aria-haspopup="menu"
+          :aria-expanded="modeMenuOpen"
+          @click="toggleModeMenu"
+        >
+          <LayoutGrid class="h-4 w-4" />
+          {{ activeModeLabel }}
+          <ChevronDown class="h-4 w-4" />
+        </button>
+
+        <div
+          v-if="modeMenuOpen"
+          class="absolute left-4 top-[calc(100%+0.75rem)] z-30 w-[23.5rem] rounded-lg border border-slate-200 bg-white p-2 text-slate-800 shadow-[0_18px_42px_rgba(15,23,42,0.18)]"
+          role="menu"
+          aria-label="Research modes"
+        >
+          <section
+            v-for="section in modeMenuSections"
+            :key="section.label"
+            class="py-2"
           >
-            <div class="flex items-center gap-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
-              <component :is="metric.icon" class="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" />
-              <span>{{ metric.label }}</span>
-            </div>
-            <p class="mt-2 text-2xl font-semibold leading-none text-slate-950 dark:text-white">{{ metric.value }}</p>
-            <p class="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">{{ metric.helper }}</p>
-          </article>
+            <p class="px-4 pb-2 text-xs font-bold uppercase tracking-wide text-slate-400">{{ section.label }}</p>
+            <button
+              v-for="item in section.items"
+              :key="item.label"
+              type="button"
+              class="flex w-full items-center gap-3 rounded-md px-4 py-3 text-left text-base font-semibold transition"
+              :class="[
+                isModeItemLocked(item) ? 'text-slate-500' : 'text-slate-800 hover:bg-slate-100 hover:text-[#0f7c82]',
+                activeModeLabel === item.label ? 'bg-slate-100 text-[#0f7c82]' : '',
+              ]"
+              role="menuitem"
+              :aria-disabled="isModeItemLocked(item) ? 'true' : undefined"
+              @click="selectMode(item)"
+            >
+              <component
+                :is="item.icon"
+                class="h-4 w-4 shrink-0"
+                :class="activeModeLabel === item.label ? 'text-[#0f7c82]' : 'text-slate-500'"
+              />
+              <span class="min-w-0 flex-1">{{ item.label }}</span>
+              <span
+                v-if="isModeItemLocked(item)"
+                class="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold uppercase tracking-wide text-slate-500"
+              >
+                <Lock class="h-3 w-3" />
+                PRO
+              </span>
+            </button>
+          </section>
         </div>
       </div>
-    </section>
 
-    <div class="grid min-h-0 flex-1 gap-3 xl:grid-cols-[minmax(0,1.35fr)_minmax(18rem,0.9fr)_22rem]">
-      <HomeLiteratureChat class="min-h-[34rem] xl:min-h-0" @open-source="emit('openSource', $event)" />
+      <textarea
+        v-model="queryText"
+        rows="3"
+        class="block w-full resize-none border-0 px-8 py-5 text-base leading-7 text-slate-800 outline-none placeholder:text-slate-400"
+        placeholder="Upload a paper, extract friction records, or open the database..."
+        @keydown.enter.exact.prevent="submitResearchQuestion"
+      />
 
-      <div class="grid min-h-0 gap-3 xl:grid-rows-[auto_minmax(0,1fr)]">
-        <HomeSuggestedActions :actions="summary.suggestedActions" :loading="loading" @action="emitAction" />
-        <HomeRecentRuns :runs="summary.recentRuns" @action="emitAction(pipelineAction)" />
-      </div>
+      <div class="flex items-center justify-between border-t border-slate-200 px-4 py-3">
+        <button
+          type="button"
+          class="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+          aria-label="Upload papers"
+          @click="emitRoute('Upload papers', 'upload-pdfs')"
+        >
+          <Upload class="h-5 w-5" />
+        </button>
 
-      <div class="grid min-h-0 gap-3 xl:grid-rows-[auto_minmax(0,1fr)]">
-        <HomeTodayPanel :today="summary.today" @action="emitAction(reviewQueueAction)" />
-        <HomeHealthSnapshot :health="summary.health" @action="emitAction(datasetBuilderAction)" />
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-500"
+          >
+            Extended
+          </button>
+          <button
+            type="button"
+            class="flex h-10 w-10 items-center justify-center rounded-lg bg-[#77b6bd] text-white transition hover:bg-[#5aa4ac]"
+            aria-label="Run extraction workflow"
+            @click="submitResearchQuestion"
+          >
+            <ArrowRight class="h-5 w-5" />
+          </button>
+        </div>
       </div>
     </div>
 
-    <div
-      v-if="error"
-      class="inline-flex max-w-max items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
-    >
-      <RefreshCw class="h-4 w-4" />
-      {{ error }}
+    <div class="mt-8 flex flex-wrap justify-center gap-3">
+      <button
+        v-for="item in quickActions"
+        :key="item.label"
+        type="button"
+        class="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-[#0f7c82]/50 hover:text-[#0f7c82]"
+        @click="emitRoute(item.label, item.target)"
+      >
+        <component :is="item.icon" class="h-4 w-4 text-slate-500" />
+        {{ item.label }}
+      </button>
     </div>
-  </div>
+
+    <div class="mt-12 grid w-full max-w-[58rem] gap-4 md:grid-cols-3">
+      <button
+        v-for="card in suggestedCards"
+        :key="card.title"
+        type="button"
+        class="min-h-[10rem] rounded-2xl border border-slate-200 bg-white p-5 text-left transition hover:-translate-y-0.5 hover:border-[#0f7c82]/40 hover:shadow-md"
+        @click="emitRoute(card.title, card.target)"
+      >
+        <span class="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
+          Suggested
+        </span>
+        <h2 class="mt-4 text-base font-semibold leading-6 text-slate-950">{{ card.title }}</h2>
+        <p class="mt-2 text-sm leading-6 text-slate-500">{{ card.body }}</p>
+      </button>
+    </div>
+  </section>
 </template>

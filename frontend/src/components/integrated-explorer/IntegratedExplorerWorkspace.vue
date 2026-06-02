@@ -1,58 +1,49 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import {
+  getCandidateFieldEvidence,
+  getPdfBboxPreview,
+  getRecordFieldEvidence,
   searchRecords,
   type RecordResponse,
   type EvidenceResult,
+  type FieldEvidenceEntry,
+  type RecordFieldEvidenceResponse,
 } from '@/lib/api'
 import {
   canonicalExperimentScaleValue,
-  experimentScaleLabel,
-  experimentScaleSearchText,
 } from '@/lib/experimentScale'
-import type {
-  EvidenceSnippet as InteractiveEvidenceSnippet,
-  EvidenceTagType as InteractiveEvidenceTagType,
-  RowData as InteractiveEvidenceRow,
-} from '@/components/InteractiveEvidencePanel'
 import {
   Search,
   ChevronLeft,
   ChevronRight,
-  ChevronUp,
-  ChevronDown,
   Save,
-  ExternalLink,
-  Edit,
-  SlidersHorizontal,
+  Trash2,
   X,
   Check,
   Layers,
   ChevronsLeft,
   ChevronsRight,
 } from 'lucide-vue-next'
-import ConfidencePanel from '@/components/integrated-explorer/ConfidencePanel.vue'
-import RecordCard from '@/components/integrated-explorer/RecordCard.vue'
+import ChemicalText from '@/components/ChemicalText.vue'
 import RecordTable from '@/components/integrated-explorer/RecordTable.vue'
 import Modal from '@/components/ui/Modal.vue'
-import InteractiveEvidencePanelHost from '@/components/InteractiveEvidencePanelHost.vue'
-import { useEvidencePanel } from '@/composables/useEvidencePanel'
+import { recordEvidenceCacheKey, useEvidencePanel } from '@/composables/useEvidencePanel'
 import { useRecordEditing } from '@/composables/useRecordEditing'
 import { useRecordSearch } from '@/composables/useRecordSearch'
+import { evidencePreviewErrorMessage } from '@/lib/evidencePreviewErrors'
 import type { HighlightRect } from '@/types/pdf-highlight'
 import {
   cofDisplay,
-  conditionGroupClass,
+  compactRecordDisplayId,
   conditionGroups,
   confidenceDisplay,
   confidenceValueFor,
   formatIonicLiquidHtml,
   lubricantDisplay,
   lubricantStructureItems,
+  recordDisplayId,
   tribopairDisplay,
-  tribopairParts,
-  tribopairExtras,
-  surfaceRoughnessBadge,
   type IonStructurePreviewItem,
 } from '@/lib/integratedExplorerHelpers'
 import { normalizePotentialDisplayText } from '@/lib/potential'
@@ -63,13 +54,16 @@ const props = defineProps<{
   sourceName?: string
   literatureMetadata?: any
   selectedFileId?: string | null
+  recordScope?: 'active' | 'group_library'
   fixedExperimentScale?: string | null
   focusRecordId?: number | null
+  focusEntityType?: 'record' | 'candidate' | null
   externalExportRequest?: { id: number, format: ExportFormat } | null
+  externalFilterRequestId?: number | null
 }>()
 
 const emit = defineEmits<{
-  'view-literature': [payload?: { literatureId?: number | null, recordId?: number | null }]
+  'view-literature': [payload?: { literatureId?: number | null, recordId?: number | null, mode?: 'grounding' | null }]
   'clear-doi': []
   'clear-source': []
   'clear-focused-record': []
@@ -84,6 +78,7 @@ type ExportFormat = 'json' | 'csv' | 'ndjson'
 
 const {
   loading,
+  error: searchError,
   result,
   filterOptions,
   selectedExperimentScale,
@@ -93,7 +88,6 @@ const {
   selectedSubstrateMaterial,
   selectedSubstrateCoating,
   selectedSpeedValue,
-  selectedShearRateValue,
   selectedTemperatureValue,
   selectedPotentialValue,
   selectedWaterContentValue,
@@ -123,30 +117,23 @@ const {
 } = useRecordSearch({
   initialDoi: toRef(props, 'initialDoi'),
   selectedFileId: toRef(props, 'selectedFileId'),
+  targetRecordId: toRef(props, 'focusRecordId'),
+  targetEntityType: toRef(props, 'focusEntityType'),
+  scope: toRef(props, 'recordScope'),
   fixedExperimentScale: toRef(props, 'fixedExperimentScale'),
   pageSize: PAGE_SIZE,
 })
 
-const advancedSearchSummary = computed(() => {
-  if (!hasManualFilters.value) {
-    return props.selectedFileId
-      ? '当前文献内浏览全部记录，可固定阳离子或阴离子，再缩小到特定摩擦副、条件或区间。'
-      : '可按 DOI 搜索，或点"高级筛选"按离子组成 / 摩擦副 / 条件精确筛选。'
-  }
-  return `已启用 ${activeManualFilterCount.value} 个筛选条件，结果在下表中实时更新。`
-})
-
 type AdvancedFilterState = {
-  cation: string
-  anion: string
-  probe: string
-  substrate: string
-  coating: string
-  speed: string
-  shearRate: string
-  temperature: string
-  potential: string
-  water: string
+  cation: string[]
+  anion: string[]
+  probe: string[]
+  substrate: string[]
+  coating: string[]
+  speed: string[]
+  temperature: string[]
+  potential: string[]
+  water: string[]
   scale: string
   loadMin: string
   loadMax: string
@@ -163,19 +150,17 @@ type AdvancedOptionKey =
   | 'substrate'
   | 'coating'
   | 'speed'
-  | 'shearRate'
   | 'temperature'
   | 'potential'
   | 'water'
-  | 'scale'
 
 type AdvancedFilterField = {
   key: AdvancedOptionKey
   label: string
-  group: '材料层' | '工况'
+  group: 'Material' | 'Condition'
   description: string
   options: string[]
-  selected: string
+  selected: string[]
   accentClass: string
   optionCount?: number
 }
@@ -186,40 +171,58 @@ type IonFilterRole = 'cation' | 'anion'
 const activeIonRole = ref<IonFilterRole>('cation')
 const advancedOptionSearch = ref('')
 
-const scaleFilterOptions = computed(() => {
-  const source = filterOptions.value.experimentScales?.length
-    ? filterOptions.value.experimentScales
-    : ['macroscale', 'nanoscale']
-  const seen = new Set<string>()
-  const options: string[] = []
-  for (const value of source) {
-    const canonical = canonicalExperimentScaleValue(value)
-    if (!canonical || seen.has(canonical)) continue
-    seen.add(canonical)
-    options.push(canonical)
-  }
-  const order = ['macroscale', 'nanoscale', 'microscale', 'unknown']
-  return options.sort((a, b) => {
-    const ai = order.indexOf(a)
-    const bi = order.indexOf(b)
-    if (ai >= 0 || bi >= 0) return (ai >= 0 ? ai : 999) - (bi >= 0 ? bi : 999)
-    return a.localeCompare(b)
-  })
+type ScaleLaneValue = '' | 'nanoscale' | 'macroscale'
+
+const scaleLaneOptions: Array<{
+  value: ScaleLaneValue
+  label: string
+  shortLabel: string
+  detail: string
+}> = [
+  { value: '', label: 'All', shortLabel: 'All', detail: '全部摩擦记录' },
+  { value: 'nanoscale', label: 'Nano / AFM', shortLabel: 'Nano', detail: 'AFM / SFB / FFM' },
+  { value: 'macroscale', label: 'Macro / Tribometer', shortLabel: 'Macro', detail: 'Ball / pin / wear' },
+]
+
+const activeScaleLane = computed<ScaleLaneValue>(() => {
+  const canonical = canonicalExperimentScaleValue(selectedExperimentScale.value)
+  if (canonical === 'nanoscale' || canonical === 'macroscale') return canonical
+  return ''
 })
+
+function setScaleLane(value: ScaleLaneValue) {
+  selectedExperimentScale.value = canonicalExperimentScaleValue(value)
+  clearSelection()
+  handleSearch()
+  appliedAdvancedFilterState.value = captureAdvancedFilterState()
+}
+
+const contactPrimaryFilterLabel = computed(() =>
+  activeScaleLane.value === 'macroscale' ? 'Counterface' : 'Probe',
+)
+const contactPrimaryFilterDescription = computed(() =>
+  activeScaleLane.value === 'macroscale' ? 'Ball, pin, block, or upper body' : 'Upper surface or probe tip',
+)
+const contactSecondaryFilterLabel = computed(() =>
+  activeScaleLane.value === 'macroscale' ? 'Specimen / Disk' : 'Substrate',
+)
+const contactSecondaryFilterDescription = computed(() =>
+  activeScaleLane.value === 'macroscale' ? 'Disk, ring, lower balls, or specimen' : 'Lower surface / base material',
+)
 
 const ionFilterRoles = computed(() => [
   {
     key: 'cation' as const,
-    label: '阳离子',
-    description: '固定阳离子',
+    label: 'Cation',
+    description: 'Pin the positive ion',
     options: filterOptions.value.cations,
     selected: selectedCation.value,
     accentClass: 'bg-sky-500',
   },
   {
     key: 'anion' as const,
-    label: '阴离子',
-    description: '固定阴离子',
+    label: 'Anion',
+    description: 'Pin the negative ion',
     options: filterOptions.value.anions,
     selected: selectedAnion.value,
     accentClass: 'bg-teal-500',
@@ -232,99 +235,81 @@ const activeIonFilterRole = computed(() => {
 
 const ionSelectionSummary = computed(() => {
   const parts = []
-  if (selectedCation.value) parts.push(`阳 ${selectedCation.value}`)
-  if (selectedAnion.value) parts.push(`阴 ${selectedAnion.value}`)
+  if (selectedCation.value.length) parts.push(`C+ ${selectedCation.value.join(', ')}`)
+  if (selectedAnion.value.length) parts.push(`A- ${selectedAnion.value.join(', ')}`)
   return parts.join(' · ')
 })
 
 const advancedFilterFields = computed<AdvancedFilterField[]>(() => [
   {
     key: 'ions',
-    label: '离子组成',
-    group: '材料层',
-    description: '阳离子 / 阴离子',
+    label: 'Ion pair',
+    group: 'Material',
+    description: 'Cation / anion',
     options: [],
-    selected: ionSelectionSummary.value,
+    selected: ionSelectionSummary.value ? [ionSelectionSummary.value] : [],
     accentClass: 'bg-sky-500',
     optionCount: filterOptions.value.cations.length + filterOptions.value.anions.length,
   },
   {
     key: 'probe',
-    label: '探针材料',
-    group: '材料层',
-    description: '上表面或探针端',
+    label: contactPrimaryFilterLabel.value,
+    group: 'Material',
+    description: contactPrimaryFilterDescription.value,
     options: filterOptions.value.probeMaterials,
     selected: selectedProbeMaterial.value,
     accentClass: 'bg-cyan-500',
   },
   {
     key: 'substrate',
-    label: '基底材料',
-    group: '材料层',
-    description: '下表面 / 基底',
+    label: contactSecondaryFilterLabel.value,
+    group: 'Material',
+    description: contactSecondaryFilterDescription.value,
     options: filterOptions.value.substrateMaterials,
     selected: selectedSubstrateMaterial.value,
     accentClass: 'bg-slate-700',
   },
   {
     key: 'coating',
-    label: '涂层',
-    group: '材料层',
-    description: '氧化层、膜层、修饰层',
+    label: 'Coating',
+    group: 'Material',
+    description: 'Oxide, film, or surface modifier',
     options: filterOptions.value.substrateCoatings,
     selected: selectedSubstrateCoating.value,
     accentClass: 'bg-amber-500',
   },
   {
-    key: 'scale',
-    label: '实验尺度',
-    group: '工况',
-    description: '宏观摩擦 / 纳米摩擦',
-    options: scaleFilterOptions.value,
-    selected: selectedExperimentScale.value,
-    accentClass: 'bg-indigo-500',
-  },
-  {
     key: 'speed',
-    label: '滑移速度',
-    group: '工况',
-    description: '线速度，单位通常为 μm/s、mm/s',
+    label: 'Sliding speed',
+    group: 'Condition',
+    description: 'Linear speed, μm/s or mm/s',
     options: filterOptions.value.speedValues,
     selected: selectedSpeedValue.value,
     accentClass: 'bg-violet-500',
   },
   {
-    key: 'shearRate',
-    label: '剪切率',
-    group: '工况',
-    description: '速度梯度，单位通常为 s^-1',
-    options: filterOptions.value.shearRateValues || [],
-    selected: selectedShearRateValue.value,
-    accentClass: 'bg-fuchsia-500',
-  },
-  {
     key: 'temperature',
-    label: '温度',
-    group: '工况',
-    description: '室温、高温或低温',
+    label: 'Temperature',
+    group: 'Condition',
+    description: 'Room, high, or low temperature',
     options: filterOptions.value.temperatureValues,
     selected: selectedTemperatureValue.value,
     accentClass: 'bg-rose-500',
   },
   {
     key: 'potential',
-    label: '电势',
-    group: '工况',
-    description: '电化学窗口',
+    label: 'Potential',
+    group: 'Condition',
+    description: 'Electrochemical bias',
     options: filterOptions.value.potentialValues,
     selected: selectedPotentialValue.value,
     accentClass: 'bg-blue-500',
   },
   {
     key: 'water',
-    label: '含水量',
-    group: '工况',
-    description: '水含量 / 湿度记录',
+    label: 'Water',
+    group: 'Condition',
+    description: 'Water content or humidity',
     options: filterOptions.value.waterContentValues,
     selected: selectedWaterContentValue.value,
     accentClass: 'bg-emerald-500',
@@ -333,11 +318,11 @@ const advancedFilterFields = computed<AdvancedFilterField[]>(() => [
 
 const emptyAdvancedFilterField: AdvancedFilterField = {
   key: 'ions',
-  label: '离子组成',
-  group: '材料层',
-  description: '阳离子 / 阴离子',
+  label: 'Ion pair',
+  group: 'Material',
+  description: 'Cation / anion',
   options: [],
-  selected: '',
+  selected: [],
   accentClass: 'bg-sky-500',
 }
 
@@ -354,8 +339,8 @@ const activeAdvancedOptions = computed(() => {
   return activeAdvancedFilterField.value.options
 })
 
-const activeAdvancedSelectedValue = computed(() => {
-  if (activeAdvancedOptionKey.value === 'ions') return activeIonFilterRole.value?.selected || ''
+const activeAdvancedSelectedValues = computed(() => {
+  if (activeAdvancedOptionKey.value === 'ions') return activeIonFilterRole.value?.selected || []
   return activeAdvancedFilterField.value.selected
 })
 
@@ -371,11 +356,11 @@ const matchingAdvancedOptions = computed(() => {
 })
 
 const visibleAdvancedOptions = computed(() => {
-  const selectedValue = activeAdvancedSelectedValue.value
+  const selectedValues = new Set(activeAdvancedSelectedValues.value)
   return [...matchingAdvancedOptions.value]
     .sort((a, b) => {
-      if (a === selectedValue) return -1
-      if (b === selectedValue) return 1
+      if (selectedValues.has(a) && !selectedValues.has(b)) return -1
+      if (!selectedValues.has(a) && selectedValues.has(b)) return 1
       return a.localeCompare(b)
     })
     .slice(0, ADVANCED_OPTION_LIMIT)
@@ -389,20 +374,17 @@ function normalizeAdvancedOptionText(value: string): string {
   return value.toLowerCase().replace(/\s+/g, ' ').trim()
 }
 
-function advancedFilterValueDisplay(key: AdvancedOptionKey, value: string): string {
+function advancedFilterValueDisplay(_key: AdvancedOptionKey, value: string): string {
   if (!value) return ''
-  if (key === 'scale') return experimentScaleLabel(value)
   return value
 }
 
-function advancedFilterSearchText(key: AdvancedOptionKey, value: string): string {
-  if (key === 'scale') return normalizeAdvancedOptionText(experimentScaleSearchText(value))
+function advancedFilterSearchText(_key: AdvancedOptionKey, value: string): string {
   return normalizeAdvancedOptionText(value)
 }
 
-function advancedFilterRawTitle(key: AdvancedOptionKey, value: string): string | undefined {
+function advancedFilterRawTitle(_key: AdvancedOptionKey, value: string): string | undefined {
   if (!value) return undefined
-  if (key === 'scale') return canonicalExperimentScaleValue(value)
   return value
 }
 
@@ -421,37 +403,50 @@ function commitAdvancedDiscreteFilterChange() {
   appliedAdvancedFilterState.value = captureAdvancedFilterState()
 }
 
+function toggleSelectedValue(values: string[], value: string): string[] {
+  const normalized = String(value || '').trim()
+  if (!normalized) return values
+  return values.includes(normalized)
+    ? values.filter((item) => item !== normalized)
+    : [...values, normalized]
+}
+
 function setAdvancedFilterValue(key: AdvancedOptionKey, value: string) {
   if (key === 'ions') {
-    if (activeIonRole.value === 'cation') selectedCation.value = value
-    if (activeIonRole.value === 'anion') selectedAnion.value = value
+    if (activeIonRole.value === 'cation') selectedCation.value = toggleSelectedValue(selectedCation.value, value)
+    if (activeIonRole.value === 'anion') selectedAnion.value = toggleSelectedValue(selectedAnion.value, value)
   }
-  if (key === 'probe') selectedProbeMaterial.value = value
-  if (key === 'substrate') selectedSubstrateMaterial.value = value
-  if (key === 'coating') selectedSubstrateCoating.value = value
-  if (key === 'speed') selectedSpeedValue.value = value
-  if (key === 'shearRate') selectedShearRateValue.value = value
-  if (key === 'temperature') selectedTemperatureValue.value = value
-  if (key === 'potential') selectedPotentialValue.value = value
-  if (key === 'water') selectedWaterContentValue.value = value
-  if (key === 'scale') selectedExperimentScale.value = canonicalExperimentScaleValue(value)
+  if (key === 'probe') selectedProbeMaterial.value = toggleSelectedValue(selectedProbeMaterial.value, value)
+  if (key === 'substrate') selectedSubstrateMaterial.value = toggleSelectedValue(selectedSubstrateMaterial.value, value)
+  if (key === 'coating') selectedSubstrateCoating.value = toggleSelectedValue(selectedSubstrateCoating.value, value)
+  if (key === 'speed') selectedSpeedValue.value = toggleSelectedValue(selectedSpeedValue.value, value)
+  if (key === 'temperature') selectedTemperatureValue.value = toggleSelectedValue(selectedTemperatureValue.value, value)
+  if (key === 'potential') selectedPotentialValue.value = toggleSelectedValue(selectedPotentialValue.value, value)
+  if (key === 'water') selectedWaterContentValue.value = toggleSelectedValue(selectedWaterContentValue.value, value)
   advancedOptionSearch.value = ''
   commitAdvancedDiscreteFilterChange()
 }
 
 function clearAdvancedFilterValue(key: AdvancedOptionKey) {
   if (key === 'ions') {
-    if (activeIonRole.value === 'cation') selectedCation.value = ''
-    if (activeIonRole.value === 'anion') selectedAnion.value = ''
+    if (activeIonRole.value === 'cation') selectedCation.value = []
+    if (activeIonRole.value === 'anion') selectedAnion.value = []
     commitAdvancedDiscreteFilterChange()
     return
   }
-  setAdvancedFilterValue(key, '')
+  if (key === 'probe') selectedProbeMaterial.value = []
+  if (key === 'substrate') selectedSubstrateMaterial.value = []
+  if (key === 'coating') selectedSubstrateCoating.value = []
+  if (key === 'speed') selectedSpeedValue.value = []
+  if (key === 'temperature') selectedTemperatureValue.value = []
+  if (key === 'potential') selectedPotentialValue.value = []
+  if (key === 'water') selectedWaterContentValue.value = []
+  commitAdvancedDiscreteFilterChange()
 }
 
 function clearIonFilterRole(role: IonFilterRole) {
-  if (role === 'cation') selectedCation.value = ''
-  if (role === 'anion') selectedAnion.value = ''
+  if (role === 'cation') selectedCation.value = []
+  if (role === 'anion') selectedAnion.value = []
   commitAdvancedDiscreteFilterChange()
 }
 
@@ -462,16 +457,15 @@ function applyAdvancedTypedValue() {
 
 function captureAdvancedFilterState(): AdvancedFilterState {
   return {
-    cation: selectedCation.value,
-    anion: selectedAnion.value,
-    probe: selectedProbeMaterial.value,
-    substrate: selectedSubstrateMaterial.value,
-    coating: selectedSubstrateCoating.value,
-    speed: selectedSpeedValue.value,
-    shearRate: selectedShearRateValue.value,
-    temperature: selectedTemperatureValue.value,
-    potential: selectedPotentialValue.value,
-    water: selectedWaterContentValue.value,
+    cation: [...selectedCation.value],
+    anion: [...selectedAnion.value],
+    probe: [...selectedProbeMaterial.value],
+    substrate: [...selectedSubstrateMaterial.value],
+    coating: [...selectedSubstrateCoating.value],
+    speed: [...selectedSpeedValue.value],
+    temperature: [...selectedTemperatureValue.value],
+    potential: [...selectedPotentialValue.value],
+    water: [...selectedWaterContentValue.value],
     scale: selectedExperimentScale.value,
     loadMin: loadMin.value,
     loadMax: loadMax.value,
@@ -481,16 +475,15 @@ function captureAdvancedFilterState(): AdvancedFilterState {
 }
 
 function restoreAdvancedFilterState(state: AdvancedFilterState) {
-  selectedCation.value = state.cation
-  selectedAnion.value = state.anion
-  selectedProbeMaterial.value = state.probe
-  selectedSubstrateMaterial.value = state.substrate
-  selectedSubstrateCoating.value = state.coating
-  selectedSpeedValue.value = state.speed
-  selectedShearRateValue.value = state.shearRate
-  selectedTemperatureValue.value = state.temperature
-  selectedPotentialValue.value = state.potential
-  selectedWaterContentValue.value = state.water
+  selectedCation.value = [...state.cation]
+  selectedAnion.value = [...state.anion]
+  selectedProbeMaterial.value = [...state.probe]
+  selectedSubstrateMaterial.value = [...state.substrate]
+  selectedSubstrateCoating.value = [...state.coating]
+  selectedSpeedValue.value = [...state.speed]
+  selectedTemperatureValue.value = [...state.temperature]
+  selectedPotentialValue.value = [...state.potential]
+  selectedWaterContentValue.value = [...state.water]
   selectedExperimentScale.value = state.scale
   loadMin.value = state.loadMin
   loadMax.value = state.loadMax
@@ -499,6 +492,7 @@ function restoreAdvancedFilterState(state: AdvancedFilterState) {
 }
 
 function applyAdvancedFilters() {
+  clearSelection()
   handleSearch()
   appliedAdvancedFilterState.value = captureAdvancedFilterState()
 }
@@ -512,27 +506,22 @@ function collapseAdvancedFilters() {
   showAdvancedFilters.value = false
 }
 
-function toggleAdvancedFilters() {
-  showAdvancedFilters.value = !showAdvancedFilters.value
-}
-
 function clearAllAdvancedFilters() {
+  clearSelection()
   clearAdvancedSearch()
   appliedAdvancedFilterState.value = captureAdvancedFilterState()
 }
 
 function removeAdvancedSearchChip(id: string) {
-  if (id === 'manual-cation') selectedCation.value = ''
-  if (id === 'manual-anion') selectedAnion.value = ''
-  if (id === 'manual-probe') selectedProbeMaterial.value = ''
-  if (id === 'manual-substrate') selectedSubstrateMaterial.value = ''
-  if (id === 'manual-coating') selectedSubstrateCoating.value = ''
-  if (id === 'manual-speed') selectedSpeedValue.value = ''
-  if (id === 'manual-shear-rate') selectedShearRateValue.value = ''
-  if (id === 'manual-temperature') selectedTemperatureValue.value = ''
-  if (id === 'manual-potential') selectedPotentialValue.value = ''
-  if (id === 'manual-water') selectedWaterContentValue.value = ''
-  if (id === 'manual-scale') selectedExperimentScale.value = ''
+  if (id === 'manual-cation') selectedCation.value = []
+  if (id === 'manual-anion') selectedAnion.value = []
+  if (id === 'manual-probe') selectedProbeMaterial.value = []
+  if (id === 'manual-substrate') selectedSubstrateMaterial.value = []
+  if (id === 'manual-coating') selectedSubstrateCoating.value = []
+  if (id === 'manual-speed') selectedSpeedValue.value = []
+  if (id === 'manual-temperature') selectedTemperatureValue.value = []
+  if (id === 'manual-potential') selectedPotentialValue.value = []
+  if (id === 'manual-water') selectedWaterContentValue.value = []
   if (id === 'manual-load') {
     loadMin.value = ''
     loadMax.value = ''
@@ -541,6 +530,7 @@ function removeAdvancedSearchChip(id: string) {
     cofMin.value = ''
     cofMax.value = ''
   }
+  clearSelection()
   handleSearch()
   appliedAdvancedFilterState.value = captureAdvancedFilterState()
 }
@@ -548,22 +538,54 @@ function removeAdvancedSearchChip(id: string) {
 const {
   evidenceModalRecord,
   evidenceData,
-  evidenceLoading,
   evidenceError,
   closeEvidenceModal,
   openEvidenceModal,
 } = useEvidencePanel()
 
+type DatabaseEvidenceField = 'ionic-liquid' | 'tribopair' | 'conditions' | 'cof'
+const databaseEvidenceField = ref<DatabaseEvidenceField>('conditions')
+const databaseEvidenceFocusedFieldKey = ref<string | null>(null)
+const databaseEvidencePosition = ref({ top: 160, left: 160 })
+
+type DatabaseEvidenceQuote = {
+  text: string
+  highlights?: string[]
+  fieldKey?: string
+}
+
+type DatabaseEvidenceSlide = {
+  id: string
+  fieldKey?: string
+  label: string
+  page: number | null
+  value: string
+  quote: DatabaseEvidenceQuote | null
+  note?: string
+  noteLabel?: string
+  locatorKey?: string
+  imageSrc: string | null
+  imageLoading?: boolean
+  imageError?: string | null
+}
+
+const databaseFieldEvidence = ref<Record<string, RecordFieldEvidenceResponse | null>>({})
+const databaseFieldEvidenceLoading = ref<Record<string, boolean>>({})
+const databaseFieldEvidenceError = ref<Record<string, string | null>>({})
+const databaseEvidenceSlideIndex = ref(0)
+const databaseEvidenceOpenToken = ref(0)
+const databaseEvidencePreviewImages = ref<Record<string, string | null>>({})
+const databaseEvidencePreviewLoading = ref<Record<string, boolean>>({})
+const databaseEvidencePreviewError = ref<Record<string, string | null>>({})
+
 const {
   deletingRowId,
   editDrawerRecord,
   activeEditValues,
-  openEditModal,
   closeEditDrawer,
   updateActiveEditingField,
   saveActiveEditRecord,
   isSavingActiveEditRecord,
-  removeRecord,
 } = useRecordEditing({
   result,
   evidenceData,
@@ -574,9 +596,18 @@ const {
 // 批量选择 + 批量操作 ─────────────────────────────────────────
 const selectedIds = ref<Set<number>>(new Set())
 const batchActionPending = ref(false)
-const batchEditField = ref<string>('')
-const batchEditValue = ref<string>('')
 const batchError = ref('')
+const selectablePageRecordIds = computed(() =>
+  result.value.items
+    .filter((record) => databaseRecordEntityType(record) !== 'candidate')
+    .map((record) => Number(record.id))
+    .filter((id) => Number.isFinite(id)),
+)
+const visibleRecordIds = computed(() => new Set(selectablePageRecordIds.value))
+const visibleSelectedIds = computed(() => new Set(
+  Array.from(selectedIds.value).filter((id) => visibleRecordIds.value.has(id)),
+))
+const visibleRecordSelectionKey = computed(() => Array.from(visibleRecordIds.value).join('|'))
 
 function toggleSelectOne(recordId: number) {
   const next = new Set(selectedIds.value)
@@ -586,8 +617,7 @@ function toggleSelectOne(recordId: number) {
 }
 function toggleSelectPage(select: boolean) {
   const next = new Set(selectedIds.value)
-  for (const r of result.value.items) {
-    const id = Number(r.id)
+  for (const id of selectablePageRecordIds.value) {
     if (select) next.add(id)
     else next.delete(id)
   }
@@ -598,18 +628,18 @@ function clearSelection() {
 }
 
 async function handleBatchDelete() {
-  if (!selectedIds.value.size) return
-  if (!confirm(`确定要删除选中的 ${selectedIds.value.size} 条记录？此操作不可撤销。`)) return
+  if (!visibleSelectedIds.value.size) return
+  if (!confirm(`Delete ${visibleSelectedIds.value.size} selected records? This cannot be undone.`)) return
   batchActionPending.value = true
   batchError.value = ''
   try {
-    const ids = Array.from(selectedIds.value)
+    const ids = Array.from(visibleSelectedIds.value)
     for (const id of ids) {
       try {
         const { deleteTribologyRecord } = await import('@/lib/api')
         await deleteTribologyRecord(id)
       } catch (e: any) {
-        batchError.value = `删除记录 #${id} 失败：${e?.response?.data?.detail || e?.message || '未知错误'}`
+        batchError.value = `Failed to delete record #${id}: ${e?.response?.data?.detail || e?.message || 'Unknown error'}`
         break
       }
     }
@@ -620,47 +650,13 @@ async function handleBatchDelete() {
   }
 }
 
-const BATCH_FIELD_OPTIONS: Array<{ key: string; label: string }> = [
-  { key: 'substrateMaterial', label: '基底材料' },
-  { key: 'substrateCoating', label: '涂层' },
-  { key: 'probeMaterial', label: '探针材料' },
-  { key: 'temperature', label: '温度' },
-  { key: 'potential', label: '电势' },
-  { key: 'speedValue', label: '滑动速度' },
-  { key: 'shearRate', label: '剪切率' },
-  { key: 'loadValue', label: '法向载荷' },
-]
-
-async function handleBatchEdit() {
-  if (!selectedIds.value.size) return
-  if (!batchEditField.value) {
-    batchError.value = '请先选择要修改的字段'
-    return
-  }
-  if (!confirm(`将选中的 ${selectedIds.value.size} 条记录的「${
-    BATCH_FIELD_OPTIONS.find((o) => o.key === batchEditField.value)?.label || batchEditField.value
-  }」改为「${batchEditValue.value || '空'}」？`)) return
-  batchActionPending.value = true
-  batchError.value = ''
-  try {
-    const ids = Array.from(selectedIds.value)
-    const { updateTribologyRecord } = await import('@/lib/api')
-    for (const id of ids) {
-      try {
-        await updateTribologyRecord(id, { [batchEditField.value]: batchEditValue.value })
-      } catch (e: any) {
-        batchError.value = `更新记录 #${id} 失败：${e?.response?.data?.detail || e?.message || '未知错误'}`
-        break
-      }
-    }
-    batchEditField.value = ''
-    batchEditValue.value = ''
-    clearSelection()
-    await fetchData()
-  } finally {
-    batchActionPending.value = false
-  }
-}
+watch(
+  visibleRecordSelectionKey,
+  () => {
+    if (!selectedIds.value.size) return
+    selectedIds.value = visibleSelectedIds.value
+  },
+)
 
 const imagePreview = ref<{
   open: boolean
@@ -684,16 +680,6 @@ const structurePreview = ref<{
   title: '',
   items: [],
 })
-type EvidenceTermHit = {
-  term: string
-  page: number
-  bbox: number[]
-  matched_text?: string | null
-  semantic_type?: string | null
-  inferred?: boolean
-  snippet_text?: string | null
-  image_b64?: string | null
-}
 const pdfLocate = ref<{
   open: boolean
   title: string
@@ -710,10 +696,6 @@ const pdfLocate = ref<{
   notice: '',
 })
 
-const activeEvidenceRow = computed<InteractiveEvidenceRow | null>(() => {
-  if (!evidenceModalRecord.value) return null
-  return buildInteractiveEvidenceRow(evidenceModalRecord.value)
-})
 function openStructurePreview(record: RecordResponse) {
   const items = lubricantStructureItems(record)
   structurePreview.value = {
@@ -729,283 +711,35 @@ function closeStructurePreview() {
   structurePreview.value.rowId = null
 }
 
-function evidenceImageSrc(recordId: number): string | null {
-  const ev = evidenceData.value[recordId]
+function databaseRecordEntityType(record: RecordResponse) {
+  return String(record.reviewEntityType || record.entityType || 'record').trim().toLowerCase() === 'candidate'
+    ? 'candidate'
+    : 'record'
+}
+
+function databaseRecordEntityId(record: RecordResponse) {
+  const parsed = Number(record.entityId || record.id)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : record.id
+}
+
+function databaseRecordCacheKey(record: RecordResponse) {
+  return recordEvidenceCacheKey(record)
+}
+
+function databaseRecordEvidenceData(record: RecordResponse): EvidenceResult | null | undefined {
+  return evidenceData.value[databaseRecordCacheKey(record)]
+}
+
+function evidenceImageSrc(record: RecordResponse): string | null {
+  const ev = databaseRecordEvidenceData(record)
   if (!ev?.image_b64) return null
   return `data:image/png;base64,${ev.image_b64}`
 }
 
-function evidencePagePreviewSrc(recordId: number): string | null {
-  const ev = evidenceData.value[recordId]
+function evidencePagePreviewSrc(record: RecordResponse): string | null {
+  const ev = databaseRecordEvidenceData(record)
   if (!ev?.page_preview_b64) return null
   return `data:image/png;base64,${ev.page_preview_b64}`
-}
-
-function evidenceTermImageSrc(hit: EvidenceTermHit | null | undefined): string | null {
-  if (!hit?.image_b64) return null
-  return `data:image/png;base64,${hit.image_b64}`
-}
-
-function firstNonEmpty(...values: Array<string | null | undefined>): string | undefined {
-  for (const value of values) {
-    const normalized = String(value || '').trim()
-    if (normalized) return normalized
-  }
-  return undefined
-}
-
-function normalizeEvidencePage(...values: Array<number | null | undefined>): number {
-  for (const value of values) {
-    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-      return Math.max(1, Math.floor(value))
-    }
-  }
-  return 1
-}
-
-function normalizeEvidenceTargets(value: string | Array<string | null | undefined> | null | undefined): string[] {
-  const items = Array.isArray(value) ? value : [value]
-  const seen = new Set<string>()
-  const normalized: string[] = []
-  for (const item of items) {
-    const text = String(item || '').trim()
-    if (!text || seen.has(text)) continue
-    seen.add(text)
-    normalized.push(text)
-  }
-  return normalized
-}
-
-function buildInteractiveEvidenceSnippet(
-  record: RecordResponse,
-  section: string,
-  target: string | Array<string | null | undefined> | null | undefined,
-  options?: {
-    fallbackPage?: number | null
-    preferImage?: boolean
-    semanticTypes?: string[]
-    previewLabel?: string
-    previewHtml?: string
-    allowFallbackBoundingBox?: boolean
-  },
-): InteractiveEvidenceSnippet | undefined {
-  const ev = evidenceData.value[record.id]
-  const normalizedTargets = normalizeEvidenceTargets(target)
-  const normalizedTarget = normalizedTargets[0]
-  const hit = normalizedTargets.length ? findBestTermHit(ev, normalizedTargets, options?.semanticTypes) : null
-  const allowsImageOnlyFallback = Boolean(options?.preferImage && isVisualEvidenceSource(ev))
-  const requiresResolvedHit = !allowsImageOnlyFallback
-  if (requiresResolvedHit && !hit) return undefined
-  const page = normalizeEvidencePage(hit?.page, options?.fallbackPage, ev?.page, record.evidencePage, record.sourcePage)
-  const text = firstNonEmpty(hit?.snippet_text, ev?.text_snippet, ev?.evidence_text, record.evidence)
-  const hitImageSrc = evidenceTermImageSrc(hit)
-  const previewSrc = evidenceImageSrc(record.id) || evidencePagePreviewSrc(record.id)
-  const shouldUseHitImage = Boolean(hitImageSrc && isVisualEvidenceSource(ev))
-  const shouldUseImage = Boolean(options?.preferImage && previewSrc && isVisualEvidenceSource(ev))
-  const previewLabel = firstNonEmpty(
-    normalizeTraceDisplayText(options?.previewLabel),
-    normalizedTargets.length > 1
-      ? normalizedTargets.map((item) => normalizeTraceDisplayText(item)).join(' · ')
-      : normalizeTraceDisplayText(normalizedTarget),
-  )
-
-  if (shouldUseHitImage) {
-    return {
-      page,
-      section,
-      type: 'image',
-      target: normalizedTarget,
-      highlightTargets: normalizedTargets.length > 1 ? normalizedTargets : undefined,
-      previewLabel,
-      previewHtml: options?.previewHtml,
-      imageUrl: hitImageSrc || undefined,
-      boundingBox: hit?.bbox || undefined,
-    }
-  }
-
-  if (shouldUseImage) {
-    return {
-      page,
-      section,
-      type: 'image',
-      target: normalizedTarget,
-      highlightTargets: normalizedTargets.length > 1 ? normalizedTargets : undefined,
-      previewLabel,
-      previewHtml: options?.previewHtml,
-      imageUrl: previewSrc || undefined,
-      boundingBox: hit?.bbox || (options?.allowFallbackBoundingBox ? ev?.bbox || undefined : undefined),
-    }
-  }
-
-  if (!text || !normalizedTarget) return undefined
-
-  return {
-    page,
-    section,
-    type: 'text',
-    text,
-    target: normalizedTarget,
-    highlightTargets: normalizedTargets.length > 1 ? normalizedTargets : undefined,
-    previewLabel,
-    previewHtml: options?.previewHtml,
-    boundingBox: hit?.bbox || undefined,
-  }
-}
-
-function buildInteractiveEvidenceRow(record: RecordResponse): InteractiveEvidenceRow | null {
-  const ev = evidenceData.value[record.id]
-  const primaryPage = normalizeEvidencePage(ev?.page, record.evidencePage, record.sourcePage)
-  const cofTarget = firstNonEmpty(record.cofRaw, record.cofValue != null ? String(record.cofValue) : undefined)
-  const cof =
-    buildInteractiveEvidenceSnippet(record, firstNonEmpty(ev?.source, record.sourceFigure, 'Primary evidence') || 'Primary evidence', cofTarget, {
-      fallbackPage: primaryPage,
-      preferImage: true,
-      semanticTypes: ['cof'],
-      allowFallbackBoundingBox: true,
-    }) ||
-    buildInteractiveEvidenceSnippet(record, 'Primary evidence', cofTarget, {
-      fallbackPage: primaryPage,
-      semanticTypes: ['cof'],
-    })
-
-  if (!cof) return null
-
-  const ionicLiquid = buildInteractiveEvidenceSnippet(record, 'Ionic liquid', record.lubricant, {
-    fallbackPage: primaryPage,
-    semanticTypes: ['lubricant'],
-    previewLabel: lubricantDisplay(record),
-    previewHtml: formatIonicLiquidHtml(lubricantDisplay(record)),
-  })
-  const surface = buildInteractiveEvidenceSnippet(
-    record,
-    'Surface / substrate',
-    firstNonEmpty(record.substrateMaterial, record.substrateCoating, record.materialName),
-    {
-      fallbackPage: primaryPage,
-      semanticTypes: ['material'],
-      previewLabel: firstNonEmpty(record.substrateMaterial, record.substrateCoating, record.materialName),
-    },
-  )
-  const speed = buildInteractiveEvidenceSnippet(
-    record,
-    'Slip velocity',
-    record.speedValue,
-    {
-      fallbackPage: primaryPage,
-      preferImage: true,
-      semanticTypes: ['speed'],
-      previewLabel: record.speedValue || undefined,
-    },
-  )
-  const shearRate = buildInteractiveEvidenceSnippet(
-    record,
-    'Shear rate',
-    record.shearRate,
-    {
-      fallbackPage: primaryPage,
-      preferImage: true,
-      semanticTypes: ['shear_rate'],
-      previewLabel: record.shearRate || undefined,
-    },
-  )
-  const load = buildInteractiveEvidenceSnippet(
-    record,
-    'Load range',
-    record.loadValue,
-    {
-      fallbackPage: primaryPage,
-      preferImage: true,
-      semanticTypes: ['load'],
-      previewLabel: record.loadValue || undefined,
-    },
-  )
-  const condition = buildInteractiveEvidenceSnippet(
-    record,
-    'Condition',
-    [record.potential, record.waterContent],
-    {
-      fallbackPage: primaryPage,
-      semanticTypes: ['potential', 'water_content'],
-      previewLabel: [normalizePotentialDisplayText(record.potential), record.waterContent].filter((value) => String(value || '').trim()).join(' · ') || undefined,
-    },
-  )
-  const temperature = buildInteractiveEvidenceSnippet(record, 'Temperature', record.temperature, {
-    fallbackPage: primaryPage,
-    semanticTypes: ['temperature'],
-    previewLabel: record.temperature || undefined,
-  })
-
-  return {
-    id: record.id,
-    evidenceType: 'multi-snippet',
-    evidenceMap: {
-      cof,
-      ionicLiquid,
-      surface,
-      speed,
-      shearRate,
-      load,
-      condition,
-      temperature,
-    },
-    highlight:
-      firstNonEmpty(record.evidence, ev?.text_snippet, ev?.evidence_text, ev?.source, record.sourceFigure)
-      || 'Source-grounded evidence synthesized from the current record.',
-  }
-}
-
-function interactiveEvidenceHighlightColor(tag: InteractiveEvidenceTagType): string {
-  if (tag === 'ionicLiquid') return 'rgba(99, 102, 241, 0.35)'
-  if (tag === 'surface') return 'rgba(249, 115, 22, 0.35)'
-  if (tag === 'speed') return 'rgba(14, 165, 233, 0.35)'
-  if (tag === 'shearRate') return 'rgba(217, 70, 239, 0.35)'
-  if (tag === 'load') return 'rgba(6, 182, 212, 0.35)'
-  if (tag === 'condition') return 'rgba(16, 185, 129, 0.35)'
-  if (tag === 'temperature') return 'rgba(244, 63, 94, 0.35)'
-  return 'rgba(59, 130, 246, 0.35)'
-}
-
-function openInteractiveEvidencePdf(
-  record: RecordResponse,
-  payload: {
-    page: number
-    snippet: InteractiveEvidenceSnippet
-    activeTag: InteractiveEvidenceTagType
-  },
-) {
-  if (!record.literatureId) return
-
-  const highlight =
-    buildHighlightRect(
-      `${record.id}-${payload.activeTag}-${Date.now()}`,
-      payload.page,
-      payload.snippet.boundingBox,
-      interactiveEvidenceHighlightColor(payload.activeTag),
-    ) ||
-    buildPageAnchorHighlight(
-      `${record.id}-${payload.activeTag}-page-${payload.page}-${Date.now()}`,
-      payload.page,
-      interactiveEvidenceHighlightColor(payload.activeTag),
-    )
-
-  pdfLocate.value.open = true
-  pdfLocate.value.title = `Evidence Locator · ${payload.activeTag} · Page ${payload.page}`
-  pdfLocate.value.pdfUrl = `/api/pdf/${record.literatureId}`
-  pdfLocate.value.highlights = [highlight]
-  pdfLocate.value.activeHighlightId = highlight.id
-  pdfLocate.value.notice =
-    payload.activeTag !== 'cof' && payload.page !== normalizeEvidencePage(evidenceData.value[record.id]?.page, record.evidencePage, record.sourcePage)
-      ? `Cross-page evidence jump: ${payload.activeTag} is grounded on page ${payload.page}.`
-      : ''
-}
-
-function handleEvidenceModalPdfOpen(payload: {
-  page: number
-  snippet: InteractiveEvidenceSnippet
-  activeTag: InteractiveEvidenceTagType
-}) {
-  if (!evidenceModalRecord.value) return
-  openInteractiveEvidencePdf(evidenceModalRecord.value, payload)
 }
 
 function openImagePreview(src: string, title: string) {
@@ -1048,118 +782,7 @@ function onGlobalKeydown(e: KeyboardEvent) {
   if (structurePreview.value.open) closeStructurePreview()
   if (pdfLocate.value.open) closePdfLocate()
   if (editDrawerRecord.value) closeEditDrawer()
-}
-
-function normalizeTermKey(input: string): string {
-  return String(input || '')
-    .toLowerCase()
-    .replace(/[\u03bc\u00b5]/g, 'u')
-    .replace(/Î¼|Âµ|渭|碌/g, 'u')
-    .replace(/[^a-z0-9]/g, '')
-    .replace(/\s+/g, '')
-    .replace(/[()=:,.;]/g, '')
-}
-
-function normalizeTraceDisplayText(input: string | null | undefined): string {
-  return String(input || '')
-    .trim()
-    .replace(/[\u03bc\u00b5]/g, 'μ')
-    .replace(/Î¼|Âµ|渭|碌/g, 'μ')
-    .replace(/\s+/g, ' ')
-}
-
-function normalizeIlCationToken(input: string): string {
-  const token = String(input || '').toLowerCase().replace(/[^a-z0-9]/g, '')
-  if (!token) return ''
-  if (/^p\d+$/.test(token)) return token
-  if (token === '1ethyl3methylimidazolium' || token === 'ethyl3methylimidazolium') return 'emim'
-  if (token === '1butyl3methylimidazolium' || token === 'butyl3methylimidazolium') return 'bmim'
-  if (token === '1hexyl3methylimidazolium' || token === 'hexyl3methylimidazolium') return 'hmim'
-  if (token === 'tributylmethylphosphonium') return 'p4441'
-  if (token === 'trihexyltetradecylphosphonium') return 'p66614'
-  return token
-}
-
-function normalizeIlAnionToken(input: string): string {
-  const token = String(input || '').toLowerCase().replace(/[^a-z0-9]/g, '')
-  if (!token) return ''
-  if (token === 'tfsi' || token === 'ntf2') return 'tfsi'
-  if (token === 'fap' || token === 'tris(pentafluoroethyl)trifluorophosphate'.replace(/[^a-z0-9]/g, '')) return 'fap'
-  if (
-    token === 'bistrifluoromethanesulfonamide'
-    || token === 'bistrifluoromethylsulfonylimide'
-    || token === 'bistrifluoromethanesulfonylimide'
-  ) {
-    return 'tfsi'
-  }
-  return token
-}
-
-function inferIlAliasKeyFromName(input: string): string {
-  const lower = String(input || '').toLowerCase()
-  if (!lower) return ''
-
-  let cation = ''
-  if (lower.includes('imidazolium')) {
-    if (/1?\s*[-]?\s*ethyl\s*[-]?\s*3\s*[-]?\s*methyl/.test(lower) || /ethyl\s*methylimidazolium/.test(lower)) cation = 'emim'
-    if (/1?\s*[-]?\s*butyl\s*[-]?\s*3\s*[-]?\s*methyl/.test(lower) || /butyl\s*methylimidazolium/.test(lower)) cation = 'bmim'
-    if (/1?\s*[-]?\s*hexyl\s*[-]?\s*3\s*[-]?\s*methyl/.test(lower) || /hexyl\s*methylimidazolium/.test(lower)) cation = 'hmim'
-  }
-  if (lower.includes('phosphonium')) {
-    if (lower.includes('tributyl') && lower.includes('methyl')) cation = 'p4441'
-    if (lower.includes('trihexyl') && lower.includes('tetradecyl')) cation = 'p66614'
-  }
-
-  let anion = ''
-  if (lower.includes('tris(pentafluoroethyl)trifluorophosphate') || /\bfap\b/.test(lower)) {
-    anion = 'fap'
-  }
-  if (
-    lower.includes('ntf2')
-    || (lower.includes('bis(trifluoromethane') && lower.includes('sulfonamide'))
-    || (lower.includes('bis(trifluoromethylsulfonyl') && lower.includes('imide'))
-  ) {
-    anion = 'tfsi'
-  }
-
-  if (!cation || !anion) return ''
-  return `${cation}|${anion}`
-}
-
-function normalizeIlAliasKey(input: string): string {
-  const raw = String(input || '').trim()
-  if (!raw) return ''
-
-  const bracketPair = raw.match(/\[([^\]]+)\]\s*\[([^\]]+)\]/i)
-  if (bracketPair) {
-    const cation = normalizeIlCationToken(bracketPair[1] || '')
-    const anion = normalizeIlAnionToken(bracketPair[2] || '')
-    if (cation && anion) return `${cation}|${anion}`
-  }
-
-  return inferIlAliasKeyFromName(raw)
-}
-
-function extractNumberTokens(input: string): string[] {
-  return (String(input || '').match(/\d+(?:\.\d+)?/g) || []).map((v) => String(v))
-}
-
-function numericTokensConsistent(term: string, matched: string): boolean {
-  const termNums = extractNumberTokens(term).map((n) => Number(n)).filter((n) => Number.isFinite(n))
-  if (!termNums.length) return true
-  const matchedNums = extractNumberTokens(matched).map((n) => Number(n)).filter((n) => Number.isFinite(n))
-  if (!matchedNums.length) return false
-  return termNums.every((tv) => {
-    const tol = Math.max(1e-6, Math.abs(tv) * 0.01)
-    return matchedNums.some((mv) => Math.abs(mv - tv) <= tol)
-  })
-}
-
-function commonPrefixLen(a: string, b: string): number {
-  const n = Math.min(a.length, b.length)
-  let i = 0
-  while (i < n && a[i] === b[i]) i += 1
-  return i
+  if (evidenceModalRecord.value) closeDatabaseEvidencePopover()
 }
 
 function closePdfLocate() {
@@ -1169,107 +792,6 @@ function closePdfLocate() {
   pdfLocate.value.highlights = []
   pdfLocate.value.activeHighlightId = null
   pdfLocate.value.notice = ''
-}
-
-function findBestTermHitWithinHits(hits: EvidenceTermHit[], term: string): EvidenceTermHit | null {
-  const termRaw = String(term || '').trim()
-  if (!termRaw) return null
-  const termIlKey = normalizeIlAliasKey(termRaw)
-  const key = normalizeTermKey(termRaw)
-  const keyWithoutPrefix = key.replace(/^[a-z]+/, '')
-  const termNums = extractNumberTokens(termRaw)
-
-  if (termIlKey) {
-    const ilExact = hits.find((h) => {
-      const hk = normalizeIlAliasKey(h.term)
-      const mk = normalizeIlAliasKey(h.matched_text || '')
-      return hk === termIlKey || mk === termIlKey
-    })
-    if (ilExact && !ilExact.inferred) return ilExact
-    if (ilExact) return ilExact
-  }
-
-  const exact = hits.find((h) => {
-    const hk = normalizeTermKey(h.term)
-    const mk = normalizeTermKey(h.matched_text || '')
-    return (hk === key || mk === key) && !h.inferred
-  })
-  if (exact) return exact
-
-  const inferredExact = hits.find((h) => {
-    const hk = normalizeTermKey(h.term)
-    const mk = normalizeTermKey(h.matched_text || '')
-    return hk === key || mk === key
-  })
-  if (inferredExact) return inferredExact
-
-  // Keep numeric consistency first; avoids speed/temperature drifting to unrelated values.
-  const numericConsistent = hits.filter((h) => {
-    if (!termNums.length) return true
-    return numericTokensConsistent(termRaw, String(h.matched_text || ''))
-  })
-  if (termNums.length && numericConsistent.length === 0) return null
-  if (numericConsistent.length === 1) return numericConsistent[0] || null
-
-  const candidates = numericConsistent.length ? numericConsistent : hits
-  const compact = candidates.find((h) => {
-    const hk = normalizeTermKey(h.term)
-    const mk = normalizeTermKey(h.matched_text || '')
-    const best = hk.length >= mk.length ? hk : mk
-    const short = hk.length < 4 && mk.length < 4
-    if (!best || short) return false
-    const prefix = commonPrefixLen(key, best)
-    const prefixRatio = prefix / Math.max(1, Math.min(key.length, best.length))
-    const contains =
-      (best.length >= Math.max(5, Math.floor(key.length * 0.55)) && key.includes(best))
-      || (key.length >= Math.max(5, Math.floor(best.length * 0.55)) && best.includes(key))
-    return (prefixRatio >= 0.6 || contains) && !h.inferred
-  })
-  if (compact) return compact
-
-  if (keyWithoutPrefix && keyWithoutPrefix !== key) {
-    const fallback = hits.find((h) => {
-      const hk = normalizeTermKey(h.term)
-      if (!hk || hk.length < 4) return false
-      return hk === keyWithoutPrefix
-    })
-    if (fallback) return fallback
-  }
-
-  return null
-}
-
-function findBestTermHit(
-  ev: EvidenceResult | null | undefined,
-  term: string | string[],
-  semanticTypes?: string[],
-): EvidenceTermHit | null {
-  const hits = Array.isArray(ev?.term_hits) ? (ev?.term_hits as EvidenceTermHit[]) : []
-  if (!hits.length) return null
-
-  const normalizedTerms = (Array.isArray(term) ? term : [term])
-    .map((value) => String(value || '').trim())
-    .filter(Boolean)
-  if (!normalizedTerms.length) return null
-
-  const semanticSet = new Set(
-    (semanticTypes || [])
-      .map((value) => String(value || '').trim().toLowerCase())
-      .filter(Boolean),
-  )
-  const semanticallyMatchedHits = semanticSet.size
-    ? hits.filter((hit) => semanticSet.has(String(hit.semantic_type || '').trim().toLowerCase()))
-    : []
-  const hitPools = semanticallyMatchedHits.length ? [semanticallyMatchedHits, hits] : [hits]
-
-  for (const hitPool of hitPools) {
-    for (const candidateTerm of normalizedTerms) {
-      const match = findBestTermHitWithinHits(hitPool, candidateTerm)
-      if (match) return match
-    }
-  }
-
-  return null
 }
 
 function buildHighlightRect(
@@ -1318,6 +840,21 @@ function buildPageAnchorHighlight(id: string, page: number, color?: string): Hig
   }
 }
 
+function parseRecordEvidenceBbox(record: RecordResponse): number[] | null {
+  const raw = record.evidenceBbox
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.map((value) => Number(value)) : null
+  } catch {
+    const values = String(raw)
+      .split(',')
+      .map((value) => Number(value.trim()))
+      .filter((value) => Number.isFinite(value))
+    return values.length >= 4 ? values : null
+  }
+}
+
 function isVisualEvidenceSource(ev: EvidenceResult | null | undefined): boolean {
   const sourceType = String(ev?.source_type || '').trim().toLowerCase()
   if (sourceType === 'visual') return true
@@ -1333,11 +870,11 @@ function isVisualEvidenceSource(ev: EvidenceResult | null | undefined): boolean 
   )
 }
 
-function openRecordPdf(record: RecordResponse) {
+function openRecordPdf(record: RecordResponse, options: { forcePdf?: boolean } = {}) {
   if (!record.literatureId) return
-  const ev = evidenceData.value[record.id]
-  if (isVisualEvidenceSource(ev)) {
-    const previewSrc = evidenceImageSrc(record.id) || evidencePagePreviewSrc(record.id)
+  const ev = databaseRecordEvidenceData(record)
+  if (!options.forcePdf && isVisualEvidenceSource(ev)) {
+    const previewSrc = evidenceImageSrc(record) || evidencePagePreviewSrc(record)
     if (previewSrc) {
       openImagePreview(
         previewSrc,
@@ -1346,13 +883,14 @@ function openRecordPdf(record: RecordResponse) {
       return
     }
   }
-  const targetPage = ev?.page || 1
+  const targetPage = ev?.page || record.evidencePage || record.sourcePage || 1
+  const targetBbox = ev?.bbox || parseRecordEvidenceBbox(record)
   const highlight =
-    buildHighlightRect(`${record.id}-ev-${Date.now()}`, ev?.page || 0, ev?.bbox, 'rgba(250, 204, 21, 0.35)') ||
+    buildHighlightRect(`${record.id}-ev-${Date.now()}`, targetPage, targetBbox, 'rgba(250, 204, 21, 0.35)') ||
     buildPageAnchorHighlight(`${record.id}-page-${targetPage}-${Date.now()}`, targetPage, 'rgba(250, 204, 21, 0.35)')
 
   pdfLocate.value.open = true
-  pdfLocate.value.title = `Source Locator · Page ${targetPage}`
+  pdfLocate.value.title = `${record.literature?.title || 'Source Locator'} · Page ${targetPage}`
   pdfLocate.value.pdfUrl = `/api/pdf/${record.literatureId}`
   pdfLocate.value.highlights = [highlight]
   pdfLocate.value.activeHighlightId = highlight.id
@@ -1367,21 +905,656 @@ function clearDoiSearch() {
   clearDoiFilter(() => emit('clear-doi'))
 }
 
-function handleOpenEvidenceModal(record: RecordResponse) {
-  closeEditDrawer()
-  openEvidenceModal(record)
+function positionDatabaseEvidencePopover(event?: Event) {
+  const target = event?.currentTarget as HTMLElement | null | undefined
+  const rect = target?.getBoundingClientRect()
+  const width = 430
+  databaseEvidencePosition.value = rect
+    ? {
+        top: Math.min(window.innerHeight - 300, rect.bottom + 10),
+        left: Math.max(16, Math.min(window.innerWidth - width - 16, rect.left + rect.width / 2 - width / 2)),
+      }
+    : { top: 160, left: 160 }
 }
 
-function handleOpenReviewRecord(record: RecordResponse) {
-  emit('view-literature', {
-    literatureId: record.literatureId ?? null,
-    recordId: record.id ?? null,
+async function fetchDatabaseFieldEvidence(record: RecordResponse) {
+  const cacheKey = databaseRecordCacheKey(record)
+  if (!record.id || databaseFieldEvidenceLoading.value[cacheKey]) return
+  if (databaseFieldEvidence.value[cacheKey]) return
+
+  databaseFieldEvidenceLoading.value[cacheKey] = true
+  databaseFieldEvidenceError.value[cacheKey] = null
+  try {
+    const entityId = databaseRecordEntityId(record)
+    databaseFieldEvidence.value[cacheKey] = databaseRecordEntityType(record) === 'candidate'
+      ? await getCandidateFieldEvidence(entityId, record.literatureId)
+      : await getRecordFieldEvidence(entityId)
+  } catch (err: any) {
+    databaseFieldEvidence.value[cacheKey] = null
+    databaseFieldEvidenceError.value[cacheKey] = err?.message || 'Failed to load field evidence'
+  } finally {
+    databaseFieldEvidenceLoading.value[cacheKey] = false
+  }
+}
+
+function parseDatabaseEvidenceBbox(raw: unknown): number[] | null {
+  if (!raw) return null
+  if (Array.isArray(raw)) {
+    const values = raw.map((value) => Number(value)).filter((value) => Number.isFinite(value))
+    return values.length >= 4 ? values.slice(0, 4) : null
+  }
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw)
+      return parseDatabaseEvidenceBbox(parsed)
+    } catch {
+      const values = raw.split(',').map((value) => Number(value.trim())).filter((value) => Number.isFinite(value))
+      return values.length >= 4 ? values.slice(0, 4) : null
+    }
+  }
+  return null
+}
+
+function databaseEvidencePreviewKey(record: RecordResponse, page: number, bbox: number[]) {
+  return [
+    record.literatureId,
+    page,
+    'wide',
+    ...bbox.map((value) => Number(value).toFixed(1)),
+  ].join(':')
+}
+
+function isDatabaseVisualEvidenceEntry(entry: FieldEvidenceEntry) {
+  const evidence = entry.evidence || {}
+  const sourceType = normalizeDatabaseEvidenceText(evidence.source_type).toLowerCase()
+  const sourceLabel = normalizeDatabaseEvidenceText(evidence.source_label).toLowerCase()
+  return sourceType === 'table'
+    || sourceType === 'figure'
+    || sourceType === 'visual'
+    || sourceType === 'image'
+    || /\b(?:fig|figure|table|plot)\.?\s*\d*/.test(sourceLabel)
+}
+
+function databaseEvidenceEntryHasPdfLocator(entry: FieldEvidenceEntry) {
+  const page = typeof entry.evidence?.page === 'number' && Number.isFinite(entry.evidence.page)
+    ? entry.evidence.page
+    : null
+  return Boolean(page && parseDatabaseEvidenceBbox(entry.evidence?.bbox))
+}
+
+function databaseEvidenceShouldRenderPdfPreview(entry: FieldEvidenceEntry) {
+  const sourceType = normalizeDatabaseEvidenceText(entry.evidence?.source_type).toLowerCase()
+  if (sourceType === 'text' && normalizeDatabaseEvidenceText(entry.evidence?.quote)) return false
+  if (String(entry.grounding_mode || '').toLowerCase() === 'derived') return false
+  return isDatabaseVisualEvidenceEntry(entry) || !normalizeDatabaseEvidenceText(entry.evidence?.quote)
+}
+
+async function fetchDatabaseEvidencePreview(record: RecordResponse, page: number | null | undefined, bbox: number[] | null | undefined) {
+  if (!record.literatureId || !page || !bbox?.length) return
+  const key = databaseEvidencePreviewKey(record, page, bbox)
+  if (databaseEvidencePreviewImages.value[key] || databaseEvidencePreviewLoading.value[key]) return
+
+  databaseEvidencePreviewLoading.value[key] = true
+  databaseEvidencePreviewError.value[key] = null
+  try {
+    const response = await getPdfBboxPreview(record.literatureId, page, bbox, 'region', 'wide')
+    databaseEvidencePreviewImages.value[key] = `data:image/png;base64,${response.image_b64}`
+  } catch (err: any) {
+    databaseEvidencePreviewImages.value[key] = null
+    databaseEvidencePreviewError.value[key] = evidencePreviewErrorMessage(err)
+  } finally {
+    databaseEvidencePreviewLoading.value[key] = false
+  }
+}
+
+async function hydrateDatabaseEvidencePreviews(record: RecordResponse) {
+  await fetchDatabaseFieldEvidence(record)
+  const fieldTargets = databaseEvidenceSelectedEntries(record)
+    .filter(({ entry }) => databaseEvidenceEntryHasPdfLocator(entry) && databaseEvidenceShouldRenderPdfPreview(entry))
+    .map(({ entry }) => ({
+      page: entry.evidence?.page ?? null,
+      bbox: parseDatabaseEvidenceBbox(entry.evidence?.bbox),
+    }))
+  await Promise.all(
+    fieldTargets.map((target) => fetchDatabaseEvidencePreview(record, target.page, target.bbox)),
+  )
+}
+
+function isCurrentDatabaseEvidenceRequest(record: RecordResponse, field: DatabaseEvidenceField, focusedFieldKey: string | null, evidenceOpenToken: number) {
+  return databaseEvidenceOpenToken.value === evidenceOpenToken
+    && evidenceModalRecord.value
+    && databaseRecordCacheKey(evidenceModalRecord.value) === databaseRecordCacheKey(record)
+    && databaseEvidenceField.value === field
+    && databaseEvidenceFocusedFieldKey.value === focusedFieldKey
+}
+
+function handleOpenEvidenceModal(record: RecordResponse, field: DatabaseEvidenceField = 'conditions', event?: Event, fieldKey?: string) {
+  closeEditDrawer()
+	  databaseEvidenceField.value = field
+	  const focusedFieldKey = normalizeDatabaseEvidenceFieldKey(fieldKey)
+	  databaseEvidenceFocusedFieldKey.value = focusedFieldKey
+	  databaseEvidenceSlideIndex.value = 0
+	  const evidenceOpenToken = databaseEvidenceOpenToken.value + 1
+	  databaseEvidenceOpenToken.value = evidenceOpenToken
+	  positionDatabaseEvidencePopover(event)
+	  openEvidenceModal(record, { syncConfidence: false })
+	  void hydrateDatabaseEvidencePreviews(record).then(() => {
+	    if (isCurrentDatabaseEvidenceRequest(record, field, focusedFieldKey, evidenceOpenToken)) {
+	      setDatabaseEvidencePreferredSlide(record, field)
+	    }
+	  })
+	}
+
+function databaseEvidenceTitle(field = databaseEvidenceField.value) {
+  if (databaseEvidenceFocusedFieldKey.value) return databaseEvidenceFieldLabel(databaseEvidenceFocusedFieldKey.value)
+  if (field === 'ionic-liquid') return 'Ionic Liquid'
+  if (field === 'tribopair') return 'Tribopair'
+  if (field === 'cof') return 'COF'
+  return 'Conditions'
+}
+
+function databaseEvidenceValue(record: RecordResponse, field = databaseEvidenceField.value) {
+  const focusedValue = databaseEvidenceFocusedValue(record)
+  if (focusedValue) return focusedValue
+  if (field === 'ionic-liquid') return lubricantDisplay(record)
+  if (field === 'tribopair') return tribopairDisplay(record)
+  if (field === 'cof') return cofDisplay(record)
+  const summaries = conditionGroups(record)
+    .map((group) => `${group.label}: ${group.summary}`)
+    .filter((value) => String(value || '').trim())
+  return summaries.join(' · ') || '--'
+}
+
+function databaseEvidencePage(record: RecordResponse) {
+  const fieldPage = databaseEvidenceSelectedEntries(record)
+    .filter(({ fieldKey, entry }) => databaseEvidenceEntryHasContent(fieldKey, entry))
+    .map(({ entry }) => entry.evidence?.page)
+    .find((page) => typeof page === 'number' && Number.isFinite(page) && page > 0)
+  if (fieldPage) return `Page ${fieldPage}`
+
+  const hitPage = databaseEvidenceTermHits(record)
+    .map((hit) => hit.page)
+    .find((page) => typeof page === 'number' && Number.isFinite(page) && page > 0)
+  if (hitPage) return `Page ${hitPage}`
+
+  const ev = databaseRecordEvidenceData(record)
+  const page = ev?.page || record.evidencePage || record.sourcePage
+  return page ? `Page ${page}` : 'Source'
+}
+
+function normalizeDatabaseEvidenceText(value: unknown) {
+  return String(value || '').trim().replace(/\s+/g, ' ')
+}
+
+function normalizeDatabaseEvidenceFieldKey(value: unknown) {
+  const key = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_')
+  const aliases: Record<string, string> = {
+    water: 'water_content',
+    lubricant: 'ionic_liquid',
+    ionic_liquid_display: 'ionic_liquid',
+    material_name: 'material',
+    loadvalue: 'load',
+    load_value: 'load',
+    loadraw: 'load',
+    load_raw: 'load',
+    normal_load: 'load',
+    normalload: 'load',
+  }
+  return aliases[key] || key || null
+}
+
+function databaseEvidenceFocusedValue(record: RecordResponse) {
+  const focusedKey = databaseEvidenceFocusedFieldKey.value
+  if (!focusedKey) return ''
+  const fields = databaseFieldEvidence.value[databaseRecordCacheKey(record)]?.fields || {}
+  const entry = fields[focusedKey]
+  const entryValue = normalizeDatabaseEvidenceText(entry?.value)
+  if (entryValue) return entryValue
+  const fallbacks: Record<string, unknown> = {
+    ionic_liquid: lubricantDisplay(record),
+    cation: record.cation,
+    anion: record.anion,
+    material: record.materialName,
+    probe_material: record.probeMaterial,
+    probe_geometry: record.probeGeometry,
+    probe_radius: record.probeRadius,
+    probe_roughness: record.probeRoughness,
+    substrate_material: record.substrateMaterial || record.materialName,
+    substrate_coating: record.substrateCoating,
+    substrate_roughness: record.substrateRoughness,
+    surface_roughness: record.surfaceRoughness,
+    film_thickness: record.filmThickness,
+    load: record.loadValue,
+    speed: record.speedValue,
+    shear_rate: record.shearRate,
+    potential: record.potential,
+    temperature: record.temperature,
+    water_content: record.waterContent,
+    cof: cofDisplay(record),
+  }
+  return normalizeDatabaseEvidenceText(fallbacks[focusedKey])
+}
+
+function databaseEvidenceFieldKeys(field = databaseEvidenceField.value) {
+  if (databaseEvidenceFocusedFieldKey.value) return databaseEvidenceFocusedFieldKeys(databaseEvidenceFocusedFieldKey.value)
+  if (field === 'ionic-liquid') return ['ionic_liquid', 'lubricant', 'lubricant_alias', 'ionic_liquid_display', 'cation', 'anion']
+  if (field === 'tribopair') return [
+    'probe_material',
+    'probe_geometry',
+    'probe_radius',
+	    'probe_roughness',
+	    'film_thickness',
+	    'substrate_material',
+    'substrate_coating',
+    'substrate_roughness',
+    'surface_roughness',
+    'material',
+    'material_name',
+  ]
+  if (field === 'cof') return ['cof', 'cof_extracted', 'friction_force', 'wear_rate']
+	  return ['temperature', 'load', 'normal_load', 'speed', 'shear_rate', 'potential', 'water_content']
+}
+
+function databaseEvidenceSemanticTypes(field = databaseEvidenceField.value) {
+  if (databaseEvidenceFocusedFieldKey.value) return new Set(databaseEvidenceFocusedFieldKeys(databaseEvidenceFocusedFieldKey.value).map(databaseEvidenceSemanticKey))
+  if (field === 'ionic-liquid') return new Set(['lubricant', 'ionic_liquid', 'cation', 'anion'])
+		  if (field === 'tribopair') return new Set(['material', 'probe_material', 'substrate_material', 'substrate_coating', 'surface_roughness', 'film_thickness'])
+  if (field === 'cof') return new Set(['cof', 'friction_force', 'wear_rate'])
+		  return new Set(['temperature', 'load', 'speed', 'shear_rate', 'potential', 'water_content'])
+}
+
+function databaseEvidenceEntryQualityScore(fieldKey: string, entry: FieldEvidenceEntry) {
+  const evidence = entry.evidence || {}
+  let score = 0
+  if (normalizeDatabaseEvidenceText(evidence.quote)) score += 6
+  if (normalizeDatabaseEvidenceText(evidence.matched_text) || normalizeDatabaseEvidenceText(evidence.matchedText)) score += 4
+  if (typeof evidence.page === 'number' && Number.isFinite(evidence.page)) score += 2
+  if (parseDatabaseEvidenceBbox(evidence.bbox)) score += isDatabaseVisualEvidenceEntry(entry) ? 3 : 1
+  if (normalizeDatabaseEvidenceText(entry.grounding_note)) score += 2
+  if (String(entry.grounding_mode || '').toLowerCase() === 'derived') score += 2
+  if (normalizeDatabaseEvidenceText(entry.value)) score += 1
+  if (fieldKey.includes('alias') || fieldKey === 'lubricant') score -= 1
+  return score
+}
+
+function databaseEvidenceBestEntriesBySemanticKey(entries: Array<{ fieldKey: string, entry: FieldEvidenceEntry }>) {
+  const bySemantic = new Map<string, { fieldKey: string, entry: FieldEvidenceEntry }>()
+  for (const item of entries) {
+    const semanticKey = databaseEvidenceSemanticKey(item.fieldKey)
+    const existing = bySemantic.get(semanticKey)
+    if (!existing || databaseEvidenceEntryQualityScore(item.fieldKey, item.entry) > databaseEvidenceEntryQualityScore(existing.fieldKey, existing.entry)) {
+      bySemantic.set(semanticKey, item)
+    }
+  }
+  return Array.from(bySemantic.values())
+}
+
+function databaseEvidenceFocusedFieldKeys(fieldKey: string) {
+  const normalized = normalizeDatabaseEvidenceFieldKey(fieldKey) || fieldKey
+  const fallbackKeys: Record<string, string[]> = {
+    cation: ['cation'],
+    anion: ['anion'],
+    material: ['material', 'material_name'],
+    probe_material: ['probe_material'],
+    substrate_material: ['substrate_material'],
+    substrate_coating: ['substrate_coating'],
+    probe_roughness: ['probe_roughness'],
+    substrate_roughness: ['substrate_roughness'],
+    surface_roughness: ['surface_roughness'],
+    load: ['load', 'normal_load'],
+    water_content: ['water_content', 'water'],
+    cof: ['cof', 'cof_extracted'],
+  }
+  return Array.from(new Set(fallbackKeys[normalized] || [normalized]))
+}
+
+function databaseEvidenceFocusedEntries(fields: Record<string, FieldEvidenceEntry | undefined>) {
+  const focusedKey = databaseEvidenceFocusedFieldKey.value
+  if (!focusedKey) return null
+  const entries = databaseEvidenceFocusedFieldKeys(focusedKey)
+    .map((fieldKey) => ({ fieldKey, entry: fields[fieldKey] }))
+    .filter((item): item is { fieldKey: string, entry: FieldEvidenceEntry } => Boolean(item.entry))
+  const exact = entries.filter(({ fieldKey, entry }) => (
+    databaseEvidenceSemanticKey(fieldKey) === databaseEvidenceSemanticKey(focusedKey)
+    && databaseEvidenceEntryHasContent(fieldKey, entry)
+  ))
+  if (exact.length) return databaseEvidenceBestEntriesBySemanticKey(exact)
+  return []
+}
+
+function databaseEvidenceSelectedEntries(record: RecordResponse) {
+  const fields = databaseFieldEvidence.value[databaseRecordCacheKey(record)]?.fields || {}
+  const focusedEntries = databaseEvidenceFocusedEntries(fields)
+  if (focusedEntries) return focusedEntries
+  const entries = databaseEvidenceFieldKeys()
+    .map((fieldKey) => ({ fieldKey, entry: fields[fieldKey] }))
+    .filter((item): item is { fieldKey: string, entry: FieldEvidenceEntry } => Boolean(item.entry))
+  if (databaseEvidenceField.value !== 'tribopair') return databaseEvidenceBestEntriesBySemanticKey(entries)
+
+  const roleSpecificKeys = new Set(['probe_material', 'probe_geometry', 'probe_radius', 'probe_roughness', 'substrate_material', 'substrate_coating', 'substrate_roughness', 'surface_roughness'])
+  const hasRoleSpecificEvidence = entries.some(({ fieldKey, entry }) => roleSpecificKeys.has(fieldKey) && databaseEvidenceEntryHasContent(fieldKey, entry))
+  const selectedEntries = hasRoleSpecificEvidence
+    ? entries.filter(({ fieldKey }) => !['material', 'material_name'].includes(fieldKey))
+    : entries
+  return databaseEvidenceBestEntriesBySemanticKey(selectedEntries)
+}
+
+function databaseEvidenceTermHits(record: RecordResponse) {
+  const semanticTypes = databaseEvidenceSemanticTypes()
+  const coveredSemanticKeys = databaseEvidenceCoveredSemanticKeys(record)
+  return (databaseRecordEvidenceData(record)?.term_hits || []).filter((hit) => {
+    const semanticType = String(hit.semantic_type || '').trim().toLowerCase()
+    return semanticTypes.has(semanticType) && !coveredSemanticKeys.has(databaseEvidenceSemanticKey(semanticType))
   })
 }
 
-function handleOpenEditModal(record: RecordResponse) {
+function databaseEvidenceSemanticKey(fieldKey: string) {
+  const normalized = String(fieldKey || '').trim().toLowerCase().replace(/[\s-]+/g, '_')
+  const aliases: Record<string, string> = {
+    material_name: 'material',
+    ionic_liquid_display: 'ionic_liquid',
+    lubricant_alias: 'ionic_liquid',
+    lubricant: 'ionic_liquid',
+    cof_extracted: 'cof',
+    loadvalue: 'load',
+    load_value: 'load',
+    loadraw: 'load',
+    load_raw: 'load',
+    normal_load: 'load',
+    normalload: 'load',
+  }
+  return aliases[normalized] || normalized
+}
+
+function databaseEvidenceEntryHasContent(fieldKey: string, entry: FieldEvidenceEntry) {
+  if (!databaseEvidenceEntryHasDisplayValue(entry)) return false
+  const quotes = databaseEvidenceQuoteFromEntry(fieldKey, entry)
+  const page = typeof entry.evidence?.page === 'number' && Number.isFinite(entry.evidence.page)
+    ? entry.evidence.page
+    : null
+  const bbox = parseDatabaseEvidenceBbox(entry.evidence?.bbox)
+  return Boolean(quotes.length || (page && bbox && databaseEvidenceShouldRenderPdfPreview(entry)))
+}
+
+function databaseEvidenceCoveredSemanticKeys(record: RecordResponse) {
+  const covered = new Set<string>()
+  for (const { fieldKey, entry } of databaseEvidenceSelectedEntries(record)) {
+    if (!databaseEvidenceEntryHasContent(fieldKey, entry)) continue
+    covered.add(databaseEvidenceSemanticKey(fieldKey))
+  }
+  return covered
+}
+
+function databaseEvidenceContextualNumericHighlight(text: string, numericText: string, fieldKey: string) {
+  const normalizedNumber = normalizeDatabaseEvidenceText(numericText).replace(/[^\d.+-]/g, '')
+  if (!normalizedNumber) return ''
+  const unitPattern = fieldKey.includes('roughness')
+    ? '(?:nm|μm|um)'
+    : '(?:nm|μm|um|mm|cm|m|hz|n|mn|nn|v|mv|k|°c|c)'
+  const escaped = normalizedNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\\\./g, '[.]')
+  const unitHit = new RegExp(`(?:RMS\\s+|roughness\\s+|scan\\s+(?:size|rate)\\s+(?:was\\s+)?|velocity\\s+(?:of\\s+)?)?${escaped}\\s*${unitPattern}\\b`, 'i').exec(text)
+  return normalizeDatabaseEvidenceText(unitHit?.[0])
+}
+
+function databaseEvidenceDerivedHighlights(text: string) {
+  return Array.from(text.matchAll(/\b(?:scan\s+(?:size|length|range|rate|frequency)\s+(?:was\s+)?)?\d+(?:\.\d+)?\s*(?:nm|μm|um|mm|hz)\b/gi))
+    .map((match) => normalizeDatabaseEvidenceText(match[0]))
+    .filter(Boolean)
+}
+
+function databaseEvidenceQuoteHighlights(fieldKey: string, entry: FieldEvidenceEntry, quote: string, matchedText: string) {
+  const isDerived = String(entry.grounding_mode || '').toLowerCase() === 'derived'
+  const text = quote || matchedText
+  if (isDerived) {
+    const derivedHighlights = databaseEvidenceDerivedHighlights(text)
+    return derivedHighlights.length ? derivedHighlights : [text].filter(Boolean)
+  }
+
+  const highlights: string[] = []
+  if (/^\s*[-+]?\d+(?:\.\d+)?\s*$/.test(matchedText)) {
+    const contextual = databaseEvidenceContextualNumericHighlight(text, matchedText, fieldKey)
+    if (contextual) highlights.push(contextual)
+  } else if (matchedText) {
+    highlights.push(matchedText)
+  }
+
+  const valueText = normalizeDatabaseEvidenceText(entry.value)
+  if (valueText && text.toLowerCase().includes(valueText.toLowerCase())) highlights.push(valueText)
+  return Array.from(new Set(highlights.filter(Boolean)))
+}
+
+function databaseEvidenceShouldSuppressBareEvidence(fieldKey: string, quote = '', matchedText = '', groundingMode = '') {
+  const combined = `${normalizeDatabaseEvidenceText(quote)} ${normalizeDatabaseEvidenceText(matchedText)}`.trim()
+  const matched = normalizeDatabaseEvidenceText(matchedText)
+  const quoteText = normalizeDatabaseEvidenceText(quote)
+  const isBareMatchedNumber = /^\s*[-+]?\d+(?:\.\d+)?\s*$/.test(matched)
+  const isBareQuoteNumber = /^\s*[-+]?\d+(?:\.\d+)?\s*$/.test(quoteText)
+  if (groundingMode === 'derived' && !databaseEvidenceDerivedHighlights(combined).length) return true
+  if (isBareMatchedNumber && (!quoteText || isBareQuoteNumber)) return true
+  if (fieldKey.includes('roughness')) {
+    const hasContext = /\b(?:nm|μm|um|rms|roughness|root[- ]mean[- ]square)\b/i.test(combined)
+    if ((isBareMatchedNumber || isBareQuoteNumber) && !hasContext) return true
+  }
+  return false
+}
+
+function databaseEvidenceQuoteFromEntry(fieldKey: string, entry: FieldEvidenceEntry): DatabaseEvidenceQuote[] {
+  const matchedText = normalizeDatabaseEvidenceText(entry.evidence?.matched_text)
+    || normalizeDatabaseEvidenceText(entry.evidence?.matchedText)
+  const quote = normalizeDatabaseEvidenceText(entry.evidence?.quote)
+  const note = normalizeDatabaseEvidenceText(entry.grounding_note)
+  const isDerived = String(entry.grounding_mode || '').toLowerCase() === 'derived'
+  const quotes: DatabaseEvidenceQuote[] = []
+  const primaryText = quote || matchedText
+  const suppressBareEvidence = databaseEvidenceShouldSuppressBareEvidence(fieldKey, quote, matchedText, String(entry.grounding_mode || '').toLowerCase())
+
+  if (primaryText && !suppressBareEvidence) {
+    const text = note && !isDerived && note !== primaryText ? `${primaryText} ${note}` : primaryText
+    quotes.push({ text, highlights: databaseEvidenceQuoteHighlights(fieldKey, entry, text, matchedText), fieldKey })
+  }
+  if ((suppressBareEvidence || !primaryText) && note) {
+    quotes.push({ text: note, highlights: databaseEvidenceQuoteHighlights(fieldKey, entry, note, matchedText), fieldKey })
+  }
+  return quotes
+}
+
+function databaseEvidenceFieldLabel(fieldKey: string) {
+  return fieldKey
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+function databaseEvidenceEntryValue(entry: FieldEvidenceEntry) {
+  return normalizeDatabaseEvidenceText(entry.value)
+}
+
+function databaseEvidenceEntryHasDisplayValue(entry: FieldEvidenceEntry) {
+  const value = databaseEvidenceEntryValue(entry).toLowerCase()
+  return Boolean(value && !['unknown', 'unknown material', 'unknown il', 'n/a', 'none', '-', '--'].includes(value))
+}
+
+function databaseEvidenceSlideHasContent(slide: DatabaseEvidenceSlide) {
+  return Boolean(
+    normalizeDatabaseEvidenceText(slide.quote?.text)
+      || normalizeDatabaseEvidenceText(slide.note)
+      || slide.imageSrc
+  )
+}
+
+function databaseEvidenceSlides(record: RecordResponse): DatabaseEvidenceSlide[] {
+  const slides: DatabaseEvidenceSlide[] = []
+  for (const { fieldKey, entry } of databaseEvidenceSelectedEntries(record)) {
+    if (!databaseEvidenceEntryHasDisplayValue(entry)) continue
+    if (!databaseEvidenceEntryHasContent(fieldKey, entry)) continue
+    const page = typeof entry.evidence?.page === 'number' && Number.isFinite(entry.evidence.page)
+      ? entry.evidence.page
+      : null
+    const bbox = parseDatabaseEvidenceBbox(entry.evidence?.bbox)
+    const key = page && bbox && databaseEvidenceShouldRenderPdfPreview(entry) ? databaseEvidencePreviewKey(record, page, bbox) : ''
+    const quote = databaseEvidenceQuoteFromEntry(fieldKey, entry)[0] || null
+    const isDerived = String(entry.grounding_mode || '').toLowerCase() === 'derived'
+    const bboxOnlyNote = !quote && page && bbox
+      ? 'PDF locator available; quote text was not stored for this field.'
+      : ''
+	    const slide = {
+	      id: `field-${fieldKey}-${page || 'text'}-${slides.length}`,
+	      fieldKey,
+	      label: databaseEvidenceFieldLabel(fieldKey),
+	      page,
+	      value: databaseEvidenceEntryValue(entry),
+	      quote,
+	      note: isDerived
+	        ? normalizeDatabaseEvidenceText(entry.grounding_note)
+	        : bboxOnlyNote,
+	      noteLabel: isDerived ? 'Derived calculation' : 'Evidence locator',
+	      locatorKey: page ? `${page}:${bbox ? bbox.join(',') : 'page-only'}` : '',
+	      imageSrc: key ? databaseEvidencePreviewImages.value[key] || null : null,
+      imageLoading: key ? Boolean(databaseEvidencePreviewLoading.value[key]) : false,
+      imageError: key ? databaseEvidencePreviewError.value[key] || null : null,
+    }
+    if (databaseEvidenceSlideHasContent(slide)) slides.push(slide)
+  }
+
+  for (const hit of databaseEvidenceTermHits(record)) {
+    const value = normalizeDatabaseEvidenceText(hit.matched_text) || normalizeDatabaseEvidenceText(hit.term)
+    const quoteText = normalizeDatabaseEvidenceText(hit.snippet_text) || value
+    const slide = {
+      id: `term-${hit.semantic_type || 'hit'}-${hit.page}-${slides.length}`,
+      fieldKey: hit.semantic_type || undefined,
+      label: databaseEvidenceFieldLabel(String(hit.semantic_type || databaseEvidenceTitle())),
+      page: hit.page || null,
+      value,
+      quote: quoteText ? { text: quoteText, highlights: [value, normalizeDatabaseEvidenceText(hit.term)].filter(Boolean) } : null,
+      imageSrc: hit.image_b64 ? `data:image/png;base64,${hit.image_b64}` : null,
+    }
+    if (databaseEvidenceSlideHasContent(slide)) slides.push(slide)
+  }
+
+  const seen = new Set<string>()
+  return slides.filter((slide) => {
+    const key = databaseEvidenceSlideDedupeKey(slide)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function databaseEvidenceSlideDedupeKey(slide: DatabaseEvidenceSlide) {
+  return [
+    slide.locatorKey || slide.page || '',
+    normalizeDatabaseEvidenceText(slide.value),
+    normalizeDatabaseEvidenceText(slide.quote?.text),
+    normalizeDatabaseEvidenceText(slide.note),
+  ].join('|')
+}
+
+function activeDatabaseEvidenceSlide(record: RecordResponse) {
+  const slides = databaseEvidenceSlides(record)
+  if (!slides.length) return null
+  const boundedIndex = Math.min(Math.max(0, databaseEvidenceSlideIndex.value), slides.length - 1)
+  if (boundedIndex !== databaseEvidenceSlideIndex.value) databaseEvidenceSlideIndex.value = boundedIndex
+  return slides[boundedIndex] || null
+}
+
+function databaseEvidenceIsLoading(record: RecordResponse) {
+  return Boolean(databaseFieldEvidenceLoading.value[databaseRecordCacheKey(record)] && databaseEvidenceSlides(record).length === 0)
+}
+
+function databaseEvidenceDisplayError(record: RecordResponse) {
+  const fieldError = databaseFieldEvidenceError.value[databaseRecordCacheKey(record)]
+  if (fieldError) return fieldError
+  return databaseEvidenceSlides(record).length === 0 ? evidenceError.value[databaseRecordCacheKey(record)] : ''
+}
+
+function databaseEvidencePreferredSlideIndex(record: RecordResponse, field = databaseEvidenceField.value) {
+  const slides = databaseEvidenceSlides(record)
+  if (!slides.length) return 0
+  if (field === 'conditions') {
+    const derivedSpeedIndex = slides.findIndex((slide) => (
+      databaseEvidenceSemanticKey(slide.fieldKey || '') === 'speed'
+      && Boolean(normalizeDatabaseEvidenceText(slide.note))
+    ))
+    if (derivedSpeedIndex >= 0) return derivedSpeedIndex
+  }
+  const imageIndex = slides.findIndex((slide) => Boolean(slide.imageSrc || slide.imageLoading))
+  return imageIndex >= 0 ? imageIndex : 0
+}
+
+function setDatabaseEvidencePreferredSlide(record: RecordResponse, field = databaseEvidenceField.value) {
+  databaseEvidenceSlideIndex.value = databaseEvidencePreferredSlideIndex(record, field)
+}
+
+function activeDatabaseEvidenceQuote(record: RecordResponse): DatabaseEvidenceQuote | null {
+  return activeDatabaseEvidenceSlide(record)?.quote || null
+}
+
+function activeDatabaseEvidenceNote(record: RecordResponse): string {
+  return normalizeDatabaseEvidenceText(activeDatabaseEvidenceSlide(record)?.note)
+}
+
+function databaseEvidenceSlideCount(record: RecordResponse) {
+  return databaseEvidenceSlides(record).length
+}
+
+function moveDatabaseEvidenceSlide(record: RecordResponse, direction: -1 | 1) {
+  const count = databaseEvidenceSlideCount(record)
+  if (count <= 1) return
+  databaseEvidenceSlideIndex.value = (databaseEvidenceSlideIndex.value + direction + count) % count
+}
+
+function splitDatabaseEvidenceQuote(quote: DatabaseEvidenceQuote) {
+  const highlights = (quote.highlights || [])
+    .map((value) => normalizeDatabaseEvidenceText(value))
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length)
+  if (!highlights.length) return [{ text: quote.text, active: false }]
+
+  const source = quote.text
+  const normalizedSource = source.toLowerCase()
+  const ranges: Array<{ start: number, end: number }> = []
+  for (const highlight of highlights) {
+    const normalizedHighlight = highlight.toLowerCase()
+    let cursor = 0
+    while (normalizedHighlight && cursor < normalizedSource.length) {
+      const index = normalizedSource.indexOf(normalizedHighlight, cursor)
+      if (index < 0) break
+      const end = index + highlight.length
+      const overlaps = ranges.some((range) => index < range.end && end > range.start)
+      if (!overlaps) ranges.push({ start: index, end })
+      cursor = end
+    }
+  }
+  if (!ranges.length) return [{ text: source, active: false }]
+
+  ranges.sort((a, b) => a.start - b.start)
+  const parts: Array<{ text: string, active: boolean }> = []
+  let cursor = 0
+  for (const range of ranges) {
+    if (range.start > cursor) parts.push({ text: source.slice(cursor, range.start), active: false })
+    parts.push({ text: source.slice(range.start, range.end), active: true })
+    cursor = range.end
+  }
+  if (cursor < source.length) parts.push({ text: source.slice(cursor), active: false })
+  return parts.filter((part) => part.text)
+}
+
+function closeDatabaseEvidencePopover() {
+  databaseEvidenceFocusedFieldKey.value = null
   closeEvidenceModal()
-  openEditModal(record)
+}
+
+function handleOpenLiteratureRecord(record: RecordResponse) {
+  if (!record.literatureId) {
+    openRecordPdf(record, { forcePdf: true })
+    return
+  }
+  emit('view-literature', {
+    literatureId: record.literatureId,
+    recordId: databaseRecordEntityId(record),
+    mode: 'grounding',
+  })
+  closeDatabaseEvidencePopover()
+  closeEditDrawer()
 }
 
 function exportFilename(ext: string): string {
@@ -1413,7 +1586,8 @@ function csvEscape(value: unknown): string {
 
 function toCsv(records: RecordResponse[]): string {
   const headers = [
-    'id',
+    'recordId',
+    'internalId',
     'literatureId',
     'doi',
     'title',
@@ -1441,6 +1615,7 @@ function toCsv(records: RecordResponse[]): string {
     'evidencePage',
   ]
   const rows = records.map((r) => [
+    recordDisplayId(r),
     r.id,
     r.literatureId,
     r.literature?.doi || '',
@@ -1477,7 +1652,7 @@ async function fetchAllFilteredRecords(): Promise<RecordResponse[]> {
   let skip = 0
   const all: RecordResponse[] = []
   while (true) {
-    const page = await searchRecords(filter, skip, pageSize)
+    const page = await searchRecords(filter, skip, pageSize, { scope: props.recordScope })
     all.push(...(page.items || []))
     skip += page.items.length
     if (!page.items.length || skip >= page.total) break
@@ -1529,21 +1704,34 @@ watch(
   },
 )
 
+watch(
+  () => props.externalFilterRequestId,
+  (requestId, previousId) => {
+    if (!requestId || requestId === previousId) return
+    showAdvancedFilters.value = true
+  },
+)
+
 // 自动翻页找到目标记录（最多 12 跳，防死循环）
 const focusHopsRemaining = ref(0)
 watch(
-  () => props.focusRecordId,
-  (id) => {
+  () => [props.focusRecordId, props.focusEntityType],
+  ([id]) => {
     if (id == null) return
     focusHopsRemaining.value = 12
     if (currentPage.value !== 1) goToPage(1)
   },
+  { immediate: true },
 )
 watch(
-  [() => props.focusRecordId, () => result.value.items, () => loading.value],
-  ([id, items, isLoading]) => {
+  [() => props.focusRecordId, () => props.focusEntityType, () => result.value.items, () => loading.value],
+  ([id, entityType, items, isLoading]) => {
     if (id == null || isLoading) return
-    const found = (items as any[]).some((row) => Number(row?.id) === Number(id))
+    const targetEntityType = String(entityType || '').trim().toLowerCase()
+    const found = (items as any[]).some((row) => {
+      const rowEntityType = String(row?.reviewEntityType || row?.entityType || 'record').trim().toLowerCase()
+      return Number(row?.id) === Number(id) && (!targetEntityType || rowEntityType === targetEntityType)
+    })
     if (found) {
       focusHopsRemaining.value = 0
       return
@@ -1574,93 +1762,113 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="flex h-full flex-col overflow-hidden bg-slate-50 dark:bg-[#07111d] dark:text-slate-100">
-    <div class="border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950/80">
-      <section class="overflow-hidden">
-        <div class="space-y-2.5">
-          <div class="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
-            <div v-if="!props.selectedFileId" class="relative min-w-0 flex-1">
+    <div class="border-b border-slate-200 bg-white px-4 py-2.5 dark:border-slate-800 dark:bg-slate-950/80">
+      <section class="relative">
+        <div class="flex min-w-0 items-center gap-3">
+          <div v-if="!props.selectedFileId" class="flex min-w-[20rem] flex-[0_1_38rem] items-center gap-2">
+            <div class="relative min-w-0 flex-1">
               <Search class="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
                 v-model="searchDoi"
                 type="text"
-                placeholder="按文献 DOI 搜索…"
-                class="h-12 w-full rounded-md border border-slate-200 bg-slate-50/60 pl-11 pr-12 text-sm text-slate-700 shadow-sm transition focus:border-slate-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-slate-100 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-200 dark:placeholder:text-slate-500 dark:focus:border-slate-500 dark:focus:bg-slate-900 dark:focus:ring-slate-500/10"
+                placeholder="Search"
+                class="h-10 w-full rounded-[9px] border border-slate-200 bg-slate-50/70 pl-11 pr-10 text-sm font-semibold text-slate-800 shadow-sm transition placeholder:text-slate-400 focus:border-[#92e6dc] focus:bg-white focus:outline-none focus:ring-4 focus:ring-[#ddfbf7] dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-cyan-500/10"
                 @keydown.enter.prevent="applyAdvancedFilters"
               />
               <button
                 v-if="searchDoi"
                 type="button"
-                class="absolute right-3 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                class="absolute right-3 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full text-slate-400 transition hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
                 @click="clearDoiSearch"
               >
                 <X class="h-4 w-4" />
               </button>
             </div>
-
-            <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-              <button
-                type="button"
-                class="inline-flex h-9 shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                @click="toggleAdvancedFilters"
-              >
-                <SlidersHorizontal class="h-4 w-4" />
-                <span>高级筛选</span>
-                <span
-                  v-if="activeManualFilterCount"
-                  class="inline-flex min-w-5 items-center justify-center rounded-md bg-slate-900 px-1.5 py-0.5 text-[11px] font-bold text-white dark:bg-slate-100 dark:text-slate-950"
-                >
-                  {{ activeManualFilterCount }}
-                </span>
-                <ChevronUp v-if="showAdvancedFilters" class="h-4 w-4" />
-                <ChevronDown v-else class="h-4 w-4" />
-              </button>
-
-              <button
-                v-for="chip in manualFilterChips"
-                :key="chip.id"
-                type="button"
-                class="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                @click="removeAdvancedSearchChip(chip.id)"
-              >
-                <span>{{ chip.label }}: {{ chip.value }}</span>
-                <X class="h-3.5 w-3.5" />
-              </button>
-
-              <button
-                v-if="hasManualFilters"
-                type="button"
-                class="h-8 px-2 text-xs font-medium text-slate-500 underline-offset-4 transition hover:text-slate-800 hover:underline dark:text-slate-400 dark:hover:text-slate-200"
-                @click="clearAllAdvancedFilters"
-              >
-                清空筛选
-              </button>
-            </div>
+            <button
+              type="button"
+              class="inline-flex h-10 shrink-0 items-center gap-2 rounded-[9px] border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 shadow-sm transition hover:border-[#92e6dc] hover:text-[#0f7c82] focus:outline-none focus:ring-4 focus:ring-[#ddfbf7]"
+              aria-label="Apply database search"
+              @click="applyAdvancedFilters"
+            >
+              <Search class="h-4 w-4" />
+              Search records
+            </button>
           </div>
 
-          <p class="text-xs leading-5 text-slate-500 dark:text-slate-400">
-            {{ advancedSearchSummary }}
-          </p>
+          <div
+            v-if="!props.fixedExperimentScale"
+            class="filter-scale-strip inline-flex h-10 shrink-0 items-center rounded-[9px] border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-700 dark:bg-slate-950"
+            aria-label="Tribology library lane"
+          >
+            <button
+              v-for="lane in scaleLaneOptions"
+              :key="lane.value || 'all'"
+              type="button"
+              class="group inline-flex h-8 min-w-0 items-center gap-1.5 rounded-[6px] px-3 text-xs font-black transition"
+              :class="activeScaleLane === lane.value
+                ? lane.value === 'macroscale'
+                  ? 'bg-orange-100 text-orange-700 shadow-sm dark:bg-orange-400/15 dark:text-orange-300'
+                  : lane.value === 'nanoscale'
+                    ? 'bg-[#e9fbf8] text-[#0f7c82] shadow-sm dark:bg-cyan-400/10 dark:text-cyan-300'
+                    : 'bg-slate-950 text-white shadow-sm dark:bg-slate-100 dark:text-slate-950'
+                : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-200'"
+              :title="lane.detail"
+              @click="setScaleLane(lane.value)"
+            >
+              <span
+                class="h-1.5 w-1.5 rounded-full"
+                :class="lane.value === 'macroscale'
+                  ? 'bg-orange-500'
+                  : lane.value === 'nanoscale'
+                    ? 'bg-[#0f7c82]'
+                    : 'bg-slate-400'"
+              />
+              <span>{{ lane.label }}</span>
+            </button>
+          </div>
+
+          <div class="ml-auto flex h-10 shrink-0 items-center gap-1.5 rounded-[9px] border border-slate-200 bg-white px-2 shadow-sm dark:border-slate-700 dark:bg-slate-950">
+            <span class="px-2 text-xs font-black text-slate-500 dark:text-slate-400">
+              Selected {{ visibleSelectedIds.size }}
+            </span>
+            <button
+              type="button"
+              class="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-rose-200 bg-rose-50 px-3 text-xs font-black text-rose-500 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-45 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-300"
+              :disabled="visibleSelectedIds.size === 0 || batchActionPending"
+              @click="handleBatchDelete"
+            >
+              <Trash2 class="h-3.5 w-3.5" />
+              <span v-if="batchActionPending">Deleting...</span>
+              <span v-else>Delete selected</span>
+            </button>
+          </div>
         </div>
 
-	        <div
-	          v-if="showAdvancedFilters"
-	          class="mx-auto mt-3 max-h-[72vh] w-[calc(100vw-2rem)] max-w-[860px] overflow-hidden rounded-md border border-slate-200 bg-white shadow-[0_20px_44px_-34px_rgba(15,23,42,0.45)] dark:border-slate-800 dark:bg-slate-900/90 dark:shadow-none"
-	        >
-          <!-- Header -->
-	          <div class="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 dark:border-slate-800/60 lg:flex-row lg:items-center lg:justify-between">
+        <p
+          v-if="batchError"
+          class="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-300"
+        >
+          {{ batchError }}
+        </p>
+
+        <div
+          v-if="showAdvancedFilters"
+          class="filter-lens-panel filter-deck absolute right-0 top-12 z-40 max-h-[calc(100vh-9rem)] w-[min(980px,calc(100vw-2rem))] overflow-hidden rounded-[14px] border border-slate-200 bg-white shadow-[0_26px_70px_-34px_rgba(15,23,42,0.55)] dark:border-slate-800 dark:bg-slate-900/96"
+        >
+          <div class="flex flex-col gap-3 border-b border-slate-100 bg-[linear-gradient(180deg,#ffffff_0%,#f7fffd_100%)] px-4 py-3 dark:border-slate-800/60 dark:bg-none lg:flex-row lg:items-center lg:justify-between">
             <div class="flex min-w-0 items-center gap-3">
-              <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-                <SlidersHorizontal class="h-5 w-5" />
+              <div class="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-[#079672] text-white shadow-[0_12px_28px_-20px_rgba(7,150,114,0.9)] dark:bg-emerald-400 dark:text-slate-950">
+                <Layers class="h-5 w-5" />
               </div>
               <div class="min-w-0">
                 <div class="flex items-center gap-2">
-                  <h3 class="text-base font-bold text-slate-900 dark:text-white">高级筛选检索台</h3>
-                  <span v-if="activeManualFilterCount" class="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                  <h3 class="text-base font-black tracking-[0.02em] text-slate-950 dark:text-white">Filters</h3>
+                  <span v-if="activeManualFilterCount" class="rounded-full bg-[#e6fbf8] px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.12em] text-[#0f7c82] dark:bg-cyan-500/10 dark:text-cyan-200">
                     {{ activeManualFilterCount }} active
                   </span>
                 </div>
-                <p class="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
-                  可只固定阳离子或阴离子，也可组合固定；候选列表只渲染前 {{ ADVANCED_OPTION_LIMIT }} 条。
+                <p class="mt-0.5 truncate text-xs font-medium text-slate-500 dark:text-slate-400">
+                  Search, choose a lane, then pin the smallest useful slice.
                 </p>
               </div>
             </div>
@@ -1668,299 +1876,367 @@ onBeforeUnmount(() => {
               <button
                 v-if="hasManualFilters"
                 type="button"
-                class="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800/50 dark:hover:text-slate-200"
+                class="rounded-[7px] px-3 py-1.5 text-xs font-black text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
                 @click="clearAllAdvancedFilters"
               >
-                清空全部
+                Clear all
               </button>
-	              <button
-	                type="button"
-	                class="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-	                @click="collapseAdvancedFilters"
-	              >
-	                收起
-	              </button>
+              <button
+                type="button"
+                class="grid h-8 w-8 place-items-center rounded-[7px] border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-900 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                aria-label="Close filters"
+                @click="collapseAdvancedFilters"
+              >
+                <X class="h-4 w-4" />
+              </button>
             </div>
           </div>
 
-          <!-- Body -->
-	          <div class="grid max-h-[520px] divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800/60 xl:grid-cols-[180px_minmax(0,1fr)_210px] xl:divide-x xl:divide-y-0">
-            <!-- Col 1: Fields Nav -->
-	            <nav class="flex flex-col bg-slate-50/30 p-3 dark:bg-slate-950/20">
-	              <div class="mb-3 px-1">
-                <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">字段导航</p>
+          <div class="max-h-[calc(100vh-18rem)] overflow-y-auto">
+            <div class="grid gap-3 border-b border-slate-100 p-4 dark:border-slate-800/60 lg:grid-cols-[minmax(260px,1fr)_auto] lg:items-center">
+              <div v-if="!props.selectedFileId" class="relative min-w-0">
+                <Search class="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  v-model="searchDoi"
+                  type="text"
+                  placeholder="Search DOI, title, ion, surface..."
+                  class="h-11 w-full rounded-[10px] border border-slate-200 bg-slate-50/80 pl-11 pr-12 text-sm font-semibold text-slate-800 transition placeholder:text-slate-400 focus:border-[#92e6dc] focus:bg-white focus:outline-none focus:ring-4 focus:ring-[#ddfbf7] dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-cyan-500/10"
+                  @keydown.enter.prevent="applyAdvancedFilters"
+                />
+                <button
+                  v-if="searchDoi"
+                  type="button"
+                  class="absolute right-3 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full text-slate-400 transition hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                  @click="clearDoiSearch"
+                >
+                  <X class="h-4 w-4" />
+                </button>
               </div>
-              <div class="space-y-1">
+
+              <div
+                v-if="!props.fixedExperimentScale"
+                class="filter-scale-strip inline-flex h-11 shrink-0 items-center rounded-[10px] border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-950"
+                aria-label="Tribology library lane"
+              >
+                <button
+                  v-for="lane in scaleLaneOptions"
+                  :key="lane.value || 'all'"
+                  type="button"
+                  class="group inline-flex h-9 min-w-0 items-center gap-1.5 rounded-[7px] px-3 text-xs font-black transition"
+                  :class="activeScaleLane === lane.value
+                    ? lane.value === 'macroscale'
+                      ? 'bg-orange-100 text-orange-700 shadow-sm dark:bg-orange-400/15 dark:text-orange-300'
+                      : lane.value === 'nanoscale'
+                        ? 'bg-[#e9fbf8] text-[#0f7c82] shadow-sm dark:bg-cyan-400/10 dark:text-cyan-300'
+                        : 'bg-slate-950 text-white shadow-sm dark:bg-slate-100 dark:text-slate-950'
+                    : 'text-slate-500 hover:bg-white hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-200'"
+                  :title="lane.detail"
+                  @click="setScaleLane(lane.value)"
+                >
+                  <span
+                    class="h-1.5 w-1.5 rounded-full"
+                    :class="lane.value === 'macroscale'
+                      ? 'bg-orange-500'
+                      : lane.value === 'nanoscale'
+                        ? 'bg-[#0f7c82]'
+                        : 'bg-slate-400'"
+                  />
+                  {{ lane.shortLabel }}
+                </button>
+              </div>
+            </div>
+
+            <div class="grid divide-y divide-slate-100 dark:divide-slate-800/60 lg:grid-cols-[250px_minmax(0,1fr)] lg:divide-x lg:divide-y-0">
+              <nav class="filter-field-dock bg-slate-50/55 p-3 dark:bg-slate-950/20">
+                <p class="mb-2 px-1 text-[10px] font-black uppercase tracking-[0.22em] text-slate-400 dark:text-slate-500">Facet map</p>
+                <div class="grid gap-1.5">
                 <button
                   v-for="field in advancedFilterFields"
                   :key="field.key"
                   type="button"
-                  class="group flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition"
+                  class="filter-field-card group grid w-full grid-cols-[10px_minmax(0,1fr)_auto] items-center gap-2 rounded-[9px] border px-2.5 py-2.5 text-left transition"
                   :class="field.key === activeAdvancedOptionKey
-                    ? 'bg-white shadow-sm ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-700'
-                    : 'text-slate-600 hover:bg-slate-100/50 dark:text-slate-400 dark:hover:bg-slate-800/30'"
+                    ? 'border-[#9de9df] bg-white shadow-[0_14px_30px_-24px_rgba(7,150,114,0.75)] dark:border-cyan-500/30 dark:bg-slate-900'
+                    : 'border-transparent text-slate-600 hover:border-slate-200 hover:bg-white dark:text-slate-400 dark:hover:border-slate-700 dark:hover:bg-slate-900/70'"
                   @click="selectAdvancedFilterField(field.key)"
                 >
-                  <span class="h-2 w-2 shrink-0 rounded-full" :class="field.accentClass" />
-                  <span class="min-w-0 flex-1">
-	                    <span class="flex items-center justify-between gap-2">
-	                      <span class="truncate text-sm font-semibold" :class="field.key === activeAdvancedOptionKey ? 'text-slate-900 dark:text-white' : ''">{{ field.label }}</span>
-	                      <span class="text-[10px] font-medium text-slate-400">{{ field.optionCount ?? field.options.length }}</span>
-	                    </span>
-                    <span
-                      class="mt-0.5 block truncate text-[11px]"
-                      :class="field.key === activeAdvancedOptionKey ? 'text-slate-500 dark:text-slate-400' : 'text-slate-400/80 dark:text-slate-500/80'"
-                    >
-                      {{ advancedFilterValueDisplay(field.key, field.selected) || field.description }}
+                  <span class="h-2.5 w-2.5 rounded-full" :class="field.accentClass" />
+                  <span class="min-w-0">
+                    <span class="block truncate text-[13px] font-black" :class="field.key === activeAdvancedOptionKey ? 'text-slate-950 dark:text-white' : ''">{{ field.label }}</span>
+                    <span class="mt-0.5 block truncate text-[11px] text-slate-400 dark:text-slate-500">
+                      {{ field.selected.length ? field.selected.join(', ') : field.description }}
                     </span>
                   </span>
+                  <span class="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-black text-slate-400 dark:bg-slate-800 dark:text-slate-500">{{ field.optionCount ?? field.options.length }}</span>
                 </button>
-              </div>
-            </nav>
-
-            <!-- Col 2: Candidates -->
-	            <section class="flex min-w-0 flex-col p-3">
-	              <div class="mb-3 flex items-start justify-between gap-3">
-                <div class="min-w-0">
-                  <div class="flex items-center gap-2">
-                    <span class="h-2 w-2 rounded-full" :class="activeAdvancedFilterField.accentClass" />
-                    <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                      {{ activeAdvancedFilterField.group }}
-                    </p>
-                  </div>
-                  <h3 class="mt-1 truncate text-lg font-bold text-slate-900 dark:text-white">
-                    {{ activeAdvancedFilterField.label }}
-                  </h3>
                 </div>
-                <p class="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-                  {{ matchingAdvancedOptions.length }} / {{ activeAdvancedOptions.length }}
-                </p>
-              </div>
+              </nav>
 
-              <div
-                v-if="activeAdvancedOptionKey === 'ions'"
-	                class="mb-3 rounded-md border border-slate-200 bg-slate-50/70 p-2 dark:border-slate-800 dark:bg-slate-950/30"
-              >
+              <section class="filter-candidate-stage min-w-0 p-4">
+                <div class="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="h-2 w-2 rounded-full" :class="activeAdvancedFilterField.accentClass" />
+                      <p class="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400 dark:text-slate-500">
+                        {{ activeAdvancedFilterField.group }}
+                      </p>
+                    </div>
+                    <h3 class="mt-1 truncate text-xl font-black leading-tight text-slate-950 dark:text-white">
+                      {{ activeAdvancedFilterField.label }}
+                    </h3>
+                  </div>
+                  <p class="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-black text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400">
+                    {{ matchingAdvancedOptions.length }} / {{ activeAdvancedOptions.length }}
+                  </p>
+                </div>
+
                 <div
-                  v-for="role in ionFilterRoles"
-                  :key="role.key"
-                  class="group flex w-full items-center overflow-hidden rounded-lg transition"
-                  :class="role.key === activeIonRole
-                    ? 'bg-white shadow-sm ring-1 ring-slate-300 dark:bg-slate-900 dark:ring-slate-600'
-                    : 'hover:bg-white/80 dark:hover:bg-slate-900/70'"
+                  v-if="activeAdvancedOptionKey === 'ions'"
+                  class="ion-filter-switch mb-3 grid gap-2 rounded-[11px] border border-slate-200 bg-slate-50/70 p-1.5 dark:border-slate-800 dark:bg-slate-950/30 sm:grid-cols-2"
                 >
-                  <button
-                    type="button"
-                    class="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left"
-                    @click="selectIonFilterRole(role.key)"
+                  <div
+                    v-for="role in ionFilterRoles"
+                    :key="role.key"
+                    class="group flex min-w-0 items-center overflow-hidden rounded-[9px] transition"
+                    :class="role.key === activeIonRole
+                      ? 'bg-white shadow-sm ring-1 ring-[#9de9df] dark:bg-slate-900 dark:ring-cyan-500/30'
+                      : 'hover:bg-white/80 dark:hover:bg-slate-900/70'"
                   >
-                    <span class="h-2.5 w-2.5 shrink-0 rounded-full" :class="role.accentClass" />
-                    <span class="min-w-0 flex-1">
-                      <span class="flex min-w-0 items-center gap-2">
-                        <span class="shrink-0 whitespace-nowrap text-sm font-bold text-slate-900 dark:text-white">
-                          {{ role.label }}
+                    <button
+                      type="button"
+                      class="flex min-w-0 flex-1 items-center gap-2.5 px-3 py-2.5 text-left"
+                      @click="selectIonFilterRole(role.key)"
+                    >
+                      <span class="grid h-8 w-8 shrink-0 place-items-center rounded-[8px] text-xs font-black" :class="role.key === 'cation' ? 'bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-200' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-200'">
+                        {{ role.key === 'cation' ? 'C+' : 'A-' }}
+                      </span>
+                      <span class="min-w-0 flex-1">
+                        <span class="flex min-w-0 items-center gap-2">
+                          <span class="shrink-0 whitespace-nowrap text-sm font-black text-slate-950 dark:text-white">
+                            {{ role.label }}
+                          </span>
+                          <span class="shrink-0 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-400 dark:bg-slate-800">
+                            {{ role.options.length }}
+                          </span>
                         </span>
-                        <span class="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 dark:bg-slate-800">
-                          {{ role.options.length }} 候选
+                        <span
+                          class="mt-0.5 block truncate text-xs"
+                          :class="role.selected.length ? 'font-black text-slate-900 dark:text-slate-100' : 'text-slate-400 dark:text-slate-500'"
+                        >
+                          {{ role.selected.length ? role.selected.join(', ') : 'Any' }}
                         </span>
                       </span>
-                      <span
-                        class="mt-0.5 block truncate text-xs"
-                        :class="role.selected ? 'font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-400 dark:text-slate-500'"
-                      >
-                        {{ role.selected || '不固定' }}
-                      </span>
-                    </span>
-                    <Check v-if="!role.selected && role.key === activeIonRole" class="h-4 w-4 shrink-0 text-slate-700 dark:text-slate-200" />
-                  </button>
+                      <Check v-if="role.selected.length && role.key === activeIonRole" class="h-4 w-4 shrink-0 text-[#0f7c82] dark:text-cyan-200" />
+                    </button>
+                    <button
+                      v-if="role.selected.length"
+                      type="button"
+                      class="mr-1 grid h-7 w-7 shrink-0 place-items-center rounded-[7px] text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                      @click.stop="clearIonFilterRole(role.key)"
+                    >
+                      <X class="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                <div class="relative mb-3">
+                  <Search class="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    v-model="advancedOptionSearch"
+                    type="search"
+                    :placeholder="`Find ${activeAdvancedCandidateLabel}`"
+                    class="h-10 w-full rounded-[9px] border-0 bg-slate-100 pl-10 pr-10 text-sm font-semibold text-slate-900 ring-1 ring-inset ring-slate-200 transition placeholder:text-slate-400 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-[#93e7e8] dark:bg-slate-800 dark:text-white dark:ring-slate-700 dark:focus:bg-slate-900"
+                    @keydown.enter.prevent="advancedTypedCandidate ? applyAdvancedTypedValue() : applyAdvancedFilters()"
+                  >
                   <button
-                    v-if="role.selected"
+                    v-if="advancedOptionSearch"
                     type="button"
-                    class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-                    @click.stop="clearIonFilterRole(role.key)"
+                    class="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-full text-slate-400 transition hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+                    @click="advancedOptionSearch = ''"
                   >
                     <X class="h-3.5 w-3.5" />
                   </button>
                 </div>
-              </div>
 
-	              <div class="relative mb-3">
-                <Search class="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <input
-                  v-model="advancedOptionSearch"
-                  type="search"
-                  :placeholder="`搜索 ${activeAdvancedCandidateLabel} 候选…`"
-                  class="h-10 w-full rounded-md border-0 bg-slate-100 pl-10 pr-10 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 transition placeholder:text-slate-500 focus:bg-white focus:ring-2 focus:ring-inset focus:ring-slate-400 dark:bg-slate-800 dark:text-white dark:ring-slate-700 dark:focus:bg-slate-900"
-                  @keydown.enter.prevent="advancedTypedCandidate ? applyAdvancedTypedValue() : applyAdvancedFilters()"
-                >
                 <button
-                  v-if="advancedOptionSearch"
+                  v-if="advancedTypedCandidate"
                   type="button"
-                  class="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-slate-400 transition hover:bg-slate-200 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-slate-200"
-                  @click="advancedOptionSearch = ''"
+                  class="mb-3 flex w-full items-center justify-between rounded-[9px] border border-dashed border-[#9debed] bg-[#f4fffe] px-4 py-2.5 text-left text-sm font-black text-[#0f7c82] transition hover:bg-white dark:border-cyan-500/30 dark:bg-cyan-500/10 dark:text-cyan-200 dark:hover:bg-slate-900"
+                  @click="applyAdvancedTypedValue"
                 >
-                  <X class="h-3.5 w-3.5" />
+                  <span class="truncate">Use “{{ advancedFilterValueDisplay(activeAdvancedOptionKey, advancedTypedCandidate) }}” as {{ activeAdvancedCandidateLabel }}</span>
+                  <span class="ml-3 shrink-0 rounded-full bg-white px-1.5 py-0.5 text-[10px] uppercase text-slate-500 dark:bg-slate-900 dark:text-slate-300">Enter</span>
                 </button>
-              </div>
 
-              <button
-                v-if="advancedTypedCandidate"
-                type="button"
-	                class="mb-3 flex w-full items-center justify-between rounded-md border border-dashed border-slate-300 bg-slate-50 px-4 py-2.5 text-left text-sm font-medium text-slate-700 transition hover:bg-white dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-200 dark:hover:bg-slate-800"
-	                @click="applyAdvancedTypedValue"
-	              >
-	                <span class="truncate">使用 “{{ advancedFilterValueDisplay(activeAdvancedOptionKey, advancedTypedCandidate) }}” 作为 {{ activeAdvancedCandidateLabel }}</span>
-	                <span class="ml-3 shrink-0 rounded bg-slate-200 px-1.5 py-0.5 text-[10px] uppercase text-slate-600 dark:bg-slate-700 dark:text-slate-300">Enter</span>
-	              </button>
-
-	              <div
-	                v-if="activeAdvancedOptionKey !== 'ions' && activeAdvancedSelectedValue"
-		                class="mb-3 flex items-center justify-between gap-3 rounded-md bg-slate-50 px-4 py-3 ring-1 ring-slate-200 dark:bg-slate-800/60 dark:ring-slate-700"
-	              >
-	                <div class="min-w-0">
-	                  <p class="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">已选择</p>
-	                  <p
-	                    class="mt-0.5 truncate text-sm font-semibold text-slate-900 dark:text-slate-100"
-	                    :title="advancedFilterRawTitle(activeAdvancedOptionKey, activeAdvancedSelectedValue)"
-	                  >{{ advancedFilterValueDisplay(activeAdvancedOptionKey, activeAdvancedSelectedValue) }}</p>
-                </div>
-                <button
-                  type="button"
-                  class="shrink-0 rounded-md bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700"
-                  @click="clearAdvancedFilterValue(activeAdvancedFilterField.key)"
+                <div
+                  v-if="activeAdvancedOptionKey !== 'ions' && activeAdvancedSelectedValues.length"
+                  class="mb-3 flex items-center justify-between gap-3 rounded-[9px] bg-[#f4fffe] px-4 py-3 ring-1 ring-[#b8eff0] dark:bg-cyan-500/10 dark:ring-cyan-500/30"
                 >
-                  清除
-                </button>
-              </div>
-
-	              <div class="max-h-56 overflow-auto rounded-md border border-slate-100 bg-white dark:border-slate-800 dark:bg-slate-950/50">
-	                  <button
-	                    v-for="option in visibleAdvancedOptions"
-	                    :key="`${activeAdvancedFilterField.key}-${activeIonRole}-${option}`"
-	                    type="button"
-	                    class="flex w-full items-center gap-3 border-b border-slate-50 px-4 py-2.5 text-left text-sm transition last:border-b-0 hover:bg-slate-50 dark:border-slate-800/50 dark:hover:bg-slate-800/50"
-	                    :class="option === activeAdvancedSelectedValue ? 'bg-slate-100 dark:bg-slate-800/80' : ''"
-	                    :title="advancedFilterRawTitle(activeAdvancedFilterField.key, option)"
-	                    @click="setAdvancedFilterValue(activeAdvancedFilterField.key, option)"
-	                  >
-	                    <span class="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-300" :class="option === activeAdvancedSelectedValue ? 'font-semibold text-slate-900 dark:text-slate-100' : ''">{{ advancedFilterValueDisplay(activeAdvancedFilterField.key, option) }}</span>
-	                    <Check v-if="option === activeAdvancedSelectedValue" class="h-4 w-4 text-slate-700 dark:text-slate-200" />
-	                  </button>
-                  <div v-if="!visibleAdvancedOptions.length" class="px-4 py-8 text-center text-sm text-slate-400">
-                    没有匹配候选。可以直接使用当前输入作为筛选值。
-	              </div>
-              </div>
-              <p v-if="hiddenAdvancedOptionCount" class="mt-3 text-center text-xs text-slate-400">
-                还有 {{ hiddenAdvancedOptionCount }} 个候选未展示，继续输入可缩小范围。
-              </p>
-            </section>
-
-            <!-- Col 3: Values & Active -->
-	            <aside class="flex flex-col bg-slate-50/30 p-3 dark:bg-slate-950/20">
-	              <div class="mb-4">
-	                <div class="mb-3 flex items-center justify-between">
-                  <p class="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Active Slice</p>
-                  <span v-if="activeManualFilterCount" class="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-400">{{ activeManualFilterCount }}</span>
-                </div>
-                <div v-if="manualFilterChips.length" class="flex flex-wrap gap-2">
+                  <div class="min-w-0">
+                    <p class="text-[10px] font-black uppercase tracking-[0.2em] text-[#0f7c82] dark:text-cyan-200">Pinned</p>
+                    <p
+                      class="mt-0.5 truncate text-sm font-black text-slate-950 dark:text-slate-100"
+                      :title="activeAdvancedSelectedValues.join(', ')"
+                    >{{ activeAdvancedSelectedValues.join(', ') }}</p>
+                  </div>
                   <button
-                    v-for="chip in manualFilterChips"
-                    :key="chip.id"
                     type="button"
-                    class="group flex max-w-full items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
-                    @click="removeAdvancedSearchChip(chip.id)"
+                    class="shrink-0 rounded-[7px] bg-white px-2.5 py-1.5 text-xs font-black text-slate-700 transition hover:bg-slate-100 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700"
+                    @click="clearAdvancedFilterValue(activeAdvancedFilterField.key)"
                   >
-                    <span class="truncate font-medium">{{ chip.label }}</span>
-                    <span class="text-slate-400 dark:text-slate-500">:</span>
-                    <span class="truncate text-slate-900 dark:text-white">{{ chip.value }}</span>
-                    <X class="ml-0.5 h-3 w-3 text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-300" />
+                    Clear
                   </button>
                 </div>
-                <p v-else class="text-xs text-slate-400 dark:text-slate-500">
-                  当前没有手动筛选，表格显示当前文献或全库范围。
-                </p>
-              </div>
 
-              <div>
-	                <p class="mb-3 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">数值窗口</p>
-	                <div class="space-y-3">
-                  <div>
-                    <label class="mb-2 block text-xs font-medium text-slate-700 dark:text-slate-300">载荷窗口 (Load)</label>
-                    <div class="flex items-center gap-2">
-                      <input
-                        v-model="loadMin"
-                        type="text"
-                        inputmode="decimal"
-                        placeholder="Min"
-                        class="h-9 w-full rounded-md border-0 bg-white px-3 text-sm text-slate-900 ring-1 ring-inset transition focus:ring-2 focus:ring-inset dark:bg-slate-900 dark:text-white"
-                        :class="isLoadRangeInvalid ? 'ring-rose-300 focus:ring-rose-500 dark:ring-rose-500/50' : 'ring-slate-200 focus:ring-slate-400 dark:ring-slate-700'"
-                        @keydown.enter.prevent="applyAdvancedFilters"
-                      />
-                      <span class="text-slate-400">-</span>
-                      <input
-                        v-model="loadMax"
-                        type="text"
-                        inputmode="decimal"
-                        placeholder="Max"
-                        class="h-9 w-full rounded-md border-0 bg-white px-3 text-sm text-slate-900 ring-1 ring-inset transition focus:ring-2 focus:ring-inset dark:bg-slate-900 dark:text-white"
-                        :class="isLoadRangeInvalid ? 'ring-rose-300 focus:ring-rose-500 dark:ring-rose-500/50' : 'ring-slate-200 focus:ring-slate-400 dark:ring-slate-700'"
-                        @keydown.enter.prevent="applyAdvancedFilters"
-                      />
-                    </div>
-                    <p v-if="isLoadRangeInvalid" class="mt-1 text-[11px] text-rose-500">输入无效，最小值不能大于最大值。</p>
+                <div class="option-river grid max-h-56 grid-cols-1 gap-2 overflow-auto rounded-[10px] border border-slate-100 bg-white p-2 dark:border-slate-800 dark:bg-slate-950/50 sm:grid-cols-2">
+                  <button
+                    v-for="option in visibleAdvancedOptions"
+                    :key="`${activeAdvancedFilterField.key}-${activeIonRole}-${option}`"
+                    type="button"
+                    class="flex min-w-0 items-center gap-2 rounded-[8px] border px-3 py-2.5 text-left text-sm transition hover:border-[#9debed] hover:bg-[#f4fffe] dark:hover:border-cyan-500/30 dark:hover:bg-cyan-500/10"
+                    :class="activeAdvancedSelectedValues.includes(option) ? 'border-[#9debed] bg-[#ecfeff] dark:border-cyan-500/30 dark:bg-cyan-500/10' : 'border-slate-100 dark:border-slate-800'"
+                    :title="advancedFilterRawTitle(activeAdvancedFilterField.key, option)"
+                    @click="setAdvancedFilterValue(activeAdvancedFilterField.key, option)"
+                  >
+                    <span class="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-300" :class="activeAdvancedSelectedValues.includes(option) ? 'font-black text-slate-950 dark:text-slate-100' : 'font-semibold'">{{ advancedFilterValueDisplay(activeAdvancedFilterField.key, option) }}</span>
+                    <Check v-if="activeAdvancedSelectedValues.includes(option)" class="h-4 w-4 shrink-0 text-[#0f7c82] dark:text-cyan-200" />
+                  </button>
+                  <div v-if="!visibleAdvancedOptions.length" class="col-span-full px-4 py-8 text-center text-sm font-semibold text-slate-400">
+                    No matches. Press Enter to use the current value.
                   </div>
+                </div>
+                <p v-if="hiddenAdvancedOptionCount" class="mt-3 text-center text-xs font-medium text-slate-400">
+                  {{ hiddenAdvancedOptionCount }} more options. Type to narrow.
+                </p>
+              </section>
+            </div>
 
-                  <div>
-                    <label class="mb-2 block text-xs font-medium text-slate-700 dark:text-slate-300">COF 窗口</label>
-                    <div class="flex items-center gap-2">
-                      <input
-                        v-model="cofMin"
-                        type="text"
-                        inputmode="decimal"
-                        placeholder="Min"
-                        class="h-9 w-full rounded-md border-0 bg-white px-3 text-sm text-slate-900 ring-1 ring-inset transition focus:ring-2 focus:ring-inset dark:bg-slate-900 dark:text-white"
-                        :class="isCofRangeInvalid ? 'ring-rose-300 focus:ring-rose-500 dark:ring-rose-500/50' : 'ring-slate-200 focus:ring-slate-400 dark:ring-slate-700'"
-                        @keydown.enter.prevent="applyAdvancedFilters"
-                      />
-                      <span class="text-slate-400">-</span>
-                      <input
-                        v-model="cofMax"
-                        type="text"
-                        inputmode="decimal"
-                        placeholder="Max"
-                        class="h-9 w-full rounded-md border-0 bg-white px-3 text-sm text-slate-900 ring-1 ring-inset transition focus:ring-2 focus:ring-inset dark:bg-slate-900 dark:text-white"
-                        :class="isCofRangeInvalid ? 'ring-rose-300 focus:ring-rose-500 dark:ring-rose-500/50' : 'ring-slate-200 focus:ring-slate-400 dark:ring-slate-700'"
-                        @keydown.enter.prevent="applyAdvancedFilters"
-                      />
+            <div class="filter-slice-panel border-t border-slate-100 bg-slate-50/55 p-4 dark:border-slate-800/60 dark:bg-slate-950/20">
+              <div class="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+                <div>
+                  <div class="mb-2 flex items-center justify-between">
+                    <p class="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400 dark:text-slate-500">Active slice</p>
+                    <span v-if="activeManualFilterCount" class="rounded-full bg-[#e6fbf8] px-2 py-0.5 text-[10px] font-black text-[#0f7c82] dark:bg-cyan-500/10 dark:text-cyan-200">{{ activeManualFilterCount }}</span>
+                  </div>
+                  <div v-if="manualFilterChips.length" class="flex flex-wrap gap-2">
+                    <button
+                      v-for="chip in manualFilterChips"
+                      :key="chip.id"
+                      type="button"
+                      class="group flex max-w-full items-center gap-1.5 rounded-[8px] border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-600 transition hover:border-[#9debed] hover:bg-[#f4fffe] dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-cyan-500/30 dark:hover:bg-cyan-500/10"
+                      @click="removeAdvancedSearchChip(chip.id)"
+                    >
+                      <span class="truncate font-black">{{ chip.label }}</span>
+                      <span class="text-slate-400 dark:text-slate-500">:</span>
+                      <span class="truncate font-semibold text-slate-950 dark:text-white">{{ chip.value }}</span>
+                      <X class="ml-0.5 h-3 w-3 shrink-0 text-slate-400 group-hover:text-[#0f7c82] dark:group-hover:text-cyan-200" />
+                    </button>
+                  </div>
+                  <p v-else class="rounded-[9px] border border-dashed border-slate-200 bg-white px-3 py-3 text-xs font-semibold text-slate-400 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-500">
+                    No filters pinned.
+                  </p>
+                </div>
+
+                <div>
+                  <p class="mb-2 text-[10px] font-black uppercase tracking-[0.22em] text-slate-400 dark:text-slate-500">Ranges</p>
+                  <div class="grid gap-2 sm:grid-cols-2">
+                    <div class="rounded-[9px] border border-slate-200 bg-white p-2.5 dark:border-slate-800 dark:bg-slate-900/70">
+                      <label class="mb-2 block text-xs font-black text-slate-700 dark:text-slate-300">Load</label>
+                      <div class="flex items-center gap-2">
+                        <input
+                          v-model="loadMin"
+                          type="text"
+                          inputmode="decimal"
+                          placeholder="Min"
+                          class="h-9 w-full rounded-[7px] border-0 bg-slate-50 px-3 text-sm font-semibold text-slate-900 ring-1 ring-inset transition focus:ring-2 focus:ring-inset dark:bg-slate-950 dark:text-white"
+                          :class="isLoadRangeInvalid ? 'ring-rose-300 focus:ring-rose-500 dark:ring-rose-500/50' : 'ring-slate-200 focus:ring-[#93e7e8] dark:ring-slate-700'"
+                          @keydown.enter.prevent="applyAdvancedFilters"
+                        />
+                        <span class="text-slate-300">-</span>
+                        <input
+                          v-model="loadMax"
+                          type="text"
+                          inputmode="decimal"
+                          placeholder="Max"
+                          class="h-9 w-full rounded-[7px] border-0 bg-slate-50 px-3 text-sm font-semibold text-slate-900 ring-1 ring-inset transition focus:ring-2 focus:ring-inset dark:bg-slate-950 dark:text-white"
+                          :class="isLoadRangeInvalid ? 'ring-rose-300 focus:ring-rose-500 dark:ring-rose-500/50' : 'ring-slate-200 focus:ring-[#93e7e8] dark:ring-slate-700'"
+                          @keydown.enter.prevent="applyAdvancedFilters"
+                        />
+                      </div>
+                      <p v-if="isLoadRangeInvalid" class="mt-1 text-[11px] font-semibold text-rose-500">Min cannot exceed max.</p>
                     </div>
-                    <p v-if="isCofRangeInvalid" class="mt-1 text-[11px] text-rose-500">输入无效，最小值不能大于最大值。</p>
+
+                    <div class="rounded-[9px] border border-slate-200 bg-white p-2.5 dark:border-slate-800 dark:bg-slate-900/70">
+                      <label class="mb-2 block text-xs font-black text-slate-700 dark:text-slate-300">COF</label>
+                      <div class="flex items-center gap-2">
+                        <input
+                          v-model="cofMin"
+                          type="text"
+                          inputmode="decimal"
+                          placeholder="Min"
+                          class="h-9 w-full rounded-[7px] border-0 bg-slate-50 px-3 text-sm font-semibold text-slate-900 ring-1 ring-inset transition focus:ring-2 focus:ring-inset dark:bg-slate-950 dark:text-white"
+                          :class="isCofRangeInvalid ? 'ring-rose-300 focus:ring-rose-500 dark:ring-rose-500/50' : 'ring-slate-200 focus:ring-[#93e7e8] dark:ring-slate-700'"
+                          @keydown.enter.prevent="applyAdvancedFilters"
+                        />
+                        <span class="text-slate-300">-</span>
+                        <input
+                          v-model="cofMax"
+                          type="text"
+                          inputmode="decimal"
+                          placeholder="Max"
+                          class="h-9 w-full rounded-[7px] border-0 bg-slate-50 px-3 text-sm font-semibold text-slate-900 ring-1 ring-inset transition focus:ring-2 focus:ring-inset dark:bg-slate-950 dark:text-white"
+                          :class="isCofRangeInvalid ? 'ring-rose-300 focus:ring-rose-500 dark:ring-rose-500/50' : 'ring-slate-200 focus:ring-[#93e7e8] dark:ring-slate-700'"
+                          @keydown.enter.prevent="applyAdvancedFilters"
+                        />
+                      </div>
+                      <p v-if="isCofRangeInvalid" class="mt-1 text-[11px] font-semibold text-rose-500">Min cannot exceed max.</p>
+                    </div>
                   </div>
                 </div>
               </div>
-            </aside>
+            </div>
           </div>
 
-          <!-- Footer -->
           <div class="flex items-center justify-between border-t border-slate-100 bg-slate-50/50 px-5 py-3 dark:border-slate-800/60 dark:bg-slate-900/50">
-	            <p class="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">
-	              候选选择会即时刷新；取消会回到上一次已应用的数值窗口。
-            </p>
-            <div class="flex w-full justify-end gap-3 sm:w-auto">
+            <div class="flex min-w-0 items-center gap-2">
+              <span class="hidden text-xs font-black text-slate-500 dark:text-slate-400 sm:inline">
+                Selected {{ visibleSelectedIds.size }}
+              </span>
               <button
+                v-if="selectedIds.size > 0"
                 type="button"
-                class="rounded-md px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-200/50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
-                @click="cancelAdvancedFilters"
+                class="rounded-[7px] px-2.5 py-1.5 text-xs font-black text-slate-500 transition hover:bg-slate-200/50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+                @click="clearSelection"
               >
-                取消
+                Clear selected
               </button>
               <button
                 type="button"
-                class="inline-flex h-9 items-center justify-center gap-2 rounded-md bg-slate-900 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white dark:focus:ring-offset-slate-900"
+                class="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-rose-200 bg-rose-50 px-3 text-xs font-black text-rose-600 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-45 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-300"
+                :disabled="visibleSelectedIds.size === 0 || batchActionPending"
+                @click="handleBatchDelete"
+              >
+                <Trash2 class="h-3.5 w-3.5" />
+                <span v-if="batchActionPending">Deleting...</span>
+                <span v-else>Delete</span>
+              </button>
+            </div>
+            <div class="flex shrink-0 justify-end gap-2">
+              <button
+                type="button"
+                class="rounded-[7px] px-4 py-2 text-sm font-black text-slate-600 transition hover:bg-slate-200/50 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+                @click="cancelAdvancedFilters"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="inline-flex h-9 items-center justify-center gap-2 rounded-[7px] bg-slate-950 px-5 text-sm font-black text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-[#93e7e8] focus:ring-offset-2 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white dark:focus:ring-offset-slate-900"
                 :disabled="hasInvalidManualRange"
                 @click="applyAdvancedFilters"
               >
                 <Search class="h-4 w-4" />
-                应用筛选
+                Apply
               </button>
             </div>
           </div>
@@ -1968,82 +2244,33 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div v-if="selectedIds.size > 0" class="px-6 pt-3">
-      <div class="flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-white/90 px-3 py-2.5 text-sm text-slate-700 shadow-[0_18px_42px_-34px_rgba(15,23,42,0.65)] ring-1 ring-slate-100 backdrop-blur dark:border-slate-800 dark:bg-slate-950/85 dark:text-slate-200 dark:ring-slate-800">
-        <div class="mr-1 flex items-center gap-2">
-          <span class="inline-flex h-7 min-w-7 items-center justify-center rounded-full bg-slate-950 px-2 text-xs font-black tabular-nums text-white dark:bg-white dark:text-slate-950">
-            {{ selectedIds.size }}
-          </span>
-          <span class="text-xs font-black uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Batch Edit</span>
-        </div>
-
+    <div class="flex-1 overflow-hidden px-6 py-4">
+      <div
+        v-if="searchError"
+        aria-label="Database records could not be loaded"
+        class="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-[8px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-200"
+      >
+        <span>{{ searchError }}</span>
         <button
           type="button"
-          class="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs font-bold text-slate-500 transition hover:border-slate-300 hover:bg-white hover:text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
-          @click="clearSelection"
+          class="rounded-[7px] border border-rose-200 bg-white px-3 py-1.5 text-xs font-black text-rose-700 transition hover:bg-rose-100 dark:border-rose-400/30 dark:bg-rose-500/10 dark:text-rose-100 dark:hover:bg-rose-500/20"
+          @click="fetchData"
         >
-          取消选择
+          Retry
         </button>
-
-        <span class="mx-1 hidden h-6 w-px bg-slate-200 dark:bg-slate-800 sm:block" />
-
-        <select
-          v-model="batchEditField"
-          class="h-9 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 outline-none transition focus:border-slate-400 focus:ring-4 focus:ring-slate-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:focus:border-slate-500 dark:focus:ring-slate-500/10"
-        >
-          <option value="">选择字段...</option>
-          <option v-for="opt in BATCH_FIELD_OPTIONS" :key="opt.key" :value="opt.key">{{ opt.label }}</option>
-        </select>
-        <input
-          v-model="batchEditValue"
-          type="text"
-          :placeholder="batchEditField ? '新值，留空则清除' : '先选字段'"
-          :disabled="!batchEditField"
-          class="h-9 w-48 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-4 focus:ring-slate-100 disabled:bg-slate-50 disabled:text-slate-400 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:focus:border-slate-500 dark:focus:ring-slate-500/10 dark:disabled:bg-slate-900"
-        >
-        <button
-          type="button"
-          class="inline-flex h-9 items-center gap-1 rounded-lg bg-slate-950 px-3 text-xs font-black text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-45 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200"
-          :disabled="!batchEditField || batchActionPending"
-          @click="handleBatchEdit"
-        >
-          <span v-if="batchActionPending">应用中...</span>
-          <span v-else>应用修改</span>
-        </button>
-
-        <button
-          type="button"
-          class="ml-auto inline-flex h-9 items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-3 text-xs font-black text-rose-600 transition hover:border-rose-300 hover:bg-rose-100 disabled:opacity-50 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-300"
-          :disabled="batchActionPending"
-          @click="handleBatchDelete"
-        >
-          删除选中
-        </button>
-
-        <span
-          v-if="batchError"
-          class="basis-full rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-600 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-300"
-        >
-          {{ batchError }}
-        </span>
       </div>
-    </div>
-
-    <div class="flex-1 overflow-auto px-6 py-4">
       <RecordTable
         :loading="loading"
         :records="result.items"
         :row-number-start="rangeStart || 1"
         :deleting-row-id="deletingRowId"
-        :evidence-data="evidenceData"
         :structure-preview-open="structurePreview.open"
         :structure-preview-row-id="structurePreview.rowId"
         :focus-record-id="focusRecordId ?? null"
+        :focus-entity-type="focusEntityType || null"
         :selected-ids="selectedIds"
         :open-evidence-modal="handleOpenEvidenceModal"
-        :open-review-record="handleOpenReviewRecord"
-        :open-edit-modal="handleOpenEditModal"
-        :remove-record="removeRecord"
+        :open-literature="handleOpenLiteratureRecord"
         :open-structure-preview="openStructurePreview"
         @toggle-select="toggleSelectOne"
         @toggle-select-page="toggleSelectPage"
@@ -2059,7 +2286,7 @@ onBeforeUnmount(() => {
           暂无符合条件的记录
         </template>
       </div>
-      <div class="flex items-center gap-1">
+      <div v-if="result.total > 0" class="flex items-center gap-1">
         <button
           class="inline-flex items-center gap-1 rounded-md border border-slate-300 px-1.5 py-1 text-slate-400 hover:bg-slate-50 hover:text-slate-600 disabled:opacity-40 dark:border-slate-700 dark:hover:bg-slate-800"
           :disabled="currentPage === 1"
@@ -2094,183 +2321,141 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <Modal :show="!!evidenceModalRecord" max-width="full" @close="closeEvidenceModal">
-      <template #header>
-        <div v-if="evidenceModalRecord" class="flex w-full items-center justify-between gap-4">
+    <Transition
+      enter-active-class="transition ease-out duration-200"
+      enter-from-class="opacity-0"
+      enter-to-class="opacity-100"
+      leave-active-class="transition ease-in duration-150"
+      leave-from-class="opacity-100"
+      leave-to-class="opacity-0"
+    >
+      <div
+        v-if="evidenceModalRecord"
+        class="database-field-evidence-popover fixed z-[90] w-[min(42rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-lg border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/15"
+        :style="{ top: `${databaseEvidencePosition.top}px`, left: `${databaseEvidencePosition.left}px` }"
+      >
+        <div class="flex items-center justify-between gap-3">
           <div class="min-w-0">
-            <div class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400">Evidence Workspace</div>
-            <div class="mt-1 truncate text-base font-semibold text-slate-900 dark:text-slate-100">
-              Record #{{ evidenceModalRecord.id }} · {{ tribopairDisplay(evidenceModalRecord) }}
-            </div>
+            <h4 class="truncate text-sm font-black text-slate-950">
+              {{ databaseEvidenceTitle() }}
+            </h4>
+            <p class="mt-0.5 text-xs font-bold text-slate-400">
+              {{ databaseEvidencePage(evidenceModalRecord) }}
+            </p>
           </div>
-          <div class="flex items-center gap-2">
-            <button
-              type="button"
-              class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-              @click="handleOpenEditModal(evidenceModalRecord)"
-            >
-              <Edit class="h-4 w-4" /> Edit
-            </button>
-            <button
-              v-if="evidenceModalRecord.literatureId"
-              type="button"
-              class="inline-flex items-center gap-1.5 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"
-              @click="openRecordPdf(evidenceModalRecord)"
-            >
-              <ExternalLink class="h-4 w-4" /> Open PDF
-            </button>
-          </div>
+          <button
+            type="button"
+            class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-800"
+            aria-label="Close evidence"
+            @click="closeDatabaseEvidencePopover"
+          >
+            <X class="h-4 w-4" />
+          </button>
         </div>
-      </template>
-
-      <div v-if="evidenceModalRecord" class="grid h-[78vh] gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
-        <aside class="space-y-4 overflow-auto pr-1">
-          <!-- Tribopair Cross-Check Card -->
-          <div class="rounded-md border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
-            <div class="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
-              <Layers class="h-4 w-4 text-emerald-500" /> Tribopair Cross-Check
-            </div>
-            <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-              <!-- Probe -->
-              <div>
-                <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Probe</div>
-                <div class="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">
-                  {{ tribopairParts(evidenceModalRecord).probe }}
+        <div class="mt-3 rounded-md bg-teal-50/70 px-3 py-2 text-sm font-extrabold text-[#0f7c82]">
+          <ChemicalText :text="databaseEvidenceValue(evidenceModalRecord)" />
+        </div>
+        <div class="database-evidence-content-scroll mt-3 max-h-[min(72vh,44rem)] space-y-2 overflow-y-auto pr-1">
+          <p v-if="databaseEvidenceIsLoading(evidenceModalRecord)" class="rounded-md border border-slate-100 bg-slate-50 px-3 py-2 text-sm font-medium leading-6 text-slate-500">
+            Locating evidence...
+          </p>
+          <p v-else-if="databaseEvidenceDisplayError(evidenceModalRecord)" class="rounded-md border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-medium leading-6 text-rose-600">
+            {{ databaseEvidenceDisplayError(evidenceModalRecord) }}
+          </p>
+          <template v-else>
+            <div
+              v-if="activeDatabaseEvidenceSlide(evidenceModalRecord)"
+              class="rounded-md border border-slate-100 bg-slate-50 p-2"
+            >
+              <div class="mb-2 flex items-center justify-between gap-2">
+                <div class="min-w-0">
+                  <div class="truncate text-xs font-black uppercase tracking-[0.12em] text-slate-400">
+                    {{ activeDatabaseEvidenceSlide(evidenceModalRecord)?.label }}
+                  </div>
+                  <div class="text-xs font-bold text-slate-500">
+                    {{ activeDatabaseEvidenceSlide(evidenceModalRecord)?.page ? `Page ${activeDatabaseEvidenceSlide(evidenceModalRecord)?.page}` : 'Text evidence' }}
+                  </div>
                 </div>
-                <div v-if="tribopairExtras(evidenceModalRecord).probeDetails" class="mt-0.5 text-xs text-slate-500">
-                  {{ tribopairExtras(evidenceModalRecord).probeDetails }}
-                </div>
-              </div>
-              
-              <!-- Substrate -->
-              <div>
-                <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Substrate</div>
-                <div class="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">
-                  {{ tribopairParts(evidenceModalRecord).substrate }}
-                </div>
-                <div v-if="surfaceRoughnessBadge(evidenceModalRecord)" class="mt-0.5 text-xs text-slate-500">
-                  Roughness: {{ surfaceRoughnessBadge(evidenceModalRecord)?.label }}
-                </div>
-              </div>
-
-              <!-- Coating -->
-              <div v-if="tribopairParts(evidenceModalRecord).coating">
-                <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Coating</div>
-                <div class="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">
-                  {{ tribopairParts(evidenceModalRecord).coating }}
-                </div>
-              </div>
-
-              <!-- Film Thickness -->
-              <div v-if="tribopairExtras(evidenceModalRecord).filmThickness">
-                <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Film Thickness</div>
-                <div class="mt-1 text-sm font-medium text-slate-900 dark:text-slate-100">
-                  {{ tribopairExtras(evidenceModalRecord).filmThickness }}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <RecordCard
-            :record="evidenceModalRecord"
-            :evidence="evidenceData[evidenceModalRecord.id] || null"
-            eyebrow="Selected Record"
-          />
-
-          <div class="rounded-md border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
-            <div class="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
-              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-book-open h-4 w-4"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> Reference Source
-            </div>
-            <div class="mt-4 space-y-4">
-              <div>
-                <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Title</div>
-                <div class="mt-1 text-sm font-medium leading-6 text-slate-900 dark:text-slate-100">
-                  {{ evidenceModalRecord.literature?.title || '--' }}
-                </div>
-              </div>
-              <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                <div>
-                  <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Authors</div>
-                  <div class="mt-1 text-sm text-slate-700 dark:text-slate-300">{{ evidenceModalRecord.literature?.authors || '--' }}</div>
-                </div>
-                <div>
-                  <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Journal</div>
-                  <div class="mt-1 text-sm text-slate-700 dark:text-slate-300">{{ evidenceModalRecord.literature?.journal || '--' }}</div>
-                </div>
-              </div>
-              <div>
-                <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">DOI</div>
-                <div class="mt-1 text-sm">
-                  <a
-                    v-if="evidenceModalRecord.literature?.doi"
-                    :href="`https://doi.org/${evidenceModalRecord.literature?.doi}`"
-                    target="_blank"
-                    class="inline-flex items-center gap-1 text-[#315083] hover:underline dark:text-sky-300"
+                <div v-if="databaseEvidenceSlideCount(evidenceModalRecord) > 1" class="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    class="grid h-7 w-7 place-items-center rounded-md border border-slate-200 bg-white text-slate-500 transition hover:border-teal-200 hover:text-[#0f7c82]"
+                    aria-label="Previous evidence"
+                    @click="moveDatabaseEvidenceSlide(evidenceModalRecord, -1)"
                   >
-                    {{ evidenceModalRecord.literature?.doi }}
-                    <ExternalLink class="h-3.5 w-3.5" />
-                  </a>
-                  <span v-else class="text-slate-700 dark:text-slate-300">--</span>
+                    <ChevronLeft class="h-4 w-4" />
+                  </button>
+                  <span class="min-w-10 text-center text-[11px] font-black text-slate-400">
+                    {{ databaseEvidenceSlideIndex + 1 }}/{{ databaseEvidenceSlideCount(evidenceModalRecord) }}
+                  </span>
+                  <button
+                    type="button"
+                    class="grid h-7 w-7 place-items-center rounded-md border border-slate-200 bg-white text-slate-500 transition hover:border-teal-200 hover:text-[#0f7c82]"
+                    aria-label="Next evidence"
+                    @click="moveDatabaseEvidenceSlide(evidenceModalRecord, 1)"
+                  >
+                    <ChevronRight class="h-4 w-4" />
+                  </button>
                 </div>
               </div>
-            </div>
-          </div>
 
-          <ConfidencePanel
-            :record="evidenceModalRecord"
-            :evidence="evidenceData[evidenceModalRecord.id] || null"
-            delta-mode="evidence"
-          />
-        </aside>
-
-        <section class="flex min-h-0 flex-col rounded-lg border border-slate-800 bg-[#08111f] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)]">
-          <div class="mb-4 flex flex-wrap items-start justify-between gap-3 px-1">
-            <div>
-              <div class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Context-Aware Evidence</div>
-              <div class="mt-1 text-sm text-slate-300">
-                <span class="font-semibold text-white" v-html="formatIonicLiquidHtml(lubricantDisplay(evidenceModalRecord))"></span>
-                <span class="mx-2 text-slate-500">·</span>
-                <span>{{ cofDisplay(evidenceModalRecord) }}</span>
-              </div>
-            </div>
-            <div class="flex flex-wrap gap-2">
-              <span
-                v-for="group in conditionGroups(evidenceModalRecord)"
-                :key="`modal-cond-${group.key}`"
-                class="inline-flex max-w-full items-center gap-2 rounded-md border px-3 py-1 text-[11px] font-semibold"
-                :class="conditionGroupClass(group.key)"
+	              <div
+	                v-if="activeDatabaseEvidenceSlide(evidenceModalRecord)?.imageSrc"
+	                class="database-evidence-image-frame overflow-hidden rounded-md border border-emerald-100 bg-white"
+	              >
+	                <img
+	                  :src="activeDatabaseEvidenceSlide(evidenceModalRecord)?.imageSrc || ''"
+	                  alt="Highlighted PDF evidence"
+	                  class="max-h-[min(42vh,26rem)] w-full object-contain"
+	                >
+	              </div>
+              <div
+                v-else-if="activeDatabaseEvidenceSlide(evidenceModalRecord)?.imageLoading"
+                class="rounded-md border border-dashed border-slate-200 bg-white px-3 py-8 text-center text-sm font-semibold text-slate-400"
               >
-                <span class="tracking-[0.16em]">{{ group.label }}</span>
-                <span class="truncate border-l border-current/20 pl-2 tracking-normal">{{ group.summary }}</span>
-              </span>
-            </div>
-          </div>
+                Rendering highlighted PDF evidence...
+              </div>
+              <div
+                v-else-if="activeDatabaseEvidenceSlide(evidenceModalRecord)?.imageError"
+                class="rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700"
+              >
+                {{ activeDatabaseEvidenceSlide(evidenceModalRecord)?.imageError }}
+              </div>
 
-          <div class="min-h-0 flex-1 overflow-auto">
-            <p v-if="evidenceLoading[evidenceModalRecord.id]" class="rounded-md border border-slate-700/70 bg-slate-900/60 px-4 py-5 text-sm text-slate-300">
-              Locating evidence...
+	              <p
+	                v-if="activeDatabaseEvidenceQuote(evidenceModalRecord)"
+	                class="mt-2 rounded-md border border-slate-100 bg-white px-3 py-2 text-sm font-medium leading-6 text-slate-600"
+	              >
+                <template
+                  v-for="(part, partIndex) in splitDatabaseEvidenceQuote(activeDatabaseEvidenceQuote(evidenceModalRecord)!)"
+                  :key="`${evidenceModalRecord.id}-slide-${databaseEvidenceSlideIndex}-${partIndex}`"
+                >
+                  <mark
+                    v-if="part.active"
+                    class="rounded bg-violet-100 px-0.5 py-0 text-slate-900"
+                  >
+                    <ChemicalText :text="part.text" />
+                  </mark>
+	                  <ChemicalText v-else :text="part.text" />
+	                </template>
+	              </p>
+	              <div
+	                v-if="activeDatabaseEvidenceNote(evidenceModalRecord)"
+	                class="mt-2 rounded-md border border-teal-100 bg-teal-50 px-3 py-2 text-sm font-semibold leading-6 text-teal-800"
+	              >
+		                <div class="text-[11px] font-black uppercase tracking-[0.14em] text-teal-600">
+		                  {{ activeDatabaseEvidenceSlide(evidenceModalRecord)?.noteLabel || 'Derived calculation' }}
+		                </div>
+		                <ChemicalText :text="activeDatabaseEvidenceNote(evidenceModalRecord)" />
+	              </div>
+	            </div>
+            <p v-if="databaseEvidenceSlides(evidenceModalRecord).length === 0" class="rounded-md border border-dashed border-slate-200 px-3 py-3 text-sm font-semibold text-slate-400">
+              No field-level quote was stored for this {{ databaseEvidenceTitle().toLowerCase() }} value.
             </p>
-            <p v-else-if="evidenceError[evidenceModalRecord.id]" class="rounded-md border border-rose-500/30 bg-rose-500/10 px-4 py-5 text-sm text-rose-200">
-              {{ evidenceError[evidenceModalRecord.id] }}
-            </p>
-            <template v-else-if="activeEvidenceRow">
-              <p v-if="evidenceData[evidenceModalRecord.id] && !evidenceData[evidenceModalRecord.id]?.has_pdf" class="mb-3 rounded-md border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
-                PDF file not found on backend disk; evidence image cannot be generated.
-              </p>
-              <InteractiveEvidencePanelHost
-                :row="activeEvidenceRow"
-                :pdf-url="evidenceModalRecord.literatureId ? `/api/pdf/${evidenceModalRecord.literatureId}` : ''"
-                class-name="rounded-md"
-                @open-pdf="handleEvidenceModalPdfOpen"
-              />
-            </template>
-            <p v-else class="rounded-md border border-slate-700/70 bg-slate-900/60 px-4 py-5 text-sm text-slate-300">
-              No evidence available for this record.
-            </p>
-          </div>
-        </section>
+          </template>
+        </div>
       </div>
-    </Modal>
+    </Transition>
 
     <Transition
       enter-active-class="transition ease-out duration-300"
@@ -2295,7 +2480,7 @@ onBeforeUnmount(() => {
                 <div class="min-w-0">
                   <div class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-400 dark:text-slate-500">Edit Parameters</div>
                   <div class="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-100">
-                    Record #{{ editDrawerRecord.id }}
+                    {{ compactRecordDisplayId(editDrawerRecord) }}
                   </div>
                   <div class="mt-2 text-sm text-slate-500 dark:text-slate-400" v-html="formatIonicLiquidHtml(lubricantDisplay(editDrawerRecord))"></div>
                 </div>

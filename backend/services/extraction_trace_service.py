@@ -175,6 +175,55 @@ async def get_extraction_run(db: AsyncSession, run_id: str) -> Optional[Extracti
     return row.scalar_one_or_none()
 
 
+async def mark_extraction_run_started(
+    db: AsyncSession,
+    *,
+    run_id: str,
+    extractor_type: str,
+    profile: str,
+    message: str | None = None,
+) -> None:
+    run = await get_extraction_run(db, run_id)
+    if not run or str(run.status or "").strip().lower() == "cancelled":
+        return
+
+    label = "Diffusion" if extractor_type == "diffusion" else "Tribology"
+    started_message = message or f"{label} extraction is running."
+    summary: dict[str, Any] = {}
+    if run.summary_json:
+        try:
+            loaded = json.loads(run.summary_json)
+            if isinstance(loaded, dict):
+                summary = loaded
+        except Exception:
+            summary = {}
+
+    progress_log = summary.get("progress_log")
+    if not isinstance(progress_log, list):
+        progress_log = []
+    if not any(
+        isinstance(item, dict)
+        and str(item.get("stage") or "").strip() == "stage_a.start"
+        and str(item.get("message") or "").strip() == started_message
+        for item in progress_log
+    ):
+        progress_log = [*progress_log, {"stage": "stage_a.start", "message": started_message}]
+
+    summary = {
+        **summary,
+        "run_id": run_id,
+        "extractor_type": extractor_type,
+        "profile": profile,
+        "current_stage": "stage_a.start",
+        "current_message": started_message,
+        "progress_log": progress_log,
+    }
+    run.status = "running"
+    run.profile = profile
+    run.error_message = None
+    run.summary_json = _json_dumps(summary)
+
+
 async def get_latest_extraction_run_by_literature(
     db: AsyncSession,
     literature_id: int,
@@ -198,8 +247,8 @@ async def is_extraction_cancelled(
         run = (
             await db.execute(select(ExtractionRun).where(ExtractionRun.run_id == run_id))
         ).scalar_one_or_none()
-        if run and str(run.status or "").strip().lower() == "cancelled":
-            return True
+        if run:
+            return str(run.status or "").strip().lower() == "cancelled"
 
     if literature_id:
         literature = await db.get(Literature, literature_id)

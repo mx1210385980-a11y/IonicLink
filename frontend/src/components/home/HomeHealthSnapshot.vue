@@ -58,20 +58,20 @@ function meterWidth(value: number | null) {
 </script>
 
 <template>
-  <section class="shell-surface flex min-h-0 flex-col px-4 py-3.5">
+  <section class="shell-surface flex min-h-0 flex-col px-4 py-3.5 sm:px-4.5">
     <div class="flex items-start justify-between gap-4">
       <div>
-        <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+        <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400 dark:text-slate-500">
           {{ isChinese ? 'Health Snapshot' : 'Health Snapshot' }}
         </p>
-        <h2 class="mt-1 text-lg font-semibold tracking-normal text-slate-950 dark:text-white">
-          {{ isChinese ? '质量快照' : 'Quality snapshot' }}
+        <h2 class="mt-1 text-lg font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">
+          {{ isChinese ? '质量快照。' : 'Quality snapshot.' }}
         </h2>
       </div>
 
       <button
         type="button"
-        class="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+        class="inline-flex items-center gap-2 rounded-full border border-black/8 bg-white/72 px-3.5 py-2 text-xs font-semibold text-slate-700 transition hover:bg-white dark:border-white/10 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10"
         @click="emit('action')"
       >
         {{ isChinese ? '进入数据集构建' : 'Open Dataset Builder' }}
@@ -83,19 +83,19 @@ function meterWidth(value: number | null) {
       <article
         v-for="item in items"
         :key="item.key"
-        class="rounded-md border border-slate-200 bg-white px-3 py-2.5 dark:border-slate-800 dark:bg-slate-900"
+        class="rounded-[1rem] border border-black/8 bg-white/70 px-3 py-2.5 dark:border-white/10 dark:bg-white/5"
       >
         <div class="flex items-start justify-between gap-3">
           <div>
             <p class="text-sm font-semibold text-slate-950 dark:text-white">{{ item.label }}</p>
             <p class="mt-0.5 text-[11px] leading-4 text-slate-500 dark:text-slate-400">{{ item.detail }}</p>
           </div>
-          <p class="text-lg font-semibold tracking-normal text-slate-950 dark:text-white">{{ item.value }}</p>
+          <p class="text-lg font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">{{ item.value }}</p>
         </div>
 
         <div class="mt-2.5 h-1.5 overflow-hidden rounded-full bg-slate-200/80 dark:bg-white/10">
           <div
-            class="h-full rounded-full bg-slate-800 dark:bg-slate-200"
+            class="h-full rounded-full bg-gradient-to-r from-[#22338b] via-[#4153cb] to-[#6ba3ff]"
             :style="{ width: meterWidth(item.progress) }"
           />
         </div>

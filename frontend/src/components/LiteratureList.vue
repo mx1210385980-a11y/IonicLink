@@ -70,43 +70,25 @@ const searchText = ref('')
 const listMode = ref<'list' | 'grid'>('list')
 const favoriteIds = ref<number[]>([])
 
-function isNoDataLiterature(item: Literature) {
-  return String(item.status || '').trim().toLowerCase() === 'no_data'
-}
-
-function sortLiteratureForList(items: Literature[]) {
-  return [...items].sort((a, b) => {
-    const aNoData = isNoDataLiterature(a) ? 1 : 0
-    const bNoData = isNoDataLiterature(b) ? 1 : 0
-    if (aNoData !== bNoData) return aNoData - bNoData
-    return Number(b.id || 0) - Number(a.id || 0)
-  })
-}
-
 const recentLiterature = computed(() => {
   return [...literature.value]
-    .sort((a, b) => {
-      const aNoData = isNoDataLiterature(a) ? 1 : 0
-      const bNoData = isNoDataLiterature(b) ? 1 : 0
-      if (aNoData !== bNoData) return aNoData - bNoData
-      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    })
+    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
     .slice(0, 12)
 })
 
 const filteredLiterature = computed(() => {
-  let rows = sortLiteratureForList(literature.value)
+  let rows = literature.value
   if (activeTab.value === 'recent') rows = recentLiterature.value
   if (activeTab.value === 'favorites') rows = rows.filter((r) => favoriteIds.value.includes(r.id))
 
   const q = searchText.value.trim().toLowerCase()
-  const filteredRows = !q ? rows : rows.filter((r) =>
+  if (!q) return rows
+  return rows.filter((r) =>
     [r.title, r.authors, r.journal, r.doi, String(r.year || '')]
       .join(' ')
       .toLowerCase()
       .includes(q)
   )
-  return activeTab.value === 'recent' ? filteredRows : sortLiteratureForList(filteredRows)
 })
 
 // --- Computed: only columns that have at least one non-empty value across all records ---
@@ -141,7 +123,7 @@ const loadLiterature = async () => {
   loading.value = true
   try {
     const data = await listLiterature(0, 100)
-    literature.value = sortLiteratureForList(data)
+    literature.value = data
   } catch (error: any) {
     showNotification('error', `Failed to load literature: ${error.message}`)
   } finally {

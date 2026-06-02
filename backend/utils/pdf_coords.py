@@ -152,6 +152,8 @@ def _normalize_context_text(text: str) -> str:
 
 def _search_context_is_compatible(semantic_type: str, query: str, local_context: str) -> bool:
     semantic = str(semantic_type or "").strip().lower()
+    if semantic in {"surface_roughness", "probe_roughness", "substrate_roughness"}:
+        semantic = "roughness"
     if not semantic:
         return True
 
@@ -160,7 +162,21 @@ def _search_context_is_compatible(semantic_type: str, query: str, local_context:
 
     haystack = _normalize_context_text(local_context)
     if semantic == "speed":
-        return any(token in haystack for token in ("um/s", "um s-1", "um s−1"))
+        query_text = _normalize_context_text(query)
+        has_linear_speed = any(token in haystack for token in ("um/s", "um s-1", "um s−1"))
+        has_scan_conditions = (
+            "scan" in haystack
+            and re.search(r"scan\s*(?:size|length|range)", haystack)
+            and re.search(r"scan\s*(?:rate|frequency)|\bhz\b", haystack)
+        )
+        query_is_scan_conditions = (
+            "scan" in query_text
+            and (
+                re.search(r"scan\s*(?:size|length|range)", query_text)
+                or re.search(r"scan\s*(?:rate|frequency)|\bhz\b", query_text)
+            )
+        )
+        return has_linear_speed or bool(has_scan_conditions and query_is_scan_conditions)
     if semantic == "shear_rate":
         return any(token in haystack for token in ("shear rate", "s-1", "s^-1", "s−1"))
     if semantic == "load":
@@ -168,7 +184,7 @@ def _search_context_is_compatible(semantic_type: str, query: str, local_context:
     if semantic == "roughness" and _extract_number_tokens(query):
         return any(
             token in haystack
-            for token in ("roughness", "rms", "root-mean-square", "root mean square")
+            for token in ("roughness", "rms", "root-mean-square", "root mean square", "nm", "um", "pm")
         )
     if semantic == "potential":
         query_lower = _normalize_context_text(query)
@@ -187,6 +203,18 @@ def _search_context_is_compatible(semantic_type: str, query: str, local_context:
                 return True
             return any(token in haystack for token in ("potential", "voltage", "applied bias", "bias voltage"))
 
+    return True
+
+
+def _matched_text_is_compatible(semantic_type: str, query: str, matched_text: str) -> bool:
+    semantic = str(semantic_type or "").strip().lower()
+    if semantic in {"surface_roughness", "probe_roughness", "substrate_roughness"}:
+        semantic = "roughness"
+    if semantic == "roughness" and _extract_number_tokens(query):
+        alpha_tokens = _extract_alpha_sequences(matched_text)
+        allowed = {"roughness", "rms", "root", "mean", "square", "nm", "um", "pm"}
+        if alpha_tokens and not any(token in allowed for token in alpha_tokens):
+            return False
     return True
 
 
@@ -309,6 +337,22 @@ def _word_level_find_rect(page: fitz.Page, query: str):
                 x1 = max(float(words[k][2]) for k in range(i, j))
                 y1 = max(float(words[k][3]) for k in range(i, j))
                 return fitz.Rect(x0, y0, x1, y1), seg_text
+    return None
+
+
+def _roughness_word_level_find_rect(page: fitz.Page, query: str):
+    if not _extract_number_tokens(query):
+        return None
+    words = page.get_text("words") or []
+    for word in sorted(words, key=lambda w: (w[5], w[6], w[7])):
+        matched_text = str(word[4] or "").strip().rstrip(",;")
+        if not _numeric_tokens_match(query, matched_text):
+            continue
+        rect = fitz.Rect(float(word[0]), float(word[1]), float(word[2]), float(word[3]))
+        local_context = _extract_tight_local_context(page, rect)
+        context_text = " ".join(part for part in [matched_text, local_context] if part).strip()
+        if _search_context_is_compatible("roughness", query, context_text):
+            return rect, matched_text
     return None
 
 
@@ -664,9 +708,11 @@ def find_text_coordinates(pdf_path: str, search_terms: list[dict]) -> list[dict]
                                 continue
                             if not _query_matches_matched_text(query_clean, matched_text):
                                 continue
+                            if not _matched_text_is_compatible(semantic_type, query_clean, matched_text):
+                                continue
                             local_context = (
                                 _extract_tight_local_context(page, rect)
-                                if semantic_type == "potential"
+                                if semantic_type in {"potential", "roughness", "surface_roughness", "probe_roughness", "substrate_roughness"}
                                 else _extract_local_context(page, rect)
                             )
                             context_text = " ".join(part for part in [matched_text, local_context] if part).strip()
@@ -717,7 +763,10 @@ def find_text_coordinates(pdf_path: str, search_terms: list[dict]) -> list[dict]
                             break
 
                     # Fallback for tokenization/encoding mismatches.
-                    fallback = _word_level_find_rect(page, query_clean)
+                    if semantic_type in {"roughness", "surface_roughness", "probe_roughness", "substrate_roughness"}:
+                        fallback = _roughness_word_level_find_rect(page, query_clean)
+                    else:
+                        fallback = _word_level_find_rect(page, query_clean)
                     if fallback:
                         rect, matched_text = fallback
                         if restrict_to_anchor_bbox and ax0 is not None and not _in_anchor(rect):
@@ -726,9 +775,11 @@ def find_text_coordinates(pdf_path: str, search_terms: list[dict]) -> list[dict]
                             continue
                         if not _query_matches_matched_text(query_clean, matched_text or ""):
                             continue
+                        if not _matched_text_is_compatible(semantic_type, query_clean, matched_text or ""):
+                            continue
                         local_context = (
                             _extract_tight_local_context(page, rect)
-                            if semantic_type == "potential"
+                            if semantic_type in {"potential", "roughness", "surface_roughness", "probe_roughness", "substrate_roughness"}
                             else _extract_local_context(page, rect)
                         )
                         context_text = " ".join(part for part in [matched_text, local_context] if part).strip()

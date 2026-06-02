@@ -179,16 +179,6 @@ class TribologyDataBase(BaseModel):
             legacy_surface_roughness=self.surface_roughness,
         )
 
-        has_probe_details = any(
-            value for value in (self.probe_geometry, self.probe_radius, self.probe_roughness)
-        )
-        has_substrate_details = any(
-            value for value in (self.substrate_coating, self.substrate_roughness)
-        )
-        if has_probe_details and not self.probe_material:
-            raise ValueError("probeMaterial is required when probe details are recorded.")
-        if has_substrate_details and not self.substrate_material:
-            raise ValueError("substrateMaterial is required when substrate details are recorded.")
         speed_conditions = normalize_speed_conditions(self.speed_conditions) or derive_speed_conditions(
             self.speed_raw or self.speed_value,
             context=self.evidence,

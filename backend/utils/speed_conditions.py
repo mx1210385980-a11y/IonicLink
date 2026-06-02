@@ -103,6 +103,8 @@ def normalize_speed_conditions(value: Any) -> dict[str, Any]:
         sliding = 2.0 * scan_length * scan_rate
         calculation = calculation or f"v = 2 x {scan_length:g} μm x {scan_rate:g} Hz"
         value_type = value_type or "derived"
+    if calculation and sliding is not None and "μm/s" not in calculation and "um/s" not in calculation.lower():
+        calculation = f"{calculation} = {_compact(sliding)} μm/s"
     if not value_type:
         value_type = "linear" if sliding is not None else "scan_rate" if scan_rate is not None else "unknown"
     if scan_rate is not None and sliding is None:
@@ -124,6 +126,8 @@ def normalize_speed_conditions(value: Any) -> dict[str, Any]:
 
 
 def derive_speed_conditions(speed: Any = None, *, context: Any = None) -> dict[str, Any]:
+    speed_text = _normalize_text(speed)
+    context_text = _normalize_text(context)
     text = _normalize_text(" ".join(str(part or "") for part in (speed, context) if part not in (None, "")))
     if not text:
         return {}
@@ -167,12 +171,23 @@ def derive_speed_conditions(speed: Any = None, *, context: Any = None) -> dict[s
         if value is not None:
             sliding = _linear_velocity_um_s(value, velocity_match.group(2))
 
+    derived_from_scan = scan_rate is not None and scan_length is not None
+    calculation = ""
+    raw_text = str(speed or "").strip() or text
+    if derived_from_scan:
+        derived_sliding = 2.0 * float(scan_length) * float(scan_rate)
+        if sliding is None or abs(float(sliding) - derived_sliding) <= max(0.05, abs(derived_sliding) * 0.02):
+            sliding = derived_sliding
+            calculation = f"v = 2 x {scan_length:g} μm x {scan_rate:g} Hz"
+            raw_text = context_text or text
+
     return normalize_speed_conditions({
-        "raw_text": str(speed or "").strip() or text,
-        "value_type": "derived" if scan_rate is not None and scan_length is not None and sliding is None else "linear" if sliding is not None else "scan_rate" if scan_rate is not None else "unknown",
+        "raw_text": raw_text,
+        "value_type": "derived" if derived_from_scan and calculation else "linear" if sliding is not None else "scan_rate" if scan_rate is not None else "unknown",
         "sliding_velocity_um_s": sliding,
         "scan_rate_hz": scan_rate,
         "scan_length_um": scan_length,
+        "calculation": calculation,
     })
 
 

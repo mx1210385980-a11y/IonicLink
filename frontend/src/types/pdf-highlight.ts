@@ -9,6 +9,8 @@ export interface HighlightRect {
     page: number
     /** Optional RGBA color for PDF overlay highlight */
     color?: string
+    /** Text that was matched in the source PDF, when available */
+    matchedText?: string | null
     /** Bounding box in PDF points (origin: top-left) */
     coords: {
         x: number // Left

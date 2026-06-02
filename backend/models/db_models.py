@@ -92,6 +92,11 @@ class User(Base):
         back_populates="created_by",
         cascade="all, delete-orphan",
     )
+    figure_crop_overrides: Mapped[List["FigureCropOverride"]] = relationship(
+        "FigureCropOverride",
+        back_populates="created_by",
+        foreign_keys="FigureCropOverride.created_by_user_id",
+    )
 
 
 class Workspace(Base):
@@ -376,6 +381,11 @@ class Literature(Base):
         back_populates="literature",
         cascade="all, delete-orphan",
     )
+    figure_crop_overrides: Mapped[List["FigureCropOverride"]] = relationship(
+        "FigureCropOverride",
+        back_populates="literature",
+        cascade="all, delete-orphan",
+    )
 
 
 class TribologyData(Base):
@@ -579,6 +589,38 @@ class ExtractionCandidate(Base):
     created_at: Mapped[datetime] = mapped_column(default=func.now())
 
     run: Mapped["ExtractionRun"] = relationship("ExtractionRun", back_populates="candidates")
+
+
+class FigureCropOverride(Base):
+    __tablename__ = "figure_crop_overrides"
+    __table_args__ = (
+        UniqueConstraint("literature_id", "normalized_label", "page", name="uq_figure_crop_override_target"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    literature_id: Mapped[int] = mapped_column(ForeignKey("literature.id"), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(120), nullable=False)
+    normalized_label: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    page: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    caption: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    bbox_json: Mapped[str] = mapped_column(Text, nullable=False)
+    algorithm_bbox_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    preview_image_b64: Mapped[str] = mapped_column(Text, nullable=False)
+    algorithm_version: Mapped[str] = mapped_column(String(80), default="pdf-visual-segmentation.v1", nullable=False)
+
+    created_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    updated_by_user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), index=True, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(default=func.now(), onupdate=func.now())
+
+    literature: Mapped["Literature"] = relationship("Literature", back_populates="figure_crop_overrides")
+    created_by: Mapped["User"] = relationship(
+        "User",
+        back_populates="figure_crop_overrides",
+        foreign_keys=[created_by_user_id],
+    )
+    updated_by: Mapped[Optional["User"]] = relationship("User", foreign_keys=[updated_by_user_id])
 
 
 class DiffusionRecord(Base):

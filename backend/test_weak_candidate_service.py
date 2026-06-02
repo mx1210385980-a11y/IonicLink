@@ -85,6 +85,63 @@ def test_build_weak_candidate_items_uses_aliases_when_canonical_values_are_place
     }
 
 
+def test_build_weak_candidate_items_recovers_il_from_context_before_using_unknown_placeholder():
+    trace_candidates = [
+        {
+            "modality": "text",
+            "page": 2,
+            "normalized": {
+                "ionic_liquid": "Unknown IL",
+                "material_name": "1-butyl-3-methylimidazolium tetrafluoroborate ([BMIM][BF4], BB)",
+                "cof": "0.08",
+                "evidence": (
+                    "The extensively studied 1-butyl-3-methylimidazolium "
+                    "tetrafluoroborate ([BMIM][BF4], BB) was used as the IL."
+                ),
+            },
+        }
+    ]
+
+    items, summary = build_weak_candidate_items(trace_candidates)
+
+    assert summary == {"weak_candidate_count": 1}
+    assert items[0]["ionic_liquid"] == "[BMIM][BF4]"
+
+
+def test_build_weak_candidate_items_rejects_reference_marker_il_noise_without_recoverable_il():
+    trace_candidates = [
+        {
+            "modality": "text",
+            "page": 5,
+            "normalized": {
+                "ionic_liquid": "[63][previously]",
+                "material_name": "Unknown Material",
+                "cof": "0.080",
+                "speed": "1000000 μm/s",
+                "evidence": (
+                    "Werzer et al. [63] previously found that the friction "
+                    "coefficient increased as the sliding speed increased."
+                ),
+            },
+        },
+        {
+            "modality": "text",
+            "page": 6,
+            "normalized": {
+                "ionic_liquid": "[66][beneficial]",
+                "material_name": "Unknown Material",
+                "cof": "0.12",
+                "evidence": "A smoother structure [66] beneficial for sliding motion was discussed.",
+            },
+        },
+    ]
+
+    items, summary = build_weak_candidate_items(trace_candidates)
+
+    assert items == []
+    assert summary == {"weak_candidate_count": 0}
+
+
 def test_build_weak_candidate_items_falls_back_for_blank_source_label():
     trace_candidates = [
         {

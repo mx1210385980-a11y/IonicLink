@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 
 import {
+  getCandidateEvidence,
   getRecordEvidence,
   promoteTribologyRecordConfidence,
   type EvidenceResult,
@@ -11,26 +12,42 @@ import {
   confidenceDetailsFor,
 } from '@/lib/integratedExplorerHelpers'
 
+type EvidencePanelOptions = {
+  syncConfidence?: boolean
+}
+
+export function recordEvidenceCacheKey(record: Pick<RecordResponse, 'id' | 'entityType' | 'reviewEntityType' | 'entityId'>) {
+  const entityType = String(record.reviewEntityType || record.entityType || 'record').trim().toLowerCase()
+  const entityId = Number(record.entityId || record.id)
+  return `${entityType === 'candidate' ? 'candidate' : 'record'}:${Number.isFinite(entityId) ? entityId : record.id}`
+}
+
+function isCandidateRecord(record: Pick<RecordResponse, 'entityType' | 'reviewEntityType'>) {
+  return String(record.reviewEntityType || record.entityType || '').trim().toLowerCase() === 'candidate'
+}
+
 export function useEvidencePanel() {
   const evidenceModalRecord = ref<RecordResponse | null>(null)
-  const evidenceData = ref<Record<number, EvidenceResult | null>>({})
-  const evidenceLoading = ref<Record<number, boolean>>({})
-  const evidenceError = ref<Record<number, string | null>>({})
-  const confidenceSyncing = ref<Record<number, boolean>>({})
+  const evidenceData = ref<Record<string, EvidenceResult | null>>({})
+  const evidenceLoading = ref<Record<string, boolean>>({})
+  const evidenceError = ref<Record<string, string | null>>({})
+  const confidenceSyncing = ref<Record<string, boolean>>({})
 
   function closeEvidenceModal() {
     evidenceModalRecord.value = null
   }
 
   async function persistPromotedConfidence(record: RecordResponse, previousStoredScore?: number) {
-    const ev = evidenceData.value[record.id]
-    if (!ev || confidenceSyncing.value[record.id]) return
+    if (isCandidateRecord(record)) return
+    const cacheKey = recordEvidenceCacheKey(record)
+    const ev = evidenceData.value[cacheKey]
+    if (!ev || confidenceSyncing.value[cacheKey]) return
 
     const liveDetails = confidenceDetailsFor(record, ev)
     const storedScore = Number(previousStoredScore ?? record.confidence ?? 0)
     if (Math.abs(liveDetails.score - storedScore) < 1e-6) return
 
-    confidenceSyncing.value[record.id] = true
+    confidenceSyncing.value[cacheKey] = true
     try {
       const resp = await promoteTribologyRecordConfidence(record.id, {
         confidence: liveDetails.score,
@@ -50,14 +67,16 @@ export function useEvidencePanel() {
     } catch (err) {
       console.error('Failed to persist promoted confidence', err)
     } finally {
-      confidenceSyncing.value[record.id] = false
+      confidenceSyncing.value[cacheKey] = false
     }
   }
 
-  async function fetchEvidence(record: RecordResponse) {
-    if (!record.literatureId || evidenceLoading.value[record.id]) return
+  async function fetchEvidence(record: RecordResponse, options: EvidencePanelOptions = {}) {
+    const cacheKey = recordEvidenceCacheKey(record)
+    if (!record.literatureId || evidenceLoading.value[cacheKey]) return
+    const shouldSyncConfidence = options.syncConfidence !== false
 
-    const cached = evidenceData.value[record.id]
+    const cached = evidenceData.value[cacheKey]
     const hasUsefulCachedData =
       !!cached &&
       (cached.has_image ||
@@ -67,30 +86,36 @@ export function useEvidencePanel() {
     const hasTermHits = !!(cached && Array.isArray(cached.term_hits) && cached.term_hits.length > 0)
 
     if (hasUsefulCachedData && (!cached?.has_pdf || hasTermHits)) {
+      if (!shouldSyncConfidence) return
       const previousStoredScore = applyLiveConfidence(record, cached)
       await persistPromotedConfidence(record, previousStoredScore)
       return
     }
 
-    evidenceLoading.value[record.id] = true
-    evidenceError.value[record.id] = null
+    evidenceLoading.value[cacheKey] = true
+    evidenceError.value[cacheKey] = null
 
     try {
-      const ev = await getRecordEvidence(record.literatureId, record.id)
-      evidenceData.value[record.id] = ev
-      const previousStoredScore = applyLiveConfidence(record, ev)
-      await persistPromotedConfidence(record, previousStoredScore)
+      const entityId = Number(record.entityId || record.id)
+      const ev = isCandidateRecord(record)
+        ? await getCandidateEvidence(record.literatureId, entityId)
+        : await getRecordEvidence(record.literatureId, entityId)
+      evidenceData.value[cacheKey] = ev
+      if (shouldSyncConfidence) {
+        const previousStoredScore = applyLiveConfidence(record, ev)
+        await persistPromotedConfidence(record, previousStoredScore)
+      }
     } catch (err: any) {
-      evidenceData.value[record.id] = null
-      evidenceError.value[record.id] = err?.message || 'Failed to load evidence'
+      evidenceData.value[cacheKey] = null
+      evidenceError.value[cacheKey] = err?.message || 'Failed to load evidence'
     } finally {
-      evidenceLoading.value[record.id] = false
+      evidenceLoading.value[cacheKey] = false
     }
   }
 
-  function openEvidenceModal(record: RecordResponse) {
+  function openEvidenceModal(record: RecordResponse, options: EvidencePanelOptions = {}) {
     evidenceModalRecord.value = record
-    void fetchEvidence(record)
+    void fetchEvidence(record, options)
   }
 
   return {
@@ -101,5 +126,6 @@ export function useEvidencePanel() {
     closeEvidenceModal,
     fetchEvidence,
     openEvidenceModal,
+    recordEvidenceCacheKey,
   }
 }

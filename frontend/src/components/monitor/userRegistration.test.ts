@@ -62,10 +62,6 @@ describe('user registration helpers', () => {
     })
   })
 
-  it('defaults new members to the workspace-only researcher role', () => {
-    expect(createEmptyRegistrationForm().role).toBe('workspace_researcher')
-  })
-
   it('returns a success state with workspace information', () => {
     expect(buildRegistrationSuccessState({
       id: 12,

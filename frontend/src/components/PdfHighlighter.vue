@@ -5,9 +5,18 @@ import type { PDFDocumentProxy, PDFPageProxy, RenderTask } from 'pdfjs-dist'
 import PdfPageOverlay from './PdfPageOverlay.vue'
 import type { ExtractedData } from '@/types/pdf-highlight'
 import { Loader2, ZoomIn, ZoomOut, RotateCcw } from 'lucide-vue-next'
+import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
-// Configure the PDF.js worker from the CDN
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`
+function resolvePdfWorkerSrc(): string {
+  if (typeof window === 'undefined') {
+    return pdfjsWorkerUrl
+  }
+  const url = new URL(pdfjsWorkerUrl, window.location.origin)
+  url.searchParams.set('pdfjs', pdfjsLib.version)
+  return url.toString()
+}
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = resolvePdfWorkerSrc()
 
 // ─── Props & Emits ───────────────────────────────────────────────────────────
 const props = withDefaults(defineProps<{

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowUpRight, BookOpen, Database, FolderKanban, GitBranch, LibraryBig, Sparkles, Table2 } from 'lucide-vue-next'
+import { ArrowUpRight, BookOpen, Database, FolderKanban, GitBranch, Sparkles } from 'lucide-vue-next'
 
 type KnowledgeMode = {
   key: string
@@ -10,6 +10,8 @@ type KnowledgeMode = {
 const props = defineProps<{
   currentSection: string
   modes: KnowledgeMode[]
+  activeScopeLabel: string
+  selectedSourceName: string
   selectedRecordCount: number
 }>()
 
@@ -18,119 +20,89 @@ const emit = defineEmits<{
   openReview: []
 }>()
 
-
-
-function isModeActive(mode: KnowledgeMode) {
-  if (mode.key === props.currentSection) return true
-  return mode.key === 'datasets' && props.currentSection === 'cleaning'
-}
-
 function iconFor(section: string) {
-  if (section === 'snapshots') return Table2
-  if (section === 'insights') return Sparkles
-  if (section === 'sources') return LibraryBig
   if (section === 'graph') return GitBranch
   if (section === 'cleaning') return Sparkles
   if (section === 'datasets') return FolderKanban
   return Database
 }
-
-function labelZh(label: string) {
-  switch (label) {
-    case 'Data Grid': return '数据浏览'
-    case 'Data Snapshot': return '数据快照'
-    case 'Pattern Discovery': return '规律发现'
-    case 'Graph View': return '关系图'
-    case 'Data Cleaning': return '数据清洗'
-    case 'Dataset Builder': return '训练数据集'
-    case 'Dataset Workflow': return '数据准备'
-    case 'Source Atlas': return '来源图谱'
-    default: return label
-  }
-}
-
-function descriptionFor(section: string) {
-  if (section === 'sources') return '期刊封面 / 来源分布'
-  if (section === 'snapshots') return 'approved 索引表'
-  if (section === 'insights') return '图表统计 / 文字稿'
-  if (section === 'graph') return '阳/阴离子对热图'
-  if (section === 'cleaning') return '清洗缺失 / 异常'
-  if (section === 'datasets') return '质量检查 / 训练版本'
-  return '查看全部记录'
-}
-
-function statusFor(mode: KnowledgeMode) {
-  if (mode.key === 'explorer') return props.selectedRecordCount > 0 ? `${props.selectedRecordCount} 条` : '待选择'
-  if (mode.key === 'snapshots') return '可查看'
-  if (mode.key === 'insights') return '已生成'
-  if (mode.key === 'sources') return mode.count ? `${mode.count} 篇` : '待入库'
-  if (mode.key === 'cleaning') return mode.count ? `待处理 ${mode.count}` : '可继续'
-  if (mode.key === 'datasets') {
-    if (mode.count) return `待清洗 ${mode.count}`
-    return props.selectedRecordCount > 0 ? '可生成' : '待数据'
-  }
-  if (mode.key === 'graph') return '可查看'
-  return ''
-}
-
-function statusClass(mode: KnowledgeMode) {
-  if (isModeActive(mode)) return 'bg-white text-indigo-700 dark:bg-white/10 dark:text-indigo-200'
-  if (mode.key === 'sources' && mode.count) return 'bg-sky-50 text-sky-700 dark:bg-sky-500/12 dark:text-sky-300'
-  if (mode.key === 'cleaning' && mode.count) return 'bg-amber-50 text-amber-700 dark:bg-amber-500/12 dark:text-amber-300'
-  if (mode.key === 'datasets' && mode.count) return 'bg-amber-50 text-amber-700 dark:bg-amber-500/12 dark:text-amber-300'
-  if (mode.key === 'datasets' && props.selectedRecordCount > 0) return 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/12 dark:text-emerald-300'
-  return 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
-}
-
-
 </script>
 
 <template>
-  <aside class="flex min-h-0 flex-col rounded-lg border border-slate-200 bg-white p-1.5 dark:border-slate-800 dark:bg-slate-900">
-    <div class="px-1.5 pb-1 pt-1">
-      <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">视图</p>
-    </div>
-    <div class="space-y-1">
-      <button
-        v-for="mode in props.modes"
-        :key="mode.key"
-        type="button"
-        class="flex w-full items-center justify-between gap-1.5 rounded-md border px-2 py-2 text-left transition"
-        :class="isModeActive(mode)
-          ? 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/12 dark:text-indigo-200'
-          : 'border-transparent bg-transparent text-slate-700 hover:border-slate-200 hover:bg-slate-50 dark:text-slate-300 dark:hover:border-slate-800 dark:hover:bg-slate-800/60'"
-        @click="emit('select', mode.key)"
-      >
-        <span class="flex min-w-0 items-center gap-2">
-          <component :is="iconFor(mode.key)" class="h-3.5 w-3.5 shrink-0" />
-          <span class="min-w-0">
-            <span class="block truncate text-[13px] font-semibold leading-4">{{ labelZh(mode.label) }}</span>
-            <span class="mt-0.5 block truncate text-[10px] font-normal leading-3 text-slate-500 dark:text-slate-500">{{ descriptionFor(mode.key) }}</span>
-          </span>
-        </span>
-        <span
-          class="shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-semibold tabular-nums"
-          :class="statusClass(mode)"
+  <aside class="flex min-h-0 flex-col rounded-[1.8rem] border border-[#dbe5f0] bg-[#eff4fa] p-4">
+    <div>
+      <p class="text-[11px] font-bold uppercase tracking-[0.24em] text-[#8ca0ba]">Asset Explorer</p>
+      <div class="mt-4 space-y-2">
+        <button
+          v-for="mode in props.modes"
+          :key="mode.key"
+          type="button"
+          class="flex w-full items-center justify-between rounded-[1rem] border px-3.5 py-3 text-left transition"
+          :class="mode.key === props.currentSection
+            ? 'border-[#cfd9ff] bg-white text-[#4c4fdc] shadow-[0_18px_35px_-28px_rgba(76,79,220,0.6)]'
+            : 'border-transparent bg-transparent text-slate-700 hover:border-[#d9e3ef] hover:bg-white/80'"
+          @click="emit('select', mode.key)"
         >
-          {{ statusFor(mode) }}
-        </span>
-      </button>
+          <span class="flex items-center gap-3">
+            <component :is="iconFor(mode.key)" class="h-4.5 w-4.5" />
+            <span class="text-[1rem] font-semibold">{{ mode.label }}</span>
+          </span>
+          <span
+            v-if="mode.count !== undefined && mode.count !== null"
+            class="rounded-[0.65rem] px-2 py-1 text-xs font-semibold"
+            :class="mode.key === props.currentSection ? 'bg-[#eef0ff] text-[#4c4fdc]' : 'bg-[#ffeef1] text-[#f04d75]'"
+          >
+            {{ mode.count }}
+          </span>
+        </button>
+      </div>
     </div>
 
+    <div class="mt-8">
+      <div class="flex items-center justify-between gap-3">
+        <p class="text-[11px] font-bold uppercase tracking-[0.24em] text-[#8ca0ba]">Pinned Assets</p>
+        <span class="text-sm text-[#93a2b8]">...</span>
+      </div>
 
+      <div class="mt-4 space-y-3">
+        <article class="rounded-[1.15rem] border border-white/70 bg-white/88 px-4 py-4 shadow-[0_14px_32px_-28px_rgba(15,23,42,0.35)]">
+          <p class="text-[0.98rem] font-semibold tracking-[-0.03em] text-slate-900">{{ props.selectedSourceName }}</p>
+          <div class="mt-2 flex items-center gap-3 text-sm text-slate-500">
+            <span>{{ props.selectedRecordCount }} records</span>
+            <span class="font-semibold text-[#5a6f8d]">ACTIVE SOURCE</span>
+          </div>
+        </article>
 
-    <div class="mt-auto pt-3">
-      <button
-        type="button"
-        class="inline-flex w-full items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-[13px] transition hover:bg-white dark:border-slate-800 dark:bg-slate-950/40 dark:hover:bg-slate-800"
-        @click="emit('openReview')"
-      >
-        <span class="flex min-w-0 items-center gap-2">
-          <BookOpen class="h-3.5 w-3.5 shrink-0 text-indigo-500" />
-          <span class="font-semibold text-slate-800 dark:text-slate-200">返回审核</span>
-        </span>
-        <ArrowUpRight class="h-3.5 w-3.5 text-slate-400" />
-      </button>
+        <article class="rounded-[1.15rem] border border-white/70 bg-white/88 px-4 py-4 shadow-[0_14px_32px_-28px_rgba(15,23,42,0.35)]">
+          <p class="text-[0.98rem] font-semibold tracking-[-0.03em] text-slate-900">{{ props.activeScopeLabel }}</p>
+          <div class="mt-2 flex items-center gap-3 text-sm text-slate-500">
+            <span>Scope-linked library</span>
+            <span class="font-semibold text-[#5a6f8d]">WORKSPACE</span>
+          </div>
+        </article>
+
+        <article class="rounded-[1.15rem] border border-dashed border-[#d7e0ed] bg-[#f8fbff] px-4 py-4">
+          <p class="text-[0.95rem] font-semibold tracking-[-0.02em] text-slate-800">Dataset Builder Queue</p>
+          <p class="mt-2 text-sm leading-6 text-slate-500">
+            Promote verified records into a clean, exportable asset bundle from the right-hand rail.
+          </p>
+        </article>
+
+        <button
+          type="button"
+          class="inline-flex w-full items-center justify-between rounded-[1.1rem] border border-[#d7e0ed] bg-white px-4 py-3.5 text-left transition hover:bg-[#f8fbff]"
+          @click="emit('openReview')"
+        >
+          <span class="flex items-center gap-3">
+            <BookOpen class="h-4.5 w-4.5 text-[#4c4fdc]" />
+            <span>
+              <span class="block text-[0.96rem] font-semibold text-slate-900">Literature Mgmt</span>
+              <span class="mt-1 block text-sm text-slate-500">Back to review queue and source papers</span>
+            </span>
+          </span>
+          <ArrowUpRight class="h-4 w-4 text-slate-400" />
+        </button>
+      </div>
     </div>
   </aside>
 </template>

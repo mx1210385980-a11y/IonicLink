@@ -1,8 +1,16 @@
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
+import fitz
+
+from models.db_models import Literature, RecordCandidate, TribologyData as TribologyDataDB
 from models.tribology import TribologyData
-from routers.extraction import _build_term_query_variants
+from routers.data_explorer import _record_to_response as _data_explorer_record_to_response
+from routers.extraction import _build_term_query_variants, _tribology_record_api_payload
+from services.query_service import _record_to_payload as _query_record_to_payload
 from services.llm.deduplication import deduplicate_records_with_report
+from services.file_service import _record_to_response_item
 from services.llm.prompts import (
     ABBREV_MAPPING_PROMPT,
     FIGURE_TABLE_EXTRACTION_PROMPT,
@@ -70,6 +78,36 @@ def test_dedup_merges_missing_field_into_complete_record():
     assert merged[0].speed == "1 um/s"
 
 
+def test_dedup_merges_same_record_across_repeated_source_pages():
+    records = [
+        TribologyData(
+            material_name="Graphite",
+            ionic_liquid="[N8,8,8,12][A4BMB]",
+            probe_material="Probe N/A",
+            substrate_material="Graphite",
+            cof="0.0032",
+            temperature="298.15 K",
+            source="Plain text",
+            source_page=1,
+        ),
+        TribologyData(
+            material_name="Graphite",
+            ionic_liquid="[N8,8,8,12][A4BMB]",
+            probe_material="Probe N/A",
+            substrate_material="Graphite",
+            cof="0.0032",
+            temperature="298.15 K",
+            source="Plain text",
+            source_page=8,
+        ),
+    ]
+
+    merged, report = deduplicate_records_with_report(records)
+
+    assert len(merged) == 1
+    assert report.merged_count == 1
+
+
 def test_prompts_include_required_provenance_constraints():
     required_tokens = ["source", "source_page", "source_figure", "evidence"]
 
@@ -118,6 +156,298 @@ def test_il_query_builders_expand_full_name_to_table_label_aliases():
         )
     )
     assert "HMIM FAP" in record_queries
+
+
+def test_tribology_payload_exposes_unified_weak_candidate_metadata():
+    candidate = RecordCandidate(
+        id=17,
+        literature_id=124,
+        material_name="graphene",
+        lubricant="[EMIM][TFSI]",
+        cof_raw="0.08",
+        source="Text",
+        source_page=4,
+        evidence="COF was 0.08 for [EMIM][TFSI] on graphene.",
+        confidence=0.52,
+        review_status="needs_review",
+        record_origin="weak_candidate",
+        assembly_notes="Candidate was admitted for review, but load and sliding speed were not confirmed.",
+    )
+
+    payload = _tribology_record_api_payload(candidate)
+
+    assert payload["entity_type"] == "candidate"
+    assert payload["entity_id"] == 17
+    assert payload["entityType"] == "candidate"
+    assert payload["entityId"] == 17
+    assert payload["review_entity_type"] == "candidate"
+    assert payload["confidence_tier"] == "low"
+    assert payload["confidenceTier"] == "low"
+    assert payload["admission_reason"] == "weak_candidate"
+    assert payload["admissionReason"] == "weak_candidate"
+    assert payload["missing_fields"] == ["normal_load", "speed"]
+    assert payload["missingFields"] == ["normal_load", "speed"]
+    assert payload["quality_notes"].startswith("Candidate was admitted")
+    assert payload["qualityNotes"].startswith("Candidate was admitted")
+    assert payload["fields"]["ionic_liquid"] == "[EMIM][TFSI]"
+    assert payload["fields"]["cof"] == "0.08"
+    assert payload["source"] == "Text"
+    assert payload["display_source"]["page"] == 4
+    assert payload["displaySource"]["label"] == "Text"
+
+
+def test_tribology_payload_exposes_formal_record_as_same_display_shape():
+    record = TribologyDataDB(
+        id=33,
+        literature_id=124,
+        material_name="graphene",
+        lubricant="[EMIM][TFSI]",
+        cof_raw="0.08",
+        source="Table 1",
+        source_page=4,
+        confidence=0.91,
+        review_status="approved",
+        record_origin="llm_extraction",
+    )
+
+    payload = _tribology_record_api_payload(record)
+
+    assert payload["entity_type"] == "record"
+    assert payload["entity_id"] == 33
+    assert payload["entityType"] == "record"
+    assert payload["entityId"] == 33
+    assert payload["review_entity_type"] == "record"
+    assert payload["confidence_tier"] == "high"
+    assert payload["confidenceTier"] == "high"
+    assert payload["admission_reason"] == "strict_validated"
+    assert payload["fields"]["material_name"] == "graphene"
+    assert payload["fields"]["cof"] == "0.08"
+    assert payload["source"] == "Table 1"
+    assert payload["display_source"]["page"] == 4
+    assert payload["displaySource"]["label"] == "Table 1"
+
+
+def test_tribology_payload_enriches_derived_speed_for_preview_rows():
+    record = TribologyDataDB(
+        id=34,
+        literature_id=124,
+        material_name="Au(111)",
+        lubricant="[BMIM][AOT]",
+        cof_raw="0.524",
+        speed_value="6",
+        source="Methods",
+        source_page=3,
+        evidence="The scan size was 500 nm, and scan rate was 6 Hz.",
+        field_evidence_json='{"speed":{"value":"6","evidence":{"quote":"The scan size was 500 nm, and scan rate was 6 Hz.","matched_text":"6","page":3,"bbox":[10,20,14,30]}}}',
+        confidence=0.91,
+        review_status="approved",
+        record_origin="llm_extraction",
+    )
+
+    payload = _tribology_record_api_payload(record)
+
+    assert payload["speed"] == "6"
+    assert payload["speed_conditions"]["value_type"] == "derived"
+    assert payload["field_evidence_json"]["speed"]["value"] == "6 μm/s"
+    assert payload["field_evidence_json"]["speed"]["grounding_mode"] == "derived"
+    assert payload["field_evidence_json"]["speed"]["evidence"]["matched_text"] == "The scan size was 500 nm, and scan rate was 6 Hz."
+    assert "v = 2 x 0.5 μm x 6 Hz = 6 μm/s" in payload["field_evidence_json"]["speed"]["grounding_note"]
+
+
+def test_preview_response_repairs_legacy_derived_speed_evidence():
+    record = TribologyDataDB(
+        id=35,
+        literature_id=124,
+        material_name="Au(111)",
+        lubricant="[BMIM][AOT]",
+        cof_raw="0.524",
+        speed_value="6",
+        source="Methods",
+        source_page=3,
+        evidence="The scan size was 500 nm, and scan rate was 6 Hz.",
+        field_evidence_json='{"speed":{"value":"6","evidence":{"quote":"The scan size was 500 nm, and scan rate was 6 Hz.","matched_text":"6","page":3,"bbox":[10,20,14,30]}}}',
+        confidence=0.91,
+        review_status="approved",
+        record_origin="llm_extraction",
+    )
+
+    payload = _record_to_response_item(record)
+
+    speed = payload["field_evidence_json"]["speed"]
+    assert payload["speed"] == "6 μm/s"
+    assert payload["speed_conditions"]["value_type"] == "derived"
+    assert speed["value"] == "6 μm/s"
+    assert speed["grounding_mode"] == "derived"
+    assert speed["evidence"]["quote"] == "The scan size was 500 nm, and scan rate was 6 Hz."
+    assert speed["evidence"]["matched_text"] == "The scan size was 500 nm, and scan rate was 6 Hz."
+    assert speed["evidence"]["bbox"] is None
+    assert "v = 2 x 0.5 μm x 6 Hz = 6 μm/s" in speed["grounding_note"]
+
+
+def test_database_response_uses_repaired_derived_speed_display():
+    record = TribologyDataDB(
+        id=37,
+        literature_id=124,
+        material_name="Au(111)",
+        lubricant="[BMIM][AOT]",
+        cof_raw="0.524",
+        speed_value="6",
+        source="Methods",
+        source_page=3,
+        evidence="The scan size was 500 nm, and scan rate was 6 Hz.",
+        field_evidence_json='{"speed":{"value":"6","evidence":{"quote":"The scan size was 500 nm, and scan rate was 6 Hz.","matched_text":"6","page":3,"bbox":[10,20,14,30]}}}',
+        confidence=0.91,
+        review_status="approved",
+        record_origin="llm_extraction",
+    )
+
+    payload = _data_explorer_record_to_response(record).model_dump(by_alias=True)
+
+    assert payload["speedValue"] == "6 μm/s"
+    assert payload["speedConditions"]["value_type"] == "derived"
+    assert payload["speedConditions"]["raw_text"] == "The scan size was 500 nm, and scan rate was 6 Hz."
+    assert payload["fieldEvidenceJson"]["speed"]["value"] == "6 μm/s"
+    assert payload["fieldEvidenceJson"]["speed"]["grounding_mode"] == "derived"
+    assert payload["fieldEvidenceJson"]["speed"]["evidence"]["matched_text"] == "The scan size was 500 nm, and scan rate was 6 Hz."
+    assert payload["fieldEvidenceJson"]["speed"]["evidence"]["bbox"] is None
+    assert "v = 2 x 0.5 μm x 6 Hz = 6 μm/s" in payload["fieldEvidenceJson"]["speed"]["grounding_note"]
+
+
+def test_database_response_derives_speed_evidence_from_pdf_scan_context(tmp_path: Path):
+    pdf_path = tmp_path / "scan-context.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=594, height=792)
+    page.insert_text((72, 96), "2. MATERIALS AND METHODS", fontsize=11)
+    page.insert_text((72, 122), "The scan size was 500 nm, and scan rate was 6 Hz.", fontsize=11)
+    doc.save(pdf_path)
+    doc.close()
+
+    record = TribologyDataDB(
+        id=39,
+        literature_id=124,
+        material_name="Au(111)",
+        lubricant="[BMIM][AOT]",
+        cof_raw="0.524",
+        speed_value="6",
+        source="Methods",
+        source_page=1,
+        evidence="AFM friction measurements were performed in the methods section.",
+        field_evidence_json=json.dumps(
+            {
+                "speed": {
+                    "value": "6",
+                    "evidence": {
+                        "source_type": "text",
+                        "quote": "6",
+                        "matched_text": "6",
+                        "page": 1,
+                        "bbox": [250, 114, 258, 130],
+                    },
+                }
+            }
+        ),
+        confidence=0.91,
+        review_status="approved",
+        record_origin="llm_extraction",
+    )
+    record.literature = Literature(
+        id=124,
+        doi="10.0000/scan-context",
+        title="Scan context",
+        authors="Tester",
+        journal="Test",
+        year=2026,
+        file_path=str(pdf_path),
+    )
+
+    payload = _data_explorer_record_to_response(record).model_dump(by_alias=True)
+
+    speed = payload["fieldEvidenceJson"]["speed"]
+    assert payload["speedValue"] == "6 μm/s"
+    assert payload["speedConditions"]["raw_text"] == "The scan size was 500 nm, and scan rate was 6 Hz."
+    assert speed["evidence"]["quote"] == "The scan size was 500 nm, and scan rate was 6 Hz."
+    assert speed["evidence"]["matched_text"] == "The scan size was 500 nm, and scan rate was 6 Hz."
+    assert speed["evidence"]["bbox"] is None
+    assert "v = 2 x 0.5 μm x 6 Hz = 6 μm/s" in speed["grounding_note"]
+
+
+def test_database_search_payload_uses_repaired_field_evidence():
+    record = TribologyDataDB(
+        id=38,
+        literature_id=124,
+        material_name="Au(111)",
+        lubricant="[BMIM][AOT]",
+        cof_raw="0.524",
+        speed_value="6",
+        source="Methods",
+        source_page=3,
+        evidence="The scan size was 500 nm, and scan rate was 6 Hz.",
+        field_evidence_json='{"speed":{"value":"6","evidence":{"quote":"The scan size was 500 nm, and scan rate was 6 Hz.","matched_text":"6","page":3,"bbox":[10,20,14,30]}}}',
+        confidence=0.91,
+        review_status="approved",
+        record_origin="llm_extraction",
+    )
+
+    payload = _query_record_to_payload(record)
+
+    assert payload["speed_value"] == "6 μm/s"
+    assert payload["speed_conditions"]["value_type"] == "derived"
+    assert payload["field_evidence_json"]["speed"]["value"] == "6 μm/s"
+    assert payload["field_evidence_json"]["speed"]["evidence"]["matched_text"] == "The scan size was 500 nm, and scan rate was 6 Hz."
+    assert payload["field_evidence_json"]["speed"]["evidence"]["bbox"] is None
+
+
+def test_preview_response_clears_bare_roughness_number_evidence():
+    record = TribologyDataDB(
+        id=36,
+        literature_id=124,
+        material_name="mica",
+        lubricant="[EMIM][TFSI]",
+        cof_raw="0.02",
+        probe_roughness="RMS 2 nm",
+        source="Methods",
+        source_page=3,
+        field_evidence_json='{"probe_roughness":{"value":"RMS 2 nm","evidence":{"source_type":"text","quote":"2","matched_text":"2","page":3,"bbox":[10,20,14,30]}}}',
+        confidence=0.91,
+        review_status="approved",
+        record_origin="llm_extraction",
+    )
+
+    payload = _record_to_response_item(record)
+
+    roughness = payload["field_evidence_json"]["probe_roughness"]
+    assert roughness["evidence"]["quote"] is None
+    assert roughness["evidence"]["matched_text"] is None
+    assert roughness["evidence"]["bbox"] is None
+    assert "roughness/unit context" in roughness["grounding_note"]
+
+
+def test_preview_response_expands_roughness_numeric_hit_to_rms_context():
+    record = TribologyDataDB(
+        id=40,
+        literature_id=124,
+        material_name="mica",
+        lubricant="[EMIM][TFSI]",
+        cof_raw="0.02",
+        probe_roughness="RMS 2 nm",
+        source="Methods",
+        source_page=3,
+        field_evidence_json=(
+            '{"probe_roughness":{"value":"RMS 2 nm","evidence":'
+            '{"source_type":"text","quote":"The colloidal probe had RMS 2 nm roughness.",'
+            '"matched_text":"2","page":3,"bbox":[10,20,14,30]}}}'
+        ),
+        confidence=0.91,
+        review_status="approved",
+        record_origin="llm_extraction",
+    )
+
+    payload = _record_to_response_item(record)
+
+    roughness = payload["field_evidence_json"]["probe_roughness"]
+    assert roughness["evidence"]["quote"] == "The colloidal probe had RMS 2 nm roughness."
+    assert roughness["evidence"]["matched_text"] == "RMS 2 nm"
+    assert roughness["evidence"]["bbox"] is None
 
 
 def test_drop_reason_rejects_ambiguous_figure_legend_without_numeric_support():

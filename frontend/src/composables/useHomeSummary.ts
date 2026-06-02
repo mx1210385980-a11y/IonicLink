@@ -304,9 +304,9 @@ function buildSuggestedActions(input: {
       description: latestProcessedPaper?.detail
         || (input.reviewPending > 0
           ? (input.isChinese ? '优先把最近机器抽取结果推进到人工确认。' : 'Move the latest machine output into human review first.')
-          : (input.isChinese ? '先进入审阅面，确认最近一批抽取结果。' : 'Open Review and confirm the most recent extracted records.')),
+          : (input.isChinese ? '打开文献库并检查最近一批抽取结果。' : 'Open the library and inspect the latest extracted records.')),
       actionType: latestProcessedPaper?.literature_id ? 'open_record' : 'route',
-      target: latestProcessedPaper?.literature_id ? String(latestProcessedPaper.literature_id) : 'review/inbox',
+      target: latestProcessedPaper?.literature_id ? String(latestProcessedPaper.literature_id) : 'library/explorer',
       priority: input.failedRuns > 0 ? 'medium' : input.reviewPending > 0 ? 'high' : 'medium',
     },
     {
@@ -320,19 +320,19 @@ function buildSuggestedActions(input: {
           ? (input.isChinese ? '优先回到 Pipeline 处理失败运行。' : 'Go back to Pipeline and clear the failed run first.')
           : (input.isChinese ? '当前没有失败运行。' : 'There is no failed run right now.')),
       actionType: 'retry_run',
-      target: latestFailedRun?.runId || 'pipeline/runs',
+      target: latestFailedRun?.runId || 'library/explorer',
       priority: input.failedRuns > 0 ? 'high' : 'low',
     },
     {
       id: 'open-review-queue',
-      label: input.isChinese ? '打开待审队列' : 'Open Review Queue',
+      label: input.isChinese ? '打开文献库' : 'Open Library',
       description: input.reviewPending > 0
         ? (input.isChinese
           ? `${input.reviewPending} 条记录仍待人工确认。`
           : `${input.reviewPending} records still need human confirmation.`)
         : (input.isChinese ? '当前没有明显的待审积压。' : 'There is no obvious review backlog right now.'),
       actionType: 'route',
-      target: 'review/queue',
+      target: 'library/explorer',
       priority: input.reviewPending > 0 ? 'high' : input.runningRuns > 0 ? 'medium' : 'low',
     },
     {

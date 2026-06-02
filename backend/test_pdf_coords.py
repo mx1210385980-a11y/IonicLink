@@ -100,6 +100,53 @@ def test_find_text_coordinates_keeps_cof_numeric_hit_when_context_mentions_mu(tm
     assert hits[0]["matched_text"] == "0.10"
 
 
+def test_find_text_coordinates_accepts_derived_speed_scan_condition_context(tmp_path: Path):
+    pdf_path = tmp_path / "derived_speed_scan_conditions.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=1000, height=220)
+    page.insert_text(
+        (40, 72),
+        "The scan size was 500 nm, and scan rate was 6 Hz.",
+        fontsize=12,
+    )
+    doc.save(pdf_path)
+    doc.close()
+
+    hits = find_text_coordinates(
+        str(pdf_path),
+        [{
+            "id": "speed",
+            "queries": ["The scan size was 500 nm, and scan rate was 6 Hz."],
+            "semantic_type": "speed",
+        }],
+    )
+
+    assert len(hits) == 1
+    assert "scan size" in (hits[0]["matched_text"] or "")
+
+
+def test_find_text_coordinates_roughness_alias_rejects_bare_number_before_context(tmp_path: Path):
+    pdf_path = tmp_path / "roughness_alias_context.pdf"
+    doc = fitz.open()
+    page = doc.new_page(width=1000, height=240)
+    page.insert_text(
+        (40, 72),
+        "Section 2 describes calibration. The AFM tip has RMS roughness 2 nm after cleaning.",
+        fontsize=12,
+    )
+    doc.save(pdf_path)
+    doc.close()
+
+    hits = find_text_coordinates(
+        str(pdf_path),
+        [{"id": "rough", "queries": ["2.0"], "semantic_type": "surface_roughness"}],
+    )
+
+    assert len(hits) == 1
+    assert hits[0]["matched_text"] == "2"
+    assert hits[0]["x"] > 250
+
+
 def test_find_text_coordinates_rejects_potential_numeric_without_voltage_context(tmp_path: Path):
     pdf_path = tmp_path / "potential_not_plain_number.pdf"
     doc = fitz.open()

@@ -1,12 +1,29 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
-import { 
-  Download, ChevronDown, ChevronUp, Gauge, ThermometerSun, 
-  Timer, Layers, AlertCircle, CheckCircle2, RefreshCw, Check, Zap, Search, FileText, FileSearch
+import { computed, ref, watch } from 'vue'
+import {
+  AlertCircle,
+  BookOpen,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  FileSearch,
+  FileText,
+  Layers,
+  RefreshCw,
+  Search,
 } from 'lucide-vue-next'
-import { formatTribopairLabel, type BatchFile, type TribologyData, type LiteratureMetadata } from '@/lib/api'
+import type { BatchFile, LiteratureMetadata, RecordResponse, TribologyData } from '@/lib/api'
+import ConditionMicrobar from '@/components/integrated-explorer/ConditionMicrobar.vue'
+import LubricantRecipeCell from '@/components/integrated-explorer/LubricantRecipeCell.vue'
+import TribopairCapsule from '@/components/integrated-explorer/TribopairCapsule.vue'
+import {
+  cofDisplay,
+  compactRecordDisplayId,
+  recordDisplayId,
+} from '@/lib/integratedExplorerHelpers'
 import { useValidation } from '@/composables/useValidation'
-import { normalizePotentialDisplayText } from '@/lib/potential'
 import LiteratureMetadataCard from '@/components/LiteratureMetadataCard.vue'
 import Button from '@/components/ui/Button.vue'
 import Badge from '@/components/ui/Badge.vue'
@@ -27,26 +44,29 @@ const emit = defineEmits<{
   'view-grounding': [fileId: string]
 }>()
 
-// Use validation composable
 const { validateRecord } = useValidation()
 
-// selectedFileId is now controlled by prop
+const COL_SELECT = 'w-[48px]'
+const COL_ID = 'w-[56px]'
+const COL_IONIC = 'w-[280px]'
+const COL_TRIBOPAIR = 'w-[240px]'
+const COL_CONDITIONS = 'w-[304px]'
+const COL_COF = 'w-[126px]'
+const COL_LITERATURE = 'w-[210px]'
+
 const selectedFileId = computed(() => props.selectedId)
 const expandedRows = ref<Set<string>>(new Set())
 const showExportMenu = ref(false)
 
-// Selected file
 const selectedFile = computed(() => {
   if (!selectedFileId.value) return null
-  return props.files.find(f => f.id === selectedFileId.value) || null
+  return props.files.find((file) => file.id === selectedFileId.value) || null
 })
 
-// Quick Filter Logic
 const selectedLiquidFilter = ref<string>('All')
 const filterSearch = ref('')
 const isFilterExpanded = ref(false)
 
-// Reset filter when file changes
 watch(selectedFileId, () => {
   selectedLiquidFilter.value = 'All'
   filterSearch.value = ''
@@ -55,61 +75,40 @@ watch(selectedFileId, () => {
 
 const uniqueLiquids = computed(() => {
   if (!selectedFile.value) return []
-  
   const counts: Record<string, number> = {}
-  
-  selectedFile.value.records.forEach(r => {
-    let name = r.ionic_liquid?.trim()
-    if (!name) name = 'Unknown'
+  selectedFile.value.records.forEach((record) => {
+    const name = record.ionic_liquid?.trim() || 'Unknown'
     counts[name] = (counts[name] || 0) + 1
   })
-  
   return Object.entries(counts)
     .map(([name, count]) => ({ name, count }))
-    .sort((a, b) => b.count - a.count)
+    .sort((left, right) => right.count - left.count)
 })
 
-// Filter the chips list itself based on search
 const visibleUniqueLiquids = computed(() => {
   if (!filterSearch.value) return uniqueLiquids.value
-  
   const search = filterSearch.value.toLowerCase()
-  return uniqueLiquids.value.filter(l => l.name.toLowerCase().includes(search))
+  return uniqueLiquids.value.filter((liquid) => liquid.name.toLowerCase().includes(search))
 })
 
-// Determine which chips to display (truncation logic)
-const displayedFilterLiquids = computed(() => {
-  if (isFilterExpanded.value) return visibleUniqueLiquids.value
-  // Show top 8 by default
-  return visibleUniqueLiquids.value.slice(0, 8)
-})
+const displayedFilterLiquids = computed(() => (
+  isFilterExpanded.value ? visibleUniqueLiquids.value : visibleUniqueLiquids.value.slice(0, 8)
+))
 
 const filteredRecords = computed(() => {
   if (!selectedFile.value) return []
-  
-  const records = selectedFile.value.records
-  if (selectedLiquidFilter.value === 'All') {
-    return records
-  }
-  
-  return records.filter(r => {
-    let name = r.ionic_liquid?.trim()
-    if (!name) name = 'Unknown'
-    return name === selectedLiquidFilter.value
-  })
+  if (selectedLiquidFilter.value === 'All') return selectedFile.value.records
+  return selectedFile.value.records.filter((record) => (record.ionic_liquid?.trim() || 'Unknown') === selectedLiquidFilter.value)
 })
 
-// Statistics
 const stats = computed(() => {
   const total = props.files.length
-  const completed = props.files.filter(f => f.status === 'success').length
-  const totalRecords = props.files.reduce((sum, f) => sum + f.records.length, 0)
-  const withWarnings = props.files.filter(f => f.hasWarnings).length
-  
+  const completed = props.files.filter((file) => file.status === 'success').length
+  const totalRecords = props.files.reduce((sum, file) => sum + file.records.length, 0)
+  const withWarnings = props.files.filter((file) => file.hasWarnings).length
   return { total, completed, totalRecords, withWarnings }
 })
 
-// Toggle row expansion
 function toggleRow(id: string) {
   if (expandedRows.value.has(id)) {
     expandedRows.value.delete(id)
@@ -118,138 +117,166 @@ function toggleRow(id: string) {
   }
 }
 
-// Parse COF value
-function parseCof(cof: string | undefined): number | undefined {
-  if (!cof) return undefined
-  const numericStr = cof.replace(/[^\d.]/g, '')
-  const val = parseFloat(numericStr)
-  return isNaN(val) ? undefined : val
+function parseNumericValue(value: string | undefined) {
+  if (!value) return null
+  const match = value.match(/[-+]?\d+(?:\.\d+)?/)
+  if (!match) return null
+  const parsed = Number(match[0])
+  return Number.isFinite(parsed) ? parsed : null
 }
 
-// COF color
-function getCofColor(cofStr: string | undefined): string {
-  const cof = parseCof(cofStr)
-  if (cof === undefined) return 'bg-muted'
-  if (cof < 0.1) return 'bg-green-500'
-  if (cof < 0.2) return 'bg-yellow-500'
-  return 'bg-red-500'
+function previewNumericId(record: TribologyData, index: number) {
+  const parsed = Number(record.id)
+  return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : index + 1
 }
 
-// COF width
-function getCofWidth(cofStr: string | undefined): string {
-  const cof = parseCof(cofStr)
-  if (cof === undefined) return '0%'
-  return `${Math.min(cof * 200, 100)}%`
+function previewDisplayId(record: TribologyData, index: number) {
+  const direct = String((record as any).displayId || '').trim()
+  if (direct) return direct
+  const raw = String(record.id || '').trim()
+  if (raw && !/^\d+$/.test(raw)) return raw
+  return `P-${String(index + 1).padStart(3, '0')}`
 }
 
-// Export current file
-function exportCurrentFile(format: 'json' | 'csv' = 'json') {
-  if (selectedFileId.value) {
-    emit('export', selectedFileId.value, format)
+function previewRecordResponse(record: TribologyData, index: number): RecordResponse {
+  const metadata = selectedFile.value?.metadata
+  const confidenceDetails = (record as any).confidence_details || (record as any).confidenceDetails
+  return {
+    id: previewNumericId(record, index),
+    displayId: previewDisplayId(record, index),
+    materialName: record.material_name,
+    lubricant: record.ionic_liquid,
+    lubricantComponents: record.lubricant_components || null,
+    lubricantAlias: record.lubricant_alias || null,
+    ionicLiquidDisplay: record.ionic_liquid_display || record.ionic_liquid || null,
+    lubricantTooltip: record.lubricant_tooltip || null,
+    cofValue: parseNumericValue(record.cof),
+    cofOperator: record.cof?.match(/[<>~=]/)?.[0] || null,
+    cofRaw: record.cof || null,
+    cofExtracted: record.cof_extracted || null,
+    loadValue: record.load || record.normal_load || null,
+    loadRaw: record.load || record.normal_load || null,
+    loadConditions: record.load_conditions || null,
+    speedValue: record.speed || null,
+    speedConditions: record.speed_conditions || null,
+    shearRate: record.shear_rate || null,
+    temperature: record.temperature || null,
+    potential: record.potential || null,
+    waterContent: record.water_content || null,
+    probeMaterial: record.probe_material || null,
+    probeGeometry: record.probe_geometry || null,
+    probeRadius: record.probe_radius || null,
+    probeRoughness: record.probe_roughness || null,
+    substrateMaterial: record.substrate_material || null,
+    substrateCoating: record.substrate_coating || null,
+    substrateRoughness: record.substrate_roughness || null,
+    tribopairLabel: null,
+    surfaceRoughness: record.surface_roughness || null,
+    residualFilmThicknessD: record.residual_film_thickness_d || null,
+    layerSpacingDelta: record.layer_spacing_delta || null,
+    filmThickness: record.film_thickness || null,
+    regime: record.regime || null,
+    tribologicalSystem: record.tribological_system || null,
+    experimentProfile: null,
+    experimentScale: record.experiment_scale || null,
+    experimentMethod: record.experiment_method || null,
+    measurementType: record.measurement_type || null,
+    trainingView: null,
+    molRatio: record.mol_ratio || null,
+    cation: record.cation || null,
+    anion: record.anion || null,
+    cationSmiles: record.cation_smiles || null,
+    anionSmiles: record.anion_smiles || null,
+    ilSmiles: record.il_smiles || null,
+    ilInchikey: record.il_inchikey || null,
+    alkylChainLength: record.alkyl_chain_length || null,
+    confidence: Number(record.confidence ?? 0.9),
+    confidenceDetails: confidenceDetails
+      && typeof confidenceDetails.score === 'number'
+      && typeof confidenceDetails.percent === 'number'
+      && Array.isArray(confidenceDetails.penalties)
+      ? confidenceDetails
+      : undefined,
+    reviewStatus: record.review_status || null,
+    literatureId: 0,
+    literature: {
+      id: 0,
+      doi: metadata?.doi || '',
+      title: metadata?.title || selectedFile.value?.name || 'Extraction preview',
+      authors: metadata?.authors || null,
+      journal: metadata?.journal || '',
+      year: metadata?.year ? Number(metadata.year) : null,
+    },
+    evidence: record.evidence || null,
+    evidencePage: record.source_page || null,
+    evidenceBbox: String((record as any).evidence_bbox || '').trim() || null,
+    source: record.source || null,
+    sourcePage: record.source_page || null,
+    sourceFigure: record.source_figure || null,
   }
 }
 
+function previewLiteratureTitle() {
+  return selectedFile.value?.metadata?.title || selectedFile.value?.name || 'Extraction preview'
+}
 
+function previewLiteratureMeta(record: TribologyData) {
+  const source = record.source_figure || record.source || (record.source_page ? `Page ${record.source_page}` : '')
+  if (source) return source
+  const metadata = selectedFile.value?.metadata
+  const journal = String(metadata?.journal || '').trim()
+  const year = metadata?.year ? String(metadata.year) : ''
+  if (journal && year) return `${journal} (${year})`
+  return journal || year || 'Source grounding'
+}
 
-// Retry/re-extract specified file
+function exportCurrentFile(format: 'json' | 'csv' = 'json') {
+  if (selectedFileId.value) emit('export', selectedFileId.value, format)
+}
+
 async function handleReprocess(fileId?: string) {
-  // If not a string (e.g. event object), use selectedFileId
   const targetId = typeof fileId === 'string' ? fileId : selectedFileId.value
   if (!targetId) return
-  
   emit('retry', targetId)
 }
 
-// Determine if superlubricity (COF < 0.01)
-function isSuperlubricity(cofStr: string | undefined): boolean {
-  if (!cofStr) return false
-  
-  // If it contains "<" symbol, it means the actual value is less than the displayed value
-  const hasLessThan = cofStr.includes('<')
-  const cof = parseCof(cofStr)
-  
-  if (cof === undefined) return false
-  
-  // If there is a "<" symbol and value <= 0.01, or value is strictly < 0.01, it is judged as superlubricity
-  return hasLessThan ? cof <= 0.01 : cof < 0.01
-}
-
-function tribopairDisplay(item: TribologyData) {
-  return formatTribopairLabel({
-    probeMaterial: item.probe_material,
-    substrateMaterial: item.substrate_material,
-    substrateCoating: item.substrate_coating,
-    materialName: item.material_name,
-  })
-}
-
-
-
-
-
-
-// Update record and validate
 function updateRecordField(recordId: string, fieldName: keyof TribologyData, value: string | undefined) {
   if (!selectedFile.value) return
-  
-  const record = selectedFile.value.records.find(r => r.id === recordId)
+  const record = selectedFile.value.records.find((item) => item.id === recordId)
   if (!record) return
-  
-  // Store original value if first edit
-  if (!record.originalValue) {
-    record.originalValue = { ...record }
-  }
-  
-  // Update the field
+  if (!record.originalValue) record.originalValue = { ...record }
   ;(record as any)[fieldName] = value
-  
-  // Mark as modified
   record.validationStatus = 'modified'
-  
-  // Re-validate
   const validation = validateRecord(record)
   record.validationStatus = validation.status
   record.validationMessage = validation.message
-  
-  // Emit update
   emit('update:record', selectedFile.value.id, recordId, record)
 }
 
-// Verify single record
 function verifyRecord(recordId: string) {
   if (!selectedFile.value) return
-  
-  const record = selectedFile.value.records.find(r => r.id === recordId)
+  const record = selectedFile.value.records.find((item) => item.id === recordId)
   if (!record) return
-  
-  // If currently verified, click to unverify (more natural interaction)
   if (record.validationStatus === 'verified') {
     const validation = validateRecord(record)
     record.validationStatus = validation.status
     record.validationMessage = validation.message
   } else {
-    // Manual confirmation: force mark as verified
     record.validationStatus = 'verified'
     record.validationMessage = undefined
   }
-  
   emit('update:record', selectedFile.value.id, recordId, record)
 }
 
-// Verify all
 function markAllAsVerified() {
   if (!selectedFile.value) return
-  
-  selectedFile.value.records.forEach(record => {
+  selectedFile.value.records.forEach((record) => {
     const validation = validateRecord(record)
-    
-    // Only mark as verified if no severe issues
-    if (validation.issues.every(i => i.severity !== 'error')) {
+    if (validation.issues.every((issue) => issue.severity !== 'error')) {
       record.validationStatus = 'verified'
       record.validationMessage = undefined
     }
   })
-  
   emit('update:file', selectedFile.value.id)
 }
 </script>
@@ -264,12 +291,9 @@ function markAllAsVerified() {
         </p>
       </div>
     </div>
-    
+
     <div class="flex-1 overflow-hidden p-4 relative">
-      
-      <!-- Right: Detail view -->
       <div class="h-full flex flex-col min-w-0">
-        <!-- No file selected -->
         <div v-if="!selectedFile" class="absolute inset-0 flex items-center justify-center p-6">
           <div class="text-center bg-white rounded-2xl shadow-sm border border-gray-100/50 p-12 max-w-2xl w-full mx-auto">
             <div class="w-16 h-16 bg-blue-50/80 rounded-2xl flex items-center justify-center mx-auto mb-6 ring-8 ring-blue-50/30">
@@ -285,18 +309,12 @@ function markAllAsVerified() {
             </Button>
           </div>
         </div>
-        
-        <!-- Selected file details -->
+
         <div v-else class="h-full flex flex-col">
-          <!-- Header action bar -->
           <div class="flex items-center justify-between mb-3 pb-3 border-b gap-4">
             <div class="min-w-0 flex-1 overflow-hidden">
-              <h3 class="font-semibold truncate" :title="selectedFile.name">
-                {{ selectedFile.name }}
-              </h3>
-              <p class="text-xs text-muted-foreground mt-0.5">
-                {{ selectedFile.records.length }} records
-              </p>
+              <h3 class="font-semibold truncate" :title="selectedFile.name">{{ selectedFile.name }}</h3>
+              <p class="text-xs text-muted-foreground mt-0.5">{{ selectedFile.records.length }} records</p>
             </div>
             <div class="flex gap-2">
               <Button
@@ -320,22 +338,17 @@ function markAllAsVerified() {
                 Sync to DB
               </Button>
               <Button
-                v-if="selectedFile.status === 'success' || selectedFile.status === 'error'"
+                v-if="['success', 'error', 'no_data'].includes(selectedFile.status)"
                 size="sm"
                 variant="outline"
-                @click="handleReprocess()"
                 title="Re-extract data"
+                @click="handleReprocess()"
               >
                 <RefreshCw class="h-4 w-4 mr-1" />
                 Re-extract
               </Button>
-              <!-- Export dropdown button -->
               <div v-if="selectedFile.records.length > 0" class="relative">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  @click="showExportMenu = !showExportMenu"
-                >
+                <Button size="sm" variant="outline" @click="showExportMenu = !showExportMenu">
                   <Download class="h-4 w-4 mr-1" />
                   Export
                   <ChevronDown class="h-3 w-3 ml-1" />
@@ -349,69 +362,55 @@ function markAllAsVerified() {
                     class="w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors"
                     @click="exportCurrentFile('json'); showExportMenu = false"
                   >
-                    📄 Export JSON
+                    Export JSON
                   </button>
                   <button
                     class="w-full text-left px-3 py-1.5 text-sm hover:bg-accent transition-colors"
                     @click="exportCurrentFile('csv'); showExportMenu = false"
                   >
-                    📊 Export CSV
+                    Export CSV
                   </button>
                 </div>
               </div>
-              <!-- Source Grounding button -->
               <Button
                 v-if="selectedFile.status === 'success' && selectedFile.records.length > 0"
                 size="sm"
                 variant="outline"
                 class="text-amber-600 border-amber-500 hover:bg-amber-50"
-                @click="emit('view-grounding', selectedFile.id)"
                 title="View source highlights"
+                @click="emit('view-grounding', selectedFile.id)"
               >
                 <FileText class="h-4 w-4 mr-1" />
                 Source
               </Button>
             </div>
           </div>
-          
-          
-          <!-- Filter Bar (High Density) -->
+
           <div v-if="selectedFile.records.length > 0 && uniqueLiquids.length > 0" class="px-4 py-2 border-b bg-muted/5 flex flex-wrap items-center gap-2 text-xs">
-            <!-- Label -->
             <div class="flex items-center gap-1.5 mr-1 text-muted-foreground shrink-0">
-               <span class="font-medium">Filter:</span>
-               <Badge variant="outline" class="text-[10px] h-4 px-1 font-normal border-muted-foreground/30">
-                  {{ uniqueLiquids.length }} types
-               </Badge>
+              <span class="font-medium">Filter:</span>
+              <Badge variant="outline" class="text-[10px] h-4 px-1 font-normal border-muted-foreground/30">
+                {{ uniqueLiquids.length }} types
+              </Badge>
             </div>
-            
-            <!-- All Chip -->
             <button
               class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium transition-colors border shadow-sm h-6"
-              :class="selectedLiquidFilter === 'All' 
-                ? 'bg-primary text-primary-foreground border-primary' 
-                : 'bg-card text-card-foreground hover:bg-muted border-border'"
+              :class="selectedLiquidFilter === 'All' ? 'bg-primary text-primary-foreground border-primary' : 'bg-card text-card-foreground hover:bg-muted border-border'"
               @click="selectedLiquidFilter = 'All'"
             >
               All
               <span class="ml-1 opacity-70 scale-90">({{ selectedFile.records.length }})</span>
             </button>
-            
-            <!-- Liquid Chips -->
             <button
               v-for="liquid in displayedFilterLiquids"
               :key="liquid.name"
               class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium transition-colors border shadow-sm h-6"
-              :class="selectedLiquidFilter === liquid.name 
-                ? 'bg-blue-600 text-white border-blue-600' 
-                : 'bg-white text-slate-700 hover:bg-blue-50 border-slate-200'"
+              :class="selectedLiquidFilter === liquid.name ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700 hover:bg-blue-50 border-slate-200'"
               @click="selectedLiquidFilter = liquid.name"
             >
               {{ liquid.name }}
               <span class="ml-1 opacity-70 scale-90">({{ liquid.count }})</span>
             </button>
-            
-            <!-- Expand/Collapse Button (Link style) -->
             <button
               v-if="visibleUniqueLiquids.length > 8"
               class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium text-primary hover:text-primary/80 hover:bg-primary/5 transition-colors h-6"
@@ -420,158 +419,110 @@ function markAllAsVerified() {
               <component :is="isFilterExpanded ? ChevronUp : ChevronDown" class="h-3 w-3 mr-0.5" />
               {{ isFilterExpanded ? 'Collapse' : `+${visibleUniqueLiquids.length - 8}` }}
             </button>
-            
-            <!-- Compact Search (Inline) -->
-             <div v-if="uniqueLiquids.length > 5 || filterSearch" class="relative w-32 ml-auto">
-                <Search class="absolute left-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                <input
-                  v-model="filterSearch"
-                  class="w-full h-6 pl-6 pr-2 rounded border text-[10px] bg-background focus:outline-none focus:ring-1 focus:ring-primary"
-                  placeholder="Search..."
-                />
-              </div>
+            <div v-if="uniqueLiquids.length > 5 || filterSearch" class="relative w-32 ml-auto">
+              <Search class="absolute left-1.5 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+              <input
+                v-model="filterSearch"
+                class="w-full h-6 pl-6 pr-2 rounded border text-[10px] bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                placeholder="Search..."
+              />
+            </div>
           </div>
 
-          <!-- Data card list -->
           <div class="flex-1 overflow-y-auto min-h-0 relative">
-            <!-- No data -->
             <div v-if="selectedFile.records.length === 0" class="absolute inset-0 flex items-center justify-center">
               <div class="text-center">
                 <AlertCircle class="mx-auto h-10 w-10 text-muted-foreground/50" />
-                <p class="mt-2 text-sm text-muted-foreground">
-                  No data extracted for this file
+                <p class="mt-2 text-sm font-semibold text-muted-foreground">
+                  {{ selectedFile.status === 'no_data' ? 'No extractable records were found for this mode.' : 'No data extracted for this file' }}
                 </p>
+                <Button
+                  v-if="['error', 'no_data'].includes(selectedFile.status)"
+                  size="sm"
+                  variant="outline"
+                  class="mt-4"
+                  @click="handleReprocess()"
+                >
+                  <RefreshCw class="h-4 w-4 mr-1" />
+                  Re-extract
+                </Button>
               </div>
             </div>
-            
-          <!-- Literature info card -->
+
             <LiteratureMetadataCard
               v-if="selectedFile.metadata"
               :metadata="selectedFile.metadata"
               :editable="true"
-              @update:metadata="(m) => selectedFile && emit('update:metadata', selectedFile.id, m)"
+              @update:metadata="(metadata) => selectedFile && emit('update:metadata', selectedFile.id, metadata)"
             />
-            
-            <!-- Data list -->
-            <div v-if="filteredRecords.length > 0" class="space-y-3">
-              <div
-                v-for="item in filteredRecords"
-                :key="item.id"
-                class="rounded-lg border bg-card overflow-hidden transition-all hover:shadow-md relative"
-                :class="{
-                  'border-l-4 border-l-green-500': item.validationStatus === 'verified',
-                  'border-yellow-500 bg-yellow-50/30': item.validationStatus === 'warning',
-                }"
-              >
-                <!-- Modified indicator -->
-                <div
-                  v-if="item.validationStatus === 'modified'"
-                  class="absolute top-2 right-2 w-2 h-2 rounded-full bg-blue-500"
-                  title="Modified"
-                ></div>
-                <!-- Main info row -->
-                <div
-                  class="p-4 cursor-pointer"
-                  @click="toggleRow(item.id!)"
-                >
-                  <div class="flex items-start justify-between gap-4">
-                    <div class="flex-1 min-w-0">
-                      <!-- Ionic liquid -->
-                      <h4 class="font-semibold text-base truncate">
-                        {{ item.ionic_liquid || '-' }}
-                      </h4>
-                      <!-- Cation/Anion decomposition badges -->
-                      <div v-if="item.cation || item.anion" class="flex items-center gap-1 mt-0.5">
-                        <Badge v-if="item.cation" class="bg-teal-500/10 text-teal-700 border-teal-500/20 text-[10px] px-1.5 py-0">
-                          {{ item.cation }}⁺
-                        </Badge>
-                        <Badge v-if="item.anion" class="bg-rose-500/10 text-rose-700 border-rose-500/20 text-[10px] px-1.5 py-0">
-                          {{ item.anion }}⁻
-                        </Badge>
-                        <Badge v-if="item.alkyl_chain_length" class="bg-indigo-500/10 text-indigo-700 border-indigo-500/20 text-[10px] px-1.5 py-0">
-                          C{{ item.alkyl_chain_length }}
-                        </Badge>
-                      </div>
-                      <!-- Tribopair -->
-                      <p class="text-sm text-muted-foreground mt-0.5">
-                        {{ tribopairDisplay(item) }}
-                      </p>
-                      
-                      <!-- Condition labels -->
-                      <div class="flex flex-wrap gap-1.5 mt-2">
-                        <!-- Superlubricity label -->
-                        <Badge 
-                          v-if="isSuperlubricity(item.cof)" 
-                          class="bg-gradient-to-r from-pink-500/20 to-purple-500/20 text-pink-600 border-pink-500/30 font-semibold"
-                        >
-                          ✨ Superlubricity
-                        </Badge>
-                        <Badge v-if="item.load" class="bg-blue-500/10 text-blue-600 border-blue-500/20">
-                          <Gauge class="w-3 h-3 mr-1" />
-                          <EditableField
-                            :model-value="item.load"
-                            field-name="load"
-                            :validation-status="item.validationStatus"
-                            placeholder="-"
-                            @update:model-value="updateRecordField(item.id!, 'load', $event)"
-                          />
-                        </Badge>
-                        <Badge v-if="item.temperature" class="bg-orange-500/10 text-orange-600 border-orange-500/20">
-                          <ThermometerSun class="w-3 h-3 mr-1" />
-                          <EditableField
-                            :model-value="item.temperature"
-                            field-name="temperature"
-                            :validation-status="item.validationStatus"
-                            placeholder="-"
-                            @update:model-value="updateRecordField(item.id!, 'temperature', $event)"
-                          />
-                        </Badge>
-                        <Badge v-if="item.speed" class="bg-purple-500/10 text-purple-600 border-purple-500/20">
-                          <Timer class="w-3 h-3 mr-1" />
-                          <EditableField
-                            :model-value="item.speed"
-                            field-name="speed"
-                            :validation-status="item.validationStatus"
-                            placeholder="-"
-                            @update:model-value="updateRecordField(item.id!, 'speed', $event)"
-                          />
-                        </Badge>
-                        <Badge v-if="item.potential" class="bg-yellow-500/10 text-yellow-600 border-yellow-500/20">
-                          <Zap class="w-3 h-3 mr-1" />
-                          <EditableField
-                            :model-value="normalizePotentialDisplayText(item.potential)"
-                            field-name="potential"
-                            :validation-status="item.validationStatus"
-                            placeholder="-"
-                            @update:model-value="updateRecordField(item.id!, 'potential', $event)"
-                          />
-                        </Badge>
-                        <Badge v-if="item.contact_type" class="bg-green-500/10 text-green-600 border-green-500/20">
-                          <Layers class="w-3 h-3 mr-1" />
-                          {{ item.contact_type }}
-                        </Badge>
+
+            <div v-if="filteredRecords.length > 0" class="virtual-table-container database-record-table flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950/85">
+              <div class="virtual-table-header shrink-0 border-b border-slate-200 bg-[linear-gradient(180deg,#fcfeff_0%,#f7fafc_100%)] text-[0.68rem] font-black uppercase tracking-[0.18em] text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                <div class="flex items-center">
+                  <div :class="COL_SELECT" class="shrink-0 px-3 py-3.5"><span class="column-ruler-label justify-center"><span class="column-ruler-mark" />OK</span></div>
+                  <div :class="COL_ID" class="shrink-0 px-3 py-3.5 text-center"><span class="column-ruler-label justify-center"><span class="column-ruler-mark" />#</span></div>
+                  <div :class="COL_IONIC" class="shrink-0 px-4 py-3.5"><span class="column-ruler-label"><span class="column-ruler-mark" />IONIC LIQUID</span></div>
+                  <div :class="COL_TRIBOPAIR" class="shrink-0 px-4 py-3.5"><span class="column-ruler-label"><span class="column-ruler-mark" />TRIBOPAIR</span></div>
+                  <div :class="COL_CONDITIONS" class="shrink-0 px-3 py-3.5"><span class="column-ruler-label"><span class="column-ruler-mark" />CONDITIONS</span></div>
+                  <div :class="COL_COF" class="shrink-0 px-4 py-3.5 text-[#0f7c82]"><span class="column-ruler-label column-ruler-label--metric"><span class="column-ruler-mark" />COF</span></div>
+                  <div :class="COL_LITERATURE" class="shrink-0 px-4 py-3.5"><span class="column-ruler-label"><span class="column-ruler-mark" />SOURCE</span></div>
+                </div>
+              </div>
+
+              <div class="virtual-table-body overflow-auto">
+                <template v-for="(item, index) in filteredRecords" :key="item.id || index">
+                  <div
+                    class="virtual-record-row group flex w-full items-start border-b border-slate-100 transition-colors hover:bg-[#f8fcfd] dark:border-slate-800 dark:hover:bg-slate-900/70"
+                    :class="{
+                      'border-l-4 border-l-green-500': item.validationStatus === 'verified',
+                      'bg-yellow-50/40': item.validationStatus === 'warning',
+                    }"
+                    @click="toggleRow(item.id!)"
+                  >
+                    <div :class="COL_SELECT" class="shrink-0 self-center px-3 py-4">
+                      <button
+                        type="button"
+                        class="inline-flex h-7 w-7 items-center justify-center rounded-md border transition hover:border-[#0f7c82] hover:bg-[#eefafa] hover:text-[#0f7c82]"
+                        :class="item.validationStatus === 'verified' ? 'border-[#0f7c82] bg-[#0f7c82] text-white shadow-sm' : 'border-slate-300 bg-white text-transparent'"
+                        :title="item.validationStatus === 'verified' ? 'Verified' : 'Mark as verified'"
+                        @click.stop="verifyRecord(item.id!)"
+                      >
+                        <Check class="h-4 w-4 stroke-[3]" />
+                      </button>
+                    </div>
+
+                    <div :class="COL_ID" class="shrink-0 self-center px-3 py-4 text-center">
+                      <span
+                        class="inline-flex h-6 min-w-9 items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-1.5 text-[12px] font-bold leading-none text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400"
+                        :title="recordDisplayId(previewRecordResponse(item, index))"
+                      >
+                        {{ compactRecordDisplayId(previewRecordResponse(item, index)) }}
+                      </span>
+                    </div>
+
+                    <div :class="COL_IONIC" class="shrink-0 px-4 py-4">
+                      <div class="workspace-card cursor-pointer rounded-[9px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f7c82]/35">
+                        <LubricantRecipeCell :record="previewRecordResponse(item, index)" />
                       </div>
                     </div>
-                    
-                    <!-- COF display -->
-                    <div class="flex flex-col items-end gap-2">
-                      <!-- Verify button -->
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        class="h-6 w-6 p-0"
-                        :class="item.validationStatus === 'verified' ? 'text-green-600 hover:text-green-700' : 'text-muted-foreground hover:text-primary'"
-                        @click.stop="verifyRecord(item.id!)"
-                        :title="item.validationStatus === 'verified' ? 'Verified' : 'Mark as verified'"
-                      >
-                        <Check class="h-4 w-4" />
-                      </Button>
-                      
-                      <div class="text-right">
-                        <p class="text-xs text-muted-foreground">COF</p>
-                        <div class="text-lg font-bold">
+
+                    <div :class="COL_TRIBOPAIR" class="shrink-0 px-4 py-3">
+                      <div class="workspace-card cursor-pointer rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f7c82]/35">
+                        <TribopairCapsule :record="previewRecordResponse(item, index)" />
+                      </div>
+                    </div>
+
+                    <div :class="COL_CONDITIONS" class="flex shrink-0 justify-center px-3 py-3">
+                      <div class="workspace-card block w-fit max-w-[296px] cursor-pointer rounded-[9px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f7c82]/35">
+                        <ConditionMicrobar :record="previewRecordResponse(item, index)" />
+                      </div>
+                    </div>
+
+                    <div :class="COL_COF" class="shrink-0 self-center px-4 py-4">
+                      <div class="workspace-card cursor-pointer rounded-lg px-1 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f7c82]/35">
+                        <div class="text-[clamp(1.05rem,0.95rem+0.28vw,1.28rem)] font-extrabold leading-none text-blue-600" @click.stop>
                           <EditableField
-                            :model-value="item.cof"
+                            :model-value="cofDisplay(previewRecordResponse(item, index))"
                             field-name="cof"
                             :validation-status="item.validationStatus"
                             :validation-message="item.validationMessage"
@@ -580,99 +531,76 @@ function markAllAsVerified() {
                           />
                         </div>
                       </div>
-                      <!-- COF bar chart -->
-                      <div class="w-20 h-2 bg-muted rounded-full overflow-hidden">
-                        <div
-                          class="h-full transition-all duration-300"
-                          :class="getCofColor(item.cof)"
-                          :style="{ width: getCofWidth(item.cof) }"
-                        ></div>
+                    </div>
+
+                    <div :class="COL_LITERATURE" class="shrink-0 self-center px-4 py-3">
+                      <button
+                        type="button"
+                        class="group flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left transition hover:border-[#0f7c82]/35 hover:bg-[#f3fbfc] dark:border-slate-700 dark:bg-slate-950 dark:hover:border-[#0f7c82]/40 dark:hover:bg-slate-900"
+                        :title="previewLiteratureTitle()"
+                        aria-label="Open extraction source grounding"
+                        @click.stop="emit('view-grounding', selectedFile.id)"
+                      >
+                        <BookOpen class="h-4 w-4 shrink-0 text-[#0f7c82]" />
+                        <span class="min-w-0">
+                          <span class="block truncate text-[13px] font-extrabold leading-4 text-slate-800 group-hover:text-[#0f7c82] dark:text-slate-100">{{ previewLiteratureTitle() }}</span>
+                          <span class="block truncate text-[11.5px] font-semibold leading-4 text-slate-500 dark:text-slate-400">{{ previewLiteratureMeta(item) }}</span>
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div v-if="expandedRows.has(item.id!)" class="border-b border-slate-100 bg-muted/30 px-4 py-3">
+                    <div class="grid grid-cols-2 gap-3 text-sm">
+                      <div class="flex items-center gap-2">
+                        <span class="text-muted-foreground">COF:</span>
+                        <EditableField
+                          :model-value="item.cof"
+                          field-name="cof"
+                          :validation-status="item.validationStatus"
+                          :validation-message="item.validationMessage"
+                          placeholder="-"
+                          @update:model-value="updateRecordField(item.id!, 'cof', $event)"
+                        />
                       </div>
-                      
-                      <component
-                        :is="expandedRows.has(item.id!) ? ChevronUp : ChevronDown"
-                        class="w-5 h-5 text-muted-foreground"
-                      />
+                      <div v-if="item.wear_rate" class="flex items-center gap-2">
+                        <span class="text-muted-foreground">Wear Rate:</span>
+                        <EditableField
+                          :model-value="item.wear_rate"
+                          field-name="wear_rate"
+                          :validation-status="item.validationStatus"
+                          placeholder="-"
+                          @update:model-value="updateRecordField(item.id!, 'wear_rate', $event)"
+                        />
+                      </div>
+                      <div v-if="item.load" class="flex items-center gap-2">
+                        <span class="text-muted-foreground">Load:</span>
+                        <EditableField :model-value="item.load" field-name="load" :validation-status="item.validationStatus" placeholder="-" @update:model-value="updateRecordField(item.id!, 'load', $event)" />
+                      </div>
+                      <div v-if="item.speed" class="flex items-center gap-2">
+                        <span class="text-muted-foreground">Speed:</span>
+                        <EditableField :model-value="item.speed" field-name="speed" :validation-status="item.validationStatus" placeholder="-" @update:model-value="updateRecordField(item.id!, 'speed', $event)" />
+                      </div>
+                      <div v-if="item.temperature" class="flex items-center gap-2">
+                        <span class="text-muted-foreground">Temperature:</span>
+                        <EditableField :model-value="item.temperature" field-name="temperature" :validation-status="item.validationStatus" placeholder="-" @update:model-value="updateRecordField(item.id!, 'temperature', $event)" />
+                      </div>
+                      <div v-if="item.potential" class="flex items-center gap-2">
+                        <span class="text-muted-foreground">Potential:</span>
+                        <EditableField :model-value="item.potential" field-name="potential" :validation-status="item.validationStatus" placeholder="-" @update:model-value="updateRecordField(item.id!, 'potential', $event)" />
+                      </div>
+                      <div v-if="item.base_oil"><span class="text-muted-foreground">Base Oil:</span><span class="ml-2">{{ item.base_oil }}</span></div>
+                      <div v-if="item.concentration"><span class="text-muted-foreground">Concentration:</span><span class="ml-2">{{ item.concentration }}</span></div>
+                      <div v-if="item.film_thickness"><span class="text-muted-foreground">Film Thickness:</span><span class="ml-2">{{ item.film_thickness }}</span></div>
+                      <div v-if="item.mol_ratio"><span class="text-muted-foreground">Mol Ratio:</span><span class="ml-2">{{ item.mol_ratio }}</span></div>
+                      <div v-if="item.water_content"><span class="text-muted-foreground">Water / Humidity:</span><span class="ml-2">{{ item.water_content }}</span></div>
+                      <div v-if="item.cation"><span class="text-muted-foreground">Cation:</span><span class="ml-2">{{ item.cation }}</span></div>
+                      <div v-if="item.anion"><span class="text-muted-foreground">Anion:</span><span class="ml-2">{{ item.anion }}</span></div>
+                      <div v-if="item.source" class="col-span-2"><span class="text-muted-foreground">Source:</span><span class="ml-2">{{ item.source }}</span></div>
+                      <div v-if="item.notes" class="col-span-2"><span class="text-muted-foreground">Notes:</span><span class="ml-2">{{ item.notes }}</span></div>
                     </div>
                   </div>
-                </div>
-                
-                <!-- Expanded details -->
-                <div
-                  v-if="expandedRows.has(item.id!)"
-                  class="px-4 pb-4 pt-0 border-t bg-muted/30"
-                >
-                  <div class="grid grid-cols-2 gap-3 text-sm pt-3">
-                    <div v-if="item.base_oil">
-                      <span class="text-muted-foreground">Base Oil:</span>
-                      <span class="ml-2">{{ item.base_oil }}</span>
-                    </div>
-                    <div v-if="item.concentration">
-                      <span class="text-muted-foreground">Concentration:</span>
-                      <span class="ml-2">{{ item.concentration }}</span>
-                    </div>
-                    <div v-if="item.film_thickness">
-                      <span class="text-muted-foreground">Film Thickness:</span>
-                      <span class="ml-2">{{ item.film_thickness }}</span>
-                    </div>
-                    <div v-if="item.mol_ratio">
-                      <span class="text-muted-foreground">Mol Ratio:</span>
-                      <span class="ml-2">{{ item.mol_ratio }}</span>
-                    </div>
-                    <div v-if="item.cation">
-                      <span class="text-muted-foreground">Cation:</span>
-                      <span class="ml-2">{{ item.cation }}</span>
-                    </div>
-                    <div v-if="item.anion">
-                      <span class="text-muted-foreground">Anion:</span>
-                      <span class="ml-2">{{ item.anion }}</span>
-                    </div>
-                    <div v-if="item.alkyl_chain_length">
-                      <span class="text-muted-foreground">Alkyl Chain:</span>
-                      <span class="ml-2">C{{ item.alkyl_chain_length }}</span>
-                    </div>
-                    <div v-if="item.il_smiles" class="col-span-2">
-                      <span class="text-muted-foreground">SMILES:</span>
-                      <span class="ml-2 font-mono text-xs break-all">{{ item.il_smiles }}</span>
-                    </div>
-                    <div v-if="item.il_inchikey" class="col-span-2">
-                      <span class="text-muted-foreground">InChIKey:</span>
-                      <span class="ml-2 font-mono text-xs">{{ item.il_inchikey }}</span>
-                    </div>
-                    <div v-if="item.water_content">
-                      <span class="text-muted-foreground">Water / Humidity:</span>
-                      <span class="ml-2">{{ item.water_content }}</span>
-                    </div>
-                    <div v-if="item.probe_material || item.substrate_material" class="col-span-2">
-                      <span class="text-muted-foreground">Tribopair:</span>
-                      <span class="ml-2">{{ tribopairDisplay(item) }}</span>
-                    </div>
-                    <div v-if="item.probe_roughness">
-                      <span class="text-muted-foreground">Probe Roughness:</span>
-                      <span class="ml-2">{{ item.probe_roughness }}</span>
-                    </div>
-                    <div v-if="item.substrate_roughness">
-                      <span class="text-muted-foreground">Substrate Roughness:</span>
-                      <span class="ml-2">{{ item.substrate_roughness }}</span>
-                    </div>
-                    <div v-if="item.wear_rate">
-                      <span class="text-muted-foreground">Wear Rate:</span>
-                      <span class="ml-2">{{ item.wear_rate }}</span>
-                    </div>
-                    <div v-if="item.test_duration">
-                      <span class="text-muted-foreground">Duration:</span>
-                      <span class="ml-2">{{ item.test_duration }}</span>
-                    </div>
-                    <div v-if="item.source" class="col-span-2">
-                      <span class="text-muted-foreground">Source:</span>
-                      <span class="ml-2">{{ item.source }}</span>
-                    </div>
-                    <div v-if="item.notes" class="col-span-2">
-                      <span class="text-muted-foreground">Notes:</span>
-                      <span class="ml-2">{{ item.notes }}</span>
-                    </div>
-                  </div>
-                </div>
+                </template>
               </div>
             </div>
           </div>
@@ -681,3 +609,57 @@ function markAllAsVerified() {
     </div>
   </div>
 </template>
+
+<style scoped>
+.database-record-table {
+  font-size: clamp(14px, 13px + 0.18vw, 16px);
+}
+
+.database-record-table .virtual-table-header {
+  font-size: clamp(0.72rem, 0.68rem + 0.16vw, 0.84rem);
+}
+
+.virtual-table-body {
+  -webkit-overflow-scrolling: touch;
+}
+
+.workspace-card {
+  transition: transform 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+
+.workspace-card:hover {
+  transform: translateY(-1px);
+}
+
+.column-ruler-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  min-height: 1.25rem;
+  color: #64748b;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.75);
+  position: relative;
+}
+
+.column-ruler-label::after {
+  content: "";
+  position: absolute;
+  left: 1rem;
+  right: 0;
+  bottom: -0.42rem;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(15, 124, 130, 0.34), rgba(148, 163, 184, 0.08));
+}
+
+.column-ruler-mark {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 999px;
+  background: #0f7c82;
+  box-shadow: 0 0 0 3px rgba(15, 124, 130, 0.1);
+}
+
+.column-ruler-label--metric {
+  color: #0f7c82;
+}
+</style>

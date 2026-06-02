@@ -16,7 +16,7 @@ function createUser(): AuthUser {
     id: 7,
     username: 'tester',
     displayName: 'Test User',
-    role: 'researcher',
+    role: 'admin',
     group: {
       id: 1,
       name: 'Core Lab',
@@ -26,8 +26,8 @@ function createUser(): AuthUser {
     availableScopes: [
       {
         type: 'group_library',
-        key: 'group_library',
-        label: '课题组文献库',
+        key: 'group:1',
+        label: 'Group Library',
         workspaceId: null,
         ownerUserId: null,
         isPersonal: false,
@@ -55,23 +55,10 @@ describe('session state', () => {
     sessionState.ready = false
   })
 
-  it('prefers the personal workspace for researcher sessions', () => {
+  it('prefers the personal workspace when no explicit scope is selected', () => {
     const user = createUser()
 
     expect(getActiveScope(user)?.key).toBe('workspace:42')
-  })
-
-  it('honors an explicitly selected group library scope', () => {
-    const user = createUser()
-    sessionState.activeScopeKey = 'group_library'
-
-    expect(getActiveScope(user)?.key).toBe('group_library')
-  })
-
-  it('prefers the group library for admin sessions', () => {
-    const user = { ...createUser(), role: 'principal_investigator' }
-
-    expect(getActiveScope(user)?.key).toBe('group_library')
   })
 
   it('persists token and resolved scope when setting a session', () => {

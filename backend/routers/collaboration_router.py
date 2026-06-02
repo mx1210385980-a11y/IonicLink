@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -18,7 +18,7 @@ from models.db_models import (
     RecordCandidate,
     TribologyData,
 )
-from security import AuthPrincipal, get_current_principal, is_admin, require_literature_access
+from security import AuthPrincipal, RequestScope, can_write_scope, get_current_principal, is_admin, require_literature_access
 from services.activity_logging_service import log_activity
 
 router = APIRouter(prefix="/api/collaboration", tags=["collaboration"])
@@ -239,6 +239,30 @@ async def _copy_tribology_records(db: AsyncSession, *, source_literature_id: int
     return copied
 
 
+async def _clear_group_literature_records(
+    db: AsyncSession,
+    *,
+    target_literature_id: int,
+    replace_diffusion: bool,
+    replace_tribology: bool,
+) -> None:
+    if replace_diffusion:
+        existing_ids = [
+            int(record_id)
+            for record_id in (
+                await db.execute(
+                    select(DiffusionRecord.id).where(DiffusionRecord.literature_id == target_literature_id)
+                )
+            ).scalars().all()
+        ]
+        if existing_ids:
+            await db.execute(delete(DiffusionFeatureSet).where(DiffusionFeatureSet.record_id.in_(existing_ids)))
+        await db.execute(delete(DiffusionRecord).where(DiffusionRecord.literature_id == target_literature_id))
+
+    if replace_tribology:
+        await db.execute(delete(TribologyData).where(TribologyData.literature_id == target_literature_id))
+
+
 async def _find_or_create_group_literature(
     db: AsyncSession,
     *,
@@ -260,6 +284,23 @@ async def _find_or_create_group_literature(
         ).scalar_one_or_none()
     if target:
         return target
+
+    normalized_title = str(source.title or "").strip().lower()
+    if normalized_title and source.year:
+        target = (
+            await db.execute(
+                select(Literature).where(
+                    Literature.group_id == source.group_id,
+                    Literature.scope_type == "group_library",
+                    Literature.scope_key == "group_library",
+                    Literature.workspace_id.is_(None),
+                    func.lower(Literature.title) == normalized_title,
+                    Literature.year == source.year,
+                )
+            )
+        ).scalar_one_or_none()
+        if target:
+            return target
 
     target = Literature(
         doi=source.doi,
@@ -290,6 +331,61 @@ async def _find_or_create_group_literature(
     db.add(target)
     await db.flush()
     return target
+
+
+async def _publish_literature_to_group_library(
+    db: AsyncSession,
+    *,
+    source: Literature,
+    principal: AuthPrincipal,
+) -> dict[str, Any]:
+    if source.scope_type == "group_library":
+        return {
+            "target": source,
+            "copied": {"diffusion": 0, "tribology": 0},
+            "message": "Literature is already in the group library",
+        }
+    if source.scope_type != "workspace":
+        raise HTTPException(status_code=400, detail="Only workspace literature can be published")
+
+    source_counts = await _record_counts(db, source.id)
+    if source_counts["totalCount"] <= 0:
+        raise HTTPException(status_code=400, detail="No extracted records are available to publish")
+
+    target = await _find_or_create_group_literature(db, source=source, principal=principal)
+    await _clear_group_literature_records(
+        db,
+        target_literature_id=target.id,
+        replace_diffusion=source_counts["diffusionRecordCount"] + source_counts["diffusionCandidateCount"] > 0,
+        replace_tribology=source_counts["tribologyRecordCount"] + source_counts["tribologyCandidateCount"] > 0,
+    )
+    diffusion_copied = await _copy_diffusion_records(
+        db,
+        source_literature_id=source.id,
+        target_literature_id=target.id,
+    )
+    tribology_copied = await _copy_tribology_records(
+        db,
+        source_literature_id=source.id,
+        target_literature_id=target.id,
+    )
+    if diffusion_copied + tribology_copied <= 0:
+        raise HTTPException(status_code=400, detail="No reviewable records were copied into the group library")
+
+    source.submission_status = "approved"
+    source.reviewed_at = datetime.utcnow()
+    source.reviewed_by_user_id = principal.user.id
+    source.promoted_literature_id = target.id
+    target.reviewed_at = source.reviewed_at
+    target.reviewed_by_user_id = principal.user.id
+    target.review_note = source.review_note
+    target.status = "completed"
+
+    return {
+        "target": target,
+        "copied": {"diffusion": diffusion_copied, "tribology": tribology_copied},
+        "message": "Published into group library",
+    }
 
 
 @router.post("/literature/{literature_id}/submit")
@@ -333,6 +429,53 @@ async def submit_literature_for_review(
         "success": True,
         "literature": _literature_submission_payload(literature, counts),
         "message": "Submitted for group approval",
+    }
+
+
+@router.post("/literature/{literature_id}/publish")
+async def publish_literature_to_group_library(
+    literature_id: int,
+    payload: SubmissionNotePayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    if not can_write_scope(
+        principal,
+        RequestScope(
+            scope_type="group_library",
+            group_id=principal.group.id,
+            scope_key="group_library",
+            workspace=None,
+        ),
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Group library write access is required")
+
+    source = await require_literature_access(db, principal, literature_id, write=True)
+    source.review_note = _clean_note(payload.note)
+    result = await _publish_literature_to_group_library(db, source=source, principal=principal)
+    await db.commit()
+    await db.refresh(source)
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="publish_literature_to_group_library",
+        action_detail={
+            "source_literature_id": source.id,
+            "target_literature_id": result["target"].id,
+            "copied": result["copied"],
+        },
+        resource_type="literature",
+        resource_id=source.id,
+        request=request,
+    )
+    return {
+        "success": True,
+        "literature": _literature_submission_payload(source, await _record_counts(db, source.id)),
+        "targetLiteratureId": result["target"].id,
+        "copied": result["copied"],
+        "message": result["message"],
     }
 
 
@@ -392,27 +535,11 @@ async def approve_literature_submission(
     if source_counts["totalCount"] <= 0:
         raise HTTPException(status_code=400, detail="No extracted records are available to promote")
 
-    target = await _find_or_create_group_literature(db, source=source, principal=principal)
-    diffusion_copied = await _copy_diffusion_records(
-        db,
-        source_literature_id=source.id,
-        target_literature_id=target.id,
-    )
-    tribology_copied = await _copy_tribology_records(
-        db,
-        source_literature_id=source.id,
-        target_literature_id=target.id,
-    )
-    if diffusion_copied + tribology_copied <= 0:
-        raise HTTPException(status_code=400, detail="No reviewable records were copied into the group library")
-
-    source.submission_status = "approved"
+    result = await _publish_literature_to_group_library(db, source=source, principal=principal)
+    target = result["target"]
+    diffusion_copied = result["copied"]["diffusion"]
+    tribology_copied = result["copied"]["tribology"]
     source.review_note = _clean_note(payload.note)
-    source.reviewed_at = datetime.utcnow()
-    source.reviewed_by_user_id = principal.user.id
-    source.promoted_literature_id = target.id
-    target.reviewed_at = source.reviewed_at
-    target.reviewed_by_user_id = principal.user.id
     target.review_note = source.review_note
 
     await db.commit()

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, type Component } from 'vue'
 import {
-  Beaker,
   BookOpen,
   ChevronLeft,
   ChevronRight,
@@ -11,7 +10,6 @@ import {
   Library,
   LogOut,
   Moon,
-  PieChart,
   Search,
   ShieldCheck,
   Server,
@@ -60,10 +58,8 @@ const emit = defineEmits<{
 }>()
 
 const primaryNav: NavItem[] = [
-  { key: 'pipeline',  label: 'Extract',   icon: Search      },
-  { key: 'home',      label: 'Overview',  icon: PieChart    },
-  { key: 'review',    label: 'Review',    icon: Library     },
-  { key: 'knowledge', label: 'Knowledge', icon: Database    },
+  { key: 'home',      label: 'Home',      icon: Search      },
+  { key: 'library',   label: 'Library',   icon: Library     },
   { key: 'quality',   label: 'Quality',   icon: ShieldCheck },
   { key: 'modeling',  label: 'Modeling',  icon: FlaskConical },
 ]
@@ -124,7 +120,7 @@ function statusDotClass(file: BatchFile): string {
 function statusLabel(file: BatchFile): string {
   if (file.status === 'uploading') return props.isChinese ? '上传中' : 'Uploading'
   if (file.status === 'processing') return props.isChinese ? '处理中' : 'Processing'
-  if (file.status === 'success' && file.hasWarnings) return props.isChinese ? '待审核' : 'Review'
+  if (file.status === 'success' && file.hasWarnings) return props.isChinese ? '待处理' : 'Issues'
   if (file.status === 'success') return props.isChinese ? '完成' : 'Done'
   if (file.status === 'error') return props.isChinese ? '失败' : 'Error'
   if (file.status === 'no_data') return props.isChinese ? '无数据' : 'No data'
@@ -134,10 +130,9 @@ function statusLabel(file: BatchFile): string {
 
 function navLabel(item: NavItem): string {
   if (!props.isChinese) return item.label
-  if (item.key === 'pipeline') return '抽取'
-  if (item.key === 'home') return '概览'
-  if (item.key === 'review') return '审阅'
+  if (item.key === 'home') return '首页'
   if (item.key === 'knowledge') return '知识库'
+  if (item.key === 'library') return '文献库'
   if (item.key === 'quality') return '质量'
   if (item.key === 'modeling') return '建模'
   if (item.key === 'admin') return '管理'
@@ -148,21 +143,19 @@ function navLabel(item: NavItem): string {
 function handlePaperClick(file: BatchFile) {
   emit('selectFile', file.id)
   if (file.status === 'uploading' || file.status === 'processing' || file.status === 'uploaded') {
-    emit('navigate', 'pipeline', 'runs')
-  } else if (file.status === 'success' && file.hasWarnings) {
-    emit('navigate', 'review', 'inbox')
+    emit('navigate', 'library', 'explorer')
   } else if (file.status === 'success') {
-    emit('navigate', 'knowledge', 'explorer')
+    emit('navigate', 'library', 'explorer')
   } else if (file.status === 'error' || file.status === 'cancelled') {
-    emit('navigate', 'pipeline', 'runs')
+    emit('navigate', 'library', 'explorer')
   } else {
-    emit('navigate', 'pipeline', 'upload')
+    emit('navigate', 'library', 'explorer')
   }
 }
 
 function openScopeLibrary() {
   emit('selectFile', null)
-  emit('navigate', 'knowledge', 'explorer')
+  emit('navigate', 'library', 'explorer')
 }
 
 function truncateName(name: string, maxLen = 22): string {
@@ -200,11 +193,14 @@ onBeforeUnmount(() => {
   <aside
     class="sidebar-shell relative z-50 flex h-screen shrink-0 flex-col overflow-hidden transition-[width] duration-300"
     :class="isCollapsed ? 'w-[4.75rem]' : 'w-[224px]'"
+    :aria-label="isChinese ? 'IonicLink 主导航' : 'IonicLink primary navigation'"
   >
     <button
       type="button"
       class="absolute right-2 top-3 flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-white/8 hover:text-slate-200"
       :title="isCollapsed ? (isChinese ? '展开侧栏' : 'Expand sidebar') : (isChinese ? '收起侧栏' : 'Collapse sidebar')"
+      :aria-label="isCollapsed ? (isChinese ? '展开侧栏' : 'Expand sidebar') : (isChinese ? '收起侧栏' : 'Collapse sidebar')"
+      :aria-expanded="!isCollapsed"
       @click="toggleSidebarCollapse"
     >
       <ChevronRight v-if="isCollapsed" class="h-4 w-4" />
@@ -218,16 +214,18 @@ onBeforeUnmount(() => {
     >
       <button
         type="button"
-        class="sidebar-brand-mark flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition"
-        :title="isChinese ? '打开内容中心' : 'Open Content Center'"
-        @click="emit('navigate', 'blog', 'articles')"
+        class="sidebar-brand-mark flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-md bg-white shadow-sm transition"
+        :title="isChinese ? '返回首页' : 'Go to home'"
+        :aria-label="isChinese ? '返回首页' : 'Go to home'"
+        @click="emit('navigate', 'home')"
       >
-        <Beaker class="h-4 w-4" />
+        <img src="/ioniclink.png" alt="" class="h-7 w-7 object-contain" />
       </button>
       <button
         v-if="!isCollapsed"
         type="button"
-        class="text-[1.05rem] font-semibold leading-none text-white transition hover:text-slate-200"
+        class="cursor-pointer text-[1.05rem] font-semibold leading-none text-white transition hover:text-slate-200"
+        :aria-label="isChinese ? '返回概览' : 'Go to overview'"
         @click="emit('navigate', 'home')"
       >
         IonicLink
@@ -235,7 +233,11 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Primary nav -->
-    <nav class="mt-2 flex flex-col gap-0.5" :class="isCollapsed ? 'px-2' : 'px-2'">
+    <nav
+      class="mt-2 flex flex-col gap-0.5"
+      :class="isCollapsed ? 'px-2' : 'px-2'"
+      :aria-label="isChinese ? '主要功能' : 'Primary sections'"
+    >
       <button
         v-for="item in primaryNav"
         :key="item.key"
@@ -247,6 +249,8 @@ onBeforeUnmount(() => {
           currentView === item.key ? 'text-white' : 'text-slate-400',
         ]"
         :title="navLabel(item)"
+        :aria-label="navLabel(item)"
+        :aria-current="currentView === item.key ? 'page' : undefined"
         @click="emit('navigate', item.key)"
       >
         <component
@@ -255,11 +259,6 @@ onBeforeUnmount(() => {
           :class="currentView === item.key ? 'text-white' : 'text-slate-500 group-hover:text-slate-300'"
         />
         <span v-if="!isCollapsed">{{ navLabel(item) }}</span>
-        <span
-          v-if="item.key === 'review' && batchFiles.some(f => f.status === 'success' && f.hasWarnings)"
-          class="h-1.5 w-1.5 rounded-full bg-amber-400"
-          :class="isCollapsed ? 'absolute right-2 top-2' : 'ml-auto'"
-        />
       </button>
     </nav>
 
@@ -273,7 +272,8 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="text-[10px] font-medium text-slate-500 transition hover:text-slate-200"
-          @click="emit('navigate', 'pipeline', 'upload')"
+          :aria-label="isChinese ? '上传论文' : 'Upload paper'"
+          @click="emit('navigate', 'library', 'explorer')"
         >
           + {{ isChinese ? '上传' : 'Add' }}
         </button>
@@ -288,6 +288,8 @@ onBeforeUnmount(() => {
           type="button"
           class="sidebar-paper-row group mb-1 flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition"
           :class="selectedFileId === null ? 'is-active' : 'text-slate-400'"
+          :aria-current="selectedFileId === null ? 'page' : undefined"
+          :aria-label="isChinese ? '打开课题组文献库' : 'Open group library'"
           @click="openScopeLibrary"
         >
           <Database class="h-3.5 w-3.5 shrink-0 text-slate-600 group-hover:text-slate-400" />
@@ -309,6 +311,8 @@ onBeforeUnmount(() => {
           type="button"
           class="sidebar-paper-row group flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left transition"
           :class="selectedFileId === file.id ? 'is-active' : 'text-slate-400'"
+          :aria-current="selectedFileId === file.id ? 'page' : undefined"
+          :aria-label="`${isChinese ? '打开论文' : 'Open paper'}：${file.name}，${statusLabel(file)}`"
           @click="handlePaperClick(file)"
         >
           <FileText class="h-3.5 w-3.5 shrink-0 text-slate-600 group-hover:text-slate-400" />
@@ -335,6 +339,8 @@ onBeforeUnmount(() => {
           class="sidebar-paper-row group flex h-10 w-10 items-center justify-center rounded-md transition"
           :class="selectedFileId === null ? 'is-active' : 'text-slate-400'"
           :title="isChinese ? '课题组文献库' : 'Group Library'"
+          :aria-current="selectedFileId === null ? 'page' : undefined"
+          :aria-label="isChinese ? '打开课题组文献库' : 'Open group library'"
           @click="openScopeLibrary"
         >
           <Database class="h-4 w-4 shrink-0 text-slate-500 group-hover:text-slate-300" />
@@ -344,7 +350,8 @@ onBeforeUnmount(() => {
           type="button"
           class="flex h-10 w-10 items-center justify-center rounded-md text-slate-400 transition hover:bg-white/6 hover:text-slate-200"
           :title="isChinese ? '上传论文' : 'Upload paper'"
-          @click="emit('navigate', 'pipeline', 'upload')"
+          :aria-label="isChinese ? '上传论文' : 'Upload paper'"
+          @click="emit('navigate', 'library', 'explorer')"
         >
           <FileText class="h-4 w-4" />
         </button>
@@ -358,6 +365,8 @@ onBeforeUnmount(() => {
           class="sidebar-paper-row relative flex h-10 w-10 items-center justify-center rounded-md transition"
           :class="selectedFileId === file.id ? 'is-active' : 'text-slate-400'"
           :title="truncateName(file.name, 36)"
+          :aria-current="selectedFileId === file.id ? 'page' : undefined"
+          :aria-label="`${isChinese ? '打开论文' : 'Open paper'}：${file.name}，${statusLabel(file)}`"
           @click="handlePaperClick(file)"
         >
           <FileText class="h-4 w-4 text-slate-500" />
@@ -382,6 +391,8 @@ onBeforeUnmount(() => {
           currentView === item.key ? 'text-white' : 'text-slate-500',
         ]"
         :title="navLabel(item)"
+        :aria-label="navLabel(item)"
+        :aria-current="currentView === item.key ? 'page' : undefined"
         @click="emit('navigate', item.key)"
       >
         <component :is="item.icon" class="h-3.5 w-3.5 shrink-0" />
@@ -429,6 +440,7 @@ onBeforeUnmount(() => {
           type="button"
           class="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition hover:bg-white/8 hover:text-slate-200"
           :title="isChinese ? '切换主题' : 'Toggle theme'"
+          :aria-label="isChinese ? '切换主题' : 'Toggle theme'"
           @click="emit('toggleDark')"
         >
           <Sun v-if="isDark" class="h-3.5 w-3.5" />
@@ -438,6 +450,7 @@ onBeforeUnmount(() => {
           type="button"
           class="flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition hover:bg-white/8 hover:text-red-400"
           :title="isChinese ? '退出登录' : 'Sign out'"
+          :aria-label="isChinese ? '退出登录' : 'Sign out'"
           @click="emit('logout')"
         >
           <LogOut class="h-3.5 w-3.5" />

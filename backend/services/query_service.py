@@ -8,9 +8,14 @@ from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from models.db_models import Literature, TribologyData
+from models.db_models import Literature, RecordCandidate, TribologyData
 from security import literature_scope_conditions
-from services.file_service import _normalize_record_chemistry
+from services.file_service import (
+    _is_derived_speed_conditions,
+    _normalize_record_chemistry,
+    _parse_json_object,
+    _repair_response_field_evidence_map,
+)
 from services.il_resolver_service import ANION_DB, CATION_DB, resolve_il
 from services.score_service import calculate_confidence, calculate_confidence_details
 from services.unit_converter import parse_force_range_to_newtons, parse_force_to_newtons
@@ -29,7 +34,7 @@ from utils.structured_conditions import (
     normalize_load_conditions,
     normalize_tribological_system,
 )
-from utils.speed_conditions import derive_speed_conditions, normalize_speed_conditions
+from utils.speed_conditions import derive_speed_conditions, normalize_speed_conditions, speed_value_from_conditions
 from utils.tribopair import compose_tribopair_label, composite_roughness_label
 
 logger = logging.getLogger(__name__)
@@ -137,23 +142,48 @@ def _normalized_json_filter_terms(values: list[str] | tuple[str, ...] | set[str]
     return sorted({str(value or "").strip().lower() for value in values or [] if str(value or "").strip()})
 
 
-def _json_text(path: str):
-    return func.lower(func.coalesce(func.json_extract(TribologyData.tribological_system_json, path), ""))
+def _json_text(path: str, model: Any = TribologyData):
+    return func.lower(func.coalesce(func.json_extract(model.tribological_system_json, path), ""))
 
 
-def _build_conditions(filter_params: Any):
+def _text_search_condition(query: object, model: Any = TribologyData):
+    term = str(query or "").strip().lower()
+    if not term:
+        return None
+    pattern = f"%{term}%"
+    fields = [
+        Literature.doi,
+        Literature.title,
+        Literature.authors,
+        Literature.journal,
+        model.lubricant,
+        model.lubricant_alias,
+        model.cation,
+        model.anion,
+        model.probe_material,
+        model.substrate_material,
+        model.substrate_coating,
+        model.material_name,
+    ]
+    return or_(*[
+        func.lower(func.coalesce(field, "")).like(pattern)
+        for field in fields
+    ])
+
+
+def _build_conditions(filter_params: Any, model: Any = TribologyData):
     conditions = []
     if getattr(filter_params, "record_id", None) is not None:
-        conditions.append(TribologyData.id == filter_params.record_id)
+        conditions.append(model.id == filter_params.record_id)
     if getattr(filter_params, "materials", None):
         terms = [term for term in getattr(filter_params, "materials", None) or [] if str(term or "").strip()]
         if terms:
             conditions.append(
                 or_(
-                    TribologyData.probe_material.in_(terms),
-                    TribologyData.substrate_material.in_(terms),
-                    TribologyData.substrate_coating.in_(terms),
-                    TribologyData.material_name.in_(terms),
+                    model.probe_material.in_(terms),
+                    model.substrate_material.in_(terms),
+                    model.substrate_coating.in_(terms),
+                    model.material_name.in_(terms),
                 )
             )
     if getattr(filter_params, "lubricants", None):
@@ -177,7 +207,7 @@ def _build_conditions(filter_params: Any):
                     lubricant_terms.add("EAN")
 
         if lubricant_terms:
-            conditions.append(TribologyData.lubricant.in_(sorted(lubricant_terms)))
+            conditions.append(model.lubricant.in_(sorted(lubricant_terms)))
     if getattr(filter_params, "cations", None):
         cation_terms = _ion_component_filter_terms(
             getattr(filter_params, "cations", None) or [],
@@ -185,7 +215,7 @@ def _build_conditions(filter_params: Any):
             charge_suffix="+",
         )
         if cation_terms:
-            conditions.append(TribologyData.cation.in_(cation_terms))
+            conditions.append(model.cation.in_(cation_terms))
     if getattr(filter_params, "anions", None):
         anion_terms = _ion_component_filter_terms(
             getattr(filter_params, "anions", None) or [],
@@ -193,41 +223,47 @@ def _build_conditions(filter_params: Any):
             charge_suffix="-",
         )
         if anion_terms:
-            conditions.append(TribologyData.anion.in_(anion_terms))
+            conditions.append(model.anion.in_(anion_terms))
     if getattr(filter_params, "cof_min", None) is not None:
-        conditions.append(TribologyData.cof_value >= filter_params.cof_min)
+        conditions.append(model.cof_value >= filter_params.cof_min)
     if getattr(filter_params, "cof_max", None) is not None:
-        conditions.append(TribologyData.cof_value <= filter_params.cof_max)
+        conditions.append(model.cof_value <= filter_params.cof_max)
     review_statuses = [str(status).strip().lower() for status in (getattr(filter_params, "review_statuses", None) or []) if str(status or "").strip()]
     if review_statuses:
-        conditions.append(func.lower(TribologyData.review_status).in_(review_statuses))
+        conditions.append(func.lower(model.review_status).in_(review_statuses))
     experiment_scales = _normalized_scale_filter_terms(getattr(filter_params, "experiment_scales", None) or [])
     if experiment_scales:
-        conditions.append(_json_text("$.scale").in_(experiment_scales))
+        conditions.append(_json_text("$.scale", model).in_(experiment_scales))
     experiment_methods = _normalized_json_filter_terms(getattr(filter_params, "experiment_methods", None) or [])
     if experiment_methods:
-        conditions.append(_json_text("$.method").in_(experiment_methods))
+        conditions.append(_json_text("$.method", model).in_(experiment_methods))
     measurement_types = _normalized_json_filter_terms(getattr(filter_params, "measurement_types", None) or [])
     if measurement_types:
-        conditions.append(_json_text("$.measurement_type").in_(measurement_types))
+        conditions.append(_json_text("$.measurement_type", model).in_(measurement_types))
     training_views = _normalized_json_filter_terms(getattr(filter_params, "training_views", None) or [])
     if training_views:
-        conditions.append(_json_text("$.training_view").in_(training_views))
+        conditions.append(_json_text("$.training_view", model).in_(training_views))
     if getattr(filter_params, "speed_values", None):
-        conditions.append(TribologyData.speed_value.in_(filter_params.speed_values))
+        conditions.append(model.speed_value.in_(filter_params.speed_values))
     if getattr(filter_params, "shear_rate_values", None):
-        conditions.append(TribologyData.shear_rate.in_(filter_params.shear_rate_values))
+        conditions.append(model.shear_rate.in_(filter_params.shear_rate_values))
     if getattr(filter_params, "temperature_values", None):
-        conditions.append(TribologyData.temperature.in_(filter_params.temperature_values))
+        conditions.append(model.temperature.in_(filter_params.temperature_values))
     if getattr(filter_params, "potential_values", None):
-        conditions.append(TribologyData.potential.in_(filter_params.potential_values))
+        conditions.append(model.potential.in_(filter_params.potential_values))
     if getattr(filter_params, "water_content_values", None):
-        conditions.append(TribologyData.water_content.in_(filter_params.water_content_values))
+        conditions.append(model.water_content.in_(filter_params.water_content_values))
     if getattr(filter_params, "doi", None):
         conditions.append(Literature.doi == filter_params.doi)
+    text_condition = _text_search_condition(
+        getattr(filter_params, "query", None) or getattr(filter_params, "q", None),
+        model,
+    )
+    if text_condition is not None:
+        conditions.append(text_condition)
     if getattr(filter_params, "file_id", None):
         try:
-            conditions.append(TribologyData.literature_id == int(filter_params.file_id))
+            conditions.append(model.literature_id == int(filter_params.file_id))
         except (TypeError, ValueError):
             conditions.append(Literature.file_path.like(f"%{filter_params.file_id}%"))
     return conditions
@@ -352,7 +388,64 @@ def _grounding_bucket_from_record(record: TribologyData) -> str:
     return "text_grounded"
 
 
-def _record_to_payload(record: TribologyData) -> dict[str, Any]:
+def format_record_display_id(display_index: int | None, fallback_record_id: int | None = None) -> str:
+    try:
+        index = int(display_index) if display_index is not None else 0
+    except (TypeError, ValueError):
+        index = 0
+    if index > 0:
+        return f"R-{index:06d}"
+    try:
+        record_id = int(fallback_record_id) if fallback_record_id is not None else 0
+    except (TypeError, ValueError):
+        record_id = 0
+    return f"R-{record_id:06d}" if record_id > 0 else "R-000000"
+
+
+def _confidence_tier(score: Any) -> str:
+    try:
+        value = float(score or 0.0)
+    except (TypeError, ValueError):
+        value = 0.0
+    if value >= 0.8:
+        return "high"
+    if value >= 0.6:
+        return "medium"
+    return "low"
+
+
+async def _display_indices_for_records(
+    session: AsyncSession,
+    records: list[TribologyData],
+    *,
+    scope_conditions: list[Any] | None = None,
+) -> dict[int, int]:
+    record_ids = [int(record.id) for record in records if getattr(record, "id", None) is not None]
+    if not record_ids:
+        return {}
+
+    ranked_stmt = (
+        select(
+            TribologyData.id.label("record_id"),
+            func.row_number().over(order_by=TribologyData.id).label("display_index"),
+        )
+        .join(TribologyData.literature)
+    )
+    if scope_conditions:
+        ranked_stmt = ranked_stmt.where(*scope_conditions)
+    ranked_records = ranked_stmt.subquery()
+    stmt = select(ranked_records.c.record_id, ranked_records.c.display_index).where(
+        ranked_records.c.record_id.in_(record_ids)
+    )
+    result = await _execute_counted(session, stmt, operation="search_records.display_ids")
+    return {
+        int(row.record_id): int(row.display_index)
+        for row in result
+        if row.record_id is not None and row.display_index is not None
+    }
+
+
+def _record_to_payload(record: TribologyData, *, display_index: int | None = None) -> dict[str, Any]:
     literature_payload = None
     if record.literature:
         literature_payload = {
@@ -367,14 +460,18 @@ def _record_to_payload(record: TribologyData) -> dict[str, Any]:
     runtime_details = effective_confidence_details(record)
     lubricant_components = components_for_record(record)
     lubricant_alias = getattr(record, "lubricant_alias", None)
+    field_evidence_map = _parse_json_object(getattr(record, "field_evidence_json", None))
+    repaired_field_evidence_map, repaired_speed_conditions = _repair_response_field_evidence_map(record, field_evidence_map)
+    speed_conditions = repaired_speed_conditions or normalize_speed_conditions(getattr(record, "speed_conditions_json", None)) or derive_speed_conditions(record.speed_value)
+    speed_value = speed_value_from_conditions(speed_conditions) if _is_derived_speed_conditions(speed_conditions) else None
+    speed_value = speed_value or record.speed_value
     cof_extracted = normalize_cof_extracted(getattr(record, "cof_extracted_json", None)) or derive_cof_extracted(
         record.cof_raw,
         record.cof_value,
         load=record.load_raw or record.load_value,
-        speed=record.speed_value,
+        speed=speed_value,
     )
     load_conditions = normalize_load_conditions(getattr(record, "load_conditions_json", None)) or derive_load_conditions(record.load_raw or record.load_value)
-    speed_conditions = normalize_speed_conditions(getattr(record, "speed_conditions_json", None)) or derive_speed_conditions(record.speed_value)
     tribological_system = normalize_tribological_system(getattr(record, "tribological_system_json", None)) or derive_tribological_system(getattr(record, "regime", None))
     experiment_profile = build_experiment_profile(
         {
@@ -382,7 +479,7 @@ def _record_to_payload(record: TribologyData) -> dict[str, Any]:
             "cof": record.cof_raw,
             "cof_value": record.cof_value,
             "load": record.load_raw or record.load_value,
-            "speed": record.speed_value,
+            "speed": speed_value,
             "probe_geometry": record.probe_geometry,
             "probe_radius": record.probe_radius,
             "regime": getattr(record, "regime", None),
@@ -393,8 +490,16 @@ def _record_to_payload(record: TribologyData) -> dict[str, Any]:
     )
     if tribological_system:
         tribological_system = {**tribological_system, **experiment_profile}
+    review_entity_type = "candidate" if isinstance(record, RecordCandidate) else "record"
     payload = {
         "id": record.id,
+        "display_id": f"C-{int(record.id):06d}" if review_entity_type == "candidate" else format_record_display_id(display_index, record.id),
+        "entity_type": review_entity_type,
+        "entity_id": record.id,
+        "review_entity_type": review_entity_type,
+        "confidence_tier": _confidence_tier(runtime_details.get("score") or getattr(record, "confidence", None)),
+        "admission_reason": getattr(record, "record_origin", None) or ("review_candidate" if review_entity_type == "candidate" else "strict_validated"),
+        "quality_notes": getattr(record, "assembly_notes", None),
         "material_name": record.material_name,
         "lubricant": record.lubricant,
         "lubricant_components": lubricant_components,
@@ -408,7 +513,7 @@ def _record_to_payload(record: TribologyData) -> dict[str, Any]:
         "load_value": record.load_value,
         "load_raw": record.load_raw,
         "load_conditions": load_conditions,
-        "speed_value": record.speed_value,
+        "speed_value": speed_value,
         "speed_conditions": speed_conditions,
         "shear_rate": getattr(record, "shear_rate", None),
         "temperature": record.temperature,
@@ -456,9 +561,12 @@ def _record_to_payload(record: TribologyData) -> dict[str, Any]:
         "source": getattr(record, "source", None),
         "source_page": getattr(record, "source_page", None),
         "source_figure": getattr(record, "source_figure", None),
+        "field_evidence_json": repaired_field_evidence_map,
         "confidence": float(runtime_details.get("score") or 0.0),
         "confidence_details": runtime_details,
         "review_status": getattr(record, "review_status", None),
+        "record_origin": getattr(record, "record_origin", None),
+        "assembly_notes": getattr(record, "assembly_notes", None),
         "literature_id": record.literature_id,
         "literature": literature_payload,
     }
@@ -475,27 +583,42 @@ async def search_records(
     scope_filter_values: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     logger.debug("Executing record search skip=%s limit=%s scope=%s", skip, limit, scope_filter_values)
-    conditions = _build_conditions(filter_params)
+    record_conditions = _build_conditions(filter_params, TribologyData)
+    candidate_conditions = _build_conditions(filter_params, RecordCandidate)
     scope_conditions = literature_scope_conditions(scope_filter_values) if scope_filter_values else []
     use_load_filter = (
         getattr(filter_params, "load_min", None) is not None
         or getattr(filter_params, "load_max", None) is not None
     )
 
-    if use_load_filter:
+    def _database_review_order(record: Any) -> tuple[int, int, int]:
+        record_id = int(getattr(record, "id", 0) or 0)
+        literature_id = int(getattr(record, "literature_id", 0) or 0)
+        if isinstance(record, RecordCandidate):
+            return (0, -record_id, -literature_id)
+        return (1, literature_id, record_id)
+
+    async def _fetch_records_for_model(model: Any, conditions: list[Any], *, operation: str):
         stmt = (
-            select(TribologyData)
-            .join(TribologyData.literature)
-            .options(selectinload(TribologyData.literature))
+            select(model)
+            .join(model.literature)
+            .options(selectinload(model.literature))
         )
         if scope_conditions:
             stmt = stmt.where(*scope_conditions)
         if conditions:
             stmt = stmt.where(and_(*conditions))
-        stmt = stmt.order_by(TribologyData.id)
+        if model is RecordCandidate:
+            stmt = stmt.where(RecordCandidate.promoted_record_id.is_(None))
+        stmt = stmt.order_by(model.id)
+        result = await _execute_counted(session, stmt, operation=operation)
+        return list(result.scalars().all())
 
-        result = await _execute_counted(session, stmt, operation="search_records.load_filtered")
-        all_records = result.scalars().all()
+    if use_load_filter:
+        all_records = [
+            *(await _fetch_records_for_model(TribologyData, record_conditions, operation="search_records.load_filtered.records")),
+            *(await _fetch_records_for_model(RecordCandidate, candidate_conditions, operation="search_records.load_filtered.candidates")),
+        ]
 
         filtered_records = []
         for record in all_records:
@@ -507,36 +630,29 @@ async def search_records(
                 continue
             filtered_records.append(record)
 
+        filtered_records.sort(key=_database_review_order)
         total = len(filtered_records)
         records = filtered_records[skip : skip + limit]
     else:
-        count_stmt = select(func.count(TribologyData.id)).join(TribologyData.literature)
-        if scope_conditions:
-            count_stmt = count_stmt.where(*scope_conditions)
-        if conditions:
-            count_stmt = count_stmt.where(and_(*conditions))
-        total_result = await _execute_counted(session, count_stmt, operation="search_records.count")
-        total = total_result.scalar() or 0
+        all_records = [
+            *(await _fetch_records_for_model(TribologyData, record_conditions, operation="search_records.page.records")),
+            *(await _fetch_records_for_model(RecordCandidate, candidate_conditions, operation="search_records.page.candidates")),
+        ]
+        all_records.sort(key=_database_review_order)
+        total = len(all_records)
+        records = all_records[skip : skip + limit]
 
-        stmt = (
-            select(TribologyData)
-            .join(TribologyData.literature)
-            .options(selectinload(TribologyData.literature))
-        )
-        if scope_conditions:
-            stmt = stmt.where(*scope_conditions)
-        if conditions:
-            stmt = stmt.where(and_(*conditions))
-        stmt = stmt.order_by(TribologyData.id).offset(skip).limit(limit)
-
-        result = await _execute_counted(session, stmt, operation="search_records.page")
-        records = result.scalars().all()
+    final_records = [record for record in records if isinstance(record, TribologyData)]
+    display_indices = await _display_indices_for_records(session, final_records, scope_conditions=scope_conditions)
 
     return {
         "total": total,
         "skip": skip,
         "limit": limit,
-        "items": [_record_to_payload(record) for record in records],
+        "items": [
+            _record_to_payload(record, display_index=display_indices.get(int(record.id)))
+            for record in records
+        ],
     }
 
 

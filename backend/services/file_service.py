@@ -16,7 +16,7 @@ import hashlib
 import fitz
 from difflib import SequenceMatcher
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from fastapi import UploadFile
 from sqlalchemy import delete, func
@@ -31,8 +31,14 @@ from services.llm.deduplication import deduplicate_records_with_report
 from services.data_sync_service import get_literature_by_id
 from services.doi_service import DOIService
 from services.llm.utils import normalize_record_value
+from services.normalization import normalize_extraction_row
 from knowledge_base import normalize_ionic_liquid
 from services.score_service import calculate_confidence, calculate_confidence_details
+from services.tribology_review_quality import (
+    annotate_tribology_payload_quality,
+    field_grounding_status,
+)
+from services.weak_candidate_service import build_weak_candidate_items
 from services.fallback_extraction_service import extract_metadata_fallback, extract_table_fallback_records
 from services.il_resolver_service import (
     ANION_DB,
@@ -49,6 +55,7 @@ from services.extraction_trace_service import (
     finalize_extraction_run,
     get_extraction_run,
     is_extraction_cancelled,
+    mark_extraction_run_started,
     update_extraction_run_progress,
 )
 from utils.cof_extraction import derive_cof_extracted, normalize_cof_extracted, serialize_cof_extracted
@@ -79,12 +86,17 @@ from utils.speed_conditions import (
 from models.tribology import TribologyData as ExtractTribologyData
 from security import AuthPrincipal, RequestScope, build_scope_key, can_manage_literature
 from utils.tribopair import composite_roughness_label
+from utils.document_context import apply_experimental_document_context, extract_experimental_document_context
 
 TEMP_UPLOAD_DIR = "temp_uploads"
 EXTRACTED_REFERENCE_DIR = os.path.join("Reference", "Extracted")
 ENABLE_CACHED_PDF_EVIDENCE_RELOCATION = os.getenv("ENABLE_CACHED_PDF_EVIDENCE_RELOCATION", "false").lower() == "true"
 DEFAULT_TEMPERATURE_VALUE = "298.15 K"
+DEFAULT_VISUAL_FALLBACK_MAX_PAGES = 12
+DEFAULT_VISUAL_FALLBACK_TIMEOUT_SECONDS = 960
+VISUAL_FALLBACK_PROFILE = "review_figure_estimate"
 logger = logging.getLogger(__name__)
+REJECTED_REVIEW_STATUSES = {"rejected", "flagged", "needs_evidence", "needs_review"}
 
 
 class InvalidUploadError(ValueError):
@@ -100,6 +112,257 @@ def _resolve_confidence(raw: object, record_like: dict) -> float:
     except Exception:
         scoring_input["model_confidence"] = raw
     return float(calculate_confidence(scoring_input))
+
+
+def _bounded_int_env(name: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, value))
+
+
+def _bounded_float_env(name: str, default: float, minimum: float, maximum: float) -> float:
+    try:
+        value = float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(value):
+        return default
+    return max(minimum, min(maximum, value))
+
+
+def _should_retry_tribology_visual_fallback(result: dict[str, Any], *, profile: str) -> bool:
+    if str(profile or "").strip().lower() != "standard":
+        return False
+    data_rows = result.get("data") or []
+    has_primary_metric = any(_resolve_primary_metric_key(item) for item in data_rows if isinstance(item, dict))
+
+    summary = result.get("extraction_summary") or {}
+    coverage = summary.get("page_coverage") or {}
+    visual_pages = coverage.get("visual_pages") or []
+    selected_visual_pages = coverage.get("selected_visual_pages") or []
+    if not visual_pages or selected_visual_pages:
+        return False
+
+    total_pages = int(coverage.get("total_pages") or len(visual_pages) or 0)
+    max_pages = _bounded_int_env("LLM_VISUAL_FALLBACK_MAX_PAGES", DEFAULT_VISUAL_FALLBACK_MAX_PAGES, 1, 80)
+    if total_pages > max_pages:
+        return False
+
+    trace_candidates = result.get("trace_candidates") or []
+    candidate_count = max(int(summary.get("candidate_count") or 0), len(trace_candidates))
+    dropped = summary.get("dropped_by_reason") or {}
+    has_metric_gap = any(
+        int(dropped.get(reason) or 0) > 0
+        for reason in ("missing_primary_metric", "no_target_metric", "no_core_quant_signal")
+    )
+    if has_primary_metric and not has_metric_gap:
+        return False
+    return candidate_count > 0 or has_metric_gap
+
+
+def _allow_likely_ils_for_persistence(
+    *,
+    profile: str,
+    visual_fallback_used: bool,
+    extraction_summary: dict[str, Any] | None = None,
+) -> bool:
+    if str(profile or "").strip().lower() == "review_figure_estimate":
+        return True
+    visual_summary = (extraction_summary or {}).get("visual_fallback") if isinstance(extraction_summary, dict) else {}
+    return bool(visual_fallback_used or (isinstance(visual_summary, dict) and visual_summary.get("used")))
+
+
+def _page_int(value: Any) -> int | None:
+    try:
+        page = int(value)
+    except (TypeError, ValueError):
+        return None
+    return page if page > 0 else None
+
+
+def _visual_fallback_page_hints(result: dict[str, Any]) -> list[int]:
+    summary = result.get("extraction_summary") or {}
+    coverage = summary.get("page_coverage") or {}
+    visual_pages = {_page_int(page) for page in (coverage.get("visual_pages") or [])}
+    visual_pages.discard(None)
+    max_pages = _bounded_int_env("LLM_VISUAL_FALLBACK_FOCUS_MAX_PAGES", 6, 1, 20)
+
+    scored: dict[int, int] = {}
+    page_candidate_counts = summary.get("page_candidate_counts") or {}
+    if isinstance(page_candidate_counts, dict):
+        for raw_page, stats in page_candidate_counts.items():
+            page = _page_int(raw_page)
+            if page is None:
+                continue
+            if visual_pages and page not in visual_pages:
+                continue
+            total = 1
+            if isinstance(stats, dict):
+                total = int(stats.get("total") or stats.get("figure") or stats.get("text") or 1)
+            scored[page] = max(scored.get(page, 0), total)
+
+    for candidate in result.get("trace_candidates") or []:
+        if not isinstance(candidate, dict):
+            continue
+        raw = candidate.get("raw") if isinstance(candidate.get("raw"), dict) else {}
+        page = _page_int(candidate.get("page") or raw.get("source_page") or raw.get("page"))
+        if page is None:
+            continue
+        if visual_pages and page not in visual_pages:
+            continue
+        scored[page] = max(scored.get(page, 0), 1)
+
+    if not scored:
+        return []
+    selected = sorted(scored, key=lambda page: (-scored[page], page))[:max_pages]
+    return sorted(selected)
+
+
+def _merge_visual_fallback_result(
+    original: dict[str, Any],
+    visual: dict[str, Any],
+    *,
+    used: bool,
+) -> dict[str, Any]:
+    original_summary = dict(original.get("extraction_summary") or {})
+    visual_summary = dict(visual.get("extraction_summary") or {})
+    visual_records = visual.get("data") or []
+    visual_traces = visual.get("trace_candidates") or []
+    original_traces = original.get("trace_candidates") or []
+
+    if visual_records:
+        merged = dict(visual)
+        merged_summary = dict(visual_summary)
+        merged_summary["visual_fallback"] = {
+            "used": used,
+            "profile": VISUAL_FALLBACK_PROFILE,
+            "replaced_empty_text_result": True,
+            "original_candidate_count": max(
+                int(original_summary.get("candidate_count") or 0),
+                len(original_traces),
+            ),
+        }
+        merged_summary["progress_log"] = [
+            *(original_summary.get("progress_log") or []),
+            {
+                "stage": "stage_c.visual_retry_start",
+                "message": f"profile={VISUAL_FALLBACK_PROFILE}",
+            },
+            *(visual_summary.get("progress_log") or []),
+        ]
+        merged["extraction_summary"] = merged_summary
+        merged["trace_candidates"] = [*original_traces, *visual_traces]
+        return merged
+
+    merged = dict(original)
+    merged_traces = [*original_traces, *visual_traces]
+    merged_summary = {
+        **original_summary,
+        "candidate_count": max(
+            int(original_summary.get("candidate_count") or 0),
+            len(merged_traces),
+            int(visual_summary.get("candidate_count") or 0),
+        ),
+        "progress_log": [
+            *(original_summary.get("progress_log") or []),
+            {
+                "stage": "stage_c.visual_retry_start",
+                "message": f"profile={VISUAL_FALLBACK_PROFILE}",
+            },
+            *(visual_summary.get("progress_log") or []),
+        ],
+        "visual_fallback": {
+            "used": used,
+            "profile": VISUAL_FALLBACK_PROFILE,
+            "replaced_empty_text_result": False,
+            "visual_candidate_count": max(
+                int(visual_summary.get("candidate_count") or 0),
+                len(visual_traces),
+            ),
+        },
+    }
+    merged["trace_candidates"] = merged_traces
+    merged["extraction_summary"] = merged_summary
+    return merged
+
+
+async def _maybe_retry_tribology_visual_fallback(
+    result: dict[str, Any],
+    *,
+    content: str,
+    images: Optional[list[str]],
+    pdf_path: Optional[str],
+    profile: str,
+    strict_cof_mode: bool,
+    progress_callback: Optional[Callable[[dict[str, Any]], Awaitable[None]]],
+    extract_with_metadata: Callable[..., Awaitable[dict[str, Any]]],
+) -> tuple[dict[str, Any], bool]:
+    if not _should_retry_tribology_visual_fallback(result, profile=profile):
+        return result, False
+
+    event = {
+        "stage": "stage_c.visual_retry_start",
+        "message": f"profile={VISUAL_FALLBACK_PROFILE}",
+        "force": True,
+        "candidate_count": int((result.get("extraction_summary") or {}).get("candidate_count") or 0),
+        "kept_count": 0,
+        "dropped_by_reason": (result.get("extraction_summary") or {}).get("dropped_by_reason") or {},
+        "page_coverage": (result.get("extraction_summary") or {}).get("page_coverage") or {},
+        "page_candidate_counts": (result.get("extraction_summary") or {}).get("page_candidate_counts") or {},
+        "progress_log": [
+            *((result.get("extraction_summary") or {}).get("progress_log") or []),
+            {"stage": "stage_c.visual_retry_start", "message": f"profile={VISUAL_FALLBACK_PROFILE}"},
+        ],
+    }
+    visual_page_hints = _visual_fallback_page_hints(result)
+    if visual_page_hints:
+        event["visual_page_hints"] = visual_page_hints
+    if progress_callback:
+        try:
+            await progress_callback(event)
+        except Exception as progress_err:
+            logger.warning("Visual fallback progress persistence failed: %s", progress_err)
+
+    timeout_s = _bounded_float_env(
+        "LLM_VISUAL_FALLBACK_TIMEOUT_SECONDS",
+        DEFAULT_VISUAL_FALLBACK_TIMEOUT_SECONDS,
+        30.0,
+        1800.0,
+    )
+    try:
+        kwargs = {
+            "content": content,
+            "pdf_path": pdf_path,
+            "extraction_profile": VISUAL_FALLBACK_PROFILE,
+            "progress_callback": progress_callback,
+            "strict_cof_mode": True if strict_cof_mode is False else strict_cof_mode,
+        }
+        if visual_page_hints:
+            kwargs["visual_page_hints"] = visual_page_hints
+        if images:
+            kwargs["images"] = images
+        visual_result = await asyncio.wait_for(extract_with_metadata(**kwargs), timeout=timeout_s)
+    except Exception as err:
+        merged = dict(result)
+        summary = dict(merged.get("extraction_summary") or {})
+        summary["visual_fallback"] = {
+            "used": False,
+            "profile": VISUAL_FALLBACK_PROFILE,
+            "error": f"{type(err).__name__}: {err}",
+        }
+        summary["progress_log"] = [
+            *(summary.get("progress_log") or []),
+            {
+                "stage": "stage_c.visual_retry_error",
+                "message": f"{type(err).__name__}: {err}",
+            },
+        ]
+        merged["extraction_summary"] = summary
+        return merged, False
+
+    return _merge_visual_fallback_result(result, visual_result or {}, used=True), True
 
 
 def _title_key(value: Optional[str]) -> str:
@@ -332,6 +595,61 @@ def _extract_doi_candidates(text_content: str, filename: str) -> list[str]:
     return out
 
 
+def _doi_metadata_to_upload_payload(metadata: Any) -> dict[str, Any]:
+    if not metadata:
+        return {}
+    return {
+        "title": getattr(metadata, "title", None),
+        "authors": getattr(metadata, "authors", None),
+        "doi": getattr(metadata, "doi", None),
+        "journal": getattr(metadata, "journal", None),
+        "issn": getattr(metadata, "issn", None),
+        "year": getattr(metadata, "year", None),
+        "volume": getattr(metadata, "volume", None),
+        "issue": getattr(metadata, "issue", None),
+        "pages": getattr(metadata, "pages", None),
+    }
+
+
+def _clean_upload_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    cleaned: dict[str, Any] = {}
+    for key, value in (payload or {}).items():
+        if value in (None, "", []):
+            continue
+        if key == "year":
+            try:
+                cleaned[key] = int(value)
+            except (TypeError, ValueError):
+                continue
+        else:
+            cleaned[key] = str(value).strip()
+    return cleaned
+
+
+async def _resolve_upload_metadata(
+    text_content: str,
+    filename: str,
+    doi_candidates: Optional[list[str]] = None,
+) -> dict[str, Any]:
+    doi_candidates = doi_candidates if doi_candidates is not None else _extract_doi_candidates(text_content, filename)
+    fallback_metadata = _clean_upload_metadata(extract_metadata_fallback(text_content))
+    metadata = dict(fallback_metadata)
+
+    if doi_candidates:
+        metadata.setdefault("doi", doi_candidates[0])
+        try:
+            resolved = await DOIService().resolve_doi(doi_candidates[0])
+            resolved_payload = _clean_upload_metadata(_doi_metadata_to_upload_payload(resolved))
+            if resolved_payload:
+                metadata = {**metadata, **resolved_payload}
+        except Exception as exc:
+            logger.warning("Upload DOI metadata resolution failed doi=%s: %s", doi_candidates[0], exc)
+
+    if metadata.get("doi"):
+        metadata["doi"] = DOIService()._normalize_doi(metadata["doi"]) or metadata["doi"]
+    return metadata
+
+
 async def _find_existing_by_title_fallback(
     db: AsyncSession,
     filename: str,
@@ -445,6 +763,27 @@ def _resolve_existing_path(raw_path: Optional[str]) -> Optional[str]:
     return None
 
 
+def _load_literature_context_text(literature: Literature) -> str:
+    content = str(getattr(literature, "content", "") or "").strip()
+    if content:
+        return content
+
+    pdf_path = _resolve_existing_path(getattr(literature, "file_path", None))
+    if not pdf_path:
+        return ""
+    try:
+        with fitz.open(pdf_path) as doc:
+            return "\n".join(doc[page_index].get_text("text") or "" for page_index in range(len(doc))).strip()
+    except Exception as exc:
+        logger.warning(
+            "Unable to extract PDF text for cached context literature_id=%s file_path=%s error=%s",
+            getattr(literature, "id", None),
+            getattr(literature, "file_path", None),
+            exc,
+        )
+        return ""
+
+
 def _build_record_uniqueness_key(item: dict) -> tuple:
     """Conservative uniqueness key used before DB persistence."""
     return (
@@ -489,7 +828,7 @@ def _build_in_progress_summary(run: Optional[ExtractionRun]) -> dict:
     }
 
 
-def _build_cancelled_extraction_summary(run_id: Optional[str], *, profile: str = "high_accuracy") -> dict[str, Any]:
+def _build_cancelled_extraction_summary(run_id: Optional[str], *, profile: str = "auto") -> dict[str, Any]:
     return {
         "run_id": run_id,
         "candidate_count": 0,
@@ -599,11 +938,40 @@ def _parse_cof_value(raw_value: Optional[str]) -> Optional[float]:
 
 def _is_unknown_il(value: Optional[str]) -> bool:
     text = str(value or "").strip().lower()
-    return text in {"", "unknown", "unknown il", "n/a", "none", "-", "--"}
+    return text in {"", "unknown", "unknown il", "n/a", "none", "-", "--"} or _looks_like_reference_marker_il(value)
+
+
+def _looks_like_reference_marker_il(value: Optional[str]) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    pair = re.fullmatch(r"\[([^\[\]]+)\]\[([^\[\]]+)\]", text)
+    if pair:
+        left, right = pair.group(1).strip(), pair.group(2).strip()
+        common_words = {
+            "and", "as", "at", "by", "for", "from", "in", "into", "near",
+            "of", "on", "or", "the", "to", "with", "without", "beneficial",
+        }
+        if left.isdigit():
+            return True
+        if (
+            left.isalpha()
+            and right.isalpha()
+            and left.islower()
+            and right.islower()
+            and (left in common_words or right in common_words)
+        ):
+            return True
+    return bool(
+        re.fullmatch(r"\[\d{1,4}\]\[[A-Za-z]{2,24}\]", text)
+        or re.fullmatch(r"\[\d{1,4}\]", text)
+    )
 
 
 def _normalize_il_token(token: str) -> str:
     text = str(token or "").strip()
+    if _looks_like_reference_marker_il(text):
+        return ""
     text = re.sub(r"\]\s+\[", "][", text)
     text = re.sub(r"\]\s*i\s*\[", "]i[", text, flags=re.IGNORECASE)
     compact = re.sub(r"\s+", "", text)
@@ -620,6 +988,8 @@ def _extract_il_candidates(text: str) -> list[str]:
     def _canonicalize_il(value: Optional[str]) -> str:
         token = str(value or "").strip()
         if not token:
+            return ""
+        if _looks_like_reference_marker_il(token):
             return ""
         token_l = token.lower()
         if "ethylammonium nitrate" in token_l or re.search(r"\bean\b", token_l):
@@ -650,6 +1020,8 @@ def _extract_il_candidates(text: str) -> list[str]:
         for hit in re.findall(pat, text, flags=re.IGNORECASE):
             token = _normalize_il_token(hit)
             if not token:
+                continue
+            if _looks_like_reference_marker_il(token):
                 continue
             normalized = normalize_ionic_liquid(token) or token
             if normalized not in candidates:
@@ -1012,6 +1384,221 @@ def _build_field_evidence_entry(
     }
 
 
+def _compact_condition_number(value: Any) -> Optional[str]:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed):
+        return None
+    if parsed.is_integer():
+        return f"{int(parsed)}"
+    return f"{parsed:g}"
+
+
+def _is_derived_speed_conditions(speed_conditions: Any) -> bool:
+    normalized = normalize_speed_conditions(speed_conditions)
+    return (
+        str(normalized.get("value_type") or "").strip().lower() == "derived"
+        and normalized.get("scan_rate_hz") is not None
+        and normalized.get("scan_length_um") is not None
+        and normalized.get("sliding_velocity_um_s") is not None
+    )
+
+
+def _derived_speed_text_is_contextual(text: Any) -> bool:
+    normalized = _filled_text(text).lower()
+    if not normalized:
+        return False
+    has_scan_length = bool(re.search(r"scan\s*(?:size|length|range)|\b\d+(?:\.\d+)?\s*(?:nm|μm|um)\b", normalized))
+    has_scan_rate = bool(re.search(r"scan\s*(?:rate|frequency)|\b\d+(?:\.\d+)?\s*hz\b", normalized))
+    return "scan" in normalized and has_scan_length and has_scan_rate
+
+
+def _derived_speed_conditions_need_source_context(speed_conditions: Any) -> bool:
+    normalized = normalize_speed_conditions(speed_conditions)
+    return _is_derived_speed_conditions(normalized) and not _derived_speed_text_is_contextual(normalized.get("raw_text"))
+
+
+def _derived_speed_locator_text(speed_conditions: Any) -> Optional[str]:
+    normalized = normalize_speed_conditions(speed_conditions)
+    raw_text = _filled_text(normalized.get("raw_text"))
+    if raw_text and _derived_speed_text_is_contextual(raw_text):
+        return raw_text
+    scan_length = _compact_condition_number(normalized.get("scan_length_um"))
+    scan_rate = _compact_condition_number(normalized.get("scan_rate_hz"))
+    if scan_length and scan_rate:
+        return f"scan size {scan_length} μm; scan rate {scan_rate} Hz"
+    return None
+
+
+def _derived_speed_grounding_note(speed_conditions: Any) -> Optional[str]:
+    normalized = normalize_speed_conditions(speed_conditions)
+    if not _is_derived_speed_conditions(normalized):
+        return None
+    calculation = _filled_text(normalized.get("calculation"))
+    scan_length = _compact_condition_number(normalized.get("scan_length_um"))
+    scan_rate = _compact_condition_number(normalized.get("scan_rate_hz"))
+    sliding = _compact_condition_number(normalized.get("sliding_velocity_um_s"))
+    if not calculation and scan_length and scan_rate and sliding:
+        calculation = f"v = 2 x {scan_length} μm x {scan_rate} Hz = {sliding} μm/s"
+    if calculation:
+        return f"Derived sliding speed from scan size and scan rate: {calculation}."
+    return "Derived sliding speed from scan size and scan rate."
+
+
+def _clean_derived_speed_source_text(text: Any) -> Optional[str]:
+    cleaned = re.sub(r"\s+", " ", _filled_text(text)).strip(" ;")
+    if not cleaned:
+        return None
+    scan_start = re.search(r"(?:the\s+)?scan\s*(?:size|length|range)\b", cleaned, flags=re.IGNORECASE)
+    if scan_start:
+        prefix = cleaned[:scan_start.start()].strip()
+        heading_like_prefix = (
+            bool(prefix)
+            and not re.search(r"[.;:]", prefix)
+            and (
+                re.search(r"\b(?:materials and methods|methods?|methodology|experimental)\b", prefix, flags=re.IGNORECASE)
+                or prefix.upper() == prefix
+            )
+        )
+        if prefix and re.search(r"[.;:]", prefix) and not heading_like_prefix:
+            return cleaned
+        if heading_like_prefix:
+            cleaned = cleaned[scan_start.start():].strip(" ;")
+    match = re.search(
+        r"(?:the\s+)?scan\s*(?:size|length|range)[^.;]*?(?:scan\s*(?:rate|frequency)|frequency)[^.;]*[.;]?",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        return match.group(0).strip(" ;")
+    return cleaned
+
+
+def _derived_speed_source_text_from_context(context: Any) -> Optional[str]:
+    text = _filled_text(context)
+    if not text:
+        return None
+    sentences = [
+        re.sub(r"\s+", " ", candidate).strip(" ;")
+        for candidate in re.split(r"(?<=[.!?])\s+|[\n\r]+", text)
+    ]
+    for sentence in sentences:
+        lowered = sentence.lower()
+        if "scan" in lowered and re.search(r"scan\s*(?:size|length|range)", lowered) and re.search(r"scan\s*(?:rate|frequency)|frequency", lowered):
+            return _clean_derived_speed_source_text(sentence)
+    match = re.search(
+        r"(?:the\s+)?scan\s*(?:size|length|range)[^.;]{0,120}?scan\s*(?:rate|frequency)[^.;]*",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        return _clean_derived_speed_source_text(match.group(0))
+    return None
+
+
+def _speed_value_matches_derived_speed(value: Any, speed_conditions: Any) -> bool:
+    normalized = normalize_speed_conditions(speed_conditions)
+    derived = normalized.get("sliding_velocity_um_s")
+    if derived is None:
+        return False
+    value_text = _filled_text(value)
+    if not value_text:
+        return True
+    number = re.search(r"[-+]?\d+(?:\.\d+)?", value_text)
+    if not number:
+        return True
+    try:
+        return abs(float(number.group(0)) - float(derived)) <= 0.05
+    except Exception:
+        return False
+
+
+def _derive_speed_conditions_from_pdf_scan_context(file_path: Optional[str], speed_value: Any = None) -> dict[str, Any]:
+    pdf_path = _resolve_existing_path(file_path)
+    if not pdf_path or not os.path.exists(pdf_path):
+        return {}
+    try:
+        with fitz.open(pdf_path) as doc:
+            for page_index, page in enumerate(doc):
+                page_text = " ".join((page.get_text("text") or "").split())
+                source_text = _derived_speed_source_text_from_context(page_text)
+                if not source_text:
+                    continue
+                derived = derive_speed_conditions(speed_value, context=source_text)
+                if not _is_derived_speed_conditions(derived):
+                    continue
+                if not _speed_value_matches_derived_speed(speed_value, derived):
+                    continue
+                derived["raw_text"] = source_text
+                derived["source_page"] = page_index + 1
+                derived["source_label"] = "Materials and methods"
+                return derived
+    except Exception:
+        return {}
+    return {}
+
+
+def _derived_speed_evidence_is_contextual(evidence: dict[str, Any]) -> bool:
+    text = " ".join(
+        _filled_text(evidence.get(key))
+        for key in ("quote", "matched_text", "matchedText")
+    ).lower()
+    has_scan_length = bool(re.search(r"scan\s*(?:size|length|range)|\b\d+(?:\.\d+)?\s*(?:nm|μm|um)\b", text))
+    has_scan_rate = bool(re.search(r"scan\s*(?:rate|frequency)|\b\d+(?:\.\d+)?\s*hz\b", text))
+    return bool(
+        text
+        and "scan" in text
+        and has_scan_length
+        and has_scan_rate
+    )
+
+
+def _speed_conditions_for_field_evidence(item: dict[str, Any], db_record: Any) -> dict[str, Any]:
+    normalized = normalize_speed_conditions(
+        item.get("speed_conditions")
+        or item.get("speedConditions")
+        or getattr(db_record, "speed_conditions_json", None)
+    )
+    if normalized:
+        return normalized
+
+    context = " ".join(
+        _filled_text(part)
+        for part in (
+            item.get("evidence"),
+            item.get("notes"),
+            item.get("source"),
+            item.get("source_figure"),
+            getattr(db_record, "source", None),
+            getattr(db_record, "source_figure", None),
+        )
+        if _filled_text(part)
+    )
+    derived = derive_speed_conditions(item.get("speed") or item.get("speed_value"), context=context)
+    if _is_derived_speed_conditions(derived):
+        source_text = _derived_speed_source_text_from_context(context)
+        raw_text = _filled_text(derived.get("raw_text"))
+        if source_text and (not _derived_speed_text_is_contextual(raw_text) or len(source_text) < len(raw_text)):
+            derived["raw_text"] = source_text
+    return derived
+
+
+def _field_evidence_text_context(field_evidence: dict[str, Any], field_key: str) -> str:
+    entry = field_evidence.get(field_key) if isinstance(field_evidence.get(field_key), dict) else {}
+    evidence = entry.get("evidence") if isinstance(entry.get("evidence"), dict) else {}
+    return " ".join(
+        part
+        for part in (
+            _filled_text(evidence.get("quote")),
+            _filled_text(evidence.get("matched_text") or evidence.get("matchedText")),
+            _filled_text(entry.get("grounding_note")),
+        )
+        if part
+    )
+
+
 def _is_visual_source_type(source_type: Any, source_label: Any = None) -> bool:
     source_type_text = _filled_text(source_type).lower()
     source_label_text = _filled_text(source_label).lower()
@@ -1164,12 +1751,19 @@ def _field_context_query_variants(field_key: str, value: Any) -> list[str]:
                 f"uncoated {text}",
             ])
     elif field_key in {"surface_roughness", "probe_roughness", "substrate_roughness"}:
+        roughness_number = re.search(r"[-+]?\d+(?:\.\d+)?\s*(?:nm|μm|um|pm)\b", text, flags=re.IGNORECASE)
+        roughness_texts = [text]
+        if roughness_number:
+            roughness_texts.append(roughness_number.group(0).strip())
+        for roughness_text in dict.fromkeys(roughness_texts):
+            queries.extend([
+                f"RMS roughness was smaller than {roughness_text}",
+                f"roughness was smaller than {roughness_text}",
+                f"RMS roughness {roughness_text}",
+                f"roughness {roughness_text}",
+            ])
         queries.extend([
-            f"RMS roughness was smaller than {text}",
-            f"roughness was smaller than {text}",
-            f"smaller than {text}",
-            f"RMS roughness {text}",
-            f"roughness {text}",
+            f"{text}",
         ])
     elif field_key == "speed":
         for variant in _micro_text_variants(text):
@@ -1413,6 +2007,15 @@ def _derive_grounding_metadata(
     matched_text = _filled_text(evidence_map.get("matched_text"))
     combined = " ".join(part for part in [matched_text, quote] if part).strip()
     combined_lower = combined.lower()
+    normalized_value = value_text.strip().lower()
+
+    source_is_precise = _source_label_has_precise_region(evidence_map.get("source_type"), evidence_map.get("source_label"))
+    if (
+        field_key == "temperature"
+        and normalized_value in {"298.15 k", "298.15k", "298 k", "298k", "293 k", "293k"}
+        and any(token in combined_lower for token in ("room temperature", "room-temperature", "ambient temperature"))
+    ):
+        return "derived", 'Normalized from room-temperature wording.'
 
     if not _evidence_has_location(evidence_map):
         return None, None
@@ -1420,15 +2023,6 @@ def _derive_grounding_metadata(
     if _text_explicitly_matches_field_value(field_key, value_text, matched_text) or _text_explicitly_matches_field_value(field_key, value_text, quote):
         return "explicit", None
 
-    normalized_value = value_text.strip().lower()
-    source_is_precise = _source_label_has_precise_region(evidence_map.get("source_type"), evidence_map.get("source_label"))
-    if (
-        field_key == "temperature"
-        and source_is_precise
-        and normalized_value in {"298 k", "298k", "293 k", "293k"}
-        and any(token in combined_lower for token in ("room temperature", "room-temperature", "ambient temperature"))
-    ):
-        return "derived", 'Normalized from room-temperature wording.'
     if (
         field_key == "potential"
         and source_is_precise
@@ -1873,6 +2467,62 @@ def _refine_potential_evidence_from_metric_context_with_pdf(
     return entries
 
 
+def _clean_field_quote_text(text: Any, *, max_chars: int = 420) -> str:
+    cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(cleaned) > max_chars:
+        cleaned = cleaned[:max_chars].strip()
+        if re.search(r"[A-Za-z0-9]$", cleaned):
+            cleaned = re.sub(r"\s+\S*$", "", cleaned).strip()
+    return cleaned
+
+
+def _extract_line_quote_from_bbox(page: Any, bbox: list[float]) -> str:
+    try:
+        x0, y0, x1, y1 = [float(value) for value in bbox]
+        words = page.get_text("words") or []
+    except Exception:
+        return ""
+    if not words:
+        return ""
+
+    def _word_rect(word: Any) -> tuple[float, float, float, float]:
+        return (float(word[0]), float(word[1]), float(word[2]), float(word[3]))
+
+    def _intersects_or_near(word: Any, margin: float = 3.0) -> bool:
+        wx0, wy0, wx1, wy1 = _word_rect(word)
+        return max(x0 - margin, wx0) <= min(x1 + margin, wx1) and max(y0 - margin, wy0) <= min(y1 + margin, wy1)
+
+    target_lines = {
+        (int(word[5]), int(word[6]))
+        for word in words
+        if len(word) >= 7 and _intersects_or_near(word)
+    }
+    if not target_lines:
+        target_cy = (y0 + y1) / 2.0
+        nearby = [
+            word for word in words
+            if len(word) >= 7 and abs(((float(word[1]) + float(word[3])) / 2.0) - target_cy) <= 5.0
+        ]
+        if nearby:
+            closest = min(nearby, key=lambda word: abs(((float(word[0]) + float(word[2])) / 2.0) - ((x0 + x1) / 2.0)))
+            target_lines.add((int(closest[5]), int(closest[6])))
+    if not target_lines:
+        return ""
+
+    min_x = max(0.0, x0 - 260.0)
+    max_x = x1 + 360.0
+    line_words = [
+        word for word in words
+        if len(word) >= 7
+        and (int(word[5]), int(word[6])) in target_lines
+        and min_x <= float(word[0]) <= max_x
+    ]
+    if not line_words:
+        return ""
+    line_words.sort(key=lambda word: (int(word[5]), int(word[6]), float(word[0])))
+    return _clean_field_quote_text(" ".join(str(word[4] or "") for word in line_words))
+
+
 def _extract_field_quote_from_bbox(
     pdf_path: Optional[str],
     page_num: Optional[int],
@@ -1886,6 +2536,10 @@ def _extract_field_quote_from_bbox(
     try:
         doc = fitz.open(pdf_path)
         page = doc[int(page_num) - 1]
+        line_quote = _extract_line_quote_from_bbox(page, bbox)
+        if line_quote and (len(line_quote) >= 12 or not _filled_text(fallback_term) or _filled_text(fallback_term) in line_quote):
+            doc.close()
+            return line_quote
         x0, y0, x1, y1 = [float(value) for value in bbox]
         clip = fitz.Rect(
             max(0, x0 - 140),
@@ -1896,7 +2550,22 @@ def _extract_field_quote_from_bbox(
         snippet = re.sub(r"\s+", " ", (page.get_text("text", clip=clip) or "")).strip()
         doc.close()
         if snippet:
-            return snippet[:420]
+            return _clean_field_quote_text(snippet)
+    except Exception:
+        pass
+
+    try:
+        from services.pdf_service import extract_text_snippet
+
+        snippet = extract_text_snippet(
+            pdf_path,
+            int(page_num),
+            bbox,
+            fallback_term=_filled_text(fallback_term) or None,
+            prefer_term_context=False,
+        )
+        if snippet:
+            return _clean_field_quote_text(snippet)
     except Exception:
         return _filled_text(fallback_term) or None
 
@@ -1957,6 +2626,12 @@ def _expand_table_anchor_bbox(pdf_path: str, page_num: Optional[int], bbox: Opti
 def _field_location_match_is_reliable(field_key: str, value: Any, evidence: dict[str, Any]) -> bool:
     matched_text = _filled_text(evidence.get("matched_text"))
     quote = _filled_text(evidence.get("quote"))
+    if field_key in {"surface_roughness", "probe_roughness", "substrate_roughness"}:
+        combined = " ".join(part for part in [matched_text, quote] if part).lower()
+        if not re.search(r"\b(?:nm|μm|um|rms|roughness|root[- ]mean[- ]square)\b", combined):
+            return False
+        if not re.search(r"\b(?:rms|roughness|root[- ]mean[- ]square)\b", combined):
+            return False
     if _text_explicitly_matches_field_value(field_key, value, matched_text):
         return True
     if _text_explicitly_matches_field_value(field_key, value, quote):
@@ -2108,12 +2783,25 @@ def _locate_field_evidence_for_value(
     hit: Optional[dict[str, Any]] = None
     used_global_fallback = False
     enforced_anchor_bbox = False
+    discarded_anchor_hit = False
     if field_key == "load":
         hit, used_global_fallback, enforced_anchor_bbox = _find_hit(use_source_context=False)
     if not hit:
         hit, used_global_fallback, enforced_anchor_bbox = _find_hit(use_source_context=True)
+        if hit and enforced_anchor_bbox and resolved_anchor_bbox:
+            candidate_bbox = [
+                float(hit.get("x") or 0),
+                float(hit.get("y") or 0),
+                float(hit.get("x") or 0) + float(hit.get("w") or 0),
+                float(hit.get("y") or 0) + float(hit.get("h") or 0),
+            ]
+            if not _bbox_intersects(resolved_anchor_bbox, candidate_bbox):
+                hit = None
+                discarded_anchor_hit = True
     if not hit and resolved_anchor_bbox:
         hit, used_global_fallback, enforced_anchor_bbox = _find_hit(use_source_context=True, use_anchor_bbox=False)
+        if hit and discarded_anchor_hit:
+            used_global_fallback = True
     if not hit:
         hit, used_global_fallback, enforced_anchor_bbox = _find_hit(use_source_context=False)
     if not hit:
@@ -2131,7 +2819,7 @@ def _locate_field_evidence_for_value(
     resolved_source_label = normalized_source
     if used_global_fallback:
         resolved_source_type = "text"
-        resolved_source_label = None
+        resolved_source_label = "Text"
     if not used_global_fallback and resolved_page_hint and page != resolved_page_hint:
         return None
     if not used_global_fallback and enforced_anchor_bbox and resolved_anchor_bbox and not _bbox_intersects(resolved_anchor_bbox, bbox):
@@ -2338,8 +3026,35 @@ def _build_field_evidence_map(item: dict, db_record: TribologyData, *, confidenc
     raw_bbox = _parse_json_bbox(getattr(db_record, "evidence_bbox", None))
     source_type = _infer_source_type(source_label) if any([source_label, source_page, evidence_page, quote, raw_bbox, sample_id]) else None
     page = evidence_page or source_page
-    has_resolved_file = bool(_resolve_existing_path(file_path))
+    resolved_file_path = _resolve_existing_path(file_path)
+    has_resolved_file = bool(resolved_file_path)
     bbox = None if has_resolved_file and _is_visual_source_type(source_type, source_label) else raw_bbox
+    speed_conditions = _speed_conditions_for_field_evidence(item, db_record)
+    if not _is_derived_speed_conditions(speed_conditions):
+        speed_context = _field_evidence_text_context(provided_field_evidence, "speed")
+        if speed_context:
+            speed_conditions = _speed_conditions_for_field_evidence(
+                {**item, "evidence": speed_context, "notes": None, "source": None, "source_figure": None},
+                db_record,
+            )
+    if _is_derived_speed_conditions(speed_conditions) and resolved_file_path and _derived_speed_conditions_need_source_context(speed_conditions):
+        pdf_speed_conditions = _derive_speed_conditions_from_pdf_scan_context(
+            resolved_file_path,
+            item.get("speed") or item.get("speed_value"),
+        )
+        if _is_derived_speed_conditions(pdf_speed_conditions):
+            speed_conditions = pdf_speed_conditions
+    if not _is_derived_speed_conditions(speed_conditions) and resolved_file_path:
+        pdf_speed_conditions = _derive_speed_conditions_from_pdf_scan_context(
+            resolved_file_path,
+            item.get("speed") or item.get("speed_value"),
+        )
+        if _is_derived_speed_conditions(pdf_speed_conditions):
+            speed_conditions = pdf_speed_conditions
+    speed_is_derived = _is_derived_speed_conditions(speed_conditions)
+    derived_speed_value = speed_value_from_conditions(speed_conditions) if speed_is_derived else None
+    if derived_speed_value:
+        item = {**item, "speed": derived_speed_value, "speed_value": derived_speed_value}
 
     entries = {
         "material": _build_field_evidence_entry(
@@ -2565,7 +3280,6 @@ def _build_field_evidence_map(item: dict, db_record: TribologyData, *, confidenc
             merged["confidence"] = base.get("confidence")
         entries[field_key] = merged
 
-    resolved_file_path = _resolve_existing_path(file_path)
     if resolved_file_path:
         for field_key, entry in list(entries.items()):
             if field_key == "source_page" or not entry:
@@ -2575,14 +3289,22 @@ def _build_field_evidence_map(item: dict, db_record: TribologyData, *, confidenc
             if field_key == "temperature" and _is_default_temperature_value(entry.get("value")):
                 continue
             field_value = _field_value_for_evidence(item, field_key)
+            locate_page = page
+            locate_source_label = source_label
+            locate_source_type = source_type
+            if field_key == "speed" and speed_is_derived:
+                field_value = _derived_speed_locator_text(speed_conditions) or field_value
+                locate_page = speed_conditions.get("source_page") or locate_page
+                locate_source_label = speed_conditions.get("source_label") or locate_source_label
+                locate_source_type = "text"
             located = _locate_field_evidence_for_value(
                 file_path=resolved_file_path,
                 field_key=field_key,
                 field_value=field_value,
-                source_label=source_label,
-                page_hint=int(page) if page else None,
+                source_label=locate_source_label,
+                page_hint=int(locate_page) if locate_page else None,
                 anchor_bbox=bbox,
-                source_type=source_type,
+                source_type=locate_source_type,
             )
             if located:
                 entry["evidence"] = {
@@ -2636,14 +3358,38 @@ def _build_field_evidence_map(item: dict, db_record: TribologyData, *, confidenc
             entry["grounding_note"] = grounding_note
         elif not _filled_text(entry.get("grounding_note")):
             entry.pop("grounding_note", None)
+        if field_key == "speed" and speed_is_derived:
+            if derived_speed_value:
+                entry["value"] = derived_speed_value
+            entry["grounding_mode"] = "derived"
+            note = _derived_speed_grounding_note(speed_conditions)
+            if note:
+                entry["grounding_note"] = note
+            evidence = entry.get("evidence") if isinstance(entry.get("evidence"), dict) else {}
+            raw_text = _derived_speed_locator_text(speed_conditions)
+            if raw_text and not _derived_speed_evidence_is_contextual(evidence):
+                evidence["quote"] = raw_text
+            if raw_text and not _derived_speed_evidence_is_contextual({"matched_text": evidence.get("matched_text")}):
+                evidence["matched_text"] = raw_text
+                evidence["bbox"] = None
+            entry["evidence"] = evidence
+        if field_key in {"surface_roughness", "probe_roughness", "substrate_roughness"}:
+            evidence = entry.get("evidence") if isinstance(entry.get("evidence"), dict) else {}
+            if evidence and not _field_location_match_is_reliable(field_key, entry.get("value"), evidence):
+                cleaned_evidence = dict(evidence)
+                cleaned_evidence["bbox"] = None
+                cleaned_evidence["matched_text"] = None
+                cleaned_evidence["quote"] = None
+                entry["evidence"] = cleaned_evidence
+                entry["grounding_note"] = (
+                    "Stored evidence text does not include roughness/unit context; location needs re-extraction."
+                )
 
     return {key: value for key, value in entries.items() if value}
 
 
 def _field_entry_has_evidence(entry: Optional[dict[str, Any]]) -> bool:
-    evidence = (entry or {}).get("evidence") or {}
-    bbox = evidence.get("bbox")
-    return bool(evidence.get("page") and isinstance(bbox, list) and len(bbox) >= 4)
+    return field_grounding_status(entry or {}) == "grounded"
 
 
 def _resolve_review_status(field_evidence_map: dict[str, Any]) -> tuple[str, Optional[str]]:
@@ -2671,10 +3417,251 @@ def _computed_surface_roughness_label_for_record(record: Any, field_evidence_map
     )
 
 
+def _looks_like_bare_numeric_evidence(text: Any) -> bool:
+    value = str(text or "").strip()
+    return bool(value and re.fullmatch(r"[-+]?\d+(?:\.\d+)?", value))
+
+
+def _roughness_contextual_numeric_match(value: Any, quote: Any) -> Optional[str]:
+    value_text = _filled_text(value)
+    quote_text = _filled_text(quote)
+    number_match = re.search(r"[-+]?\d+(?:\.\d+)?", value_text)
+    if not number_match or not quote_text:
+        return None
+    number = number_match.group(0)
+    escaped = re.escape(number).replace(r"\.", r"[.]")
+    contextual = re.search(
+        rf"\b(?:(?:rms|roughness|root[- ]mean[- ]square)\s*)?{escaped}\s*(?:nm|μm|um)\b",
+        quote_text,
+        flags=re.IGNORECASE,
+    )
+    return contextual.group(0).strip() if contextual else None
+
+
+def _response_field_has_bare_numeric_roughness_evidence(field_key: str, entry: dict[str, Any]) -> bool:
+    if field_key not in {"surface_roughness", "probe_roughness", "substrate_roughness"}:
+        return False
+    evidence = entry.get("evidence") if isinstance(entry.get("evidence"), dict) else {}
+    quote = evidence.get("quote")
+    matched_text = evidence.get("matched_text") or evidence.get("matchedText")
+    if not (_looks_like_bare_numeric_evidence(quote) or _looks_like_bare_numeric_evidence(matched_text)):
+        return False
+    combined = " ".join(str(part or "") for part in (quote, matched_text)).lower()
+    return not re.search(r"\b(?:nm|μm|um|rms|roughness|root[- ]mean[- ]square)\b", combined)
+
+
+def _relocate_response_roughness_evidence(
+    field_key: str,
+    entry: dict[str, Any],
+    *,
+    pdf_path: Optional[str],
+) -> Optional[dict[str, Any]]:
+    if not pdf_path or not _response_field_has_bare_numeric_roughness_evidence(field_key, entry):
+        return None
+    evidence = entry.get("evidence") if isinstance(entry.get("evidence"), dict) else {}
+    page = evidence.get("page")
+    try:
+        page_hint = int(page) if page else None
+    except (TypeError, ValueError):
+        page_hint = None
+    located = _locate_field_evidence_for_value(
+        file_path=pdf_path,
+        field_key=field_key,
+        field_value=entry.get("value"),
+        source_label=evidence.get("source_label"),
+        page_hint=page_hint,
+        anchor_bbox=None,
+        source_type=evidence.get("source_type") or "text",
+    )
+    if not located:
+        return None
+    merged_evidence = {
+        **evidence,
+        **located,
+    }
+    if not _field_location_match_is_reliable(field_key, entry.get("value"), merged_evidence):
+        return None
+    contextual_match = _roughness_contextual_numeric_match(entry.get("value"), merged_evidence.get("quote"))
+    if contextual_match:
+        merged_evidence["matched_text"] = contextual_match
+        merged_evidence["bbox"] = None
+    repaired = dict(entry or {})
+    repaired["evidence"] = merged_evidence
+    existing_note = _filled_text(repaired.get("grounding_note"))
+    if "roughness/unit context" in existing_note:
+        repaired.pop("grounding_note", None)
+    return repaired
+
+
+def _repair_response_roughness_evidence(
+    field_key: str,
+    entry: dict[str, Any],
+    *,
+    pdf_path: Optional[str] = None,
+) -> dict[str, Any]:
+    if field_key not in {"surface_roughness", "probe_roughness", "substrate_roughness"}:
+        return entry
+    evidence = dict(entry.get("evidence") or {})
+    if not evidence:
+        return entry
+    if _field_location_match_is_reliable(field_key, entry.get("value"), evidence):
+        if _looks_like_bare_numeric_evidence(evidence.get("matched_text") or evidence.get("matchedText")):
+            contextual_match = _roughness_contextual_numeric_match(entry.get("value"), evidence.get("quote"))
+            if contextual_match:
+                repaired = dict(entry or {})
+                repaired["evidence"] = {
+                    **evidence,
+                    "matched_text": contextual_match,
+                    "bbox": None,
+                }
+                return repaired
+        return entry
+    if not _response_field_has_bare_numeric_roughness_evidence(field_key, entry):
+        return entry
+    relocated = _relocate_response_roughness_evidence(field_key, entry, pdf_path=pdf_path)
+    if relocated:
+        return relocated
+
+    repaired = dict(entry or {})
+    repaired["evidence"] = {
+        **evidence,
+        "quote": None,
+        "matched_text": None,
+        "bbox": None,
+    }
+    repaired["grounding_note"] = (
+        _filled_text(repaired.get("grounding_note"))
+        or "Stored evidence text does not include roughness/unit context; location needs re-extraction."
+    )
+    return repaired
+
+
+def _response_speed_conditions_for_record(
+    record: Any,
+    field_evidence_map: dict[str, Any],
+    *,
+    pdf_path: Optional[str] = None,
+) -> dict[str, Any]:
+    speed_conditions = normalize_speed_conditions(getattr(record, "speed_conditions_json", None))
+    if speed_conditions:
+        if _is_derived_speed_conditions(speed_conditions) and pdf_path and _derived_speed_conditions_need_source_context(speed_conditions):
+            pdf_speed_conditions = _derive_speed_conditions_from_pdf_scan_context(
+                pdf_path,
+                getattr(record, "speed_value", None),
+            )
+            if _is_derived_speed_conditions(pdf_speed_conditions):
+                return pdf_speed_conditions
+        return speed_conditions
+
+    speed_context_item = {
+        "speed": getattr(record, "speed_value", None),
+        "speed_value": getattr(record, "speed_value", None),
+        "evidence": getattr(record, "evidence", None),
+        "source": getattr(record, "source", None),
+        "source_figure": getattr(record, "source_figure", None),
+    }
+    speed_conditions = _speed_conditions_for_field_evidence(speed_context_item, record)
+    if _is_derived_speed_conditions(speed_conditions):
+        return speed_conditions
+    speed_context = _field_evidence_text_context(field_evidence_map, "speed")
+    if speed_context:
+        speed_conditions = _speed_conditions_for_field_evidence(
+            {
+                "speed": getattr(record, "speed_value", None),
+                "speed_value": getattr(record, "speed_value", None),
+                "evidence": speed_context,
+                "source": None,
+                "source_figure": None,
+            },
+            record,
+        )
+        if _is_derived_speed_conditions(speed_conditions):
+            return speed_conditions
+    if pdf_path:
+        pdf_speed_conditions = _derive_speed_conditions_from_pdf_scan_context(
+            pdf_path,
+            getattr(record, "speed_value", None),
+        )
+        if _is_derived_speed_conditions(pdf_speed_conditions):
+            return pdf_speed_conditions
+    return speed_conditions
+
+
+def _apply_derived_speed_response_evidence(
+    entry: dict[str, Any],
+    speed_conditions: dict[str, Any],
+) -> dict[str, Any]:
+    updated = dict(entry or {})
+    evidence = dict(updated.get("evidence") or {})
+    raw_text = _derived_speed_locator_text(speed_conditions)
+    if raw_text and not _derived_speed_evidence_is_contextual(evidence):
+        evidence = {
+            **evidence,
+            "source_type": "text",
+            "page": speed_conditions.get("source_page") or evidence.get("page"),
+            "source_label": speed_conditions.get("source_label") or evidence.get("source_label"),
+            "bbox": None,
+            "matched_text": raw_text,
+            "quote": raw_text,
+        }
+    elif raw_text:
+        evidence["quote"] = _filled_text(evidence.get("quote")) or raw_text
+        matched_text = _filled_text(evidence.get("matched_text") or evidence.get("matchedText"))
+        if not _derived_speed_evidence_is_contextual({"matched_text": matched_text}):
+            matched_text = raw_text
+            evidence["bbox"] = None
+        evidence["matched_text"] = matched_text
+    updated["evidence"] = evidence
+    updated["grounding_mode"] = "derived"
+    grounding_note = _derived_speed_grounding_note(speed_conditions)
+    if grounding_note:
+        updated["grounding_note"] = grounding_note
+    derived_value = speed_value_from_conditions(speed_conditions)
+    if derived_value:
+        updated["value"] = derived_value
+    return updated
+
+
+def _repair_response_field_evidence_map(
+    record: Any,
+    field_evidence_map: dict[str, Any],
+    *,
+    pdf_path: Optional[str] = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    repaired_map = {
+        key: dict(value)
+        for key, value in (field_evidence_map or {}).items()
+        if isinstance(value, dict)
+    }
+    if pdf_path is None:
+        pdf_path = getattr(getattr(record, "literature", None), "file_path", None)
+    speed_conditions = _response_speed_conditions_for_record(record, repaired_map, pdf_path=pdf_path)
+    if _is_derived_speed_conditions(speed_conditions):
+        speed_entry = repaired_map.get("speed") if isinstance(repaired_map.get("speed"), dict) else {}
+        repaired_map["speed"] = _apply_derived_speed_response_evidence(speed_entry, speed_conditions)
+
+    for roughness_key in ("surface_roughness", "probe_roughness", "substrate_roughness"):
+        entry = repaired_map.get(roughness_key)
+        if isinstance(entry, dict):
+            repaired_map[roughness_key] = _repair_response_roughness_evidence(
+                roughness_key,
+                entry,
+                pdf_path=pdf_path,
+            )
+
+    return repaired_map, speed_conditions
+
+
 def _record_to_response_item(record: Any) -> dict[str, Any]:
     cof_str = record.cof_raw if record.cof_raw else (str(record.cof_value) if record.cof_value else None)
     review_entity_type = "candidate" if isinstance(record, RecordCandidate) else "record"
     field_evidence_map = _parse_json_object(record.field_evidence_json)
+    field_evidence_map, speed_conditions = _repair_response_field_evidence_map(
+        record,
+        field_evidence_map,
+        pdf_path=getattr(getattr(record, "literature", None), "file_path", None),
+    )
+    derived_speed_value = speed_value_from_conditions(speed_conditions) if _is_derived_speed_conditions(speed_conditions) else None
     surface_roughness = _computed_surface_roughness_label_for_record(record, field_evidence_map)
     lubricant_components = components_for_record(record)
     lubricant_alias = getattr(record, "lubricant_alias", None)
@@ -2695,7 +3682,7 @@ def _record_to_response_item(record: Any) -> dict[str, Any]:
             "tribological_system": tribological_system,
             "cof": cof_str,
             "load": getattr(record, "load_raw", None) or getattr(record, "load_value", None),
-            "speed": getattr(record, "speed_value", None),
+            "speed": derived_speed_value or getattr(record, "speed_value", None),
             "friction_force": getattr(record, "friction_force", None),
             "wear_rate": getattr(record, "wear_rate", None),
             "probe_geometry": getattr(record, "probe_geometry", None),
@@ -2727,8 +3714,9 @@ def _record_to_response_item(record: Any) -> dict[str, Any]:
         "load_value": record.load_value,
         "load_raw": record.load_raw,
         "load_conditions": load_conditions,
-        "speed": record.speed_value,
-        "speed_value": record.speed_value,
+        "speed": derived_speed_value or record.speed_value,
+        "speed_value": derived_speed_value or record.speed_value,
+        "speed_conditions": speed_conditions,
         "shear_rate": getattr(record, "shear_rate", None),
         "temperature": record.temperature,
         "potential": record.potential,
@@ -2772,16 +3760,44 @@ def _record_to_response_item(record: Any) -> dict[str, Any]:
         "review_entity_type": review_entity_type,
         "assembly_notes": record.assembly_notes,
     }
+    is_weak_candidate = str(record.record_origin or "").strip().lower() == "weak_candidate"
+    model_confidence = getattr(record, "confidence", None)
+    if is_weak_candidate:
+        try:
+            model_confidence = min(float(model_confidence or 0.52), 0.52)
+        except (TypeError, ValueError):
+            model_confidence = 0.52
+
     confidence_details = calculate_confidence_details(
         {
             **payload,
             "field_evidence_json": field_evidence_map,
-            "model_confidence": getattr(record, "confidence", None),
+            "model_confidence": model_confidence,
         }
     )
-    payload["confidence"] = float(confidence_details.get("score") or 0.0)
+    computed_confidence = float(confidence_details.get("score") or 0.0)
+    if is_weak_candidate:
+        capped_confidence = min(computed_confidence, 0.52)
+        confidence_details = {
+            **confidence_details,
+            "score": capped_confidence,
+            "percent": round(capped_confidence * 100.0, 1),
+            "band": "low",
+        }
+        payload["confidence"] = capped_confidence
+    else:
+        payload["confidence"] = computed_confidence
     payload["confidence_details"] = confidence_details
-    return payload
+    if is_weak_candidate:
+        payload.update(
+            {
+                "confidence_tier": "low",
+                "admission_reason": "weak_candidate",
+                "review_status": "needs_review",
+                "review_entity_type": "candidate",
+            }
+        )
+    return annotate_tribology_payload_quality(payload)
 
 
 async def _count_cached_record_artifacts(db: AsyncSession, literature_id: int) -> tuple[int, int]:
@@ -2792,6 +3808,258 @@ async def _count_cached_record_artifacts(db: AsyncSession, literature_id: int) -
         await db.execute(select(func.count(TribologyData.id)).where(TribologyData.literature_id == literature_id))
     ).scalar() or 0
     return int(candidate_count), int(final_count)
+
+
+def _has_stable_doi(value: Any) -> bool:
+    doi = _filled_text(value)
+    return bool(doi and not doi.lower().startswith("temp-"))
+
+
+async def _load_reusable_tribology_rows(
+    db: AsyncSession,
+    source_literature_id: int,
+) -> tuple[list[TribologyData | RecordCandidate], str]:
+    final_rows = list(
+        (
+            await db.execute(
+                select(TribologyData)
+                .where(TribologyData.literature_id == source_literature_id)
+                .order_by(TribologyData.id.asc())
+            )
+        ).scalars().all()
+    )
+    if final_rows:
+        return final_rows, "tribology_data"
+
+    candidate_rows = list(
+        (
+            await db.execute(
+                select(RecordCandidate)
+                .where(
+                    RecordCandidate.literature_id == source_literature_id,
+                    RecordCandidate.promoted_record_id.is_(None),
+                )
+                .order_by(RecordCandidate.id.asc())
+            )
+        ).scalars().all()
+    )
+    reusable_candidates = [
+        row
+        for row in candidate_rows
+        if str(row.review_status or "").strip().lower() not in REJECTED_REVIEW_STATUSES
+    ]
+    return reusable_candidates, "record_candidates"
+
+
+async def _find_matching_tribology_cache_source(
+    db: AsyncSession,
+    literature: Literature,
+) -> tuple[Literature, int, int] | None:
+    group_id = getattr(literature, "group_id", None)
+    if not group_id:
+        return None
+
+    matches_by_id: dict[int, Literature] = {}
+    if _has_stable_doi(getattr(literature, "doi", None)):
+        doi_matches = list(
+            (
+                await db.execute(
+                    select(Literature).where(
+                        Literature.group_id == group_id,
+                        Literature.id != literature.id,
+                        Literature.doi == literature.doi,
+                    )
+                )
+            ).scalars().all()
+        )
+        matches_by_id.update({item.id: item for item in doi_matches})
+
+    file_hash = _filled_text(getattr(literature, "file_hash", None))
+    if file_hash:
+        hash_matches = list(
+            (
+                await db.execute(
+                    select(Literature).where(
+                        Literature.group_id == group_id,
+                        Literature.id != literature.id,
+                        Literature.file_hash == file_hash,
+                    )
+                )
+            ).scalars().all()
+        )
+        matches_by_id.update({item.id: item for item in hash_matches})
+
+    reusable: list[tuple[Literature, int, int]] = []
+    for candidate in matches_by_id.values():
+        candidate_count, final_count = await _count_cached_record_artifacts(db, candidate.id)
+        if candidate_count or final_count:
+            reusable.append((candidate, candidate_count, final_count))
+
+    if not reusable:
+        return None
+
+    return max(
+        reusable,
+        key=lambda item: (
+            item[2],
+            item[1],
+            _literature_cache_priority(item[0]),
+        ),
+    )
+
+
+def _clone_tribology_row_to_candidate(
+    source: TribologyData | RecordCandidate,
+    *,
+    target_literature_id: int,
+    source_literature: Literature,
+) -> RecordCandidate:
+    skip = {"id", "literature_id", "promoted_record_id", "promoted_at"}
+    target_columns = {column.name for column in RecordCandidate.__table__.columns}
+    data = {
+        column.name: getattr(source, column.name)
+        for column in source.__table__.columns
+        if column.name in target_columns and column.name not in skip
+    }
+    existing_note = _filled_text(data.get("assembly_notes"))
+    source_note = (
+        f"Copied from canonical extraction literature #{source_literature.id} "
+        f"({source_literature.scope_key or source_literature.scope_type or 'unknown scope'})."
+    )
+    data.update(
+        {
+            "literature_id": target_literature_id,
+            "promoted_record_id": None,
+            "review_status": "pending_review",
+            "record_origin": "canonical_cache",
+            "assembly_notes": "; ".join(part for part in (existing_note, source_note) if part),
+        }
+    )
+    return RecordCandidate(**data)
+
+
+_MISSING_PROBE_VALUES = {
+    "",
+    "-",
+    "--",
+    "n/a",
+    "na",
+    "none",
+    "null",
+    "unknown",
+    "unknown material",
+    "probe n/a",
+    "not specified",
+}
+
+
+_FAST_TABLE_RECORD_ORIGINS = {"gemini_flash_table", "fast_table_extraction"}
+
+
+def _is_fast_table_record_origin(value: Any) -> bool:
+    return _filled_text(value) in _FAST_TABLE_RECORD_ORIGINS
+
+
+def _probe_value_is_missing(value: Any) -> bool:
+    return str(value or "").strip().lower() in _MISSING_PROBE_VALUES
+
+
+def _backfill_cached_record_tribopair(
+    record: Any,
+    item: dict[str, Any],
+    *,
+    document_context: dict[str, Any],
+    page_context: str,
+) -> bool:
+    enriched = apply_experimental_document_context(item, document_context)
+    enriched = normalize_extraction_row(
+        enriched,
+        getattr(record, "source_page", None),
+        page_context=page_context,
+    )
+    changed = False
+    for item_key, column_name in (
+        ("probe_material", "probe_material"),
+        ("probe_geometry", "probe_geometry"),
+        ("probe_radius", "probe_radius"),
+        ("probe_roughness", "probe_roughness"),
+        ("substrate_material", "substrate_material"),
+        ("substrate_coating", "substrate_coating"),
+        ("substrate_roughness", "substrate_roughness"),
+        ("material_name", "material_name"),
+    ):
+        value = enriched.get(item_key)
+        if not _filled_text(value):
+            continue
+        current = getattr(record, column_name, None)
+        if column_name == "probe_material":
+            should_update = _probe_value_is_missing(current)
+        elif column_name == "probe_geometry":
+            value_l = str(value or "").strip().lower()
+            probe_l = str(enriched.get("probe_material") or "").strip().lower()
+            should_update = (
+                (not _filled_text(current) and (value_l != "surface pair" or probe_l == "mica"))
+                or (
+                    str(current or "").strip().lower() == "colloid probe"
+                    and value_l == "tip"
+                    and probe_l == "silicon nitride"
+                )
+                or (
+                    str(current or "").strip().lower() == "colloid probe"
+                    and value_l == "surface pair"
+                    and probe_l == "mica"
+                )
+            )
+        else:
+            should_update = not _filled_text(current)
+        if should_update:
+            setattr(record, column_name, value)
+            item[item_key] = value
+            changed = True
+    return changed
+
+
+async def _copy_matching_tribology_cache_records(
+    db: AsyncSession,
+    literature: Literature,
+) -> dict[str, Any] | None:
+    existing_candidate_count, existing_final_count = await _count_cached_record_artifacts(db, literature.id)
+    if existing_candidate_count or existing_final_count:
+        return None
+
+    source_match = await _find_matching_tribology_cache_source(db, literature)
+    if not source_match:
+        return None
+
+    source_literature, _, _ = source_match
+    rows, source_table = await _load_reusable_tribology_rows(db, source_literature.id)
+    if not rows:
+        return None
+
+    clones = [
+        _clone_tribology_row_to_candidate(
+            row,
+            target_literature_id=literature.id,
+            source_literature=source_literature,
+        )
+        for row in rows
+    ]
+    db.add_all(clones)
+    literature.status = "completed"
+    literature.error_message = None
+    await db.flush()
+    logger.info(
+        "Copied %s cached tribology record(s) from literature_id=%s to literature_id=%s",
+        len(clones),
+        source_literature.id,
+        literature.id,
+    )
+    return {
+        "source_literature_id": source_literature.id,
+        "source_scope_key": source_literature.scope_key,
+        "source_table": source_table,
+        "copied_count": len(clones),
+    }
 
 
 def _is_no_data_message(value: Optional[str]) -> bool:
@@ -2940,21 +4208,28 @@ def _build_db_record_from_item(
         )
     load_text = item.get("load") or item.get("normal_load")
     load_conditions = normalize_load_conditions(item.get("load_conditions") or item.get("loadConditions")) or derive_load_conditions(load_text)
-    speed_conditions = normalize_speed_conditions(item.get("speed_conditions") or item.get("speedConditions"))
+    resolved_record_origin = _filled_text(item.get("record_origin")) or record_origin
+    is_fast_table_record = _is_fast_table_record_origin(resolved_record_origin)
+    speed_conditions = {} if is_fast_table_record else normalize_speed_conditions(item.get("speed_conditions") or item.get("speedConditions"))
     if not speed_conditions:
-        speed_context = " ".join(
-            str(part or "")
-            for part in (item.get("evidence"), item.get("notes"), item.get("source"), item.get("source_figure"))
-            if part not in (None, "")
-        )
-        speed_conditions = derive_speed_conditions(item.get("speed"), context=speed_context)
-    speed_value = speed_value_from_conditions(speed_conditions) or item.get("speed")
+        if is_fast_table_record:
+            speed_conditions = {}
+        else:
+            speed_context = " ".join(
+                str(part or "")
+                for part in (item.get("evidence"), item.get("notes"), item.get("source"), item.get("source_figure"))
+                if part not in (None, "")
+            )
+            speed_conditions = derive_speed_conditions(item.get("speed"), context=speed_context)
+    if is_fast_table_record:
+        speed_value = item.get("speed") or item.get("speed_value")
+    else:
+        speed_value = speed_value_from_conditions(speed_conditions) or item.get("speed")
     if speed_conditions.get("scan_rate_hz") is not None and speed_conditions.get("sliding_velocity_um_s") is None:
         speed_value = None
     tribological_system = normalize_tribological_system(item.get("tribological_system") or item.get("tribologicalSystem")) or derive_tribological_system(item.get("regime"))
     experiment_profile = build_experiment_profile({**item, "tribological_system": tribological_system})
     tribological_system = {**tribological_system, **experiment_profile} if tribological_system else experiment_profile
-    resolved_record_origin = _filled_text(item.get("record_origin")) or record_origin
     db_record = model_cls(
         literature_id=literature_id,
         material_name=item.get("material_name", "Unknown"),
@@ -3004,9 +4279,14 @@ def _build_db_record_from_item(
         series_id=item.get("series_id"),
         record_origin=resolved_record_origin,
     )
-    _try_resolve_evidence_coords(db_record, item, file_path)
-    field_evidence_map = _build_field_evidence_map(item, db_record, confidence=confidence, file_path=file_path)
+    if resolved_record_origin != "weak_candidate" and not is_fast_table_record:
+        _try_resolve_evidence_coords(db_record, item, file_path)
+    evidence_lookup_file_path = None if is_fast_table_record else file_path
+    field_evidence_map = _build_field_evidence_map(item, db_record, confidence=confidence, file_path=evidence_lookup_file_path)
     review_status, assembly_notes = _resolve_review_status(field_evidence_map)
+    requested_review_status = _filled_text(item.get("review_status")).lower()
+    if is_fast_table_record or requested_review_status in {"needs_review", "pending_review"}:
+        review_status = "needs_review"
     item_assembly_notes = _filled_text(item.get("assembly_notes"))
     if item_assembly_notes:
         assembly_notes = "; ".join(part for part in (assembly_notes, item_assembly_notes) if part)
@@ -3049,7 +4329,164 @@ def _build_db_record_from_item(
             "confidence_details": confidence_details,
         }
     )
+    response_item = annotate_tribology_payload_quality(response_item)
     return db_record, response_item
+
+
+async def _persist_weak_candidates_for_review(
+    db: AsyncSession,
+    *,
+    literature: Literature,
+    trace_candidates: list[dict[str, Any]],
+    file_path: Optional[str],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    weak_items, weak_summary = build_weak_candidate_items(trace_candidates)
+    if not weak_items:
+        return [], weak_summary
+    _apply_default_temperature(weak_items)
+    _normalize_record_chemistry(weak_items)
+
+    await db.execute(delete(RecordCandidate).where(RecordCandidate.literature_id == literature.id))
+    await db.execute(delete(TribologyData).where(TribologyData.literature_id == literature.id))
+
+    db_rows: list[RecordCandidate] = []
+    response_rows: list[tuple[RecordCandidate, dict[str, Any]]] = []
+    for item in weak_items:
+        quality_notes = _filled_text(item.get("quality_notes"))
+        db_record, response_item = _build_db_record_from_item(
+            literature_id=literature.id,
+            item={
+                **item,
+                "confidence": min(float(item.get("confidence") or 0.52), 0.52),
+                "record_origin": "weak_candidate",
+                "review_status": "needs_review",
+                "assembly_notes": quality_notes or item.get("assembly_notes"),
+            },
+            file_path=None,
+            record_origin="weak_candidate",
+            model_cls=RecordCandidate,
+        )
+        db_record.review_status = "needs_review"
+        db_record.record_origin = "weak_candidate"
+        db_record.confidence = min(float(getattr(db_record, "confidence", 0.52) or 0.52), 0.52)
+        db_record.assembly_notes = quality_notes or db_record.assembly_notes
+        confidence_details = response_item.get("confidence_details")
+        if isinstance(confidence_details, dict):
+            confidence_details = {
+                **confidence_details,
+                "score": db_record.confidence,
+                "percent": round(db_record.confidence * 100.0, 1),
+                "band": "low",
+            }
+        else:
+            confidence_details = {
+                "score": db_record.confidence,
+                "percent": round(db_record.confidence * 100.0, 1),
+                "band": "low",
+            }
+        response_item.update(
+            {
+                "review_status": "needs_review",
+                "record_origin": "weak_candidate",
+                "review_entity_type": "candidate",
+                "confidence": db_record.confidence,
+                "confidence_details": confidence_details,
+                "confidence_tier": item.get("confidence_tier") or "low",
+                "admission_reason": item.get("admission_reason") or "weak_candidate",
+                "missing_fields": item.get("missing_fields") or [],
+                "quality_notes": quality_notes or item.get("quality_notes"),
+                "assembly_notes": db_record.assembly_notes,
+            }
+        )
+        db_rows.append(db_record)
+        response_rows.append((db_record, response_item))
+
+    db.add_all(db_rows)
+    await db.flush()
+
+    data: list[dict[str, Any]] = []
+    for db_record, response_item in response_rows:
+        response_item["id"] = str(db_record.id)
+        data.append(response_item)
+
+    literature.status = "completed"
+    literature.error_message = None
+
+    return data, {
+        **weak_summary,
+        "review_status": "needs_review",
+        "candidate_count": len(data),
+        "final_count": 0,
+        "admission_reason": "weak_candidate",
+    }
+
+
+async def _finalize_weak_candidates_for_review(
+    db: AsyncSession,
+    *,
+    literature: Literature,
+    run_id: str,
+    llm_summary: dict[str, Any],
+    trace_candidates: list[dict[str, Any]],
+    extra_candidates: Optional[list[dict[str, Any]]] = None,
+    file_path: Optional[str],
+    profile: str,
+    dropped_by_reason: Optional[dict[str, Any]] = None,
+) -> Optional[tuple[list[dict[str, Any]], dict[str, Any]]]:
+    all_candidates = [*(trace_candidates or []), *((extra_candidates or []))]
+    weak_rows, weak_summary = await _persist_weak_candidates_for_review(
+        db,
+        literature=literature,
+        trace_candidates=all_candidates,
+        file_path=file_path,
+    )
+    if not weak_rows:
+        return None
+
+    await add_extraction_candidates(
+        db,
+        run_id=run_id,
+        candidates=all_candidates,
+    )
+    weak_count = len(weak_rows)
+    candidate_count = max(
+        int((llm_summary or {}).get("candidate_count") or 0),
+        len(all_candidates),
+    )
+    weak_message = f"{weak_count} weak candidates need review."
+    extraction_summary = {
+        "run_id": run_id,
+        "candidate_count": candidate_count,
+        "final_count": 0,
+        "weak_candidate_count": weak_count,
+        "review_status": "needs_review",
+        "status": "needs_review",
+        "dropped_by_reason": dropped_by_reason if dropped_by_reason is not None else (llm_summary or {}).get("dropped_by_reason") or {},
+        "page_coverage": (llm_summary or {}).get("page_coverage") or {},
+        "page_candidate_counts": (llm_summary or {}).get("page_candidate_counts") or {},
+        "progress_log": [
+            *((llm_summary or {}).get("progress_log") or []),
+            {
+                "stage": "stage_e.weak_candidates",
+                "message": weak_message,
+            },
+        ],
+        "current_stage": "stage_e.weak_candidates",
+        "current_message": weak_message,
+        "admission_reason": weak_summary.get("admission_reason") or "weak_candidate",
+        "profile": profile,
+    }
+    await finalize_extraction_run(
+        db,
+        run_id=run_id,
+        status="completed",
+        candidate_count=candidate_count,
+        final_count=0,
+        dropped_by_reason=extraction_summary["dropped_by_reason"],
+        summary=extraction_summary,
+        error_message=None,
+    )
+    return weak_rows, extraction_summary
 
 
 async def _load_cached_extraction_result(
@@ -3066,6 +4503,11 @@ async def _load_cached_extraction_result(
 
     data_list = []
     changed_db_rows = False
+    literature_content = _load_literature_context_text(literature)
+    if literature_content and not str(getattr(literature, "content", "") or "").strip():
+        literature.content = literature_content
+        changed_db_rows = True
+    document_context = extract_experimental_document_context({0: literature_content}) if literature_content else {}
     for i, r in enumerate(db_records):
         cof_str = r.cof_raw if r.cof_raw else (str(r.cof_value) if r.cof_value else None)
         cached_item = {
@@ -3087,6 +4529,13 @@ async def _load_cached_extraction_result(
             "regime": getattr(r, "regime", None),
             "tribological_system": normalize_tribological_system(getattr(r, "tribological_system_json", None)) or derive_tribological_system(getattr(r, "regime", None)),
             "surface_roughness": getattr(r, "surface_roughness", None),
+            "probe_material": getattr(r, "probe_material", None),
+            "probe_geometry": getattr(r, "probe_geometry", None),
+            "probe_radius": getattr(r, "probe_radius", None),
+            "probe_roughness": getattr(r, "probe_roughness", None),
+            "substrate_material": getattr(r, "substrate_material", None),
+            "substrate_coating": getattr(r, "substrate_coating", None),
+            "substrate_roughness": getattr(r, "substrate_roughness", None),
             "evidence": r.evidence,
             "source": r.source,
             "source_page": r.source_page,
@@ -3094,6 +4543,13 @@ async def _load_cached_extraction_result(
             "sample_id": r.sample_id,
             "series_id": r.series_id,
         }
+        if _backfill_cached_record_tribopair(
+            r,
+            cached_item,
+            document_context=document_context,
+            page_context=literature_content,
+        ):
+            changed_db_rows = True
         parsed_field_evidence = _parse_json_object(r.field_evidence_json)
         if not parsed_field_evidence or _field_evidence_map_looks_generic(parsed_field_evidence):
             # Cached extraction is often loaded on app entry. Avoid doing synchronous
@@ -3188,15 +4644,25 @@ async def _load_cached_extraction_result(
         "issue": literature.issue,
         "pages": literature.pages,
     }
+    weak_candidate_count = sum(
+        1
+        for row in data_list
+        if str(row.get("record_origin") or "").strip().lower() == "weak_candidate"
+    )
+    final_count = max(0, len(data_list) - weak_candidate_count)
     cache_summary = {
         "run_id": None,
         "candidate_count": len(data_list),
-        "final_count": len(data_list),
+        "final_count": final_count,
+        "weak_candidate_count": weak_candidate_count,
         "dropped_by_reason": {},
         "page_coverage": {},
         "page_candidate_counts": {},
         "progress_log": [],
     }
+    if weak_candidate_count:
+        cache_summary["review_status"] = "needs_review"
+        cache_summary["status"] = "needs_review"
     return metadata, data_list, cache_summary
 
 
@@ -3732,6 +5198,7 @@ async def save_upload_entry(
                     logger.info("Backfilled PDF for literature_id=%s path=%s", existing_hash_match.id, pdf_path)
                 await db.commit()
                 return existing_hash_match
+        doi_candidates: list[str] = []
         # --- DOI/title dedup guard ---
         try:
             doi_candidates = _extract_doi_candidates(text_content, file.filename)
@@ -3805,15 +5272,20 @@ async def save_upload_entry(
 
 
         # 3. Create new Literature entry
+        upload_metadata = await _resolve_upload_metadata(text_content, file.filename, doi_candidates)
         # Generate a temporary DOI for files without DOI
         temp_doi = f"temp-{int(__import__('time').time() * 1000)}"
         
         new_lit = Literature(
-            title=file.filename,
-            doi=temp_doi,
-            authors="",
-            journal="",
-            year=0,
+            title=upload_metadata.get("title") or file.filename,
+            doi=upload_metadata.get("doi") or temp_doi,
+            authors=upload_metadata.get("authors") or "",
+            journal=upload_metadata.get("journal") or "",
+            year=upload_metadata.get("year") or 0,
+            volume=upload_metadata.get("volume"),
+            issue=upload_metadata.get("issue"),
+            pages=upload_metadata.get("pages"),
+            issn=upload_metadata.get("issn"),
             file_path=None, 
             file_hash=file_hash,
             content=text_content,
@@ -3983,6 +5455,38 @@ def _refines_same_cation_pair(current_name: object, current_resolved: dict, next
     return len(str(next_anion)) > len(str(current_anion))
 
 
+def _component_pair_supported_by_context(candidate_name: object, resolved: dict, item: dict[str, Any]) -> bool:
+    candidate_text = str(candidate_name or "").strip()
+    if not candidate_text:
+        return False
+    context = " ".join(
+        str(item.get(key) or "")
+        for key in (
+            "ionic_liquid",
+            "lubricant",
+            "material_name",
+            "substrate_material",
+            "evidence",
+            "notes",
+            "source",
+            "source_figure",
+            "sample_id",
+        )
+    )
+    context_l = context.lower()
+    compact_context = re.sub(r"\s+", "", context_l)
+    compact_candidate = re.sub(r"\s+", "", candidate_text.lower())
+    if compact_candidate and compact_candidate in compact_context:
+        return True
+
+    cation, anion = _canonical_pair_parts(candidate_text, resolved)
+    if not cation or not anion:
+        return False
+    cation_pattern = rf"(?<![A-Za-z0-9]){re.escape(str(cation).lower())}(?![A-Za-z0-9])"
+    anion_pattern = rf"(?<![A-Za-z0-9]){re.escape(str(anion).lower())}(?![A-Za-z0-9])"
+    return bool(re.search(cation_pattern, context_l) and re.search(anion_pattern, context_l))
+
+
 def _normalize_record_chemistry(records: list[dict]) -> None:
     for item in records or []:
         if not isinstance(item, dict):
@@ -4009,14 +5513,18 @@ def _normalize_record_chemistry(records: list[dict]) -> None:
             load_conditions = derive_load_conditions(item.get("load") or item.get("normal_load"))
         if load_conditions:
             item["load_conditions"] = load_conditions
-        speed_conditions = normalize_speed_conditions(item.get("speed_conditions") or item.get("speedConditions"))
+        is_fast_table_record = _is_fast_table_record_origin(item.get("record_origin"))
+        speed_conditions = {} if is_fast_table_record else normalize_speed_conditions(item.get("speed_conditions") or item.get("speedConditions"))
         if not speed_conditions:
-            speed_context = " ".join(
-                str(part or "")
-                for part in (item.get("evidence"), item.get("notes"), item.get("source"), item.get("source_figure"))
-                if part not in (None, "")
-            )
-            speed_conditions = derive_speed_conditions(item.get("speed") or item.get("speed_value"), context=speed_context)
+            if is_fast_table_record:
+                speed_conditions = {}
+            else:
+                speed_context = " ".join(
+                    str(part or "")
+                    for part in (item.get("evidence"), item.get("notes"), item.get("source"), item.get("source_figure"))
+                    if part not in (None, "")
+                )
+                speed_conditions = derive_speed_conditions(item.get("speed") or item.get("speed_value"), context=speed_context)
         if speed_conditions:
             item["speed_conditions"] = speed_conditions
             derived_speed = speed_value_from_conditions(speed_conditions)
@@ -4026,6 +5534,8 @@ def _normalize_record_chemistry(records: list[dict]) -> None:
             elif speed_conditions.get("scan_rate_hz") is not None:
                 item["speed"] = None
                 item["speed_value"] = None
+        elif is_fast_table_record and item.get("speed") not in (None, "") and item.get("speed_value") in (None, ""):
+            item["speed_value"] = item.get("speed")
         tribological_system = normalize_tribological_system(item.get("tribological_system") or item.get("tribologicalSystem"))
         if not tribological_system:
             tribological_system = derive_tribological_system(item.get("regime"))
@@ -4057,6 +5567,9 @@ def _normalize_record_chemistry(records: list[dict]) -> None:
             ("ionic_liquid", item.get("ionic_liquid")),
             ("lubricant", item.get("lubricant")),
             ("components", item.get("cation") and item.get("anion") and f"[{item.get('cation')}][{item.get('anion')}]"),
+            ("material_name", item.get("material_name")),
+            ("substrate_material", item.get("substrate_material")),
+            ("sample_id", item.get("sample_id")),
             ("film_thickness", raw_film_candidate if raw_film_candidate and not item.get("film_thickness") else None),
             ("evidence", item.get("evidence")),
             ("notes", item.get("notes")),
@@ -4071,6 +5584,12 @@ def _normalize_record_chemistry(records: list[dict]) -> None:
         canonical_matches: list[tuple[str, Optional[str], dict]] = []
         for label, candidate in il_candidates:
             candidate_name, candidate_resolved = _canonicalize_ionic_liquid_name(candidate)
+            if label == "components" and candidate_name and not _component_pair_supported_by_context(
+                candidate_name,
+                candidate_resolved,
+                item,
+            ):
+                continue
             if candidate_name:
                 canonical_matches.append((label, candidate_name, candidate_resolved))
         if canonical_matches:
@@ -4123,7 +5642,7 @@ async def process_file_safe(
     content: str = None,
     images: list = None,
     force: bool = False,
-    profile: str = "high_accuracy",
+    profile: str = "auto",
     strict_cof_mode: Optional[bool] = None,
     run_id: str | None = None,
 ):
@@ -4132,15 +5651,13 @@ async def process_file_safe(
     Returns (metadata_dict, data_list, extraction_summary) for immediate frontend display.
     Handles caching logic internally.
     """
-    profile = (profile or "high_accuracy").strip().lower()
-    if profile not in {"high_accuracy", "standard", "review_figure_estimate"}:
-        profile = "high_accuracy"
-    allow_likely_ils = profile == "review_figure_estimate"
-    resolved_strict_cof_mode = (profile in {"high_accuracy", "review_figure_estimate"}) if strict_cof_mode is None else bool(strict_cof_mode)
+    requested_profile = (profile or "auto").strip().lower()
+    profile = "auto"
+    resolved_strict_cof_mode = False if strict_cof_mode is None else bool(strict_cof_mode)
     logger.info(
         "Starting isolated processing literature_id=%s profile=%s strict_cof_mode=%s force=%s",
         file_id,
-        profile,
+        requested_profile,
         resolved_strict_cof_mode,
         force,
     )
@@ -4208,7 +5725,7 @@ async def process_file_safe(
                         now_utc = datetime.utcnow()
                         last_touch = running_run.updated_at or running_run.created_at
                         if last_touch:
-                            stale_minutes = 4 if profile in {"high_accuracy", "review_figure_estimate"} else 3
+                            stale_minutes = 4
                             is_stale = (now_utc - last_touch) > timedelta(minutes=stale_minutes)
                         if not is_stale and running_run.created_at:
                             has_progress = bool((running_run.summary_json or "").strip() and (running_run.summary_json or "").strip() != "{}")
@@ -4255,6 +5772,18 @@ async def process_file_safe(
                     logger.info("Returning cached extraction for literature_id=%s", file_id)
                     return cached_result
                 if literature.status == "no_data":
+                    canonical_cache = await _copy_matching_tribology_cache_records(db, literature)
+                    if canonical_cache:
+                        metadata, data_list, cache_summary = await _load_cached_extraction_result(db, literature)
+                        cache_summary = {
+                            **cache_summary,
+                            "canonical_cache": canonical_cache,
+                            "cache_refreshed": True,
+                            "recovered_from_no_data": True,
+                        }
+                        await db.commit()
+                        return metadata, data_list, cache_summary
+
                     fallback_records, fallback_info = extract_table_fallback_records(
                         content or literature.content or "",
                         resolved_file_path,
@@ -4346,14 +5875,23 @@ async def process_file_safe(
 
             existing_run = await get_extraction_run(db, run_id)
             if existing_run:
-                existing_run.status = "running"
-                existing_run.profile = profile
-                existing_run.error_message = None
+                await mark_extraction_run_started(
+                    db,
+                    run_id=run_id,
+                    extractor_type="tribology",
+                            profile=profile,
+                )
             else:
                 await create_extraction_run(
                     db,
                     run_id=run_id,
                     literature_id=literature.id,
+                    extractor_type="tribology",
+                    profile=profile,
+                )
+                await mark_extraction_run_started(
+                    db,
+                    run_id=run_id,
                     extractor_type="tribology",
                     profile=profile,
                 )
@@ -4415,7 +5953,7 @@ async def process_file_safe(
                     logger.warning("Progress persistence failed for run_id=%s: %s", run_id, progress_err)
 
             # Call LLM (smart routing: pass pdf_path so visual pages go to Qwen-VL only)
-            extract_timeout_s = 960 if profile in {"high_accuracy", "review_figure_estimate"} else 720
+            extract_timeout_s = 960
             try:
                 if images:
                     result = await asyncio.wait_for(
@@ -4456,11 +5994,32 @@ async def process_file_safe(
                     },
                     "trace_candidates": [],
                 }
+
+            if (result.get("extraction_summary") or {}).get("pipeline") == "fast_table":
+                visual_fallback_used = False
+            else:
+                result, visual_fallback_used = await _maybe_retry_tribology_visual_fallback(
+                    result,
+                    content=content or "",
+                    images=images,
+                    pdf_path=resolved_file_path,
+                    profile=profile,
+                    strict_cof_mode=bool(resolved_strict_cof_mode),
+                    progress_callback=_persist_run_progress,
+                    extract_with_metadata=llm_service.extract_with_metadata,
+                )
+            if visual_fallback_used:
+                logger.info("Visual fallback extraction completed for literature_id=%s", file_id)
             
             records = result.get("data", [])
             metadata = result.get("metadata", {})
             llm_summary = result.get("extraction_summary", {}) or {}
             trace_candidates = result.get("trace_candidates", []) or []
+            allow_likely_ils = _allow_likely_ils_for_persistence(
+                profile=profile,
+                visual_fallback_used=visual_fallback_used,
+                extraction_summary=llm_summary,
+            )
 
             await _raise_if_cancelled("stage_d.post_model")
 
@@ -4590,6 +6149,17 @@ async def process_file_safe(
                         record_origin="llm_extraction",
                         model_cls=RecordCandidate,
                     )
+                    if _is_fast_table_record_origin(item.get("record_origin")):
+                        db_record.record_origin = str(item.get("record_origin") or "").strip()
+                        db_record.review_status = "needs_review"
+                        response_item.update(
+                            {
+                                "record_origin": db_record.record_origin,
+                                "review_status": "needs_review",
+                                "review_entity_type": "candidate",
+                                "admission_reason": db_record.record_origin,
+                            }
+                        )
                     new_records_db.append(db_record)
                     response_rows.append((db_record, response_item))
                 
@@ -4599,6 +6169,34 @@ async def process_file_safe(
                 for db_record, response_item in response_rows:
                     response_item["id"] = str(db_record.id)
                     response_data_list.append(response_item)
+
+                persisted_candidate_count = len(trace_candidates) + len(stage_e_candidates)
+                dropped_by_reason = {
+                    **(llm_summary.get("dropped_by_reason") or {}),
+                    **(merge_report.get("dropped_by_reason") or {}),
+                    **blocked_by_reason,
+                }
+                if metric_dropped:
+                    dropped_by_reason["missing_primary_metric"] = (
+                        int(dropped_by_reason.get("missing_primary_metric") or 0) + metric_dropped
+                    )
+
+                if not response_data_list:
+                    weak_result = await _finalize_weak_candidates_for_review(
+                        db,
+                        literature=literature,
+                        run_id=run_id,
+                        llm_summary=llm_summary,
+                        trace_candidates=trace_candidates,
+                        extra_candidates=stage_e_candidates,
+                        file_path=resolved_file_path,
+                        profile=profile,
+                        dropped_by_reason=dropped_by_reason,
+                    )
+                    if weak_result:
+                        await db.commit()
+                        weak_rows, weak_summary = weak_result
+                        return metadata, weak_rows, weak_summary
                 
                 # Update Metadata (with DOI conflict guard)
                 if metadata:
@@ -4626,16 +6224,6 @@ async def process_file_safe(
                     candidates=[*trace_candidates, *stage_e_candidates],
                 )
 
-                persisted_candidate_count = len(trace_candidates) + len(stage_e_candidates)
-                dropped_by_reason = {
-                    **(llm_summary.get("dropped_by_reason") or {}),
-                    **(merge_report.get("dropped_by_reason") or {}),
-                    **blocked_by_reason,
-                }
-                if metric_dropped:
-                    dropped_by_reason["missing_primary_metric"] = (
-                        int(dropped_by_reason.get("missing_primary_metric") or 0) + metric_dropped
-                    )
                 extraction_summary = {
                     "run_id": run_id,
                     "candidate_count": max(
@@ -4664,6 +6252,21 @@ async def process_file_safe(
                 await db.commit()
                 return metadata, response_data_list, extraction_summary
             else:
+                weak_result = await _finalize_weak_candidates_for_review(
+                    db,
+                    literature=literature,
+                    run_id=run_id,
+                    llm_summary=llm_summary,
+                    trace_candidates=trace_candidates,
+                    extra_candidates=None,
+                    file_path=resolved_file_path,
+                    profile=profile,
+                )
+                if weak_result:
+                    await db.commit()
+                    weak_rows, extraction_summary = weak_result
+                    return metadata, weak_rows, extraction_summary
+
                 await _raise_if_cancelled("stage_e.before_no_data_finalize")
                 no_data_message = build_no_data_reason(
                     literature=literature,
@@ -4715,6 +6318,41 @@ async def process_file_safe(
                         dropped_by_reason=extraction_summary["dropped_by_reason"],
                         summary=extraction_summary,
                         error_message=no_data_message,
+                    )
+                    await db.commit()
+                    return (metadata or cached_metadata), cached_data, extraction_summary
+
+                canonical_cache = await _copy_matching_tribology_cache_records(db, literature)
+                if canonical_cache:
+                    cached_metadata, cached_data, _ = await _load_cached_extraction_result(db, literature)
+                    extraction_summary["canonical_cache"] = canonical_cache
+                    extraction_summary["llm_dropped_by_reason"] = extraction_summary.get("dropped_by_reason") or {}
+                    extraction_summary["dropped_by_reason"] = {}
+                    extraction_summary["final_count"] = len(cached_data)
+                    extraction_summary["current_stage"] = "stage_e.canonical_cache"
+                    extraction_summary["current_message"] = "Reused existing extraction records from a matching DOI/file cache."
+                    extraction_summary["progress_log"] = [
+                        *(extraction_summary.get("progress_log") or []),
+                        {
+                            "stage": "stage_e.canonical_cache",
+                            "message": (
+                                "Reused existing extraction records from "
+                                f"literature #{canonical_cache['source_literature_id']}."
+                            ),
+                        },
+                    ]
+                    await finalize_extraction_run(
+                        db,
+                        run_id=run_id,
+                        status="completed",
+                        candidate_count=max(
+                            int(extraction_summary.get("candidate_count") or 0),
+                            int(canonical_cache.get("copied_count") or 0),
+                        ),
+                        final_count=len(cached_data),
+                        dropped_by_reason=extraction_summary["dropped_by_reason"],
+                        summary=extraction_summary,
+                        error_message=None,
                     )
                     await db.commit()
                     return (metadata or cached_metadata), cached_data, extraction_summary
@@ -4774,7 +6412,7 @@ async def process_file_background(
     file_id: int,
     extractor_type: str = "tribology",
     force: bool = False,
-    profile: str = "high_accuracy",
+    profile: str = "auto",
     strict_cof_mode: Optional[bool] = None,
     run_id: str | None = None,
 ):
@@ -5040,8 +6678,8 @@ async def reprocess_literature(
         extraction_result = await llm_service.extract_with_metadata(
             content=content,
             pdf_path=resolved_file_path,
-            extraction_profile="high_accuracy",
-            strict_cof_mode=True,
+            extraction_profile="auto",
+            strict_cof_mode=False,
         )
         
         metadata_dict = extraction_result.get("metadata", {})

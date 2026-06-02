@@ -83,7 +83,7 @@ const callout = computed(() => {
 
     <section class="shell-surface px-5 py-5 sm:px-6">
       <div class="flex items-start gap-3">
-        <div class="flex h-11 w-11 items-center justify-center rounded-md border border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+        <div class="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#101b29] text-[#f4d18f] dark:bg-[#f4d18f] dark:text-[#111827]">
           <component :is="callout.icon" class="h-5 w-5" />
         </div>
         <div>

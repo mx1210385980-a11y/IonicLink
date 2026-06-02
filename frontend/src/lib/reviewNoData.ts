@@ -1,9 +1,12 @@
 import type { BatchFile } from '@/lib/api'
 
 export type ReviewNoDataDiagnostic = {
+  kind: 'empty' | 'diffusion_figure_estimate'
   title: string
   message: string
   hints: string[]
+  primaryActionLabel?: string
+  primaryActionDescription?: string
 }
 
 function statusOf(file: Pick<BatchFile, 'status'> | null | undefined) {
@@ -32,8 +35,28 @@ export function reviewNoDataDiagnostic(file: Pick<BatchFile, 'extractor_type' | 
   const message = rawMessage && !/^loaded from literature library$/i.test(rawMessage)
     ? rawMessage
     : fallbackMessage
+  const normalizedMessage = message.toLowerCase()
+  const needsFigureEstimate = isDiffusion && (
+    normalizedMessage.includes('no explicit diffusion coefficient')
+    || normalizedMessage.includes('no valid diffusion records')
+    || normalizedMessage.includes('no extractable diffusion records')
+    || normalizedMessage.includes('没有显式')
+    || normalizedMessage.includes('没有可直接入库')
+  )
+
+  if (needsFigureEstimate) {
+    return {
+      kind: 'diffusion_figure_estimate',
+      title: '需要图表估读',
+      message: '没有找到可直接入库的表格/正文数值。若扩散系数只在曲线图里，请翻到图表页，用原始轴单位录入估读值；不要把图注文字当作单位。',
+      hints: ['翻到图表页', '录入原始轴单位', '保存为待审候选'],
+      primaryActionLabel: '用当前页估读',
+      primaryActionDescription: '把当前 PDF 页作为证据来源，手动录入曲线读数。',
+    }
+  }
 
   return {
+    kind: 'empty',
     title: isDiffusion ? '没有可审阅的扩散记录' : '没有可审阅记录',
     message,
     hints: isDiffusion

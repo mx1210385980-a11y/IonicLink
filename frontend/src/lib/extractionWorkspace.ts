@@ -14,6 +14,59 @@ export type UploadInitialStateResponse = {
   extractor_type?: ExtractorType | string | null
 }
 
+export type UploadExtractionItemSeed = {
+  id: string
+  recordCount?: number | null
+  candidateCount?: number | null
+  cachedRecordCount?: number | null
+}
+
+export type UploadExtractionStateItem<TPaper extends UploadExtractionItemSeed = UploadExtractionItemSeed> = TPaper & {
+  status: 'queued' | 'extracting' | 'completed' | 'no_data' | 'failed' | 'cancelled'
+  message: string
+  records: number
+  extractedRows: unknown[]
+  progress: number
+  resultLoading?: boolean
+  resultError?: string
+}
+
+export function buildPdfUploadExtractionItems<TPaper extends UploadExtractionItemSeed>(
+  selected: TPaper[],
+  existingItems: Array<UploadExtractionStateItem<TPaper>>,
+  options: {
+    isCachedPaper: (paper: TPaper) => boolean
+  },
+): Array<UploadExtractionStateItem<TPaper>> {
+  const selectedIds = new Set(selected.map((paper) => paper.id))
+  const existingById = new Map(existingItems.map((item) => [item.id, item]))
+  const preservedExisting = existingItems.filter((item) => !selectedIds.has(item.id))
+  const nextSelected = selected.map((paper) => {
+    const existing = existingById.get(paper.id)
+    if (options.isCachedPaper(paper)) {
+      return {
+        ...paper,
+        status: 'completed' as const,
+        message: 'Loaded cached records from the literature library.',
+        records: Number(paper.cachedRecordCount || paper.recordCount || paper.candidateCount || existing?.records || 0),
+        extractedRows: existing?.extractedRows || [],
+        resultLoading: existing?.resultLoading,
+        resultError: existing?.resultError,
+        progress: 100,
+      }
+    }
+    return {
+      ...paper,
+      status: 'queued' as const,
+      message: 'Queued for Smart extraction.',
+      records: 0,
+      extractedRows: [],
+      progress: 4,
+    }
+  })
+  return [...preservedExisting, ...nextSelected]
+}
+
 export function deriveValidationStatus(reviewStatus?: string | null): TribologyData['validationStatus'] {
   const normalized = String(reviewStatus || '').trim().toLowerCase()
   if (normalized === 'approved') return 'verified'

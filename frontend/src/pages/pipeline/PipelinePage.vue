@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import {
   Bot,
   CheckCircle2,
@@ -14,25 +14,7 @@ import {
   Upload,
 } from 'lucide-vue-next'
 
-import { useI18n } from '@/composables/useI18n'
-import {
-  listDiffusionLibrary,
-  listLiterature,
-  type AgentMessage,
-  type AgentWorkflow,
-  type BatchFile,
-  type DiffusionLibraryRecord,
-  type ExtractionRunDetail,
-  type ExtractorType,
-  type Literature,
-} from '@/lib/api'
-import {
-  extractionHistoryRecordCount,
-  recentDiffusionLiteratureHistory,
-  recentExtractionHistory,
-  recentLiteratureHistory,
-  type DiffusionLiteratureHistory,
-} from '@/lib/pipelineHistory'
+import type { AgentMessage, AgentWorkflow, BatchFile, ExtractionRunDetail, ExtractorType } from '@/lib/api'
 
 const props = defineProps<{
   currentSection: string
@@ -66,11 +48,8 @@ const emit = defineEmits([
   'batch-upload',
   'extract',
   'batch-extract',
-  'cancel-extraction',
   'send-chat',
   'update-sidebar-tab',
-  'open-review',
-  'open-review-target',
   'clear-doi',
   'set-default-extractor-type',
   'set-file-extractor-type',
@@ -104,168 +83,24 @@ type InspectorLog = {
   tone: 'info' | 'agent' | 'system'
 }
 
-type InspectorDiagnostic = {
-  key: string
-  label: string
-  value: string
-}
-
-type ExtractorOption = {
-  key: ExtractorType
-  label: string
-  shortLabel: string
-  helper: string
-  detail: string
-  activeClass: string
-  inactiveClass: string
-  badgeClass: string
-}
-
-type ExtractionHistoryItem = {
-  id: string
-  literatureId?: number
-  name: string
-  badgeLabel: string
-  badgeClass: string
-  meta: string
-  isSelected: boolean
-  origin: 'session' | 'library'
-}
-
-const RECENT_EXTRACTION_HISTORY_LIMIT = 5
-const RECENT_EXTRACTION_LIBRARY_LOOKUP_LIMIT = 100
-const HISTORY_REFRESH_INTERVAL_MS = 60_000
-
 const searchQuery = ref('')
 const statusFilter = ref<PipelineFilter>('all')
 const fileInput = ref<HTMLInputElement | null>(null)
-const libraryExtractionHistory = ref<Literature[]>([])
-const diffusionExtractionHistory = ref<DiffusionLibraryRecord[]>([])
-const libraryHistoryLoading = ref(false)
-const libraryHistoryError = ref('')
-const { isChinese } = useI18n()
-let historyRefreshTimer: ReturnType<typeof setInterval> | null = null
-const extractorOptions = computed<ExtractorOption[]>(() => [
-  {
-    key: 'tribology',
-    label: isChinese.value ? '摩擦学数据抽取' : 'Tribology Data',
-    shortLabel: isChinese.value ? '摩擦学抽取' : 'Tribology',
-    helper: isChinese.value ? '用于润滑、摩擦、磨损实验论文' : 'For lubrication, friction, and wear papers',
-    detail: isChinese.value ? '抽取 COF、载荷、速度、温度、材料配副、离子液体。' : 'Extracts COF, load, speed, temperature, tribopair, and ionic liquid.',
-    activeClass: 'border-blue-300 bg-blue-50 text-blue-950 shadow-sm ring-1 ring-blue-200',
-    inactiveClass: 'border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50/40',
-    badgeClass: 'border-blue-200 bg-blue-50 text-blue-700',
-  },
-  {
-    key: 'diffusion',
-    label: isChinese.value ? '扩散数据抽取' : 'Diffusion Data',
-    shortLabel: isChinese.value ? '扩散抽取' : 'Diffusion',
-    helper: isChinese.value ? '用于限域扩散、输运和分子动力学论文' : 'For confined diffusion, transport, and MD papers',
-    detail: isChinese.value ? '抽取 D 值、限域尺度、温度、体系组成、离子液体。' : 'Extracts D values, confinement scale, temperature, system composition, and ionic liquid.',
-    activeClass: 'border-emerald-300 bg-emerald-50 text-emerald-950 shadow-sm ring-1 ring-emerald-200',
-    inactiveClass: 'border-slate-200 bg-white text-slate-700 hover:border-emerald-200 hover:bg-emerald-50/40',
-    badgeClass: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  },
-])
-
-const pageCopy = computed(() => ({
-  eyebrow: isChinese.value ? '核心工作流' : 'Core Workflow',
-  title: isChinese.value ? '文献数据抽取' : 'Literature Extraction',
-  subtitle: isChinese.value
-    ? '上传论文，选择抽取类型，启动代理抽取并进入审阅。'
-    : 'Upload papers, choose an extraction type, run agents, then move results into review.',
-  upload: isChinese.value ? '上传论文' : 'Upload Document',
-  extractSelected: isChinese.value ? '抽取当前论文' : 'Extract Selected',
-  batchExtract: isChinese.value ? '抽取队列' : 'Extract Queue',
-  selected: isChinese.value ? '当前论文' : 'Selected',
-  noSelection: isChinese.value ? '尚未选择论文' : 'No document selected',
-  extractionType: isChinese.value ? '抽取类型' : 'Extraction Type',
-  extractionTypeHint: isChinese.value ? '先选类型，再上传或抽取；当前论文会沿用这个类型。' : 'Choose the task type before upload or extraction. The selected paper will use it.',
-  search: isChinese.value ? '搜索运行...' : 'Search runs...',
-  filter: isChinese.value ? '筛选' : 'Filter',
-  autoRefresh: isChinese.value ? '自动刷新' : 'Auto-refreshing',
-  groupedRuns: isChinese.value ? '批量运行' : 'Batch Runs',
-}))
-
-const READY_TO_EXTRACT_STATUSES = new Set(['uploaded', 'queued', 'pending', 'ready', 'staged', 'cancelled', 'no_data', 'error', 'failed', 'success', 'completed'])
-const RUNNING_STATUSES = new Set(['processing', 'running', 'extracting'])
-const FINISHED_STATUSES = new Set(['success', 'completed'])
-const FAILED_STATUSES = new Set(['error', 'failed'])
-
-function normalizedFileStatus(fileOrStatus?: BatchFile | string | null) {
-  const rawStatus = typeof fileOrStatus === 'string'
-    ? fileOrStatus
-    : fileOrStatus?.status
-  return String(rawStatus || '').trim().toLowerCase()
-}
-
-function hasReadyMessage(file?: BatchFile | null) {
-  const message = String(file?.progressMessage || '').trim().toLowerCase()
-  if (!message) return false
-  return message.includes('ready to extract')
-    || message.includes('ready to launch')
-    || message.includes('可以开始')
-    || message.includes('待抽取')
-}
-
-function isFileRunning(file?: BatchFile | null) {
-  if (!file) return false
-  return RUNNING_STATUSES.has(normalizedFileStatus(file))
-}
-
-function isFileReadyToExtract(file?: BatchFile | null) {
-  if (!file) return false
-  const status = normalizedFileStatus(file)
-  if (isFileRunning(file)) return false
-  return READY_TO_EXTRACT_STATUSES.has(status) || hasReadyMessage(file)
-}
-
-function displayStatusForFile(file: BatchFile) {
-  const status = normalizedFileStatus(file)
-  if (status === 'uploading' && hasReadyMessage(file)) return 'uploaded'
-  if (['queued', 'pending', 'ready', 'staged'].includes(status)) return 'uploaded'
-  if (status === 'running' || status === 'extracting') return 'processing'
-  if (status === 'completed') return 'success'
-  if (status === 'failed') return 'error'
-  return status || 'uploaded'
-}
-
-const extractionMetrics = computed(() => {
-  const files = props.files
-  return [
-    {
-      key: 'queued',
-      label: isChinese.value ? '待抽取' : 'Ready',
-      value: files.filter((file) => isFileReadyToExtract(file)).length,
-    },
-    {
-      key: 'running',
-      label: isChinese.value ? '运行中' : 'Running',
-      value: files.filter((file) => isFileRunning(file)).length,
-    },
-    {
-      key: 'done',
-      label: isChinese.value ? '已抽取' : 'Extracted',
-      value: files.filter((file) => FINISHED_STATUSES.has(normalizedFileStatus(file))).length,
-    },
-    {
-      key: 'failed',
-      label: isChinese.value ? '待重试' : 'Retry',
-      value: files.filter((file) => FAILED_STATUSES.has(normalizedFileStatus(file))).length,
-    },
-  ]
-})
+const extractorOptions: Array<{ key: ExtractorType; label: string; helper: string }> = [
+  { key: 'tribology', label: 'Tribology Schema', helper: 'COF, tribopair, test conditions' },
+  { key: 'diffusion', label: 'Diffusion Schema', helper: 'Confinement, D values, ionic liquid' },
+]
 
 const queueEyebrow = computed(() => {
-  if (props.currentSection === 'batch') return isChinese.value ? '批量抽取与重试' : 'BATCH EXTRACTION & RETRIES'
-  if (props.currentSection === 'upload') return isChinese.value ? '上传队列' : 'UPLOAD QUEUE & STAGING'
-  return isChinese.value ? '抽取运行队列' : 'ACTIVE EXTRACTION QUEUE'
+  if (props.currentSection === 'batch') return 'BATCH SYNC & RETRIES'
+  if (props.currentSection === 'upload') return 'UPLOAD QUEUE & STAGING'
+  return 'ACTIVE QUEUE & RECENT'
 })
 
 const queueTitle = computed(() => {
-  if (props.currentSection === 'batch') return isChinese.value ? '管理批量抽取、失败重试和结果同步。' : 'Monitor grouped extraction, retries, and sync work.'
-  if (props.currentSection === 'upload') return isChinese.value ? '先把论文放入队列，再启动抽取。' : 'Stage documents before extraction.'
-  return isChinese.value ? '跟踪抽取进度和代理日志。' : 'Monitor extraction flow and agent logs.'
+  if (props.currentSection === 'batch') return 'Monitor grouped sync and retry work.'
+  if (props.currentSection === 'upload') return 'Stage documents before extraction.'
+  return 'Monitor extraction flow.'
 })
 
 const filteredFiles = computed(() => {
@@ -276,14 +111,8 @@ const filteredFiles = computed(() => {
       if (query && !String(file.name || '').toLowerCase().includes(query)) {
         return false
       }
-      if (statusFilter.value === 'processing') {
-        return isFileRunning(file)
-      }
-      if (statusFilter.value === 'error') {
-        return FAILED_STATUSES.has(normalizedFileStatus(file))
-      }
-      if (statusFilter.value === 'success') {
-        return FINISHED_STATUSES.has(normalizedFileStatus(file))
+      if (statusFilter.value !== 'all' && file.status !== statusFilter.value) {
+        return false
       }
       return true
     })
@@ -291,63 +120,30 @@ const filteredFiles = computed(() => {
 })
 
 const selectedQueueFile = computed<BatchFile | null>(() => {
-  const activeId = props.activeId || props.selectedFileId
-  const activeFile = activeId ? props.files.find((file) => file.id === activeId) : null
-  const selectedFile = props.selectedFile?.id
-    ? props.files.find((file) => file.id === props.selectedFile?.id)
-    : null
-  return activeFile
-    || selectedFile
+  return props.files.find((file) => file.id === props.activeId)
+    || props.selectedFile
     || filteredFiles.value[0]
     || props.files[0]
-    || props.selectedFile
     || null
 })
 
 const activeExtractorType = computed<ExtractorType>(() => selectedQueueFile.value?.extractor_type || props.defaultExtractorType || 'tribology')
 
-const activeExtractorOption = computed(() => extractorOptions.value.find((option) => option.key === activeExtractorType.value) || extractorOptions.value[0]!)
-
 const extractableFiles = computed(() => {
-  return props.files.filter((file) => isFileReadyToExtract(file))
+  return props.files.filter((file) => ['uploaded', 'error', 'no_data', 'success'].includes(String(file.status || '').toLowerCase()))
 })
 
 const canExtractSelected = computed(() => {
-  return isFileReadyToExtract(selectedQueueFile.value)
-})
-
-const canCancelSelected = computed(() => {
-  const file = selectedQueueFile.value
-  const run = activeInspectorRun.value
-  const fileStatus = normalizedFileStatus(file)
-  const runStatus = String(run?.status || '').toLowerCase()
-  return RUNNING_STATUSES.has(fileStatus) || ['running', 'processing'].includes(runStatus)
-})
-
-const canOpenSelectedReview = computed(() => {
   const file = selectedQueueFile.value
   if (!file) return false
-  const status = normalizedFileStatus(file)
-  const run = activeInspectorRun.value
-  const diffusionReviewableCount = activeExtractorType.value === 'diffusion' && run
-    ? diffusionArtifactCounts(run).reviewable
-    : 0
-  return file.records.length > 0 || status === 'success' || diffusionReviewableCount > 0
+  return !['processing'].includes(String(file.status || '').toLowerCase())
 })
 
 const selectedExtractLabel = computed(() => {
-  const status = normalizedFileStatus(selectedQueueFile.value)
-  if (isChinese.value) {
-    if (status === 'error') return '重试抽取'
-    if (status === 'no_data') return '重新抽取'
-    if (status === 'success') return '重新抽取'
-    if (status === 'cancelled') return '恢复抽取'
-    return '开始抽取'
-  }
+  const status = String(selectedQueueFile.value?.status || '').toLowerCase()
   if (status === 'error') return 'Retry Extract'
   if (status === 'no_data') return 'Re-run Extract'
   if (status === 'success') return 'Re-run Extract'
-  if (status === 'cancelled') return 'Restart Extract'
   return 'Start Extract'
 })
 
@@ -357,22 +153,19 @@ const activeInspectorRun = computed<ExtractionRunDetail | null>(() => {
   const selectedFile = selectedQueueFile.value
   const activeRun = props.activeRun
   if (!selectedFile || !activeRun) return null
-  const runExtractorType = activeRun.extractor_type === 'diffusion' ? 'diffusion' : 'tribology'
-  return String(activeRun.literature_id) === String(selectedFile.id) && runExtractorType === activeExtractorType.value
-    ? activeRun
-    : null
+  return String(activeRun.literature_id) === String(selectedFile.id) ? activeRun : null
 })
 
 const queueItems = computed<QueueItem[]>(() => filteredFiles.value.map((file) => ({
   id: file.id,
   name: file.name,
-  status: displayStatusForFile(file),
-  badge: statusBadge(file),
-  badgeClass: statusBadgeClass(file),
+  status: file.status,
+  badge: statusBadge(file.status),
+  badgeClass: statusBadgeClass(file.status),
   meta: [
     `doc-${String(file.id || '').slice(0, 6)}`,
     file.scopeKey || props.operatorName || props.activeScopeLabel,
-    isFileRunning(file) ? `${Math.max(1, Math.round(file.progress || 0))}% complete` : detailLabel(file),
+    file.status === 'processing' ? `${Math.max(1, Math.round(file.progress || 0))}% complete` : detailLabel(file),
   ].join('  •  '),
   sublabel: file.errorMessage || file.progressMessage || stageLabelFromFile(file),
   progress: progressForFile(file),
@@ -384,31 +177,23 @@ const inspectorFileName = computed(() => props.activeFileName || selectedQueueFi
 
 const inspectorStatus = computed(() => {
   if (activeInspectorRun.value) return formatRunStatus(activeInspectorRun.value.status)
-  if (selectedQueueFile.value) return statusBadge(selectedQueueFile.value)
+  if (selectedQueueFile.value) return statusBadge(selectedQueueFile.value.status)
   return 'IDLE'
 })
 
 const inspectorSteps = computed<InspectorStep[]>(() => {
   const activeRun = activeInspectorRun.value
   const selectedFile = selectedQueueFile.value
-  const failed = isFailedRun(activeRun?.status) || FAILED_STATUSES.has(normalizedFileStatus(selectedFile))
-  const completed = isCompletedRun(activeRun?.status) || FINISHED_STATUSES.has(normalizedFileStatus(selectedFile))
+  const failed = isFailedRun(activeRun?.status) || selectedFile?.status === 'error'
+  const completed = isCompletedRun(activeRun?.status) || selectedFile?.status === 'success'
   const activeIndex = inferActiveStage(activeRun, selectedFile)
 
-  const definitions = activeExtractorType.value === 'diffusion'
-    ? [
-        { id: 'register', label: isChinese.value ? '论文登记' : 'Document Registration' },
-        { id: 'layout', label: isChinese.value ? 'PDF 解析与分块' : 'PDF Parsing & Chunking' },
-        { id: 'extract', label: isChinese.value ? '扩散候选抽取' : 'Diffusion Candidate Extraction' },
-        { id: 'standardize', label: isChinese.value ? '字段标准化' : 'Field Standardization' },
-        { id: 'review', label: isChinese.value ? '进入审阅队列' : 'Review Queue Handoff' },
-      ]
-    : [
-        { id: 'register', label: isChinese.value ? '论文登记' : 'Document Registration' },
-        { id: 'layout', label: isChinese.value ? '版面解析与分块' : 'Layout Analysis & Chunking' },
-        { id: 'extract', label: isChinese.value ? '代理抽取' : 'LLM Agent Extraction' },
-        { id: 'validate', label: isChinese.value ? '结果校验' : 'Result Validation' },
-      ]
+  const definitions = [
+    { id: 'register', label: 'Document Registration' },
+    { id: 'layout', label: 'Layout Analysis & Chunking' },
+    { id: 'extract', label: 'LLM Agent Extraction' },
+    { id: 'validate', label: 'Schema Validation' },
+  ]
 
   return definitions.map((definition, index) => {
     let state: InspectorStep['state'] = 'waiting'
@@ -449,13 +234,12 @@ const inspectorLogs = computed<InspectorLog[]>(() => {
   }
 
   if (selectedQueueFile.value?.errorMessage || selectedQueueFile.value?.progressMessage) {
-    const selectedStatus = normalizedFileStatus(selectedQueueFile.value)
     return [
       {
         id: 'file-message',
-        prefix: FAILED_STATUSES.has(selectedStatus) ? 'ISSUE' : selectedStatus === 'no_data' ? 'NO DATA' : 'INFO',
+        prefix: selectedQueueFile.value.status === 'error' ? 'ISSUE' : selectedQueueFile.value.status === 'no_data' ? 'NO DATA' : 'INFO',
         message: selectedQueueFile.value.errorMessage || selectedQueueFile.value.progressMessage || 'Waiting for live logs.',
-        tone: FAILED_STATUSES.has(selectedStatus) || selectedStatus === 'no_data' ? 'system' : 'info',
+        tone: selectedQueueFile.value.status === 'error' || selectedQueueFile.value.status === 'no_data' ? 'system' : 'info',
       },
     ]
   }
@@ -470,193 +254,11 @@ const inspectorLogs = computed<InspectorLog[]>(() => {
   ]
 })
 
-const inspectorDiagnostics = computed(() => {
-  const file = selectedQueueFile.value
-  const run = activeInspectorRun.value
-  const isDiffusion = activeExtractorType.value === 'diffusion'
-  const artifacts = diffusionArtifactCounts(run)
-  const status = String(run?.status || normalizedFileStatus(file) || '').toLowerCase()
-  const currentMessage = String(
-    run?.summary?.current_message
-    || run?.progress_log?.slice(-1)[0]?.message
-    || file?.progressMessage
-    || '',
-  ).trim()
-  const issue = String(
-    run?.summary?.no_data_reason
-    || run?.error_message
-    || file?.errorMessage
-    || '',
-  ).trim()
-  const reviewable = isDiffusion ? artifacts.reviewable : Number(run?.final_count || file?.records.length || 0)
-  const chips: InspectorDiagnostic[] = isDiffusion
-    ? [
-        { key: 'candidate', label: isChinese.value ? '候选' : 'Candidates', value: String(artifacts.candidates) },
-        { key: 'final', label: isChinese.value ? '已入库' : 'Approved', value: String(artifacts.final) },
-        { key: 'dropped', label: isChinese.value ? '丢弃' : 'Dropped', value: String(droppedTotal(run)) },
-      ]
-    : [
-        { key: 'final', label: isChinese.value ? '记录' : 'Records', value: String(run?.final_count || file?.records.length || 0) },
-        { key: 'candidate', label: isChinese.value ? '候选' : 'Candidates', value: String(run?.candidate_count || 0) },
-        { key: 'dropped', label: isChinese.value ? '丢弃' : 'Dropped', value: String(droppedTotal(run)) },
-      ]
-  const readyForReview = reviewable > 0 || Boolean(file?.records.length)
-  const noData = status === 'no_data' || (!readyForReview && ['success', 'completed'].includes(status))
-  const waitingForRunLog = status === 'processing' && (!run?.run_id || run?.summary?.next_action === 'wait_for_run_log')
-
-  return {
-    show: Boolean(file),
-    title: isDiffusion
-      ? (isChinese.value ? '扩散抽取诊断' : 'Diffusion Extraction Diagnostics')
-      : (isChinese.value ? '抽取诊断' : 'Extraction Diagnostics'),
-    message: readyForReview
-      ? (isDiffusion
-        ? (isChinese.value
-          ? `已生成 ${reviewable} 条可审阅扩散记录，下一步进入 Review 确认。`
-          : `${reviewable} diffusion rows are ready for review.`)
-        : (currentMessage || (isChinese.value ? '结果已准备好，可以进入审阅。' : 'Records are ready for review.')))
-      : waitingForRunLog
-        ? (isChinese.value ? '抽取已进入服务器队列，正在等待 worker 创建新的运行日志。' : 'Extraction is queued on the server while the worker creates a fresh run log.')
-        : issue || currentMessage || (isChinese.value ? '等待运行日志返回。' : 'Waiting for run logs.'),
-    tone: readyForReview ? 'ready' : noData ? 'warning' : FAILED_STATUSES.has(status) ? 'error' : 'neutral',
-    chips,
-    nextAction: readyForReview
-      ? (isChinese.value ? '打开审阅，确认候选记录后再入库。' : 'Open Review and confirm candidates before promotion.')
-      : noData
-        ? (isChinese.value ? '建议重抽，或检查论文是否真的包含扩散系数表述。' : 'Re-run extraction or check whether the paper contains diffusion coefficients.')
-        : waitingForRunLog
-          ? (isChinese.value ? '保持本页打开即可；日志出现后进度会自动切到 PDF 解析、候选抽取和标准化阶段。' : 'Keep this page open; progress will switch to parsing, extraction, and standardization as soon as logs appear.')
-        : (isChinese.value ? '保持本页打开，系统会继续刷新运行状态。' : 'Keep this page open while the run refreshes.'),
-  }
-})
-
 const inspectorSummary = computed(() => ({
   queue: props.queueSizeLabel,
   state: props.runStateLabel,
   scope: props.activeScopeLabel,
 }))
-
-const sessionExtractionHistoryItems = computed<ExtractionHistoryItem[]>(() => (
-  recentExtractionHistory(props.files, RECENT_EXTRACTION_HISTORY_LIMIT).map((file) => ({
-    id: file.id,
-    name: file.name,
-    badgeLabel: extractorLabel(file.extractor_type || props.defaultExtractorType),
-    badgeClass: extractorBadgeClass(file.extractor_type || props.defaultExtractorType),
-    meta: historyMeta(file),
-    isSelected: file.id === props.activeId || file.id === props.selectedFileId || file.id === selectedQueueFile.value?.id,
-    origin: 'session',
-  }))
-))
-
-const libraryExtractionHistoryItems = computed<ExtractionHistoryItem[]>(() => (
-  recentLiteratureHistory(
-    libraryExtractionHistory.value.filter(hasTribologyLiteratureRecords),
-    RECENT_EXTRACTION_HISTORY_LIMIT,
-  ).map((literature) => ({
-    id: `library-${literature.id}`,
-    literatureId: literature.id,
-    name: literature.title || literature.doi || `Literature ${literature.id}`,
-    badgeLabel: isChinese.value ? '润滑' : 'Tribology',
-    badgeClass: 'border-blue-100 bg-blue-50/60 text-blue-600',
-    meta: literatureHistoryMeta(literature, 'tribology'),
-    isSelected: String(literature.id) === props.selectedFileId,
-    origin: 'library',
-  }))
-))
-
-const literatureDiffusionHistoryItems = computed<ExtractionHistoryItem[]>(() => (
-  recentLiteratureHistory(
-    libraryExtractionHistory.value.filter(hasDiffusionLiteratureRecords),
-    RECENT_EXTRACTION_HISTORY_LIMIT,
-  ).map((literature) => ({
-    id: `literature-diffusion-${literature.id}`,
-    literatureId: literature.id,
-    name: literature.title || literature.doi || `Literature ${literature.id}`,
-    badgeLabel: isChinese.value ? '扩散' : 'Diffusion',
-    badgeClass: 'border-emerald-100 bg-emerald-50/70 text-emerald-700',
-    meta: literatureHistoryMeta(literature, 'diffusion'),
-    isSelected: String(literature.id) === props.selectedFileId,
-    origin: 'library',
-  }))
-))
-
-const diffusionExtractionHistoryItems = computed<ExtractionHistoryItem[]>(() => (
-  recentDiffusionLiteratureHistory(diffusionExtractionHistory.value, RECENT_EXTRACTION_HISTORY_LIMIT).map((item) => ({
-    id: `diffusion-${item.literatureId}`,
-    literatureId: item.literatureId,
-    name: item.title || item.doi || `Literature ${item.literatureId}`,
-    badgeLabel: isChinese.value ? '扩散' : 'Diffusion',
-    badgeClass: 'border-emerald-100 bg-emerald-50/70 text-emerald-700',
-    meta: diffusionHistoryMeta(item),
-    isSelected: String(item.literatureId) === props.selectedFileId,
-    origin: 'library',
-  }))
-))
-
-const extractionHistoryItems = computed<ExtractionHistoryItem[]>(() => {
-  const seen = new Set<string>()
-  const items: ExtractionHistoryItem[] = []
-  const addItems = (nextItems: ExtractionHistoryItem[], maxItems = RECENT_EXTRACTION_HISTORY_LIMIT) => {
-    let added = 0
-    for (const item of nextItems) {
-      const key = item.literatureId ? String(item.literatureId) : item.id
-      if (seen.has(key)) continue
-      seen.add(key)
-      items.push(item)
-      added += 1
-      if (added >= maxItems || items.length >= RECENT_EXTRACTION_HISTORY_LIMIT) break
-    }
-  }
-
-  const diffusionItems = [
-    ...diffusionExtractionHistoryItems.value,
-    ...literatureDiffusionHistoryItems.value,
-  ]
-
-  addItems(sessionExtractionHistoryItems.value)
-  addItems(diffusionItems, Math.min(2, RECENT_EXTRACTION_HISTORY_LIMIT))
-  addItems(libraryExtractionHistoryItems.value)
-  addItems(diffusionItems)
-  return items
-})
-
-async function refreshLibraryExtractionHistory() {
-  libraryHistoryLoading.value = true
-  libraryHistoryError.value = ''
-  const [literatureResult, diffusionResult] = await Promise.allSettled([
-    listLiterature(0, RECENT_EXTRACTION_LIBRARY_LOOKUP_LIMIT),
-    listDiffusionLibrary('', 0, RECENT_EXTRACTION_LIBRARY_LOOKUP_LIMIT),
-  ])
-
-  if (literatureResult.status === 'fulfilled') {
-    libraryExtractionHistory.value = literatureResult.value
-  }
-  if (diffusionResult.status === 'fulfilled') {
-    diffusionExtractionHistory.value = diffusionResult.value.items
-  }
-
-  const failed = [literatureResult, diffusionResult].find((result) => result.status === 'rejected') as PromiseRejectedResult | undefined
-  libraryHistoryError.value = failed?.reason?.message || ''
-  libraryHistoryLoading.value = false
-}
-
-onMounted(() => {
-  void refreshLibraryExtractionHistory()
-  historyRefreshTimer = setInterval(() => {
-    void refreshLibraryExtractionHistory()
-  }, HISTORY_REFRESH_INTERVAL_MS)
-})
-
-onBeforeUnmount(() => {
-  if (historyRefreshTimer) {
-    clearInterval(historyRefreshTimer)
-    historyRefreshTimer = null
-  }
-})
-
-watch(() => props.sessionScopeKey, () => {
-  void refreshLibraryExtractionHistory()
-})
 
 function triggerUpload() {
   fileInput.value?.click()
@@ -665,24 +267,9 @@ function triggerUpload() {
 function triggerSelectedExtract() {
   const file = selectedQueueFile.value
   if (!file || !canExtractSelected.value) return
-  const status = normalizedFileStatus(file)
-  const force = ['error', 'failed', 'success', 'completed', 'cancelled', 'no_data'].includes(status)
+  const force = ['error', 'success'].includes(String(file.status || '').toLowerCase())
+    || String(file.status || '').toLowerCase() === 'no_data'
   emit('extract', file.id, force)
-}
-
-function triggerCancelSelected() {
-  const file = selectedQueueFile.value
-  if (!file || !canCancelSelected.value) return
-  emit('cancel-extraction', file.id)
-}
-
-function openHistoryItem(item: ExtractionHistoryItem) {
-  if (item.literatureId) {
-    emit('open-review-target', { literatureId: item.literatureId })
-    return
-  }
-  emit('select-file', item.id)
-  emit('open-review', item.id)
 }
 
 function setActiveExtractor(extractorType: ExtractorType) {
@@ -717,171 +304,73 @@ function cycleFilter() {
 }
 
 function filterLabel() {
-  if (statusFilter.value === 'processing') return isChinese.value ? '运行中' : 'Running'
-  if (statusFilter.value === 'error') return isChinese.value ? '失败' : 'Failed'
-  if (statusFilter.value === 'success') return isChinese.value ? '完成' : 'Completed'
-  return isChinese.value ? '全部' : 'All'
-}
-
-function extractorLabel(extractorType?: ExtractorType | string | null) {
-  const normalized = extractorType === 'diffusion' ? 'diffusion' : 'tribology'
-  return extractorOptions.value.find((option) => option.key === normalized)?.shortLabel
-    || (normalized === 'diffusion' ? 'Diffusion' : 'Tribology')
-}
-
-function extractorBadgeClass(extractorType?: ExtractorType | string | null) {
-  const normalized = extractorType === 'diffusion' ? 'diffusion' : 'tribology'
-  return extractorOptions.value.find((option) => option.key === normalized)?.badgeClass
-    || 'border-slate-200 bg-slate-50 text-slate-600'
-}
-
-function historyMeta(file: BatchFile) {
-  const count = Array.isArray(file.records) ? file.records.length : 0
-  const recordText = count === 1
-    ? (isChinese.value ? '1 条记录' : '1 record')
-    : (isChinese.value ? `${count} 条记录` : `${count} records`)
-  const statusText = isChinese.value ? '已抽取' : 'extracted'
-  const message = String(file.progressMessage || '').trim()
-  return message && count === 0 ? `${statusText} · ${message}` : `${statusText} · ${recordText}`
-}
-
-function literatureCountForKind(literature: Literature, kind: 'tribology' | 'diffusion') {
-  if (kind === 'diffusion') {
-    return Math.max(0, Number(literature.diffusionRecordCount || 0))
-      + Math.max(0, Number(literature.diffusionCandidateCount || 0))
-  }
-  const explicitCount = Math.max(0, Number(literature.tribologyRecordCount || 0))
-    + Math.max(0, Number(literature.tribologyCandidateCount || 0))
-  return explicitCount || extractionHistoryRecordCount(literature)
-}
-
-function hasDiffusionLiteratureRecords(literature: Literature) {
-  return literatureCountForKind(literature, 'diffusion') > 0
-}
-
-function hasTribologyLiteratureRecords(literature: Literature) {
-  const hasTypedCounts = literature.tribologyRecordCount != null
-    || literature.tribologyCandidateCount != null
-    || literature.diffusionRecordCount != null
-    || literature.diffusionCandidateCount != null
-  if (hasTypedCounts) return literatureCountForKind(literature, 'tribology') > 0
-  return extractionHistoryRecordCount(literature) > 0
-}
-
-function literatureHistoryMeta(literature: Literature, kind: 'tribology' | 'diffusion') {
-  const count = literatureCountForKind(literature, kind)
-  const unit = kind === 'diffusion'
-    ? (isChinese.value ? '条扩散记录' : 'diffusion rows')
-    : (isChinese.value ? '条记录' : 'records')
-  const recordText = count === 1
-    ? (kind === 'diffusion' ? (isChinese.value ? '1 条扩散记录' : '1 diffusion row') : (isChinese.value ? '1 条记录' : '1 record'))
-    : `${count} ${unit}`
-  const dateText = shortHistoryDate(literature.reviewedAt || literature.submittedAt || (literature as any).createdAt || literature.created_at)
-  return dateText
-    ? `${isChinese.value ? '已抽取' : 'extracted'} · ${recordText} · ${dateText}`
-    : `${isChinese.value ? '已抽取' : 'extracted'} · ${recordText}`
-}
-
-function diffusionHistoryMeta(item: DiffusionLiteratureHistory) {
-  const recordText = item.recordCount === 1
-    ? (isChinese.value ? '1 条扩散记录' : '1 diffusion row')
-    : (isChinese.value ? `${item.recordCount} 条扩散记录` : `${item.recordCount} diffusion rows`)
-  return `${isChinese.value ? '已抽取' : 'extracted'} · ${recordText}`
-}
-
-function shortHistoryDate(value?: string | null) {
-  const parsed = value ? Date.parse(String(value)) : Number.NaN
-  if (!Number.isFinite(parsed)) return ''
-  const date = new Date(parsed)
-  return `${date.getMonth() + 1}/${date.getDate()}`
+  if (statusFilter.value === 'processing') return 'Running'
+  if (statusFilter.value === 'error') return 'Failed'
+  if (statusFilter.value === 'success') return 'Completed'
+  return 'All'
 }
 
 function queueWeight(file: BatchFile) {
-  const status = normalizedFileStatus(file)
   if (file.id === props.activeId || file.id === props.selectedFileId) return 100
-  if (status === 'uploading' && !hasReadyMessage(file)) return 90
-  if (RUNNING_STATUSES.has(status)) return 80
-  if (status === 'no_data') return 70
-  if (FAILED_STATUSES.has(status)) return 60
-  if (isFileReadyToExtract(file)) return 40
+  if (file.status === 'processing') return 80
+  if (file.status === 'no_data') return 70
+  if (file.status === 'error') return 60
+  if (file.status === 'uploaded') return 40
   return 20
 }
 
 function progressForFile(file: BatchFile) {
-  const status = normalizedFileStatus(file)
-  if (FINISHED_STATUSES.has(status)) return 100
-  if (status === 'no_data') return 100
-  if (status === 'uploading' && !hasReadyMessage(file)) return Math.max(6, Math.round(file.progress || 6))
-  if (status === 'cancelled') return Math.max(8, Math.round(file.progress || 18))
-  if (FAILED_STATUSES.has(status)) return Math.max(18, Math.round(file.progress || 35))
-  if (RUNNING_STATUSES.has(status)) return Math.max(12, Math.round(file.progress || 18))
+  if (file.status === 'success') return 100
+  if (file.status === 'no_data') return 100
+  if (file.status === 'error') return Math.max(18, Math.round(file.progress || 35))
+  if (file.status === 'processing') return Math.max(12, Math.round(file.progress || 18))
   return 8
 }
 
 function detailLabel(file: BatchFile) {
-  const status = normalizedFileStatus(file)
-  if (FINISHED_STATUSES.has(status)) return `${file.records?.length || 0} records extracted`
-  if (status === 'no_data') return file.errorMessage || 'No extractable records found'
-  if (status === 'uploading' && !hasReadyMessage(file)) return isChinese.value ? '正在上传到服务器' : 'Uploading to server'
-  if (status === 'cancelled') return 'Stopped by user'
-  if (FAILED_STATUSES.has(status)) return 'Needs retry'
+  if (file.status === 'success') return `${file.records?.length || 0} records extracted`
+  if (file.status === 'no_data') return 'No extractable records found'
+  if (file.status === 'error') return 'Needs retry'
   return 'Ready to launch'
 }
 
 function stageLabelFromFile(file: BatchFile) {
-  const status = normalizedFileStatus(file)
   if (file.errorMessage) return file.errorMessage
   if (file.progressMessage) return file.progressMessage
-  if (status === 'uploading' && !hasReadyMessage(file)) return isChinese.value ? '正在上传并登记论文' : 'Uploading and registering document'
-  if (RUNNING_STATUSES.has(status)) return 'Agent extraction in progress'
-  if (FINISHED_STATUSES.has(status)) return 'Completed'
-  if (status === 'no_data') return 'No extractable records found'
-  if (status === 'cancelled') return 'Extraction stopped'
-  if (FAILED_STATUSES.has(status)) return 'Execution failed'
+  if (file.status === 'processing') return 'Agent extraction in progress'
+  if (file.status === 'success') return 'Completed'
+  if (file.status === 'no_data') return 'No extractable records found'
+  if (file.status === 'error') return 'Execution failed'
   return 'Queued for extraction'
 }
 
-function statusBadge(fileOrStatus: BatchFile | string) {
-  const status = typeof fileOrStatus === 'string'
-    ? normalizedFileStatus(fileOrStatus)
-    : displayStatusForFile(fileOrStatus)
-  if (status === 'uploading') return isChinese.value ? '上传中' : 'UPLOADING'
+function statusBadge(status: string) {
   if (status === 'processing') return 'RUNNING'
   if (status === 'success') return 'SUCCESS'
   if (status === 'no_data') return 'NO DATA'
-  if (status === 'cancelled') return 'STOPPED'
   if (status === 'error') return 'FAILED'
   return 'QUEUED'
 }
 
-function statusBadgeClass(fileOrStatus: BatchFile | string) {
-  const status = typeof fileOrStatus === 'string'
-    ? normalizedFileStatus(fileOrStatus)
-    : displayStatusForFile(fileOrStatus)
-  if (status === 'uploading') return 'border-sky-200 bg-sky-50 text-sky-700'
-  if (status === 'processing') return 'border-blue-200 bg-blue-50 text-blue-700'
-  if (status === 'success') return 'border-emerald-200 bg-emerald-50 text-emerald-700'
-  if (status === 'no_data') return 'border-amber-200 bg-amber-50 text-amber-700'
-  if (status === 'cancelled') return 'border-amber-200 bg-amber-50 text-amber-700'
-  if (status === 'error') return 'border-rose-200 bg-rose-50 text-rose-700'
-  return 'border-slate-200 bg-slate-50 text-slate-500'
+function statusBadgeClass(status: string) {
+  if (status === 'processing') return 'border-[#cfd8ff] bg-[#eef2ff] text-[#3f55c4]'
+  if (status === 'success') return 'border-[#b7efcf] bg-[#e9fff2] text-[#0f9f63]'
+  if (status === 'no_data') return 'border-[#d8c7ff] bg-[#f5efff] text-[#7a4de8]'
+  if (status === 'error') return 'border-[#ffc9cf] bg-[#fff1f3] text-[#ef3958]'
+  return 'border-[#d8e2ef] bg-[#f8fbff] text-[#7e91aa]'
 }
 
 function progressTone(status: string) {
-  status = normalizedFileStatus(status)
-  if (status === 'uploading') return 'bg-sky-500'
-  if (status === 'processing') return 'bg-blue-600'
-  if (status === 'success') return 'bg-emerald-500'
-  if (status === 'no_data') return 'bg-amber-500'
-  if (status === 'cancelled') return 'bg-amber-500'
-  if (status === 'error') return 'bg-rose-500'
-  return 'bg-slate-200'
+  if (status === 'processing') return 'bg-[linear-gradient(90deg,#5a5de8_0%,#6674ff_100%)]'
+  if (status === 'success') return 'bg-[linear-gradient(90deg,#1cc985_0%,#15b77a_100%)]'
+  if (status === 'no_data') return 'bg-[linear-gradient(90deg,#8b5cf6_0%,#a855f7_100%)]'
+  if (status === 'error') return 'bg-[linear-gradient(90deg,#ff5573_0%,#ef3958_100%)]'
+  return 'bg-[linear-gradient(90deg,#c9d3e5_0%,#b9c6de_100%)]'
 }
 
 function inferActiveStage(activeRun: ExtractionRunDetail | null, file: BatchFile | null) {
-  const fileStatus = normalizedFileStatus(file)
-  if (isCompletedRun(activeRun?.status) || ['success', 'completed', 'no_data'].includes(fileStatus)) return 4
-  if (isFailedRun(activeRun?.status) || FAILED_STATUSES.has(fileStatus)) {
+  if (isCompletedRun(activeRun?.status) || ['success', 'no_data'].includes(String(file?.status || '').toLowerCase())) return 4
+  if (isFailedRun(activeRun?.status) || file?.status === 'error') {
     const stage = String(activeRun?.summary?.current_stage || activeRun?.progress_log?.slice(-1)[0]?.stage || '').toLowerCase()
     if (stage.includes('stage_e') || stage.includes('validation')) return 3
     if (stage.includes('stage_c') || stage.includes('stage_d') || stage.includes('extract')) return 2
@@ -903,18 +392,12 @@ function stepMeta(id: string, state: InspectorStep['state'], activeRun: Extracti
   if (id === 'extract' && activeRun) {
     return `${activeRun.candidate_count || 0} candidates`
   }
-  if (id === 'standardize' && activeRun) {
-    return `${diffusionArtifactCounts(activeRun).reviewable} ready`
-  }
-  if (id === 'review' && activeRun) {
-    return diffusionArtifactCounts(activeRun).reviewable > 0 ? 'review' : 'pending'
-  }
   if (id === 'validate' && activeRun) {
     if (String(activeRun.status || '').toLowerCase() === 'no_data') return 'no data'
     return `${activeRun.final_count || 0} records`
   }
   if (id === 'layout') {
-    return file && isFileRunning(file) ? `${Math.max(1, Math.round(file.progress || 0))}%` : 'active'
+    return file?.status === 'processing' ? `${Math.max(1, Math.round(file.progress || 0))}%` : 'active'
   }
   return 'active'
 }
@@ -937,40 +420,12 @@ function isFailedRun(status?: string | null) {
   return ['failed', 'error', 'cancelled'].includes(String(status || '').toLowerCase())
 }
 
-function diffusionArtifactCounts(run: ExtractionRunDetail | null) {
-  const artifacts = (run?.summary?.diffusion_artifacts || {}) as Record<string, unknown>
-  const candidates = Number(artifacts.candidate_count ?? run?.candidate_count ?? 0)
-  const final = Number(artifacts.final_count ?? run?.final_count ?? 0)
-  const reviewable = Number(artifacts.reviewable_count ?? (candidates + final))
-  return {
-    candidates: Number.isFinite(candidates) ? Math.max(0, candidates) : 0,
-    final: Number.isFinite(final) ? Math.max(0, final) : 0,
-    reviewable: Number.isFinite(reviewable) ? Math.max(0, reviewable) : 0,
-  }
-}
-
-function droppedTotal(run: ExtractionRunDetail | null) {
-  const dropped = run?.dropped_by_reason || {}
-  return Object.values(dropped).reduce((sum, value) => {
-    const numeric = Number(value)
-    return sum + (Number.isFinite(numeric) ? numeric : 0)
-  }, 0)
-}
-
-function diagnosticToneClass(tone: string) {
-  if (tone === 'ready') return 'border-emerald-200 bg-emerald-50 text-emerald-900'
-  if (tone === 'warning') return 'border-amber-200 bg-amber-50 text-amber-900'
-  if (tone === 'error') return 'border-rose-200 bg-rose-50 text-rose-900'
-  return 'border-slate-200 bg-slate-50 text-slate-700'
-}
-
 function formatRunStatus(status?: string | null) {
   const normalized = String(status || '').toLowerCase()
   if (!normalized) return 'IDLE'
   if (normalized === 'no_data') return 'NO DATA'
   if (normalized === 'completed') return 'SUCCESS'
   if (normalized === 'processing') return 'RUNNING'
-  if (normalized === 'cancelled') return 'STOPPED'
   return normalized.toUpperCase()
 }
 
@@ -981,7 +436,7 @@ function formatStageLabel(stage?: string | null) {
   if (normalized.includes('stage_b')) return 'Layout analysis'
   if (normalized.includes('stage_c')) return 'Chunking and extraction'
   if (normalized.includes('stage_d')) return 'Candidate validation'
-  if (normalized.includes('stage_e')) return isChinese.value ? '结果校验' : 'Result validation'
+  if (normalized.includes('stage_e')) return 'Schema validation'
   return String(stage || '').replace(/[_\.]+/g, ' ')
 }
 
@@ -1009,9 +464,9 @@ function formatAgentMessage(message: AgentMessage) {
 }
 
 function logToneClass(tone: InspectorLog['tone']) {
-  if (tone === 'agent') return 'text-emerald-400'
-  if (tone === 'system') return 'text-blue-400'
-  return 'text-slate-300'
+  if (tone === 'agent') return 'text-[#7df5d8]'
+  if (tone === 'system') return 'text-[#9cb7ff]'
+  return 'text-[#d5def1]'
 }
 </script>
 
@@ -1026,167 +481,65 @@ function logToneClass(tone: InspectorLog['tone']) {
       @change="handleFileInput"
     >
 
-    <section class="shell-surface-strong px-4 py-4 sm:px-5">
-      <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_28rem] xl:items-center">
-        <div class="min-w-0">
-          <div class="section-eyebrow">
-            {{ pageCopy.eyebrow }}
-          </div>
-          <div class="mt-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-            <div class="min-w-0">
-              <h1 class="text-2xl font-semibold leading-8 text-slate-950 sm:text-3xl">
-                {{ pageCopy.title }}
-              </h1>
-              <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-                {{ pageCopy.subtitle }}
-              </p>
-            </div>
+    <section class="shell-surface px-4 py-4 sm:px-5">
+      <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div class="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            class="inline-flex items-center gap-2 rounded-[0.95rem] bg-[linear-gradient(135deg,#5b56ea_0%,#4a57df_100%)] px-5 py-3 text-sm font-semibold text-white shadow-[0_22px_44px_-28px_rgba(74,87,223,0.82)] transition hover:brightness-105"
+            @click="triggerUpload"
+          >
+            <Upload class="h-4 w-4" />
+            Upload Document
+          </button>
 
-            <div class="grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-4 lg:w-[28rem]">
-              <article
-                v-for="metric in extractionMetrics"
-                :key="metric.key"
-                class="metric-tile px-3 py-2.5"
-              >
-                <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-400">{{ metric.label }}</p>
-                <p class="mt-1 text-2xl font-semibold leading-none text-slate-950">{{ metric.value }}</p>
-              </article>
-            </div>
-          </div>
+          <button
+            type="button"
+            class="inline-flex items-center gap-2 rounded-[0.95rem] px-5 py-3 text-sm font-semibold transition"
+            :class="canBatchExtract
+              ? 'bg-[#111827] text-white hover:bg-[#1f2937]'
+              : 'cursor-not-allowed bg-[#dbe2ea] text-white/75'"
+            :disabled="!canBatchExtract"
+            @click="triggerBatchExtract"
+          >
+            <Bot class="h-4 w-4" />
+            Extract Queue
+          </button>
 
-          <div class="mt-4 flex flex-wrap items-center gap-2.5">
+          <div class="inline-flex flex-wrap items-center gap-1 rounded-[1rem] border border-[#d9e2ef] bg-white p-1">
             <button
+              v-for="option in extractorOptions"
+              :key="option.key"
               type="button"
-              class="action-primary px-5 py-2.5 text-sm"
-              @click="triggerUpload"
+              class="inline-flex items-center rounded-[0.8rem] px-3 py-2 text-sm font-semibold transition"
+              :class="activeExtractorType === option.key ? 'bg-[#101b29] text-[#f4d18f]' : 'text-slate-600 hover:bg-[#f8fbff]'"
+              @click="setActiveExtractor(option.key)"
             >
-              <Upload class="h-4 w-4" />
-              {{ pageCopy.upload }}
+              {{ option.label }}
             </button>
-
-            <button
-              type="button"
-              class="px-5 py-2.5 text-sm"
-              :class="canExtractSelected
-                ? 'action-primary'
-                : 'action-muted'"
-              :disabled="!canExtractSelected"
-              @click="triggerSelectedExtract"
-            >
-              <Bot class="h-4 w-4" />
-              {{ selectedExtractLabel }}
-            </button>
-
-            <button
-              type="button"
-              class="px-5 py-2.5 text-sm"
-              :class="canBatchExtract
-                ? 'action-secondary'
-                : 'action-muted'"
-              :disabled="!canBatchExtract"
-              @click="triggerBatchExtract"
-            >
-              <CheckCircle2 class="h-4 w-4" />
-              {{ pageCopy.batchExtract }}
-            </button>
-
-            <span class="min-w-0 truncate text-sm text-slate-500">
-              {{ pageCopy.selected }}:
-              <span class="font-semibold text-slate-800">{{ selectedQueueFile?.name || pageCopy.noSelection }}</span>
-            </span>
-          </div>
-
-          <div v-if="extractionHistoryItems.length" class="mt-4 border-t border-slate-100 pt-3">
-            <div class="flex items-center justify-between gap-3">
-              <p class="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-                {{ isChinese ? '历史提取文献' : 'Recent Extractions' }}
-              </p>
-              <span class="shrink-0 text-[10px] font-semibold text-slate-400">
-                {{ isChinese ? '近 5 条' : 'Last 5' }}
-              </span>
-            </div>
-
-            <div class="mt-2 flex gap-2 overflow-x-auto pb-1">
-              <button
-                v-for="item in extractionHistoryItems"
-                :key="item.id"
-                type="button"
-                class="group flex min-w-[13rem] max-w-[15.5rem] items-center gap-2 rounded-md border border-slate-100 bg-white/70 px-2.5 py-2 text-left text-slate-500 transition hover:border-slate-200 hover:bg-white hover:text-slate-800"
-                :class="item.isSelected ? 'border-slate-200 bg-slate-50 text-slate-800' : ''"
-                :title="item.name"
-                @click="openHistoryItem(item)"
-              >
-                <FileText class="h-3.5 w-3.5 shrink-0 text-slate-300 transition group-hover:text-slate-500" />
-                <span class="min-w-0 flex-1">
-                  <span class="block truncate text-xs font-semibold">{{ item.name }}</span>
-                  <span class="mt-0.5 block truncate text-[11px] text-slate-400">{{ item.meta }}</span>
-                </span>
-                <span class="shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-semibold" :class="item.badgeClass">
-                  {{ item.badgeLabel }}
-                </span>
-              </button>
-            </div>
           </div>
         </div>
 
-        <div class="grid gap-3">
-          <div>
-            <div class="mb-2 flex items-end justify-between gap-3">
-              <div>
-                <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-400">{{ pageCopy.extractionType }}</p>
-                <p class="mt-1 text-xs leading-5 text-slate-500">{{ pageCopy.extractionTypeHint }}</p>
-              </div>
-              <span class="shrink-0 rounded-md border px-2.5 py-1 text-xs font-semibold" :class="activeExtractorOption.badgeClass">
-                {{ activeExtractorOption.shortLabel }}
-              </span>
-            </div>
-            <div class="grid gap-2">
-              <button
-                v-for="option in extractorOptions"
-                :key="option.key"
-                type="button"
-                class="rounded-md border px-3.5 py-3 text-left transition hover:shadow-sm"
-                :class="activeExtractorType === option.key ? option.activeClass : option.inactiveClass"
-                @click="setActiveExtractor(option.key)"
-              >
-                <span class="flex items-start justify-between gap-3">
-                  <span class="min-w-0">
-                    <span class="block text-sm font-semibold">{{ option.label }}</span>
-                    <span class="mt-1 block text-xs leading-5 opacity-75">{{ option.helper }}</span>
-                  </span>
-                  <span
-                    class="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border"
-                    :class="activeExtractorType === option.key ? 'border-current bg-white/60' : 'border-slate-300'"
-                  >
-                    <span v-if="activeExtractorType === option.key" class="h-2 w-2 rounded-full bg-current" />
-                  </span>
-                </span>
-                <span class="mt-2 block text-xs leading-5 opacity-80">{{ option.detail }}</span>
-              </button>
-            </div>
-          </div>
-
-          <div class="flex flex-wrap items-center gap-2">
-            <div class="relative min-w-[16rem] flex-1">
-              <Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                v-model="searchQuery"
-                type="text"
-                class="h-10 w-full rounded-md border border-slate-200 bg-white pl-10 pr-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-500 focus:border-slate-400 focus:ring-1 focus:ring-slate-400"
-                :placeholder="pageCopy.search"
-              >
-            </div>
-
-            <button
-              type="button"
-              class="action-secondary h-10 px-3.5 text-sm"
-              :title="`${pageCopy.filter}: ${filterLabel()}`"
-              @click="cycleFilter"
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="relative min-w-[16rem] flex-1 lg:w-[17rem] lg:flex-none">
+            <Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              v-model="searchQuery"
+              type="text"
+              class="h-11 w-full rounded-[0.95rem] border border-[#d9e2ef] bg-white pl-10 pr-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-[#b7c6ef]"
+              placeholder="Search runs..."
             >
-              <Filter class="h-4 w-4" />
-              <span class="hidden sm:inline">{{ filterLabel() }}</span>
-            </button>
           </div>
+
+          <button
+            type="button"
+            class="inline-flex h-11 items-center gap-2 rounded-[0.95rem] border border-[#d9e2ef] bg-white px-3.5 text-sm font-medium text-slate-600 transition hover:bg-[#f8fbff]"
+            :title="`Filter: ${filterLabel()}`"
+            @click="cycleFilter"
+          >
+            <Filter class="h-4 w-4" />
+            <span class="hidden sm:inline">{{ filterLabel() }}</span>
+          </button>
         </div>
       </div>
     </section>
@@ -1195,32 +548,30 @@ function logToneClass(tone: InspectorLog['tone']) {
       <section class="shell-surface flex min-h-0 flex-col overflow-hidden">
         <div class="flex items-start justify-between gap-3 border-b border-black/8 px-5 py-4">
           <div>
-            <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-500">{{ queueEyebrow }}</p>
-            <h2 class="mt-1 text-base font-semibold text-slate-900">
+            <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8ea2c0]">{{ queueEyebrow }}</p>
+            <h2 class="mt-1 text-[1.05rem] font-semibold tracking-[-0.04em] text-slate-950">
               {{ queueTitle }}
             </h2>
             <p class="mt-2 text-sm text-slate-500">
-              {{ pageCopy.extractionType }}:
-              <span class="ml-1 inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-semibold" :class="activeExtractorOption.badgeClass">
-                {{ activeExtractorOption.shortLabel }}
-              </span>
+              Current schema: <span class="font-semibold text-slate-800">{{ activeExtractorType === 'diffusion' ? 'Diffusion' : 'Tribology' }}</span>
             </p>
           </div>
           <div class="flex flex-wrap items-center justify-end gap-3">
             <button
               type="button"
-              class="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm font-medium transition"
+              class="inline-flex items-center gap-2 rounded-[0.9rem] border px-3.5 py-2 text-sm font-medium transition"
               :class="currentSection === 'batch'
-                ? 'border-cyan-200 bg-cyan-50 text-cyan-700'
-                : 'border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50'"
+                ? 'border-[#d8c7ff] bg-[#f5efff] text-[#6d3fe0]'
+                : 'border-[#d9e2ef] bg-white text-slate-700 hover:bg-[#f8fbff]'"
               @click="emit('change-section', currentSection === 'batch' ? 'runs' : 'batch')"
             >
               <Bot class="h-4 w-4" />
-              {{ pageCopy.groupedRuns }}
+              Batch Sync
             </button>
+            <p class="hidden text-xs text-slate-400 xl:block">Open grouped sync and retry view.</p>
             <div class="inline-flex items-center gap-2 text-sm text-slate-500">
               <Clock3 class="h-4 w-4" />
-              {{ pageCopy.autoRefresh }}
+              Auto-refreshing
             </div>
           </div>
         </div>
@@ -1231,33 +582,30 @@ function logToneClass(tone: InspectorLog['tone']) {
               v-for="item in queueItems"
               :key="item.id"
               type="button"
-              class="w-full rounded-md border px-4 py-4 text-left transition hover:shadow-sm"
+              class="w-full rounded-[1.2rem] border px-4 py-3.5 text-left transition"
               :class="item.isSelected
-                ? 'border-cyan-200 bg-cyan-50/35 ring-1 ring-cyan-100'
-                : 'border-slate-100 bg-white hover:border-slate-200 hover:bg-slate-50/50'"
+                ? 'border-[#aebdfc] bg-[#f7f9ff] shadow-[0_18px_42px_-34px_rgba(74,87,223,0.5)]'
+                : 'border-black/8 bg-white hover:border-[#d5ddf2] hover:bg-[#fbfcff]'"
               @click="emit('select-file', item.id)"
             >
               <div class="flex items-start justify-between gap-3">
                 <div class="flex min-w-0 items-start gap-3">
-                  <div class="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-500">
+                  <div class="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-[0.9rem] bg-[#f3f6fb] text-[#7e91aa]">
                     <FileText class="h-5 w-5" />
                   </div>
 
                   <div class="min-w-0">
-                    <p class="truncate text-[0.98rem] font-semibold tracking-normal text-slate-950">
+                    <p class="truncate text-[0.98rem] font-semibold tracking-[-0.03em] text-slate-950">
                       {{ item.name }}
                     </p>
                     <p class="mt-1 truncate text-sm text-slate-500">{{ item.meta }}</p>
-                    <span
-                      class="mt-2 inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-semibold"
-                      :class="extractorBadgeClass(files.find((file) => file.id === item.id)?.extractor_type || defaultExtractorType)"
-                    >
-                      {{ extractorLabel(files.find((file) => file.id === item.id)?.extractor_type || defaultExtractorType) }}
-                    </span>
+                    <p class="mt-1 text-xs font-medium text-slate-400">
+                      {{ (files.find((file) => file.id === item.id)?.extractor_type || defaultExtractorType) === 'diffusion' ? 'Diffusion schema' : 'Tribology schema' }}
+                    </p>
                   </div>
                 </div>
 
-                <div class="inline-flex shrink-0 items-center rounded-md border px-2.5 py-1 text-sm font-semibold" :class="item.badgeClass">
+                <div class="inline-flex shrink-0 items-center rounded-[0.7rem] border px-2.5 py-1 text-sm font-semibold" :class="item.badgeClass">
                   {{ item.badge }}
                 </div>
               </div>
@@ -1271,7 +619,7 @@ function logToneClass(tone: InspectorLog['tone']) {
               <div class="mt-3 flex items-center justify-between gap-3 text-sm">
                 <p class="min-w-0 truncate text-slate-500">{{ item.sublabel }}</p>
                 <div class="inline-flex shrink-0 items-center gap-1 text-slate-500">
-                  <span>{{ item.status === 'uploading' ? (isChinese ? '上传中' : 'Uploading') : item.status === 'processing' ? (isChinese ? '代理抽取中' : 'Agent: Extraction') : item.status === 'error' ? (isChinese ? '需要重试' : 'Needs retry') : item.status === 'cancelled' ? (isChinese ? '已停止' : 'Stopped') : item.status === 'no_data' ? (isChinese ? '无相关数据' : 'No related data') : item.status === 'success' ? (isChinese ? '完成' : 'Completed') : (isChinese ? '待抽取' : 'Queued') }}</span>
+                  <span>{{ item.status === 'processing' ? 'Agent: Extraction' : item.status === 'error' ? 'Needs retry' : item.status === 'no_data' ? 'No related data' : item.status === 'success' ? 'Completed' : 'Queued' }}</span>
                   <ChevronRight class="h-4 w-4" />
                 </div>
               </div>
@@ -1280,7 +628,7 @@ function logToneClass(tone: InspectorLog['tone']) {
 
           <div
             v-else
-            class="flex h-full min-h-[18rem] items-center justify-center rounded-md border border-dashed border-slate-300 bg-white px-6 text-center text-sm text-slate-500"
+            class="flex h-full min-h-[18rem] items-center justify-center rounded-[1.2rem] border border-dashed border-black/10 bg-white/55 px-6 text-center text-sm text-slate-500"
           >
             No pipeline runs match the current search and filter.
           </div>
@@ -1291,12 +639,12 @@ function logToneClass(tone: InspectorLog['tone']) {
         <div class="border-b border-black/8 px-5 py-5">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-500">RUN INSPECTOR</p>
-              <h2 class="mt-1 truncate text-base font-semibold text-slate-900">
+              <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8ea2c0]">RUN INSPECTOR</p>
+              <h2 class="mt-2 truncate text-[1rem] font-semibold tracking-[-0.04em] text-slate-950">
                 {{ inspectorFileName }}
               </h2>
             </div>
-            <button type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-600">
+            <button type="button" class="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:bg-black/[0.04] hover:text-slate-600">
               <MoreHorizontal class="h-4 w-4" />
             </button>
           </div>
@@ -1304,7 +652,7 @@ function logToneClass(tone: InspectorLog['tone']) {
 
         <div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
           <div>
-            <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-500">Execution Stages</p>
+            <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8ea2c0]">Execution Stages</p>
             <div class="mt-4 space-y-4">
               <div
                 v-for="step in inspectorSteps"
@@ -1315,12 +663,12 @@ function logToneClass(tone: InspectorLog['tone']) {
                   <div
                     class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border"
                     :class="step.state === 'complete'
-                      ? 'border-emerald-200 bg-emerald-50 text-emerald-600'
+                      ? 'border-[#17bf79] bg-[#edfff5] text-[#17bf79]'
                       : step.state === 'active'
-                        ? 'border-blue-200 bg-blue-50 text-blue-600'
+                        ? 'border-[#7f92ff] bg-[#eef2ff] text-[#5865f2]'
                         : step.state === 'error'
-                          ? 'border-rose-200 bg-rose-50 text-rose-600'
-                          : 'border-slate-200 bg-slate-50 text-slate-400'"
+                          ? 'border-[#ffb9c4] bg-[#fff1f3] text-[#ef3958]'
+                          : 'border-[#d9e2ef] bg-white text-[#d0d9e7]'"
                   >
                     <CheckCircle2 v-if="step.state === 'complete'" class="h-3.5 w-3.5" />
                     <LoaderCircle v-else-if="step.state === 'active'" class="h-3.5 w-3.5 animate-spin" />
@@ -1333,67 +681,39 @@ function logToneClass(tone: InspectorLog['tone']) {
                     {{ step.label }}
                   </span>
                 </div>
-                <span class="shrink-0 text-sm text-slate-400">{{ step.meta }}</span>
+                <span class="shrink-0 text-sm text-[#8ea2c0]">{{ step.meta }}</span>
               </div>
             </div>
-          </div>
-
-          <div
-            v-if="inspectorDiagnostics.show"
-            class="mt-6 rounded-md border px-4 py-4"
-            :class="diagnosticToneClass(inspectorDiagnostics.tone)"
-          >
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <p class="text-[11px] font-semibold uppercase tracking-widest opacity-70">{{ inspectorDiagnostics.title }}</p>
-                <p class="mt-2 text-sm leading-6">{{ inspectorDiagnostics.message }}</p>
-              </div>
-              <CircleAlert v-if="inspectorDiagnostics.tone !== 'ready'" class="mt-0.5 h-4 w-4 shrink-0 opacity-70" />
-              <CheckCircle2 v-else class="mt-0.5 h-4 w-4 shrink-0 opacity-70" />
-            </div>
-
-            <div class="mt-3 grid grid-cols-3 gap-2">
-              <div
-                v-for="chip in inspectorDiagnostics.chips"
-                :key="chip.key"
-                class="rounded border border-current/10 bg-white/55 px-2.5 py-2"
-              >
-                <p class="text-[10px] font-semibold uppercase tracking-widest opacity-60">{{ chip.label }}</p>
-                <p class="mt-1 text-lg font-semibold leading-none">{{ chip.value }}</p>
-              </div>
-            </div>
-
-            <p class="mt-3 text-xs leading-5 opacity-75">{{ inspectorDiagnostics.nextAction }}</p>
           </div>
 
           <div class="mt-8">
-            <p class="text-[11px] font-semibold uppercase tracking-widest text-slate-500">Live Agent Logs</p>
-            <div class="mt-3 rounded-md bg-slate-900 px-4 py-4 text-xs leading-relaxed">
+            <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8ea2c0]">Live Agent Logs</p>
+            <div class="mt-3 rounded-[1rem] bg-[#121a2d] px-4 py-4 text-[12px] leading-7 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
               <div v-for="entry in inspectorLogs" :key="entry.id" class="flex items-start gap-3">
-                <span class="text-slate-600">&gt;</span>
+                <span class="text-[#50607d]">&gt;</span>
                 <p class="font-mono" :class="logToneClass(entry.tone)">
-                  <span class="mr-2 text-slate-500">[{{ entry.prefix }}]</span>{{ entry.message }}
+                  <span class="mr-2 text-[#7da1ff]">[{{ entry.prefix }}]</span>{{ entry.message }}
                 </p>
               </div>
             </div>
           </div>
 
           <div class="mt-8 grid gap-2">
-            <div class="rounded-md border border-slate-100 bg-slate-50 px-3.5 py-3 text-sm text-slate-600">
-              <span class="mr-2 text-[11px] font-semibold uppercase tracking-widest text-slate-400">Queue</span>
+            <div class="rounded-[0.95rem] border border-black/8 bg-white/70 px-3.5 py-3 text-sm text-slate-600">
+              <span class="mr-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#8ea2c0]">Queue</span>
               {{ inspectorSummary.queue }}
             </div>
             <div
-              class="rounded-md border px-3.5 py-3 text-sm"
+              class="rounded-[0.95rem] border px-3.5 py-3 text-sm"
               :class="inspectorStatus === 'NO DATA'
-                ? 'border-amber-100 bg-amber-50/50 text-amber-700'
-                : 'border-slate-100 bg-slate-50/50 text-slate-600'"
+                ? 'border-[#d8c7ff] bg-[#f5efff] text-[#6d3fe0]'
+                : 'border-black/8 bg-white/70 text-slate-600'"
             >
-              <span class="mr-2 text-[11px] font-semibold uppercase tracking-widest text-slate-400">Run State</span>
+              <span class="mr-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#8ea2c0]">Run State</span>
               {{ inspectorStatus }} / {{ inspectorSummary.state }}
             </div>
-            <div class="rounded-md border border-slate-100 bg-slate-50 px-3.5 py-3 text-sm text-slate-600">
-              <span class="mr-2 text-[11px] font-semibold uppercase tracking-widest text-slate-400">Scope</span>
+            <div class="rounded-[0.95rem] border border-black/8 bg-white/70 px-3.5 py-3 text-sm text-slate-600">
+              <span class="mr-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#8ea2c0]">Scope</span>
               {{ inspectorSummary.scope }}
             </div>
           </div>
@@ -1401,34 +721,14 @@ function logToneClass(tone: InspectorLog['tone']) {
           <div class="mt-4 grid gap-2 sm:grid-cols-2">
             <button
               type="button"
-              class="px-4 py-2.5 text-sm"
+              class="inline-flex items-center justify-center rounded-[0.95rem] px-4 py-3 text-sm font-semibold transition"
               :class="canExtractSelected
-                ? 'action-primary'
-                : 'action-muted'"
+                ? 'bg-[linear-gradient(135deg,#5b56ea_0%,#4a57df_100%)] text-white hover:brightness-105'
+                : 'cursor-not-allowed bg-[#dbe2ea] text-white/75'"
               :disabled="!canExtractSelected"
               @click="triggerSelectedExtract"
             >
               {{ selectedExtractLabel }}
-            </button>
-            <button
-              v-if="canCancelSelected"
-              type="button"
-              class="inline-flex items-center justify-center rounded-md border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-medium text-rose-700 transition hover:bg-rose-100"
-              @click="triggerCancelSelected"
-            >
-              停止提取
-            </button>
-            <button
-              type="button"
-              class="px-4 py-2.5 text-sm"
-              :class="canOpenSelectedReview
-                ? 'action-secondary'
-                : 'action-muted'"
-              :disabled="!canOpenSelectedReview"
-              :title="canOpenSelectedReview ? 'Open review workspace' : 'Review opens after extraction records are ready'"
-              @click="emit('open-review', selectedQueueFile?.id || selectedFileId)"
-            >
-              Open Review
             </button>
           </div>
         </div>

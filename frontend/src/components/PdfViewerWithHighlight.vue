@@ -1,66 +1,49 @@
 <script setup lang="ts">
-/**
- * PdfViewerWithHighlight.vue
- * ─────────────────────────────────────────────────────────────
- * PDF viewer that renders pages via pdfjs-dist and delegates
- * highlight rendering to PdfHighlightOverlay.vue.
- *
- * ✅  Uses pdfjs-dist v5 with a LOCAL Vite worker (no CDN)
- * ✅  Delegates highlighting to PdfHighlightOverlay (% based, zoom-resilient)
- * ✅  Supports bottom-left origin for PDFMiner-style backends
- * ✅  Exposes scrollToHighlight(id) for programmatic scroll
- */
-import { ref, shallowRef, computed, watch, onMounted, onBeforeUnmount, nextTick, markRaw } from 'vue'
+import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
+import {
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  MinusCircle,
+  PlusCircle,
+  Search,
+  SlidersHorizontal,
+  X,
+} from 'lucide-vue-next'
 import PdfHighlightOverlay from './PdfHighlightOverlay.vue'
 import type { HighlightRect } from '@/types/pdf-highlight'
 import type { HighlightItem } from './PdfHighlightOverlay.vue'
 import { resolveApiUrl } from '@/lib/api'
 import { authFetch } from '@/lib/session'
 
-// ─── Worker (Vite-local, no CDN) ─────────────────────────────────────────────
 import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-const pdfjsWorkerSrc = `${pdfjsWorkerUrl}?v=mjs-worker-20260518`
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerSrc
+
+function resolvePdfWorkerSrc(): string {
+  if (typeof window === 'undefined') {
+    return pdfjsWorkerUrl
+  }
+  const url = new URL(pdfjsWorkerUrl, window.location.origin)
+  url.searchParams.set('pdfjs', pdfjsLib.version)
+  return url.toString()
+}
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = resolvePdfWorkerSrc()
 
 function resolvePdfContentUrl(src: string): string {
   const normalized = String(src || '').trim()
-  if (!normalized || normalized.startsWith('blob:') || normalized.startsWith('data:')) {
-    return normalized
+  if (/\/api\/pdf\/\d+$/i.test(normalized)) {
+    return `${normalized}/content`
   }
-
-  const appendContent = (path: string) => (
-    /^\/api\/pdf\/\d+$/i.test(path) ? `${path}/content` : path
-  )
-
-  if (/^https?:\/\//i.test(normalized)) {
-    try {
-      const parsed = new URL(normalized)
-      parsed.pathname = appendContent(parsed.pathname)
-      return parsed.toString()
-    } catch {
-      return normalized
-    }
-  }
-
-  const [path, query = ''] = normalized.split('?', 2)
-  const contentPath = appendContent(path || '')
-  return query ? `${contentPath}?${query}` : contentPath
+  return normalized
 }
 
-// ─── Props ───────────────────────────────────────────────────────────────────
 const props = withDefaults(defineProps<{
-  /** PDF source: URL string, Uint8Array, or ArrayBuffer */
   src: string | Uint8Array | ArrayBuffer
-  /** Highlight rectangles (coords in PDF points) */
   highlights?: HighlightRect[]
-  /** ID of the currently active / focused highlight */
   activeId?: string | null
-  /** Container width in px (0 = fill parent) */
   width?: number
-  /** Manual scale override (0 = auto-fit) */
   scale?: number
-  /** Coordinate origin from backend: 'top-left' (default) or 'bottom-left' (PDFMiner) */
   origin?: 'top-left' | 'bottom-left'
 }>(), {
   highlights: () => [],
@@ -72,54 +55,53 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   (e: 'loaded', pageCount: number): void
-  (e: 'rendered'): void
   (e: 'highlight-click', id: string): void
   (e: 'error', message: string): void
 }>()
 
-// ─── Refs ────────────────────────────────────────────────────────────────────
-const containerRef = ref<HTMLDivElement>()
-const pagesRef = ref<HTMLDivElement[]>([])
+interface PageMeta {
+  width: number
+  height: number
+}
 
-// PDF internal state
+const containerRef = ref<HTMLDivElement>()
+const stageRef = ref<HTMLDivElement>()
+const pagesRef = ref<HTMLDivElement[]>([])
 const pdfDoc = shallowRef<any>(null)
 const pageCount = ref(0)
 const currentScale = ref(1)
+const currentPageNumber = ref(1)
+const zoomScale = ref(1)
+const isAutoScale = ref(true)
 const isLoading = ref(true)
 const errorMsg = ref('')
 const authenticatedPdfBlobUrl = ref('')
-
-// Per-page metadata: store each page's native size (in PDF points)
-interface PageMeta {
-  width: number   // in PDF points
-  height: number  // in PDF points
-}
+const pdfFilename = ref('paper.pdf')
 const pageMetas = ref<PageMeta[]>([])
+const pageTexts = ref<Record<number, string>>({})
+const searchOpen = ref(false)
+const searchTerm = ref('')
+const searchResults = ref<{ page: number; snippet: string; index: number }[]>([])
+const activeSearchIndex = ref(0)
 
-type PdfCropBox = [number, number, number, number]
+let renderRequestId = 0
+let renderQueue = Promise.resolve()
 
-type EvidenceCaptureRequest = {
-  page?: number | null
-  terms?: string[]
-  fallbackId?: string | null
-  padding?: number
-  minWidth?: number
-  minHeight?: number
+function invalidateRenderQueue() {
+  renderRequestId += 1
 }
 
-type EvidenceCaptureResult = {
-  imageUrl: string
-  matchedText?: string
-  precise: boolean
+function queueRenderAllPages(pdf: any) {
+  const requestId = ++renderRequestId
+  renderQueue = renderQueue
+    .catch(() => undefined)
+    .then(async () => {
+      if (requestId !== renderRequestId || pdfDoc.value !== pdf) return
+      await renderAllPages(pdf, requestId)
+    })
+  return renderQueue
 }
 
-type TextBox = {
-  text: string
-  bbox: PdfCropBox
-}
-
-// ─── Computed: group highlights by page ──────────────────────────────────────
-/** Group HighlightRect → HighlightItem[] per page for the overlay component */
 const highlightsByPage = computed(() => {
   const map: Record<number, HighlightItem[]> = {}
   for (const h of props.highlights) {
@@ -137,33 +119,19 @@ const highlightsByPage = computed(() => {
   return map
 })
 
-const highlightSignature = computed(() => {
-  return (props.highlights || [])
-    .map((item) => {
-      const { id, page, coords } = item
-      return [
-        id,
-        page,
-        coords?.x,
-        coords?.y,
-        coords?.w,
-        coords?.h,
-      ].join(':')
-    })
-    .join('|')
-})
+const zoomPercent = computed(() => Math.round(currentScale.value * 100))
+const activeSearchResult = computed(() => searchResults.value[activeSearchIndex.value] ?? null)
 
-/** Helper to safely get page metadata */
 function getPageMeta(pageNum: number): PageMeta {
   return pageMetas.value[pageNum - 1] ?? { width: 612, height: 792 }
 }
 
-// ─── Lifecycle ───────────────────────────────────────────────────────────────
 onMounted(() => {
   loadPdf()
 })
 
 onBeforeUnmount(() => {
+  invalidateRenderQueue()
   if (pdfDoc.value) {
     pdfDoc.value.destroy()
     pdfDoc.value = null
@@ -171,9 +139,12 @@ onBeforeUnmount(() => {
   revokeAuthenticatedBlobUrl()
 })
 
-// Re-load when src changes
 watch(() => props.src, () => {
   loadPdf()
+})
+
+watch(searchTerm, () => {
+  rebuildSearchResults()
 })
 
 function revokeAuthenticatedBlobUrl() {
@@ -196,36 +167,23 @@ async function fetchPdfBytes(): Promise<Uint8Array> {
   if (resp.status === 403) {
     throw new Error('You do not have access to this PDF.')
   }
-  if (resp.status === 404) {
-    throw new Error('No previewable PDF is available for this literature.')
-  }
   if (!resp.ok) {
     throw new Error(`PDF fetch failed: ${resp.status} ${resp.statusText}`)
   }
 
-  let bytes: Uint8Array
-  const contentType = String(resp.headers.get('content-type') || '').toLowerCase()
-  if (contentType.includes('application/json')) {
-    const payload = await resp.json()
-    const dataB64 = String(payload?.data_b64 || '')
-    if (!dataB64) {
-      throw new Error('PDF content payload is empty.')
-    }
-    const binary = window.atob(dataB64)
-    bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i += 1) {
-      bytes[i] = binary.charCodeAt(i)
-    }
-  } else {
-    bytes = new Uint8Array(await resp.arrayBuffer())
+  const payload = await resp.json()
+  pdfFilename.value = String(payload?.filename || payload?.name || 'paper.pdf')
+  const dataB64 = String(payload?.data_b64 || '')
+  if (!dataB64) {
+    throw new Error('PDF content payload is empty.')
   }
-  if (!bytes.byteLength) {
-    throw new Error('PDF content is empty.')
+  const binary = window.atob(dataB64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i)
   }
   revokeAuthenticatedBlobUrl()
-  const pdfBuffer = new ArrayBuffer(bytes.byteLength)
-  new Uint8Array(pdfBuffer).set(bytes)
-  authenticatedPdfBlobUrl.value = URL.createObjectURL(new Blob([pdfBuffer], { type: 'application/pdf' }))
+  authenticatedPdfBlobUrl.value = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }))
   return bytes
 }
 
@@ -243,46 +201,70 @@ async function openPdfInNewTab() {
   }
 }
 
-// ─── Core: Load PDF ──────────────────────────────────────────────────────────
+async function downloadPdf() {
+  try {
+    if (!authenticatedPdfBlobUrl.value) {
+      await fetchPdfBytes()
+    }
+    if (!authenticatedPdfBlobUrl.value) return
+    const link = document.createElement('a')
+    link.href = authenticatedPdfBlobUrl.value
+    link.download = pdfFilename.value || 'paper.pdf'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  } catch (err: any) {
+    errorMsg.value = err?.message || 'Failed to download PDF'
+    emit('error', errorMsg.value)
+  }
+}
+
 async function loadPdf() {
   if (!props.src) return
 
   isLoading.value = true
   errorMsg.value = ''
 
-  // Destroy previous doc
   if (pdfDoc.value) {
+    invalidateRenderQueue()
     pdfDoc.value.destroy()
     pdfDoc.value = null
   }
 
   try {
-    // If the source is a URL string, fetch the bytes first.  This gives us
-    // better control over errors (network/CORS) and avoids pdfjs attempting
-    // to stream/parse an HTML error page and then blowing up with obscure
-    // messages like “a.toHex is not a function”.
     const data = await fetchPdfBytes()
     const loadingTask = pdfjsLib.getDocument({ data })
-
     const pdf = await loadingTask.promise
+
     pdfDoc.value = markRaw(pdf)
     pageCount.value = pdf.numPages
+    currentPageNumber.value = 1
+    pagesRef.value = []
 
-    // Collect page metas
     const metas: PageMeta[] = []
-    for (let i = 1; i <= pdf.numPages; i++) {
+    const textMap: Record<number, string> = {}
+    for (let i = 1; i <= pdf.numPages; i += 1) {
       const page = await pdf.getPage(i)
-      const vp = page.getViewport({ scale: 1 })
-      metas.push({ width: vp.width, height: vp.height })
+      const viewport = page.getViewport({ scale: 1 })
+      metas.push({ width: viewport.width, height: viewport.height })
+
+      const textContent = await page.getTextContent().catch(() => null)
+      if (textContent) {
+        textMap[i] = textContent.items
+          .map((item: any) => String(item?.str || ''))
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim()
+      }
     }
     pageMetas.value = metas
+    pageTexts.value = textMap
+    rebuildSearchResults()
 
     emit('loaded', pdf.numPages)
 
-    // Render all pages
     await nextTick()
-    await renderAllPages(pdf)
-    emit('rendered')
+    await queueRenderAllPages(pdfDoc.value)
     if (props.activeId) {
       await scrollToHighlightWhenReady(props.activeId)
     }
@@ -295,393 +277,444 @@ async function loadPdf() {
   }
 }
 
-// ─── Render pages to canvas ──────────────────────────────────────────────────
-async function renderAllPages(pdf: any) {
-  for (let i = 1; i <= pdf.numPages; i++) {
+async function renderAllPages(pdf: any, requestId = renderRequestId) {
+  for (let i = 1; i <= pdf.numPages; i += 1) {
+    if (requestId !== renderRequestId || pdfDoc.value !== pdf) return
     try {
       const page = await pdf.getPage(i)
-
-      // Determine scale
-      let scale = props.scale || 0
-      if (scale <= 0 && containerRef.value) {
-        const containerWidth = props.width || containerRef.value.clientWidth
-        const vp1 = page.getViewport({ scale: 1 })
-        scale = (containerWidth - 4) / vp1.width // slight padding
-      }
-      if (scale <= 0) scale = 1
-      currentScale.value = scale
-
-      const viewport = page.getViewport({ scale })
-      const outputScale = Math.min(2.5, Math.max(1, window.devicePixelRatio || 1))
-
-      // Get the canvas inside the page wrapper
+      if (requestId !== renderRequestId || pdfDoc.value !== pdf) return
       const pageEl = pagesRef.value?.[i - 1]
       if (!pageEl) continue
 
-      const canvas = pageEl?.querySelector('canvas') as HTMLCanvasElement | null
+      let scale = props.scale || 0
+      if (scale <= 0 && isAutoScale.value && containerRef.value) {
+        const stageWidth = stageRef.value ? stageRef.value.clientWidth : 0
+        const containerWidth = props.width || stageWidth || containerRef.value.clientWidth
+        const viewportAtOne = page.getViewport({ scale: 1 })
+        scale = Math.min(1.35, Math.max(0.55, (containerWidth - 96) / viewportAtOne.width))
+      }
+      if (scale <= 0) scale = zoomScale.value
+      currentScale.value = scale
+      zoomScale.value = scale
+
+      const viewport = page.getViewport({ scale })
+      const canvas = pageEl.querySelector('canvas') as HTMLCanvasElement | null
       if (!canvas) continue
 
       const ctx = canvas.getContext('2d')
       if (!ctx) continue
 
-      canvas.width = Math.floor(viewport.width * outputScale)
-      canvas.height = Math.floor(viewport.height * outputScale)
+      canvas.width = viewport.width
+      canvas.height = viewport.height
       canvas.style.width = `${viewport.width}px`
       canvas.style.height = `${viewport.height}px`
-
-      // Set the wrapper size to match
       pageEl.style.width = `${viewport.width}px`
       pageEl.style.height = `${viewport.height}px`
 
-      await page.render({
-        canvasContext: ctx,
-        viewport,
-        transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : undefined,
-      }).promise
-    } catch (e: any) {
-      console.error(`[PdfViewer] failed to render page ${i}:`, e)
-      // stop further rendering and show user-facing error
-      errorMsg.value = `Page ${i}: ${e?.message || 'render failure'}`
+      await page.render({ canvasContext: ctx, viewport }).promise
+      if (requestId !== renderRequestId || pdfDoc.value !== pdf) return
+    } catch (err: any) {
+      if (requestId !== renderRequestId || pdfDoc.value !== pdf) return
+      console.error(`[PdfViewer] failed to render page ${i}:`, err)
+      errorMsg.value = `Page ${i}: ${err?.message || 'render failure'}`
       emit('error', errorMsg.value)
       break
     }
   }
 }
 
+function clampPage(page: number) {
+  return Math.min(Math.max(1, page), pageCount.value || 1)
+}
+
+function scrollElementIntoPdfView(el: HTMLElement, block: 'start' | 'center' = 'start') {
+  const container = containerRef.value
+  if (!container) return
+
+  const containerRect = container.getBoundingClientRect()
+  const targetRect = el.getBoundingClientRect()
+  const centerOffset = (container.clientHeight - targetRect.height) / 2
+  const offset = block === 'center' ? centerOffset : 12
+  const top = container.scrollTop + targetRect.top - containerRect.top - offset
+
+  container.scrollTo({
+    top: Math.max(0, top),
+    behavior: 'smooth',
+  })
+}
+
+async function goToPage(page: number) {
+  currentPageNumber.value = clampPage(page)
+  await nextTick()
+  const pageEl = pagesRef.value[currentPageNumber.value - 1]
+  if (pageEl) scrollElementIntoPdfView(pageEl, 'start')
+}
+
+async function previousPage() {
+  await goToPage(currentPageNumber.value - 1)
+}
+
+async function nextPage() {
+  await goToPage(currentPageNumber.value + 1)
+}
+
+async function rerenderPdf() {
+  if (!pdfDoc.value) return
+  await nextTick()
+  await queueRenderAllPages(pdfDoc.value)
+}
+
+async function zoomBy(delta: number) {
+  isAutoScale.value = false
+  zoomScale.value = Math.min(2.5, Math.max(0.55, currentScale.value + delta))
+  await rerenderPdf()
+  await goToPage(currentPageNumber.value)
+}
+
+async function setPageFromInput(event: Event) {
+  const input = event.target as HTMLInputElement
+  const page = Number(input.value)
+  if (Number.isFinite(page)) {
+    await goToPage(page)
+  }
+  input.value = String(currentPageNumber.value)
+}
+
+function updateCurrentPageFromScroll() {
+  const container = containerRef.value
+  if (!container || pagesRef.value.length < 1) return
+  const containerTop = container.getBoundingClientRect().top
+  let bestPage = currentPageNumber.value
+  let bestDistance = Number.POSITIVE_INFINITY
+
+  pagesRef.value.forEach((pageEl, index) => {
+    if (!pageEl) return
+    const distance = Math.abs(pageEl.getBoundingClientRect().top - containerTop - 24)
+    if (distance < bestDistance) {
+      bestDistance = distance
+      bestPage = index + 1
+    }
+  })
+  currentPageNumber.value = bestPage
+}
+
+function rebuildSearchResults() {
+  const query = searchTerm.value.trim().toLowerCase()
+  if (!query) {
+    searchResults.value = []
+    activeSearchIndex.value = 0
+    return
+  }
+
+  const results: { page: number; snippet: string; index: number }[] = []
+  for (const [pageKey, text] of Object.entries(pageTexts.value)) {
+    const haystack = text.toLowerCase()
+    let index = haystack.indexOf(query)
+    let guard = 0
+    while (index >= 0 && guard < 50) {
+      const start = Math.max(0, index - 72)
+      const end = Math.min(text.length, index + query.length + 96)
+      results.push({
+        page: Number(pageKey),
+        snippet: text.slice(start, end).trim(),
+        index,
+      })
+      index = haystack.indexOf(query, index + query.length)
+      guard += 1
+    }
+  }
+  searchResults.value = results.slice(0, 500)
+  activeSearchIndex.value = 0
+}
+
+async function submitSearch() {
+  rebuildSearchResults()
+  if (searchResults.value[0]) {
+    await goToPage(searchResults.value[0].page)
+  }
+}
+
+async function stepSearch(delta: number) {
+  if (!searchResults.value.length) return
+  activeSearchIndex.value = (activeSearchIndex.value + delta + searchResults.value.length) % searchResults.value.length
+  const result = searchResults.value[activeSearchIndex.value]
+  if (result) {
+    await goToPage(result.page)
+  }
+}
+
+function clearSearch() {
+  searchTerm.value = ''
+  searchResults.value = []
+  activeSearchIndex.value = 0
+}
+
 async function scrollToHighlightWhenReady(id: string, retries = 12) {
   await nextTick()
-  for (let i = 0; i < retries; i++) {
+  for (let i = 0; i < retries; i += 1) {
     const el = containerRef.value?.querySelector(`[data-highlight-id="${id}"]`) as HTMLElement | null
     if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      scrollElementIntoPdfView(el, 'center')
       return
     }
     await new Promise((resolve) => setTimeout(resolve, 80))
   }
 }
 
-async function scrollToPage(pageNum: number, behavior: ScrollBehavior = 'smooth') {
-  if (!Number.isFinite(pageNum) || pageCount.value < 1) return
-  const targetPage = Math.min(pageCount.value, Math.max(1, Math.trunc(pageNum)))
-  await nextTick()
-  const pageEl = pagesRef.value?.[targetPage - 1]
-    || containerRef.value?.querySelector(`[data-page="${targetPage}"]`) as HTMLElement | null
-  if (pageEl) {
-    pageEl.scrollIntoView({ behavior, block: 'start' })
-  }
-}
-
 watch(
-  () => [props.activeId, highlightSignature.value, isLoading.value, pageCount.value] as const,
-  async ([id, _signature, loading]) => {
+  () => [props.activeId, isLoading.value, pageCount.value] as const,
+  async ([id, loading]) => {
     if (!id || loading || pageCount.value < 1) return
     await scrollToHighlightWhenReady(id)
   },
   { immediate: true },
 )
 
-// ─── Scroll to a specific highlight ──────────────────────────────────────────
 function scrollToHighlight(id: string) {
   const el = containerRef.value?.querySelector(`[data-highlight-id="${id}"]`) as HTMLElement | null
   if (el) {
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    scrollElementIntoPdfView(el, 'center')
   }
 }
 
-function normalizeCaptureText(value: string) {
-  return String(value || '')
-    .toLowerCase()
-    .replace(/\u00b5/g, 'μ')
-    .replace(/[−–—]/g, '-')
-    .replace(/[⁰₀]/g, '0')
-    .replace(/[¹₁]/g, '1')
-    .replace(/[²₂]/g, '2')
-    .replace(/[³₃]/g, '3')
-    .replace(/[⁴₄]/g, '4')
-    .replace(/[⁵₅]/g, '5')
-    .replace(/[⁶₆]/g, '6')
-    .replace(/[⁷₇]/g, '7')
-    .replace(/[⁸₈]/g, '8')
-    .replace(/[⁹₉]/g, '9')
-    .replace(/[⁻₋]/g, '-')
-    .replace(/[＋]/g, '+')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function normalizeLooseCaptureText(value: string) {
-  return normalizeCaptureText(value).replace(/[^a-z0-9.+-]+/g, '')
-}
-
-function captureTermMatches(text: string, term: string) {
-  const normalizedText = normalizeCaptureText(text)
-  const normalizedTerm = normalizeCaptureText(term)
-  if (!normalizedText || !normalizedTerm) return false
-  if (normalizedText.includes(normalizedTerm)) return true
-  const looseTerm = normalizeLooseCaptureText(normalizedTerm)
-  return looseTerm.length >= 2 && normalizeLooseCaptureText(normalizedText).includes(looseTerm)
-}
-
-function unionBoxes(boxes: PdfCropBox[]): PdfCropBox | null {
-  if (!boxes.length) return null
-  return [
-    Math.min(...boxes.map((box) => box[0])),
-    Math.min(...boxes.map((box) => box[1])),
-    Math.max(...boxes.map((box) => box[2])),
-    Math.max(...boxes.map((box) => box[3])),
-  ]
-}
-
-function capturePageRegion(
-  pageNum: number,
-  bbox: PdfCropBox,
-  options: {
-    padding?: number
-    minWidth?: number
-    minHeight?: number
-    precise?: boolean
-    matchedText?: string
-  } = {},
-): EvidenceCaptureResult | null {
-  const pageEl = pagesRef.value?.[pageNum - 1]
-    || containerRef.value?.querySelector(`[data-page="${pageNum}"]`) as HTMLElement | null
-  const canvas = pageEl?.querySelector('canvas') as HTMLCanvasElement | null
-  if (!pageEl || !canvas || !canvas.width || !canvas.height) return null
-
-  const meta = getPageMeta(pageNum)
-  const [rawX0, rawY0, rawX1, rawY1] = bbox.map((value) => Number(value)) as PdfCropBox
-  if (![rawX0, rawY0, rawX1, rawY1].every(Number.isFinite)) return null
-
-  const targetX0 = Math.max(0, Math.min(rawX0, rawX1))
-  const targetY0 = Math.max(0, Math.min(rawY0, rawY1))
-  const targetW = Math.max(1, Math.abs(rawX1 - rawX0))
-  const targetH = Math.max(1, Math.abs(rawY1 - rawY0))
-  const padding = options.padding ?? 42
-  const minWidth = options.minWidth ?? 190
-  const minHeight = options.minHeight ?? 82
-  const centerX = targetX0 + targetW / 2
-  const centerY = targetY0 + targetH / 2
-  const cropWpt = Math.min(meta.width, Math.max(targetW + padding * 2, minWidth))
-  const cropHpt = Math.min(meta.height, Math.max(targetH + padding * 1.7, minHeight))
-  const x0pt = Math.max(0, Math.min(Math.max(0, meta.width - cropWpt), centerX - cropWpt / 2))
-  const y0pt = Math.max(0, Math.min(Math.max(0, meta.height - cropHpt), centerY - cropHpt / 2))
-  const xScale = canvas.width / meta.width
-  const yScale = canvas.height / meta.height
-  const sx = Math.max(0, Math.floor(x0pt * xScale))
-  const sy = Math.max(0, Math.floor(y0pt * yScale))
-  const sw = Math.min(canvas.width - sx, Math.ceil(cropWpt * xScale))
-  const sh = Math.min(canvas.height - sy, Math.ceil(cropHpt * yScale))
-  if (sw < 2 || sh < 2) return null
-
-  const output = document.createElement('canvas')
-  output.width = sw
-  output.height = sh
-  const ctx = output.getContext('2d')
-  if (!ctx) return null
-  ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh)
-
-  const hx = (targetX0 - x0pt) * xScale
-  const hy = (targetY0 - y0pt) * yScale
-  const hw = targetW * xScale
-  const hh = targetH * yScale
-  ctx.save()
-  ctx.fillStyle = options.precise === false ? 'rgba(14, 165, 233, 0.10)' : 'rgba(20, 184, 166, 0.16)'
-  ctx.strokeStyle = options.precise === false ? 'rgba(2, 132, 199, 0.62)' : 'rgba(13, 148, 136, 0.74)'
-  ctx.lineWidth = Math.max(1.5, Math.min(3, output.width * 0.0038))
-  ctx.setLineDash(options.precise === false ? [6, 5] : [])
-  ctx.fillRect(hx, hy, hw, hh)
-  ctx.strokeRect(hx, hy, hw, hh)
-  ctx.restore()
-
-  return {
-    imageUrl: output.toDataURL('image/png'),
-    matchedText: options.matchedText,
-    precise: options.precise !== false,
-  }
-}
-
-async function findTextEvidenceBox(pageNum: number, rawTerms: string[]): Promise<{ bbox: PdfCropBox; matchedText: string } | null> {
-  const page = await pdfDoc.value?.getPage?.(pageNum)
-  if (!page) return null
-  const terms = [...new Set(rawTerms.map((term) => String(term || '').trim()).filter((term) => term.length >= 2))]
-    .sort((left, right) => right.length - left.length)
-    .slice(0, 24)
-  if (!terms.length) return null
-
-  const viewport = page.getViewport({ scale: 1 })
-  const textContent = await page.getTextContent()
-  const items: TextBox[] = (textContent?.items || [])
-    .map((item: any): TextBox | null => {
-      const text = String(item?.str || '').trim()
-      if (!text) return null
-      const tx = (pdfjsLib as any).Util.transform(viewport.transform, item.transform)
-      const x = Number(tx[4])
-      const baselineY = Number(tx[5])
-      const height = Math.max(
-        5,
-        Number(item.height || 0),
-        Math.abs(Number(tx[3] || 0)),
-        Math.abs(Number(tx[2] || 0)),
-      )
-      const width = Math.max(3, Number(item.width || 0), text.length * height * 0.42)
-      if (![x, baselineY, height, width].every(Number.isFinite)) return null
-      return {
-        text,
-        bbox: [x, Math.max(0, baselineY - height), x + width, baselineY + Math.max(2, height * 0.18)],
-      }
-    })
-    .filter(Boolean) as TextBox[]
-
-  for (const term of terms) {
-    const item = items.find((entry) => captureTermMatches(entry.text, term))
-    if (item) return { bbox: item.bbox, matchedText: item.text }
-  }
-
-  const sorted = [...items].sort((a, b) => {
-    const dy = a.bbox[1] - b.bbox[1]
-    return Math.abs(dy) > 3 ? dy : a.bbox[0] - b.bbox[0]
-  })
-  const lines: TextBox[] = []
-  for (const item of sorted) {
-    const centerY = (item.bbox[1] + item.bbox[3]) / 2
-    const line = lines.find((candidate) => Math.abs(((candidate.bbox[1] + candidate.bbox[3]) / 2) - centerY) < 4)
-    if (!line) {
-      lines.push({ text: item.text, bbox: item.bbox })
-      continue
-    }
-    line.text = `${line.text} ${item.text}`.trim()
-    line.bbox = unionBoxes([line.bbox, item.bbox]) || line.bbox
-  }
-
-  for (const term of terms) {
-    const line = lines.find((entry) => captureTermMatches(entry.text, term))
-    if (line) return { bbox: line.bbox, matchedText: line.text }
-  }
-
-  return null
-}
-
-async function captureHighlight(id: string, padding = 42, minWidth = 190, minHeight = 82): Promise<string | null> {
-  await nextTick()
-  const highlight = (props.highlights || []).find((item) => item.id === id)
-  if (!highlight) return null
-
-  const meta = getPageMeta(highlight.page)
-  const sourceX = Number(highlight.coords.x)
-  const sourceY = Number(highlight.coords.y)
-  const sourceW = Math.max(1, Number(highlight.coords.w))
-  const sourceH = Math.max(1, Number(highlight.coords.h))
-  if (![sourceX, sourceY, sourceW, sourceH].every(Number.isFinite)) return null
-
-  const yTop = props.origin === 'bottom-left'
-    ? meta.height - sourceY - sourceH
-    : sourceY
-  return capturePageRegion(
-    highlight.page,
-    [sourceX, yTop, sourceX + sourceW, yTop + sourceH],
-    { padding, minWidth, minHeight, precise: false },
-  )?.imageUrl || null
-}
-
-async function captureEvidenceTarget(request: EvidenceCaptureRequest): Promise<EvidenceCaptureResult | null> {
-  await nextTick()
-  const pageNum = Number(request.page || 0)
-  if (Number.isFinite(pageNum) && pageNum > 0 && request.terms?.length) {
-    const textHit = await findTextEvidenceBox(Math.trunc(pageNum), request.terms).catch((error) => {
-      console.warn('[PdfViewer] text evidence lookup failed; falling back to bbox crop.', error)
-      return null
-    })
-    if (textHit) {
-      return capturePageRegion(Math.trunc(pageNum), textHit.bbox, {
-        padding: request.padding ?? 62,
-        minWidth: request.minWidth ?? 360,
-        minHeight: request.minHeight ?? 150,
-        precise: true,
-        matchedText: textHit.matchedText,
-      })
-    }
-  }
-
-  if (request.fallbackId) {
-    const imageUrl = await captureHighlight(
-      request.fallbackId,
-      request.padding ?? 62,
-      request.minWidth ?? 360,
-      request.minHeight ?? 150,
-    )
-    return imageUrl ? { imageUrl, precise: false } : null
-  }
-
-  return null
-}
-
-// ─── Highlight click handler ─────────────────────────────────────────────────
 function onOverlayClick(id: string) {
   emit('highlight-click', id)
 }
 
-// ─── Expose for parent usage ─────────────────────────────────────────────────
-defineExpose({ captureEvidenceTarget, captureHighlight, openPdfInNewTab, scrollToHighlight, scrollToPage })
+defineExpose({ scrollToHighlight })
 </script>
 
 <template>
-  <!-- Container with scroll -->
-  <div
-    ref="containerRef"
-    class="relative w-full h-full overflow-auto bg-gray-100 dark:bg-gray-900"
-  >
-    <!-- Loading Spinner -->
+  <div class="grid h-full w-full grid-rows-[3.75rem_minmax(0,1fr)] bg-slate-100 text-slate-900">
     <div
-      v-if="isLoading"
-      class="absolute inset-0 flex items-center justify-center z-20 bg-background/80 backdrop-blur-sm"
+      data-testid="pdf-toolbar"
+      class="z-30 border-b border-slate-200 bg-white/95 px-5 shadow-[0_1px_0_rgba(15,23,42,0.04)]"
     >
-      <div class="flex flex-col items-center gap-3">
-        <div class="w-8 h-8 border-3 border-primary/30 border-t-primary rounded-full animate-spin" />
-        <span class="text-sm text-muted-foreground">Loading PDF…</span>
-      </div>
-    </div>
-
-    <!-- Error State -->
-    <div
-      v-if="errorMsg && !isLoading"
-      class="absolute inset-0 flex flex-col items-center justify-center z-20"
-    >
-      <div class="text-center p-6 rounded-lg bg-destructive/10 border border-destructive/30 max-w-md">
-        <p class="text-sm font-medium text-destructive">{{ errorMsg }}</p>
-        <div class="mt-2 text-xs">
+      <div class="mx-auto grid h-full w-full max-w-[58rem] grid-cols-[auto_minmax(2rem,1fr)_auto_minmax(2rem,1fr)_auto] items-center">
+        <div
+          data-testid="pdf-page-controls"
+          class="flex items-center justify-start gap-3"
+        >
           <button
-            v-if="typeof props.src === 'string'"
             type="button"
-            class="underline"
-            @click="openPdfInNewTab"
-          >Open PDF in new tab</button>
+            data-testid="pdf-page-prev"
+            class="grid h-9 w-9 place-items-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-30"
+            :disabled="currentPageNumber <= 1"
+            @click="previousPage"
+          >
+            <ChevronLeft class="h-5 w-5" />
+          </button>
+          <input
+            data-testid="pdf-page-current"
+            class="h-9 w-11 rounded-md border border-slate-200 bg-white text-center text-sm font-semibold text-slate-900 shadow-sm outline-none focus:border-teal-600 focus:ring-2 focus:ring-teal-100"
+            :value="currentPageNumber"
+            inputmode="numeric"
+            @change="setPageFromInput"
+            @keyup.enter="setPageFromInput"
+          >
+          <span class="min-w-6 text-sm font-medium text-slate-600">{{ pageCount || 0 }}</span>
+          <button
+            type="button"
+            data-testid="pdf-page-next"
+            class="grid h-9 w-9 place-items-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 disabled:opacity-30"
+            :disabled="currentPageNumber >= pageCount"
+            @click="nextPage"
+          >
+            <ChevronRight class="h-5 w-5" />
+          </button>
+        </div>
+
+        <div />
+
+        <div
+          data-testid="pdf-zoom-controls"
+          class="flex justify-center"
+        >
+          <div class="flex h-9 items-center gap-3 rounded-md bg-slate-100 px-3 text-sm font-semibold text-slate-700">
+            <span class="w-14 text-center">{{ zoomPercent }} %</span>
+            <button
+              type="button"
+              data-testid="pdf-zoom-out"
+              class="text-slate-500 transition hover:text-slate-900"
+              @click="zoomBy(-0.12)"
+            >
+              <MinusCircle class="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              data-testid="pdf-zoom-in"
+              class="text-slate-500 transition hover:text-slate-900"
+              @click="zoomBy(0.12)"
+            >
+              <PlusCircle class="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+
+        <div />
+
+        <div
+          data-testid="pdf-toolbar-actions"
+          class="flex items-center justify-end gap-3"
+        >
+          <button
+            type="button"
+            data-testid="pdf-search-toggle"
+            class="grid h-10 w-10 place-items-center rounded-md border border-slate-300 bg-white text-slate-700 shadow-sm transition hover:border-slate-500"
+            :class="searchOpen ? 'border-slate-700 ring-2 ring-slate-200' : ''"
+            @click="searchOpen = !searchOpen"
+          >
+            <Search class="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            data-testid="pdf-download"
+            class="grid h-10 w-10 place-items-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            @click="downloadPdf"
+          >
+            <Download class="h-5 w-5" />
+          </button>
         </div>
       </div>
     </div>
 
-    <!-- Pages -->
-    <div class="flex flex-col items-center gap-2 py-4">
+    <div
+      ref="stageRef"
+      data-testid="pdf-stage"
+      class="grid min-h-0"
+      :class="searchOpen ? 'grid-cols-[minmax(0,1fr)_24rem]' : 'grid-cols-[minmax(0,1fr)]'"
+    >
       <div
-        v-for="pageNum in pageCount"
-        :key="pageNum"
-        :ref="(el: any) => { if (el) pagesRef[pageNum - 1] = el }"
-        class="relative shadow-md bg-white"
-        :data-page="pageNum"
+        ref="containerRef"
+        data-testid="pdf-scroll-region"
+        class="relative h-full min-h-0 overflow-auto bg-slate-100"
+        @scroll.passive="updateCurrentPageFromScroll"
       >
-        <!-- PDF canvas -->
-        <canvas />
+        <div
+          v-if="isLoading"
+          class="absolute inset-0 z-20 flex items-center justify-center bg-white/80 backdrop-blur-sm"
+        >
+          <div class="flex flex-col items-center gap-3">
+            <div class="h-8 w-8 animate-spin rounded-full border-4 border-teal-100 border-t-teal-700" />
+            <span class="text-sm text-slate-500">Loading PDF...</span>
+          </div>
+        </div>
 
-        <!-- Highlight Overlay (delegated to PdfHighlightOverlay) -->
-        <PdfHighlightOverlay
-          v-if="highlightsByPage[pageNum] && pageMetas[pageNum - 1]"
-          :page-width="getPageMeta(pageNum).width"
-          :page-height="getPageMeta(pageNum).height"
-          :highlights="highlightsByPage[pageNum] ?? []"
-          :origin="origin"
-          :active-id="activeId"
-          @click="onOverlayClick"
-        />
+        <div
+          v-if="errorMsg && !isLoading"
+          class="absolute inset-0 z-20 flex flex-col items-center justify-center"
+        >
+          <div class="max-w-md rounded-lg border border-amber-200 bg-white p-6 text-center shadow-sm">
+            <p class="text-sm font-medium text-slate-900">{{ errorMsg }}</p>
+            <div class="mt-3 text-sm">
+              <button
+                v-if="typeof props.src === 'string'"
+                type="button"
+                class="font-semibold text-teal-700 underline"
+                @click="openPdfInNewTab"
+              >Open PDF in new tab</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex flex-col items-center gap-3 py-2">
+          <div
+            v-for="pageNum in pageCount"
+            :key="pageNum"
+            :ref="(el: any) => { if (el) pagesRef[pageNum - 1] = el }"
+            class="relative bg-white shadow-md ring-1 ring-slate-200"
+            :data-page="pageNum"
+          >
+            <canvas />
+
+            <PdfHighlightOverlay
+              v-if="highlightsByPage[pageNum] && pageMetas[pageNum - 1]"
+              :page-width="getPageMeta(pageNum).width"
+              :page-height="getPageMeta(pageNum).height"
+              :highlights="highlightsByPage[pageNum] ?? []"
+              :origin="origin"
+              :active-id="activeId"
+              @click="onOverlayClick"
+            />
+          </div>
+        </div>
       </div>
+
+      <aside
+        v-if="searchOpen"
+        data-testid="pdf-search-panel"
+        class="min-h-0 overflow-auto border-l border-slate-200 bg-white px-5 py-4"
+      >
+        <div class="flex items-center gap-3">
+          <div class="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-md border border-slate-300 px-3 focus-within:border-slate-700">
+            <Search class="h-4 w-4 flex-none text-slate-400" />
+            <input
+              v-model="searchTerm"
+              class="min-w-0 flex-1 bg-transparent text-sm text-slate-900 outline-none placeholder:text-slate-400"
+              placeholder="Search"
+              @keyup.enter="submitSearch"
+            >
+            <button
+              v-if="searchTerm"
+              type="button"
+              class="text-slate-400 hover:text-slate-700"
+              @click="clearSearch"
+            >
+              <X class="h-4 w-4" />
+            </button>
+          </div>
+          <button
+            type="button"
+            class="grid h-10 w-10 place-items-center rounded-md text-slate-500 hover:bg-slate-100"
+          >
+            <SlidersHorizontal class="h-4 w-4" />
+          </button>
+        </div>
+
+        <div class="mt-5 border-t border-slate-200 pt-5">
+          <div class="flex items-center justify-between">
+            <p class="text-sm text-slate-600">
+              <template v-if="searchTerm">{{ searchResults.length }} results found</template>
+              <template v-else>Search within this paper</template>
+            </p>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-30"
+                :disabled="!searchResults.length"
+                @click="stepSearch(-1)"
+              >
+                <ChevronLeft class="h-5 w-5" />
+              </button>
+              <button
+                type="button"
+                class="grid h-8 w-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-30"
+                :disabled="!searchResults.length"
+                @click="stepSearch(1)"
+              >
+                <ChevronRight class="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+
+          <div v-if="activeSearchResult" class="mt-4 text-sm font-medium text-slate-500">
+            Page {{ activeSearchResult.page }}
+          </div>
+
+          <div class="mt-3 space-y-3">
+            <button
+              v-for="(result, index) in searchResults"
+              :key="`${result.page}-${result.index}`"
+              type="button"
+              class="w-full rounded-md border bg-white p-3 text-left text-sm leading-relaxed text-slate-700 shadow-sm transition hover:border-slate-500"
+              :class="index === activeSearchIndex ? 'border-slate-700 bg-slate-50' : 'border-slate-200'"
+              @click="activeSearchIndex = index; goToPage(result.page)"
+            >
+              {{ result.snippet }}
+            </button>
+          </div>
+        </div>
+      </aside>
     </div>
   </div>
 </template>

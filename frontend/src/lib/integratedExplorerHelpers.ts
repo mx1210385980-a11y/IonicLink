@@ -1,4 +1,5 @@
 import { formatTribopairLabel, type EvidenceResult, type LubricantComponent, type RecordResponse, type RecordLiteratureDTO } from '@/lib/api'
+import { canonicalExperimentScaleValue } from '@/lib/experimentScale'
 import { normalizePotentialDisplayText } from '@/lib/potential'
 
 export type ConfidenceLineItem = {
@@ -39,6 +40,57 @@ export type LubricantDisplayLine = {
   text: string
   kind: 'compound' | 'ratio'
   emphasis: 'primary' | 'secondary'
+}
+
+export type LubricantRecipeDisplay = {
+  kind: 'single' | 'blend'
+  title: string
+  primary: string
+  secondary: string
+  ratio: string
+  badge: string
+}
+
+export type ContactDisplayMode = 'nano' | 'macro' | 'unknown'
+
+export type ContactDisplayPattern =
+  | 'probe_substrate'
+  | 'ball_disk'
+  | 'pin_disk'
+  | 'four_ball'
+  | 'ball_pins'
+  | 'block_ring'
+  | 'counterface_specimen'
+
+export type ContactDisplayModel = {
+  mode: ContactDisplayMode
+  pattern: ContactDisplayPattern
+  primaryRole: string
+  secondaryRole: string
+  primaryLabel: string
+  secondaryLabel: string
+  relationLabel: string
+  detailBadges: string[]
+  title: string
+}
+
+export function recordDisplayId(record: Pick<RecordResponse, 'id' | 'displayId'>): string {
+  const displayId = String(record.displayId || '').trim()
+  if (displayId) return displayId
+  const numericId = Number(record.id)
+  if (Number.isFinite(numericId) && numericId > 0) {
+    return `R-${Math.trunc(numericId).toString().padStart(6, '0')}`
+  }
+  return 'R-000000'
+}
+
+export function compactRecordDisplayId(record: Pick<RecordResponse, 'id' | 'displayId'>): string {
+  const fullId = recordDisplayId(record)
+  const match = fullId.match(/(\d+)$/)
+  if (!match) return '#000'
+  const value = Number(match[1])
+  if (!Number.isFinite(value)) return '#000'
+  return `#${Math.trunc(value).toString().padStart(3, '0').slice(-3)}`
 }
 
 export function cofDisplay(record: RecordResponse): string {
@@ -199,6 +251,10 @@ export function surfaceRoughnessBadgeClass(tone: SurfaceRoughnessBadgeTone): str
 export function normalizeTraceDisplayText(input: string | null | undefined): string {
   return String(input || '')
     .replace(/\s+/g, ' ')
+    .replace(/(\d)\s*mum\/s\b/gi, '$1 μm/s')
+    .replace(/\bup\s+to\s*~?\s*/gi, '≤')
+    .replace(/\bat\s+most\s*~?\s*/gi, '≤')
+    .replace(/\bmaximum\s*~?\s*/gi, '≤')
     .replace(/渭/g, 'μ')
     .replace(/碌/g, 'μ')
     .replace(/(\d)\s*-\s*(\d)/g, '$1–$2')  // 数字间的连字符换成 en-dash 更紧凑
@@ -258,18 +314,6 @@ export function conditionGroups(record: RecordResponse): ConditionGroup[] {
       ]),
       title: 'Dynamic conditions',
     },
-    {
-      key: 'surf',
-      label: 'SURF',
-      summary: summarizeConditionGroup([
-        record.probeGeometry ? `${record.probeGeometry}` : '',
-        record.probeRadius ? `${record.probeRadius}` : '',
-        record.probeRoughness ? `Probe ${record.probeRoughness}` : '',
-        record.substrateCoating ? `${record.substrateCoating}` : '',
-        String(record.filmThickness || '').trim() ? `${record.filmThickness}` : '',
-      ]),
-      title: 'Surface descriptors',
-    },
   ]
   return groups.filter((group) => Boolean(group.summary))
 }
@@ -289,11 +333,38 @@ export type DetailedConditionChipDisplay = {
   unit: string
 }
 
+export type ConditionMicrobarItem = {
+  key: string
+  symbol: string
+  label: string
+  value: string
+  unit: string
+  full: string
+  title: string
+  tone: ConditionGroupTone
+  emphasis: 'primary' | 'secondary' | 'muted'
+}
+
+export type ConditionMicrobarDisplay = {
+  items: ConditionMicrobarItem[]
+  overflow: number
+  title: string
+}
+
+export type ConditionSealDisplay = {
+  primary: ConditionMicrobarItem | null
+  badge: ConditionMicrobarItem | null
+  meta: ConditionMicrobarItem[]
+  overflowItems: ConditionMicrobarItem[]
+  overflow: number
+  title: string
+}
+
 function compactScientificUnit(unit: string): string {
   const normalized = String(unit || '').trim()
   if (!normalized) return ''
   if (/^uN$/i.test(normalized)) return 'μN'
-  if (/^um\/s$/i.test(normalized)) return 'μm/s'
+  if (/^(?:um|mum|μm|µm)\/s$/i.test(normalized)) return 'μm/s'
   if (/^s\s*(?:\^\s*)?[-−]?\s*1$/i.test(normalized) || /^s[−-]1$/i.test(normalized) || normalized === 's⁻¹') {
     return 's^-1'
   }
@@ -333,14 +404,58 @@ function conditionValueIsBareNumber(text: string): boolean {
   return /^[<>≈~±≤≥]?\s*[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?(?:\s*[–\-~]\s*[-+]?\d+(?:\.\d+)?)?\s*%?$/.test(String(text || '').trim())
 }
 
-export function conditionChipDisplayParts(chip: DetailedConditionChip, fallback?: string): DetailedConditionChipDisplay {
+function numericConditionValue(value: string): number | null {
+  const parsed = Number(String(value || '').replace(/[<>≈~±≤≥]/g, '').trim())
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function formatCompactNumber(value: number): string {
+  if (!Number.isFinite(value)) return ''
+  return Number.isInteger(value) ? String(value) : Number(value.toPrecision(6)).toString()
+}
+
+function speedConditionDisplayParts(raw: string, record?: RecordResponse): DetailedConditionChipDisplay {
+  const parsed = splitNumberAndUnit(raw)
+  let value = parsed.number
+  let unit = parsed.unit ? compactScientificUnit(parsed.unit) : conditionValueIsBareNumber(parsed.number) ? 'μm/s' : ''
+  const isMacro = record ? contactScale(record) === 'macro' : false
+
+  if (isMacro && unit === 'μm/s') {
+    const numeric = numericConditionValue(value)
+    if (numeric != null && Math.abs(numeric) >= 1000) {
+      value = formatCompactNumber(numeric / 1000)
+      unit = 'mm/s'
+    }
+  }
+
+  return {
+    label: isMacro ? 'sliding speed' : 'speed',
+    value,
+    unit,
+  }
+}
+
+export function conditionChipDisplayParts(chip: DetailedConditionChip, fallback?: string, record?: RecordResponse): DetailedConditionChipDisplay {
   const raw = normalizeTraceDisplayText(fallback || chip.full)
   const lower = raw.toLowerCase()
+  const labelMap: Partial<Record<string, string>> = {
+    load: 'load',
+    speed: 'speed',
+    shear_rate: 'shear rate',
+    potential: 'potential',
+    temperature: 'temperature',
+    water: 'water',
+  }
+  const displayLabel = labelMap[chip.key] || chip.label
 
-  if (chip.key === 'speed' || chip.key === 'shear_rate') {
+  if (chip.key === 'speed') {
+    return speedConditionDisplayParts(raw, record)
+  }
+
+  if (chip.key === 'shear_rate') {
     const shearRate = extractShearRate(raw)
     if (shearRate) {
-      return { label: '剪切率', value: shearRate.value, unit: shearRate.unit }
+      return { label: 'shear rate', value: shearRate.value, unit: shearRate.unit }
     }
   }
 
@@ -348,16 +463,23 @@ export function conditionChipDisplayParts(chip: DetailedConditionChip, fallback?
     const measuredLoad = extractValueWithUnit(raw, ['nN', 'μN', 'µN', 'uN', 'mN'])
     if (/\blow\s+load\b/i.test(raw)) {
       return {
-        label: '低载荷',
-        value: measuredLoad ? measuredLoad.value.replace(/^~\s*/, '≤') : '低载荷',
+        label: 'low load',
+        value: measuredLoad ? measuredLoad.value.replace(/^~\s*/, '≤') : 'low',
         unit: measuredLoad?.unit || '',
       }
     }
     if (/\bhigh\s+load\b/i.test(raw)) {
       return {
-        label: '高载荷',
-        value: measuredLoad?.value || (lower.includes('squeeze') ? 'squeeze-out' : '高载荷'),
+        label: 'high load',
+        value: measuredLoad?.value || (lower.includes('squeeze') ? 'squeeze-out' : 'high load'),
         unit: measuredLoad?.unit || '',
+      }
+    }
+    if (measuredLoad) {
+      return {
+        label: 'load',
+        value: measuredLoad.value,
+        unit: measuredLoad.unit,
       }
     }
   }
@@ -375,10 +497,133 @@ export function conditionChipDisplayParts(chip: DetailedConditionChip, fallback?
       ? inferredUnits[chip.key] || ''
       : ''
 
+  const displayUnit = chip.key === 'potential'
+    ? inferredUnit.replace(/\s+vs\s+ocp\b/i, '').trim()
+    : inferredUnit
+
   return {
-    label: chip.label,
+    label: displayLabel,
     value: parsed.number,
-    unit: inferredUnit,
+    unit: displayUnit,
+  }
+}
+
+const CONDITION_MICROBAR_SYMBOLS: Record<string, string> = {
+  load: 'F',
+  speed: 'V',
+  shear_rate: 'γ̇',
+  potential: 'ψ',
+  temperature: 'T',
+  water: 'H₂O',
+}
+
+function conditionMicrobarSymbol(chip: DetailedConditionChip, record: RecordResponse): string {
+  if (chip.key === 'speed' && contactScale(record) === 'macro') return 'S'
+  return CONDITION_MICROBAR_SYMBOLS[chip.key] || chip.label
+}
+
+const CONDITION_MICROBAR_PRIORITY: Record<string, number> = {
+  load: 0,
+  speed: 1,
+  shear_rate: 2,
+  potential: 3,
+  temperature: 4,
+  water: 5,
+}
+
+function isQuietPotential(chip: DetailedConditionChip, display: DetailedConditionChipDisplay): boolean {
+  if (chip.key !== 'potential') return false
+  const displayText = `${display.value || ''} ${display.unit || ''}`.trim()
+  const numeric = Number(String(display.value || '').replace(/[+−]/g, (match) => (match === '−' ? '-' : '')).trim())
+  if (Number.isFinite(numeric) && Math.abs(numeric) > 1e-9) return false
+  if (Number.isFinite(numeric) && Math.abs(numeric) <= 1e-9) return true
+
+  const shortcut = String(chip.shortcut || '').trim().toLowerCase()
+  const full = String(chip.full || '').trim().toLowerCase()
+  if (shortcut === 'ocp' || shortcut === '0 v' || shortcut === 'ocv') return true
+  if (/^(?:ocp|ocv|open\s+circuit)$/i.test(full)) return true
+  return /^[-+]?0+(?:\.0+)?(?:\s*v)?(?:\s+vs\s+ocp)?$/i.test(displayText)
+}
+
+function conditionMicrobarEmphasis(chip: DetailedConditionChip, display: DetailedConditionChipDisplay): ConditionMicrobarItem['emphasis'] {
+  if (isQuietPotential(chip, display)) return 'muted'
+  if (chip.key === 'load' || chip.key === 'speed' || chip.key === 'shear_rate' || chip.key === 'potential') return 'primary'
+  if (chip.key === 'temperature' && chip.shortcut === 'RT') return 'muted'
+  if (chip.key === 'temperature') return 'primary'
+  return 'secondary'
+}
+
+function isMissingConditionDisplay(item: Pick<ConditionMicrobarItem, 'value' | 'full'>): boolean {
+  const text = `${item.value || ''} ${item.full || ''}`.toLowerCase().trim()
+  if (!text) return true
+  return /\b(?:not\s+specified|not\s+reported|not\s+available|unknown|n\/a|na|none|null)\b/.test(text)
+}
+
+export function conditionMicrobarItems(record: RecordResponse, maxVisible: number = 4): ConditionMicrobarDisplay {
+  const chips = detailedConditionChips(record)
+    .slice()
+    .sort((a, b) => (CONDITION_MICROBAR_PRIORITY[a.key] ?? 99) - (CONDITION_MICROBAR_PRIORITY[b.key] ?? 99))
+
+  const allItems = chips.map((chip) => {
+    const display = conditionChipDisplayParts(chip, undefined, record)
+    return {
+      key: chip.key,
+      symbol: conditionMicrobarSymbol(chip, record),
+      label: display.label,
+      value: chip.shortcut && chip.key !== 'temperature' ? chip.shortcut : display.value,
+      unit: chip.shortcut && chip.key !== 'temperature' ? '' : display.unit,
+      full: chip.full,
+      title: `${chip.label}: ${chip.full}`,
+      tone: chip.tone,
+      emphasis: conditionMicrobarEmphasis(chip, display),
+    }
+  }).filter((item) => Boolean(item.value || item.unit) && !isMissingConditionDisplay(item))
+
+  const visibleCount = Math.max(0, Math.trunc(maxVisible))
+  return {
+    items: allItems.slice(0, visibleCount),
+    overflow: Math.max(0, allItems.length - visibleCount),
+    title: allItems.map((item) => item.title).join(' • '),
+  }
+}
+
+function firstConditionByKey(
+  items: ConditionMicrobarItem[],
+  keys: string[],
+  fallbackToFirst: boolean = true,
+  predicate: (item: ConditionMicrobarItem) => boolean = () => true,
+): ConditionMicrobarItem | null {
+  for (const key of keys) {
+    const item = items.find((candidate) => candidate.key === key && predicate(candidate))
+    if (item) return item
+  }
+  return fallbackToFirst ? items.find(predicate) || null : null
+}
+
+export function conditionSealDisplay(record: RecordResponse): ConditionSealDisplay {
+  const allItems = conditionMicrobarItems(record, 99).items
+  const activeItem = (item: ConditionMicrobarItem) => item.emphasis !== 'muted'
+  const primary = firstConditionByKey(allItems, ['load', 'potential', 'speed', 'shear_rate', 'temperature'], false, activeItem)
+  const withoutPrimary = allItems.filter((item) => item.key !== primary?.key)
+  const activeBadge = primary
+    ? firstConditionByKey(withoutPrimary, ['potential', 'load', 'speed', 'shear_rate', 'temperature', 'water'], false, activeItem)
+    : null
+  const quietBadge = primary && !activeBadge
+    ? firstConditionByKey(withoutPrimary, ['potential', 'temperature', 'water'], false)
+    : null
+  const badge = activeBadge || quietBadge
+  const usedKeys = new Set([primary?.key, badge?.key].filter(Boolean))
+  const remaining = allItems.filter((item) => !usedKeys.has(item.key))
+  const meta = remaining.slice(0, 2)
+  const overflowItems = remaining.slice(2)
+
+  return {
+    primary,
+    badge,
+    meta,
+    overflowItems,
+    overflow: overflowItems.length,
+    title: allItems.map((item) => item.title).join(' • '),
   }
 }
 
@@ -397,7 +642,7 @@ function parseTempCelsius(text: string): number | null {
 function tempShortcut(text: string): string | undefined {
   const c = parseTempCelsius(text)
   if (c == null) return undefined
-  if (c >= 15 && c <= 35) return '室温'
+  if (c >= 15 && c <= 35) return 'RT'
   return undefined
 }
 
@@ -406,15 +651,15 @@ function potentialShortcut(text: string): string | undefined {
   if (!t) return undefined
   if (/^[-+]?0+(?:\.0+)?\s*v?$/i.test(t)) return '0 V'
   if (/^0+(?:\.0+)?\s*v\s+vs\s+ocp$/i.test(t)) return 'OCP'
-  if (t.includes('ocv') || t.includes('open circuit')) return '开路'
+  if (t.includes('ocv') || t.includes('open circuit')) return 'OCV'
   return undefined
 }
 
 function waterShortcut(text: string): string | undefined {
   const t = text.trim().toLowerCase()
   if (!t) return undefined
-  if (t.includes('anhydrous') || t === 'dry') return '干燥'
-  if (/^0\s*%?$/.test(t)) return '干燥'
+  if (t.includes('anhydrous') || t === 'dry') return 'dry'
+  if (/^0\s*%?$/.test(t)) return 'dry'
   if (/^<\s*1\s*%/.test(t)) return '<1%'
   return undefined
 }
@@ -440,11 +685,6 @@ export function detailedConditionChips(record: RecordResponse): DetailedConditio
     chips.push({ key: 'water', label: '含水', full, shortcut: waterShortcut(full), tone: 'env', title: '含水量' })
   }
 
-  const molRatio = String(record.molRatio || '').trim()
-  if (isMeaningfulRatioOrConcentration(molRatio)) {
-    chips.push({ key: 'mol_ratio', label: '浓度', full: normalizeTraceDisplayText(molRatio), tone: 'env', title: '混合比例 / 浓度' })
-  }
-
   const speed = String(record.speedValue || '').trim()
   if (speed) {
     chips.push({ key: 'speed', label: '速度', full: normalizeTraceDisplayText(speed), tone: 'dyn', title: '滑动速度' })
@@ -466,19 +706,6 @@ export function detailedConditionChips(record: RecordResponse): DetailedConditio
   return chips
 }
 
-function isMeaningfulRatioOrConcentration(value: string) {
-  const text = String(value || '').trim()
-  if (!text) return false
-  if (/^\d+(?:\.\d+)?$/.test(text)) return false
-  return (
-    /\d\s*:\s*\d/.test(text)
-    || /\d\s*\/\s*\d/.test(text)
-    || /%/.test(text)
-    || /\d(?:\.\d+)?\s*[mM]\b/.test(text)
-    || /\b(?:mol|molar|wt|mass|weight|vol|ppm|neat|pure|ratio)\b/i.test(text)
-  )
-}
-
 export type TribopairExtras = {
   probeDetails: string  // 例如 "Tip · 8 nm"，用于显示在探针名下方
   filmThickness: string  // 例如 "RMS 0.89 nm"
@@ -495,6 +722,238 @@ export function tribopairExtras(record: RecordResponse): TribopairExtras {
   return {
     probeDetails: pieces.join(' · '),
     filmThickness: String(record.filmThickness || '').trim(),
+  }
+}
+
+function normalizedContactKey(value: string | null | undefined): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[‐‑‒–—-]+/g, '_')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+function contactSystemText(record: RecordResponse): string {
+  const system = (record.tribologicalSystem || {}) as NonNullable<RecordResponse['tribologicalSystem']>
+  const profile = (record.experimentProfile || {}) as NonNullable<RecordResponse['experimentProfile']>
+  return [
+    record.experimentMethod,
+    profile.method,
+    profile.contact_geometry,
+    profile.contactGeometry,
+    system.method,
+    system.contact_geometry,
+    system.contactGeometry,
+    system.instrument,
+    system.profile,
+    system.training_view,
+    system.trainingView,
+    system.raw_text,
+    system.rawText,
+    record.trainingView,
+    record.measurementType,
+    record.regime,
+    record.probeGeometry,
+    record.loadValue,
+    record.loadRaw,
+  ]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .join(' ')
+}
+
+function contactScale(record: RecordResponse): ContactDisplayMode {
+  const system = (record.tribologicalSystem || {}) as NonNullable<RecordResponse['tribologicalSystem']>
+  const profile = (record.experimentProfile || {}) as NonNullable<RecordResponse['experimentProfile']>
+  const candidates = [
+    record.experimentScale,
+    profile.scale,
+    system.scale,
+    record.trainingView,
+    profile.training_view,
+    profile.trainingView,
+    system.training_view,
+    system.trainingView,
+  ]
+  for (const candidate of candidates) {
+    const canonical = canonicalExperimentScaleValue(String(candidate || ''))
+    if (canonical === 'macroscale') return 'macro'
+    if (canonical === 'nanoscale') return 'nano'
+  }
+
+  const text = normalizedContactKey(contactSystemText(record))
+  if (/\b(ball_on|pin_on|four_ball|block_on|tribometer|reciprocating|wear_scar)\b/.test(text)) return 'macro'
+  if (/\b(afm|ffm|sfb|colloid|tip_radius|sharp_tip|surface_force|lateral_force)\b/.test(text)) return 'nano'
+  if (/\bnm\b|\bn_n\b|\bnn\b|\bµn\b|\bun\b/.test(text)) return 'nano'
+  if (/\bn\b/.test(text)) return 'macro'
+  return 'unknown'
+}
+
+function macroContactPattern(record: RecordResponse): ContactDisplayPattern {
+  const text = normalizedContactKey(contactSystemText(record))
+  if (/\bball_on_3_pins?\b|\bball_3_pins?\b/.test(text)) return 'ball_pins'
+  if (/\bfour_ball\b|\b4_ball\b/.test(text)) return 'four_ball'
+  if (/\bpin_on_disk\b|\bpin_disk\b/.test(text)) return 'pin_disk'
+  if (/\bblock_on_ring\b|\bblock_ring\b/.test(text)) return 'block_ring'
+  if (/\bball_on_disk\b|\bball_disk\b|\bball_on_flat\b/.test(text)) return 'ball_disk'
+  const geometry = normalizedContactKey(record.probeGeometry)
+  if (geometry.includes('pin')) return 'pin_disk'
+  if (geometry.includes('ball') || geometry.includes('sphere')) return 'ball_disk'
+  return 'counterface_specimen'
+}
+
+function uniqueDisplayItems(items: string[]): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const item of items) {
+    const text = String(item || '').trim()
+    const key = text.toLowerCase()
+    if (!text || seen.has(key)) continue
+    seen.add(key)
+    result.push(text)
+  }
+  return result
+}
+
+function isBareNumericText(value: string): boolean {
+  return /^[-+]?\d+(?:\.\d+)?$/.test(value.trim())
+}
+
+function hasRoughnessUnit(value: string): boolean {
+  return /\b(?:pm|nm|um|μm|µm|mm|angstrom|angstroms)\b/i.test(value)
+}
+
+function hasRoughnessMetric(value: string): boolean {
+  return /^(?:rms|rq|ra|roughness)\b/i.test(value.trim())
+}
+
+function leadingNumber(value: string): number | null {
+  const match = value.match(/[-+]?\d+(?:\.\d+)?/)
+  if (!match) return null
+  const parsed = Number(match[0])
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function valuesLookEquivalent(a: string, b: string): boolean {
+  const first = leadingNumber(a)
+  const second = leadingNumber(b)
+  if (first == null || second == null) return false
+  return Math.abs(first - second) < 0.000001
+}
+
+function roughnessValueWithUnit(rawValue: string, fallbackValue?: string | null): string {
+  const raw = normalizeTraceDisplayText(rawValue)
+  if (!raw) return ''
+
+  if (isBareNumericText(raw)) {
+    const fallback = normalizeTraceDisplayText(fallbackValue || '')
+    if (fallback && hasRoughnessUnit(fallback) && valuesLookEquivalent(raw, fallback)) {
+      return hasRoughnessMetric(fallback) ? fallback : `Rq ${fallback}`
+    }
+    return `Rq ${raw} nm`
+  }
+
+  if (hasRoughnessUnit(raw) && !hasRoughnessMetric(raw)) return `Rq ${raw}`
+  return raw
+}
+
+function contactRoughnessDetail(role: string, value: string | null | undefined, fallbackValue?: string | null): string {
+  const formatted = roughnessValueWithUnit(String(value || ''), fallbackValue)
+  return formatted ? `${role} ${formatted}` : ''
+}
+
+function macroRoles(pattern: ContactDisplayPattern): { primary: string, secondary: string, relation: string } {
+  if (pattern === 'ball_disk') return { primary: 'Ball', secondary: 'Disk', relation: 'Ball <-> Disk' }
+  if (pattern === 'pin_disk') return { primary: 'Pin', secondary: 'Disk', relation: 'Pin <-> Disk' }
+  if (pattern === 'four_ball') return { primary: 'Upper ball', secondary: 'Lower balls', relation: 'Four-ball set' }
+  if (pattern === 'ball_pins') return { primary: 'Ball', secondary: '3 pins', relation: 'Ball <-> 3 pins' }
+  if (pattern === 'block_ring') return { primary: 'Block', secondary: 'Ring', relation: 'Block <-> Ring' }
+  return { primary: 'Counterface', secondary: 'Specimen', relation: 'Counterface <-> Specimen' }
+}
+
+export function contactDisplayModel(record: RecordResponse): ContactDisplayModel {
+  const mode = contactScale(record)
+  const parts = tribopairParts(record)
+  const extras = tribopairExtras(record)
+
+  if (mode === 'macro') {
+    const pattern = macroContactPattern(record)
+    const roles = macroRoles(pattern)
+    const primaryLabel = String(record.probeMaterial || '').trim() || `${roles.primary} N/A`
+    const secondaryLabel = String(record.substrateMaterial || record.materialName || '').trim() || `${roles.secondary} N/A`
+    const detailBadges = uniqueDisplayItems([
+      record.probeRadius || '',
+      contactRoughnessDetail('Counterface', record.probeRoughness),
+      parts.coating ? `Coat ${parts.coating}` : '',
+      contactRoughnessDetail('Specimen', record.substrateRoughness, record.surfaceRoughness),
+      record.filmThickness ? `Film ${record.filmThickness}` : '',
+    ])
+    return {
+      mode: 'macro',
+      pattern,
+      primaryRole: roles.primary,
+      secondaryRole: roles.secondary,
+      primaryLabel,
+      secondaryLabel,
+      relationLabel: roles.relation,
+      detailBadges,
+      title: [
+        `${roles.primary}: ${primaryLabel}`,
+        `${roles.secondary}: ${secondaryLabel}`,
+        detailBadges.length ? `Details: ${detailBadges.join(' · ')}` : '',
+      ].filter(Boolean).join('\n'),
+    }
+  }
+
+  if (mode === 'nano') {
+    const detailBadges = uniqueDisplayItems([
+      record.probeGeometry || '',
+      record.probeRadius || '',
+      contactRoughnessDetail('Probe', record.probeRoughness),
+      parts.coating ? `Coat ${parts.coating}` : '',
+      contactRoughnessDetail('Substrate', record.substrateRoughness, record.surfaceRoughness),
+      extras.filmThickness ? `Film ${extras.filmThickness}` : '',
+    ])
+    return {
+      mode: 'nano',
+      pattern: 'probe_substrate',
+      primaryRole: 'Probe',
+      secondaryRole: 'Substrate',
+      primaryLabel: parts.probe,
+      secondaryLabel: parts.substrate,
+      relationLabel: 'Probe -> Substrate',
+      detailBadges,
+      title: [
+        `Probe: ${parts.probe}`,
+        `Substrate: ${parts.substrate}`,
+        detailBadges.length ? `Details: ${detailBadges.join(' · ')}` : '',
+      ].filter(Boolean).join('\n'),
+    }
+  }
+
+  const primaryLabel = String(record.probeMaterial || '').trim() || 'Counterface N/A'
+  const secondaryLabel = String(record.substrateMaterial || record.materialName || '').trim() || 'Specimen N/A'
+  const detailBadges = uniqueDisplayItems([
+    record.probeGeometry || '',
+    record.probeRadius || '',
+    parts.coating ? `Coat ${parts.coating}` : '',
+    record.filmThickness ? `Film ${record.filmThickness}` : '',
+  ])
+  return {
+    mode: 'unknown',
+    pattern: 'counterface_specimen',
+    primaryRole: 'Counterface',
+    secondaryRole: 'Specimen',
+    primaryLabel,
+    secondaryLabel,
+    relationLabel: 'Counterface <-> Specimen',
+    detailBadges,
+    title: [
+      `Counterface: ${primaryLabel}`,
+      `Specimen: ${secondaryLabel}`,
+      detailBadges.length ? `Details: ${detailBadges.join(' · ')}` : '',
+    ].filter(Boolean).join('\n'),
   }
 }
 
@@ -563,7 +1022,23 @@ function canonicalIonToken(token: string): string {
   return trimmed
 }
 
+const COMMON_IONIC_LIQUID_LABELS: Record<string, string> = {
+  ean: '[EA][NO3]',
+  ethylammoniumnitrate: '[EA][NO3]',
+  ethylammoniumnitrateean: '[EA][NO3]',
+  pan: '[PA][NO3]',
+  propylammoniumnitrate: '[PA][NO3]',
+  propylammoniumnitratepan: '[PA][NO3]',
+}
+
+function commonIonicLiquidLabel(input: string): string {
+  const compact = String(input || '').toLowerCase().replace(/[^a-z0-9]+/g, '')
+  return COMMON_IONIC_LIQUID_LABELS[compact] || ''
+}
+
 function canonicalIonicLiquidLabel(input: string): string {
+  const commonLabel = commonIonicLiquidLabel(input)
+  if (commonLabel) return commonLabel
   return String(input || '')
     .replace(/\(\s*iC8\s*\)2PO2/g, 'i(C8)2PO2')
     .replace(/\[([PNpn]\d+)\]/g, (_match, token) => `[${canonicalIonToken(token)}]`)
@@ -587,7 +1062,12 @@ const CATION_STRUCTURE_SMILES: Record<string, string> = {
   ea: 'CC[NH3+]',
   pa: 'CCC[NH3+]',
   dmea: 'CC[NH+](C)C',
+  lig4: '[Li+].COCCOCCOCCOCCOC',
   mor11: 'C[N+]1(C)CCOCC1',
+  bhpt: 'OCC[n+]1ccn(CCCCCn2cc[n+](CCO)c2)c1',
+  bhpet: 'OCC[n+]1ccn(CCOCCOCCOCCOCCOCCn2cc[n+](CCO)c2)c1',
+  c10c1im2: 'C[n+]1ccn(CCCCCCCCCCn2cc[n+](C)c2)c1',
+  bupy: 'CCCC[n+]1ccccc1',
   c5py: 'CCCCC[n+]1ccccc1',
   hoc4py: 'OCCCC[n+]1ccccc1',
 }
@@ -598,6 +1078,9 @@ const ANION_STRUCTURE_SMILES: Record<string, string> = {
   tfsi: 'O=S(=O)([N-]S(=O)(=O)C(F)(F)F)C(F)(F)F',
   bob: '[B-]1(OC(=O)C(=O)O1)OC(=O)C(=O)O',
   bmb: '[B-]1(OC(=O)CC(=O)O1)OC(=O)CC(=O)O',
+  a4bmb: '[B-]1(OC(=O)CC(=O)O1)OC(=O)CC(=O)O',
+  a8bmb: '[B-]1(OC(=O)CC(=O)O1)OC(=O)CC(=O)O',
+  a12bmb: '[B-]1(OC(=O)CC(=O)O1)OC(=O)CC(=O)O',
   cl: '[Cl-]',
   br: '[Br-]',
   i: '[I-]',
@@ -649,8 +1132,31 @@ const CATION_STRUCTURE_ALIASES: Record<string, string> = {
   n4hydroxybutylpyridinium: 'hoc4py',
   '4hydroxybutylpyridinium': 'hoc4py',
   hoc4pyridinium: 'hoc4py',
+  bupy: 'bupy',
+  butylpyridinium: 'bupy',
+  nbutylpyridinium: 'bupy',
+  'n-butylpyridinium': 'bupy',
+  butylpyridiniumcation: 'bupy',
+  bupyplus: 'bupy',
   p66614: 'p66614',
   p66614plus: 'p66614',
+  ethylammonium: 'ea',
+  ethylammoniumcation: 'ea',
+  ethylammoniumplus: 'ea',
+  propylammonium: 'pa',
+  propylammoniumcation: 'pa',
+  propylammoniumplus: 'pa',
+  dimethylethylammonium: 'dmea',
+  dimethylethylammoniumcation: 'dmea',
+  li4g: 'lig4',
+  lig4plus: 'lig4',
+  lithiumtetraglymesolvate: 'lig4',
+  bhpt: 'bhpt',
+  bhpet: 'bhpet',
+  c10c1im2: 'c10c1im2',
+  c10mim2: 'c10c1im2',
+  c10c1im22: 'c10c1im2',
+  c10c1im22plus: 'c10c1im2',
 }
 
 const ANION_STRUCTURE_ALIASES: Record<string, string> = {
@@ -673,6 +1179,8 @@ const ANION_STRUCTURE_ALIASES: Record<string, string> = {
   bis244trimethylpentylphosphinate: 'ic82po2',
   aot: 'aot',
   dioctylsulfosuccinate: 'aot',
+  nitrate: 'no3',
+  nitrateanion: 'no3',
 }
 
 export type IonStructureRole = 'cation' | 'anion' | 'compound'
@@ -720,6 +1228,24 @@ function normalizeCompoundStructureKey(input: string): string {
   return COMPOUND_STRUCTURE_ALIASES[key] || key
 }
 
+const CATION_STRUCTURE_DISPLAY_TOKENS: Record<string, string> = {
+  ea: 'EA',
+  pa: 'PA',
+  dmea: 'DMEA',
+}
+
+const ANION_STRUCTURE_DISPLAY_TOKENS: Record<string, string> = {
+  no3: 'NO3',
+}
+
+function displayCationToken(token: string, key = normalizeCationStructureKey(token)): string {
+  return CATION_STRUCTURE_DISPLAY_TOKENS[key] || canonicalIonToken(token)
+}
+
+function displayAnionToken(token: string, key = normalizeAnionStructureKey(token)): string {
+  return ANION_STRUCTURE_DISPLAY_TOKENS[key] || token
+}
+
 function resolveCompoundStructureSmiles(key: string): string | null {
   return COMPOUND_STRUCTURE_SMILES[key] || null
 }
@@ -744,8 +1270,8 @@ function parseIonicLiquidCompound(compound: string) {
     anionToken,
     cationKey: normalizeCationStructureKey(cationToken),
     anionKey: normalizeAnionStructureKey(anionToken),
-    cationLabel: `[${canonicalIonToken(cationToken)}]`,
-    anionLabel: `[${anionToken}]${anionCount}`,
+    cationLabel: `[${displayCationToken(cationToken)}]`,
+    anionLabel: `[${displayAnionToken(anionToken)}]${anionCount}`,
     label: canonicalIonicLiquidLabel(`[${cationToken}][${anionToken}]${anionCount}`),
   }
 }
@@ -953,6 +1479,50 @@ export function lubricantDisplayRows(record: RecordResponse): LubricantDisplayLi
   return [...lines, ...ratioDisplayLine(components)]
 }
 
+function componentDetailLabel(component: LubricantComponent): string {
+  const fraction = componentFraction(component)
+  const unit = String(component.unit || '').trim()
+  const fractionLabel = fraction != null && unit && !isInternalDatasetFractionUnit(unit)
+    ? `: ${fraction} ${unit}`
+    : ''
+  return `${canonicalIonicLiquidLabel(component.compound)}${fractionLabel}`
+}
+
+export function lubricantRecipeDisplay(record: RecordResponse): LubricantRecipeDisplay {
+  const components = recordLubricantComponents(record)
+  const rows = lubricantDisplayRows(record)
+  const compounds = rows.filter((row) => row.kind === 'compound')
+  const ratio = componentRatioLabel(components)
+
+  if (compounds.length <= 1) {
+    const primary = compounds[0]?.text || lubricantDisplay(record)
+    return {
+      kind: 'single',
+      title: lubricantTooltip(record) || primary,
+      primary,
+      secondary: lubricantAliasDisplay(record),
+      ratio: '',
+      badge: 'IL',
+    }
+  }
+
+  const primaryRow = compounds.find((row) => row.emphasis === 'primary') || compounds[0]
+  const secondaryRows = compounds.filter((row) => row !== primaryRow)
+  const secondary = secondaryRows.map((row) => row.text).join(' / ')
+  const title = components.length
+    ? components.map(componentDetailLabel).join('\n')
+    : lubricantDisplay(record)
+
+  return {
+    kind: 'blend',
+    title,
+    primary: primaryRow?.text || lubricantDisplay(record),
+    secondary,
+    ratio,
+    badge: 'BLEND',
+  }
+}
+
 export function formatLiteratureBadge(literature?: RecordLiteratureDTO | null): { author: string, year: string, title: string, full: string } | null {
   if (!literature) return null
   const authors = String(literature.authors || '').trim()
@@ -1013,11 +1583,12 @@ export function lubricantDisplayLines(record: RecordResponse): string[] {
 export function lubricantStructureLayout(record: RecordResponse): LubricantStructureLayout | null {
   const components = recordLubricantComponents(record)
   const parsedComponents = components
-    .map((component) => parseIonicLiquidCompound(component.compound))
+    .map((component) => parseIonicLiquidCompound(canonicalIonicLiquidLabel(component.compound)))
     .filter((component): component is NonNullable<typeof component> => Boolean(component))
   const ratioLabel = componentRatioLabel(components)
+  const rawLabel = canonicalIonicLiquidLabel(recordLubricantRaw(record))
 
-  const compoundItems = (components.length ? components.map((component) => component.compound) : [recordLubricantRaw(record)])
+  const compoundItems = (components.length ? components.map((component) => component.compound) : [rawLabel || recordLubricantRaw(record)])
     .map((compound, index) => compoundStructureItem(compound, index))
     .filter((item): item is IonStructurePreviewItem => Boolean(item))
 
@@ -1054,7 +1625,7 @@ export function lubricantStructureLayout(record: RecordResponse): LubricantStruc
     return { kind: 'component-pairs', ratioLabel, pairs }
   }
 
-  const rawPair = parseIonicLiquidCompound(recordLubricantRaw(record))
+  const rawPair = parseIonicLiquidCompound(rawLabel || recordLubricantRaw(record))
   const cationToken = rawPair?.cationToken || String(record.cation || '').replace(/^\[|\]$/g, '')
   const anionToken = rawPair?.anionToken || String(record.anion || '').replace(/^\[|\]$/g, '')
   const cationKey = rawPair?.cationKey || normalizeCationStructureKey(cationToken)
@@ -1065,8 +1636,8 @@ export function lubricantStructureLayout(record: RecordResponse): LubricantStruc
       : null
   }
 
-  const cationLabel = cationToken ? `[${canonicalIonToken(cationToken)}]` : 'Cation'
-  const anionLabel = anionToken ? `[${anionToken}]` : 'Anion'
+  const cationLabel = cationToken ? `[${displayCationToken(cationToken, cationKey)}]` : 'Cation'
+  const anionLabel = anionToken ? `[${displayAnionToken(anionToken, anionKey)}]` : 'Anion'
   const cationSmiles = record.cationSmiles || resolveCationStructureSmiles(cationKey, record, false)
   const anionSmiles = record.anionSmiles || resolveAnionStructureSmiles(anionKey, record)
   const pair: LubricantStructurePair = {
@@ -1120,9 +1691,12 @@ export function lubricantTooltip(record: RecordResponse): string {
 function renderChemicalDigitsAsSubscriptHtml(input: string): string {
   const canonicalInput = canonicalIonicLiquidLabel(String(input || ''))
   const withPhosphoniumAliases = escapeHtml(canonicalInput).replace(/\[([PNpn])([0-9,]+)\]/g, (_match, aliasHead, aliasDigits) => {
-    return `[${escapeHtml(String(aliasHead))}<sub>${escapeHtml(String(aliasDigits))}</sub>]`
+    return `[${escapeHtml(String(aliasHead))}<sub>${escapeHtml(String(aliasDigits).replace(/,/g, ''))}</sub>]`
   })
   return withPhosphoniumAliases
+    .replace(/\b([A-Za-z])([0-9]+(?:,[0-9]+)+)\b/g, (_match, head, digits) => {
+      return `${escapeHtml(String(head))}<sub>${escapeHtml(String(digits).replace(/,/g, ''))}</sub>`
+    })
     .replace(/([A-Za-z\]\)])(\d{1,2})(?!\d)/g, '$1<sub>$2</sub>')
     .replace(/(^|[\[\s])i(?=\()/g, '$1<sup>i</sup>')
 }

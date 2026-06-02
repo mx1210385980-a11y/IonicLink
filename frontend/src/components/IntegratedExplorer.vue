@@ -6,15 +6,16 @@ defineProps<{
   sourceName?: string
   literatureMetadata?: any
   selectedFileId?: string | null
-  fixedExperimentScale?: string | null
+  recordScope?: 'active' | 'group_library'
   focusRecordId?: number | null
+  focusEntityType?: 'record' | 'candidate' | null
   externalExportRequest?: { id: number, format: 'json' | 'csv' | 'ndjson' } | null
+  externalFilterRequestId?: number | null
 }>()
 
 defineEmits<{
-  'view-literature': [payload?: { literatureId?: number | null, recordId?: number | null }]
+  'view-literature': [payload?: { literatureId?: number | null, recordId?: number | null, mode?: 'grounding' | null }]
   'clear-doi': []
-  'clear-source': []
   'clear-focused-record': []
 }>()
 </script>
@@ -25,12 +26,13 @@ defineEmits<{
     :source-name="sourceName"
     :literature-metadata="literatureMetadata"
     :selected-file-id="selectedFileId"
-    :fixed-experiment-scale="fixedExperimentScale"
-    :focus-record-id="focusRecordId ?? null"
+    :record-scope="recordScope"
+    :focus-record-id="focusRecordId"
+    :focus-entity-type="focusEntityType"
     :external-export-request="externalExportRequest"
-    @view-literature="$emit('view-literature', $event)"
+    :external-filter-request-id="externalFilterRequestId"
+    @view-literature="(payload) => $emit('view-literature', payload)"
     @clear-doi="$emit('clear-doi')"
-    @clear-source="$emit('clear-source')"
     @clear-focused-record="$emit('clear-focused-record')"
   />
 </template>

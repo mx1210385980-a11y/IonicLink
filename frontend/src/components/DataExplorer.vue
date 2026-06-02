@@ -15,7 +15,6 @@ import {
   ExternalLink, CheckCircle,
   Download, BookMarked, Loader2
 } from 'lucide-vue-next'
-import { normalizePotentialDisplayText } from '@/lib/potential'
 
 const props = defineProps<{
   initialDoi?: string
@@ -146,7 +145,7 @@ const conditionText = (record: RecordResponse): string | null => {
   
   if (record.speedValue != null) parts.push(`Speed: ${record.speedValue}mm/s`)
   
-  if (record.potential) parts.push(`Potential: ${normalizePotentialDisplayText(record.potential)}`)
+  if (record.potential) parts.push(`Potential: ${record.potential}`)
   
   if (record.waterContent) {
     const wc = record.waterContent.toLowerCase().includes('dry')

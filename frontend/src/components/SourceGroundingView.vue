@@ -11,7 +11,7 @@
 import { ref, computed } from 'vue'
 import PdfViewerWithHighlight from './PdfViewerWithHighlight.vue'
 import type { HighlightRect } from '@/types/pdf-highlight'
-import { FileText, MapPin, ChevronRight, Sparkles } from 'lucide-vue-next'
+import { AlertCircle, ChevronRight, FileText, MapPin, Search, Sparkles } from 'lucide-vue-next'
 
 // ─── Props ───────────────────────────────────────────────────────────────────
 const props = withDefaults(defineProps<{
@@ -57,12 +57,22 @@ const sortedPageNumbers = computed(() =>
     .map(Number)
     .sort((a, b) => a - b)
 )
+
+const highlightedPageCount = computed(() => sortedPageNumbers.value.length)
+
+function evidenceLabel(item: HighlightRect) {
+  return item.matchedText?.trim() || item.id
+}
+
+function evidenceMeta(item: HighlightRect) {
+  return `Page ${item.page} · ${Math.round(item.coords.w)} x ${Math.round(item.coords.h)} pt`
+}
 </script>
 
 <template>
-  <div class="flex h-full">
+  <div class="flex h-full bg-slate-50/70">
     <!-- ═══════════ LEFT: PDF Viewer ═══════════ -->
-    <div class="flex-1 min-w-0 border-r">
+    <div class="min-w-0 flex-1 border-r border-slate-200 bg-white">
       <PdfViewerWithHighlight
         v-if="pdfUrl"
         ref="viewerRef"
@@ -75,80 +85,84 @@ const sortedPageNumbers = computed(() =>
       <!-- No PDF State -->
       <div
         v-else
-        class="flex flex-col items-center justify-center h-full text-center"
+        class="flex h-full flex-col items-center justify-center px-8 text-center"
       >
-        <FileText class="w-12 h-12 text-muted-foreground/30 mb-3" />
-        <p class="text-sm text-muted-foreground">No PDF loaded</p>
-        <p class="text-xs text-muted-foreground/70 mt-1">Upload and extract a PDF file first</p>
+        <FileText class="mb-3 h-12 w-12 text-slate-300" />
+        <p class="text-sm font-black text-slate-700">No PDF loaded</p>
+        <p class="mt-1 max-w-sm text-xs font-semibold leading-5 text-slate-400">The source PDF is not available for this literature item.</p>
       </div>
     </div>
 
     <!-- ═══════════ RIGHT: Data Cards ═══════════ -->
-    <aside class="w-96 flex-shrink-0 flex flex-col bg-card overflow-hidden">
+    <aside class="flex w-[25rem] flex-shrink-0 flex-col overflow-hidden bg-white">
       <!-- Sidebar Header -->
-      <div class="px-4 py-3 border-b bg-card/80 backdrop-blur-sm">
+      <div class="border-b border-slate-200 bg-white px-4 py-3">
         <div class="flex items-center gap-2">
-          <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center">
-            <Sparkles class="w-4 h-4 text-white" />
+          <div class="flex h-8 w-8 items-center justify-center rounded-md bg-[#0f7c82] text-white">
+            <Sparkles class="h-4 w-4" />
           </div>
-          <div>
-            <h2 class="text-sm font-semibold">Extracted Data</h2>
-            <p class="text-xs text-muted-foreground">
-              {{ highlightData.length }} item{{ highlightData.length !== 1 ? 's' : '' }} found
+          <div class="min-w-0">
+            <h2 class="text-sm font-black text-slate-950">Evidence Workspace</h2>
+            <p class="text-xs font-semibold text-slate-500">
+              {{ highlightData.length }} source hit{{ highlightData.length !== 1 ? 's' : '' }} on {{ highlightedPageCount }} page{{ highlightedPageCount !== 1 ? 's' : '' }}
             </p>
           </div>
         </div>
       </div>
 
       <!-- Data Cards Scrollable List -->
-      <div class="flex-1 overflow-y-auto p-3 space-y-4">
+      <div class="flex-1 space-y-4 overflow-y-auto p-3">
         <template v-for="pageNum in sortedPageNumbers" :key="pageNum">
           <!-- Page Group Header -->
-          <div class="flex items-center gap-2 text-xs text-muted-foreground uppercase tracking-wider font-medium px-1">
-            <FileText class="w-3.5 h-3.5" />
+          <div class="flex items-center gap-2 px-1 text-xs font-black uppercase tracking-[0.16em] text-slate-400">
+            <FileText class="h-3.5 w-3.5" />
             <span>Page {{ pageNum }}</span>
-            <div class="flex-1 border-t border-dashed" />
+            <div class="flex-1 border-t border-dashed border-slate-200" />
           </div>
 
           <!-- Cards -->
-          <button
-            v-for="item in groupedByPage[pageNum]"
-            :key="item.id"
-            @click="selectCard(item.id)"
-            class="w-full text-left group"
-          >
+	          <button
+	            v-for="item in groupedByPage[pageNum]"
+	            :key="item.id"
+	            :aria-label="`Evidence on page ${item.page}: ${evidenceLabel(item)}`"
+	            @click="selectCard(item.id)"
+	            class="w-full text-left group"
+	          >
             <div
-              class="rounded-lg border p-3 transition-all duration-200"
+              class="rounded-md border p-3 transition-all duration-200"
               :class="[
                 item.id === activeHighlightId
-                  ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-400 shadow-md shadow-amber-500/10 ring-1 ring-amber-400/50'
-                  : 'bg-card hover:bg-accent/50 hover:border-accent-foreground/20 border-border'
+                  ? 'border-teal-300 bg-teal-50 shadow-md shadow-teal-500/10 ring-1 ring-teal-300'
+                  : 'border-slate-200 bg-white hover:border-teal-200 hover:bg-teal-50/35'
               ]"
             >
               <div class="flex items-start justify-between gap-2">
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-1.5 mb-1">
+                <div class="min-w-0 flex-1">
+                  <div class="mb-1 flex items-center gap-1.5">
                     <MapPin
-                      class="w-3.5 h-3.5 flex-shrink-0 transition-colors"
-                      :class="item.id === activeHighlightId ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'"
+                      class="h-3.5 w-3.5 flex-shrink-0 transition-colors"
+                      :class="item.id === activeHighlightId ? 'text-[#0f7c82]' : 'text-slate-400'"
                     />
                     <span
-                      class="text-sm font-medium truncate transition-colors"
-                      :class="item.id === activeHighlightId ? 'text-amber-800 dark:text-amber-200' : 'text-foreground'"
+                      class="truncate text-sm font-black transition-colors"
+                      :class="item.id === activeHighlightId ? 'text-[#0f7c82]' : 'text-slate-900'"
                     >
-                      {{ item.id }}
+                      {{ evidenceLabel(item) }}
                     </span>
                   </div>
-                  <div class="ml-5 text-xs text-muted-foreground">
-                    Page {{ item.page }} · ({{ item.coords.x.toFixed(0) }}, {{ item.coords.y.toFixed(0) }})
+                  <div class="ml-5 text-xs font-semibold text-slate-500">
+                    {{ evidenceMeta(item) }}
                   </div>
+                  <p v-if="item.matchedText" class="mt-2 line-clamp-3 rounded-md bg-slate-50 px-2 py-1.5 text-xs font-medium leading-5 text-slate-600">
+                    {{ item.matchedText }}
+                  </p>
                 </div>
                 <ChevronRight
-                  class="w-4 h-4 mt-0.5 flex-shrink-0 transition-all"
+                  class="mt-0.5 h-4 w-4 flex-shrink-0 transition-all"
                   :class="[
                     item.id === activeHighlightId
-                      ? 'text-amber-600 dark:text-amber-400 translate-x-0.5'
-                      : 'text-muted-foreground opacity-0 group-hover:opacity-100'
+                      ? 'translate-x-0.5 text-[#0f7c82]'
+                      : 'text-slate-400 opacity-0 group-hover:opacity-100'
                   ]"
                 />
               </div>
@@ -159,11 +173,16 @@ const sortedPageNumbers = computed(() =>
         <!-- Empty State -->
         <div
           v-if="highlightData.length === 0"
-          class="flex flex-col items-center justify-center h-40 text-center"
+          class="flex min-h-[20rem] flex-col items-center justify-center rounded-md border border-dashed border-slate-200 bg-slate-50 px-5 text-center"
         >
-          <FileText class="w-8 h-8 text-muted-foreground/50 mb-2" />
-          <p class="text-sm text-muted-foreground">No extracted data available</p>
-          <p class="text-xs text-muted-foreground/70 mt-1">Upload a PDF and extract data first</p>
+          <Search v-if="pdfUrl" class="mb-3 h-8 w-8 text-slate-300" />
+          <AlertCircle v-else class="mb-3 h-8 w-8 text-slate-300" />
+          <p class="text-sm font-black text-slate-700">
+            {{ pdfUrl ? 'No page-level evidence located' : 'No source document available' }}
+          </p>
+          <p class="mt-2 max-w-xs text-xs font-semibold leading-5 text-slate-400">
+            {{ pdfUrl ? 'This record can still have text evidence in the table preview, but no PDF highlight was saved for this source.' : 'The literature item does not expose a PDF for source grounding.' }}
+          </p>
         </div>
       </div>
     </aside>

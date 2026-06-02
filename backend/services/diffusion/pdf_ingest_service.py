@@ -47,6 +47,10 @@ VISUAL_SEARCH_TERMS = [
 ]
 
 
+def _is_auto_profile(profile: str) -> bool:
+    return str(profile or "").strip().lower() in {"auto", "high_accuracy", "review_figure_estimate"}
+
+
 def _score_page(text: str) -> int:
     lowered = str(text or "").lower()
     score = 0
@@ -108,8 +112,8 @@ def _build_text_chunks(
     *,
     profile: str,
 ) -> list[dict[str, Any]]:
-    max_pages_per_chunk = 3 if str(profile or "").lower() == "high_accuracy" else 2
-    max_chars = 18000 if str(profile or "").lower() == "high_accuracy" else 12000
+    max_pages_per_chunk = 3 if _is_auto_profile(profile) else 2
+    max_chars = 18000 if _is_auto_profile(profile) else 12000
 
     chunks: list[dict[str, Any]] = []
     current_pages: list[int] = []
@@ -199,7 +203,7 @@ def build_diffusion_ingest_payload(
     *,
     content: str,
     pdf_path: str | None,
-    profile: str = "high_accuracy",
+    profile: str = "auto",
 ) -> dict[str, Any]:
     base_content = str(content or "").strip()
     if not pdf_path or not os.path.exists(pdf_path):
@@ -215,14 +219,14 @@ def build_diffusion_ingest_payload(
     page_texts: dict[int, str] = classified.get("page_texts") or {}
     selected_pages = _select_ranked_pages(
         page_texts,
-        limit=16 if str(profile or "").lower() == "high_accuracy" else 8,
+        limit=16 if _is_auto_profile(profile) else 8,
     )
 
     selected_visual_pages = [
         page_idx
         for page_idx in selected_pages
         if page_idx in set(classified.get("visual_pages") or [])
-    ][: 8 if str(profile or "").lower() == "high_accuracy" else 4]
+    ][: 8 if _is_auto_profile(profile) else 4]
 
     selected_text_blocks = [
         f"[Page {page_idx + 1}]\n{(page_texts.get(page_idx) or '')[:5000]}"

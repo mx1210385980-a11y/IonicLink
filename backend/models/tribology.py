@@ -105,6 +105,10 @@ class TribologyData(BaseModel):
     review_status: Optional[str] = None
     record_origin: Optional[str] = None
     review_entity_type: Optional[str] = None
+    entity_type: Optional[str] = None
+    entity_id: Optional[int] = None
+    entityType: Optional[str] = None
+    entityId: Optional[int] = None
     assembly_notes: Optional[str] = None
 
     @model_validator(mode="before")

@@ -240,6 +240,7 @@ function toggleAll() {
 }
 
 function statusLabel(file: BatchFile): string {
+  if (file.status === 'no_data') return t('status.no_data')
   if (file.status === 'success') {
     return file.records?.length ? t('progress.extracted_records', { count: file.records.length }) : t('status.completed')
   }
@@ -251,17 +252,14 @@ function statusLabel(file: BatchFile): string {
   if (file.status === 'error') {
     return t('progress.needs_review')
   }
-  if (file.status === 'cancelled') {
-    return isChinese.value ? '已停止' : 'Stopped'
-  }
   return t('progress.ready')
 }
 
 function statusTone(file: BatchFile): string {
+  if (file.status === 'no_data') return 'text-amber-600'
   if (file.status === 'success') return 'text-green-500'
   if (file.status === 'processing') return 'text-blue-500'
   if (file.status === 'error') return 'text-rose-500'
-  if (file.status === 'cancelled') return 'text-amber-500'
   return 'text-slate-400'
 }
 

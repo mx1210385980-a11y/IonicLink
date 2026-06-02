@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch, computed } from 'vue'
 import { useRDKit } from '@/composables/useRDKit'
 import { Copy, Loader2, AlertCircle } from 'lucide-vue-next'
 
@@ -19,10 +19,10 @@ const props = withDefaults(defineProps<Props>(), {
   height: undefined,
 })
 
+const canvasRef = ref<HTMLCanvasElement | null>(null)
 const isLoading = ref(true)
 const error = ref<string | null>(null)
 const copySuccess = ref(false)
-const svgUrl = ref<string | null>(null)
 
 const { initRDKit } = useRDKit()
 
@@ -36,21 +36,8 @@ const canvasHeight = computed(() => {
   return props.size === 'thumbnail' ? 60 : 150
 })
 
-const moleculeImageStyle = computed(() => ({
-  width: `${canvasWidth.value}px`,
-  height: `${canvasHeight.value}px`,
-}))
-
-const clearSvgUrl = () => {
-  if (!svgUrl.value) return
-  URL.revokeObjectURL(svgUrl.value)
-  svgUrl.value = null
-}
-
 const renderMolecule = async () => {
-  clearSvgUrl()
-
-  if (!props.smiles) {
+  if (!props.smiles || !canvasRef.value) {
     isLoading.value = false
     return
   }
@@ -65,22 +52,53 @@ const renderMolecule = async () => {
     if (!mol || !mol.is_valid()) {
       error.value = 'Invalid SMILES structure'
       isLoading.value = false
-      mol?.delete()
       return
     }
 
-    // Keep RDKit output as SVG instead of rasterizing to a tiny canvas.
-    // This preserves crisp bonds and atom labels on Retina/high-DPI displays.
+    const canvas = canvasRef.value
+    const ctx = canvas.getContext('2d')
+    if (!ctx) {
+      error.value = 'Canvas not supported'
+      isLoading.value = false
+      return
+    }
+
+    // Clear canvas
+    ctx.clearRect(0, 0, canvasWidth.value, canvasHeight.value)
+
+    // Set background color based on dark mode
+    const isDark = document.documentElement.classList.contains('dark')
+    ctx.fillStyle = isDark ? '#1e293b' : '#ffffff'
+    ctx.fillRect(0, 0, canvasWidth.value, canvasHeight.value)
+
+    // Generate SVG and draw to canvas
     const svg = mol.get_svg_with_highlights(JSON.stringify({
       width: canvasWidth.value,
       height: canvasHeight.value,
-      bondLineWidth: props.size === 'thumbnail' ? 1.35 : 1.5,
+      bondLineWidth: props.size === 'thumbnail' ? 1 : 1.5,
       addStereoAnnotation: true,
     }))
 
+    // Convert SVG to image and draw on canvas
+    const img = new Image()
     const svgBlob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
-    svgUrl.value = URL.createObjectURL(svgBlob)
-    isLoading.value = false
+    const url = URL.createObjectURL(svgBlob)
+
+    img.onload = () => {
+      ctx.drawImage(img, 0, 0, canvasWidth.value, canvasHeight.value)
+      URL.revokeObjectURL(url)
+      isLoading.value = false
+    }
+
+    img.onerror = () => {
+      error.value = 'Failed to render structure'
+      URL.revokeObjectURL(url)
+      isLoading.value = false
+    }
+
+    img.src = url
+
+    // Cleanup
     mol.delete()
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to render structure'
@@ -111,7 +129,7 @@ watch(() => props.smiles, () => {
 })
 
 onUnmounted(() => {
-  clearSvgUrl()
+  // Cleanup is handled in renderMolecule
 })
 </script>
 
@@ -122,24 +140,15 @@ onUnmounted(() => {
     </div>
 
     <div class="relative inline-block">
-      <img
-        v-if="svgUrl"
-        :src="svgUrl"
+      <canvas
+        ref="canvasRef"
         :width="canvasWidth"
         :height="canvasHeight"
-        :style="moleculeImageStyle"
-        alt="Molecule structure"
         class="rounded border border-gray-200 dark:border-gray-700"
         :class="{
           'opacity-50': isLoading,
           'border-red-300 dark:border-red-700': error,
         }"
-      />
-      <div
-        v-else
-        class="rounded border border-gray-200 bg-white dark:border-gray-700 dark:bg-slate-800"
-        :class="{ 'border-red-300 dark:border-red-700': error }"
-        :style="moleculeImageStyle"
       />
 
       <!-- Loading State -->
@@ -196,17 +205,7 @@ onUnmounted(() => {
   display: inline-block;
 }
 
-.molecule-viewer--thumbnail img {
+.molecule-viewer--thumbnail canvas {
   display: block;
-}
-
-.molecule-viewer img {
-  background: #ffffff;
-  image-rendering: auto;
-  object-fit: contain;
-}
-
-:global(.dark) .molecule-viewer img {
-  background: #1e293b;
 }
 </style>

@@ -144,6 +144,11 @@ def _is_supported_diffusion_unit(unit: Any) -> bool:
     return _diffusion_unit_scale_to_canonical(unit) is not None
 
 
+def _is_figure_source(record: dict[str, Any]) -> bool:
+    source = str(_first_present(record.get("source"), record.get("source_figure")) or "").strip().lower()
+    return source.startswith(("fig", "figure", "image", "plot"))
+
+
 def _normalize_diffusion_unit_and_value(value: Any, unit: Any) -> tuple[float | None, str | None]:
     numeric = _to_float(value)
     if numeric is None:
@@ -162,6 +167,14 @@ def _diffusion_values_close(left: Any, right: Any) -> bool:
         return False
     tolerance = max(1e-9, abs(float(right_num)) * 0.015)
     return abs(float(left_num) - float(right_num)) <= tolerance
+
+
+def _has_nonpositive_diffusion_value(record: dict[str, Any]) -> bool:
+    for key in ("D_total", "D_cation", "D_anion"):
+        numeric = _to_float(record.get(key))
+        if numeric is not None and numeric <= 0:
+            return True
+    return False
 
 
 def _extract_diffusion_measure_from_text(text: Any) -> tuple[float | None, str | None]:
@@ -191,9 +204,11 @@ def _extract_diffusion_measures_from_text(text: Any) -> list[dict[str, Any]]:
             raw_value = float(match.group(1)) * (10 ** int(exponent))
         except Exception:
             continue
+        if raw_value <= 0:
+            continue
         unit = match.group(3).strip()
         normalized_value, normalized_unit = _normalize_diffusion_unit_and_value(raw_value, unit)
-        if normalized_value is None or not normalized_unit:
+        if normalized_value is None or normalized_value <= 0 or not normalized_unit:
             continue
         measures.append(
             {
@@ -709,11 +724,15 @@ def diffusion_drop_reason(record: dict[str, Any], *, require_evidence_measure: b
         return "invalid_payload"
     if not record_has_diffusion_value(record):
         return "no_diffusion_value"
+    if _has_nonpositive_diffusion_value(record):
+        return "nonpositive_diffusion_value"
     if _is_non_ionic_liquid_solute(record.get("ionic_liquid")):
         return "non_ionic_liquid_solute"
     evidence_text = str(record.get("evidence") or "").strip()
-    evidence_measures = _extract_diffusion_measures_from_text(evidence_text)
     unit = record.get("D_unit")
+    if unit and not _is_supported_diffusion_unit(unit) and _is_figure_source(record):
+        return "figure_unit_requires_manual_review"
+    evidence_measures = _extract_diffusion_measures_from_text(evidence_text)
     if unit and not _is_supported_diffusion_unit(unit) and not evidence_measures:
         return "unsupported_diffusion_unit"
     if require_evidence_measure:

@@ -247,6 +247,62 @@ def test_review_payload_exposes_grounding_mode_for_derived_temperature():
     assert payload["fields"]["temperature"]["grounding_note"] == "Normalized from room-temperature wording."
 
 
+def test_review_payload_clears_bare_numeric_roughness_text_when_context_is_missing():
+    record = SimpleNamespace(
+        id=12,
+        literature_id=10,
+        literature=SimpleNamespace(file_path=None),
+        sample_id=None,
+        series_id=None,
+        review_status="pending_review",
+        record_origin="llm_extraction",
+        assembly_notes=None,
+        confidence=0.88,
+        material_name="Au(111)",
+        lubricant="[Py1,4][FAP]",
+        cof_raw="0.45",
+        cof_value=0.45,
+        load_raw=None,
+        load_value=None,
+        speed_value=None,
+        temperature="298.15 K",
+        potential=None,
+        water_content=None,
+        source_page=4,
+        field_evidence_json=json.dumps(
+            {
+                "probe_roughness": {
+                    "value": "RMS 2 nm",
+                    "evidence": {
+                        "source_type": "text",
+                        "page": 4,
+                        "source_label": "Text",
+                        "quote": "2",
+                        "matched_text": "2",
+                        "bbox": [10, 20, 14, 30],
+                    },
+                },
+            }
+        ),
+        friction_force=None,
+        wear_rate=None,
+        film_thickness=None,
+        residual_film_thickness_d=None,
+        layer_spacing_delta=None,
+        surface_roughness=None,
+        probe_roughness="RMS 2 nm",
+        substrate_roughness=None,
+    )
+
+    payload = _build_record_field_evidence_payload(record)
+
+    roughness = payload["fields"]["probe_roughness"]
+    assert roughness["evidence"]["quote"] is None
+    assert roughness["evidence"]["matched_text"] is None
+    assert roughness["evidence"]["bbox"] is None
+    assert "roughness/unit context" in roughness["grounding_note"]
+
+
 def test_build_field_evidence_map_prefers_field_specific_hits(monkeypatch):
     def fake_locate(**kwargs):
         field_key = kwargs["field_key"]

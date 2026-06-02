@@ -1,39 +1,19 @@
+import * as RDKitLoaderModule from '@rdkit/rdkit'
+import rdkitWasmUrl from '@rdkit/rdkit/dist/RDKit_minimal.wasm?url'
 import type { RDKitLoader, RDKitModule } from '@rdkit/rdkit'
-import { recoverFromChunkLoadError } from '@/lib/lazyComponent'
 
 let rdkitInstance: RDKitModule | null = null
 let initPromise: Promise<RDKitModule> | null = null
-let loaderPromise: Promise<{ loader: RDKitLoader; wasmUrl: string }> | null = null
 
-function resolveRDKitLoader(moduleValue: unknown): RDKitLoader {
-  const candidate = moduleValue as RDKitLoader & { default?: RDKitLoader }
-  const loader = candidate.default ?? candidate
+function getRDKitLoader(): RDKitLoader {
+  const moduleValue = RDKitLoaderModule as unknown as RDKitLoader & { default?: RDKitLoader }
+  const loader = moduleValue.default ?? moduleValue
 
   if (typeof loader !== 'function') {
     throw new Error('RDKit loader is not available')
   }
 
   return loader
-}
-
-async function loadRDKitRuntime() {
-  if (loaderPromise) return loaderPromise
-
-  loaderPromise = Promise.all([
-    import('@rdkit/rdkit'),
-    import('@rdkit/rdkit/dist/RDKit_minimal.wasm?url'),
-  ]).then(([loaderModule, wasmModule]) => {
-    return {
-      loader: resolveRDKitLoader(loaderModule),
-      wasmUrl: String((wasmModule as { default?: string }).default || ''),
-    }
-  }).catch((error) => {
-    loaderPromise = null
-    recoverFromChunkLoadError(error)
-    throw error
-  })
-
-  return loaderPromise
 }
 
 /**
@@ -55,9 +35,9 @@ export function useRDKit() {
     }
 
     try {
-      const { loader: initRDKitModule, wasmUrl } = await loadRDKitRuntime()
+      const initRDKitModule = getRDKitLoader()
       initPromise = initRDKitModule({
-        locateFile: () => wasmUrl,
+        locateFile: () => rdkitWasmUrl,
       })
       const module = await initPromise
       rdkitInstance = module

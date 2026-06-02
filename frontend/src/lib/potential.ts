@@ -50,6 +50,14 @@ export function normalizePotentialDisplayText(input: string | number | null | un
 
   if (!text) return ''
 
+  if (
+    /\b(?:OCP|OCV|open[-\s]*circuit(?:\s+potential)?)\b/i.test(text)
+    && /\b(?:no|without)\s+(?:external\s+|applied\s+)?potential\b/i.test(text)
+    && !/[+-]?\d+(?:[\.:]\d+)?\s*(?:mV|millivolts?|V|volts?)\b/i.test(text)
+  ) {
+    return '0 V vs OCP'
+  }
+
   if (/^(?:at\s+(?:the\s+)?)?(?:OCP|OCV|open[-\s]*circuit(?:\s+potential)?)$/i.test(text)) {
     return '0 V vs OCP'
   }

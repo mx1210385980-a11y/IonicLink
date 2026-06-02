@@ -1,3 +1,5 @@
+from rdkit import Chem
+
 from services.file_service import _canonicalize_ionic_liquid_name, _normalize_record_chemistry
 from services.il_resolver_service import resolve_il, resolve_ionic_liquid_alias
 from services.normalization import normalize_extraction_row
@@ -30,6 +32,33 @@ def test_resolve_il_maps_palacio_sample_aliases_to_ion_forms():
     assert bhpt["anion_stoichiometry"] == 2
 
     assert resolve_ionic_liquid_alias("BHPET (Dicationic IL)")["canonical_name"] == "[BHPET][TFSI]2"
+
+
+def test_resolve_il_admits_long_chain_borate_ammonium_series():
+    resolved = resolve_il("[N88812][A12BMB]")
+
+    assert resolved["canonical_name"] == "[N88812][A12BMB]"
+    assert resolved["cation"] == "N88812"
+    assert resolved["anion"] == "A12BMB"
+
+
+def test_resolve_il_provides_renderable_cation_smiles_for_special_cations():
+    cases = {
+        "LiG4": ("Li(G4)", 1),
+        "BHPT": ("BHPT", 2),
+        "BHPET": ("BHPET", 2),
+        "[C10(C1Im)2][NTf2]2": ("C10(C1Im)2", 2),
+    }
+
+    for name, (expected_cation, expected_charge) in cases.items():
+        resolved = resolve_il(name)
+        cation_smiles = resolved["cation_smiles"]
+        mol = Chem.MolFromSmiles(cation_smiles)
+
+        assert resolved["cation"] == expected_cation
+        assert cation_smiles
+        assert mol is not None
+        assert sum(atom.GetFormalCharge() for atom in mol.GetAtoms()) == expected_charge
 
 
 def test_normalize_record_chemistry_preserves_literature_alias_for_standardized_il():
@@ -109,6 +138,32 @@ def test_normalize_extraction_row_normalizes_potential_reference():
     assert row["potential"] == "-0.16 V vs OCP"
 
 
+def test_normalize_extraction_row_accepts_structured_ionic_liquid_value():
+    row = normalize_extraction_row(
+        {
+            "material_name": "steel",
+            "ionic_liquid": {"value": "[BMIM][PF6]", "evidence": {"page": 2}},
+            "cof": "0.10",
+        },
+        fallback_page=2,
+    )
+
+    assert row["ionic_liquid"] == "[BMIM][PF6]"
+
+
+def test_normalize_extraction_row_accepts_structured_lubricant_fallback():
+    row = normalize_extraction_row(
+        {
+            "material_name": "steel",
+            "lubricant": {"name": "[BMIM][PF6]", "evidence": {"page": 2}},
+            "cof": "0.10",
+        },
+        fallback_page=2,
+    )
+
+    assert row["ionic_liquid"] == "[BMIM][PF6]"
+
+
 def test_normalize_record_chemistry_can_recover_lubricant_from_evidence_text():
     records = [
         {
@@ -147,6 +202,40 @@ def test_normalize_record_chemistry_recovers_mixed_notation_embedded_in_sentence
     assert canonical_name == "[Pyr14][FAP]"
     assert resolved["cation"] == "Pyr14"
     assert resolved["anion"] == "FAP"
+
+
+def test_normalize_record_chemistry_recovers_il_from_material_context():
+    records = [
+        {
+            "ionic_liquid": "Unknown IL",
+            "material_name": "1-butyl-3-methylimidazolium tetrafluoroborate ([BMIM][BF4], BB)",
+            "evidence": "The BB IL was used for the friction measurement.",
+        }
+    ]
+
+    _normalize_record_chemistry(records)
+
+    assert records[0]["ionic_liquid"] == "[BMIM][BF4]"
+    assert records[0]["lubricant"] == "[BMIM][BF4]"
+
+
+def test_normalize_record_chemistry_does_not_build_il_from_unsubstantiated_component_pair():
+    records = [
+        {
+            "ionic_liquid": "Unknown IL",
+            "cation": "EA",
+            "anion": "Ac",
+            "evidence": (
+                "The separation is approximately 0.65 nm, indicating a [BMIM]+ "
+                "cation-rich layer with standing-up cation-anion pairs."
+            ),
+        }
+    ]
+
+    _normalize_record_chemistry(records)
+
+    assert records[0]["ionic_liquid"] == "Unknown IL"
+    assert records[0].get("lubricant") != "[EA][Ac]"
 
 
 def test_row_normalizer_replaces_source_label_placeholder_with_il_from_sample_context():

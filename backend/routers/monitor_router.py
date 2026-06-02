@@ -104,6 +104,7 @@ class LLMRuntimeConfigPayload(BaseModel):
     openrouter_app_name: str | None = None
     text_model: str | None = None
     vision_model: str | None = None
+    fast_table_model: str | None = None
     vision_api_key: str | None = None
     clear_vision_api_key: bool | None = None
 

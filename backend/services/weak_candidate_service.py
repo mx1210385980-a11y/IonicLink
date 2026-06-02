@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
+
+from knowledge_base import normalize_ionic_liquid
 
 
 _EMPTY_VALUES = {
@@ -33,8 +36,61 @@ def _text(value: Any) -> str:
     return str(value).strip()
 
 
+def _looks_like_reference_marker_value(value: Any) -> bool:
+    text = _text(value)
+    if not text:
+        return False
+    pair = re.fullmatch(r"\[([^\[\]]+)\]\[([^\[\]]+)\]", text)
+    if pair:
+        left, right = pair.group(1).strip(), pair.group(2).strip()
+        common_words = {
+            "and", "as", "at", "by", "for", "from", "in", "into", "near",
+            "of", "on", "or", "the", "to", "with", "without", "beneficial",
+            "previously",
+        }
+        if left.isdigit():
+            return True
+        if (
+            left.isalpha()
+            and right.isalpha()
+            and left.islower()
+            and right.islower()
+            and (left in common_words or right in common_words)
+        ):
+            return True
+    return bool(
+        re.fullmatch(r"\[\d{1,4}\]\[[A-Za-z]{2,24}\]", text)
+        or re.fullmatch(r"\[\d{1,4}\]", text)
+    )
+
+
 def _has_value(value: Any) -> bool:
-    return _text(value).lower() not in _EMPTY_VALUES
+    return _text(value).lower() not in _EMPTY_VALUES and not _looks_like_reference_marker_value(value)
+
+
+def _extract_il_from_context(item: dict[str, Any]) -> str:
+    context = " ".join(
+        _text(item.get(key))
+        for key in (
+            "ionic_liquid",
+            "lubricant",
+            "material_name",
+            "substrate_material",
+            "evidence",
+            "notes",
+            "source",
+            "source_figure",
+            "sample_id",
+        )
+    )
+    for hit in re.findall(r"(\[[^\[\]]+?\]\s*\[[^\[\]]+?\])", context):
+        token = re.sub(r"\s+", "", hit)
+        if _looks_like_reference_marker_value(token):
+            continue
+        normalized = normalize_ionic_liquid(token) or token
+        if _has_value(normalized):
+            return normalized
+    return ""
 
 
 def _first_value(item: dict[str, Any], *keys: str) -> Any:
@@ -173,9 +229,10 @@ def build_weak_candidate_items(
         if not _has_performance_signal(item) or not _has_context_signal(item):
             continue
 
-        item["ionic_liquid"] = (
-            _first_value(item, *_FIELD_ALIASES["ionic_liquid"]) or "Unknown IL"
-        )
+        ionic_liquid = _first_value(item, *_FIELD_ALIASES["ionic_liquid"]) or _extract_il_from_context(item)
+        if not _has_value(ionic_liquid):
+            continue
+        item["ionic_liquid"] = ionic_liquid
         item["material_name"] = (
             _first_value(item, *_FIELD_ALIASES["material_name"]) or "Unknown Material"
         )

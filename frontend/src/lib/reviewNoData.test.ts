@@ -25,10 +25,26 @@ describe('review no-data helpers', () => {
   })
 
   it('explains why an empty diffusion review has nothing to audit', () => {
-    const diagnostic = reviewNoDataDiagnostic(batchFile('no_data'))
+    const diagnostic = reviewNoDataDiagnostic({
+      ...batchFile('no_data'),
+      errorMessage: 'Loaded from literature library',
+    })
 
     expect(diagnostic.title).toContain('扩散')
-    expect(diagnostic.message).toContain('No explicit diffusion coefficient')
+    expect(diagnostic.message).toContain('未找到')
     expect(diagnostic.hints.join(' ')).toContain('图表')
+  })
+
+  it('turns figure-only diffusion no-data into a clear manual-estimate workflow', () => {
+    const diagnostic = reviewNoDataDiagnostic({
+      ...batchFile('no_data'),
+      errorMessage: 'chunk 1: No explicit diffusion coefficient values with units are provided in the text or figure…',
+    })
+
+    expect(diagnostic.kind).toBe('diffusion_figure_estimate')
+    expect(diagnostic.title).toBe('需要图表估读')
+    expect(diagnostic.message).toContain('图注')
+    expect(diagnostic.primaryActionLabel).toBe('用当前页估读')
+    expect(diagnostic.hints.join(' ')).toContain('原始轴单位')
   })
 })

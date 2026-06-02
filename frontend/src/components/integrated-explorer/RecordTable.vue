@@ -2,43 +2,34 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 
-import { Edit, Eye, Trash2 } from 'lucide-vue-next'
-import LubricantStructurePreview from '@/components/integrated-explorer/LubricantStructurePreview.vue'
-import type { EvidenceResult, RecordResponse } from '@/lib/api'
-import { canonicalExperimentScaleValue, experimentScaleBadgeClass, experimentScaleLabel } from '@/lib/experimentScale'
+import { BookOpen, Check } from 'lucide-vue-next'
+import ConditionMicrobar from '@/components/integrated-explorer/ConditionMicrobar.vue'
+import LubricantRecipeCell from '@/components/integrated-explorer/LubricantRecipeCell.vue'
+import TribopairCapsule from '@/components/integrated-explorer/TribopairCapsule.vue'
+import type { RecordResponse } from '@/lib/api'
 import {
   cofDisplay,
-  type DetailedConditionChip,
-  type ConditionGroupTone,
-  confidenceDisplay,
-  confidenceValueFor,
-  conditionChipDisplayParts,
-  detailedConditionChips,
-  formatIonicLiquidPartHtml,
-  ionicLiquidParts,
-  lubricantAliasDisplay,
-  type LubricantDisplayLine,
-  lubricantDisplayRows,
-  lubricantTooltip,
-  surfaceRoughnessBadge,
-  tribopairExtras,
-  tribopairParts,
+  compactRecordDisplayId,
+  recordDisplayId,
 } from '@/lib/integratedExplorerHelpers'
 
 const props = defineProps<{
   loading: boolean
   records: RecordResponse[]
+  rowNumberStart?: number
+  focusRecordId?: number | null
+  focusEntityType?: 'record' | 'candidate' | null
   deletingRowId: number | null
-  evidenceData: Record<number, EvidenceResult | null>
   structurePreviewOpen: boolean
   structurePreviewRowId: number | null
-  focusRecordId?: number | null
-  selectedIds?: Set<number>
-  rowNumberStart?: number
-  openEvidenceModal: (record: RecordResponse) => void
-  openReviewRecord?: (record: RecordResponse) => void
-  openEditModal: (record: RecordResponse) => void
-  removeRecord: (record: RecordResponse) => void
+  selectedIds: Set<number>
+  openEvidenceModal: (
+    record: RecordResponse,
+    field?: 'ionic-liquid' | 'tribopair' | 'conditions' | 'cof',
+    event?: MouseEvent | KeyboardEvent,
+    fieldKey?: string,
+  ) => void
+  openLiterature?: (record: RecordResponse) => void
   openStructurePreview: (record: RecordResponse) => void
 }>()
 
@@ -47,28 +38,16 @@ const emit = defineEmits<{
   'toggle-select-page': [select: boolean]
 }>()
 
-function isSelected(recordId: number): boolean {
-  return Boolean(props.selectedIds?.has(Number(recordId)))
-}
-
-function displayRowNumber(index: number): number {
-  return Number(props.rowNumberStart || 1) + index
-}
-
-const allOnPageSelected = computed(() => {
-  if (!props.records?.length || !props.selectedIds) return false
-  return props.records.every((r) => props.selectedIds!.has(Number(r.id)))
-})
-const someOnPageSelected = computed(() => {
-  if (!props.records?.length || !props.selectedIds) return false
-  return props.records.some((r) => props.selectedIds!.has(Number(r.id))) && !allOnPageSelected.value
-})
-
 // Virtual scrolling configuration
-// 行内会同时渲染长离子液体名、结构缩略图、文献卡片和多组条件芯片。
-// 估算偏小会让绝对定位的虚拟行互相覆盖，看起来像重复记录。
-const ROW_HEIGHT = 264 // Estimated row height in pixels
+const ROW_HEIGHT = 160 // Estimated row height in pixels
 const OVERSCAN = 5     // Number of items to render outside visible area
+const COL_SELECT = 'w-[48px]'
+const COL_ID = 'w-[56px]'
+const COL_IONIC = 'w-[280px]'
+const COL_TRIBOPAIR = 'w-[240px]'
+const COL_CONDITIONS = 'w-[304px]'
+const COL_COF = 'w-[126px]'
+const COL_LITERATURE = 'w-[210px]'
 
 const parentRef = ref<HTMLElement | null>(null)
 
@@ -88,95 +67,74 @@ const virtualizer = useVirtualizer(
 
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
 const totalSize = computed(() => virtualizer.value.getTotalSize())
-
-// 当 focusRecordId 出现在当前页时，自动滚动到该行
-watch(
-  [() => props.focusRecordId, () => props.records, () => props.loading],
-  async ([id, records, isLoading]) => {
-    if (id == null || isLoading) return
-    const targetIndex = (records as RecordResponse[]).findIndex((r) => Number(r?.id) === Number(id))
-    if (targetIndex < 0) return
-    await nextTick()
-    try {
-      virtualizer.value.scrollToIndex(targetIndex, { align: 'center' })
-    } catch {
-      // 虚拟滚动还没初始化好，忽略
-    }
-  },
-  { immediate: true },
-)
 const visibleRecordRows = computed(() =>
   virtualRows.value.flatMap((virtualRow) => {
     const record = props.records[virtualRow.index]
     return record ? [{ virtualRow, record }] : []
   }),
 )
-
-function roughnessBadge(record: RecordResponse) {
-  return surfaceRoughnessBadge(record)
+function isCandidateRecord(record: RecordResponse) {
+  return String(record.reviewEntityType || record.entityType || '').trim().toLowerCase() === 'candidate'
+}
+function recordEntityType(record: RecordResponse) {
+  return String(record.reviewEntityType || record.entityType || 'record').trim().toLowerCase()
+}
+function recordMatchesFocusEntity(record: RecordResponse) {
+  const targetEntityType = String(props.focusEntityType || '').trim().toLowerCase()
+  return !targetEntityType || recordEntityType(record) === targetEntityType
+}
+const focusedRecordIndex = computed(() => {
+  if (props.focusRecordId == null) return -1
+  return props.records.findIndex((record) => Number(record.id) === Number(props.focusRecordId) && recordMatchesFocusEntity(record))
+})
+const pageRecordIds = computed(() =>
+  props.records
+    .filter((record) => !isCandidateRecord(record))
+    .map((record) => Number(record.id))
+    .filter((id) => Number.isFinite(id)),
+)
+const pageScrollKey = computed(() => pageRecordIds.value.join('|'))
+const selectedOnPageCount = computed(() =>
+  pageRecordIds.value.filter((id) => props.selectedIds.has(id)).length,
+)
+const allPageSelected = computed(() =>
+  pageRecordIds.value.length > 0 && selectedOnPageCount.value === pageRecordIds.value.length,
+)
+const somePageSelected = computed(() =>
+  selectedOnPageCount.value > 0 && !allPageSelected.value,
+)
+function isFocusedRecord(record: RecordResponse) {
+  return props.focusRecordId != null && Number(record.id) === Number(props.focusRecordId) && recordMatchesFocusEntity(record)
 }
 
-function lubricantLineClass(line: LubricantDisplayLine): string {
-  if (line.kind === 'ratio') return 'mt-1'
-  return line.emphasis === 'secondary'
-    ? 'text-[12.5px] font-semibold leading-[1.12] text-slate-500 dark:text-slate-400'
-    : 'text-[15px] font-bold leading-[1.16] text-slate-900 dark:text-slate-100'
+watch(
+  focusedRecordIndex,
+  async (focusedIndex) => {
+    if (focusedIndex < 0) return
+    await nextTick()
+    virtualizer.value.scrollToIndex(focusedIndex)
+  },
+  { immediate: true },
+)
+
+watch(
+  pageScrollKey,
+  async () => {
+    if (props.loading || focusedRecordIndex.value >= 0) return
+    await nextTick()
+    virtualizer.value.scrollToOffset(0)
+  },
+)
+
+function literatureTitle(record: RecordResponse) {
+  return record.literature?.title || `Literature ${record.literatureId || '--'}`
 }
 
-// 跟踪哪些行展开了"常规条件"（室温/0V等默认折叠的芯片）
-const expandedCommonRows = ref<Set<number>>(new Set())
-function isCommonExpanded(recordId: number | null | undefined): boolean {
-  if (recordId == null) return false
-  return expandedCommonRows.value.has(Number(recordId))
-}
-function toggleCommonExpand(recordId: number | null | undefined) {
-  if (recordId == null) return
-  const id = Number(recordId)
-  const next = new Set(expandedCommonRows.value)
-  if (next.has(id)) next.delete(id)
-  else next.add(id)
-  expandedCommonRows.value = next
-}
-
-function notableConditionChips(record: RecordResponse) {
-  return detailedConditionChips(record).filter((chip) => !chip.shortcut)
-}
-function commonConditionChips(record: RecordResponse) {
-  return detailedConditionChips(record).filter((chip) => Boolean(chip.shortcut))
-}
-
-function conditionToneLabelClass(tone: ConditionGroupTone): string {
-  const classes: Record<ConditionGroupTone, string> = {
-    env: 'text-sky-700 dark:text-sky-300',
-    dyn: 'text-violet-700 dark:text-violet-300',
-    surf: 'text-emerald-700 dark:text-emerald-300',
-  }
-  return classes[tone]
-}
-
-function conditionDisplayValue(chip: DetailedConditionChip, fallback?: string): string {
-  return conditionChipDisplayParts(chip, fallback).value
-}
-
-function conditionDisplayUnit(chip: DetailedConditionChip, fallback?: string): string {
-  return conditionChipDisplayParts(chip, fallback).unit
-}
-
-function conditionDisplayLabel(chip: DetailedConditionChip, fallback?: string): string {
-  return conditionChipDisplayParts(chip, fallback).label
-}
-
-function recordExperimentScaleValue(record: RecordResponse): string {
-  return canonicalExperimentScaleValue(
-    record.experimentScale
-    || record.experimentProfile?.scale
-    || record.tribologicalSystem?.scale,
-  )
-}
-
-function recordExperimentScaleLabel(record: RecordResponse): string {
-  const value = recordExperimentScaleValue(record)
-  return value ? experimentScaleLabel(value) : ''
+function literatureMeta(record: RecordResponse) {
+  const journal = String(record.literature?.journal || '').trim()
+  const year = record.literature?.year ? String(record.literature.year) : ''
+  if (journal && year) return `${journal} (${year})`
+  return journal || year || 'Open in library'
 }
 
 // Expose scroll methods for external control
@@ -187,95 +145,96 @@ defineExpose({
 </script>
 
 <template>
-  <div class="virtual-table-container flex flex-col overflow-hidden rounded-md border border-slate-200 bg-white shadow-[0_16px_36px_-30px_rgba(15,23,42,0.34)] dark:border-slate-800 dark:bg-slate-950/85 dark:shadow-[0_10px_30px_rgba(2,8,23,0.35)]">
+  <div class="virtual-table-container database-record-table flex flex-col overflow-x-auto overflow-y-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950/85 dark:shadow-[0_10px_30px_rgba(2,8,23,0.35)]">
     <!-- Fixed Header -->
-    <div class="virtual-table-header shrink-0 border-b border-slate-100 bg-slate-50 text-xs text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
-      <div class="record-table-grid items-center">
-        <div class="flex items-center justify-center px-2 py-4">
-          <input
-            type="checkbox"
-            class="h-4 w-4 cursor-pointer rounded border-slate-300 text-[#0f172a] focus:ring-[#64748b]"
-            :checked="allOnPageSelected"
-            :indeterminate.prop="someOnPageSelected"
-            :disabled="!records.length"
-            title="全选 / 取消本页全部"
-            @change="(e: any) => emit('toggle-select-page', !!e.target.checked)"
+    <div class="virtual-table-header min-w-[1264px] shrink-0 border-b border-slate-200 bg-[linear-gradient(180deg,#fcfeff_0%,#f7fafc_100%)] text-[0.68rem] font-black uppercase tracking-[0.18em] text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+      <div class="flex items-center">
+        <div :class="COL_SELECT" class="shrink-0 px-3 py-3.5">
+          <button
+            type="button"
+            class="inline-flex h-7 w-7 items-center justify-center rounded-md border text-slate-400 transition hover:border-[#0f7c82] hover:bg-[#eefafa] hover:text-[#0f7c82]"
+            :class="allPageSelected || somePageSelected ? 'border-[#0f7c82] bg-[#eefafa] text-[#0f7c82]' : 'border-slate-300 bg-white'"
+            aria-label="Select all records on this page"
+            :aria-pressed="allPageSelected"
+            @click="emit('toggle-select-page', !allPageSelected)"
           >
+            <Check v-if="allPageSelected" class="h-4 w-4 stroke-[3]" />
+            <span v-else-if="somePageSelected" class="h-1.5 w-1.5 rounded-full bg-current" />
+          </button>
         </div>
-        <div class="whitespace-nowrap px-3 py-4 font-medium">序号</div>
-        <div class="min-w-0 whitespace-nowrap px-3 py-4 font-medium">离子液体</div>
-        <div class="min-w-0 whitespace-nowrap px-2 py-4 font-medium">摩擦副</div>
-        <div class="min-w-0 whitespace-nowrap px-3 py-4 font-medium">实验条件</div>
-        <div class="cof-sticky-header whitespace-nowrap px-3 py-4 text-right font-bold text-[#315083] dark:text-sky-300">COF / 操作</div>
+        <div :class="COL_ID" class="shrink-0 px-3 py-3.5 text-center"><span class="column-ruler-label justify-center"><span class="column-ruler-mark" />#</span></div>
+        <div :class="COL_IONIC" class="shrink-0 px-4 py-3.5"><span class="column-ruler-label"><span class="column-ruler-mark" />IONIC LIQUID</span></div>
+        <div :class="COL_TRIBOPAIR" class="shrink-0 px-4 py-3.5"><span class="column-ruler-label"><span class="column-ruler-mark" />TRIBOPAIR</span></div>
+        <div :class="COL_CONDITIONS" class="shrink-0 px-3 py-3.5"><span class="column-ruler-label"><span class="column-ruler-mark" />CONDITIONS</span></div>
+        <div :class="COL_COF" class="shrink-0 px-4 py-3.5 text-[#0f7c82]"><span class="column-ruler-label column-ruler-label--metric"><span class="column-ruler-mark" />COF</span></div>
+        <div :class="COL_LITERATURE" class="shrink-0 px-4 py-3.5"><span class="column-ruler-label"><span class="column-ruler-mark" />LITERATURE</span></div>
       </div>
     </div>
 
     <!-- Scrollable Body with Virtual Scrolling -->
     <div
       ref="parentRef"
-      class="virtual-table-body flex-1 overflow-auto"
+      class="virtual-table-body min-w-[1264px] flex-1 overflow-y-auto overflow-x-hidden"
       style="height: calc(100vh - 420px); min-height: 300px; max-height: 600px;"
     >
       <!-- Empty State -->
       <div v-if="!loading && records.length === 0" class="flex h-full items-center justify-center py-16">
         <div class="text-center text-slate-400 dark:text-slate-500">
-          暂无符合条件的记录
+          No records found
         </div>
       </div>
 
-      <!-- Virtual List Container -->
       <div
-        v-else
         class="virtual-table-list relative w-full"
         :style="{ height: `${totalSize}px` }"
       >
         <template v-if="loading">
           <template v-for="virtualRow in virtualRows" :key="String(virtualRow.key)">
             <div
-              class="virtual-skeleton-row record-table-grid absolute left-0 top-0 w-full items-center border-b border-slate-100 dark:border-slate-800"
+              class="virtual-skeleton-row absolute left-0 top-0 flex w-full items-center border-b border-slate-100 px-4 dark:border-slate-800"
               :style="{
                 height: `${virtualRow.size}px`,
                 transform: `translateY(${virtualRow.start}px)`,
               }"
             >
-              <div class="flex justify-center px-2">
-                <div class="h-4 w-4 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
-              </div>
-              <div class="px-3">
-                <div class="h-4 w-10 animate-pulse rounded bg-slate-200 dark:bg-slate-700" />
-              </div>
-              <div class="min-w-0 px-3">
-                <div class="flex animate-pulse flex-col gap-2">
-                  <div class="h-4 w-24 rounded bg-slate-200 dark:bg-slate-700" />
+              <div class="flex w-full animate-pulse items-center gap-4">
+                <!-- ID skeleton -->
+                <div :class="COL_SELECT" class="shrink-0">
+                  <div class="h-7 w-7 rounded-md bg-slate-200 dark:bg-slate-700" />
+                </div>
+                <div :class="COL_ID" class="shrink-0">
+                  <div class="h-4 w-10 rounded bg-slate-200 dark:bg-slate-700" />
+                </div>
+                <!-- Ionic Liquid skeleton -->
+                <div :class="COL_IONIC" class="shrink-0">
+                  <div class="flex items-center gap-2">
+                    <div class="h-8 w-10 rounded bg-slate-200 dark:bg-slate-700" />
+                    <div class="h-4 w-28 rounded bg-slate-200 dark:bg-slate-700" />
+                  </div>
+                </div>
+                <!-- Tribopair skeleton -->
+                <div :class="COL_TRIBOPAIR" class="shrink-0">
+                  <div class="flex flex-col gap-1.5">
+                    <div class="h-6 w-32 rounded-md bg-slate-200 dark:bg-slate-700" />
+                    <div class="h-6 w-36 rounded-md bg-slate-200 dark:bg-slate-700" />
+                  </div>
+                </div>
+                <!-- Conditions skeleton -->
+                <div :class="COL_CONDITIONS" class="shrink-0">
                   <div class="flex gap-1.5">
-                    <div class="h-7 w-10 rounded bg-slate-200 dark:bg-slate-700" />
-                    <div class="h-7 w-10 rounded bg-slate-200 dark:bg-slate-700" />
+                    <div class="h-6 w-20 rounded-md bg-slate-200 dark:bg-slate-700" />
+                    <div class="h-6 w-16 rounded-md bg-slate-200 dark:bg-slate-700" />
+                    <div class="h-6 w-24 rounded-md bg-slate-200 dark:bg-slate-700" />
                   </div>
-                  <div class="h-8 w-full rounded-md bg-slate-200/80 dark:bg-slate-700/80" />
                 </div>
-              </div>
-              <div class="min-w-0 px-2">
-                <div class="flex animate-pulse flex-col gap-1.5">
-                  <div class="h-6 w-full max-w-28 rounded-md bg-slate-200 dark:bg-slate-700" />
-                  <div class="h-6 w-full max-w-32 rounded-md bg-slate-200 dark:bg-slate-700" />
+                <!-- COF skeleton -->
+                <div :class="COL_COF" class="shrink-0">
+                  <div class="h-5 w-14 rounded bg-slate-200 dark:bg-slate-700" />
                 </div>
-              </div>
-              <div class="min-w-0 px-3">
-                <div class="flex animate-pulse flex-wrap gap-2">
-                  <div class="h-8 w-24 rounded-lg bg-slate-200 dark:bg-slate-700" />
-                  <div class="h-8 w-28 rounded-lg bg-slate-200 dark:bg-slate-700" />
-                  <div class="h-8 w-20 rounded-lg bg-slate-200 dark:bg-slate-700" />
-                </div>
-              </div>
-              <div class="metric-rail cof-sticky-rail h-full px-3">
-                <div class="flex h-full animate-pulse flex-col items-end justify-center gap-2">
-                  <div class="h-5 w-16 rounded bg-slate-200 dark:bg-slate-700" />
-                  <div class="h-3 w-14 rounded bg-slate-200 dark:bg-slate-700" />
-                  <div class="flex justify-end gap-1">
-                    <div class="h-7 w-7 rounded-md bg-slate-200 dark:bg-slate-700" />
-                    <div class="h-7 w-7 rounded-md bg-slate-200 dark:bg-slate-700" />
-                    <div class="h-7 w-7 rounded-md bg-slate-200 dark:bg-slate-700" />
-                  </div>
+                <!-- Literature skeleton -->
+                <div :class="COL_LITERATURE" class="shrink-0">
+                  <div class="h-4 w-32 rounded bg-slate-200 dark:bg-slate-700" />
+                  <div class="mt-2 h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" />
                 </div>
               </div>
             </div>
@@ -285,267 +244,130 @@ defineExpose({
         <template v-else>
           <template v-for="{ virtualRow, record } in visibleRecordRows" :key="String(virtualRow.key)">
             <div
-              class="virtual-record-row record-table-grid absolute left-0 top-0 w-full items-stretch border-b border-slate-100 transition-colors hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900/70"
-              :class="[
-                focusRecordId != null && Number(record.id) === Number(focusRecordId) ? 'ring-2 ring-amber-400 bg-amber-50/70 dark:bg-amber-900/20' : '',
-                isSelected(record.id) ? 'bg-slate-100 hover:bg-slate-100 dark:bg-slate-800/70' : '',
-              ]"
+              class="virtual-record-row group absolute left-0 top-0 flex w-full items-start border-b border-slate-100 transition-colors hover:bg-[#f8fcfd] dark:border-slate-800 dark:hover:bg-slate-900/70"
+              :class="isFocusedRecord(record) ? 'database-focus-record bg-amber-50/80 ring-2 ring-amber-300/70 ring-inset dark:bg-amber-400/10 dark:ring-amber-300/35' : ''"
+              :aria-current="isFocusedRecord(record) ? 'true' : undefined"
               :style="{
                 height: `${virtualRow.size}px`,
                 transform: `translateY(${virtualRow.start}px)`,
               }"
             >
               <!-- Selection Column -->
-              <div class="flex min-w-0 items-center justify-center px-2 py-4">
-                <input
-                  type="checkbox"
-                  class="h-4 w-4 cursor-pointer rounded border-slate-300 text-[#0f172a] focus:ring-[#64748b]"
-                  :checked="isSelected(record.id)"
-                  @change="emit('toggle-select', Number(record.id))"
-                  @click.stop
+              <div :class="COL_SELECT" class="shrink-0 self-center px-3 py-4">
+                <button
+                  type="button"
+                  class="inline-flex h-7 w-7 items-center justify-center rounded-md border transition hover:border-[#0f7c82] hover:bg-[#eefafa] hover:text-[#0f7c82]"
+                  :class="selectedIds.has(Number(record.id)) ? 'border-[#0f7c82] bg-[#0f7c82] text-white shadow-sm' : 'border-slate-300 bg-white text-transparent'"
+                  aria-label="Select record"
+                  :aria-pressed="selectedIds.has(Number(record.id))"
+                  :disabled="isCandidateRecord(record)"
+                  :title="isCandidateRecord(record) ? 'Review candidates before batch deletion' : 'Select record'"
+                  @click.stop="emit('toggle-select', Number(record.id))"
+                  @dblclick.stop
                 >
+                  <Check class="h-4 w-4 stroke-[3]" />
+                </button>
               </div>
+
               <!-- ID Column -->
-              <div class="flex min-w-0 items-center px-3 py-4 text-slate-500 dark:text-slate-400">
-                <span class="flex flex-col items-start gap-0.5">
-                  {{ displayRowNumber(virtualRow.index) }}
-                  <span
-                    v-if="focusRecordId != null && Number(record.id) === Number(focusRecordId)"
-                    class="rounded-md bg-amber-400 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-white shadow-sm"
-                  >已定位</span>
+              <div :class="COL_ID" class="shrink-0 self-center px-2 py-4 text-center">
+                <span
+                  class="inline-flex h-6 min-w-9 items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-1.5 text-[12px] font-bold leading-none text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400"
+                  :title="recordDisplayId(record)"
+                >
+                  {{ compactRecordDisplayId(record) }}
+                </span>
+                <span
+                  v-if="isCandidateRecord(record)"
+                  class="mt-1 inline-flex max-w-full items-center justify-center rounded border border-amber-200 bg-amber-50 px-1 text-[9px] font-black uppercase leading-4 text-amber-700"
+                  title="Candidate row, not yet promoted to library record"
+                >
+                  Candidate
                 </span>
               </div>
 
               <!-- Ionic Liquid Column -->
-              <div class="min-w-0 px-3 py-3.5">
-                <div class="flex min-w-0 flex-col gap-2">
-                  <div
-                    class="ionic-liquid-name flex min-w-0 flex-col gap-0.5 text-[15px] font-semibold leading-[1.2] text-slate-800 dark:text-slate-100"
-                    :title="lubricantTooltip(record)"
-                  >
-                    <span
-                      v-for="(line, lineIndex) in lubricantDisplayRows(record)"
-                      :key="`${record.id}-il-line-${lineIndex}-${line.text}`"
-                      class="block max-w-full break-words"
-                      :class="lubricantLineClass(line)"
-                    >
-                      <template v-if="line.kind === 'ratio'">
-                        <span class="inline-flex items-center gap-1.5 rounded-[0.25rem] bg-[#f8fafc] px-1.5 py-[2px] text-[9.5px] font-bold text-[#475569] shadow-[inset_0_0_0_1px_rgba(226,232,240,1)] dark:bg-slate-800 dark:text-slate-300 dark:shadow-[inset_0_0_0_1px_rgba(51,65,85,1)]">
-                          <span class="text-[8.5px] font-black uppercase tracking-wider text-[#94a3b8] dark:text-slate-500">Ratio</span>
-                          {{ line.text.slice(1, -1) }}
-                        </span>
-                      </template>
-                      <template v-else>
-                        <span
-                          v-for="(part, partIndex) in ionicLiquidParts(line.text)"
-                          :key="`${record.id}-il-${lineIndex}-${partIndex}-${part}`"
-                          class="inline whitespace-normal break-words"
-                          v-html="formatIonicLiquidPartHtml(part)"
-                        />
-                      </template>
-                    </span>
-                    <span
-                      v-if="lubricantAliasDisplay(record)"
-                      class="mt-1 inline-flex w-fit max-w-full items-center gap-1.5 rounded-[0.25rem] border border-amber-200 bg-amber-50 px-1.5 py-[2px] text-[9.5px] font-bold leading-none text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300"
-                    >
-                      <span class="shrink-0 text-[8.5px] font-black uppercase tracking-wider text-amber-600/80 dark:text-amber-300/80">Alias</span>
-                      <span class="min-w-0 truncate">{{ lubricantAliasDisplay(record) }}</span>
-                    </span>
-                  </div>
-                  <LubricantStructurePreview
+              <div :class="COL_IONIC" class="shrink-0 px-4 py-4">
+                <div
+                  class="workspace-card cursor-pointer rounded-[9px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f7c82]/35"
+                  tabindex="0"
+                  aria-label="Open ionic liquid evidence"
+                  title="Open field evidence"
+                  @click.stop="openEvidenceModal(record, 'ionic-liquid', $event)"
+                  @keydown.enter.prevent.stop="openEvidenceModal(record, 'ionic-liquid', $event)"
+                >
+                  <LubricantRecipeCell
                     :record="record"
                     :active="structurePreviewOpen && structurePreviewRowId === record.id"
-                    @open="openStructurePreview"
+                    @open-structure="openStructurePreview"
+                    @open-evidence="(fieldKey, event) => openEvidenceModal(record, 'ionic-liquid', event, fieldKey)"
                   />
-                  <button
-                    v-if="record.literature"
-                    type="button"
-                    class="literature-inline-card text-left"
-                    :title="record.literature.title || undefined"
-                    @click.stop="openReviewRecord ? openReviewRecord(record) : openEvidenceModal(record)"
-                  >
-                    <span class="literature-inline-card__eyebrow">文献</span>
-                    <span class="literature-inline-card__title">{{ record.literature.title || '标题待补全' }}</span>
-                    <span class="literature-inline-card__meta">
-                      <span class="min-w-0 truncate">{{ record.literature.journal || '期刊待补全' }}</span>
-                      <span v-if="record.literature.year" class="shrink-0 tabular-nums">{{ record.literature.year }}</span>
-                    </span>
-                  </button>
                 </div>
               </div>
 
               <!-- Tribopair Column -->
-              <div class="min-w-0 px-2 py-3">
-                <div class="tribopair-stack">
-                  <div
-                    v-if="(tribopairParts(record).probe && tribopairParts(record).probe !== 'Probe N/A') || tribopairExtras(record).probeDetails"
-                    class="tribopair-pill tribopair-pill--probe"
-                    :title="'探针：' + tribopairParts(record).probe + (tribopairExtras(record).probeDetails ? ' · ' + tribopairExtras(record).probeDetails : '')"
-                  >
-                    <span class="tribopair-pill__label">探针</span>
-                    <span class="tribopair-pill__value">
-                      {{ tribopairParts(record).probe && tribopairParts(record).probe !== 'Probe N/A' ? tribopairParts(record).probe : '未记录' }}
-                    </span>
-                    <span v-if="tribopairExtras(record).probeDetails" class="tribopair-pill__meta">
-                      {{ tribopairExtras(record).probeDetails }}
-                    </span>
-                  </div>
-
-                  <div
-                    v-if="tribopairParts(record).substrate && tribopairParts(record).substrate !== 'Substrate N/A'"
-                    class="tribopair-pill tribopair-pill--substrate"
-                    :title="'基底：' + tribopairParts(record).substrate + (roughnessBadge(record) ? ' · ' + roughnessBadge(record)?.label : '')"
-                  >
-                    <span class="tribopair-pill__label">基底</span>
-                    <span class="tribopair-pill__value">{{ tribopairParts(record).substrate }}</span>
-                    <span v-if="roughnessBadge(record)" class="tribopair-pill__meta">
-                      {{ roughnessBadge(record)?.label }}
-                    </span>
-                  </div>
-
-                  <div
-                    v-if="tribopairParts(record).coating"
-                    class="tribopair-pill tribopair-pill--coating"
-                    :title="'涂层：' + tribopairParts(record).coating"
-                  >
-                    <span class="tribopair-pill__label">涂层</span>
-                    <span class="tribopair-pill__value">{{ tribopairParts(record).coating }}</span>
-                  </div>
-
-                  <p
-                    v-if="tribopairExtras(record).filmThickness"
-                    class="tribopair-film"
-                    :title="'膜厚：' + tribopairExtras(record).filmThickness"
-                  >
-                    膜厚 · {{ tribopairExtras(record).filmThickness }}
-                  </p>
-
-                  <span
-                    v-if="(!tribopairParts(record).probe || tribopairParts(record).probe === 'Probe N/A')
-                      && (!tribopairParts(record).substrate || tribopairParts(record).substrate === 'Substrate N/A')
-                      && !tribopairParts(record).coating"
-                    class="text-[11px] italic text-slate-400"
-                  >
-                    未提取
-                  </span>
+              <div :class="COL_TRIBOPAIR" class="shrink-0 px-4 py-3">
+                <div
+                  class="workspace-card cursor-pointer rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f7c82]/35"
+                  tabindex="0"
+                  aria-label="Open tribopair evidence"
+                  title="Open field evidence"
+                  @click.stop="openEvidenceModal(record, 'tribopair', $event)"
+                  @keydown.enter.prevent.stop="openEvidenceModal(record, 'tribopair', $event)"
+                >
+                  <TribopairCapsule
+                    :record="record"
+                    @open-evidence="(fieldKey, event) => openEvidenceModal(record, 'tribopair', event, fieldKey)"
+                  />
                 </div>
               </div>
 
               <!-- Conditions Column -->
-              <div class="min-w-0 px-3 py-3">
-                <div class="flex flex-col gap-1.5">
-                  <span
-                    v-if="recordExperimentScaleLabel(record)"
-                    class="mb-0.5 inline-flex w-fit items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-bold"
-                    :class="experimentScaleBadgeClass(recordExperimentScaleValue(record))"
-                    :title="recordExperimentScaleValue(record)"
-                  >
-                    <span class="uppercase tracking-wider opacity-70">尺度</span>
-                    <span>{{ recordExperimentScaleLabel(record) }}</span>
-                  </span>
-
-                  <!-- 主要条件 -->
-                  <div
-                    v-for="chip in notableConditionChips(record)"
-                    :key="chip.key"
-                    class="flex min-w-0 items-baseline gap-1.5 text-[11px] leading-snug"
-                  >
-                    <span class="shrink-0 font-bold uppercase tracking-wider" :class="conditionToneLabelClass(chip.tone)">
-                      {{ conditionDisplayLabel(chip) }}:
-                    </span>
-                    <span class="min-w-0 font-medium text-slate-800 dark:text-slate-200">
-                      {{ conditionDisplayValue(chip) }}
-                      <span
-                        v-if="conditionDisplayUnit(chip)"
-                        class="text-[10px] font-normal text-slate-500 ml-0.5"
-                      >{{ conditionDisplayUnit(chip) }}</span>
-                    </span>
-                  </div>
-
-                  <span
-                    v-if="!notableConditionChips(record).length && !commonConditionChips(record).length"
-                    class="text-[11px] text-slate-400 italic"
-                  >
-                    未提取
-                  </span>
-
-                  <!-- 常规条件 -->
-                  <button
-                    v-if="commonConditionChips(record).length && !isCommonExpanded(record.id)"
-                    type="button"
-                    class="mt-0.5 inline-flex w-fit items-center gap-1.5 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 transition hover:bg-slate-100 dark:border-slate-700/50 dark:bg-slate-800/50 dark:text-slate-400 dark:hover:bg-slate-800"
-                    :title="'常规条件已折叠：点击展开查看'"
-                    @click.stop="toggleCommonExpand(record.id)"
-                  >
-                    <span class="h-1.5 w-1.5 rounded-full bg-slate-400/60" />
-                    <span>常规 ({{ commonConditionChips(record).length }})</span>
-                  </button>
-                  <template v-else-if="commonConditionChips(record).length && isCommonExpanded(record.id)">
-                    <div
-                      v-for="chip in commonConditionChips(record)"
-                      :key="chip.key"
-                      class="flex min-w-0 items-baseline gap-1.5 text-[11px] leading-snug opacity-80"
-                    >
-                      <span class="shrink-0 font-bold uppercase tracking-wider text-slate-500">
-                        {{ conditionDisplayLabel(chip, chip.shortcut) }}:
-                      </span>
-                      <span class="min-w-0 font-medium text-slate-700 dark:text-slate-300">
-                        {{ conditionDisplayValue(chip, chip.shortcut) }}
-                        <span
-                          v-if="conditionDisplayUnit(chip, chip.shortcut)"
-                          class="text-[10px] font-normal text-slate-400 ml-0.5"
-                        >{{ conditionDisplayUnit(chip, chip.shortcut) }}</span>
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      class="mt-0.5 w-fit text-[10px] font-medium text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 underline underline-offset-2"
-                      title="收起常规条件"
-                      @click.stop="toggleCommonExpand(record.id)"
-                    >
-                      收起
-                    </button>
-                  </template>
+              <div :class="COL_CONDITIONS" class="flex shrink-0 justify-center px-3 py-3">
+                <div
+                  class="workspace-card block w-fit max-w-[296px] cursor-pointer rounded-[9px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f7c82]/35"
+                  tabindex="0"
+                  aria-label="Open conditions evidence"
+                  title="Open field evidence"
+                  @click.stop="openEvidenceModal(record, 'conditions', $event)"
+                  @keydown.enter.prevent.stop="openEvidenceModal(record, 'conditions', $event)"
+                >
+                  <ConditionMicrobar
+                    :record="record"
+                    @open-evidence="(fieldKey, event) => openEvidenceModal(record, 'conditions', event, fieldKey)"
+                  />
                 </div>
               </div>
 
-              <!-- COF + Actions Rail -->
-              <div class="metric-rail cof-sticky-rail min-w-0 px-3 py-3">
-                <div class="flex h-full flex-col items-end justify-center gap-2">
-                  <div class="text-right">
-                    <div class="whitespace-nowrap text-lg font-black tabular-nums tracking-tight text-[#315083] dark:text-sky-300">{{ cofDisplay(record) }}</div>
-                    <div class="mt-0.5 whitespace-nowrap text-[11px] font-semibold text-slate-400 dark:text-slate-500">
-                      Conf: {{ confidenceDisplay(confidenceValueFor(record, evidenceData[record.id])) }}
-                    </div>
-                  </div>
-                  <div class="flex items-center justify-end gap-1" @click.stop>
-                    <button
-                      type="button"
-                      class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                      title="进入审核"
-                      @click="openReviewRecord ? openReviewRecord(record) : openEvidenceModal(record)"
-                    >
-                      <Eye class="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:bg-slate-100 hover:text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
-                      title="编辑数据"
-                      @click="openEditModal(record)"
-                    >
-                      <Edit class="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-red-200 bg-red-50 text-red-500 transition hover:border-red-300 hover:bg-red-100 hover:text-red-600 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/15"
-                      :disabled="deletingRowId === record.id"
-                      title="删除记录"
-                      @click="removeRecord(record)"
-                    >
-                      <Trash2 class="h-3.5 w-3.5" />
-                    </button>
-                  </div>
+              <!-- COF Column -->
+              <div :class="COL_COF" class="shrink-0 self-center px-4 py-4">
+                <div
+                  class="workspace-card cursor-pointer rounded-lg px-1 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f7c82]/35"
+                  tabindex="0"
+                  aria-label="Open COF evidence"
+                  title="Open field evidence"
+                  @click.stop="openEvidenceModal(record, 'cof', $event)"
+                  @keydown.enter.prevent.stop="openEvidenceModal(record, 'cof', $event)"
+                >
+                  <div class="text-[clamp(1.05rem,0.95rem+0.28vw,1.28rem)] font-extrabold leading-none text-blue-600">{{ cofDisplay(record) }}</div>
                 </div>
+              </div>
+
+              <!-- Literature Column -->
+              <div :class="COL_LITERATURE" class="shrink-0 self-center px-4 py-3">
+                <button
+                  type="button"
+                  class="group flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left transition hover:border-[#0f7c82]/35 hover:bg-[#f3fbfc] dark:border-slate-700 dark:bg-slate-950 dark:hover:border-[#0f7c82]/40 dark:hover:bg-slate-900"
+                  :title="literatureTitle(record)"
+                  aria-label="Open literature"
+                  @click.stop="openLiterature?.(record)"
+                >
+                  <BookOpen class="h-4 w-4 shrink-0 text-[#0f7c82]" />
+                  <span class="min-w-0">
+                    <span class="block truncate text-[13px] font-extrabold leading-4 text-slate-800 group-hover:text-[#0f7c82] dark:text-slate-100">{{ literatureTitle(record) }}</span>
+                    <span class="block truncate text-[11.5px] font-semibold leading-4 text-slate-500 dark:text-slate-400">{{ literatureMeta(record) }}</span>
+                  </span>
+                </button>
               </div>
             </div>
           </template>
@@ -568,22 +390,17 @@ defineExpose({
   min-height: 0;
 }
 
+.database-record-table {
+  font-size: clamp(14px, 13px + 0.18vw, 16px);
+}
+
+.database-record-table .virtual-table-header {
+  font-size: clamp(0.72rem, 0.68rem + 0.16vw, 0.84rem);
+}
+
 .virtual-table-body {
   will-change: scroll-position;
   -webkit-overflow-scrolling: touch;
-}
-
-.record-table-grid {
-  display: grid;
-  grid-template-columns:
-    36px
-    52px
-    minmax(164px, 0.82fr)
-    minmax(190px, 1fr)
-    minmax(168px, 0.92fr)
-    minmax(118px, 126px);
-  width: 100%;
-  min-width: 0;
 }
 
 .virtual-table-list {
@@ -600,200 +417,48 @@ defineExpose({
   font-size: 0.72em;
 }
 
-.literature-inline-card {
-  display: grid;
-  gap: 0.15rem;
-  width: 100%;
+.condition-chip {
   max-width: 100%;
-  border-radius: 0.5rem;
-  border: 1px solid rgba(226, 232, 240, 0.96);
-  background: #f8fafc;
-  padding: 0.45rem 0.55rem;
-  color: #1e293b;
-  transition:
-    border-color 150ms ease,
-    background-color 150ms ease;
 }
 
-.literature-inline-card:hover {
-  border-color: rgba(148, 163, 184, 0.72);
-  background: #fff;
+.workspace-card {
+  transition: transform 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
 }
 
-.literature-inline-card__eyebrow {
-  color: #64748b;
-  font-size: 0.58rem;
-  font-weight: 900;
-  letter-spacing: 0.16em;
+.workspace-card:hover {
+  transform: translateY(-1px);
 }
 
-.literature-inline-card__title {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  font-size: 0.68rem;
-  font-weight: 800;
-  line-height: 1.25;
-}
-
-.literature-inline-card__meta {
-  display: flex;
-  min-width: 0;
+.column-ruler-label {
+  display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.38rem;
+  min-height: 1.25rem;
   color: #64748b;
-  font-size: 0.62rem;
-  font-weight: 700;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.75);
+  position: relative;
 }
 
-:global(.dark) .literature-inline-card {
-  border-color: rgba(51, 65, 85, 0.9);
-  background: rgba(15, 23, 42, 0.78);
-  color: #e2e8f0;
-}
-
-.tribopair-stack {
-  display: grid;
-  gap: 0.35rem;
-  min-width: 0;
-}
-
-.tribopair-pill {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: baseline;
-  column-gap: 0.5rem;
-  row-gap: 0.08rem;
-  min-width: 0;
-  border-radius: 0.5rem;
-  padding: 0.42rem 0.55rem;
-}
-
-.tribopair-pill__label {
-  color: #94a3b8;
-  font-size: 0.62rem;
-  font-weight: 900;
-  letter-spacing: 0.12em;
-  white-space: nowrap;
-}
-
-.tribopair-pill__value {
-  min-width: 0;
-  overflow: hidden;
-  color: inherit;
-  font-size: 0.78rem;
-  font-weight: 850;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tribopair-pill__meta {
-  grid-column: 2;
-  min-width: 0;
-  overflow: hidden;
-  color: currentColor;
-  font-size: 0.66rem;
-  font-weight: 600;
-  line-height: 1.18;
-  opacity: 0.72;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.tribopair-pill--probe {
-  border: 1px solid rgba(203, 213, 225, 0.95);
-  background: rgba(255, 255, 255, 0.96);
-  color: #334155;
-}
-
-.tribopair-pill--substrate {
-  border: 1px solid rgba(203, 213, 225, 0.95);
-  background: #f8fafc;
-  color: #1e293b;
-}
-
-.tribopair-pill--coating {
-  border: 1px solid rgba(251, 191, 36, 0.55);
-  background: #fff7ed;
-  color: #92400e;
-}
-
-.tribopair-film {
-  min-width: 0;
-  overflow: hidden;
-  color: #64748b;
-  font-size: 0.66rem;
-  font-weight: 650;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-:global(.dark) .tribopair-pill--probe {
-  border-color: rgba(51, 65, 85, 0.9);
-  background: rgba(2, 6, 23, 0.72);
-  color: #e2e8f0;
-}
-
-:global(.dark) .tribopair-pill--substrate {
-  border-color: rgba(51, 65, 85, 0.9);
-  background: rgba(15, 23, 42, 0.78);
-  color: #e2e8f0;
-}
-
-:global(.dark) .tribopair-pill--coating {
-  border-color: rgba(245, 158, 11, 0.34);
-  background: rgba(245, 158, 11, 0.12);
-  color: #fcd34d;
-}
-
-.condition-token {
-  max-width: 100%;
-}
-
-.condition-stack {
-  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
-}
-
-.metric-rail {
-  border-left: 1px solid rgba(226, 232, 240, 0.78);
-  background: rgba(248, 250, 252, 0.92);
-}
-
-.cof-sticky-header,
-.cof-sticky-rail {
-  position: sticky;
+.column-ruler-label::after {
+  content: "";
+  position: absolute;
+  left: 1rem;
   right: 0;
-  z-index: 8;
+  bottom: -0.42rem;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(15, 124, 130, 0.34), rgba(148, 163, 184, 0.08));
 }
 
-.cof-sticky-header {
-  z-index: 18;
-  background: #f8fafc;
+.column-ruler-mark {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 999px;
+  background: #0f7c82;
+  box-shadow: 0 0 0 3px rgba(15, 124, 130, 0.1);
 }
 
-.cof-sticky-rail {
-  box-shadow: -14px 0 22px -24px rgba(15, 23, 42, 0.45);
-}
-
-:global(.dark) .metric-rail {
-  border-left-color: rgba(51, 65, 85, 0.82);
-  background: rgba(15, 23, 42, 0.72);
-}
-
-@media (max-width: 1280px) {
-  .record-table-grid {
-    grid-template-columns:
-      32px
-      48px
-      minmax(150px, 0.78fr)
-      minmax(174px, 1fr)
-      minmax(156px, 0.9fr)
-      minmax(112px, 120px);
-    min-width: 0;
-  }
+.column-ruler-label--metric {
+  color: #0f7c82;
 }
 
 /* Smooth scrolling behavior */

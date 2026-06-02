@@ -233,6 +233,17 @@ AFM_2025_METHOD_TEXT = (
 )
 SS_2025_ROUGHNESS_BBOX = [306.6, 424.1, 560.0, 447.6]
 SS_2025_ROUGHNESS_TEXT = "The roughness of the stainless steel surface is about 0.8 nm."
+SPEED_2025_VALUE = "6 μm/s"
+SPEED_2025_CONDITIONS = {
+    "raw_text": AFM_2025_METHOD_TEXT,
+    "value_type": "derived",
+    "sliding_velocity_um_s": 6,
+    "scan_rate_hz": 6,
+    "scan_length_um": 0.5,
+    "unit_warning": False,
+    "calculation": "v = 2 x 0.5 μm x 6 Hz = 6 μm/s",
+}
+SPEED_2025_NOTE = "Calculated from scan size and scan rate: v = 2 x 0.5 μm x 6 Hz = 6 μm/s."
 
 FIG1_2017_BBOX = [182.32, 64.0, 439.16, 312.44]
 FIG1_2017_TEXT = (
@@ -279,7 +290,7 @@ def update_2025_rows(conn: sqlite3.Connection, lit_id: int) -> int:
     table3 = table3_evidence()
     table1_anchor = evidence("visual", 4, "Table 1", TABLE1_TEXT, TABLE1_BBOX)
     table3_anchor = evidence("visual", 7, "Table 3", TABLE3_TEXT, TABLE3_BBOX)
-    speed_ev = evidence("visual", 2, "AFM methods", AFM_2025_METHOD_TEXT, AFM_2025_METHOD_BBOX, matched_text="scan rate was 6 Hz")
+    speed_ev = evidence("text", 2, "AFM methods", AFM_2025_METHOD_TEXT, AFM_2025_METHOD_BBOX, matched_text=AFM_2025_METHOD_TEXT)
     rough_ev = evidence(
         "text",
         6,
@@ -306,7 +317,13 @@ def update_2025_rows(conn: sqlite3.Connection, lit_id: int) -> int:
             "ionic_liquid": entry("[BMIM][AOT]", primary_ev, literature_alias="[BMIm][AOT]"),
             "cof": entry(cof, primary_ev),
             "mol_ratio": entry("1.6 M", primary_ev, literature_alias="1.6 M [BMIm][AOT]"),
-            "speed": source_anchor_entry("6", speed_ev),
+            "speed": entry(
+                SPEED_2025_VALUE,
+                speed_ev,
+                confidence=0.94,
+                grounding_mode="derived",
+                grounding_note=SPEED_2025_NOTE,
+            ),
             "temperature": inferred_temperature(),
             "potential": source_anchor_entry(potential, potential_ev),
             "source_page": entry(f"Page {source_page}", primary_ev),
@@ -318,7 +335,8 @@ def update_2025_rows(conn: sqlite3.Connection, lit_id: int) -> int:
             UPDATE tribology_data
                SET literature_id = ?, source = ?, source_page = ?, source_figure = ?,
                    evidence = ?, evidence_page = ?, evidence_bbox = ?, confidence = 0.96,
-                   potential = ?, mol_ratio = '1.6 M', surface_roughness = ?, field_evidence_json = ?,
+                   potential = ?, mol_ratio = '1.6 M', surface_roughness = ?,
+                   speed_value = ?, speed_conditions_json = ?, field_evidence_json = ?,
                    review_status = 'pending_review',
                    assembly_notes = 'Relocated from legacy Row marker to the primary 2025 J. Colloid Interface Sci. PDF.'
              WHERE id = ?
@@ -333,6 +351,8 @@ def update_2025_rows(conn: sqlite3.Connection, lit_id: int) -> int:
                 dumps(primary_ev["bbox"]),
                 potential,
                 roughness,
+                SPEED_2025_VALUE,
+                dumps(SPEED_2025_CONDITIONS),
                 dumps(field_map),
                 data_id,
             ),

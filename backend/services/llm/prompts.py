@@ -14,6 +14,22 @@ Do not invent numbers. Keep provenance fields explicit.
 """
 
 
+FAST_TABLE_TRIBOLOGY_SYSTEM_PROMPT = """你是离子液体摩擦学文献的数据表提取器。只输出 JSON，不解释。"""
+
+
+FAST_TABLE_TRIBOLOGY_PROMPT = """
+这篇文献中的离子液体-摩擦副-工况-摩擦系数记录，逐条提取。
+
+输出 JSON：
+{"data":[{"ionic_liquid":"","friction_pair":"","conditions":"","cof":"","data_source_type":"","source_page":null,"source":"","evidence":""}]}
+
+规则：
+- 只输出有明确数值的摩擦系数记录。
+- 没有明确证据不要输出；趋势描述不要输出；需要从图中目测估算的不要输出。
+- source_page 尽量根据 [Page N] 标记填写；evidence 写支持该行的最短原文或表格证据。
+"""
+
+
 # Backward-compatible default extraction prompt
 TRIBOLOGY_EXTRACTION_PROMPT = JSON_ENFORCEMENT_PROMPT + """
 You are extracting quantitative interfacial tribology data from ionic-liquid literature.
@@ -319,6 +335,80 @@ Rules:
 """
 
 # Backward-compatible alias
+FOCUSED_FIG_TABLE_EXTRACTION_PROMPT = FOCUSED_EVIDENCE_EXTRACTION_PROMPT
+
+
+_TRIBOLOGY_COMPACT_SCHEMA = """
+Return ONLY:
+{
+  "data": [
+    {
+      "material_name": string|null,
+      "ionic_liquid": string|null,
+      "lubricant_components": [{"compound": string, "fraction": number|null, "unit": string|null, "role": string|null}]|null,
+      "cof": string|null,
+      "friction_force": string|null,
+      "normal_load": string|null,
+      "load": string|null,
+      "speed": string|null,
+      "temperature": string|null,
+      "wear_rate": string|null,
+      "film_thickness": string|null,
+      "residual_film_thickness_d": string|null,
+      "layer_spacing_delta": string|null,
+      "surface_roughness": string|null,
+      "probe_material": string|null,
+      "probe_geometry": string|null,
+      "substrate_material": string|null,
+      "potential": string|null,
+      "water_content": string|null,
+      "sample_id": string|null,
+      "source": string,
+      "source_page": number,
+      "source_figure": string|null,
+      "evidence": string
+    }
+  ]
+}
+"""
+
+_COMPACT_EVIDENCE_RULES = """
+Rules:
+- Output only records with explicit numeric evidence in the supplied text/image.
+- Every record must include source, source_page, source_figure, and evidence.
+- Evidence must quote or closely copy the local phrase tying the value to the condition.
+- No evidence, no row. Trend-only descriptions do not become rows.
+- Figure values that require visual estimation, slope reading, or point interpolation must be skipped.
+- Split distinct samples, potentials, humidity/water content, loads, speeds, or mixtures into separate rows.
+- Keep unknown fields null; do not infer chemistry, materials, units, or missing numeric values.
+- Never put scan frequency into `speed`; use speed only for linear distance/time values.
+- Thickness fields must stay quantitative with units.
+- Never place sample abbreviations, ionic-liquid names, or condition labels into thickness fields.
+"""
+
+
+TRIBOLOGY_EXTRACTION_PROMPT = JSON_ENFORCEMENT_PROMPT + """
+Task: Extract high-confidence quantitative ionic-liquid tribology records.
+""" + _TRIBOLOGY_COMPACT_SCHEMA + _COMPACT_EVIDENCE_RULES
+
+TEXT_EXTRACTION_PROMPT = JSON_ENFORCEMENT_PROMPT + """
+Task: Extract high-confidence quantitative records from text only.
+Prefer tables, results paragraphs, experimental sections, and captions when the numeric value is printed.
+""" + _TRIBOLOGY_COMPACT_SCHEMA + _COMPACT_EVIDENCE_RULES
+
+FIGURE_TABLE_EXTRACTION_PROMPT = JSON_ENFORCEMENT_PROMPT + """
+Task: Extract high-confidence quantitative records from figures, tables, and captions.
+Use only printed numbers, table cells, labels, and caption text visible in the image/context.
+""" + _TRIBOLOGY_COMPACT_SCHEMA + _COMPACT_EVIDENCE_RULES
+
+FIGURE_LEGEND_COF_PROMPT = JSON_ENFORCEMENT_PROMPT + """
+Task: Extract printed friction-coefficient entries from figure legends or panel annotations.
+Only keep legend phrases that explicitly show μ, mu, COF, or friction coefficient with a number.
+""" + _TRIBOLOGY_COMPACT_SCHEMA + _COMPACT_EVIDENCE_RULES
+
+FOCUSED_EVIDENCE_EXTRACTION_PROMPT = JSON_ENFORCEMENT_PROMPT + """
+Task: Extract high-confidence candidate records from evidence-rich pages.
+""" + _TRIBOLOGY_COMPACT_SCHEMA + _COMPACT_EVIDENCE_RULES
 FOCUSED_FIG_TABLE_EXTRACTION_PROMPT = FOCUSED_EVIDENCE_EXTRACTION_PROMPT
 
 

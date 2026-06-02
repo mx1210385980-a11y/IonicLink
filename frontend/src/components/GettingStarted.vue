@@ -110,7 +110,6 @@ const systemRequirements = computed<Array<{
     icon: KeyRound,
   },
 ])
-
 </script>
 
 <template>

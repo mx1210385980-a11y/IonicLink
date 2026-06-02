@@ -1,304 +1,147 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import {
-  ArrowDownUp,
-  CheckCircle2,
-  Database,
+  BookOpen,
+  Box,
   Download,
   ExternalLink,
-  FileText,
-  FlaskConical,
+  Filter,
+  Loader2,
   RefreshCw,
   Search,
+  Thermometer,
+  X,
 } from 'lucide-vue-next'
 
 import {
+  getDiffusionCandidateEvidence,
+  getDiffusionRecordEvidence,
   listDiffusionLibrary,
   type BatchFile,
   type DiffusionLibraryRecord,
-  type DiffusionLibrarySummary,
-  type DiffusionNormalizationCoefficient,
-  type DiffusionNormalizationPayload,
-  type DiffusionStandardFields,
-  type TribologyData,
+  type EvidenceResult,
+  type RecordResponse,
 } from '@/lib/api'
+import LubricantRecipeCell from '@/components/integrated-explorer/LubricantRecipeCell.vue'
+import Modal from '@/components/ui/Modal.vue'
+import {
+  lubricantDisplay,
+  lubricantStructureItems,
+  type IonStructurePreviewItem,
+} from '@/lib/integratedExplorerHelpers'
+import { lazyComponent } from '@/lib/lazyComponent'
+import type { HighlightRect } from '@/types/pdf-highlight'
+
+const MoleculeViewer = lazyComponent(() => import('@/components/MoleculeViewer.vue'))
+const PdfViewerWithHighlight = lazyComponent(() => import('@/components/PdfViewerWithHighlight.vue'))
 
 const props = defineProps<{
   currentSection: string
   selectedFile: BatchFile | null
   selectedFileName: string
+  focusFileId?: string | null
+  focusDoi?: string
+  focusRecordId?: number | null
+  focusEntityType?: 'record' | 'candidate' | null
   externalExportRequest?: { id: number, format: 'json' | 'csv' | 'ndjson' } | null
+  externalFilterRequestId?: number | null
 }>()
 
 const emit = defineEmits<{
-  openReview: [payload?: { literatureId?: number | null, recordId?: number | null }]
+  openReview: []
+  openLiterature: [payload?: { literatureId?: number | null, recordId?: number | null }]
 }>()
 
-type DiffusionRow = {
-  record: TribologyData
-  recordNo: string
-  materialSystem: string
-  sideChain: string
-  waterUptake: string
-  diffusingSpecies: string
-  dAngstrom: string
-  dMetric: string
-  dOriginal: string
-  dCanonical: string
-  normalizationStatus: string
-  normalizationNote: string
-  dataType: string
-  method: string
-  note: string
-  coefficient: number | null
-  source: string
-  literatureTitle: string
-  literatureDoi: string
-  literatureId: number | null
-  reviewEntityType: string
-  statusLabel: string
-}
-
-type IonMappingRow = {
-  system: string
-  cation: string
-  anion: string
-  diffusingIon: string
-}
-
-type NormalizationTableRow = {
-  recordNo: string
-  system: string
-  original: string
-  canonical: string
-  si: string
-  status: string
-  source: string
-  note: string
-}
-
 const query = ref('')
-const speciesFilter = ref('all')
-const sourceFilter = ref('all')
-const libraryLoading = ref(false)
-const libraryError = ref('')
-const libraryItems = ref<DiffusionLibraryRecord[]>([])
-const librarySummary = ref<DiffusionLibrarySummary>({
-  finalRecordCount: 0,
-  candidateCount: 0,
-  literatureCount: 0,
-  speciesCounts: {},
+const ionicLiquidFilter = ref('all')
+const materialFilter = ref('all')
+const geometryFilter = ref('all')
+const showFilters = ref(false)
+const loading = ref(false)
+const error = ref('')
+const libraryRecords = ref<DiffusionLibraryRecord[]>([])
+const librarySummary = ref<Record<string, any>>({})
+const pdfLocate = ref<{
+  open: boolean
+  title: string
+  pdfUrl: string
+  highlights: HighlightRect[]
+  activeHighlightId: string | null
+}>({
+  open: false,
+  title: '',
+  pdfUrl: '',
+  highlights: [],
+  activeHighlightId: null,
+})
+const structurePreview = ref<{
+  open: boolean
+  title: string
+  items: IonStructurePreviewItem[]
+}>({
+  open: false,
+  title: '',
+  items: [],
 })
 
-const selectedTitle = computed(() => {
-  return props.selectedFile?.metadata?.title || props.selectedFileName || props.selectedFile?.name || ''
-})
+const allRecords = computed(() => libraryRecords.value)
 
-const localRecords = computed<DiffusionLibraryRecord[]>(() => {
-  const records = props.selectedFile?.records || []
-  const literatureId = Number(props.selectedFile?.id || 0) || undefined
-  return records
-    .filter((record) => record.system_name || record.D_total != null || record.D_cation != null || record.D_anion != null)
-    .map((record) => {
-      const sourceRecord = record as DiffusionLibraryRecord
-      return {
-        ...sourceRecord,
-        literature_id: Number(sourceRecord.literature_id || sourceRecord.literatureId || literatureId || 0) || undefined,
-        literatureId: Number(sourceRecord.literatureId || sourceRecord.literature_id || literatureId || 0) || undefined,
-        literature: sourceRecord.literature || (literatureId ? {
-          id: literatureId,
-          title: props.selectedFile?.metadata?.title || props.selectedFile?.name || '',
-          doi: props.selectedFile?.metadata?.doi || '',
-          authors: props.selectedFile?.metadata?.authors || '',
-          journal: props.selectedFile?.metadata?.journal || '',
-          year: props.selectedFile?.metadata?.year || 0,
-        } : null),
-        literature_title: sourceRecord.literature_title || props.selectedFile?.metadata?.title || props.selectedFile?.name || '',
-        literatureTitle: sourceRecord.literatureTitle || props.selectedFile?.metadata?.title || props.selectedFile?.name || '',
-        literature_doi: sourceRecord.literature_doi || props.selectedFile?.metadata?.doi || '',
-        literatureDoi: sourceRecord.literatureDoi || props.selectedFile?.metadata?.doi || '',
-      }
-    })
-})
-
-const allRecords = computed<DiffusionLibraryRecord[]>(() => {
-  const remoteRows = libraryItems.value.filter((record) => record.system_name || record.D_total != null || record.D_cation != null || record.D_anion != null)
-  return remoteRows.length ? remoteRows : localRecords.value
-})
-
-const isUsingGlobalLibrary = computed(() => libraryItems.value.length > 0 || !selectedTitle.value)
-
-const libraryTitle = computed(() => isUsingGlobalLibrary.value ? '扩散库 / Global Diffusion Library' : selectedTitle.value)
-
-const selectedContextLabel = computed(() => {
-  return selectedTitle.value ? `当前文献：${selectedTitle.value}` : '全局扩散记录'
-})
-
-const tableRows = computed<DiffusionRow[]>(() => {
-  return allRecords.value
-    .map(toDiffusionRow)
-    .sort((left, right) => {
-      const leftValue = left.coefficient ?? Number.POSITIVE_INFINITY
-      const rightValue = right.coefficient ?? Number.POSITIVE_INFINITY
-      if (leftValue !== rightValue) return leftValue - rightValue
-      return left.materialSystem.localeCompare(right.materialSystem)
-    })
-    .map((row, index) => ({
-      ...row,
-      recordNo: `D-${String(index + 1).padStart(2, '0')}`,
-    }))
-})
-
-const speciesOptions = computed(() => {
-  return ['all', ...new Set(tableRows.value.map((row) => row.diffusingSpecies).filter(Boolean))]
-})
-
-const sourceOptions = computed(() => {
-  return ['all', ...new Set(tableRows.value.map((row) => row.source).filter((value) => value && value !== '--'))]
-})
-
-const filteredRows = computed(() => {
+const filteredRecords = computed(() => {
   const normalizedQuery = query.value.trim().toLowerCase()
-  return tableRows.value.filter((row) => {
-    if (speciesFilter.value !== 'all' && row.diffusingSpecies !== speciesFilter.value) return false
-    if (sourceFilter.value !== 'all' && row.source !== sourceFilter.value) return false
+  return allRecords.value.filter((record) => {
+    if (ionicLiquidFilter.value !== 'all' && clean(record.ionic_liquid) !== ionicLiquidFilter.value) return false
+    if (materialFilter.value !== 'all' && clean(record.confinement_material_class) !== materialFilter.value) return false
+    if (geometryFilter.value !== 'all' && clean(record.confinement_geometry_class) !== geometryFilter.value) return false
     if (!normalizedQuery) return true
-    const haystack = [
-      row.recordNo,
-      row.materialSystem,
-      row.sideChain,
-      row.waterUptake,
-      row.diffusingSpecies,
-      row.dAngstrom,
-      row.dMetric,
-      row.dataType,
-      row.method,
-      row.note,
-      row.literatureTitle,
-      row.literatureDoi,
-      row.statusLabel,
-      row.record.evidence,
-    ].join(' ').toLowerCase()
-    return haystack.includes(normalizedQuery)
+    return [
+      record.system_name,
+      record.ionic_liquid,
+      record.confinement_material_class,
+      record.confinement_geometry_class,
+      record.confinement_dimensionality,
+      record.confinement_scale_unit,
+      record.source,
+      record.evidence,
+      record.literatureTitle,
+      record.literature_title,
+      record.literatureDoi,
+      record.literature_doi,
+    ].map((item) => String(item || '').toLowerCase()).join(' ').includes(normalizedQuery)
   })
 })
 
-const trendRows = computed(() => {
-  return [...tableRows.value]
-    .filter((row) => row.coefficient != null)
-    .sort((left, right) => Number(right.coefficient || 0) - Number(left.coefficient || 0))
-})
+const ionicLiquidOptions = computed(() => distinctOptions(allRecords.value.map((record) => record.ionic_liquid)))
+const materialOptions = computed(() => distinctOptions(allRecords.value.map((record) => record.confinement_material_class)))
+const geometryOptions = computed(() => distinctOptions(allRecords.value.map((record) => record.confinement_geometry_class)))
 
-const trendStatement = computed(() => {
-  if (trendRows.value.length < 2) return '扩散趋势需要至少两条记录才能比较。'
-  return trendRows.value.map((row) => baseSystemName(row.record)).join(' > ')
-})
+const finalRecordCount = computed(() =>
+  allRecords.value.filter((record) => clean(record.reviewEntityType || record.review_entity_type) === 'record').length,
+)
+const candidateCount = computed(() =>
+  Number(librarySummary.value?.candidateCount ?? allRecords.value.length - finalRecordCount.value),
+)
+const coefficientReadyCount = computed(() => allRecords.value.filter(hasDiffusionCoefficient).length)
 
-const mechanismStatement = computed(() => {
-  const systems = tableRows.value.map((row) => baseSystemName(row.record).toLowerCase())
-  if (systems.some((name) => name.includes('mpil'))) {
-    return '侧链由 octyl 缩短至 ethyl 时，水吸收率和水相连通性提高，Cl− 迁移更容易；长烷基链会使水通道局域化，扩散受限。'
-  }
-  const species = dominantSpecies.value
-  return `${species} 的扩散差异主要由限域材料、孔道几何、温度和相互作用位点共同决定。`
-})
-
-const dominantSpecies = computed(() => {
-  const counts = new Map<string, number>()
-  tableRows.value.forEach((row) => {
-    counts.set(row.diffusingSpecies, (counts.get(row.diffusingSpecies) || 0) + 1)
-  })
-  return [...counts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] || 'Diffusing species'
-})
-
-const qualityIssueCount = computed(() => tableRows.value.filter((row) => {
-  const record = row.record
-  const reviewStatus = String(record.review_status || '').trim().toLowerCase()
-  return reviewStatus === 'needs_review'
-    || reviewStatus === 'flagged'
-    || row.reviewEntityType === 'candidate'
-    || !record.system_name
-    || !record.ionic_liquid
-    || !hasDiffusionCoefficient(record)
-    || row.source === '--'
-}).length)
-
-const sourceSummary = computed(() => {
-  const sources = sourceOptions.value.filter((source) => source !== 'all')
-  return sources.length ? sources.slice(0, 3).join(' / ') : '--'
-})
-
-const literatureCount = computed(() => {
-  const ids = new Set<number>()
-  tableRows.value.forEach((row) => {
-    if (row.literatureId) ids.add(row.literatureId)
-  })
-  return librarySummary.value.literatureCount || ids.size
-})
-
-const candidateCount = computed(() => {
-  return tableRows.value.filter((row) => row.reviewEntityType === 'candidate').length
-})
-
-const finalRecordCount = computed(() => {
-  return tableRows.value.filter((row) => row.reviewEntityType !== 'candidate').length
-})
-
-const ionMappingRows = computed<IonMappingRow[]>(() => {
-  return tableRows.value.map((row) => ({
-    system: baseSystemName(row.record),
-    cation: inferCation(row.record),
-    anion: inferAnion(row.record),
-    diffusingIon: row.diffusingSpecies,
-  }))
-})
-
-const normalizationRows = computed<NormalizationTableRow[]>(() => filteredRows.value.map((row) => ({
-  recordNo: row.recordNo,
-  system: baseSystemName(row.record),
-  original: row.dOriginal,
-  canonical: row.dCanonical,
-  si: row.dMetric === '--' ? '--' : `${row.dMetric} m²/s`,
-  status: row.normalizationStatus,
-  source: primaryNormalizationCoefficient(row.record)?.source === 'evidence' ? '原文证据' : '存储值',
-  note: row.normalizationNote,
+const exportRows = computed(() => filteredRecords.value.map((record) => ({
+  id: record.libraryId || record.library_id || record.id,
+  ionic_liquid: record.ionic_liquid || '',
+  D_total: record.D_total ?? null,
+  D_cation: record.D_cation ?? null,
+  D_anion: record.D_anion ?? null,
+  D_unit: record.D_unit || '',
+  confinement_material_class: record.confinement_material_class || '',
+  confinement_geometry_class: record.confinement_geometry_class || '',
+  confinement_dimensionality: record.confinement_dimensionality || '',
+  confinement_scale_value: record.confinement_scale_value ?? null,
+  confinement_scale_unit: record.confinement_scale_unit || '',
+  temperature_value: record.temperature_value ?? null,
+  literature_title: record.literatureTitle || record.literature_title || '',
+  literature_doi: record.literatureDoi || record.literature_doi || '',
+  source: record.source || '',
+  source_page: record.source_page ?? null,
+  evidence: record.evidence || '',
+  review_entity_type: record.reviewEntityType || record.review_entity_type || '',
 })))
-
-const normalizationReadyCount = computed(() => normalizationRows.value.filter((row) => row.status === 'normalized').length)
-
-const normalizationWarningCount = computed(() => normalizationRows.value.filter((row) => row.status !== 'normalized').length)
-
-const exportRows = computed(() => filteredRows.value.map((row) => {
-  const standard = standardFields(row.record)
-  return {
-    record_no: row.recordNo,
-    literature_id: row.literatureId,
-    literature_title: row.literatureTitle,
-    literature_doi: row.literatureDoi,
-    review_entity_type: row.reviewEntityType,
-    review_status_label: row.statusLabel,
-    system: row.materialSystem,
-    cation: inferCation(row.record),
-    anion: inferAnion(row.record),
-    side_chain: row.sideChain,
-    side_chain_carbons: standard.side_chain_carbons ?? standard.sideChainCarbons ?? null,
-    water_uptake: row.waterUptake,
-    diffusing_species: row.diffusingSpecies,
-    D_original: row.dOriginal,
-    D_normalized_10e12_m2_s: row.dCanonical,
-    D_A2_ps: row.dAngstrom,
-    D_m2_s: row.dMetric,
-    normalization_status: row.normalizationStatus,
-    normalization_note: row.normalizationNote,
-    data_type: row.dataType,
-    method_conditions: row.method,
-    note: row.note,
-    source: row.source,
-    source_page: row.record.source_page ?? null,
-    evidence: row.record.evidence || '',
-    review_status: row.record.review_status || '',
-  }
-}))
 
 watch(
   () => props.externalExportRequest?.id,
@@ -308,427 +151,307 @@ watch(
   },
 )
 
-onMounted(() => {
-  void loadDiffusionLibrary()
+watch(
+  () => props.externalFilterRequestId,
+  () => {
+    if (props.externalFilterRequestId == null) return
+    showFilters.value = true
+  },
+)
+
+watch(() => [props.focusFileId, props.focusRecordId, props.focusEntityType, props.focusDoi], () => {
+  void loadLibrary()
 })
 
-async function loadDiffusionLibrary() {
-  libraryLoading.value = true
-  libraryError.value = ''
+onMounted(() => {
+  void loadLibrary()
+})
+
+async function loadLibrary() {
+  loading.value = true
+  error.value = ''
   try {
-    const payload = await listDiffusionLibrary('', 0, 500)
-    libraryItems.value = payload.items || []
-    librarySummary.value = payload.summary || {
-      finalRecordCount: 0,
-      candidateCount: 0,
-      literatureCount: 0,
-      speciesCounts: {},
+    const result = await listDiffusionLibrary('', 0, 1000, {
+      literatureId: props.focusFileId || undefined,
+      recordId: props.focusRecordId ?? undefined,
+      entityType: props.focusEntityType ?? undefined,
+    })
+    libraryRecords.value = result.items || []
+    librarySummary.value = result.summary || {}
+    if (!props.focusFileId && props.focusDoi) {
+      query.value = props.focusDoi
     }
-  } catch (error: any) {
-    libraryError.value = error?.message || '扩散库加载失败'
-    console.warn('[DiffusionExplorer] Failed to load global diffusion library:', error)
+  } catch (err: any) {
+    error.value = err?.message || 'Failed to load diffusion library.'
   } finally {
-    libraryLoading.value = false
+    loading.value = false
   }
 }
 
-function openReviewForRow(row?: DiffusionRow | null) {
-  const target = row || filteredRows.value[0] || tableRows.value[0] || null
-  if (!target) {
-    emit('openReview')
-    return
-  }
-  const recordId = Number(target.record.id || 0)
-  emit('openReview', {
-    literatureId: target.literatureId,
-    recordId: Number.isFinite(recordId) && recordId > 0 ? recordId : null,
-  })
+function clean(value: unknown) {
+  return String(value ?? '').trim()
 }
 
-function hasDiffusionCoefficient(record: TribologyData) {
+function distinctOptions(values: unknown[]) {
+  return ['all', ...new Set(values.map(clean).filter(Boolean).sort((a, b) => a.localeCompare(b)))].slice(0, 60)
+}
+
+function hasDiffusionCoefficient(record: DiffusionLibraryRecord) {
   return [record.D_total, record.D_cation, record.D_anion].some((value) => value !== null && value !== undefined)
 }
 
-function literatureForRecord(record: DiffusionLibraryRecord) {
-  return record.literature || null
+function formatNumber(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === '') return '--'
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return String(value)
+  return `${numeric.toPrecision(4)}`.replace(/\.?0+e/, 'e').replace(/\.?0+$/, '')
 }
 
-function literatureIdForRecord(record: DiffusionLibraryRecord) {
-  const parsed = Number(record.literature_id || record.literatureId || literatureForRecord(record)?.id || 0)
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+function formatDiffusionValue(value: number | string | null | undefined, unit: string | null | undefined) {
+  const formatted = formatNumber(value)
+  if (formatted === '--') return '--'
+  return unit ? `${formatted} ${unit}` : formatted
 }
 
-function literatureTitleForRecord(record: DiffusionLibraryRecord) {
-  return String(record.literature_title || record.literatureTitle || literatureForRecord(record)?.title || '').trim() || '未命名文献'
+function layerDiffusionRows(record: DiffusionLibraryRecord) {
+  const features =
+    (record as any).novel_features_json
+    ?? (record as any).novelFeaturesJson
+    ?? {}
+  const rows = Array.isArray(features?.layer_diffusion_coefficients)
+    ? features.layer_diffusion_coefficients
+    : []
+
+  return rows
+    .map((row: Record<string, any>) => ({
+      layer: clean(row.layer),
+      D_cation: row.D_cation ?? row.d_cation ?? null,
+      D_anion: row.D_anion ?? row.d_anion ?? null,
+      unit: clean(row.unit) || record.D_unit || null,
+    }))
+    .filter((row: { layer: string, D_cation: unknown, D_anion: unknown }) =>
+      row.layer && (row.D_cation !== null || row.D_anion !== null),
+    )
 }
 
-function literatureDoiForRecord(record: DiffusionLibraryRecord) {
-  return String(record.literature_doi || record.literatureDoi || literatureForRecord(record)?.doi || '').trim()
+function coefficientTone(kind: 'total' | 'cation' | 'anion') {
+  if (kind === 'total') return 'border-[#86e7ef] bg-[#effeff] text-[#0b7280]'
+  if (kind === 'cation') return 'border-sky-200 bg-sky-50 text-sky-700'
+  return 'border-emerald-200 bg-emerald-50 text-emerald-700'
 }
 
-function reviewEntityType(record: DiffusionLibraryRecord) {
-  const explicit = String(record.review_entity_type || record.reviewEntityType || '').trim().toLowerCase()
-  return explicit === 'candidate' ? 'candidate' : 'record'
+function formatTemperature(record: DiffusionLibraryRecord) {
+  return record.temperature_value != null ? `${formatNumber(record.temperature_value)} K` : '--'
 }
 
-function reviewStatusLabel(record: DiffusionLibraryRecord) {
-  if (reviewEntityType(record) === 'candidate') return '待审阅'
-  const status = String(record.review_status || '').trim().toLowerCase()
-  if (status === 'approved' || status === 'verified') return '已入库'
-  if (status === 'flagged') return '需复核'
-  if (status === 'needs_review') return '待审阅'
-  return status ? status.replace(/_/g, ' ') : '已入库'
+function formatScale(record: DiffusionLibraryRecord) {
+  if (record.confinement_scale_value == null) return ''
+  return `${formatNumber(record.confinement_scale_value)}${record.confinement_scale_unit ? ` ${record.confinement_scale_unit}` : ''}`
 }
 
-function primaryCoefficient(record: TribologyData) {
-  const value = record.D_total ?? record.D_anion ?? record.D_cation
-  return value == null || Number.isNaN(Number(value)) ? null : Number(value)
+function literatureTitle(record: DiffusionLibraryRecord) {
+  return clean(record.literatureTitle || record.literature_title) || 'Untitled literature'
 }
 
-function readFeatureObject(value: unknown): Record<string, unknown> {
-  if (!value) return {}
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value)
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
-    } catch {
-      return {}
-    }
-  }
-  if (typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>
-  return {}
+function literatureMeta(record: DiffusionLibraryRecord) {
+  const literature = record.literature || {}
+  return [
+    clean(record.literatureDoi || record.literature_doi || literature.doi),
+    clean(literature.journal),
+    clean(literature.year),
+  ].filter(Boolean).join(' · ') || clean(record.source) || 'No source'
 }
 
-function standardFields(record: TribologyData): DiffusionStandardFields {
-  const features = readFeatureObject(record.novel_features_json)
-  const nested = readFeatureObject(features.standard_fields || features.standardFields)
-  const direct = readFeatureObject((record as any).diffusion_standard_fields || (record as any).diffusionStandardFields)
-  return { ...nested, ...direct } as DiffusionStandardFields
+function recordBadge(record: DiffusionLibraryRecord) {
+  return clean(record.reviewEntityType || record.review_entity_type) === 'record' ? 'Library' : 'Candidate'
 }
 
-function diffusionNormalization(record: TribologyData): DiffusionNormalizationPayload {
-  const features = readFeatureObject(record.novel_features_json)
-  const nested = readFeatureObject(features.diffusion_normalization || features.diffusionNormalization)
-  const direct = readFeatureObject((record as any).diffusion_normalization || (record as any).diffusionNormalization)
-  return { ...nested, ...direct } as DiffusionNormalizationPayload
+function isFocusedDiffusionRecord(record: DiffusionLibraryRecord) {
+  const targetEntityType = String(props.focusEntityType || '').trim().toLowerCase()
+  const recordEntityType = String(record.reviewEntityType || record.review_entity_type || 'record').trim().toLowerCase()
+  return props.focusRecordId != null
+    && Number(record.id) === Number(props.focusRecordId)
+    && (!targetEntityType || recordEntityType === targetEntityType)
 }
 
-function normalizationCoefficient(record: TribologyData, key: 'd_total' | 'd_cation' | 'd_anion') {
-  const payload = diffusionNormalization(record)
-  const coefficients = readFeatureObject(payload.coefficients)
-  return readFeatureObject(coefficients[key]) as DiffusionNormalizationCoefficient
-}
-
-function coefficientStatus(coefficient: DiffusionNormalizationCoefficient | null | undefined) {
-  return String(coefficient?.status || '').trim().toLowerCase()
-}
-
-function primaryNormalizationCoefficient(record: TribologyData): DiffusionNormalizationCoefficient | null {
-  const payload = diffusionNormalization(record)
-  const direct = readFeatureObject(payload.primary)
-  if (coefficientStatus(direct as DiffusionNormalizationCoefficient)) return direct as DiffusionNormalizationCoefficient
-  for (const key of ['d_total', 'd_anion', 'd_cation'] as const) {
-    const coefficient = normalizationCoefficient(record, key)
-    if (['normalized', 'unit_warning'].includes(coefficientStatus(coefficient))) return coefficient
-  }
-  return null
-}
-
-function coefficientNumber(coefficient: DiffusionNormalizationCoefficient | null | undefined, ...keys: string[]) {
-  const source = coefficient as Record<string, unknown> | null | undefined
-  if (!source) return null
-  for (const key of keys) {
-    const value = source[key]
-    if (value === null || value === undefined || value === '') continue
-    const parsed = Number(value)
-    if (Number.isFinite(parsed)) return parsed
-  }
-  return null
-}
-
-function prettifyScientificLabel(value: string) {
-  return value
-    .replace(/\s*x\s*/gi, ' × ')
-    .replace(/10\^?([+\-−]?\d+)/g, (_, exponent: string) => `10${toSuperscriptInt(Number(String(exponent).replace('−', '-')))}`)
-    .replace(/A2|Å2|A\^2|Å\^2/g, 'Å²')
-    .replace(/m2|m\^2/g, 'm²')
-    .replace(/ps-1|ps\^-1|ps⁻1/g, 'ps⁻¹')
-    .replace(/s-1|s\^-1|s⁻1/g, 's⁻¹')
-}
-
-function originalDiffusionLabel(record: TribologyData, coefficient: DiffusionNormalizationCoefficient | null) {
-  const label = String(coefficient?.original_label || coefficient?.originalLabel || '').trim()
-  if (label) return prettifyScientificLabel(label)
-  const parsed = parseEvidenceScientific(record)
-  if (parsed) return `(${parsed.coefficientText} ± ${parsed.uncertaintyText}) × 10${toSuperscriptInt(parsed.exponent)} Å²·ps⁻¹`
-  const value = primaryCoefficient(record)
-  return value == null ? '--' : prettifyScientificLabel(`${formatPlainNumber(value)} ${record.D_unit || ''}`.trim())
-}
-
-function canonicalDiffusionLabel(coefficient: DiffusionNormalizationCoefficient | null, fallbackValue: number | null) {
-  const value = coefficientNumber(coefficient, 'value_10e12_m2_s', 'value10e12M2S', 'canonical_value', 'canonicalValue')
-  const canonicalValue = value ?? (fallbackValue == null ? null : fallbackValue * 1e12)
-  if (canonicalValue == null || !Number.isFinite(canonicalValue)) return '--'
-  return `${formatPlainNumber(canonicalValue)} × 10⁻¹² m²/s`
-}
-
-function standardText(record: TribologyData, ...keys: string[]) {
-  const standard = standardFields(record) as Record<string, unknown>
-  return keys.map((key) => String(standard[key] ?? '').trim()).find(Boolean) || ''
-}
-
-function baseSystemName(record: TribologyData) {
-  return String(record.system_name || record.ionic_liquid || '--').trim() || '--'
-}
-
-function materialSystemLabel(record: TribologyData) {
-  const base = baseSystemName(record)
-  const material = String(record.confinement_material_class || '').trim()
-  if (/mpil/i.test(base)) return `${base} 水合膜`
-  return material && !base.toLowerCase().includes(material.toLowerCase()) ? `${base} / ${material}` : base
-}
-
-function inferSideChain(record: TribologyData) {
-  const standardized = standardText(record, 'side_chain_label', 'sideChainLabel')
-  if (standardized) return standardized
-  const text = `${record.system_name || ''} ${record.ionic_liquid || ''}`.toLowerCase()
-  if (text.includes('ethyl')) return '-C₂H₅'
-  if (text.includes('butyl')) return '-C₄H₉'
-  if (text.includes('octyl')) return '-C₈H₁₇'
-  if (text.includes('hexyl')) return '-C₆H₁₃'
-  const match = text.match(/c(\d{1,2})/)
-  return match?.[1] ? `-C${toSubscript(match[1])}` : '--'
-}
-
-function waterUptake(record: TribologyData) {
-  const standardized = standardText(record, 'water_uptake_label', 'waterUptakeLabel')
-  if (standardized) return standardized
-  const features = readFeatureObject(record.novel_features_json)
-  const value = features.water_uptake_value ?? features.waterUptakeValue ?? features.water_uptake ?? features.waterUptake
-  const unit = String(features.water_uptake_unit ?? features.waterUptakeUnit ?? 'wt%').replace(/\s+/g, ' ').trim()
-  if (value != null && value !== '') return `${formatPlainNumber(Number(value))} ${unit}`
-  const match = String(record.evidence || '').match(/water\s+uptake[^0-9]{0,24}(\d+(?:\.\d+)?)\s*(wt\s*%|%)/i)
-  return match?.[1] && match?.[2] ? `${match[1]} ${match[2].replace(/\s+/g, '')}` : '--'
-}
-
-function inferDiffusingSpecies(record: TribologyData) {
-  const standardized = standardText(record, 'diffusing_ion', 'diffusingIon') || String((record as any).diffusing_species || (record as any).diffusingSpecies || '').trim()
-  if (standardized) return standardized
-  const text = `${record.evidence || ''} ${record.ionic_liquid || ''} ${record.system_name || ''}`
-  if (record.D_anion != null && record.D_cation == null) {
-    if (/cl[−-]?/i.test(text)) return 'Cl−'
-    if (/bf\s*4|bf4/i.test(text)) return 'BF₄−'
-    return 'anion'
-  }
-  if (record.D_cation != null && record.D_anion == null) return 'cation'
-  if (record.D_cation != null && record.D_anion != null) return 'cation / anion'
-  return 'overall'
-}
-
-function inferCation(record: TribologyData) {
-  const standardized = standardText(record, 'cation')
-  if (standardized) return standardized
-  const name = `${record.system_name || ''} ${record.ionic_liquid || ''}`.toLowerCase()
-  if (name.includes('octyl')) return 'phosphonium, trioctyl-substituted'
-  if (name.includes('butyl')) return 'phosphonium, tributyl-substituted'
-  if (name.includes('ethyl')) return 'phosphonium, triethyl-substituted'
-  const bracket = String(record.ionic_liquid || '').match(/\[([^\]]+)\]/)
-  return bracket ? `${bracket[1]}+` : '--'
-}
-
-function inferAnion(record: TribologyData) {
-  const standardized = standardText(record, 'anion')
-  if (standardized) return standardized
-  const text = `${record.evidence || ''} ${record.ionic_liquid || ''}`.toLowerCase()
-  const system = `${record.system_name || ''} ${record.ionic_liquid || ''}`.toLowerCase()
-  if (system.includes('mpil')) return 'BF₄−'
-  if (/bf\s*4|bf4/.test(text)) return 'BF₄−'
-  if (/tfsi|ntf2/.test(text)) return 'TFSI−'
-  const brackets = [...String(record.ionic_liquid || '').matchAll(/\[([^\]]+)\]/g)]
-  return brackets[1]?.[1] ? `${brackets[1][1]}−` : '--'
-}
-
-function dataType(record: TribologyData) {
-  const standardized = standardText(record, 'data_type', 'dataType')
-  if (standardized) return standardized
-  const text = `${record.evidence || ''} ${record.source || ''}`.toLowerCase()
-  if (/msd|einstein|molecular dynamics|\bmd\b|å²|a2|ps/.test(text)) return 'MD 计算值'
-  if (/table|reported|experiment/.test(text)) return '文献报道值'
-  return '结构化记录'
-}
-
-function methodConditions(record: TribologyData) {
-  const method = /msd|einstein|å²|ps/i.test(String(record.evidence || '')) ? 'MSD-Einstein' : dataType(record)
-  const parts = [
-    method,
-    record.temperature_value != null ? `${formatPlainNumber(Number(record.temperature_value))} K` : '',
-    /20\s*ns/i.test(String(record.evidence || '')) ? '20 ns production MD' : '',
-    /n\s*=\s*3|replicas/i.test(String(record.evidence || '')) ? 'n = 3 replicas' : '',
-  ].filter(Boolean)
-  return parts.join('; ') || '--'
-}
-
-function rowNote(record: TribologyData, coefficient: number | null) {
-  const name = baseSystemName(record).toLowerCase()
-  if (name.includes('octyl')) return '最低扩散系数；长烷基链限制水通道形成，离子迁移受限'
-  if (name.includes('ethyl')) return '最高扩散系数；短侧链促进连续水相通道和 Cl− 迁移'
-  if (name.includes('butyl')) return '中等扩散能力；介于 ethyl 与 octyl 之间'
-  if (coefficient == null) return '缺少可比较的扩散系数'
-  return record.confinement_geometry_class || record.confinement_material_class || '--'
-}
-
-function parseEvidenceScientific(record: TribologyData) {
-  const evidence = String(record.evidence || '').replace(/−/g, '-')
-  const match = evidence.match(/\(?\s*(\d+(?:\.\d+)?)\s*(?:±|\+\/-)\s*(\d+(?:\.\d+)?)\s*\)?\s*(?:×|x)\s*10\s*\^?\s*(-?\d+)/i)
-  if (!match) return null
-  const coefficientText = match[1] || ''
-  const uncertaintyText = match[2] || ''
+function diffusionRecipeRecord(record: DiffusionLibraryRecord): RecordResponse {
+  const ionicLiquid = clean(record.ionic_liquid)
+  const base = record as any
   return {
-    coefficient: Number(coefficientText),
-    uncertainty: Number(uncertaintyText),
-    coefficientText,
-    uncertaintyText,
-    exponent: Number(match[3]),
+    ...base,
+    lubricant: base.lubricant || ionicLiquid,
+    ionicLiquidDisplay: base.ionicLiquidDisplay || base.ionic_liquid_display || ionicLiquid,
+    cation: base.cation || base.cation_raw || '',
+    anion: base.anion || base.anion_raw || '',
+    cationSmiles: base.cationSmiles || base.cation_smiles || null,
+    anionSmiles: base.anionSmiles || base.anion_smiles || null,
+  } as RecordResponse
+}
+
+function openStructurePreview(record: RecordResponse) {
+  structurePreview.value = {
+    open: true,
+    title: lubricantDisplay(record),
+    items: lubricantStructureItems(record),
   }
 }
 
-function diffusionDisplays(record: TribologyData) {
-  const coefficient = primaryNormalizationCoefficient(record)
-  if (coefficient) {
-    const a2Ps = coefficientNumber(coefficient, 'value_a2_ps', 'valueA2Ps')
-    const m2s = coefficientNumber(coefficient, 'value_m2_s', 'valueM2S')
-    const canonical = coefficientNumber(coefficient, 'value_10e12_m2_s', 'value10e12M2S', 'canonical_value', 'canonicalValue')
-    return {
-      coefficientA2Ps: a2Ps,
-      angstrom: a2Ps == null ? '--' : formatScientificValue(a2Ps),
-      metric: m2s == null ? '--' : formatScientificValue(m2s),
-      original: originalDiffusionLabel(record, coefficient),
-      canonical: canonicalDiffusionLabel(coefficient, m2s),
-      normalizationStatus: coefficientStatus(coefficient) || 'missing',
-      normalizationNote: coefficient.note || '',
-      canonicalValue: canonical,
-    }
-  }
+function closeStructurePreview() {
+  structurePreview.value.open = false
+  structurePreview.value.title = ''
+  structurePreview.value.items = []
+}
 
-  const parsed = parseEvidenceScientific(record)
-  if (parsed) {
-    const a2Ps = parsed.coefficient * Math.pow(10, parsed.exponent)
-    const m2s = parsed.coefficient * Math.pow(10, parsed.exponent - 8)
-    return {
-      coefficientA2Ps: a2Ps,
-      angstrom: `(${parsed.coefficientText} ± ${parsed.uncertaintyText}) × 10${toSuperscriptInt(parsed.exponent)}`,
-      metric: formatScientificValue(m2s),
-      original: `(${parsed.coefficientText} ± ${parsed.uncertaintyText}) × 10${toSuperscriptInt(parsed.exponent)} Å²·ps⁻¹`,
-      canonical: `${formatPlainNumber(a2Ps * 1e4)} × 10⁻¹² m²/s`,
-      normalizationStatus: 'normalized',
-      normalizationNote: '由原文科学计数法换算。',
-      canonicalValue: a2Ps * 1e4,
-    }
-  }
+function numericId(value: unknown) {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null
+}
 
-  const value = primaryCoefficient(record)
-  if (value == null) {
-    return {
-      coefficientA2Ps: null,
-      angstrom: '--',
-      metric: '--',
-      original: '--',
-      canonical: '--',
-      normalizationStatus: 'missing',
-      normalizationNote: '缺少可换算扩散系数。',
-      canonicalValue: null,
-    }
-  }
+function recordNumericId(record: DiffusionLibraryRecord) {
+  return numericId(record.id)
+    ?? numericId(String(record.libraryId || record.library_id || '').split(':').pop())
+}
 
-  const unit = String(record.D_unit || '').toLowerCase()
-  const metricValue = unit.includes('10') && unit.includes('12') ? value * 1e-12 : value
-  const a2PsValue = metricValue / 1e-8
+function recordLiteratureId(record: DiffusionLibraryRecord) {
+  return numericId(record.literatureId)
+    ?? numericId(record.literature_id)
+    ?? numericId(record.literature?.id)
+}
+
+function recordSourcePage(record: DiffusionLibraryRecord) {
+  return numericId(record.source_page)
+    ?? numericId((record as any).sourcePage)
+    ?? numericId((record as any).evidencePage)
+    ?? 1
+}
+
+function recordReviewEntityType(record: DiffusionLibraryRecord) {
+  return clean(record.reviewEntityType || record.review_entity_type).toLowerCase() === 'candidate'
+    ? 'candidate'
+    : 'record'
+}
+
+function parseRecordBbox(record: DiffusionLibraryRecord) {
+  const raw = record.source_bbox ?? (record as any).sourceBbox ?? (record as any).evidenceBbox
+  if (Array.isArray(raw)) return raw
+  if (typeof raw !== 'string' || !raw.trim()) return null
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : null
+  } catch {
+    return raw
+      .split(',')
+      .map((part) => Number(part.trim()))
+      .filter((value) => Number.isFinite(value))
+  }
+}
+
+function buildHighlightRect(
+  id: string,
+  page: number,
+  bbox: number[] | null | undefined,
+  color?: string,
+): HighlightRect | null {
+  if (!bbox || bbox.length < 4) return null
+  const a = Number(bbox[0])
+  const b = Number(bbox[1])
+  const c = Number(bbox[2])
+  const d = Number(bbox[3])
+  if (![a, b, c, d].every((value) => Number.isFinite(value))) return null
+
+  const left = Math.min(a, c)
+  const top = Math.min(b, d)
+  const right = Math.max(a, c)
+  const bottom = Math.max(b, d)
+  const padX = 6
+  const padY = 8
+  const minWidth = 96
+  const minHeight = 32
+  const width = Math.max(minWidth, right - left + padX * 2)
+  const height = Math.max(minHeight, bottom - top + padY * 2)
+  const centerX = (left + right) / 2
+  const centerY = (top + bottom) / 2
   return {
-    coefficientA2Ps: a2PsValue,
-    angstrom: formatScientificValue(a2PsValue),
-    metric: formatScientificValue(metricValue),
-    original: prettifyScientificLabel(`${formatPlainNumber(value)} ${record.D_unit || ''}`.trim()),
-    canonical: `${formatPlainNumber(metricValue * 1e12)} × 10⁻¹² m²/s`,
-    normalizationStatus: unit ? 'normalized' : 'unit_warning',
-    normalizationNote: unit ? '由存储值换算。' : '缺少单位，标准值需要复核。',
-    canonicalValue: metricValue * 1e12,
+    id,
+    page: Math.max(1, Math.floor(Number(page) || 1)),
+    color,
+    coords: {
+      x: Math.max(0, centerX - width / 2),
+      y: Math.max(0, centerY - height / 2),
+      w: width,
+      h: height,
+    },
   }
 }
 
-function toDiffusionRow(record: DiffusionLibraryRecord): DiffusionRow {
-  const displays = diffusionDisplays(record)
-  const source = record.source ? String(record.source) : record.source_page ? `Page ${record.source_page}` : '--'
+function buildPageAnchorHighlight(id: string, page: number, color?: string): HighlightRect {
   return {
-    record,
-    recordNo: 'D-00',
-    materialSystem: materialSystemLabel(record),
-    sideChain: inferSideChain(record),
-    waterUptake: waterUptake(record),
-    diffusingSpecies: inferDiffusingSpecies(record),
-    dAngstrom: displays.angstrom,
-    dMetric: displays.metric,
-    dOriginal: displays.original,
-    dCanonical: displays.canonical,
-    normalizationStatus: displays.normalizationStatus,
-    normalizationNote: displays.normalizationNote,
-    dataType: dataType(record),
-    method: methodConditions(record),
-    note: rowNote(record, displays.coefficientA2Ps),
-    coefficient: displays.coefficientA2Ps,
-    source,
-    literatureTitle: literatureTitleForRecord(record),
-    literatureDoi: literatureDoiForRecord(record),
-    literatureId: literatureIdForRecord(record),
-    reviewEntityType: reviewEntityType(record),
-    statusLabel: reviewStatusLabel(record),
+    id,
+    page: Math.max(1, Math.floor(Number(page) || 1)),
+    color,
+    coords: { x: 36, y: 36, w: 220, h: 46 },
   }
 }
 
-function toSubscript(value: string) {
-  const map: Record<string, string> = {
-    '0': '₀',
-    '1': '₁',
-    '2': '₂',
-    '3': '₃',
-    '4': '₄',
-    '5': '₅',
-    '6': '₆',
-    '7': '₇',
-    '8': '₈',
-    '9': '₉',
+function evidenceBbox(evidence: EvidenceResult | null) {
+  return Array.isArray(evidence?.bbox) && evidence.bbox.length >= 4
+    ? evidence.bbox
+    : null
+}
+
+async function loadRecordEvidence(record: DiffusionLibraryRecord, literatureId: number, recordId: number) {
+  try {
+    return recordReviewEntityType(record) === 'candidate'
+      ? await getDiffusionCandidateEvidence(literatureId, recordId)
+      : await getDiffusionRecordEvidence(literatureId, recordId)
+  } catch (err) {
+    console.warn('[DiffusionExplorer] Failed to load source-grounded evidence:', err)
+    return null
   }
-  return String(value).replace(/[0-9]/g, (digit) => map[digit] || digit)
 }
 
-function toSuperscriptInt(value: number) {
-  const map: Record<string, string> = {
-    '-': '⁻',
-    '+': '⁺',
-    '0': '⁰',
-    '1': '¹',
-    '2': '²',
-    '3': '³',
-    '4': '⁴',
-    '5': '⁵',
-    '6': '⁶',
-    '7': '⁷',
-    '8': '⁸',
-    '9': '⁹',
+async function openRecordPdf(record: DiffusionLibraryRecord) {
+  const literatureId = recordLiteratureId(record)
+  const recordId = recordNumericId(record)
+  if (!literatureId) {
+    emit('openLiterature', {
+      literatureId,
+      recordId,
+    })
+    return
   }
-  return String(value).replace(/[+\-0-9]/g, (char) => map[char] || char)
+
+  const evidence = recordId ? await loadRecordEvidence(record, literatureId, recordId) : null
+  const page = numericId(evidence?.page) ?? recordSourcePage(record)
+  const bbox = evidence ? evidenceBbox(evidence) : parseRecordBbox(record)
+  const highlight =
+    buildHighlightRect(`diffusion-${recordId || 'record'}-${Date.now()}`, page, bbox, 'rgba(250, 204, 21, 0.35)')
+    || buildPageAnchorHighlight(`diffusion-page-${page}-${Date.now()}`, page, 'rgba(250, 204, 21, 0.35)')
+
+  pdfLocate.value.open = true
+  pdfLocate.value.title = `${literatureTitle(record)} · Page ${page}`
+  pdfLocate.value.pdfUrl = `/api/pdf/${literatureId}`
+  pdfLocate.value.highlights = [highlight]
+  pdfLocate.value.activeHighlightId = highlight.id
 }
 
-function formatPlainNumber(value: number) {
-  if (!Number.isFinite(value)) return '--'
-  if (Math.abs(value) >= 100) return Number.isInteger(value) ? String(value) : value.toPrecision(4).replace(/(\.\d*?[1-9])0+$/, '$1')
-  return value.toPrecision(3).replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '')
+function closePdfLocate() {
+  pdfLocate.value.open = false
+  pdfLocate.value.title = ''
+  pdfLocate.value.pdfUrl = ''
+  pdfLocate.value.highlights = []
+  pdfLocate.value.activeHighlightId = null
 }
 
-function formatScientificValue(value: number) {
-  if (!Number.isFinite(value) || value === 0) return '--'
-  const exponent = Math.floor(Math.log10(Math.abs(value)))
-  const coefficient = value / Math.pow(10, exponent)
-  return `${formatPlainNumber(coefficient)} × 10${toSuperscriptInt(exponent)}`
+function onPdfLocateHighlightClick(id: string) {
+  pdfLocate.value.activeHighlightId = id
+}
+
+function resetFilters() {
+  query.value = ''
+  ionicLiquidFilter.value = 'all'
+  materialFilter.value = 'all'
+  geometryFilter.value = 'all'
 }
 
 function triggerDownload(filename: string, content: string, mimeType: string) {
@@ -746,10 +469,7 @@ function toCsv(rows: Array<Record<string, unknown>>) {
   const headers = Object.keys(rows[0] || {})
   const escapeCell = (value: unknown) => {
     const text = String(value ?? '')
-    if (/[",\n]/.test(text)) {
-      return `"${text.replace(/"/g, '""')}"`
-    }
-    return text
+    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
   }
   return [
     headers.join(','),
@@ -758,305 +478,298 @@ function toCsv(rows: Array<Record<string, unknown>>) {
 }
 
 function exportData(format: 'json' | 'csv' | 'ndjson') {
-  const baseName = selectedTitle.value.replace(/\.[^.]+$/, '').replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(0, 80) || 'diffusion-dataset'
+  const baseName = 'diffusion-library'
   if (format === 'json') {
-    triggerDownload(`${baseName}.diffusion.json`, JSON.stringify(exportRows.value, null, 2), 'application/json')
+    triggerDownload(`${baseName}.json`, JSON.stringify(exportRows.value, null, 2), 'application/json')
     return
   }
   if (format === 'ndjson') {
     triggerDownload(
-      `${baseName}.diffusion.ndjson`,
+      `${baseName}.ndjson`,
       exportRows.value.map((row) => JSON.stringify(row)).join('\n'),
       'application/x-ndjson',
     )
     return
   }
-  triggerDownload(`${baseName}.diffusion.csv`, toCsv(exportRows.value), 'text/csv;charset=utf-8')
+  triggerDownload(`${baseName}.csv`, toCsv(exportRows.value), 'text/csv;charset=utf-8')
 }
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col bg-white text-slate-950 dark:bg-slate-950 dark:text-slate-50">
-    <header class="border-b border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950">
-      <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+  <div class="flex h-full min-h-0 flex-col bg-white">
+    <div class="shrink-0 border-b border-slate-100 px-5 py-4">
+      <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div class="min-w-0">
-          <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-cyan-700 dark:text-cyan-300">Diffusion Knowledge</p>
-          <h2 class="mt-1 truncate text-[1.08rem] font-semibold tracking-normal text-slate-950 dark:text-white">
-            {{ libraryTitle }}
-          </h2>
-          <p class="mt-1 max-w-5xl text-[12px] leading-5 text-slate-500 dark:text-slate-400">
-            整库可结构化记录 {{ tableRows.length }} 条；覆盖文献 {{ literatureCount }} 篇；候选待审 {{ candidateCount }} 条；主要扩散物种 {{ dominantSpecies }}。
-            <span v-if="selectedContextLabel" class="ml-1">{{ selectedContextLabel }}</span>
-          </p>
-          <p v-if="libraryError" class="mt-1 text-[12px] font-semibold text-amber-700 dark:text-amber-300">
-            {{ libraryError }}，当前回退显示已选文献数据。
-          </p>
+          <p class="text-[11px] font-black uppercase tracking-[0.24em] text-[#0f7c82]">Diffusion Library</p>
+          <h2 class="mt-1 text-[1.35rem] font-black tracking-[-0.04em] text-slate-950">Ionic liquid diffusion coefficient</h2>
         </div>
 
-        <div class="flex shrink-0 flex-wrap items-center gap-2">
-          <button
-            type="button"
-            class="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-            :disabled="libraryLoading"
-            @click="loadDiffusionLibrary"
-          >
-            <RefreshCw class="h-3.5 w-3.5" :class="libraryLoading ? 'animate-spin' : ''" />
-            Refresh
-          </button>
-          <button
-            type="button"
-            class="inline-flex h-9 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-            @click="openReviewForRow()"
-          >
-            <ExternalLink class="h-3.5 w-3.5" />
-            Open Review
-          </button>
-          <button
-            type="button"
-            class="inline-flex h-9 items-center gap-2 rounded-md bg-slate-950 px-3 text-[12px] font-semibold text-white transition hover:bg-slate-800 dark:bg-cyan-400 dark:text-slate-950 dark:hover:bg-cyan-300"
-            @click="exportData('csv')"
-          >
-            <Download class="h-3.5 w-3.5" />
-            Export CSV
-          </button>
+        <div class="grid grid-cols-3 gap-2 rounded-xl border border-slate-200 bg-[#f8fbfd] p-1.5 text-center">
+          <div class="rounded-lg bg-white px-3 py-2 shadow-sm">
+            <p class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Library</p>
+            <p class="text-lg font-black text-[#0f7c82]">{{ finalRecordCount }}</p>
+          </div>
+          <div class="rounded-lg px-3 py-2">
+            <p class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Candidate</p>
+            <p class="text-lg font-black text-slate-800">{{ candidateCount }}</p>
+          </div>
+          <div class="rounded-lg px-3 py-2">
+            <p class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">D-ready</p>
+            <p class="text-lg font-black text-slate-800">{{ coefficientReadyCount }}</p>
+          </div>
         </div>
       </div>
 
-      <div class="mt-3 grid gap-2 md:grid-cols-4">
-        <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
-          <div class="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-            <Database class="h-3.5 w-3.5" />
-            Records
-          </div>
-          <p class="mt-1 text-xl font-semibold tabular-nums">{{ filteredRows.length }}</p>
-          <p class="text-[11px] text-slate-500">{{ finalRecordCount }} 已入库 / {{ candidateCount }} 待审</p>
-        </div>
-        <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
-          <div class="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-            <FileText class="h-3.5 w-3.5" />
-            Literature
-          </div>
-          <p class="mt-1 text-xl font-semibold tabular-nums">{{ literatureCount }}</p>
-          <p class="truncate text-[11px] text-slate-500">{{ sourceSummary }}</p>
-        </div>
-        <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
-          <div class="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-            <CheckCircle2 class="h-3.5 w-3.5" />
-            Pending Review
-          </div>
-          <p class="mt-1 text-xl font-semibold tabular-nums">{{ qualityIssueCount }}</p>
-        </div>
-        <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
-          <div class="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-            <FlaskConical class="h-3.5 w-3.5" />
-            Species
-          </div>
-          <p class="mt-1 truncate text-sm font-semibold">{{ dominantSpecies }}</p>
-        </div>
-      </div>
-
-      <div class="mt-3 grid gap-2 xl:grid-cols-[minmax(0,1fr)_12rem_12rem]">
-        <label class="relative">
-          <Search class="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+      <div class="mt-4 flex flex-col gap-2 lg:flex-row lg:items-center">
+        <label class="relative min-w-0 flex-1">
+          <Search class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             v-model="query"
             type="text"
-            class="h-9 w-full rounded-md border border-slate-200 bg-white pl-9 pr-3 text-[12px] font-medium text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-cyan-400 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100"
-            placeholder="Search system, side chain, species, note..."
+            class="h-10 w-full rounded-lg border border-[#d9e2ef] bg-white pl-10 pr-3 text-sm font-semibold text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-[#93e7e8] focus:ring-4 focus:ring-[#dffafb]"
+            placeholder="Search IL, confinement, paper..."
           >
         </label>
-        <select v-model="speciesFilter" class="h-9 rounded-md border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 outline-none dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100">
-          <option value="all">All species</option>
-          <option v-for="item in speciesOptions.filter((value) => value !== 'all')" :key="item" :value="item">{{ item }}</option>
-        </select>
-        <select v-model="sourceFilter" class="h-9 rounded-md border border-slate-200 bg-white px-3 text-[12px] font-semibold text-slate-700 outline-none dark:border-slate-800 dark:bg-slate-900 dark:text-slate-100">
-          <option value="all">All sources</option>
-          <option v-for="item in sourceOptions.filter((value) => value !== 'all')" :key="item" :value="item">{{ item }}</option>
-        </select>
+        <button
+          type="button"
+          class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 transition hover:border-[#93e7e8] hover:text-[#0f7c82]"
+          @click="showFilters = !showFilters"
+        >
+          <Filter class="h-4 w-4" />
+          Filters
+        </button>
+        <button
+          type="button"
+          class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-black text-slate-700 transition hover:border-[#93e7e8] hover:text-[#0f7c82]"
+          :disabled="loading"
+          @click="loadLibrary"
+        >
+          <RefreshCw class="h-4 w-4" :class="loading ? 'animate-spin' : ''" />
+          Refresh
+        </button>
+        <button
+          type="button"
+          class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[#0f7c82] px-3 text-sm font-black text-white transition hover:bg-[#0b6870]"
+          @click="exportData('csv')"
+        >
+          <Download class="h-4 w-4" />
+          CSV
+        </button>
       </div>
-    </header>
 
-    <div class="min-h-0 flex-1 overflow-auto px-4 py-3">
-      <div v-if="filteredRows.length" class="space-y-3">
-        <div class="grid gap-3 xl:grid-cols-[minmax(0,1.2fr)_minmax(21rem,0.8fr)]">
-          <section class="rounded-lg border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-            <div class="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-              <ArrowDownUp class="h-3.5 w-3.5" />
-              可直接入库的结论字段
-            </div>
-            <p class="mt-2 text-sm font-semibold leading-6 text-slate-900 dark:text-slate-100">
-              扩散系数趋势：{{ trendStatement }}
-            </p>
-            <p class="mt-1 text-[12px] leading-6 text-slate-500 dark:text-slate-400">
-              机理归因：{{ mechanismStatement }}
-            </p>
-          </section>
+      <div
+        v-if="showFilters"
+        class="mt-3 grid gap-2 rounded-xl border border-slate-200 bg-[#fbfdff] p-3 lg:grid-cols-[1fr_1fr_1fr_auto]"
+      >
+        <select v-model="ionicLiquidFilter" class="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none">
+          <option value="all">All ionic liquids</option>
+          <option v-for="item in ionicLiquidOptions.filter((value) => value !== 'all')" :key="item" :value="item">{{ item }}</option>
+        </select>
+        <select v-model="materialFilter" class="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none">
+          <option value="all">All materials</option>
+          <option v-for="item in materialOptions.filter((value) => value !== 'all')" :key="item" :value="item">{{ item }}</option>
+        </select>
+        <select v-model="geometryFilter" class="h-10 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700 outline-none">
+          <option value="all">All geometries</option>
+          <option v-for="item in geometryOptions.filter((value) => value !== 'all')" :key="item" :value="item">{{ item }}</option>
+        </select>
+        <button
+          type="button"
+          class="inline-flex h-10 items-center justify-center gap-1 rounded-lg px-3 text-sm font-black text-slate-500 transition hover:bg-white hover:text-slate-900"
+          @click="resetFilters"
+        >
+          <X class="h-4 w-4" />
+          Clear
+        </button>
+      </div>
+    </div>
 
-          <section class="rounded-lg border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-            <div class="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-              <FileText class="h-3.5 w-3.5" />
-              文献证据摘要
-            </div>
-            <p class="mt-2 text-[12px] leading-6 text-slate-500 dark:text-slate-400">
-              提取到 {{ tableRows.length }} 条扩散系数记录，来源集中于 {{ sourceSummary }}，当前表格按扩散系数从低到高排序，便于检查侧链长度、水吸收率和扩散能力的对应关系。
-            </p>
-          </section>
+    <div class="min-h-0 flex-1 overflow-auto px-5 py-4">
+      <div v-if="loading" class="flex h-full min-h-[18rem] items-center justify-center text-sm font-bold text-slate-500">
+        <Loader2 class="mr-2 h-4 w-4 animate-spin" />
+        Loading diffusion library...
+      </div>
+
+      <div v-else-if="error" class="flex h-full min-h-[18rem] items-center justify-center rounded-xl border border-rose-100 bg-rose-50 text-sm font-bold text-rose-600">
+        {{ error }}
+      </div>
+
+      <div v-else-if="filteredRecords.length" class="overflow-hidden rounded-2xl border border-[#dce6f2] bg-white shadow-[0_18px_50px_-42px_rgba(15,23,42,0.7)]">
+        <div class="diffusion-legend flex flex-wrap items-center justify-end gap-2 border-b border-slate-100 bg-white px-5 py-2.5 text-[11px] font-black text-slate-500">
+          <span class="mr-auto hidden uppercase tracking-[0.2em] text-slate-400 md:inline">Legend</span>
+          <span class="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2.5 py-1">
+            <Thermometer class="h-3.5 w-3.5 text-slate-400" />
+            Temperature
+          </span>
+          <span class="inline-flex items-center gap-1.5 rounded-full bg-[#f2ffff] px-2.5 py-1 text-[#0f7c82]">
+            <span class="font-black italic">D</span>
+            Confinement scale
+          </span>
+          <span class="inline-flex items-center gap-1.5 rounded-full bg-[#effeff] px-2.5 py-1 text-[#0b7280]">
+            Dtot / D+ / D-
+          </span>
         </div>
-
-        <section class="overflow-hidden rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-          <div class="grid gap-0 border-b border-slate-200 bg-slate-50/70 md:grid-cols-[minmax(0,1fr)_11rem_11rem_12rem] dark:border-slate-800 dark:bg-slate-950/60">
-            <div class="px-4 py-3">
-              <div class="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                <ArrowDownUp class="h-3.5 w-3.5" />
-                归一化模块
-              </div>
-              <p class="mt-1 text-sm font-semibold text-slate-950 dark:text-white">
-                Review 保留原文值，知识库统一换算为标准单位。
-              </p>
-            </div>
-            <div class="border-t border-slate-200 px-4 py-3 md:border-l md:border-t-0 dark:border-slate-800">
-              <p class="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-slate-500">标准单位</p>
-              <p class="mt-1 font-mono text-[13px] font-semibold text-slate-900 dark:text-slate-100">10⁻¹² m²/s</p>
-            </div>
-            <div class="border-t border-slate-200 px-4 py-3 md:border-l md:border-t-0 dark:border-slate-800">
-              <p class="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-slate-500">已归一化</p>
-              <p class="mt-1 text-lg font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">{{ normalizationReadyCount }}</p>
-            </div>
-            <div class="border-t border-slate-200 px-4 py-3 md:border-l md:border-t-0 dark:border-slate-800">
-              <p class="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-slate-500">待复核</p>
-              <p class="mt-1 text-lg font-semibold tabular-nums" :class="normalizationWarningCount ? 'text-amber-700 dark:text-amber-300' : 'text-slate-500'">{{ normalizationWarningCount }}</p>
-            </div>
-          </div>
-
-          <div class="divide-y divide-slate-100 bg-white text-[12px] dark:divide-slate-800 dark:bg-slate-950">
-            <div class="grid grid-cols-[4.6rem_minmax(9rem,1fr)_11rem_11rem_10rem] bg-white text-[10.5px] font-semibold tracking-[0.08em] text-slate-500 dark:bg-slate-900">
-              <div class="px-3 py-2.5">记录</div>
-              <div class="px-3 py-2.5">体系</div>
-              <div class="px-3 py-2.5">原文值</div>
-              <div class="px-3 py-2.5">标准值</div>
-              <div class="px-3 py-2.5">SI 值</div>
-            </div>
-            <div
-              v-for="row in normalizationRows"
-              :key="`norm-${row.recordNo}`"
-              class="grid grid-cols-[4.6rem_minmax(9rem,1fr)_11rem_11rem_10rem] items-center"
+        <table class="min-w-[1320px] table-fixed text-left">
+          <thead class="bg-[#f8fbfd] text-[12px] font-black uppercase tracking-[0.2em] text-slate-500">
+            <tr>
+              <th class="w-[31%] px-5 py-4">Ionic Liquid</th>
+              <th class="w-[23%] px-5 py-4">Diffusion System</th>
+              <th class="w-[12%] px-5 py-4">Environment</th>
+              <th class="w-[18%] px-5 py-4 text-[#0f7c82]">Diffusion Coefficient</th>
+              <th class="w-[16%] px-5 py-4">Literature</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            <tr
+              v-for="record in filteredRecords"
+              :key="record.libraryId || record.library_id || record.id"
+              class="align-middle transition hover:bg-[#f7fcfc]"
+              :class="isFocusedDiffusionRecord(record) ? 'bg-[#f2ffff] ring-2 ring-inset ring-[#63dce6]' : ''"
             >
-              <div class="px-3 py-2.5 font-mono font-semibold text-slate-700 dark:text-slate-200">{{ row.recordNo }}</div>
-              <div class="truncate px-3 py-2.5 font-semibold text-slate-900 dark:text-white">{{ row.system }}</div>
-              <div class="truncate px-3 py-2.5 font-mono text-slate-700 dark:text-slate-200">{{ row.original }}</div>
-              <div class="truncate px-3 py-2.5 font-mono font-semibold text-slate-950 dark:text-white">{{ row.canonical }}</div>
-              <div class="truncate px-3 py-2.5 font-mono text-slate-700 dark:text-slate-200">{{ row.si }}</div>
-            </div>
-          </div>
-        </section>
+              <td class="px-5 py-4">
+                <div class="min-w-[23rem] max-w-[29rem]">
+                  <LubricantRecipeCell
+                    :record="diffusionRecipeRecord(record)"
+                    @open-structure="openStructurePreview"
+                  />
+                  <p class="mt-1 ml-[2.45rem] text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">{{ recordBadge(record) }}</p>
+                </div>
+              </td>
 
-        <div class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
-          <table class="min-w-[116rem] divide-y divide-slate-200 text-left text-[12px] dark:divide-slate-800">
-            <thead class="sticky top-0 z-10 bg-slate-50 text-[10.5px] font-semibold tracking-[0.08em] text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-              <tr>
-                <th class="w-[6.5rem] px-3 py-2.5">记录编号</th>
-                <th class="w-[15rem] px-3 py-2.5">文献来源</th>
-                <th class="w-[7rem] px-3 py-2.5">入库状态</th>
-                <th class="w-[12rem] px-3 py-2.5">材料体系</th>
-                <th class="w-[7rem] px-3 py-2.5">侧链类型</th>
-                <th class="w-[8rem] px-3 py-2.5">水吸收率 WU</th>
-                <th class="w-[7rem] px-3 py-2.5">扩散物种</th>
-                <th class="w-[13rem] px-3 py-2.5">原文 D</th>
-                <th class="w-[13rem] px-3 py-2.5">标准 D</th>
-                <th class="w-[12rem] px-3 py-2.5">D / Å²·ps⁻¹</th>
-                <th class="w-[12rem] px-3 py-2.5">D / m²·s⁻¹</th>
-                <th class="w-[8rem] px-3 py-2.5">数据类型</th>
-                <th class="w-[16rem] px-3 py-2.5">方法与条件</th>
-                <th class="min-w-[18rem] px-3 py-2.5">备注</th>
-                <th class="w-[6rem] px-3 py-2.5">操作</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-100 bg-white dark:divide-slate-800 dark:bg-slate-950">
-              <tr v-for="row in filteredRows" :key="`${row.reviewEntityType}-${row.record.id || row.recordNo}`" class="align-top hover:bg-slate-50 dark:hover:bg-slate-900">
-                <td class="px-3 py-3 font-mono text-[12px] font-semibold text-slate-800 dark:text-slate-100">{{ row.recordNo }}</td>
-                <td class="px-3 py-3">
-                  <p class="line-clamp-2 font-semibold leading-5 text-slate-900 dark:text-white">{{ row.literatureTitle }}</p>
-                  <p class="mt-1 truncate text-[11px] text-slate-500">{{ row.literatureDoi || `Literature ${row.literatureId || '--'}` }}</p>
-                </td>
-                <td class="px-3 py-3">
-                  <span
-                    class="inline-flex rounded-md px-2 py-1 text-[11px] font-semibold"
-                    :class="row.reviewEntityType === 'candidate'
-                      ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-900'
-                      : 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-900'"
-                  >
-                    {{ row.statusLabel }}
+              <td class="px-5 py-4">
+                <div class="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                  <div class="flex items-center gap-2">
+                    <Box class="h-4 w-4 text-[#0f7c82]" />
+                    <p class="truncate text-sm font-black text-slate-950">{{ record.system_name || 'Confinement system' }}</p>
+                  </div>
+                  <div class="mt-2 flex flex-wrap gap-1.5">
+                    <span class="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-black text-slate-600">{{ record.confinement_material_class || 'Material N/A' }}</span>
+                    <span class="rounded-md bg-[#effafa] px-2 py-1 text-[11px] font-black text-[#0f7c82]">{{ record.confinement_geometry_class || 'Geometry N/A' }}</span>
+                    <span v-if="record.confinement_dimensionality" class="rounded-md bg-slate-50 px-2 py-1 text-[11px] font-black text-slate-500">{{ record.confinement_dimensionality }}</span>
+                  </div>
+                </div>
+              </td>
+
+              <td class="px-5 py-4">
+                <div class="flex flex-wrap gap-2">
+                  <span class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-sm font-black text-slate-700">
+                    <Thermometer class="h-4 w-4 text-slate-400" />
+                    {{ formatTemperature(record) }}
                   </span>
-                </td>
-                <td class="px-3 py-3">
-                  <p class="font-semibold text-slate-900 dark:text-white">{{ row.materialSystem }}</p>
-                  <p class="mt-1 text-[11px] leading-4 text-slate-500">{{ row.record.confinement_material_class || row.record.confinement_geometry_class || '--' }}</p>
-                </td>
-                <td class="px-3 py-3 font-mono text-slate-700 dark:text-slate-200">{{ row.sideChain }}</td>
-                <td class="px-3 py-3 font-semibold tabular-nums text-slate-700 dark:text-slate-200">{{ row.waterUptake }}</td>
-                <td class="px-3 py-3 font-semibold text-slate-800 dark:text-slate-100">{{ row.diffusingSpecies }}</td>
-                <td class="px-3 py-3 font-mono leading-5 text-slate-700 dark:text-slate-200">{{ row.dOriginal }}</td>
-                <td class="px-3 py-3 font-mono font-semibold leading-5 text-slate-900 dark:text-slate-100">{{ row.dCanonical }}</td>
-                <td class="px-3 py-3 font-mono leading-5 text-slate-800 dark:text-slate-100">{{ row.dAngstrom }}</td>
-                <td class="px-3 py-3 font-mono leading-5 text-slate-800 dark:text-slate-100">{{ row.dMetric }}</td>
-                <td class="px-3 py-3 text-slate-700 dark:text-slate-200">{{ row.dataType }}</td>
-                <td class="px-3 py-3 leading-5 text-slate-700 dark:text-slate-300">{{ row.method }}</td>
-                <td class="px-3 py-3 leading-5 text-slate-600 dark:text-slate-400">{{ row.note }}</td>
-                <td class="px-3 py-3">
-                  <button
-                    type="button"
-                    class="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-                    @click="openReviewForRow(row)"
+                  <span v-if="formatScale(record)" class="inline-flex items-center gap-1.5 rounded-lg border border-[#d9f4f5] bg-[#f2ffff] px-2.5 py-1.5 text-sm font-black text-[#0f7c82]">
+                    <span class="font-black italic">D</span>
+                    {{ formatScale(record) }}
+                  </span>
+                </div>
+              </td>
+
+              <td class="px-5 py-4">
+                <div class="grid gap-1.5">
+                  <div
+                    v-if="record.D_total !== null && record.D_total !== undefined"
+                    class="rounded-xl border px-3 py-2"
+                    :class="coefficientTone('total')"
                   >
-                    <ExternalLink class="h-3 w-3" />
-                    {{ row.reviewEntityType === 'candidate' ? '审阅入库' : '查看详情' }}
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+                    <div class="flex items-baseline justify-between gap-2">
+                      <span class="text-[12px] font-black uppercase tracking-[0.18em]">Dtot</span>
+                      <span class="truncate text-[1rem] font-black">{{ formatDiffusionValue(record.D_total, record.D_unit) }}</span>
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-2 gap-1.5">
+                    <div class="rounded-lg border px-2.5 py-1.5" :class="coefficientTone('cation')">
+                      <span class="mr-1 text-[11px] font-black uppercase tracking-[0.12em]">D+</span>
+                      <span class="text-sm font-black">{{ formatDiffusionValue(record.D_cation, record.D_unit) }}</span>
+                    </div>
+                    <div class="rounded-lg border px-2.5 py-1.5" :class="coefficientTone('anion')">
+                      <span class="mr-1 text-[11px] font-black uppercase tracking-[0.12em]">D-</span>
+                      <span class="text-sm font-black">{{ formatDiffusionValue(record.D_anion, record.D_unit) }}</span>
+                    </div>
+                  </div>
+                  <div
+                    v-if="layerDiffusionRows(record).length"
+                    class="grid gap-1 rounded-lg border border-slate-200 bg-slate-50/80 px-2.5 py-2"
+                  >
+                    <div
+                      v-for="layer in layerDiffusionRows(record)"
+                      :key="layer.layer"
+                      class="flex items-center justify-between gap-2 text-[11px] font-black text-slate-600"
+                    >
+                      <span class="shrink-0 uppercase tracking-[0.14em] text-slate-400">Layer {{ layer.layer }}</span>
+                      <span class="min-w-0 truncate tabular-nums text-slate-800">
+                        D+ {{ formatDiffusionValue(layer.D_cation, layer.unit || record.D_unit) }}
+                        · D- {{ formatDiffusionValue(layer.D_anion, layer.unit || record.D_unit) }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </td>
 
-        <section class="rounded-lg border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-          <div class="flex items-center justify-between gap-3">
-            <div>
-              <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">离子字段归一化</p>
-              <h3 class="mt-1 text-sm font-semibold text-slate-950 dark:text-white">数据库字段建议</h3>
-            </div>
-            <span class="rounded-md border border-cyan-200 bg-cyan-50 px-2 py-1 text-[11px] font-semibold text-cyan-800 dark:border-cyan-900 dark:bg-cyan-950/40 dark:text-cyan-200">
-              cation / anion / diffusing ion
-            </span>
-          </div>
-
-          <div class="mt-3 overflow-hidden rounded-md border border-slate-200 dark:border-slate-800">
-            <table class="min-w-full divide-y divide-slate-200 text-left text-[12px] dark:divide-slate-800">
-              <thead class="bg-slate-50 text-[10.5px] font-semibold tracking-[0.08em] text-slate-500 dark:bg-slate-950">
-                <tr>
-                  <th class="px-3 py-2">体系</th>
-                  <th class="px-3 py-2">cation 字段</th>
-                  <th class="px-3 py-2">anion 字段</th>
-                  <th class="px-3 py-2">diffusing ion 字段</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
-                <tr v-for="item in ionMappingRows" :key="`${item.system}-${item.diffusingIon}`">
-                  <td class="px-3 py-2 font-semibold text-slate-900 dark:text-white">{{ item.system }}</td>
-                  <td class="px-3 py-2 text-slate-600 dark:text-slate-300">{{ item.cation }}</td>
-                  <td class="px-3 py-2 font-mono text-slate-700 dark:text-slate-200">{{ item.anion }}</td>
-                  <td class="px-3 py-2 font-mono text-slate-700 dark:text-slate-200">{{ item.diffusingIon }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
+              <td class="px-5 py-4">
+                <button
+                  type="button"
+                  class="group flex max-w-full items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left shadow-sm transition hover:border-[#93e7e8]"
+                  @click="openRecordPdf(record)"
+                >
+                  <BookOpen class="h-4 w-4 shrink-0 text-[#0f7c82]" />
+                  <span class="min-w-0">
+                    <span class="block truncate text-sm font-black text-slate-900 group-hover:text-[#0f7c82]">{{ literatureTitle(record) }}</span>
+                    <span class="block truncate text-xs font-bold text-slate-500">{{ literatureMeta(record) }}</span>
+                  </span>
+                  <ExternalLink class="h-3.5 w-3.5 shrink-0 text-slate-300 group-hover:text-[#0f7c82]" />
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       <div
         v-else
-        class="flex h-full min-h-[18rem] items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-6 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400"
+        class="flex h-full min-h-[18rem] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white/70 px-6 text-center text-sm font-bold text-slate-500"
       >
-        {{ libraryLoading ? '正在加载全局扩散库...' : 'No diffusion records are available for the current scope.' }}
+        No diffusion records match the current view.
       </div>
     </div>
+
+    <Modal :show="pdfLocate.open" max-width="full" @close="closePdfLocate">
+      <template #header>
+        <div class="flex min-w-0 items-center justify-between gap-4">
+          <span class="truncate text-base font-black text-slate-900">{{ pdfLocate.title || 'Diffusion Source Locator' }}</span>
+        </div>
+      </template>
+
+      <div class="h-[78vh] min-h-[520px]">
+        <PdfViewerWithHighlight
+          v-if="pdfLocate.pdfUrl"
+          :src="pdfLocate.pdfUrl"
+          :highlights="pdfLocate.highlights"
+          :active-id="pdfLocate.activeHighlightId"
+          @highlight-click="onPdfLocateHighlightClick"
+        />
+      </div>
+    </Modal>
+
+    <Modal :show="structurePreview.open" max-width="4xl" @close="closeStructurePreview">
+      <template #header>
+        <div class="flex min-w-0 items-center justify-between gap-4">
+          <span class="truncate text-base font-black text-slate-900">Chemical Structure · {{ structurePreview.title || 'Ionic liquid' }}</span>
+        </div>
+      </template>
+
+      <div class="grid gap-4 md:grid-cols-2">
+        <div
+          v-for="item in structurePreview.items"
+          :key="item.key"
+          class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
+        >
+          <p class="mb-3 text-[11px] font-black uppercase tracking-[0.18em] text-[#0f7c82]">{{ item.role }}</p>
+          <MoleculeViewer :smiles="item.smiles" size="full" :width="360" :height="220" />
+          <p class="mt-3 text-sm font-black text-slate-900">{{ item.label }}</p>
+        </div>
+        <div v-if="!structurePreview.items.length" class="rounded-xl border border-dashed border-slate-200 p-6 text-sm font-bold text-slate-500">
+          No chemical structure is available for this diffusion record.
+        </div>
+      </div>
+    </Modal>
   </div>
 </template>

@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import type { GraphSeriesOption } from 'echarts/charts'
-import type { TooltipComponentOption } from 'echarts/components'
-import type { ComposeOption, EChartsType } from 'echarts/core'
+import * as echarts from 'echarts'
 import { AlertTriangle, BookOpen, Database, Loader2, RefreshCw } from 'lucide-vue-next'
 
 import {
@@ -17,8 +15,7 @@ import {
   type RelationshipGraphSelection,
   type SearchFilter,
 } from '@/lib/api'
-import { recoverFromChunkLoadError } from '@/lib/lazyComponent'
-import { normalizePotentialDisplayText } from '@/lib/potential'
+import { compactRecordDisplayId } from '@/lib/integratedExplorerHelpers'
 
 const props = defineProps<{
   filter: SearchFilter
@@ -35,12 +32,7 @@ const drilldown = ref<RelationshipGraphDrilldownResponse | null>(null)
 const drilldownLoading = ref(false)
 const drilldownError = ref('')
 
-type RelationshipChartOption = ComposeOption<GraphSeriesOption | TooltipComponentOption>
-type EChartsCoreModule = typeof import('echarts/core')
-
-let chart: EChartsType | null = null
-let echartsModule: EChartsCoreModule | null = null
-let echartsPromise: Promise<EChartsCoreModule> | null = null
+let chart: echarts.ECharts | null = null
 let resizeObserver: ResizeObserver | null = null
 let lastLoadedRefreshKey: number | null = null
 
@@ -117,7 +109,7 @@ function recordConditions(record: RecordResponse): string[] {
     record.loadValue ? `Load ${record.loadValue}` : '',
     record.speedValue ? `Speed ${record.speedValue}` : '',
     record.waterContent ? `Water ${record.waterContent}` : '',
-    record.potential ? `Potential ${normalizePotentialDisplayText(record.potential)}` : '',
+    record.potential ? `Potential ${record.potential}` : '',
   ].filter(Boolean)
 }
 
@@ -147,32 +139,8 @@ function disposeChart() {
   }
 }
 
-async function loadECharts() {
-  if (echartsModule) return echartsModule
-  if (!echartsPromise) {
-    echartsPromise = Promise.all([
-      import('echarts/core'),
-      import('echarts/lib/chart/graph'),
-      import('echarts/lib/component/tooltip'),
-      import('echarts/lib/renderer/installCanvasRenderer'),
-    ])
-      .then(([core, , , canvasRenderer]) => {
-        core.use([canvasRenderer.install])
-        echartsModule = core
-        return core
-      })
-      .catch((error) => {
-        echartsPromise = null
-        recoverFromChunkLoadError(error)
-        throw error
-      })
-  }
-  return echartsPromise
-}
-
-async function ensureChart() {
+function ensureChart() {
   if (!chartRoot.value) return null
-  const echarts = await loadECharts()
   if (!chart) {
     chart = echarts.init(chartRoot.value)
   }
@@ -195,7 +163,7 @@ function edgeWidth(edge: RelationshipGraphEdge, maxCount: number): number {
   return Number((1.8 + ratio * 5.2).toFixed(2))
 }
 
-function buildChartOption(data: RelationshipGraphResponse): RelationshipChartOption {
+function buildChartOption(data: RelationshipGraphResponse): echarts.EChartsCoreOption {
   const isDark = document.documentElement.classList.contains('dark')
   const categories = Array.from(new Set(data.nodes.map((node) => node.type))).map((type) => ({
     name: typeLabel(type),
@@ -272,7 +240,7 @@ function buildChartOption(data: RelationshipGraphResponse): RelationshipChartOpt
             shadowBlur: 14,
             shadowColor: `${nodeColor(node.type)}44`,
           },
-        })) as any,
+        })),
         links: data.edges.map((edge) => ({
           ...edge,
           lineStyle: {
@@ -280,7 +248,7 @@ function buildChartOption(data: RelationshipGraphResponse): RelationshipChartOpt
             color: edgeColor(edge.avgCof),
             opacity: 0.82,
           },
-        })) as any,
+        })),
       },
     ],
   }
@@ -293,7 +261,7 @@ async function renderGraph() {
   }
 
   await nextTick()
-  const instance = await ensureChart()
+  const instance = ensureChart()
   if (!instance) return
 
   instance.off('click')
@@ -593,7 +561,7 @@ onBeforeUnmount(() => {
                   <div class="min-w-0">
                     <div class="text-sm font-semibold text-slate-900 dark:text-slate-100">{{ record.lubricant || '--' }}</div>
                     <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                      Record #{{ record.id }} · {{ recordTribopair(record) }}
+                      {{ compactRecordDisplayId(record) }} · {{ recordTribopair(record) }}
                     </div>
                   </div>
                   <span class="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:bg-slate-900 dark:text-slate-300">

@@ -22,6 +22,10 @@ from services.diffusion.diffusion_postprocess_service import (
     record_has_diffusion_value,
     serialize_diffusion_row_for_response,
 )
+from services.diffusion.diffusion_table_parser import (
+    extract_layerwise_diffusion_table_records,
+    merge_layerwise_table_records,
+)
 from services.diffusion.pdf_ingest_service import build_diffusion_ingest_payload
 from services.extraction_trace_service import (
     CANCELLED_EXTRACTION_MESSAGE,
@@ -31,6 +35,7 @@ from services.extraction_trace_service import (
     finalize_extraction_run,
     get_extraction_run,
     is_extraction_cancelled,
+    mark_extraction_run_started,
     update_extraction_run_progress,
 )
 from services.llm.prompts_diffusion import (
@@ -50,6 +55,13 @@ from utils.pdf_utils import validate_pdf_file
 logger = logging.getLogger(__name__)
 
 EXTRACTOR_TYPE = "diffusion"
+
+
+def _normalize_diffusion_profile(value: Any) -> str:
+    normalized = str(value or "auto").strip().lower()
+    if normalized in {"auto", "standard", "high_accuracy", "review_figure_estimate"}:
+        return "auto"
+    return "auto"
 
 
 async def _count_diffusion_artifacts(db, literature_id: int) -> tuple[int, int]:
@@ -331,12 +343,10 @@ async def process_diffusion_file_safe(
     file_id: int,
     *,
     force: bool = False,
-    profile: str = "high_accuracy",
+    profile: str = "auto",
     run_id: str | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
-    profile = (profile or "high_accuracy").strip().lower()
-    if profile not in {"high_accuracy", "standard"}:
-        profile = "high_accuracy"
+    profile = _normalize_diffusion_profile(profile)
 
     async with async_session_maker() as db:
         run_id = run_id or uuid.uuid4().hex
@@ -427,14 +437,23 @@ async def process_diffusion_file_safe(
         literature.status = "extracting"
         await db.commit()
         if existing_run:
-            existing_run.status = "running"
-            existing_run.profile = profile
-            existing_run.error_message = None
+            await mark_extraction_run_started(
+                db,
+                run_id=run_id,
+                extractor_type=EXTRACTOR_TYPE,
+                profile=profile,
+            )
         else:
             await create_extraction_run(
                 db,
                 run_id=run_id,
                 literature_id=literature.id,
+                extractor_type=EXTRACTOR_TYPE,
+                profile=profile,
+            )
+            await mark_extraction_run_started(
+                db,
+                run_id=run_id,
                 extractor_type=EXTRACTOR_TYPE,
                 profile=profile,
             )
@@ -504,7 +523,7 @@ async def process_diffusion_file_safe(
                     profile=profile,
                     progress_callback=_persist_run_progress,
                 ),
-                timeout=720 if profile == "high_accuracy" else 420,
+                timeout=720,
             )
         except asyncio.TimeoutError:
             payload = {
@@ -526,6 +545,8 @@ async def process_diffusion_file_safe(
             return await _finish_cancelled()
 
         raw_rows = payload.get("data") if isinstance(payload.get("data"), list) else []
+        table_rows = extract_layerwise_diffusion_table_records(resolved_file_path)
+        raw_rows = merge_layerwise_table_records(raw_rows, table_rows)
         trace_candidates: list[dict[str, Any]] = []
         raw_drop_reasons: dict[str, int] = {}
         for row in raw_rows:
@@ -728,7 +749,7 @@ async def process_diffusion_file_background(
     file_id: int,
     *,
     force: bool = False,
-    profile: str = "high_accuracy",
+    profile: str = "auto",
     run_id: str | None = None,
 ) -> None:
     logger.info("Starting background diffusion extraction for literature_id=%s", file_id)

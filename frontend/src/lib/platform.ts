@@ -1,8 +1,8 @@
 export type AppView =
   | 'home'
   | 'pipeline'
-  | 'review'
   | 'knowledge'
+  | 'library'
   | 'quality'
   | 'modeling'
   | 'admin'
@@ -28,10 +28,7 @@ export type AppSection =
   | 'upload'
   | 'runs'
   | 'batch'
-  | 'inbox'
-  | 'record-review'
   | 'grounding'
-  | 'queue'
   | 'explorer'
   | 'snapshots'
   | 'insights'
@@ -60,8 +57,8 @@ export type AppRoute = {
 export const DEFAULT_SECTION_BY_VIEW: Record<AppView, AppSection> = {
   home: 'today',
   pipeline: 'upload',
-  review: 'inbox',
   knowledge: 'explorer',
+  library: 'explorer',
   quality: 'overview',
   modeling: 'training',
   admin: 'runtime',
@@ -72,8 +69,8 @@ export const DEFAULT_SECTION_BY_VIEW: Record<AppView, AppSection> = {
 export const SECTION_OPTIONS_BY_VIEW: Record<AppView, AppSection[]> = {
   home: ['today', 'alerts', 'actions'],
   pipeline: ['upload', 'runs', 'batch'],
-  review: ['inbox', 'record-review', 'grounding', 'queue'],
   knowledge: ['explorer', 'snapshots', 'insights', 'sources', 'graph', 'cleaning', 'datasets'],
+  library: ['explorer', 'snapshots', 'insights', 'sources', 'graph', 'cleaning', 'datasets'],
   quality: ['overview'],
   modeling: ['training', 'nanofriction', 'evaluation', 'registry'],
   admin: ['runtime', 'users', 'metrics'],
@@ -82,13 +79,13 @@ export const SECTION_OPTIONS_BY_VIEW: Record<AppView, AppSection[]> = {
 }
 
 const LEGACY_ROUTE_MAP: Record<LegacyAppView, AppRoute> = {
-  dashboard: { view: 'pipeline', section: 'upload' },
-  workspace: { view: 'pipeline', section: 'upload' },
+  dashboard: { view: 'library', section: 'explorer' },
+  workspace: { view: 'library', section: 'explorer' },
   cleaning: { view: 'knowledge', section: 'cleaning' },
   predict: { view: 'modeling', section: 'training' },
   monitor: { view: 'admin', section: 'runtime' },
-  literature: { view: 'review', section: 'inbox' },
-  grounding: { view: 'review', section: 'grounding' },
+  literature: { view: 'library', section: 'explorer' },
+  grounding: { view: 'library', section: 'explorer' },
   guide: { view: 'help', section: 'quick-start' },
   mentor: { view: 'home', section: 'alerts' },
   blog: { view: 'blog', section: 'articles' },
@@ -110,6 +107,13 @@ export function resolveRoute(
 ): AppRoute {
   const normalizedView = String(view || '').trim().toLowerCase()
 
+  if (normalizedView === 'pipeline') {
+    return {
+      view: 'library',
+      section: DEFAULT_SECTION_BY_VIEW.library,
+    }
+  }
+
   if (isAppView(normalizedView)) {
     return {
       view: normalizedView,
@@ -126,7 +130,7 @@ export function resolveRoute(
   }
 
   return {
-    view: 'pipeline',
-    section: DEFAULT_SECTION_BY_VIEW.pipeline,
+    view: 'home',
+    section: DEFAULT_SECTION_BY_VIEW.home,
   }
 }

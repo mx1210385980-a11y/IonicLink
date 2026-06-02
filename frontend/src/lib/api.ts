@@ -54,9 +54,36 @@ api.interceptors.request.use((config) => {
     if (!config.headers) {
         config.headers = {} as any
     }
+    const getHeader = (key: string) => {
+        const headers = config.headers as any
+        if (typeof headers.get === 'function') return headers.get(key)
+        return headers[key] ?? headers[key.toLowerCase()]
+    }
+    const setHeader = (key: string, value: string) => {
+        const headers = config.headers as any
+        if (typeof headers.set === 'function') {
+            headers.set(key, value)
+        } else {
+            headers[key] = value
+        }
+    }
+    const deleteHeader = (key: string) => {
+        const headers = config.headers as any
+        if (typeof headers.delete === 'function') {
+            headers.delete(key)
+        } else {
+            delete headers[key]
+            delete headers[key.toLowerCase()]
+        }
+    }
+    const forcedScopeType = getHeader('X-Scope-Type')
     Object.entries(authHeaders).forEach(([key, value]) => {
-        ;(config.headers as any)[key] = value
+        if (forcedScopeType && (key === 'X-Scope-Type' || key === 'X-Workspace-Id')) return
+        if (getHeader(key) == null) setHeader(key, value)
     })
+    if (String(forcedScopeType || '').toLowerCase() === 'group_library') {
+        deleteHeader('X-Workspace-Id')
+    }
     return config
 })
 
@@ -133,12 +160,12 @@ export async function uploadFile(
 }
 
 // Extract Data
-export type ExtractionProfile = 'high_accuracy' | 'standard' | 'review_figure_estimate'
+export type ExtractionProfile = 'auto' | 'high_accuracy' | 'standard' | 'review_figure_estimate'
 
 export async function extractData(
     fileId: string,
     force: boolean = false,
-    profile: ExtractionProfile = 'high_accuracy',
+    profile: ExtractionProfile = 'auto',
     strictCofMode?: boolean,
     extractorType: ExtractorType = 'tribology',
 ): Promise<ExtractionResponse> {
@@ -221,6 +248,123 @@ export async function getPdfHighlights(literatureId: string): Promise<PdfHighlig
     return response.data
 }
 
+export interface PdfPlainTextResponse {
+    literature_id: number
+    page_count: number
+    text: string
+}
+
+export interface PdfFigurePreview {
+    id: string
+    label: string
+    page: number
+    caption: string
+    image_b64: string
+    clip_bbox?: number[] | null
+    algorithm_bbox?: number[] | null
+    page_width?: number | null
+    page_height?: number | null
+    algorithm_version?: string | null
+    has_override?: boolean
+    override_id?: number | null
+}
+
+export interface PdfFigurePreviewResponse {
+    literature_id: number
+    items: PdfFigurePreview[]
+    can_adjust_crops?: boolean
+}
+
+export interface PdfPageImageResponse {
+    literature_id: number
+    page: number
+    page_width: number
+    page_height: number
+    scale: number
+    image_b64: string
+}
+
+export interface PdfBboxPreviewResponse {
+    literature_id: number
+    page: number
+    bbox: number[]
+    mode: 'region' | 'page'
+    context?: 'normal' | 'wide'
+    image_b64: string
+}
+
+export interface FigureCropOverridePayload {
+    label: string
+    page: number
+    bbox: number[]
+    caption?: string | null
+    algorithmBbox?: number[] | null
+    algorithmVersion?: string | null
+}
+
+export interface FigureCropOverrideResponse {
+    success: boolean
+    override: {
+        id: number
+        literature_id: number
+        label: string
+        normalized_label: string
+        page: number
+        caption?: string | null
+        bbox: number[]
+        algorithm_bbox?: number[] | null
+        algorithm_version?: string | null
+        created_by_user_id?: number | null
+        updated_by_user_id?: number | null
+        created_at?: string | null
+        updated_at?: string | null
+    }
+    image_b64: string
+}
+
+export async function getPdfPlainText(literatureId: number): Promise<PdfPlainTextResponse> {
+    const response = await api.get(`/api/pdf/${literatureId}/text`)
+    return response.data as PdfPlainTextResponse
+}
+
+export async function getPdfFigurePreviews(literatureId: number): Promise<PdfFigurePreviewResponse> {
+    const response = await api.get(`/api/pdf/${literatureId}/figures`)
+    return response.data as PdfFigurePreviewResponse
+}
+
+export async function getPdfPageImage(literatureId: number, page: number, scale: number = 1.6): Promise<PdfPageImageResponse> {
+    const response = await api.get(`/api/pdf/${literatureId}/page-image`, {
+        params: { page, scale },
+    })
+    return response.data as PdfPageImageResponse
+}
+
+export async function getPdfBboxPreview(
+    literatureId: number,
+    page: number,
+    bbox: number[],
+    mode: 'region' | 'page' = 'region',
+    context: 'normal' | 'wide' = 'normal',
+): Promise<PdfBboxPreviewResponse> {
+    const response = await api.get(`/api/pdf/${literatureId}/bbox-preview`, {
+        params: { page, bbox: bbox.join(','), mode, context },
+    })
+    return response.data as PdfBboxPreviewResponse
+}
+
+export async function saveFigureCropOverride(
+    literatureId: number,
+    payload: FigureCropOverridePayload,
+): Promise<FigureCropOverrideResponse> {
+    const response = await api.post(`/api/pdf/${literatureId}/figure-overrides`, payload)
+    return response.data as FigureCropOverrideResponse
+}
+
+export async function resetFigureCropOverride(literatureId: number, overrideId: number) {
+    const response = await api.delete(`/api/pdf/${literatureId}/figure-overrides/${overrideId}`)
+    return response.data as { success: boolean }
+}
+
 // Evidence result for Source Evidence panel
 export interface EvidenceResult {
     record_id: number
@@ -293,6 +437,16 @@ export interface RecordFieldEvidenceResponse {
     diffusionNormalization?: DiffusionNormalizationPayload
     required_fields: string[]
     fields: Record<string, FieldEvidenceEntry>
+}
+
+export interface ReviewFieldEvidencePatchPayload {
+    page: number
+    bbox: number[]
+    matchedText: string
+    quote?: string | null
+    sourceLabel?: string | null
+    sourceType?: string | null
+    note?: string | null
 }
 
 export interface ExtractionRunDetail {
@@ -410,6 +564,24 @@ export async function confirmDiffusionRecordFieldEvidence(recordId: number, fiel
     const response = await api.post(`/api/review/diffusion-records/${recordId}/fields/${fieldKey}/confirm`, {
         note: note ?? null,
     })
+    return response.data
+}
+
+export async function patchDiffusionCandidateFieldEvidence(
+    candidateId: number,
+    fieldKey: string,
+    payload: ReviewFieldEvidencePatchPayload,
+): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.patch(`/api/review/diffusion-candidates/${candidateId}/fields/${fieldKey}/evidence`, payload)
+    return response.data
+}
+
+export async function patchDiffusionRecordFieldEvidence(
+    recordId: number,
+    fieldKey: string,
+    payload: ReviewFieldEvidencePatchPayload,
+): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.patch(`/api/review/diffusion-records/${recordId}/fields/${fieldKey}/evidence`, payload)
     return response.data
 }
 
@@ -575,9 +747,26 @@ export async function getExtractionRunCandidates(
 
 // --- Search API ---
 
+export type ApiScopeOption = {
+    scope?: 'active' | 'group_library'
+}
+
+function scopeHeaders(options?: ApiScopeOption) {
+    return options?.scope === 'group_library'
+        ? { 'X-Scope-Type': 'group_library' }
+        : undefined
+}
+
 // Search Records (Paginated)
-export async function searchRecords(filter: SearchFilter, skip: number = 0, limit: number = 20): Promise<PaginatedRecordResponse> {
-    const response = await api.post(`/api/records/search?skip=${skip}&limit=${limit}`, filter)
+export async function searchRecords(
+    filter: SearchFilter,
+    skip: number = 0,
+    limit: number = 20,
+    options?: ApiScopeOption,
+): Promise<PaginatedRecordResponse> {
+    const response = await api.post(`/api/records/search?skip=${skip}&limit=${limit}`, filter, {
+        headers: scopeHeaders(options),
+    })
     return response.data
 }
 
@@ -696,12 +885,16 @@ export async function listDiffusionLibrary(
     query: string = '',
     skip: number = 0,
     limit: number = 500,
+    options: { literatureId?: string | number | null, recordId?: string | number | null, entityType?: 'record' | 'candidate' | string | null } = {},
 ): Promise<DiffusionLibraryResponse> {
     const response = await api.get('/api/records/diffusion-library', {
         params: {
             q: query || undefined,
             skip,
             limit,
+            literature_id: options.literatureId || undefined,
+            record_id: options.recordId || undefined,
+            entity_type: options.entityType || undefined,
         },
     })
     return response.data
@@ -814,8 +1007,10 @@ export async function getRelationshipGraphDrilldown(
 }
 
 // Get Filter Options
-export async function getFilterOptions(): Promise<RecordFilterOptions> {
-    const response = await api.get('/api/records/options')
+export async function getFilterOptions(options?: ApiScopeOption): Promise<RecordFilterOptions> {
+    const response = await api.get('/api/records/options', {
+        headers: scopeHeaders(options),
+    })
     return response.data
 }
 
@@ -1034,6 +1229,8 @@ export interface TribologyData {
     il_inchikey?: string
     alkyl_chain_length?: number
     source?: string
+    display_source?: Record<string, unknown> | null
+    displaySource?: Record<string, unknown> | null
     source_page?: number
     source_bbox?: number[] | null
     source_figure?: string
@@ -1041,6 +1238,27 @@ export interface TribologyData {
     evidence?: string
     sample_id?: string
     series_id?: string
+    semantic_key?: string
+    semanticKey?: string
+    evidence_score?: number | null
+    evidenceScore?: number | null
+    evidence_grade?: 'strong' | 'adequate' | 'weak' | 'missing' | string | null
+    evidenceGrade?: 'strong' | 'adequate' | 'weak' | 'missing' | string | null
+    evidence_summary?: Record<string, unknown> | null
+    evidenceSummary?: Record<string, unknown> | null
+    entity_type?: 'candidate' | 'record' | string | null
+    entityType?: 'candidate' | 'record' | string | null
+    entity_id?: number | string | null
+    entityId?: number | string | null
+    confidence_tier?: 'low' | 'medium' | 'high' | string | null
+    confidenceTier?: 'low' | 'medium' | 'high' | string | null
+    admission_reason?: string | null
+    admissionReason?: string | null
+    missing_fields?: string[] | null
+    missingFields?: string[] | null
+    quality_notes?: string | null
+    qualityNotes?: string | null
+    fields?: Record<string, unknown> | null
     field_evidence_json?: Record<string, FieldEvidenceEntry>
     review_status?: string
     record_origin?: string
@@ -1091,6 +1309,13 @@ export interface UploadResponse {
     file_id: string
     filename: string
     preview: string
+    status?: string
+    extractor_type?: ExtractorType
+    record_count?: number
+    candidate_count?: number
+    cached_record_count?: number
+    cache_hit?: boolean
+    metadata?: LiteratureMetadata & { id?: number | string | null }
 }
 
 // Literature Metadata Interface
@@ -1127,6 +1352,9 @@ export interface ExtractionSummary {
     current_stage?: string
     current_message?: string
     no_data_reason?: string
+    review_status?: string
+    weak_candidate_count?: number
+    admission_reason?: string
     page_candidate_counts?: Record<string, {
         total: number
         figure: number
@@ -1290,7 +1518,7 @@ export function mapRecordToPayload(record: TribologyData) {
         loadValue: parseNumericValue(record.load, /[^0-9.]/g),
         loadRaw: record.load,
         loadConditions: record.load_conditions,
-        speedValue: parseNumericValue(record.speed, /[^0-9.]/g),
+        speedValue: record.speed || null,
         speedRaw: record.speed,
         speedConditions: record.speed_conditions,
         shearRate: record.shear_rate,
@@ -1403,6 +1631,8 @@ export interface BatchFile {
 
 export type SearchFilter = {
     recordId?: number
+    entityType?: 'record' | 'candidate' | string
+    query?: string
     materials?: string[]
     probe_materials?: string[]
     substrate_materials?: string[]
@@ -1463,6 +1693,17 @@ export interface RecordLiteratureDTO {
 
 export interface RecordResponse {
     id: number
+    displayId?: string | null
+    entityType?: 'candidate' | 'record' | string | null
+    entityId?: number | string | null
+    reviewEntityType?: 'candidate' | 'record' | string | null
+    confidenceTier?: 'low' | 'medium' | 'high' | string | null
+    admissionReason?: string | null
+    missingFields?: string[] | null
+    qualityNotes?: string | null
+    recordOrigin?: string | null
+    assemblyNotes?: string | null
+    fieldEvidenceJson?: Record<string, FieldEvidenceEntry> | null
     materialName: string
     lubricant: string
     lubricantComponents?: LubricantComponent[] | null
@@ -1685,10 +1926,18 @@ export interface LiteratureDoiImportResponse {
     items: LiteratureDoiImportItem[]
 }
 
+export type LiteratureListOptions = {
+    scope?: 'active' | 'group_library'
+}
+
 // Get all literature list
-export async function listLiterature(skip: number = 0, limit: number = 100) {
+export async function listLiterature(skip: number = 0, limit: number = 100, options: LiteratureListOptions = {}) {
+    const headers = options.scope === 'group_library'
+        ? { 'X-Scope-Type': 'group_library' }
+        : undefined
     const response = await api.get('/api/sync/literature', {
-        params: { skip, limit }
+        params: { skip, limit },
+        headers,
     })
     return response.data as Literature[]
 }
@@ -1706,6 +1955,11 @@ export async function getLiteratureDetails(literatureId: number) {
 
 export async function submitLiteratureForApproval(literatureId: number, note?: string) {
     const response = await api.post(`/api/collaboration/literature/${literatureId}/submit`, { note: note || null })
+    return response.data as CollaborationSubmissionResponse
+}
+
+export async function publishLiteratureToGroupLibrary(literatureId: number, note?: string) {
+    const response = await api.post(`/api/collaboration/literature/${literatureId}/publish`, { note: note || null })
     return response.data as CollaborationSubmissionResponse
 }
 
@@ -3484,6 +3738,7 @@ export interface LLMRuntimeConfig {
     openrouter_app_name: string
     text_model: string
     vision_model: string
+    fast_table_model: string
     has_openai_api_key: boolean
     has_openrouter_api_key: boolean
     has_vision_api_key: boolean
@@ -3502,6 +3757,7 @@ export interface LLMRuntimeUpdatePayload {
     openrouter_app_name?: string
     text_model?: string
     vision_model?: string
+    fast_table_model?: string
     vision_api_key?: string
     clear_vision_api_key?: boolean
 }
@@ -3513,6 +3769,7 @@ export interface LLMRuntimeSnapshot {
         active_base_url: string
         active_text_model: string
         active_vision_model: string
+        active_fast_table_model: string
         default_headers: Record<string, string>
     }
     notes: string[]
