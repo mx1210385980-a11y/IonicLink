@@ -135,6 +135,10 @@ def canonical_measurement(value: Any) -> str | None:
     return None
 
 
+def _known(value: str | None) -> str | None:
+    return value if value and value != "unknown" else None
+
+
 def _method_from_text(text: str) -> str | None:
     lower = text.lower()
     patterns = [
@@ -256,6 +260,12 @@ def build_experiment_profile(item: dict[str, Any] | None = None, **context: Any)
         system.get("rawText"),
         item.get("contact_type"),
         item.get("contactType"),
+        item.get("material_name"),
+        item.get("materialName"),
+        item.get("substrate_material"),
+        item.get("substrateMaterial"),
+        item.get("probe_material"),
+        item.get("probeMaterial"),
         item.get("probe_geometry"),
         item.get("probeGeometry"),
         item.get("regime"),
@@ -267,29 +277,27 @@ def build_experiment_profile(item: dict[str, Any] | None = None, **context: Any)
     )
 
     method = (
-        canonical_method(item.get("experiment_method"))
-        or canonical_method(item.get("experimentMethod"))
-        or canonical_method(item.get("method"))
-        or canonical_method(system.get("method"))
-        or canonical_method(system.get("contact_geometry"))
-        or canonical_method(system.get("contactGeometry"))
+        _known(canonical_method(item.get("experiment_method")))
+        or _known(canonical_method(item.get("experimentMethod")))
+        or _known(canonical_method(item.get("method")))
+        or _known(canonical_method(system.get("method")))
+        or _known(canonical_method(system.get("contact_geometry")))
+        or _known(canonical_method(system.get("contactGeometry")))
         or _method_from_text(raw_text)
     )
     scale = (
-        canonical_scale(item.get("experiment_scale"))
-        or canonical_scale(item.get("experimentScale"))
-        or canonical_scale(item.get("scale"))
-        or canonical_scale(system.get("scale"))
+        _known(canonical_scale(item.get("experiment_scale")))
+        or _known(canonical_scale(item.get("experimentScale")))
+        or _known(canonical_scale(item.get("scale")))
+        or _known(canonical_scale(system.get("scale")))
         or _scale_from_text(raw_text, method)
     )
-    instrument = (
-        _clean_text(item.get("instrument") or system.get("instrument")).lower() or None
-    )
+    instrument = _known(_clean_text(item.get("instrument") or system.get("instrument")).lower() or None)
     if instrument not in CANONICAL_INSTRUMENTS:
         instrument = _instrument_from_method(method)
     measurement_type = _measurement_from_item({**system, **item}, raw_text) or "unknown"
     contact_geometry = (
-        canonical_method(system.get("contact_geometry") or system.get("contactGeometry"))
+        _known(canonical_method(system.get("contact_geometry") or system.get("contactGeometry")))
         or method
         or _clean_text(system.get("contact_geometry") or system.get("contactGeometry"))
         or None
@@ -301,7 +309,7 @@ def build_experiment_profile(item: dict[str, Any] | None = None, **context: Any)
     scale = scale or "unknown"
     instrument = instrument or "unknown"
     profile = _clean_text(item.get("profile") or system.get("profile")).lower()
-    if profile not in {"macro", "afm", "nano", "micro", "unknown"}:
+    if profile not in {"macro", "afm", "nano", "micro"}:
         profile = profile_for_method_scale(method, scale)
     training_view = normalize_training_view(item.get("training_view") or item.get("trainingView") or system.get("training_view") or system.get("trainingView"))
     if training_view == "all":

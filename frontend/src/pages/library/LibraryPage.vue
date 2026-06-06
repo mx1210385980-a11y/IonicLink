@@ -5,6 +5,7 @@ import {
   ArrowRight,
   BookOpen,
   Check,
+  CheckCircle,
   CloudUpload,
   Crop,
   Database,
@@ -56,8 +57,10 @@ import {
   summarizeUploadBatch,
   type UploadBatchResult,
 } from '@/lib/libraryExtractionWorkflow'
+import { sessionState } from '@/lib/session'
 import ChemicalText from '@/components/ChemicalText.vue'
 import PdfViewerWithHighlight from '@/components/PdfViewerWithHighlight.vue'
+import { isPaperReviewed, reviewBadgesForPaper, type ReviewBadge } from './reviewBadges'
 
 const props = defineProps<{
   currentSection: string
@@ -163,7 +166,7 @@ const shouldShowUploadBatchProgress = computed(() => uploadBatchTotal.value > 1 
 const uploadHasQueuedFiles = computed(() => queuedUploadFiles.value.length > 0)
 
 const uploadExtractionPresetOptions: Array<{ value: UploadExtractionPreset, label: string, description: string }> = [
-  { value: 'tribology', label: 'Tribology', description: 'Friction, COF, wear, surfaces' },
+  { value: 'tribology', label: 'Lubrication', description: 'Friction, COF, wear, surfaces' },
   { value: 'diffusion', label: 'Diffusion', description: 'Diffusion coefficients and confined transport' },
   { value: 'conductivity', label: 'Conductivity', description: 'Conductivity, EIS, transference number' },
 ]
@@ -211,7 +214,7 @@ function setUploadedPaperExtractionPreset(paperId: string, value: Event | Upload
 }
 
 function uploadPresetLabel(preset: UploadExtractionPreset) {
-  return uploadExtractionPresetOptions.find((option) => option.value === preset)?.label || 'Tribology'
+  return uploadExtractionPresetOptions.find((option) => option.value === preset)?.label || 'Lubrication'
 }
 
 function metadataFromUploadFallback(file: File, response: Awaited<ReturnType<typeof uploadFile>>) {
@@ -286,6 +289,68 @@ function upsertUploadedPaperInLibrary(paper: LiteratureMetadata & { id: string }
 const selectedPaper = ref<Literature | null>(null)
 const selectedPaperDetails = ref<any | null>(null)
 const paperDetailTab = ref<'plain' | 'pdf' | 'figures'>('plain')
+
+// Per-paper hub: turn the detail view into a working dashboard (status, key
+// parameters, and jump-into-Database actions) rather than a read-only reader.
+function paperHubFirstNumber(value: any): number | null {
+  const match = String(value ?? '').match(/-?\d+(?:\.\d+)?/)
+  if (!match) return null
+  const num = Number(match[0])
+  return Number.isFinite(num) ? num : null
+}
+
+const paperHubStats = computed(() => {
+  const paper = selectedPaper.value as any
+  if (!paper) return { records: 0, candidates: 0, status: '' }
+  const records = Number(paper.tribologyRecordCount || 0) + Number(paper.diffusionRecordCount || 0)
+    || Number(paper.recordCount || 0)
+  const candidates = Number(paper.tribologyCandidateCount || 0) + Number(paper.diffusionCandidateCount || 0)
+    || Number(paper.candidateCount || 0)
+  return { records, candidates, status: String(paper.status || '').trim() }
+})
+
+const paperPrimaryDataset = computed<'tribology' | 'diffusion'>(() => {
+  const paper = selectedPaper.value as any
+  const diffusion = Number(paper?.diffusionRecordCount || 0) + Number(paper?.diffusionCandidateCount || 0)
+  const tribology = Number(paper?.tribologyRecordCount || 0) + Number(paper?.tribologyCandidateCount || 0)
+  return diffusion > tribology ? 'diffusion' : 'tribology'
+})
+
+const paperKeyParams = computed(() => {
+  const records = (selectedPaperDetails.value?.tribologyData || []) as any[]
+  const rangeOf = (values: number[]) => {
+    if (!values.length) return ''
+    const min = Math.min(...values)
+    const max = Math.max(...values)
+    const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(2))
+    return min === max ? fmt(min) : `${fmt(min)}–${fmt(max)}`
+  }
+  const numbersFor = (keys: string[]) =>
+    records
+      .map((record) => paperHubFirstNumber(keys.map((key) => record?.[key]).find((value) => value != null && value !== '')))
+      .filter((value): value is number => value != null)
+  const cof = rangeOf(numbersFor(['cof', 'cof_value', 'cofValue']))
+  const temp = rangeOf(numbersFor(['temperature', 'temperature_value']))
+  const load = rangeOf(numbersFor(['load', 'load_value', 'loadValue', 'normal_load']))
+  const ilCounts = new Map<string, number>()
+  for (const record of records) {
+    const il = String(record?.lubricant || record?.ionic_liquid || record?.ionicLiquid || '').trim()
+    if (il) ilCounts.set(il, (ilCounts.get(il) || 0) + 1)
+  }
+  const commonIl = [...ilCounts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] || ''
+  return { cof, temp, load, commonIl, hasAny: Boolean(cof || temp || load || commonIl) }
+})
+
+function openPaperInDatabase(entityType: 'record' | 'candidate') {
+  const paper = selectedPaper.value as any
+  if (!paper) return
+  emit('open-database', {
+    fileId: String(paper.id),
+    doi: paper.doi || '',
+    dataset: paperPrimaryDataset.value,
+    entityType,
+  })
+}
 const paperDetailLoading = ref(false)
 const paperDetailError = ref('')
 const paperPlainText = ref('')
@@ -343,7 +408,7 @@ const templates: ExtractTemplate[] = [
   },
 ]
 
-const presetExtractionColumns = ['Tribology', 'Diffusion', 'Conductivity'] as const
+const presetExtractionColumns = ['Lubrication', 'Diffusion', 'Conductivity'] as const
 const extractionTableColumns = computed(() => [
   ...presetExtractionColumns.map((label) => ({
     id: label.toLowerCase(),
@@ -372,7 +437,9 @@ async function fetchPapers() {
   loading.value = true
   error.value = ''
   try {
-    items.value = await listLiterature(0, 1000, { scope: 'group_library' })
+    const role = String(sessionState.user?.role || '').trim().toLowerCase()
+    const scope = role === 'principal_investigator' || role === 'group_admin' ? 'all_visible' : 'group_library'
+    items.value = await listLiterature(0, 1000, { scope })
   } catch (err: any) {
     error.value = err?.message || 'Failed to fetch literature.'
   } finally {
@@ -531,8 +598,17 @@ function hasExtractedEvidence(paper: Literature) {
   return Number(paper.recordCount || paper.candidateCount || paper.tribologyRecordCount || paper.tribologyCandidateCount || paper.diffusionRecordCount || paper.diffusionCandidateCount || 0) > 0
 }
 
+function reviewBadgeClass(badge: ReviewBadge) {
+  if (badge.tone === 'reviewed') return 'border-teal-200 bg-teal-50 text-teal-800'
+  return 'border-amber-200 bg-amber-50 text-amber-800'
+}
+
+function reviewBadgeText(badge: ReviewBadge) {
+  return badge.label
+}
+
 function valueForColumn(paper: Literature, column: string) {
-  if (column === 'Tribology') {
+  if (column === 'Lubrication') {
     if (extractedCofPreview.value[paper.id]) return extractedCofPreview.value[paper.id]
     const records = Number(paper.tribologyRecordCount || 0)
     const candidates = Number(paper.tribologyCandidateCount || paper.candidateCount || 0)
@@ -1381,7 +1457,7 @@ const uploadExtractionSetupBlocker = computed(() => {
     !extractorForUploadPreset(presetForUploadedPaper(paper))
   ))
   if (!blockedPaper) return ''
-  return 'Conductivity extraction is not connected yet. Choose Tribology or Diffusion before starting.'
+  return 'Conductivity extraction is not connected yet. Choose Lubrication or Diffusion before starting.'
 })
 
 function openUploadExtractionSetup() {
@@ -1528,7 +1604,7 @@ async function runExtraction() {
   extractionActivePaperIds.value = [...selectedPaperIds.value]
   runningExtraction.value = true
   cancellingExtraction.value = false
-  statusMessage.value = `Extraction submitted for ${extractorTypes.map((type) => type === 'diffusion' ? 'Diffusion' : 'Tribology').join(' + ')} columns.`
+  statusMessage.value = `Extraction submitted for ${extractorTypes.map((type) => type === 'diffusion' ? 'Diffusion' : 'Lubrication').join(' + ')} columns.`
   clearExtractionPollTimer()
   seedExtractionProgress()
   try {
@@ -1707,7 +1783,7 @@ function applyCombinedExtractionRuns(paperId: number, runs: ExtractionRunDetail[
   const messageSource = failedRun || activeRun || retryableRun || runs.find((run) => runReviewableCounts(run).reviewableCount > 0) || runs[0]
   const summary = messageSource?.summary || {}
   const extractorLabel = runs
-    .map((run) => run.extractor_type === 'diffusion' ? 'Diffusion' : 'Tribology')
+    .map((run) => run.extractor_type === 'diffusion' ? 'Diffusion' : 'Lubrication')
     .filter((label, index, labels) => labels.indexOf(label) === index)
     .join(' + ')
 
@@ -1912,8 +1988,13 @@ watch(() => props.selectedFileId, () => {
           </button>
 
           <div class="mx-auto max-w-5xl">
-            <h1 class="text-xl font-extrabold leading-snug tracking-tight text-slate-900">
-              {{ titleFor(selectedPaper) }}
+            <h1 class="flex min-w-0 items-start gap-2 text-xl font-extrabold leading-snug tracking-tight text-slate-900">
+              <span class="min-w-0">{{ titleFor(selectedPaper) }}</span>
+              <CheckCircle
+                v-if="isPaperReviewed(selectedPaper)"
+                aria-label="Reviewed literature"
+                class="mt-0.5 h-5 w-5 shrink-0 text-emerald-600"
+              />
             </h1>
             <p class="mt-4 max-w-4xl text-sm leading-6 text-slate-500">
               {{ detailAuthors((selectedPaperDetails || selectedPaper).authors) }}
@@ -1958,6 +2039,74 @@ watch(() => props.selectedFileId, () => {
                   Figures
                 </button>
               </div>
+            </div>
+
+            <!-- Per-paper hub: extraction status, key parameters, jump-into-Database actions -->
+            <div class="mt-6 grid gap-3 sm:grid-cols-2" data-testid="paper-hub">
+              <div class="rounded-xl border border-slate-200 bg-white p-4">
+                <div class="text-[11px] font-black uppercase tracking-[0.14em] text-slate-400">Extraction</div>
+                <div class="mt-2 flex flex-wrap items-baseline gap-x-6 gap-y-1">
+                  <div>
+                    <span class="text-2xl font-black text-slate-900">{{ paperHubStats.records }}</span>
+                    <span class="ml-1 text-xs font-bold text-slate-500">records</span>
+                  </div>
+                  <div>
+                    <span class="text-2xl font-black" :class="paperHubStats.candidates > 0 ? 'text-amber-600' : 'text-slate-900'">{{ paperHubStats.candidates }}</span>
+                    <span class="ml-1 text-xs font-bold text-slate-500">need review</span>
+                  </div>
+                </div>
+                <div v-if="paperHubStats.status" class="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-slate-500">
+                  <span
+                    class="h-2 w-2 rounded-full"
+                    :class="paperHubStats.status === 'completed' ? 'bg-emerald-500' : paperHubStats.status === 'failed' ? 'bg-rose-500' : 'bg-amber-500'"
+                  />
+                  {{ paperHubStats.status }}
+                </div>
+              </div>
+
+              <div class="rounded-xl border border-slate-200 bg-white p-4">
+                <div class="text-[11px] font-black uppercase tracking-[0.14em] text-slate-400">Key parameters</div>
+                <dl v-if="paperKeyParams.hasAny" class="mt-2 grid grid-cols-2 gap-x-5 gap-y-1.5 text-sm">
+                  <div v-if="paperKeyParams.cof" class="flex items-baseline justify-between gap-2">
+                    <dt class="font-bold text-slate-400">COF</dt>
+                    <dd class="font-black text-slate-700">{{ paperKeyParams.cof }}</dd>
+                  </div>
+                  <div v-if="paperKeyParams.temp" class="flex items-baseline justify-between gap-2">
+                    <dt class="font-bold text-slate-400">Temp</dt>
+                    <dd class="font-black text-slate-700">{{ paperKeyParams.temp }} °C</dd>
+                  </div>
+                  <div v-if="paperKeyParams.load" class="flex items-baseline justify-between gap-2">
+                    <dt class="font-bold text-slate-400">Load</dt>
+                    <dd class="font-black text-slate-700">{{ paperKeyParams.load }}</dd>
+                  </div>
+                  <div v-if="paperKeyParams.commonIl" class="col-span-2 flex items-baseline justify-between gap-2">
+                    <dt class="font-bold text-slate-400">IL</dt>
+                    <dd class="min-w-0 truncate text-right font-black text-slate-700"><ChemicalText :text="paperKeyParams.commonIl" /></dd>
+                  </div>
+                </dl>
+                <p v-else class="mt-2 text-sm font-semibold text-slate-400">No extracted records yet.</p>
+              </div>
+            </div>
+
+            <div class="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                class="inline-flex h-10 items-center gap-2 rounded-lg bg-[#0f7c82] px-4 text-sm font-black text-white transition hover:bg-[#0b6870] disabled:cursor-not-allowed disabled:opacity-55"
+                :disabled="paperHubStats.records === 0 && paperHubStats.candidates === 0"
+                @click="openPaperInDatabase('record')"
+              >
+                <Database class="h-4 w-4" />
+                Open in Database
+              </button>
+              <button
+                v-if="paperHubStats.candidates > 0"
+                type="button"
+                class="inline-flex h-10 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 text-sm font-black text-amber-700 transition hover:bg-amber-100"
+                @click="openPaperInDatabase('candidate')"
+              >
+                <ArrowRight class="h-4 w-4" />
+                Review {{ paperHubStats.candidates }}
+              </button>
             </div>
           </div>
         </div>
@@ -2194,15 +2343,30 @@ watch(() => props.selectedFileId, () => {
                   </button>
                 </div>
                 <div class="min-w-0 space-y-3">
-                  <h2 class="max-w-4xl text-base font-extrabold leading-snug text-slate-900">
+                  <h2 class="flex max-w-4xl items-start gap-2 text-base font-extrabold leading-snug text-slate-900">
                     <button
                       type="button"
-                      class="text-left decoration-slate-500 underline-offset-4 transition hover:text-slate-700 hover:underline focus:underline focus:outline-none"
+                      class="min-w-0 text-left decoration-slate-500 underline-offset-4 transition hover:text-slate-700 hover:underline focus:underline focus:outline-none"
                       @click="openPaperDetail(item)"
                     >
-                    {{ titleFor(item) }}
+                      {{ titleFor(item) }}
                     </button>
+                    <CheckCircle
+                      v-if="isPaperReviewed(item)"
+                      aria-label="Reviewed literature"
+                      class="mt-0.5 h-4 w-4 shrink-0 text-emerald-600"
+                    />
                   </h2>
+                  <div v-if="reviewBadgesForPaper(item).length > 0" class="flex flex-wrap gap-2">
+                    <span
+                      v-for="badge in reviewBadgesForPaper(item)"
+                      :key="badge.label"
+                      class="inline-flex h-6 items-center rounded-full border px-2.5 text-xs font-black"
+                      :class="reviewBadgeClass(badge)"
+                    >
+                      {{ reviewBadgeText(badge) }}
+                    </span>
+                  </div>
                   <p v-if="detailAuthors(item.authors) !== '-'" class="max-w-5xl truncate text-base text-slate-500">
                     {{ detailAuthors(item.authors) }}
                   </p>
@@ -2265,13 +2429,30 @@ watch(() => props.selectedFileId, () => {
                     </button>
                   </td>
                   <td class="border-r border-slate-200 p-4 align-middle font-bold">
-                    <button
-                      type="button"
-                      class="text-left decoration-slate-500 underline-offset-4 transition hover:text-slate-700 hover:underline focus:underline focus:outline-none"
-                      @click="openPaperDetail(item)"
-                    >
-                      {{ titleFor(item) }}
-                    </button>
+                    <div class="flex min-w-0 items-start gap-2">
+                      <button
+                        type="button"
+                        class="min-w-0 text-left decoration-slate-500 underline-offset-4 transition hover:text-slate-700 hover:underline focus:underline focus:outline-none"
+                        @click="openPaperDetail(item)"
+                      >
+                        {{ titleFor(item) }}
+                      </button>
+                      <CheckCircle
+                        v-if="isPaperReviewed(item)"
+                        aria-label="Reviewed literature"
+                        class="mt-0.5 h-4 w-4 shrink-0 text-emerald-600"
+                      />
+                    </div>
+                    <div v-if="reviewBadgesForPaper(item).length > 0" class="mt-2 flex flex-wrap gap-1.5">
+                      <span
+                        v-for="badge in reviewBadgesForPaper(item)"
+                        :key="badge.label"
+                        class="inline-flex h-5 items-center rounded-full border px-2 text-[11px] font-black leading-none"
+                        :class="reviewBadgeClass(badge)"
+                      >
+                        {{ reviewBadgeText(badge) }}
+                      </span>
+                    </div>
                   </td>
                   <td class="border-r border-slate-200 p-4 align-middle text-slate-500">
                     {{ primaryAuthors(item.authors) }}
@@ -2510,7 +2691,7 @@ watch(() => props.selectedFileId, () => {
             </p>
             <button type="button" class="mb-3 block w-full rounded-lg border border-slate-200 bg-slate-50 p-4 text-left">
               <strong class="block text-sm">Preset columns</strong>
-              <small class="mt-1 block leading-relaxed text-slate-500">Tribology, Diffusion, and Conductivity stay available as table columns.</small>
+              <small class="mt-1 block leading-relaxed text-slate-500">Lubrication, Diffusion, and Conductivity stay available as table columns.</small>
             </button>
             <div class="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
               <button type="button" class="block w-full text-left" @click="columnComposerOpen = !columnComposerOpen">

@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import {
+  batchDeleteTribologyRecords,
   getCandidateFieldEvidence,
   getPdfBboxPreview,
+  getPdfFigurePreviews,
   getRecordFieldEvidence,
   searchRecords,
   type RecordResponse,
   type EvidenceResult,
   type FieldEvidenceEntry,
+  type PdfFigurePreview,
   type RecordFieldEvidenceResponse,
 } from '@/lib/api'
 import {
@@ -19,13 +22,17 @@ import {
   ChevronRight,
   Save,
   Trash2,
+  Ban,
   X,
   Check,
   Layers,
+  Maximize2,
+  FileText,
   ChevronsLeft,
   ChevronsRight,
 } from 'lucide-vue-next'
 import ChemicalText from '@/components/ChemicalText.vue'
+import CandidateReviewSheet from '@/components/integrated-explorer/CandidateReviewSheet.vue'
 import RecordTable from '@/components/integrated-explorer/RecordTable.vue'
 import Modal from '@/components/ui/Modal.vue'
 import { recordEvidenceCacheKey, useEvidencePanel } from '@/composables/useEvidencePanel'
@@ -34,6 +41,11 @@ import { useRecordSearch } from '@/composables/useRecordSearch'
 import { evidencePreviewErrorMessage } from '@/lib/evidencePreviewErrors'
 import type { HighlightRect } from '@/types/pdf-highlight'
 import {
+  candidateAgeDays,
+  candidateEvidenceQuality,
+  candidateEvidenceQualityLabel,
+  candidateMissingFields,
+  candidateTriageTier,
   cofDisplay,
   compactRecordDisplayId,
   conditionGroups,
@@ -42,8 +54,10 @@ import {
   formatIonicLiquidHtml,
   lubricantDisplay,
   lubricantStructureItems,
+  missingFieldLabel,
   recordDisplayId,
   tribopairDisplay,
+  type CandidateEvidenceQuality,
   type IonStructurePreviewItem,
 } from '@/lib/integratedExplorerHelpers'
 import { normalizePotentialDisplayText } from '@/lib/potential'
@@ -54,10 +68,11 @@ const props = defineProps<{
   sourceName?: string
   literatureMetadata?: any
   selectedFileId?: string | null
-  recordScope?: 'active' | 'group_library'
+  recordScope?: 'active' | 'group_library' | 'all_visible'
   fixedExperimentScale?: string | null
   focusRecordId?: number | null
   focusEntityType?: 'record' | 'candidate' | null
+  entityTypeFilter?: 'record' | 'candidate' | null
   externalExportRequest?: { id: number, format: ExportFormat } | null
   externalFilterRequestId?: number | null
 }>()
@@ -97,6 +112,9 @@ const {
   cofMin,
   cofMax,
   currentPage,
+  sortBy,
+  sortDir,
+  setSort,
   totalPages,
   rangeStart,
   rangeEnd,
@@ -119,9 +137,187 @@ const {
   selectedFileId: toRef(props, 'selectedFileId'),
   targetRecordId: toRef(props, 'focusRecordId'),
   targetEntityType: toRef(props, 'focusEntityType'),
+  entityTypeFilter: toRef(props, 'entityTypeFilter'),
   scope: toRef(props, 'recordScope'),
   fixedExperimentScale: toRef(props, 'fixedExperimentScale'),
   pageSize: PAGE_SIZE,
+})
+
+const activeLibraryEntityType = computed<'record' | 'candidate'>(() =>
+  props.entityTypeFilter === 'candidate' ? 'candidate' : 'record',
+)
+const isReviewQueue = computed(() => activeLibraryEntityType.value === 'candidate')
+
+// Track 2: review-queue triage ───────────────────────────────────────────────
+// Client-side narrowing + backlog ordering over the candidate rows the queue
+// already returns. Triage fields (confidenceTier, missingFields, recordOrigin)
+// ride along on each candidate payload, so no extra query is needed.
+type ConfidenceTierFilter = 'all' | 'weak' | 'strong'
+type EvidenceQualityFilter = 'all' | CandidateEvidenceQuality
+const triageTierFilter = ref<ConfidenceTierFilter>('all')
+const triageEvidenceQuality = ref<EvidenceQualityFilter>('all')
+const triageMissingField = ref('')
+// Staleness presets (whole days). 0 = off; a candidate matches when its age in
+// days is >= the selected threshold.
+const STALE_DAY_PRESETS = [7, 30, 90] as const
+const triageStaleDays = ref(0)
+
+const queueCandidateItems = computed(() =>
+  result.value.items.filter((record) => databaseRecordEntityType(record) === 'candidate'),
+)
+
+const triageTierCounts = computed(() => {
+  let weak = 0
+  for (const record of queueCandidateItems.value) {
+    if (candidateTriageTier(record) === 'weak') weak += 1
+  }
+  const all = queueCandidateItems.value.length
+  return { all, weak, strong: all - weak }
+})
+
+const triageMissingFieldOptions = computed(() => {
+  const counts = new Map<string, number>()
+  for (const record of queueCandidateItems.value) {
+    for (const field of candidateMissingFields(record)) {
+      counts.set(field, (counts.get(field) || 0) + 1)
+    }
+  }
+  return Array.from(counts.entries())
+    .sort((left, right) => right[1] - left[1])
+    .map(([key, count]) => ({ key, count, label: missingFieldLabel(key) }))
+})
+
+const EVIDENCE_QUALITY_ORDER: CandidateEvidenceQuality[] = ['weak', 'text_only', 'page_only', 'exact']
+const EVIDENCE_QUALITY_SORT_RANK: Record<CandidateEvidenceQuality, number> = {
+  weak: 0,
+  text_only: 1,
+  page_only: 2,
+  exact: 3,
+}
+
+const triageEvidenceQualityOptions = computed(() => {
+  const counts = new Map<CandidateEvidenceQuality, number>()
+  for (const record of queueCandidateItems.value) {
+    const quality = candidateEvidenceQuality(record)
+    counts.set(quality, (counts.get(quality) || 0) + 1)
+  }
+  return EVIDENCE_QUALITY_ORDER
+    .map((key) => ({ key, count: counts.get(key) || 0, label: candidateEvidenceQualityLabel(key) }))
+    .filter((option) => option.count > 0)
+})
+
+const triageStaleOptions = computed(() =>
+  STALE_DAY_PRESETS.map((days) => ({
+    days,
+    count: queueCandidateItems.value.filter((record) => {
+      const age = candidateAgeDays(record)
+      return age !== null && age >= days
+    }).length,
+  })).filter((option) => option.count > 0),
+)
+
+const hasTriageFilters = computed(() =>
+  isReviewQueue.value &&
+  (
+    triageTierFilter.value !== 'all' ||
+    triageEvidenceQuality.value !== 'all' ||
+    Boolean(triageMissingField.value) ||
+    triageStaleDays.value > 0
+  ),
+)
+
+function candidateMatchesTriage(record: RecordResponse) {
+  if (triageTierFilter.value !== 'all' && candidateTriageTier(record) !== triageTierFilter.value) return false
+  if (triageEvidenceQuality.value !== 'all' && candidateEvidenceQuality(record) !== triageEvidenceQuality.value) return false
+  if (triageMissingField.value && !candidateMissingFields(record).includes(triageMissingField.value)) return false
+  if (triageStaleDays.value > 0) {
+    const age = candidateAgeDays(record)
+    if (age === null || age < triageStaleDays.value) return false
+  }
+  return true
+}
+
+function setTriageTier(tier: ConfidenceTierFilter) {
+  triageTierFilter.value = triageTierFilter.value === tier ? 'all' : tier
+}
+
+function setTriageEvidenceQuality(quality: CandidateEvidenceQuality) {
+  triageEvidenceQuality.value = triageEvidenceQuality.value === quality ? 'all' : quality
+}
+
+function toggleTriageMissingField(field: string) {
+  triageMissingField.value = triageMissingField.value === field ? '' : field
+}
+
+function setTriageStaleDays(days: number) {
+  triageStaleDays.value = triageStaleDays.value === days ? 0 : days
+}
+
+function clearTriageFilters() {
+  triageTierFilter.value = 'all'
+  triageEvidenceQuality.value = 'all'
+  triageMissingField.value = ''
+  triageStaleDays.value = 0
+}
+
+// Backlog ranking: surface candidates from the most-backlogged literature first
+// (mirrors the monitor extraction-review-progress ordering), weakest within.
+const queueBacklogByLiterature = computed(() => {
+  const counts = new Map<number, number>()
+  for (const record of queueCandidateItems.value) {
+    const litId = Number(record.literatureId || 0)
+    counts.set(litId, (counts.get(litId) || 0) + 1)
+  }
+  return counts
+})
+
+const displayedRecords = computed<RecordResponse[]>(() => {
+  if (!isReviewQueue.value) return result.value.items
+  const backlog = queueBacklogByLiterature.value
+  return result.value.items
+    .filter((record) => databaseRecordEntityType(record) !== 'candidate' || candidateMatchesTriage(record))
+    .slice()
+    .sort((left, right) => {
+      const leftLit = Number(left.literatureId || 0)
+      const rightLit = Number(right.literatureId || 0)
+      const leftCount = backlog.get(leftLit) || 0
+      const rightCount = backlog.get(rightLit) || 0
+      if (leftCount !== rightCount) return rightCount - leftCount
+      if (leftLit !== rightLit) return leftLit - rightLit
+      const leftQuality = candidateEvidenceQuality(left)
+      const rightQuality = candidateEvidenceQuality(right)
+      if (leftQuality !== rightQuality) return EVIDENCE_QUALITY_SORT_RANK[leftQuality] - EVIDENCE_QUALITY_SORT_RANK[rightQuality]
+      return (Number(left.confidence) || 0) - (Number(right.confidence) || 0)
+    })
+})
+
+const displayedCandidateCount = computed(() =>
+  displayedRecords.value.filter((record) => databaseRecordEntityType(record) === 'candidate').length,
+)
+
+watch(isReviewQueue, (inQueue) => {
+  if (!inQueue) clearTriageFilters()
+})
+
+// Drop a missing-field filter once no queued candidate is missing that field.
+watch(triageMissingFieldOptions, (options) => {
+  if (triageMissingField.value && !options.some((option) => option.key === triageMissingField.value)) {
+    triageMissingField.value = ''
+  }
+})
+
+// Drop an evidence-quality filter once no queued candidate matches it.
+watch(triageEvidenceQualityOptions, (options) => {
+  if (triageEvidenceQuality.value !== 'all' && !options.some((option) => option.key === triageEvidenceQuality.value)) {
+    triageEvidenceQuality.value = 'all'
+  }
+})
+
+// Drop a staleness filter once no queued candidate is old enough to match it.
+watch(triageStaleOptions, (options) => {
+  if (triageStaleDays.value && !options.some((option) => option.days === triageStaleDays.value)) {
+    triageStaleDays.value = 0
+  }
 })
 
 type AdvancedFilterState = {
@@ -546,7 +742,6 @@ const {
 type DatabaseEvidenceField = 'ionic-liquid' | 'tribopair' | 'conditions' | 'cof'
 const databaseEvidenceField = ref<DatabaseEvidenceField>('conditions')
 const databaseEvidenceFocusedFieldKey = ref<string | null>(null)
-const databaseEvidencePosition = ref({ top: 160, left: 160 })
 
 type DatabaseEvidenceQuote = {
   text: string
@@ -564,6 +759,7 @@ type DatabaseEvidenceSlide = {
   note?: string
   noteLabel?: string
   locatorKey?: string
+  confidence?: number | null
   imageSrc: string | null
   imageLoading?: boolean
   imageError?: string | null
@@ -577,15 +773,25 @@ const databaseEvidenceOpenToken = ref(0)
 const databaseEvidencePreviewImages = ref<Record<string, string | null>>({})
 const databaseEvidencePreviewLoading = ref<Record<string, boolean>>({})
 const databaseEvidencePreviewError = ref<Record<string, string | null>>({})
+const databaseEvidenceFigurePreviews = ref<Record<number, PdfFigurePreview[]>>({})
+const databaseEvidenceFigurePreviewLoading = ref<Record<string, boolean>>({})
+const databaseEvidenceFigurePreviewImages = ref<Record<string, string | null>>({})
+const databaseEvidenceFigurePreviewError = ref<Record<string, string | null>>({})
 
 const {
   deletingRowId,
   editDrawerRecord,
   activeEditValues,
+  openEditModal,
   closeEditDrawer,
   updateActiveEditingField,
-  saveActiveEditRecord,
-  isSavingActiveEditRecord,
+  correctionPending,
+  correctionError,
+  correctionPreview,
+  correctionReviewMode,
+  previewActiveCorrection,
+  commitActiveCorrection,
+  cancelCorrectionReview,
 } = useRecordEditing({
   result,
   evidenceData,
@@ -593,10 +799,86 @@ const {
   markGraphDirty,
 })
 
+// Friendly labels for the dry-run correction diff (keys = backend columns).
+const CORRECTION_FIELD_LABELS: Record<string, string> = {
+  lubricant: 'Ionic Liquid',
+  temperature: 'Temperature',
+  potential: 'Potential',
+  water_content: 'Water Content',
+  speed_value: 'Speed',
+  shear_rate: 'Shear Rate',
+  load_value: 'Load',
+  probe_material: 'Probe Material',
+  probe_geometry: 'Probe Geometry',
+  probe_radius: 'Probe Radius',
+  probe_roughness: 'Probe Roughness',
+  substrate_material: 'Substrate',
+  material_name: 'Material',
+  substrate_coating: 'Coating',
+  substrate_roughness: 'Substrate Roughness',
+  film_thickness: 'Film / Roughness',
+  cof_raw: 'COF (raw)',
+  cof_value: 'COF',
+}
+
+function correctionValueDisplay(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '∅'
+  return String(value)
+}
+
+const correctionDiffEntries = computed(() => {
+  const diff = correctionPreview.value?.diff
+  if (!diff) return [] as Array<{ field: string; label: string; before: string; after: string }>
+  return Object.entries(diff).map(([field, change]) => ({
+    field,
+    label: CORRECTION_FIELD_LABELS[field] ?? field,
+    before: correctionValueDisplay(change?.before),
+    after: correctionValueDisplay(change?.after),
+  }))
+})
+
+const correctionConfidenceDelta = computed(() => {
+  const next = correctionPreview.value?.confidence
+  if (typeof next !== 'number' || !editDrawerRecord.value) return null
+  const current = Number(confidenceValueFor(editDrawerRecord.value) ?? 0)
+  return { next, delta: next - current }
+})
+
+// Table density (Comfortable ↔ Compact) — persisted so reviewers keep their choice.
+const TABLE_DENSITY_KEY = 'ioniclink:db-density'
+function readStoredDensity(): 'comfortable' | 'compact' {
+  try {
+    return localStorage.getItem(TABLE_DENSITY_KEY) === 'compact' ? 'compact' : 'comfortable'
+  } catch {
+    return 'comfortable'
+  }
+}
+const tableDensity = ref<'comfortable' | 'compact'>(readStoredDensity())
+function setTableDensity(value: 'comfortable' | 'compact') {
+  tableDensity.value = value
+  try {
+    localStorage.setItem(TABLE_DENSITY_KEY, value)
+  } catch {
+    /* ignore persistence failures (private mode, etc.) */
+  }
+}
+
 // 批量选择 + 批量操作 ─────────────────────────────────────────
 const selectedIds = ref<Set<number>>(new Set())
 const batchActionPending = ref(false)
 const batchError = ref('')
+const reviewSheetRecord = ref<RecordResponse | null>(null)
+const reviewSheetNextRecord = computed(() => {
+  const current = reviewSheetRecord.value
+  if (!current) return null
+  // Follow the displayed (triage-filtered + backlog-sorted) order so "next"
+  // matches what the reviewer sees in the queue.
+  const candidateRecords = displayedRecords.value.filter((record) => databaseRecordEntityType(record) === 'candidate')
+  const currentEntityId = String(databaseRecordEntityId(current))
+  const currentIndex = candidateRecords.findIndex((record) => String(databaseRecordEntityId(record)) === currentEntityId)
+  if (currentIndex < 0) return null
+  return candidateRecords[currentIndex + 1] || null
+})
 const selectablePageRecordIds = computed(() =>
   result.value.items
     .filter((record) => databaseRecordEntityType(record) !== 'candidate')
@@ -627,6 +909,105 @@ function clearSelection() {
   selectedIds.value = new Set()
 }
 
+// Track 4: bulk candidate review ──────────────────────────────────────────────
+// A candidate-only selection (keyed by entity id) that drives bulk approve/reject
+// over the same per-candidate endpoints the single-row review sheet uses.
+const selectedCandidateIds = ref<Set<string>>(new Set())
+const bulkReviewPending = ref(false)
+const bulkReviewError = ref('')
+
+const selectablePageCandidateIds = computed(() =>
+  displayedRecords.value
+    .filter((record) => databaseRecordEntityType(record) === 'candidate')
+    .map((record) => String(record.entityId ?? record.id)),
+)
+const selectedCandidateCount = computed(() =>
+  selectablePageCandidateIds.value.filter((id) => selectedCandidateIds.value.has(id)).length,
+)
+
+function toggleSelectCandidate(entityId: string) {
+  const next = new Set(selectedCandidateIds.value)
+  if (next.has(entityId)) next.delete(entityId)
+  else next.add(entityId)
+  selectedCandidateIds.value = next
+}
+function toggleSelectAllCandidates(select: boolean) {
+  const next = new Set(selectedCandidateIds.value)
+  for (const id of selectablePageCandidateIds.value) {
+    if (select) next.add(id)
+    else next.delete(id)
+  }
+  selectedCandidateIds.value = next
+}
+function clearCandidateSelection() {
+  selectedCandidateIds.value = new Set()
+}
+
+// Drop selections for candidates no longer visible (filtered out / refetched).
+watch(selectablePageCandidateIds, (ids) => {
+  if (!selectedCandidateIds.value.size) return
+  const visible = new Set(ids)
+  const pruned = new Set(Array.from(selectedCandidateIds.value).filter((id) => visible.has(id)))
+  if (pruned.size !== selectedCandidateIds.value.size) selectedCandidateIds.value = pruned
+})
+watch(isReviewQueue, (inQueue) => {
+  if (!inQueue) clearCandidateSelection()
+})
+
+function selectedCandidateRecords() {
+  return displayedRecords.value.filter(
+    (record) =>
+      databaseRecordEntityType(record) === 'candidate'
+      && selectedCandidateIds.value.has(String(record.entityId ?? record.id)),
+  )
+}
+
+async function runBulkCandidateReview(
+  action: 'approve' | 'reject',
+  apiCall: (candidateId: number) => Promise<unknown>,
+) {
+  const targets = selectedCandidateRecords()
+  if (!targets.length || bulkReviewPending.value) return
+  const verb = action === 'approve' ? 'Approve' : 'Reject'
+  if (!confirm(`${verb} ${targets.length} selected candidate${targets.length === 1 ? '' : 's'}?`)) return
+  bulkReviewPending.value = true
+  bulkReviewError.value = ''
+  let processed = 0
+  try {
+    for (const record of targets) {
+      const candidateId = Number(record.entityId ?? record.id)
+      if (!Number.isFinite(candidateId) || candidateId <= 0) continue
+      try {
+        await apiCall(candidateId)
+        processed += 1
+      } catch (e: any) {
+        bulkReviewError.value = `Failed to ${action} candidate #${candidateId}: ${e?.response?.data?.detail || e?.message || 'Unknown error'}`
+        break
+      }
+    }
+  } finally {
+    clearCandidateSelection()
+    if (reviewSheetRecord.value) reviewSheetRecord.value = null
+    if (processed > 0) {
+      window.dispatchEvent(new CustomEvent('ioniclink:review-data-changed', {
+        detail: { dataset: 'lubrication', entityType: 'candidate' },
+      }))
+      await fetchData()
+    }
+    bulkReviewPending.value = false
+  }
+}
+
+async function handleBulkApproveCandidates() {
+  const { approveReviewCandidate } = await import('@/lib/api')
+  await runBulkCandidateReview('approve', approveReviewCandidate)
+}
+
+async function handleBulkRejectCandidates() {
+  const { rejectReviewCandidate } = await import('@/lib/api')
+  await runBulkCandidateReview('reject', (candidateId) => rejectReviewCandidate(candidateId))
+}
+
 async function handleBatchDelete() {
   if (!visibleSelectedIds.value.size) return
   if (!confirm(`Delete ${visibleSelectedIds.value.size} selected records? This cannot be undone.`)) return
@@ -634,19 +1015,67 @@ async function handleBatchDelete() {
   batchError.value = ''
   try {
     const ids = Array.from(visibleSelectedIds.value)
-    for (const id of ids) {
-      try {
-        const { deleteTribologyRecord } = await import('@/lib/api')
-        await deleteTribologyRecord(id)
-      } catch (e: any) {
-        batchError.value = `Failed to delete record #${id}: ${e?.response?.data?.detail || e?.message || 'Unknown error'}`
-        break
-      }
+    const result = await batchDeleteTribologyRecords(ids)
+    if (result.failed.length) {
+      const sample = result.failed
+        .slice(0, 3)
+        .map((entry) => `#${entry.id} (${entry.reason})`)
+        .join(', ')
+      const more = result.failed.length > 3 ? `, +${result.failed.length - 3} more` : ''
+      batchError.value =
+        `Deleted ${result.deletedCount} of ${result.requested}. ` +
+        `Could not delete ${result.failed.length}: ${sample}${more}`
     }
     clearSelection()
     await fetchData()
+  } catch (e: any) {
+    batchError.value = `Batch delete failed: ${e?.response?.data?.detail || e?.message || 'Unknown error'}`
   } finally {
     batchActionPending.value = false
+  }
+}
+
+function openCandidateReviewSheet(record: RecordResponse) {
+  if (databaseRecordEntityType(record) !== 'candidate') return
+  closeDatabaseEvidencePopover()
+  reviewSheetRecord.value = record
+}
+
+function openNextCandidateReviewSheet() {
+  if (!reviewSheetNextRecord.value) return
+  closeDatabaseEvidencePopover()
+  reviewSheetRecord.value = reviewSheetNextRecord.value
+}
+
+async function handleCandidateReviewApproved() {
+  advancePastReviewedCandidate(reviewSheetRecord.value)
+}
+
+async function handleCandidateReviewRejected() {
+  advancePastReviewedCandidate(reviewSheetRecord.value)
+}
+
+function advancePastReviewedCandidate(reviewedRecord: RecordResponse | null) {
+  // Capture the next candidate before removing the current one, so the queue
+  // advances in place and the sheet stays open across candidates.
+  const nextRecord = reviewSheetNextRecord.value
+  closeDatabaseEvidencePopover()
+  if (reviewedRecord) {
+    optimisticallyRemoveApprovedCandidate(reviewedRecord)
+  }
+  reviewSheetRecord.value = nextRecord ?? null
+  window.dispatchEvent(new CustomEvent('ioniclink:review-data-changed', {
+    detail: { dataset: 'lubrication', entityType: 'candidate' },
+  }))
+  void fetchData()
+}
+
+function optimisticallyRemoveApprovedCandidate(record: RecordResponse) {
+  const approvedId = String(record.entityId ?? record.id)
+  result.value = {
+    ...result.value,
+    total: Math.max(0, result.value.total - 1),
+    items: result.value.items.filter((item) => String(item.entityId ?? item.id) !== approvedId),
   }
 }
 
@@ -856,18 +1285,15 @@ function parseRecordEvidenceBbox(record: RecordResponse): number[] | null {
 }
 
 function isVisualEvidenceSource(ev: EvidenceResult | null | undefined): boolean {
+  // Rely on the explicit source_type only. A `source` label that merely cites a
+  // figure (e.g. a text value referencing "Fig. 2") must NOT open the whole figure
+  // image — it should locate the text region in the PDF. Aligns with
+  // isDatabaseVisualEvidenceEntry so click-to-open and inline display agree.
   const sourceType = String(ev?.source_type || '').trim().toLowerCase()
-  if (sourceType === 'visual') return true
-  if (sourceType === 'text') return false
-
-  const source = String(ev?.source || '').trim().toLowerCase()
-  if (!source) return false
-  return (
-    source.startsWith('fig')
-    || source.startsWith('table')
-    || source.startsWith('image')
-    || source.startsWith('plot')
-  )
+  return sourceType === 'visual'
+    || sourceType === 'figure'
+    || sourceType === 'image'
+    || sourceType === 'table'
 }
 
 function openRecordPdf(record: RecordResponse, options: { forcePdf?: boolean } = {}) {
@@ -903,18 +1329,6 @@ function onPdfLocateHighlightClick(id: string) {
 
 function clearDoiSearch() {
   clearDoiFilter(() => emit('clear-doi'))
-}
-
-function positionDatabaseEvidencePopover(event?: Event) {
-  const target = event?.currentTarget as HTMLElement | null | undefined
-  const rect = target?.getBoundingClientRect()
-  const width = 430
-  databaseEvidencePosition.value = rect
-    ? {
-        top: Math.min(window.innerHeight - 300, rect.bottom + 10),
-        left: Math.max(16, Math.min(window.innerWidth - width - 16, rect.left + rect.width / 2 - width / 2)),
-      }
-    : { top: 160, left: 160 }
 }
 
 async function fetchDatabaseFieldEvidence(record: RecordResponse) {
@@ -964,15 +1378,80 @@ function databaseEvidencePreviewKey(record: RecordResponse, page: number, bbox: 
   ].join(':')
 }
 
+function databaseEvidenceFigurePreviewKey(record: RecordResponse, entry: FieldEvidenceEntry) {
+  const page = typeof entry.evidence?.page === 'number' && Number.isFinite(entry.evidence.page)
+    ? entry.evidence.page
+    : null
+  return [
+    record.literatureId || 'no-lit',
+    page || 'no-page',
+    databaseEvidenceFigureLabelKey(entry.evidence?.source_label) || 'no-label',
+  ].join(':')
+}
+
+function databaseEvidenceFigureLabelKey(value: unknown) {
+  return normalizeDatabaseEvidenceText(value)
+    .toLowerCase()
+    .replace(/^(?:fig(?:ure)?|table)/, '')
+    .replace(/[^a-z0-9]+/g, '')
+}
+
+function extractDatabaseEvidenceFigureLabelsFromText(value: unknown) {
+  const text = normalizeDatabaseEvidenceText(value)
+  if (!text) return []
+  return Array.from(text.matchAll(/\b(?:fig(?:ure)?|table)\.?\s*[a-z]?\d+[a-z]?\b/gi))
+    .map((match) => match[0])
+}
+
+function databaseEvidenceFigureLabelCandidates(entry: FieldEvidenceEntry) {
+  const candidates = new Set<string>()
+  const sourceLabel = databaseEvidenceFigureLabelKey(entry.evidence?.source_label)
+  if (sourceLabel) candidates.add(sourceLabel)
+  const textValues = [
+    entry.evidence?.quote,
+    entry.evidence?.matched_text,
+    entry.evidence?.matchedText,
+    entry.evidence?.context,
+    entry.value,
+  ]
+  textValues
+    .flatMap((value) => extractDatabaseEvidenceFigureLabelsFromText(value))
+    .map((value) => databaseEvidenceFigureLabelKey(value))
+    .filter(Boolean)
+    .forEach((value) => candidates.add(value))
+  return [...candidates]
+}
+
+function databaseEvidenceFigurePreviewMatchesEntry(preview: PdfFigurePreview, entry: FieldEvidenceEntry) {
+  const page = typeof entry.evidence?.page === 'number' && Number.isFinite(entry.evidence.page)
+    ? entry.evidence.page
+    : null
+  if (page && preview.page !== page) return false
+  const sourceLabels = databaseEvidenceFigureLabelCandidates(entry)
+  const previewLabel = databaseEvidenceFigureLabelKey(preview.label)
+  if (!sourceLabels.length || !previewLabel) return false
+  return sourceLabels.some((sourceLabel) =>
+    sourceLabel === previewLabel
+    || sourceLabel.startsWith(previewLabel)
+    || previewLabel.startsWith(sourceLabel),
+  )
+}
+
+function databaseEntryHasTextMatch(entry: FieldEvidenceEntry) {
+  const evidence = entry.evidence || {}
+  return Boolean(normalizeDatabaseEvidenceText(evidence.matched_text) || normalizeDatabaseEvidenceText(evidence.matchedText))
+}
+
 function isDatabaseVisualEvidenceEntry(entry: FieldEvidenceEntry) {
   const evidence = entry.evidence || {}
   const sourceType = normalizeDatabaseEvidenceText(evidence.source_type).toLowerCase()
-  const sourceLabel = normalizeDatabaseEvidenceText(evidence.source_label).toLowerCase()
+  // Rely on the explicit source_type only. A source_label that merely cites a
+  // figure (e.g. a text sentence referencing "Fig. 2") must NOT be treated as a
+  // figure, or text-grounded values render as a whole, unhelpful figure crop.
   return sourceType === 'table'
     || sourceType === 'figure'
     || sourceType === 'visual'
     || sourceType === 'image'
-    || /\b(?:fig|figure|table|plot)\.?\s*\d*/.test(sourceLabel)
 }
 
 function databaseEvidenceEntryHasPdfLocator(entry: FieldEvidenceEntry) {
@@ -1007,16 +1486,46 @@ async function fetchDatabaseEvidencePreview(record: RecordResponse, page: number
   }
 }
 
+async function fetchDatabaseFigureEvidencePreview(record: RecordResponse, entry: FieldEvidenceEntry) {
+  if (!record.literatureId || !isDatabaseVisualEvidenceEntry(entry) || databaseEntryHasTextMatch(entry)) return
+  const literatureId = record.literatureId
+  const key = databaseEvidenceFigurePreviewKey(record, entry)
+  if (databaseEvidenceFigurePreviewImages.value[key] || databaseEvidenceFigurePreviewLoading.value[key]) return
+
+  databaseEvidenceFigurePreviewLoading.value[key] = true
+  databaseEvidenceFigurePreviewError.value[key] = null
+  try {
+    if (!databaseEvidenceFigurePreviews.value[literatureId]) {
+      const response = await getPdfFigurePreviews(literatureId)
+      databaseEvidenceFigurePreviews.value[literatureId] = response.items || []
+    }
+    const matched = databaseEvidenceFigurePreviews.value[literatureId]
+      .find((preview) => databaseEvidenceFigurePreviewMatchesEntry(preview, entry))
+    databaseEvidenceFigurePreviewImages.value[key] = matched?.image_b64
+      ? `data:image/png;base64,${matched.image_b64}`
+      : null
+  } catch (err: any) {
+    databaseEvidenceFigurePreviewImages.value[key] = null
+    databaseEvidenceFigurePreviewError.value[key] = evidencePreviewErrorMessage(err)
+  } finally {
+    databaseEvidenceFigurePreviewLoading.value[key] = false
+  }
+}
+
 async function hydrateDatabaseEvidencePreviews(record: RecordResponse) {
   await fetchDatabaseFieldEvidence(record)
-  const fieldTargets = databaseEvidenceSelectedEntries(record)
+  const selectedEntries = databaseEvidenceSelectedEntries(record)
+  const fieldTargets = selectedEntries
     .filter(({ entry }) => databaseEvidenceEntryHasPdfLocator(entry) && databaseEvidenceShouldRenderPdfPreview(entry))
     .map(({ entry }) => ({
       page: entry.evidence?.page ?? null,
       bbox: parseDatabaseEvidenceBbox(entry.evidence?.bbox),
     }))
   await Promise.all(
-    fieldTargets.map((target) => fetchDatabaseEvidencePreview(record, target.page, target.bbox)),
+    [
+      ...selectedEntries.map(({ entry }) => fetchDatabaseFigureEvidencePreview(record, entry)),
+      ...fieldTargets.map((target) => fetchDatabaseEvidencePreview(record, target.page, target.bbox)),
+    ],
   )
 }
 
@@ -1028,7 +1537,7 @@ function isCurrentDatabaseEvidenceRequest(record: RecordResponse, field: Databas
     && databaseEvidenceFocusedFieldKey.value === focusedFieldKey
 }
 
-function handleOpenEvidenceModal(record: RecordResponse, field: DatabaseEvidenceField = 'conditions', event?: Event, fieldKey?: string) {
+function handleOpenEvidenceModal(record: RecordResponse, field: DatabaseEvidenceField = 'conditions', _event?: Event, fieldKey?: string) {
   closeEditDrawer()
 	  databaseEvidenceField.value = field
 	  const focusedFieldKey = normalizeDatabaseEvidenceFieldKey(fieldKey)
@@ -1036,8 +1545,8 @@ function handleOpenEvidenceModal(record: RecordResponse, field: DatabaseEvidence
 	  databaseEvidenceSlideIndex.value = 0
 	  const evidenceOpenToken = databaseEvidenceOpenToken.value + 1
 	  databaseEvidenceOpenToken.value = evidenceOpenToken
-	  positionDatabaseEvidencePopover(event)
 	  openEvidenceModal(record, { syncConfidence: false })
+	  setDatabaseEvidencePreferredSlide(record, field)
 	  void hydrateDatabaseEvidencePreviews(record).then(() => {
 	    if (isCurrentDatabaseEvidenceRequest(record, field, focusedFieldKey, evidenceOpenToken)) {
 	      setDatabaseEvidencePreferredSlide(record, field)
@@ -1239,7 +1748,67 @@ function databaseEvidenceSelectedEntries(record: RecordResponse) {
   return databaseEvidenceBestEntriesBySemanticKey(selectedEntries)
 }
 
+const databaseEvidenceConditionBaseKeys = ['temperature', 'load', 'speed', 'shear_rate', 'potential', 'water_content']
+
+function databaseEvidenceConditionSwitchEntry(record: RecordResponse, fieldKey: string) {
+  const fields = databaseFieldEvidence.value[databaseRecordCacheKey(record)]?.fields || {}
+  return databaseEvidenceFocusedFieldKeys(fieldKey)
+    .map((candidateKey) => ({ fieldKey: candidateKey, entry: fields[candidateKey] }))
+    .find((item): item is { fieldKey: string, entry: FieldEvidenceEntry } =>
+      Boolean(item.entry && databaseEvidenceEntryHasContent(item.fieldKey, item.entry)),
+    ) || null
+}
+
+function databaseEvidenceConditionSwitchKeys(record: RecordResponse) {
+  if (databaseEvidenceField.value !== 'conditions') return []
+  const seen = new Set<string>()
+  const keys: string[] = []
+  for (const fieldKey of databaseEvidenceConditionBaseKeys) {
+    const entry = databaseEvidenceConditionSwitchEntry(record, fieldKey)
+    if (!entry) continue
+    const semanticKey = databaseEvidenceSemanticKey(entry.fieldKey)
+    if (seen.has(semanticKey)) continue
+    seen.add(semanticKey)
+    keys.push(fieldKey)
+  }
+  return keys
+}
+
+function databaseEvidenceConditionSwitchValue(record: RecordResponse, fieldKey: string) {
+  const item = databaseEvidenceConditionSwitchEntry(record, fieldKey)
+  return item ? databaseEvidenceEntryValue(item.entry) : ''
+}
+
+function databaseEvidenceConditionSwitchActive(record: RecordResponse, fieldKey: string) {
+  const targetKey = databaseEvidenceSemanticKey(fieldKey)
+  const focusedKey = databaseEvidenceFocusedFieldKey.value
+  if (focusedKey) return databaseEvidenceSemanticKey(focusedKey) === targetKey
+  return databaseEvidenceSemanticKey(activeDatabaseEvidenceSlide(record)?.fieldKey || '') === targetKey
+}
+
+function focusDatabaseEvidenceConditionKey(record: RecordResponse, fieldKey: string | null) {
+  databaseEvidenceField.value = 'conditions'
+  databaseEvidenceFocusedFieldKey.value = fieldKey ? normalizeDatabaseEvidenceFieldKey(fieldKey) : null
+  databaseEvidenceSlideIndex.value = 0
+  const evidenceOpenToken = databaseEvidenceOpenToken.value + 1
+  databaseEvidenceOpenToken.value = evidenceOpenToken
+  if (!fieldKey) {
+    setDatabaseEvidencePreferredSlide(record, 'conditions')
+    return
+  }
+  void hydrateDatabaseEvidencePreviews(record).then(() => {
+    if (isCurrentDatabaseEvidenceRequest(record, 'conditions', databaseEvidenceFocusedFieldKey.value, evidenceOpenToken)) {
+      setDatabaseEvidencePreferredSlide(record, 'conditions')
+    }
+  })
+}
+
+function switchDatabaseEvidenceConditionKey(record: RecordResponse, fieldKey: string) {
+  focusDatabaseEvidenceConditionKey(record, fieldKey)
+}
+
 function databaseEvidenceTermHits(record: RecordResponse) {
+  if (databaseEvidenceFocusedFieldKey.value) return []
   const semanticTypes = databaseEvidenceSemanticTypes()
   const coveredSemanticKeys = databaseEvidenceCoveredSemanticKeys(record)
   return (databaseRecordEvidenceData(record)?.term_hits || []).filter((hit) => {
@@ -1302,6 +1871,30 @@ function databaseEvidenceDerivedHighlights(text: string) {
     .filter(Boolean)
 }
 
+function databaseEvidenceTrustedContext(fieldKey: string, entry: FieldEvidenceEntry) {
+  const context = normalizeDatabaseEvidenceText(entry.evidence?.context)
+  if (!context) return ''
+  const lowerContext = context.toLowerCase()
+  const matchedText = normalizeDatabaseEvidenceText(entry.evidence?.matched_text)
+    || normalizeDatabaseEvidenceText(entry.evidence?.matchedText)
+  const anchors = [
+    matchedText,
+    normalizeDatabaseEvidenceText(entry.evidence?.quote),
+    normalizeDatabaseEvidenceText(entry.value),
+  ]
+  if (anchors.some((anchor) => anchor.length >= 8 && lowerContext.includes(anchor.toLowerCase()))) {
+    return context
+  }
+  const isDerived = String(entry.grounding_mode || '').toLowerCase() === 'derived'
+  if (fieldKey === 'speed' && isDerived) {
+    const derivedHighlights = databaseEvidenceDerivedHighlights(context)
+    const hasScanRate = /\b(?:scan\s+(?:rate|frequency)|\d+(?:\.\d+)?\s*hz)\b/i.test(context)
+    const hasScanLength = /\b(?:scan\s+(?:size|length|range)|\d+(?:\.\d+)?\s*(?:nm|μm|um|mm))\b/i.test(context)
+    if (derivedHighlights.length >= 2 && hasScanRate && hasScanLength) return context
+  }
+  return ''
+}
+
 function databaseEvidenceQuoteHighlights(fieldKey: string, entry: FieldEvidenceEntry, quote: string, matchedText: string) {
   const isDerived = String(entry.grounding_mode || '').toLowerCase() === 'derived'
   const text = quote || matchedText
@@ -1341,7 +1934,8 @@ function databaseEvidenceShouldSuppressBareEvidence(fieldKey: string, quote = ''
 function databaseEvidenceQuoteFromEntry(fieldKey: string, entry: FieldEvidenceEntry): DatabaseEvidenceQuote[] {
   const matchedText = normalizeDatabaseEvidenceText(entry.evidence?.matched_text)
     || normalizeDatabaseEvidenceText(entry.evidence?.matchedText)
-  const quote = normalizeDatabaseEvidenceText(entry.evidence?.quote)
+  const trustedContext = databaseEvidenceTrustedContext(fieldKey, entry)
+  const quote = trustedContext || normalizeDatabaseEvidenceText(entry.evidence?.quote)
   const note = normalizeDatabaseEvidenceText(entry.grounding_note)
   const isDerived = String(entry.grounding_mode || '').toLowerCase() === 'derived'
   const quotes: DatabaseEvidenceQuote[] = []
@@ -1391,6 +1985,11 @@ function databaseEvidenceSlides(record: RecordResponse): DatabaseEvidenceSlide[]
       : null
     const bbox = parseDatabaseEvidenceBbox(entry.evidence?.bbox)
     const key = page && bbox && databaseEvidenceShouldRenderPdfPreview(entry) ? databaseEvidencePreviewKey(record, page, bbox) : ''
+    // Text-grounded values (a matched phrase) get the tight bbox crop, never the
+    // whole figure — only genuinely figure-sourced values fall back to the figure.
+    const figureKey = isDatabaseVisualEvidenceEntry(entry) && !databaseEntryHasTextMatch(entry)
+      ? databaseEvidenceFigurePreviewKey(record, entry)
+      : ''
     const quote = databaseEvidenceQuoteFromEntry(fieldKey, entry)[0] || null
     const isDerived = String(entry.grounding_mode || '').toLowerCase() === 'derived'
     const bboxOnlyNote = !quote && page && bbox
@@ -1408,9 +2007,15 @@ function databaseEvidenceSlides(record: RecordResponse): DatabaseEvidenceSlide[]
 	        : bboxOnlyNote,
 	      noteLabel: isDerived ? 'Derived calculation' : 'Evidence locator',
 	      locatorKey: page ? `${page}:${bbox ? bbox.join(',') : 'page-only'}` : '',
-	      imageSrc: key ? databaseEvidencePreviewImages.value[key] || null : null,
-      imageLoading: key ? Boolean(databaseEvidencePreviewLoading.value[key]) : false,
-      imageError: key ? databaseEvidencePreviewError.value[key] || null : null,
+	      confidence: typeof entry.confidence === 'number' && Number.isFinite(entry.confidence) ? entry.confidence : null,
+	      imageSrc: (figureKey ? databaseEvidenceFigurePreviewImages.value[figureKey] || null : null)
+          || (key ? databaseEvidencePreviewImages.value[key] || null : null),
+      imageLoading: Boolean(
+        (figureKey && databaseEvidenceFigurePreviewLoading.value[figureKey])
+          || (key && databaseEvidencePreviewLoading.value[key]),
+      ),
+      imageError: (figureKey ? databaseEvidenceFigurePreviewError.value[figureKey] || null : null)
+        || (key ? databaseEvidencePreviewError.value[key] || null : null),
     }
     if (databaseEvidenceSlideHasContent(slide)) slides.push(slide)
   }
@@ -1798,7 +2403,7 @@ onBeforeUnmount(() => {
           <div
             v-if="!props.fixedExperimentScale"
             class="filter-scale-strip inline-flex h-10 shrink-0 items-center rounded-[9px] border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-700 dark:bg-slate-950"
-            aria-label="Tribology library lane"
+            aria-label="Lubrication library lane"
           >
             <button
               v-for="lane in scaleLaneOptions"
@@ -1827,7 +2432,66 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
-          <div class="ml-auto flex h-10 shrink-0 items-center gap-1.5 rounded-[9px] border border-slate-200 bg-white px-2 shadow-sm dark:border-slate-700 dark:bg-slate-950">
+          <div
+            class="ml-auto flex h-10 shrink-0 items-center gap-0.5 rounded-[9px] border border-slate-200 bg-white px-1 shadow-sm dark:border-slate-700 dark:bg-slate-950"
+            role="group"
+            aria-label="Row density"
+          >
+            <button
+              type="button"
+              class="rounded-[7px] px-2.5 py-1 text-xs font-black transition"
+              :class="tableDensity === 'comfortable' ? 'bg-[#0f7c82] text-white' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'"
+              :aria-pressed="tableDensity === 'comfortable'"
+              title="Comfortable rows"
+              @click="setTableDensity('comfortable')"
+            >
+              Comfortable
+            </button>
+            <button
+              type="button"
+              class="rounded-[7px] px-2.5 py-1 text-xs font-black transition"
+              :class="tableDensity === 'compact' ? 'bg-[#0f7c82] text-white' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'"
+              :aria-pressed="tableDensity === 'compact'"
+              title="Compact rows — fit more on screen"
+              @click="setTableDensity('compact')"
+            >
+              Compact
+            </button>
+          </div>
+
+          <div v-if="isReviewQueue" class="flex h-10 shrink-0 items-center gap-1.5 rounded-[9px] border border-slate-200 bg-white px-2 shadow-sm dark:border-slate-700 dark:bg-slate-950">
+            <span class="px-2 text-xs font-black text-slate-500 dark:text-slate-400">
+              Selected {{ selectedCandidateCount }}
+            </span>
+            <button
+              type="button"
+              class="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-emerald-200 bg-emerald-50 px-3 text-xs font-black text-emerald-600 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-45 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-300"
+              :disabled="selectedCandidateCount === 0 || bulkReviewPending"
+              @click="handleBulkApproveCandidates"
+            >
+              <Check class="h-3.5 w-3.5 stroke-[3]" />
+              <span v-if="bulkReviewPending">Working...</span>
+              <span v-else>Approve selected</span>
+            </button>
+            <button
+              type="button"
+              class="inline-flex h-8 items-center gap-1.5 rounded-[7px] border border-rose-200 bg-rose-50 px-3 text-xs font-black text-rose-500 transition hover:border-rose-300 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-45 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-300"
+              :disabled="selectedCandidateCount === 0 || bulkReviewPending"
+              @click="handleBulkRejectCandidates"
+            >
+              <Ban class="h-3.5 w-3.5" />
+              <span>Reject selected</span>
+            </button>
+            <button
+              v-if="selectedCandidateCount > 0 && !bulkReviewPending"
+              type="button"
+              class="rounded-[7px] px-2.5 py-1.5 text-xs font-black text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-white"
+              @click="clearCandidateSelection"
+            >
+              Clear
+            </button>
+          </div>
+          <div v-else class="flex h-10 shrink-0 items-center gap-1.5 rounded-[9px] border border-slate-200 bg-white px-2 shadow-sm dark:border-slate-700 dark:bg-slate-950">
             <span class="px-2 text-xs font-black text-slate-500 dark:text-slate-400">
               Selected {{ visibleSelectedIds.size }}
             </span>
@@ -1845,11 +2509,123 @@ onBeforeUnmount(() => {
         </div>
 
         <p
+          v-if="bulkReviewError"
+          class="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-300"
+        >
+          {{ bulkReviewError }}
+        </p>
+
+        <p
           v-if="batchError"
           class="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-300"
         >
           {{ batchError }}
         </p>
+
+        <div class="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
+          <span class="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 font-black text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
+            {{ activeLibraryEntityType === 'candidate' ? 'Review Queue' : 'Official Database' }}
+          </span>
+          <span>
+            {{ activeLibraryEntityType === 'candidate'
+              ? 'Candidates waiting for review before entering the official library.'
+              : 'Approved library records only; review candidates are kept separate.' }}
+          </span>
+        </div>
+
+        <div
+          v-if="isReviewQueue"
+          class="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold"
+          data-testid="review-queue-triage"
+        >
+          <span class="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Triage</span>
+          <div class="inline-flex overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
+            <button
+              v-for="tier in ([
+                { key: 'all', label: 'All', count: triageTierCounts.all },
+                { key: 'weak', label: 'Weak', count: triageTierCounts.weak },
+                { key: 'strong', label: 'Strong', count: triageTierCounts.strong },
+              ] as const)"
+              :key="tier.key"
+              type="button"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 transition"
+              :class="triageTierFilter === tier.key
+                ? 'bg-[#0f7c82] text-white'
+                : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'"
+              @click="setTriageTier(tier.key)"
+            >
+              {{ tier.label }}
+              <span
+                class="rounded-full px-1.5 text-[10px] font-black"
+                :class="triageTierFilter === tier.key ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'"
+              >{{ tier.count }}</span>
+            </button>
+          </div>
+
+          <template v-if="triageEvidenceQualityOptions.length">
+            <span class="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Evidence</span>
+            <button
+              v-for="option in triageEvidenceQualityOptions"
+              :key="option.key"
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 transition"
+              :title="option.label"
+              :class="triageEvidenceQuality === option.key
+                ? 'border-[#0f7c82] bg-[#eefafa] text-[#0f7c82] dark:border-cyan-400/40 dark:bg-cyan-400/10 dark:text-cyan-200'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'"
+              @click="setTriageEvidenceQuality(option.key)"
+            >
+              {{ option.label.replace(' evidence', '') }}
+              <span class="text-[10px] font-black opacity-70">{{ option.count }}</span>
+            </button>
+          </template>
+
+          <template v-if="triageMissingFieldOptions.length">
+            <span class="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Missing</span>
+            <button
+              v-for="option in triageMissingFieldOptions"
+              :key="option.key"
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 transition"
+              :class="triageMissingField === option.key
+                ? 'border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'"
+              @click="toggleTriageMissingField(option.key)"
+            >
+              {{ option.label }}
+              <span class="text-[10px] font-black opacity-70">{{ option.count }}</span>
+            </button>
+          </template>
+
+          <template v-if="triageStaleOptions.length">
+            <span class="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Stale</span>
+            <button
+              v-for="option in triageStaleOptions"
+              :key="option.days"
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 transition"
+              :class="triageStaleDays === option.days
+                ? 'border-rose-300 bg-rose-50 text-rose-700 dark:border-rose-500/40 dark:bg-rose-500/10 dark:text-rose-300'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'"
+              @click="setTriageStaleDays(option.days)"
+            >
+              ≥ {{ option.days }}d
+              <span class="text-[10px] font-black opacity-70">{{ option.count }}</span>
+            </button>
+          </template>
+
+          <button
+            v-if="hasTriageFilters"
+            type="button"
+            class="rounded-md px-2 py-1 font-black text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800"
+            @click="clearTriageFilters"
+          >
+            Clear
+          </button>
+          <span v-if="hasTriageFilters" class="text-slate-500 dark:text-slate-400">
+            Showing {{ displayedCandidateCount }} of {{ triageTierCounts.all }}
+          </span>
+        </div>
 
         <div
           v-if="showAdvancedFilters"
@@ -1916,7 +2692,7 @@ onBeforeUnmount(() => {
               <div
                 v-if="!props.fixedExperimentScale"
                 class="filter-scale-strip inline-flex h-11 shrink-0 items-center rounded-[10px] border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-950"
-                aria-label="Tribology library lane"
+                aria-label="Lubrication library lane"
               >
                 <button
                   v-for="lane in scaleLaneOptions"
@@ -2244,7 +3020,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <div class="flex-1 overflow-hidden px-6 py-4">
+    <div class="flex min-h-0 flex-1 flex-col overflow-hidden px-6 py-4">
       <div
         v-if="searchError"
         aria-label="Database records could not be loaded"
@@ -2261,7 +3037,7 @@ onBeforeUnmount(() => {
       </div>
       <RecordTable
         :loading="loading"
-        :records="result.items"
+        :records="displayedRecords"
         :row-number-start="rangeStart || 1"
         :deleting-row-id="deletingRowId"
         :structure-preview-open="structurePreview.open"
@@ -2269,11 +3045,31 @@ onBeforeUnmount(() => {
         :focus-record-id="focusRecordId ?? null"
         :focus-entity-type="focusEntityType || null"
         :selected-ids="selectedIds"
+        :review-queue-mode="isReviewQueue"
+        :density="tableDensity"
+        :sort-by="sortBy"
+        :sort-dir="sortDir"
+        :selected-candidate-ids="selectedCandidateIds"
         :open-evidence-modal="handleOpenEvidenceModal"
         :open-literature="handleOpenLiteratureRecord"
+        :review-candidate-record="openCandidateReviewSheet"
         :open-structure-preview="openStructurePreview"
         @toggle-select="toggleSelectOne"
         @toggle-select-page="toggleSelectPage"
+        @toggle-select-candidate="toggleSelectCandidate"
+        @toggle-select-all-candidates="toggleSelectAllCandidates"
+        @sort="setSort"
+        @edit-record="openEditModal"
+      />
+      <CandidateReviewSheet
+        :show="Boolean(reviewSheetRecord)"
+        :record="reviewSheetRecord"
+        :next-record="reviewSheetNextRecord"
+        :has-next-candidate="Boolean(reviewSheetNextRecord)"
+        @close="reviewSheetRecord = null"
+        @next-candidate="openNextCandidateReviewSheet"
+        @saved-and-approved="handleCandidateReviewApproved"
+        @rejected="handleCandidateReviewRejected"
       />
     </div>
 
@@ -2331,128 +3127,191 @@ onBeforeUnmount(() => {
     >
       <div
         v-if="evidenceModalRecord"
-        class="database-field-evidence-popover fixed z-[90] w-[min(42rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-lg border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/15"
-        :style="{ top: `${databaseEvidencePosition.top}px`, left: `${databaseEvidencePosition.left}px` }"
+        class="database-field-evidence-popover fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[2px]"
+        @click.self="closeDatabaseEvidencePopover"
       >
-        <div class="flex items-center justify-between gap-3">
-          <div class="min-w-0">
-            <h4 class="truncate text-sm font-black text-slate-950">
-              {{ databaseEvidenceTitle() }}
-            </h4>
-            <p class="mt-0.5 text-xs font-bold text-slate-400">
-              {{ databaseEvidencePage(evidenceModalRecord) }}
-            </p>
-          </div>
-          <button
-            type="button"
-            class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-800"
-            aria-label="Close evidence"
-            @click="closeDatabaseEvidencePopover"
-          >
-            <X class="h-4 w-4" />
-          </button>
-        </div>
-        <div class="mt-3 rounded-md bg-teal-50/70 px-3 py-2 text-sm font-extrabold text-[#0f7c82]">
-          <ChemicalText :text="databaseEvidenceValue(evidenceModalRecord)" />
-        </div>
-        <div class="database-evidence-content-scroll mt-3 max-h-[min(72vh,44rem)] space-y-2 overflow-y-auto pr-1">
-          <p v-if="databaseEvidenceIsLoading(evidenceModalRecord)" class="rounded-md border border-slate-100 bg-slate-50 px-3 py-2 text-sm font-medium leading-6 text-slate-500">
-            Locating evidence...
-          </p>
-          <p v-else-if="databaseEvidenceDisplayError(evidenceModalRecord)" class="rounded-md border border-rose-100 bg-rose-50 px-3 py-2 text-sm font-medium leading-6 text-rose-600">
-            {{ databaseEvidenceDisplayError(evidenceModalRecord) }}
-          </p>
-          <template v-else>
-            <div
-              v-if="activeDatabaseEvidenceSlide(evidenceModalRecord)"
-              class="rounded-md border border-slate-100 bg-slate-50 p-2"
-            >
-              <div class="mb-2 flex items-center justify-between gap-2">
-                <div class="min-w-0">
-                  <div class="truncate text-xs font-black uppercase tracking-[0.12em] text-slate-400">
-                    {{ activeDatabaseEvidenceSlide(evidenceModalRecord)?.label }}
-                  </div>
-                  <div class="text-xs font-bold text-slate-500">
-                    {{ activeDatabaseEvidenceSlide(evidenceModalRecord)?.page ? `Page ${activeDatabaseEvidenceSlide(evidenceModalRecord)?.page}` : 'Text evidence' }}
-                  </div>
-                </div>
-                <div v-if="databaseEvidenceSlideCount(evidenceModalRecord) > 1" class="flex shrink-0 items-center gap-1">
-                  <button
-                    type="button"
-                    class="grid h-7 w-7 place-items-center rounded-md border border-slate-200 bg-white text-slate-500 transition hover:border-teal-200 hover:text-[#0f7c82]"
-                    aria-label="Previous evidence"
-                    @click="moveDatabaseEvidenceSlide(evidenceModalRecord, -1)"
-                  >
-                    <ChevronLeft class="h-4 w-4" />
-                  </button>
-                  <span class="min-w-10 text-center text-[11px] font-black text-slate-400">
-                    {{ databaseEvidenceSlideIndex + 1 }}/{{ databaseEvidenceSlideCount(evidenceModalRecord) }}
-                  </span>
-                  <button
-                    type="button"
-                    class="grid h-7 w-7 place-items-center rounded-md border border-slate-200 bg-white text-slate-500 transition hover:border-teal-200 hover:text-[#0f7c82]"
-                    aria-label="Next evidence"
-                    @click="moveDatabaseEvidenceSlide(evidenceModalRecord, 1)"
-                  >
-                    <ChevronRight class="h-4 w-4" />
-                  </button>
-                </div>
+        <div class="flex max-h-[88vh] w-[min(1080px,96vw)] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white text-left shadow-[0_32px_120px_-32px_rgba(15,23,42,0.6)]">
+          <!-- Header: field, page, value, slide nav, close -->
+          <div class="flex shrink-0 items-center justify-between gap-3 border-b border-slate-100 px-5 py-3">
+            <div class="flex min-w-0 items-center gap-3">
+              <div class="min-w-0">
+                <h4 class="truncate text-sm font-black text-slate-950">{{ databaseEvidenceTitle() }}</h4>
+                <p class="text-xs font-bold text-slate-400">{{ databaseEvidencePage(evidenceModalRecord) }}</p>
               </div>
-
-	              <div
-	                v-if="activeDatabaseEvidenceSlide(evidenceModalRecord)?.imageSrc"
-	                class="database-evidence-image-frame overflow-hidden rounded-md border border-emerald-100 bg-white"
-	              >
-	                <img
-	                  :src="activeDatabaseEvidenceSlide(evidenceModalRecord)?.imageSrc || ''"
-	                  alt="Highlighted PDF evidence"
-	                  class="max-h-[min(42vh,26rem)] w-full object-contain"
-	                >
-	              </div>
-              <div
-                v-else-if="activeDatabaseEvidenceSlide(evidenceModalRecord)?.imageLoading"
-                class="rounded-md border border-dashed border-slate-200 bg-white px-3 py-8 text-center text-sm font-semibold text-slate-400"
-              >
-                Rendering highlighted PDF evidence...
+              <div class="shrink-0 rounded-md bg-teal-50/70 px-3 py-1 text-sm font-extrabold text-[#0f7c82]">
+                <ChemicalText :text="databaseEvidenceValue(evidenceModalRecord)" />
               </div>
-              <div
-                v-else-if="activeDatabaseEvidenceSlide(evidenceModalRecord)?.imageError"
-                class="rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700"
-              >
-                {{ activeDatabaseEvidenceSlide(evidenceModalRecord)?.imageError }}
-              </div>
-
-	              <p
-	                v-if="activeDatabaseEvidenceQuote(evidenceModalRecord)"
-	                class="mt-2 rounded-md border border-slate-100 bg-white px-3 py-2 text-sm font-medium leading-6 text-slate-600"
-	              >
-                <template
-                  v-for="(part, partIndex) in splitDatabaseEvidenceQuote(activeDatabaseEvidenceQuote(evidenceModalRecord)!)"
-                  :key="`${evidenceModalRecord.id}-slide-${databaseEvidenceSlideIndex}-${partIndex}`"
+            </div>
+            <div class="flex shrink-0 items-center gap-2">
+              <div v-if="databaseEvidenceSlideCount(evidenceModalRecord) > 1" class="flex items-center gap-1">
+                <button
+                  type="button"
+                  class="grid h-7 w-7 place-items-center rounded-md border border-slate-200 bg-white text-slate-500 transition hover:border-teal-200 hover:text-[#0f7c82]"
+                  aria-label="Previous evidence"
+                  @click="moveDatabaseEvidenceSlide(evidenceModalRecord, -1)"
                 >
-                  <mark
-                    v-if="part.active"
-                    class="rounded bg-violet-100 px-0.5 py-0 text-slate-900"
+                  <ChevronLeft class="h-4 w-4" />
+                </button>
+                <span class="min-w-10 text-center text-[11px] font-black text-slate-400">
+                  {{ databaseEvidenceSlideIndex + 1 }}/{{ databaseEvidenceSlideCount(evidenceModalRecord) }}
+                </span>
+                <button
+                  type="button"
+                  class="grid h-7 w-7 place-items-center rounded-md border border-slate-200 bg-white text-slate-500 transition hover:border-teal-200 hover:text-[#0f7c82]"
+                  aria-label="Next evidence"
+                  @click="moveDatabaseEvidenceSlide(evidenceModalRecord, 1)"
+                >
+                  <ChevronRight class="h-4 w-4" />
+                </button>
+              </div>
+              <button
+                type="button"
+                class="grid h-8 w-8 shrink-0 place-items-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-800"
+                aria-label="Close evidence"
+                @click="closeDatabaseEvidencePopover"
+              >
+                <X class="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          <div
+            v-if="databaseEvidenceField === 'conditions' && databaseEvidenceConditionSwitchKeys(evidenceModalRecord).length > 1"
+            class="database-evidence-condition-switcher flex shrink-0 items-center gap-2 overflow-x-auto border-b border-slate-100 bg-slate-50/70 px-5 py-2"
+          >
+            <button
+              type="button"
+              class="inline-flex h-8 shrink-0 items-center rounded-md border px-3 text-xs font-black transition"
+              :class="!databaseEvidenceFocusedFieldKey
+                ? 'border-[#0f7c82] bg-[#0f7c82] text-white shadow-sm'
+                : 'border-slate-200 bg-white text-slate-500 hover:border-teal-200 hover:text-[#0f7c82]'"
+              @click="focusDatabaseEvidenceConditionKey(evidenceModalRecord, null)"
+            >
+              All
+            </button>
+            <button
+              v-for="fieldKey in databaseEvidenceConditionSwitchKeys(evidenceModalRecord)"
+              :key="fieldKey"
+              type="button"
+              class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-3 text-xs font-black transition"
+              :class="databaseEvidenceConditionSwitchActive(evidenceModalRecord, fieldKey)
+                ? 'border-[#0f7c82] bg-white text-[#0f7c82] shadow-sm'
+                : 'border-slate-200 bg-white text-slate-500 hover:border-teal-200 hover:text-[#0f7c82]'"
+              @click="switchDatabaseEvidenceConditionKey(evidenceModalRecord, fieldKey)"
+            >
+              <span>{{ databaseEvidenceFieldLabel(fieldKey) }}</span>
+              <span
+                v-if="databaseEvidenceConditionSwitchValue(evidenceModalRecord, fieldKey)"
+                class="max-w-[8rem] truncate rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500"
+              >
+                {{ databaseEvidenceConditionSwitchValue(evidenceModalRecord, fieldKey) }}
+              </span>
+            </button>
+          </div>
+
+          <!-- Body: two-pane (image | text+context), both visible together -->
+          <div class="min-h-0 flex-1 overflow-hidden">
+            <div v-if="databaseEvidenceIsLoading(evidenceModalRecord)" class="grid h-full place-items-center p-10 text-sm font-semibold text-slate-500">
+              Locating evidence...
+            </div>
+            <div v-else-if="databaseEvidenceDisplayError(evidenceModalRecord)" class="grid h-full place-items-center p-10 text-sm font-semibold text-rose-600">
+              {{ databaseEvidenceDisplayError(evidenceModalRecord) }}
+            </div>
+            <template v-else>
+              <div
+                v-if="activeDatabaseEvidenceSlide(evidenceModalRecord)"
+                class="grid h-full min-h-0"
+                :class="(activeDatabaseEvidenceSlide(evidenceModalRecord)?.imageSrc || activeDatabaseEvidenceSlide(evidenceModalRecord)?.imageLoading || activeDatabaseEvidenceSlide(evidenceModalRecord)?.imageError)
+                  ? 'md:grid-cols-[1.3fr_1fr]'
+                  : 'grid-cols-1'"
+              >
+                <!-- Image pane -->
+                <div
+                  v-if="activeDatabaseEvidenceSlide(evidenceModalRecord)?.imageSrc || activeDatabaseEvidenceSlide(evidenceModalRecord)?.imageLoading || activeDatabaseEvidenceSlide(evidenceModalRecord)?.imageError"
+                  class="database-evidence-image-pane flex min-h-0 items-center justify-center overflow-auto border-b border-slate-100 bg-slate-50 p-4 md:border-b-0 md:border-r"
+                >
+                  <button
+                    v-if="activeDatabaseEvidenceSlide(evidenceModalRecord)?.imageSrc"
+                    type="button"
+                    class="group relative block w-full cursor-zoom-in outline-none focus-visible:ring-4 focus-visible:ring-[#d8fbfb]"
+                    aria-label="Enlarge evidence image"
+                    @click="openImagePreview(activeDatabaseEvidenceSlide(evidenceModalRecord)?.imageSrc || '', `${databaseEvidenceTitle()} · ${databaseEvidencePage(evidenceModalRecord)}`)"
                   >
-                    <ChemicalText :text="part.text" />
-                  </mark>
-	                  <ChemicalText v-else :text="part.text" />
-	                </template>
-	              </p>
-	              <div
-	                v-if="activeDatabaseEvidenceNote(evidenceModalRecord)"
-	                class="mt-2 rounded-md border border-teal-100 bg-teal-50 px-3 py-2 text-sm font-semibold leading-6 text-teal-800"
-	              >
-		                <div class="text-[11px] font-black uppercase tracking-[0.14em] text-teal-600">
-		                  {{ activeDatabaseEvidenceSlide(evidenceModalRecord)?.noteLabel || 'Derived calculation' }}
-		                </div>
-		                <ChemicalText :text="activeDatabaseEvidenceNote(evidenceModalRecord)" />
-	              </div>
-	            </div>
-            <p v-if="databaseEvidenceSlides(evidenceModalRecord).length === 0" class="rounded-md border border-dashed border-slate-200 px-3 py-3 text-sm font-semibold text-slate-400">
-              No field-level quote was stored for this {{ databaseEvidenceTitle().toLowerCase() }} value.
-            </p>
-          </template>
+                    <img
+                      :src="activeDatabaseEvidenceSlide(evidenceModalRecord)?.imageSrc || ''"
+                      alt="Highlighted PDF evidence"
+                      class="mx-auto max-h-[74vh] w-full rounded-md border border-emerald-100 bg-white object-contain"
+                    >
+                    <span class="pointer-events-none absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-md bg-slate-950/70 text-white opacity-0 transition group-hover:opacity-100 group-focus-visible:opacity-100">
+                      <Maximize2 class="h-4 w-4" />
+                    </span>
+                  </button>
+                  <div v-else-if="activeDatabaseEvidenceSlide(evidenceModalRecord)?.imageLoading" class="text-sm font-semibold text-slate-400">
+                    Rendering highlighted PDF evidence...
+                  </div>
+                  <div v-else class="rounded-md border border-amber-100 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700">
+                    {{ activeDatabaseEvidenceSlide(evidenceModalRecord)?.imageError }}
+                  </div>
+                </div>
+
+                <!-- Text + context pane -->
+                <div class="database-evidence-content-scroll flex min-h-0 flex-col overflow-y-auto px-5 py-4">
+                  <div class="shrink-0">
+                    <div class="truncate text-xs font-black uppercase tracking-[0.12em] text-slate-400">
+                      {{ activeDatabaseEvidenceSlide(evidenceModalRecord)?.label }}
+                    </div>
+                    <div class="text-xs font-bold text-slate-500">
+                      {{ activeDatabaseEvidenceSlide(evidenceModalRecord)?.page ? `Page ${activeDatabaseEvidenceSlide(evidenceModalRecord)?.page}` : 'Text evidence' }}
+                    </div>
+                  </div>
+                  <p
+                    v-if="activeDatabaseEvidenceQuote(evidenceModalRecord)"
+                    class="mt-3 rounded-lg border border-slate-100 bg-slate-50 px-3.5 py-3 text-[15px] font-medium leading-7 text-slate-700"
+                  >
+                    <template
+                      v-for="(part, partIndex) in splitDatabaseEvidenceQuote(activeDatabaseEvidenceQuote(evidenceModalRecord)!)"
+                      :key="`${evidenceModalRecord.id}-slide-${databaseEvidenceSlideIndex}-${partIndex}`"
+                    >
+                      <mark v-if="part.active" class="rounded bg-[#cdf3ef] px-0.5 py-0 font-black text-[#0b6870]">
+                        <ChemicalText :text="part.text" />
+                      </mark>
+                      <ChemicalText v-else :text="part.text" />
+                    </template>
+                  </p>
+                  <p v-else class="mt-3 rounded-lg border border-dashed border-slate-200 px-3.5 py-3 text-sm font-semibold text-slate-400">
+                    No field-level quote was stored for this value.
+                  </p>
+                  <div
+                    v-if="activeDatabaseEvidenceNote(evidenceModalRecord)"
+                    class="mt-3 rounded-lg border border-teal-100 bg-teal-50 px-3.5 py-3 text-sm font-semibold leading-6 text-teal-800"
+                  >
+                    <div class="text-[11px] font-black uppercase tracking-[0.14em] text-teal-600">
+                      {{ activeDatabaseEvidenceSlide(evidenceModalRecord)?.noteLabel || 'Derived calculation' }}
+                    </div>
+                    <ChemicalText :text="activeDatabaseEvidenceNote(evidenceModalRecord)" />
+                  </div>
+                  <div class="mt-auto flex items-center justify-between gap-3 pt-4">
+                    <span class="text-[11px] font-black uppercase tracking-[0.1em] text-slate-400">
+                      <template v-if="activeDatabaseEvidenceSlide(evidenceModalRecord)?.page">p.{{ activeDatabaseEvidenceSlide(evidenceModalRecord)?.page }}</template>
+                      <template v-if="activeDatabaseEvidenceSlide(evidenceModalRecord)?.confidence != null"> · {{ Math.round((activeDatabaseEvidenceSlide(evidenceModalRecord)?.confidence || 0) * 100) }}%</template>
+                    </span>
+                    <button
+                      v-if="evidenceModalRecord.literatureId"
+                      type="button"
+                      class="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-600 transition hover:border-[#8fe5e7] hover:text-[#0f7c82]"
+                      @click="openRecordPdf(evidenceModalRecord, { forcePdf: true })"
+                    >
+                      <FileText class="h-3.5 w-3.5" />
+                      Open in PDF
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="grid h-full place-items-center p-10 text-sm font-semibold text-slate-400">
+                No field-level quote was stored for this {{ databaseEvidenceTitle().toLowerCase() }} value.
+              </div>
+            </template>
+          </div>
         </div>
       </div>
     </Transition>
@@ -2698,24 +3557,90 @@ onBeforeUnmount(() => {
             </div>
 
             <div class="border-t border-slate-200 px-6 py-4 dark:border-slate-800">
+              <p
+                v-if="correctionError"
+                class="mb-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-600 dark:border-rose-500/25 dark:bg-rose-500/10 dark:text-rose-300"
+              >
+                {{ correctionError }}
+              </p>
+
+              <div
+                v-if="correctionReviewMode"
+                class="mb-3 rounded-lg border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-800 dark:bg-slate-900/60"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <span class="text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Review changes</span>
+                  <span
+                    v-if="correctionConfidenceDelta"
+                    class="text-[11px] font-semibold text-slate-500 dark:text-slate-400"
+                  >
+                    Confidence {{ confidenceDisplay(correctionConfidenceDelta.next) }}
+                    <span
+                      v-if="Math.abs(correctionConfidenceDelta.delta) >= 0.005"
+                      :class="correctionConfidenceDelta.delta >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500 dark:text-rose-400'"
+                    >
+                      ({{ correctionConfidenceDelta.delta >= 0 ? '+' : '' }}{{ (correctionConfidenceDelta.delta * 100).toFixed(0) }}%)
+                    </span>
+                  </span>
+                </div>
+                <div v-if="correctionDiffEntries.length" class="mt-2 max-h-52 space-y-1.5 overflow-auto">
+                  <div
+                    v-for="entry in correctionDiffEntries"
+                    :key="entry.field"
+                    class="grid grid-cols-[120px_1fr] items-start gap-2 text-xs"
+                  >
+                    <span class="font-semibold text-slate-500 dark:text-slate-400">{{ entry.label }}</span>
+                    <span class="min-w-0">
+                      <span class="break-words text-rose-500 line-through dark:text-rose-400">{{ entry.before }}</span>
+                      <span class="mx-1 text-slate-400">→</span>
+                      <span class="break-words font-semibold text-emerald-600 dark:text-emerald-400">{{ entry.after }}</span>
+                    </span>
+                  </div>
+                </div>
+                <p v-else class="mt-2 text-xs text-slate-500 dark:text-slate-400">No field changes detected — nothing to save.</p>
+              </div>
+
               <div class="flex items-center justify-between gap-3">
-                <p class="text-xs text-slate-500 dark:text-slate-400">Focused editor for correcting extracted values without expanding the table.</p>
+                <p class="text-xs text-slate-500 dark:text-slate-400">
+                  <template v-if="correctionReviewMode">Confirm to apply via the audited correction service.</template>
+                  <template v-else>Changes are previewed before saving via the audited correction service.</template>
+                </p>
                 <div class="flex items-center gap-2">
-                  <button
-                    type="button"
-                    class="inline-flex h-10 items-center rounded-md border border-slate-300 px-4 text-sm font-medium text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-                    @click="closeEditDrawer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    class="inline-flex h-10 items-center gap-1.5 rounded-md bg-slate-900 px-4 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"
-                    :disabled="isSavingActiveEditRecord()"
-                    @click="saveActiveEditRecord"
-                  >
-                    <Save class="h-4 w-4" /> Save Changes
-                  </button>
+                  <template v-if="correctionReviewMode">
+                    <button
+                      type="button"
+                      class="inline-flex h-10 items-center rounded-md border border-slate-300 px-4 text-sm font-medium text-slate-600 transition hover:bg-slate-50 disabled:opacity-60 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                      :disabled="correctionPending"
+                      @click="cancelCorrectionReview"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      class="inline-flex h-10 items-center gap-1.5 rounded-md bg-[#0f7c82] px-4 text-sm font-medium text-white transition hover:bg-[#0c656a] disabled:opacity-60"
+                      :disabled="correctionPending || correctionDiffEntries.length === 0"
+                      @click="commitActiveCorrection"
+                    >
+                      <Save class="h-4 w-4" /> {{ correctionPending ? 'Saving…' : 'Confirm & save' }}
+                    </button>
+                  </template>
+                  <template v-else>
+                    <button
+                      type="button"
+                      class="inline-flex h-10 items-center rounded-md border border-slate-300 px-4 text-sm font-medium text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                      @click="closeEditDrawer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      class="inline-flex h-10 items-center gap-1.5 rounded-md bg-slate-900 px-4 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-slate-100 dark:text-slate-950 dark:hover:bg-white"
+                      :disabled="correctionPending"
+                      @click="previewActiveCorrection"
+                    >
+                      {{ correctionPending ? 'Checking…' : 'Review changes' }}
+                    </button>
+                  </template>
                 </div>
               </div>
             </div>

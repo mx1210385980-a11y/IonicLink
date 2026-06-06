@@ -6,9 +6,10 @@ defineProps<{
   sourceName?: string
   literatureMetadata?: any
   selectedFileId?: string | null
-  recordScope?: 'active' | 'group_library'
+  recordScope?: 'active' | 'group_library' | 'all_visible'
   focusRecordId?: number | null
   focusEntityType?: 'record' | 'candidate' | null
+  entityTypeFilter?: 'record' | 'candidate' | null
   externalExportRequest?: { id: number, format: 'json' | 'csv' | 'ndjson' } | null
   externalFilterRequestId?: number | null
 }>()
@@ -29,6 +30,7 @@ defineEmits<{
     :record-scope="recordScope"
     :focus-record-id="focusRecordId"
     :focus-entity-type="focusEntityType"
+    :entity-type-filter="entityTypeFilter"
     :external-export-request="externalExportRequest"
     :external-filter-request-id="externalFilterRequestId"
     @view-literature="(payload) => $emit('view-literature', payload)"

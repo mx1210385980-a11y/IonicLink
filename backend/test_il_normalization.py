@@ -1,7 +1,12 @@
 from rdkit import Chem
 
 from services.file_service import _canonicalize_ionic_liquid_name, _normalize_record_chemistry
-from services.il_resolver_service import resolve_il, resolve_ionic_liquid_alias
+from services.il_resolver_service import (
+    ANION_DB,
+    filter_to_supported_ionic_liquid_records,
+    resolve_il,
+    resolve_ionic_liquid_alias,
+)
 from services.normalization import normalize_extraction_row
 from services.normalization.potential import normalize_potential_text
 from services.data_sync_service import _normalize_quantitative_thickness
@@ -40,6 +45,59 @@ def test_resolve_il_admits_long_chain_borate_ammonium_series():
     assert resolved["canonical_name"] == "[N88812][A12BMB]"
     assert resolved["cation"] == "N88812"
     assert resolved["anion"] == "A12BMB"
+
+
+def test_resolve_il_keeps_long_chain_borate_anion_structures():
+    resolved_by_anion = {
+        resolved["anion"]: resolved
+        for resolved in (
+            resolve_il("[N88812][A4BMB]"),
+            resolve_il("[N88812][A8BMB]"),
+            resolve_il("[N88812][A12BMB]"),
+        )
+    }
+
+    assert set(resolved_by_anion) == {"A4BMB", "A8BMB", "A12BMB"}
+    assert resolved_by_anion["A4BMB"]["anion_smiles"] != resolved_by_anion["A8BMB"]["anion_smiles"]
+    assert resolved_by_anion["A8BMB"]["anion_smiles"] != resolved_by_anion["A12BMB"]["anion_smiles"]
+    for anion, resolved in resolved_by_anion.items():
+        assert resolved["anion_smiles"]
+        assert resolved["il_smiles"]
+        assert resolved["anion_smiles"] != ANION_DB["BMB"]["smiles"]
+        assert Chem.MolFromSmiles(resolved["anion_smiles"])
+        assert anion.lower().replace("bmb", "") in {"a4", "a8", "a12"}
+
+
+def test_resolve_il_keeps_bmim_iodide_mixed_notation_records():
+    resolved = resolve_il("[BMIM][I,]")
+
+    assert resolved["canonical_name"] == "[BMIM][I]"
+    assert resolved["cation"] == "BMIM"
+    assert resolved["anion"] == "I"
+
+    records = [
+        {
+            "ionic_liquid": "[BMIM][I,]",
+            "cof": "0.12",
+            "evidence": "Table 2: [BMIM] I, +0.5 V = 0.12",
+        }
+    ]
+
+    _normalize_record_chemistry(records)
+    kept, dropped = filter_to_supported_ionic_liquid_records(records)
+
+    assert kept == [
+        {
+            **records[0],
+            "ionic_liquid": "[BMIM][I]",
+            "lubricant": "[BMIM][I]",
+            "cation": "BMIM",
+            "anion": "I",
+            "cof": "0.12",
+            "evidence": "Table 2: [BMIM] I, +0.5 V = 0.12",
+        }
+    ]
+    assert dropped == []
 
 
 def test_resolve_il_provides_renderable_cation_smiles_for_special_cations():

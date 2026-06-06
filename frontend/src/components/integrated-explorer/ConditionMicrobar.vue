@@ -7,6 +7,7 @@ import { conditionSealDisplay, type ConditionMicrobarItem } from '@/lib/integrat
 
 const props = defineProps<{
   record: RecordResponse
+  compact?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -28,6 +29,17 @@ const passiveOverflowItems = computed(() => [
   ...seal.value.meta,
   ...seal.value.overflowItems,
 ].slice(3))
+
+// Flat, ordered list of condition readouts for the single-line compact row.
+const compactItems = computed(() => {
+  const base = seal.value.primary
+    ? [seal.value.primary, ...seal.value.meta, ...seal.value.overflowItems]
+    : [...seal.value.meta, ...seal.value.overflowItems]
+  return base.filter((item): item is ConditionMicrobarItem => Boolean(item))
+})
+const COMPACT_VISIBLE = 4
+const compactVisibleItems = computed(() => compactItems.value.slice(0, COMPACT_VISIBLE))
+const compactOverflowCount = computed(() => Math.max(0, compactItems.value.length - COMPACT_VISIBLE))
 
 const conditionIcons: Record<string, Component> = {
   load: Scale,
@@ -85,7 +97,33 @@ function openItemEvidence(item: ConditionMicrobarItem | null, event: MouseEvent 
 
 <template>
   <div
-    v-if="seal.primary"
+    v-if="compact"
+    class="flex min-w-0 max-w-[296px] flex-wrap items-center gap-1"
+    :title="seal.title || 'No experimental conditions'"
+  >
+    <button
+      v-for="item in compactVisibleItems"
+      :key="item.key"
+      type="button"
+      class="inline-flex shrink-0 items-center gap-1 rounded-[5px] border px-1.5 py-0.5 text-[10.5px] font-bold leading-none"
+      :class="accentClass(item)"
+      :title="item.title"
+      :aria-label="`Open ${item.label} evidence`"
+      @click.stop="openItemEvidence(item, $event)"
+      @keydown.enter.prevent.stop="openItemEvidence(item, $event)"
+    >
+      <span class="text-[8px] font-black uppercase opacity-70">{{ item.symbol }}</span>
+      <span>{{ formatCompactConditionReadout(item) }}</span>
+    </button>
+    <span
+      v-if="compactOverflowCount"
+      class="shrink-0 rounded-[5px] border border-slate-200 px-1 py-0.5 text-[9px] font-black text-slate-400 dark:border-slate-700 dark:text-slate-500"
+    >+{{ compactOverflowCount }}</span>
+    <span v-if="!compactVisibleItems.length" class="text-[10.5px] font-semibold text-slate-400">--</span>
+  </div>
+
+  <div
+    v-else-if="seal.primary"
     class="condition-seal condition-ruler relative min-h-[74px] w-fit min-w-[210px] max-w-[296px] overflow-visible rounded-[9px] border border-slate-200 bg-white px-2.5 py-2 shadow-[0_10px_18px_-18px_rgba(15,23,42,0.65)] dark:border-slate-800 dark:bg-slate-950"
     :title="seal.title || 'No experimental conditions'"
   >

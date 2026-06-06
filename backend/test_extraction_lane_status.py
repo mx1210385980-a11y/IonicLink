@@ -143,6 +143,40 @@ def test_deduped_tribology_payloads_include_stable_semantic_keys():
     assert deduped[0]["semantic_key"] != deduped[1]["semantic_key"]
 
 
+def test_deduped_tribology_payloads_keep_distinct_source_figures():
+    rows = [
+        {
+            "id": "360",
+            "material_name": "Si(100)",
+            "ionic_liquid": "[BMIM][PF6]",
+            "probe_material": "Steel",
+            "substrate_material": "Si(100)",
+            "cof": "0.05",
+            "load": "70 nN",
+            "source_page": 9,
+            "source_figure": "Fig. 8a",
+            "field_evidence_json": {},
+        },
+        {
+            "id": "363",
+            "material_name": "Si(100)",
+            "ionic_liquid": "[BMIM][PF6]",
+            "probe_material": "Steel",
+            "substrate_material": "Si(100)",
+            "cof": "0.05",
+            "load": "70 nN",
+            "source_page": 9,
+            "source_figure": "Fig. 8b",
+            "field_evidence_json": {},
+        },
+    ]
+
+    deduped = _deduplicate_tribology_payloads(rows)
+
+    assert [row["id"] for row in deduped] == ["360", "363"]
+    assert deduped[0]["semantic_key"] != deduped[1]["semantic_key"]
+
+
 def test_evidence_quality_scores_text_quotes_above_label_only_evidence():
     quote_backed = _deduplicate_tribology_payloads([
         {
@@ -175,6 +209,46 @@ def test_evidence_quality_scores_text_quotes_above_label_only_evidence():
     assert quote_backed["evidence_score"] >= 0.65
     assert label_only["evidence_grade"] == "weak"
     assert label_only["evidence_score"] < 0.65
+
+
+def test_evidence_quality_treats_labeled_quote_without_pdf_page_as_adequate():
+    curated = _deduplicate_tribology_payloads([
+        {
+            "id": "1",
+            "material_name": "Graphite",
+            "ionic_liquid": "[BMIM][PF6]",
+            "cof": "0.023",
+            "field_evidence_json": {
+                "material": {
+                    "value": "Graphite",
+                    "evidence": {
+                        "source_type": "dataset_import",
+                        "source_label": "ILS_dataset.csv Row 83",
+                        "quote": "Imported row 83 from ILS_dataset.csv",
+                    },
+                },
+                "ionic_liquid": {
+                    "value": "[BMIM][PF6]",
+                    "evidence": {
+                        "source_type": "dataset_import",
+                        "source_label": "ILS_dataset.csv Row 83",
+                        "quote": "Imported row 83 from ILS_dataset.csv",
+                    },
+                },
+                "cof": {
+                    "value": "0.023",
+                    "evidence": {
+                        "source_type": "dataset_import",
+                        "source_label": "ILS_dataset.csv Row 83",
+                        "quote": "Imported row 83 from ILS_dataset.csv",
+                    },
+                },
+            },
+        }
+    ])[0]
+
+    assert curated["evidence_grade"] in {"adequate", "strong"}
+    assert curated["evidence_score"] >= 0.65
 
 
 @pytest.mark.anyio

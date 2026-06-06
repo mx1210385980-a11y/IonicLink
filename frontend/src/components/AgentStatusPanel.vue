@@ -587,7 +587,7 @@ onBeforeUnmount(() => {
             <CheckCircle2 class="h-4 w-4" />
             Run finished without extracted records
           </div>
-          <div class="mt-1">The document completed processing, but no usable tribology rows were produced.</div>
+          <div class="mt-1">The document completed processing, but no usable lubrication rows were produced.</div>
         </div>
       </div>
     </CardContent>

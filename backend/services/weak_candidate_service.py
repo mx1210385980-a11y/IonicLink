@@ -194,6 +194,54 @@ def _safe_confidence(value: Any) -> float:
     return min(confidence, 0.52)
 
 
+def _load_looks_like_ratio_or_cof_noise(value: Any, item: dict[str, Any]) -> bool:
+    load_text = _text(value).replace("−", "-").replace("–", "-")
+    if not load_text:
+        return False
+    context = " ".join(
+        _text(item.get(key))
+        for key in ("evidence", "notes", "source", "source_figure", "regime", "assembly_notes")
+    )
+    normalized_context = context.replace("−", "-").replace("–", "-").lower()
+    has_explicit_load_context = bool(re.search(r"\b(?:normal\s+)?load\b|\bforce\b", normalized_context))
+    if has_explicit_load_context:
+        return False
+
+    if re.search(r"\b(?:molar\s+)?ratio\b|\bil\s*:\s*c", normalized_context, flags=re.IGNORECASE):
+        if re.fullmatch(r"\d+(?:\.\d+)?\s*-\s*\d+(?:\.\d+)?\s*(?:nN|µN|μN|uN|mN|N)", load_text, flags=re.IGNORECASE):
+            return True
+
+    descending_range = re.fullmatch(
+        r"(?P<first>\d+(?:\.\d+)?)\s*-\s*(?P<second>\d+(?:\.\d+)?)\s*(?:nN|µN|μN|uN|mN|N)",
+        load_text,
+        flags=re.IGNORECASE,
+    )
+    if descending_range and float(descending_range.group("second")) < float(descending_range.group("first")):
+        return True
+
+    if re.search(r"\b(?:friction\s+)?coefficients?\b|\bcof\b", normalized_context):
+        if re.fullmatch(r"10\s*-\s*\d+\s*(?:nN|µN|μN|uN|mN|N|AFM)?", load_text, flags=re.IGNORECASE):
+            return True
+
+    return False
+
+
+def _discard_spurious_load_fields(item: dict[str, Any]) -> None:
+    load_value = _first_value(item, "normal_load", "load", "load_value", "load_raw")
+    if not _load_looks_like_ratio_or_cof_noise(load_value, item):
+        return
+    for key in (
+        "normal_load",
+        "load",
+        "load_value",
+        "load_raw",
+        "load_conditions",
+        "loadConditions",
+        "load_conditions_json",
+    ):
+        item.pop(key, None)
+
+
 def _candidate_source(trace: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
     return {
         "page": item.get("source_page"),
@@ -233,6 +281,7 @@ def build_weak_candidate_items(
         if not _has_value(ionic_liquid):
             continue
         item["ionic_liquid"] = ionic_liquid
+        _discard_spurious_load_fields(item)
         item["material_name"] = (
             _first_value(item, *_FIELD_ALIASES["material_name"]) or "Unknown Material"
         )

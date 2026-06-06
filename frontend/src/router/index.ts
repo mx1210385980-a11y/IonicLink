@@ -65,7 +65,7 @@ const legacyRedirects: Array<{ path: string; view: AppView }> = [
   { path: '/monitor', view: 'admin' },
   { path: '/literature', view: 'library' },
   { path: '/grounding', view: 'library' },
-  { path: '/guide', view: 'help' },
+  { path: '/guide', view: 'home' },
   { path: '/mentor', view: 'home' },
 ]
 
@@ -101,7 +101,6 @@ const routes: RouteRecordRaw[] = [
   createViewRoute('quality'),
   createViewRoute('modeling'),
   createViewRoute('admin'),
-  createViewRoute('help'),
   createViewRoute('blog'),
   ...legacyRedirects.map(({ path, view }) => ({
     path,

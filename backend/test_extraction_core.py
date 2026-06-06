@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace
 
 from models.tribology import TribologyData
+from routers import extraction as extraction_router
 from routers.extraction import _build_record_field_evidence_payload
 from services.file_service import _build_field_evidence_map
 from services.file_service import _derive_grounding_metadata
@@ -197,6 +198,189 @@ def test_review_payload_includes_potential_field_and_conditions_summary():
     assert payload["fields"]["potential"]["status"] == "grounded"
     assert payload["fields"]["water_content"]["value"] == "Dry"
     assert payload["fields"]["conditions"]["value"] == "15-75 nN | 298.15 K | +1 V | Dry"
+
+
+def test_review_payload_preserves_candidate_evidence_alias_keys():
+    record = SimpleNamespace(
+        id=12,
+        literature_id=10,
+        sample_id=None,
+        series_id=None,
+        review_status="pending_review",
+        record_origin="candidate",
+        assembly_notes=None,
+        confidence=0.72,
+        material_name="mica",
+        lubricant="[BMIM][BF4]",
+        cof_raw="COF was 0.08",
+        cof_value=0.08,
+        load_raw="2 nN",
+        load_value="2 nN",
+        speed_value="10 um/s",
+        temperature=None,
+        potential=None,
+        water_content=None,
+        source_page=5,
+        field_evidence_json=json.dumps(
+            {
+                "lubricant": {"value": "[BMIM][BF4]", "evidence": {"page": 5, "quote": "[BMIM][BF4]"}},
+                "cof_raw": {"value": "0.08", "evidence": {"page": 5, "quote": "COF was 0.08"}},
+                "load_raw": {"value": "2 nN", "evidence": {"page": 5, "quote": "2 nN"}},
+                "probe_material": {"value": "Si3N4 tip", "evidence": {"page": 5, "quote": "Si3N4 tip"}},
+            }
+        ),
+        friction_force=None,
+        wear_rate=None,
+        film_thickness=None,
+        residual_film_thickness_d=None,
+        layer_spacing_delta=None,
+        surface_roughness=None,
+    )
+
+    payload = _build_record_field_evidence_payload(record)
+
+    assert payload["fields"]["lubricant"]["value"] == "[BMIM][BF4]"
+    assert payload["fields"]["cof_raw"]["evidence"]["quote"] == "COF was 0.08"
+    assert payload["fields"]["load"]["evidence"]["quote"] == "2 nN"
+
+
+def test_review_payload_adds_long_field_evidence_context(monkeypatch):
+    monkeypatch.setattr(
+        extraction_router,
+        "_extract_text_snippet",
+        lambda *args, **kwargs: (
+            "The AFM friction trace in Fig. 2 reports that the coefficient of friction "
+            "decreased to 0.08 for [BMIM][BF4] on mica under the stated load."
+        ),
+    )
+    record = SimpleNamespace(
+        id=13,
+        literature_id=10,
+        literature=SimpleNamespace(file_path="/tmp/review-source.pdf"),
+        sample_id=None,
+        series_id=None,
+        review_status="pending_review",
+        record_origin="candidate",
+        assembly_notes=None,
+        confidence=0.72,
+        material_name="mica",
+        lubricant="[BMIM][BF4]",
+        cof_raw="0.08",
+        cof_value=0.08,
+        load_raw=None,
+        load_value=None,
+        speed_value=None,
+        temperature=None,
+        potential=None,
+        water_content=None,
+        source_page=5,
+        field_evidence_json=json.dumps(
+            {
+                "cof": {
+                    "value": "0.08",
+                    "evidence": {
+                        "source_type": "figure",
+                        "source_label": "Fig. 2",
+                        "page": 5,
+                        "bbox": [20, 30, 220, 180],
+                        "quote": "Graph label reports COF 0.08",
+                        "matched_text": "0.08",
+                    },
+                },
+            }
+        ),
+        friction_force=None,
+        wear_rate=None,
+        film_thickness=None,
+        residual_film_thickness_d=None,
+        layer_spacing_delta=None,
+        surface_roughness=None,
+    )
+
+    payload = _build_record_field_evidence_payload(record)
+
+    assert payload["fields"]["cof"]["evidence"]["quote"] == "Graph label reports COF 0.08"
+    assert "coefficient of friction decreased to 0.08" in payload["fields"]["cof"]["evidence"]["context"]
+
+
+def test_review_payload_does_not_attach_unrelated_long_field_context(monkeypatch):
+    monkeypatch.setattr(
+        extraction_router,
+        "_extract_text_snippet",
+        lambda *args, **kwargs: (
+            "The forward and reverse traces were transformed into a true friction force "
+            "from the torsion of the cantilever. The friction coefficient is the "
+            "conventional way of quantifying friction."
+        ),
+    )
+    record = SimpleNamespace(
+        id=14,
+        literature_id=10,
+        literature=SimpleNamespace(file_path="/tmp/review-source.pdf"),
+        sample_id=None,
+        series_id=None,
+        review_status="pending_review",
+        record_origin="candidate",
+        assembly_notes=None,
+        confidence=0.95,
+        material_name="HOPG",
+        lubricant="[BMIM][PF6]",
+        cof_raw="0.08",
+        cof_value=0.08,
+        load_raw="~0-150 nN",
+        load_value="~0-150 nN",
+        speed_value="20 μm/s",
+        temperature="298 K",
+        potential=None,
+        water_content="humidity ~55%",
+        source_page=5,
+        field_evidence_json=json.dumps(
+            {
+                "water_content": {
+                    "value": "humidity ~55%",
+                    "confidence": 0.95,
+                    "evidence": {
+                        "source_type": "text",
+                        "page": 3,
+                        "source_label": "Experimental conditions",
+                        "quote": "Frictional experiments were performed with a humidity of ~55%.",
+                        "bbox": [42.5, 73.7, 292.1, 322.1],
+                        "matched_text": "humidity of ~55%",
+                    },
+                },
+                "speed": {
+                    "value": "20 μm/s",
+                    "confidence": 0.98,
+                    "evidence": {
+                        "source_type": "calculation",
+                        "page": 2,
+                        "source_label": "Methods 2.3 derived from scan rate and scan size",
+                        "quote": "The scan rate was 2 Hz; trace and retrace tracks of 5 μm x 5 μm under the tip.",
+                        "bbox": [303.31, 362.66, 552.85, 479.17],
+                        "matched_text": "scan rate was 2 Hz; trace and retrace tracks of 5 μm x 5 μm",
+                        "calculation": "v = 2 x 5 μm x 2 Hz = 20 μm/s",
+                    },
+                    "grounding_mode": "derived",
+                    "grounding_note": "Derived sliding speed from scan size and scan rate: v = 2 x 5 μm x 2 Hz = 20 μm/s.",
+                },
+            }
+        ),
+        friction_force=None,
+        wear_rate=None,
+        film_thickness=None,
+        residual_film_thickness_d=None,
+        layer_spacing_delta=None,
+        surface_roughness=None,
+    )
+
+    payload = _build_record_field_evidence_payload(record)
+
+    water_evidence = payload["fields"]["water_content"]["evidence"]
+    speed_evidence = payload["fields"]["speed"]["evidence"]
+    assert water_evidence["quote"] == "Frictional experiments were performed with a humidity of ~55%."
+    assert "context" not in water_evidence
+    assert speed_evidence["quote"] == "The scan rate was 2 Hz; trace and retrace tracks of 5 μm x 5 μm under the tip."
+    assert "context" not in speed_evidence
 
 
 def test_review_payload_exposes_grounding_mode_for_derived_temperature():

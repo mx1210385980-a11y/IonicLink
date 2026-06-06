@@ -110,6 +110,13 @@ export async function login(username: string, password: string) {
     return response.data as LoginResponse
 }
 
+export async function startPublicSession() {
+    const response = await api.post('/api/auth/public-session', {}, {
+        timeout: 15000,
+    })
+    return response.data as LoginResponse
+}
+
 export async function getCurrentUser() {
     const response = await api.get('/api/auth/me', {
         timeout: 8000,
@@ -396,6 +403,7 @@ export interface FieldEvidenceSource {
     page?: number | null
     source_label?: string | null
     quote?: string | null
+    context?: string | null
     matched_text?: string | null
     matchedText?: string | null
     bbox?: number[] | null
@@ -651,8 +659,26 @@ export async function approveReviewCandidate(candidateId: number): Promise<Recor
     return response.data
 }
 
+export async function rejectReviewCandidate(candidateId: number, note?: string): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/candidates/${candidateId}/reject`, { note: note ?? null })
+    return response.data
+}
+
+export async function updateReviewCandidateFields(
+    candidateId: number,
+    fields: Record<string, string | number | null>,
+): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.patch(`/api/review/candidates/${candidateId}/fields`, { fields })
+    return response.data
+}
+
 export async function approveDiffusionReviewCandidate(candidateId: number): Promise<RecordFieldEvidenceResponse> {
     const response = await api.post(`/api/review/diffusion-candidates/${candidateId}/approve`)
+    return response.data
+}
+
+export async function rejectDiffusionReviewCandidate(candidateId: number, note?: string): Promise<RecordFieldEvidenceResponse> {
+    const response = await api.post(`/api/review/diffusion-candidates/${candidateId}/reject`, { note: note ?? null })
     return response.data
 }
 
@@ -748,13 +774,19 @@ export async function getExtractionRunCandidates(
 // --- Search API ---
 
 export type ApiScopeOption = {
-    scope?: 'active' | 'group_library'
+    scope?: 'active' | 'group_library' | 'all_visible'
 }
 
 function scopeHeaders(options?: ApiScopeOption) {
     return options?.scope === 'group_library'
         ? { 'X-Scope-Type': 'group_library' }
         : undefined
+}
+
+function scopeParams(options?: ApiScopeOption): Record<string, string> {
+    return options?.scope === 'all_visible'
+        ? { scope_mode: 'all_visible' }
+        : {}
 }
 
 // Search Records (Paginated)
@@ -764,7 +796,12 @@ export async function searchRecords(
     limit: number = 20,
     options?: ApiScopeOption,
 ): Promise<PaginatedRecordResponse> {
-    const response = await api.post(`/api/records/search?skip=${skip}&limit=${limit}`, filter, {
+    const params = new URLSearchParams({
+        skip: String(skip),
+        limit: String(limit),
+        ...scopeParams(options),
+    })
+    const response = await api.post(`/api/records/search?${params.toString()}`, filter, {
         headers: scopeHeaders(options),
     })
     return response.data
@@ -885,17 +922,19 @@ export async function listDiffusionLibrary(
     query: string = '',
     skip: number = 0,
     limit: number = 500,
-    options: { literatureId?: string | number | null, recordId?: string | number | null, entityType?: 'record' | 'candidate' | string | null } = {},
+    options: ApiScopeOption & { literatureId?: string | number | null, recordId?: string | number | null, entityType?: 'record' | 'candidate' | string | null } = {},
 ): Promise<DiffusionLibraryResponse> {
     const response = await api.get('/api/records/diffusion-library', {
         params: {
             q: query || undefined,
             skip,
             limit,
+            ...scopeParams(options),
             literature_id: options.literatureId || undefined,
             record_id: options.recordId || undefined,
             entity_type: options.entityType || undefined,
         },
+        headers: scopeHeaders(options),
     })
     return response.data
 }
@@ -1009,6 +1048,7 @@ export async function getRelationshipGraphDrilldown(
 // Get Filter Options
 export async function getFilterOptions(options?: ApiScopeOption): Promise<RecordFilterOptions> {
     const response = await api.get('/api/records/options', {
+        params: scopeParams(options),
         headers: scopeHeaders(options),
     })
     return response.data
@@ -1054,6 +1094,39 @@ export async function promoteTribologyRecordConfidence(recordId: number, data: P
 // Delete single data record
 export async function deleteTribologyRecord(recordId: number) {
     const response = await api.delete(`/api/records/${recordId}`)
+    return response.data
+}
+
+export interface BatchDeleteResult {
+    success: boolean
+    requested: number
+    deletedCount: number
+    deleted: number[]
+    failed: Array<{ id: number; reason: string }>
+}
+
+export interface RecordCorrectionResult {
+    success: boolean
+    id: number
+    committed: boolean
+    dryRun: boolean
+    diff: Record<string, { before: unknown; after: unknown }>
+    candidateIds: number[]
+    confidence: number | null
+}
+
+export async function correctRecord(
+    recordId: number,
+    payload: { fields: Record<string, unknown>; linkCandidateIds?: number[] },
+    options?: { dryRun?: boolean },
+): Promise<RecordCorrectionResult> {
+    const query = options?.dryRun ? '?dryRun=true' : ''
+    const response = await api.post(`/api/records/${recordId}/correct${query}`, payload)
+    return response.data
+}
+
+export async function batchDeleteTribologyRecords(ids: number[]): Promise<BatchDeleteResult> {
+    const response = await api.post('/api/records/batch-delete', { ids })
     return response.data
 }
 
@@ -1447,6 +1520,43 @@ export interface SyncResult {
     synced_count?: number
 }
 
+function cleanLegacyTribopairRole(value: string) {
+    return value.replace(/\s+/g, ' ').trim()
+}
+
+function looksLikeIonicLiquidSegment(value: string) {
+    const text = value.toLowerCase()
+    return Boolean(
+        /[\[\]]/.test(value)
+        || /\b(?:ionic\s+liquid|il|mim|imidazolium|phosphonium|pyridinium)\b/.test(text)
+        || /\b(?:bmim|emim|hmim|tfsi|ntf2|bf4|pf6|fap|bmb|aot)\b/.test(text),
+    )
+}
+
+function looksLikeContactPairSide(value: string) {
+    return /\b(?:afm|tip|probe|ball|bead|pin|disk|disc|plate|electrode|substrate|surface|mica|hopg|graphite|steel|silica|sio2|alumina|ptfe|au)\b/i.test(value)
+}
+
+export function parseLegacyTribopairLabel(materialName?: string | null) {
+    const legacy = cleanLegacyTribopairRole(String(materialName || ''))
+    if (!legacy || !legacy.includes('/')) return null
+    const parts = legacy.split(/\s+\/\s+/).map(cleanLegacyTribopairRole).filter(Boolean)
+    const middle = parts[1] || ''
+    if (parts.length >= 3 && looksLikeIonicLiquidSegment(middle)) {
+        return {
+            probe: parts[0],
+            substrate: parts.slice(2).join(' / '),
+        }
+    }
+    if (parts.length === 2 && parts.every(looksLikeContactPairSide)) {
+        return {
+            probe: parts[0],
+            substrate: parts[1],
+        }
+    }
+    return null
+}
+
 export function formatTribopairLabel(input: {
     probeMaterial?: string | null
     substrateMaterial?: string | null
@@ -1463,6 +1573,8 @@ export function formatTribopairLabel(input: {
             ? `${probe} vs. ${substrate} (${coating})`
             : `${probe} vs. ${substrate}`
     }
+    const legacyPair = parseLegacyTribopairLabel(legacy)
+    if (legacyPair) return `${legacyPair.probe} vs. ${legacyPair.substrate}`
     if (substrate) return substrate
     if (probe) return probe
     return legacy || '--'
@@ -1656,7 +1768,11 @@ export type SearchFilter = {
     training_views?: string[]
     doi?: string
     fileId?: string
+    sortBy?: RecordSortColumn
+    sortDir?: 'asc' | 'desc'
 }
+
+export type RecordSortColumn = 'id' | 'cof' | 'load' | 'confidence' | 'date'
 
 export interface RecordFilterOptions {
     materials: string[]
@@ -1751,6 +1867,8 @@ export interface RecordResponse {
     ilInchikey?: string | null
     alkylChainLength?: number | null
     confidence: number
+    evidenceScore?: number | null
+    evidenceGrade?: 'strong' | 'adequate' | 'weak' | 'missing' | string | null
     confidenceDetails?: {
         base_score?: number
         base_percent?: number
@@ -1764,6 +1882,7 @@ export interface RecordResponse {
         boost_percent?: number
     }
     reviewStatus?: string | null
+    extractedAt?: string | null
     literatureId: number
     literature: RecordLiteratureDTO | null
     // Evidence / Source Evidence fields
@@ -1927,7 +2046,7 @@ export interface LiteratureDoiImportResponse {
 }
 
 export type LiteratureListOptions = {
-    scope?: 'active' | 'group_library'
+    scope?: 'active' | 'group_library' | 'all_visible'
 }
 
 // Get all literature list
@@ -1936,7 +2055,7 @@ export async function listLiterature(skip: number = 0, limit: number = 100, opti
         ? { 'X-Scope-Type': 'group_library' }
         : undefined
     const response = await api.get('/api/sync/literature', {
-        params: { skip, limit },
+        params: { skip, limit, ...scopeParams(options) },
         headers,
     })
     return response.data as Literature[]
@@ -3572,6 +3691,64 @@ export async function getGroupActivitySummary(): Promise<GroupActivitySummary> {
 /** 获取操作类型定义 */
 export async function getActionTypes(): Promise<{ action_types: Array<{ key: string; label: string }> }> {
     const response = await api.get('/api/monitor/action-types')
+    return response.data
+}
+
+export interface ExtractionReviewProgressSummary {
+    libraryLiterature: number
+    reviewedLiterature: number
+    approvedRecords: number
+    approvedTribologyRecords: number
+    approvedDiffusionRecords: number
+    flaggedOrRejectedRecords: number
+    unpromotedCandidates: number
+    unpromotedTribologyCandidates: number
+    unpromotedDiffusionCandidates: number
+    reviewCompletionRate: number
+    reviewCompletionNumerator: number
+    reviewCompletionDenominator: number
+    reviewCompletionLabel: string
+}
+
+export interface ExtractionReviewProgressTrendItem {
+    date: string
+    reviewedLiterature: number
+    approvedRecords: number
+    unpromotedCandidates: number
+    reviewCompletionRate: number
+}
+
+export interface ExtractionReviewProgressLiterature {
+    id: number
+    title: string
+    doi?: string | null
+    journal?: string | null
+    year?: number | null
+    reviewedAt?: string | null
+    reviewNote?: string | null
+    submissionStatus?: string | null
+    approvedRecords?: number
+    unpromotedCandidates?: number
+}
+
+export interface ExtractionReviewCandidateBacklogItem {
+    id: number
+    title: string
+    doi?: string | null
+    journal?: string | null
+    year?: number | null
+    unpromotedCandidates: number
+}
+
+export interface ExtractionReviewProgressResponse {
+    summary: ExtractionReviewProgressSummary
+    trend: ExtractionReviewProgressTrendItem[]
+    recentReviewedLiterature: ExtractionReviewProgressLiterature[]
+    candidateBacklog: ExtractionReviewCandidateBacklogItem[]
+}
+
+export async function getExtractionReviewProgress(): Promise<ExtractionReviewProgressResponse> {
+    const response = await api.get('/api/monitor/extraction-review-progress')
     return response.data
 }
 

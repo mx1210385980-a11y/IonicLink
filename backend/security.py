@@ -54,9 +54,19 @@ DEFAULT_GROUP_NAME = os.getenv("IONICLINK_GROUP_NAME", "IonicLink Research Group
 DEFAULT_GROUP_SLUG = os.getenv("IONICLINK_GROUP_SLUG", "ioniclink-research-group")
 DEFAULT_ADMIN_USERNAME = os.getenv("IONICLINK_ADMIN_USERNAME", "admin")
 DEFAULT_ADMIN_DISPLAY_NAME = os.getenv("IONICLINK_ADMIN_DISPLAY_NAME", "Group Admin")
-DEFAULT_ADMIN_PASSWORD = os.getenv("IONICLINK_ADMIN_PASSWORD", "ChangeMe123!")
+EXAMPLE_ADMIN_PASSWORD = "ChangeMe123!"
+DEFAULT_ADMIN_PASSWORD = os.getenv("IONICLINK_ADMIN_PASSWORD", "")
+DEFAULT_PUBLIC_USERNAME = os.getenv("IONICLINK_PUBLIC_USERNAME", "public-extractor")
+DEFAULT_PUBLIC_DISPLAY_NAME = os.getenv("IONICLINK_PUBLIC_DISPLAY_NAME", "IonicLink Extraction")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+
+
+def validate_bootstrap_admin_password(password: str | None) -> None:
+    if not password or password == EXAMPLE_ADMIN_PASSWORD:
+        raise RuntimeError(
+            "IONICLINK_ADMIN_PASSWORD must be set to a non-example value before bootstrapping the admin user."
+        )
 
 
 @dataclass(slots=True)
@@ -179,6 +189,10 @@ def scope_filters(scope: RequestScope) -> dict[str, Any]:
 
 
 def literature_scope_conditions(filters: dict[str, Any]):
+    if filters["scope_type"] == "all_visible":
+        return [
+            Literature.group_id == filters["group_id"],
+        ]
     conditions = [
         Literature.group_id == filters["group_id"],
         Literature.scope_type == filters["scope_type"],

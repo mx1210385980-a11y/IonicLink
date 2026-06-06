@@ -3,6 +3,11 @@ import { describe, expect, it } from 'vitest'
 import type { EvidenceResult, RecordResponse } from '@/lib/api'
 import {
   applyLiveConfidence,
+  candidateAgeDays,
+  candidateEvidenceQuality,
+  candidateEvidenceQualityLabel,
+  candidateMissingFields,
+  candidateTriageTier,
   cofDisplay,
   contactDisplayModel,
   conditionChipDisplayParts,
@@ -23,10 +28,12 @@ import {
   lubricantStructureItems,
   lubricantStructureLayout,
   lubricantTooltip,
+  missingFieldLabel,
   normalizeConfidenceDetails,
   normalizeTraceDisplayText,
   recordDisplayId,
   surfaceRoughnessBadge,
+  tribopairDisplay,
   tribopairExtras,
   tribopairParts,
 } from '@/lib/integratedExplorerHelpers'
@@ -510,6 +517,39 @@ describe('integratedExplorerHelpers', () => {
     })
   })
 
+  it('parses legacy slash tribopairs instead of showing them as a messy material label', () => {
+    const legacyRecord = createRecord({
+      materialName: 'sharp Si AFM tip / Au electrode',
+      probeMaterial: null,
+      substrateMaterial: null,
+      substrateCoating: null,
+      experimentScale: 'nanoscale',
+      experimentMethod: 'electrochemical_afm',
+    })
+
+    expect(tribopairDisplay(legacyRecord)).toBe('sharp Si AFM tip vs. Au electrode')
+    expect(tribopairParts(legacyRecord)).toEqual({
+      probe: 'sharp Si AFM tip',
+      substrate: 'Au electrode',
+      coating: '',
+    })
+  })
+
+  it('drops ionic-liquid middle segments when parsing legacy three-part tribopairs', () => {
+    const legacyRecord = createRecord({
+      materialName: 'SiO2 colloid probe / [BMIM][PF6] / mica',
+      probeMaterial: null,
+      substrateMaterial: null,
+      substrateCoating: null,
+    })
+
+    expect(tribopairDisplay(legacyRecord)).toBe('SiO2 colloid probe vs. mica')
+    expect(tribopairParts(legacyRecord)).toMatchObject({
+      probe: 'SiO2 colloid probe',
+      substrate: 'mica',
+    })
+  })
+
   it('collects probe contact details for the tribopair capsule', () => {
     expect(tribopairExtras(createRecord({
       probeGeometry: 'Tip',
@@ -585,6 +625,36 @@ describe('integratedExplorerHelpers', () => {
       secondaryLabel: 'Au(111)',
     })
     expect(model.detailBadges).toEqual(expect.arrayContaining(['sharp AFM tip', '8 nm', 'Film 2.4 nm']))
+  })
+
+  it('keeps probe and substrate separated for snake_case extraction payloads', () => {
+    const model = contactDisplayModel({
+      ...createRecord({
+        materialName: 'silica colloid probe / Au(111)',
+        probeMaterial: null,
+        probeGeometry: null,
+        probeRadius: null,
+        substrateMaterial: null,
+        substrateCoating: null,
+        experimentScale: 'nanoscale',
+        experimentMethod: 'afm_colloidal_probe',
+      }),
+      probe_material: 'Silica',
+      probe_geometry: 'Colloid probe',
+      probe_radius: '2.5 μm',
+      substrate_material: 'Au(111)',
+    } as RecordResponse)
+
+    expect(model).toMatchObject({
+      mode: 'nano',
+      primaryRole: 'Probe',
+      secondaryRole: 'Substrate',
+      primaryLabel: 'Silica',
+      secondaryLabel: 'Au(111)',
+    })
+    expect(model.detailBadges).toEqual(expect.arrayContaining(['Colloid probe', '2.5 μm']))
+    expect(model.primaryLabel).not.toContain('N/A')
+    expect(model.secondaryLabel).not.toContain('probe')
   })
 
   it('labels unitless roughness values in the contact capsule as nanometer Rq details', () => {
@@ -774,6 +844,23 @@ describe('integratedExplorerHelpers', () => {
     expect(hoc4py?.pairs[0]?.anion.smiles).toContain('S(=O)(=O)')
   })
 
+  it('renders long-chain borate anions with their A4 A8 A12 side chains', () => {
+    const layouts = ['A4BMB', 'A8BMB', 'A12BMB'].map((anion) => lubricantStructureLayout(createRecord({
+      lubricant: `[N88812][${anion}]`,
+      cation: 'N88812',
+      anion,
+      cationSmiles: 'CCCCCCCCCCCC[N+](CCCCCCCC)(CCCCCCCC)CCCCCCCC',
+    })))
+    const anionSmiles = layouts.map((layout) => layout?.pairs[0]?.anion.smiles)
+
+    expect(anionSmiles).toHaveLength(3)
+    expect(new Set(anionSmiles).size).toBe(3)
+    expect(anionSmiles[0]).toContain('CCCC')
+    expect(anionSmiles[1]).toContain('CCCCCCCC')
+    expect(anionSmiles[2]).toContain('CCCCCCCCCCCC')
+    expect(anionSmiles).not.toContain('[B-]1(OC(=O)CC(=O)O1)OC(=O)CC(=O)O')
+  })
+
   it('renders special solvate and dicationic cations without backend smiles fallbacks', () => {
     const cases = [
       {
@@ -908,5 +995,62 @@ describe('integratedExplorerHelpers', () => {
       lubricantComponents: [],
     })
     expect(lubricantStructureItems(pureBaseOil).map((item) => item.label)).toEqual(['hexadecane'])
+  })
+})
+
+describe('review-queue triage helpers', () => {
+  it('classifies weak candidates by origin or low tier', () => {
+    expect(candidateTriageTier(createRecord({ recordOrigin: 'weak_candidate' } as Partial<RecordResponse>))).toBe('weak')
+    expect(candidateTriageTier(createRecord({ confidenceTier: 'low' } as Partial<RecordResponse>))).toBe('weak')
+    expect(candidateTriageTier(createRecord({ confidenceTier: 'high' } as Partial<RecordResponse>))).toBe('strong')
+    expect(candidateTriageTier(createRecord())).toBe('strong')
+  })
+
+  it('normalizes missing fields and labels them for reviewers', () => {
+    const record = createRecord({ missingFields: ['ionic_liquid', ' COF ', ''] } as Partial<RecordResponse>)
+    expect(candidateMissingFields(record)).toEqual(['ionic_liquid', 'cof'])
+    expect(candidateMissingFields(createRecord())).toEqual([])
+    expect(missingFieldLabel('ionic_liquid')).toBe('Ionic liquid')
+    expect(missingFieldLabel('normal_load')).toBe('Load')
+    expect(missingFieldLabel('surface_potential')).toBe('Surface Potential')
+    expect(missingFieldLabel('')).toBe('')
+  })
+
+  it('reports candidate age in whole days from extractedAt', () => {
+    const tenDaysAgo = new Date(Date.now() - 10 * 86_400_000).toISOString()
+    expect(candidateAgeDays(createRecord({ extractedAt: tenDaysAgo } as Partial<RecordResponse>))).toBe(10)
+    // Missing or unparseable timestamps yield null so they never match a staleness filter.
+    expect(candidateAgeDays(createRecord())).toBeNull()
+    expect(candidateAgeDays(createRecord({ extractedAt: 'not-a-date' } as Partial<RecordResponse>))).toBeNull()
+    // Future timestamps clamp to 0 rather than going negative.
+    const future = new Date(Date.now() + 86_400_000).toISOString()
+    expect(candidateAgeDays(createRecord({ extractedAt: future } as Partial<RecordResponse>))).toBe(0)
+  })
+
+  it('classifies candidate evidence quality for review triage', () => {
+    expect(candidateEvidenceQuality(createRecord({
+      evidence: 'A clear quote',
+      evidencePage: 4,
+      evidenceBbox: '[1,2,3,4]',
+    } as Partial<RecordResponse>))).toBe('exact')
+    expect(candidateEvidenceQuality(createRecord({
+      evidence: 'A clear quote',
+      sourcePage: 4,
+      evidenceBbox: null,
+    } as Partial<RecordResponse>))).toBe('page_only')
+    expect(candidateEvidenceQuality(createRecord({
+      evidence: 'A clear quote',
+      sourcePage: null,
+      evidencePage: null,
+      evidenceBbox: null,
+    } as Partial<RecordResponse>))).toBe('text_only')
+    expect(candidateEvidenceQuality(createRecord({
+      evidence: '',
+      sourcePage: null,
+      evidencePage: null,
+      evidenceBbox: null,
+    } as Partial<RecordResponse>))).toBe('weak')
+    expect(candidateEvidenceQualityLabel('exact')).toBe('Exact evidence')
+    expect(candidateEvidenceQualityLabel('page_only')).toBe('Page-only evidence')
   })
 })

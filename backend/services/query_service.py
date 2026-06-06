@@ -18,6 +18,7 @@ from services.file_service import (
 )
 from services.il_resolver_service import ANION_DB, CATION_DB, resolve_il
 from services.score_service import calculate_confidence, calculate_confidence_details
+from services.tribology_review_quality import evidence_quality_summary
 from services.unit_converter import parse_force_range_to_newtons, parse_force_to_newtons
 from services.usage_metrics_service import get_usage_metrics_service
 from knowledge_base import normalize_ionic_liquid
@@ -38,6 +39,24 @@ from utils.speed_conditions import derive_speed_conditions, normalize_speed_cond
 from utils.tribopair import compose_tribopair_label, composite_roughness_label
 
 logger = logging.getLogger(__name__)
+
+
+def _trusted_final_record_condition(model: Any):
+    page_conditions = []
+    if hasattr(model, "evidence_page"):
+        page_conditions.append(model.evidence_page.is_not(None))
+    if hasattr(model, "source_page"):
+        page_conditions.append(model.source_page.is_not(None))
+    page_locator_condition = or_(*page_conditions) if page_conditions else False
+    return and_(
+        or_(
+            model.review_status.is_(None),
+            func.trim(model.review_status) == "",
+            func.lower(model.review_status) == "approved",
+        ),
+        func.length(func.trim(model.evidence)) > 0,
+        page_locator_condition,
+    )
 
 
 async def _execute_counted(session: AsyncSession, stmt: Any, *, operation: str):
@@ -491,6 +510,21 @@ def _record_to_payload(record: TribologyData, *, display_index: int | None = Non
     if tribological_system:
         tribological_system = {**tribological_system, **experiment_profile}
     review_entity_type = "candidate" if isinstance(record, RecordCandidate) else "record"
+    evidence_summary = evidence_quality_summary(
+        {
+            "material_name": record.material_name,
+            "lubricant": record.lubricant,
+            "cof_raw": record.cof_raw,
+            "cof_value": record.cof_value,
+            "load_raw": record.load_raw,
+            "load_value": record.load_value,
+            "speed_value": speed_value,
+            "temperature": record.temperature,
+            "potential": record.potential,
+            "water_content": record.water_content,
+            "field_evidence_json": repaired_field_evidence_map,
+        }
+    )
     payload = {
         "id": record.id,
         "display_id": f"C-{int(record.id):06d}" if review_entity_type == "candidate" else format_record_display_id(display_index, record.id),
@@ -563,15 +597,70 @@ def _record_to_payload(record: TribologyData, *, display_index: int | None = Non
         "source_figure": getattr(record, "source_figure", None),
         "field_evidence_json": repaired_field_evidence_map,
         "confidence": float(runtime_details.get("score") or 0.0),
+        "evidence_score": evidence_summary["score"],
+        "evidenceScore": evidence_summary["score"],
+        "evidence_grade": evidence_summary["grade"],
+        "evidenceGrade": evidence_summary["grade"],
+        "evidence_summary": evidence_summary,
+        "evidenceSummary": evidence_summary,
         "confidence_details": runtime_details,
         "review_status": getattr(record, "review_status", None),
         "record_origin": getattr(record, "record_origin", None),
         "assembly_notes": getattr(record, "assembly_notes", None),
+        "extracted_at": record.extracted_at.isoformat() if getattr(record, "extracted_at", None) else None,
         "literature_id": record.literature_id,
         "literature": literature_payload,
     }
     _normalize_record_chemistry([payload])
     return payload
+
+
+_SORTABLE_FIELDS = frozenset({"id", "cof", "load", "confidence", "date"})
+
+
+def _record_sort_value(record: Any, sort_by: str) -> Any:
+    """Extract a comparable key for one of the supported sort columns.
+
+    Returns None for records that have no value in that column so callers can
+    push them to the end regardless of sort direction.
+    """
+    if sort_by == "cof":
+        return getattr(record, "cof_value", None)
+    if sort_by == "load":
+        bounds = _parse_load_bounds(getattr(record, "load_value", None) or getattr(record, "load_raw", None))
+        if bounds is None:
+            return None
+        return (bounds[0] + bounds[1]) / 2.0
+    if sort_by == "confidence":
+        value = getattr(record, "confidence", None)
+        try:
+            return float(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+    if sort_by == "date":
+        return getattr(record, "extracted_at", None)
+    # Default / "id"
+    return int(getattr(record, "id", 0) or 0)
+
+
+def _apply_explicit_sort(records: list[Any], sort_by: str, sort_dir: str) -> list[Any]:
+    """Sort records by an explicit column with missing values pinned last.
+
+    A stable secondary sort by id keeps ordering deterministic for ties.
+    """
+    reverse = str(sort_dir or "asc").strip().lower() == "desc"
+    present: list[tuple[Any, Any]] = []
+    missing: list[Any] = []
+    for record in records:
+        value = _record_sort_value(record, sort_by)
+        if value is None:
+            missing.append(record)
+        else:
+            present.append((value, record))
+    present.sort(key=lambda pair: int(getattr(pair[1], "id", 0) or 0))
+    present.sort(key=lambda pair: pair[0], reverse=reverse)
+    missing.sort(key=lambda record: int(getattr(record, "id", 0) or 0))
+    return [record for _, record in present] + missing
 
 
 async def search_records(
@@ -585,11 +674,18 @@ async def search_records(
     logger.debug("Executing record search skip=%s limit=%s scope=%s", skip, limit, scope_filter_values)
     record_conditions = _build_conditions(filter_params, TribologyData)
     candidate_conditions = _build_conditions(filter_params, RecordCandidate)
+    entity_type_filter = str(getattr(filter_params, "entity_type", "") or "").strip().lower()
+    include_records = entity_type_filter != "candidate"
+    include_candidates = entity_type_filter != "record"
     scope_conditions = literature_scope_conditions(scope_filter_values) if scope_filter_values else []
     use_load_filter = (
         getattr(filter_params, "load_min", None) is not None
         or getattr(filter_params, "load_max", None) is not None
     )
+    sort_by = str(getattr(filter_params, "sort_by", "") or "").strip().lower()
+    if sort_by not in _SORTABLE_FIELDS:
+        sort_by = ""
+    sort_dir = str(getattr(filter_params, "sort_dir", "") or "").strip().lower()
 
     def _database_review_order(record: Any) -> tuple[int, int, int]:
         record_id = int(getattr(record, "id", 0) or 0)
@@ -610,14 +706,22 @@ async def search_records(
             stmt = stmt.where(and_(*conditions))
         if model is RecordCandidate:
             stmt = stmt.where(RecordCandidate.promoted_record_id.is_(None))
+            stmt = stmt.where(
+                or_(
+                    RecordCandidate.review_status.is_(None),
+                    func.lower(RecordCandidate.review_status) != "rejected",
+                )
+            )
+        elif not getattr(filter_params, "review_statuses", None):
+            stmt = stmt.where(_trusted_final_record_condition(model))
         stmt = stmt.order_by(model.id)
         result = await _execute_counted(session, stmt, operation=operation)
         return list(result.scalars().all())
 
     if use_load_filter:
         all_records = [
-            *(await _fetch_records_for_model(TribologyData, record_conditions, operation="search_records.load_filtered.records")),
-            *(await _fetch_records_for_model(RecordCandidate, candidate_conditions, operation="search_records.load_filtered.candidates")),
+            *(await _fetch_records_for_model(TribologyData, record_conditions, operation="search_records.load_filtered.records") if include_records else []),
+            *(await _fetch_records_for_model(RecordCandidate, candidate_conditions, operation="search_records.load_filtered.candidates") if include_candidates else []),
         ]
 
         filtered_records = []
@@ -630,15 +734,21 @@ async def search_records(
                 continue
             filtered_records.append(record)
 
-        filtered_records.sort(key=_database_review_order)
+        if sort_by:
+            filtered_records = _apply_explicit_sort(filtered_records, sort_by, sort_dir)
+        else:
+            filtered_records.sort(key=_database_review_order)
         total = len(filtered_records)
         records = filtered_records[skip : skip + limit]
     else:
         all_records = [
-            *(await _fetch_records_for_model(TribologyData, record_conditions, operation="search_records.page.records")),
-            *(await _fetch_records_for_model(RecordCandidate, candidate_conditions, operation="search_records.page.candidates")),
+            *(await _fetch_records_for_model(TribologyData, record_conditions, operation="search_records.page.records") if include_records else []),
+            *(await _fetch_records_for_model(RecordCandidate, candidate_conditions, operation="search_records.page.candidates") if include_candidates else []),
         ]
-        all_records.sort(key=_database_review_order)
+        if sort_by:
+            all_records = _apply_explicit_sort(all_records, sort_by, sort_dir)
+        else:
+            all_records.sort(key=_database_review_order)
         total = len(all_records)
         records = all_records[skip : skip + limit]
 

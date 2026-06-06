@@ -67,6 +67,28 @@ def _normalize_number(value: Any) -> str:
         return _normalize_text(value)
 
 
+def _source_figure_identity(row: dict[str, Any]) -> str:
+    explicit = row.get("source_figure") or row.get("sourceFigure") or row.get("source_label") or row.get("sourceLabel")
+    if explicit:
+        return _normalize_text(explicit)
+
+    field_map = row.get("field_evidence_json") or row.get("fieldEvidenceJson") or {}
+    if not isinstance(field_map, dict):
+        return ""
+
+    labels: list[str] = []
+    for entry in field_map.values():
+        if not isinstance(entry, dict):
+            continue
+        evidence = entry.get("evidence")
+        if not isinstance(evidence, dict):
+            continue
+        label = evidence.get("source_label") or evidence.get("sourceLabel")
+        if label:
+            labels.append(_normalize_text(label))
+    return "|".join(sorted({label for label in labels if label}))
+
+
 def tribology_payload_dedupe_key(row: dict[str, Any]) -> tuple[str, ...]:
     cof_extracted = row.get("cof_extracted") if isinstance(row.get("cof_extracted"), dict) else {}
     return (
@@ -93,6 +115,7 @@ def tribology_payload_dedupe_key(row: dict[str, Any]) -> tuple[str, ...]:
         _normalize_text(row.get("speed") or row.get("speed_value")),
         _normalize_text(row.get("potential")),
         _normalize_text(row.get("water_content")),
+        _source_figure_identity(row),
         _normalize_text(row.get("sample_id")),
         _normalize_text(row.get("series_id")),
     )
@@ -139,12 +162,18 @@ def field_evidence_score(entry: dict[str, Any] | None) -> float:
         str(evidence.get(key) or "").strip()
         for key in ("quote", "matched_text", "matchedText")
     )
+    has_labeled_source = any(
+        str(evidence.get(key) or "").strip()
+        for key in ("source_label", "source_type", "sample_id")
+    )
     if has_page and has_bbox and has_text_source:
         return 1.0
     if has_page and has_bbox:
         return 0.9
     if has_page and has_text_source:
         return 0.8
+    if has_text_source and has_labeled_source:
+        return 0.7
     if has_text_source:
         return 0.55
     if any(evidence.get(key) not in (None, "", []) for key in ("page", "source_label", "sample_id", "source_type")):

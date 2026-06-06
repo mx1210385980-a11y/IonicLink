@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import {
   BookOpen,
   Box,
+  Check,
   Download,
   ExternalLink,
   Filter,
@@ -14,6 +15,8 @@ import {
 } from 'lucide-vue-next'
 
 import {
+  approveDiffusionReviewCandidate,
+  rejectDiffusionReviewCandidate,
   getDiffusionCandidateEvidence,
   getDiffusionRecordEvidence,
   listDiffusionLibrary,
@@ -23,6 +26,7 @@ import {
   type RecordResponse,
 } from '@/lib/api'
 import LubricantRecipeCell from '@/components/integrated-explorer/LubricantRecipeCell.vue'
+import DiffusionReviewSheet from '@/components/knowledge/DiffusionReviewSheet.vue'
 import Modal from '@/components/ui/Modal.vue'
 import {
   lubricantDisplay,
@@ -43,6 +47,8 @@ const props = defineProps<{
   focusDoi?: string
   focusRecordId?: number | null
   focusEntityType?: 'record' | 'candidate' | null
+  entityTypeFilter?: 'record' | 'candidate' | null
+  recordScope?: 'active' | 'all_visible'
   externalExportRequest?: { id: number, format: 'json' | 'csv' | 'ndjson' } | null
   externalFilterRequestId?: number | null
 }>()
@@ -59,6 +65,7 @@ const geometryFilter = ref('all')
 const showFilters = ref(false)
 const loading = ref(false)
 const error = ref('')
+const reviewActionError = ref('')
 const libraryRecords = ref<DiffusionLibraryRecord[]>([])
 const librarySummary = ref<Record<string, any>>({})
 const pdfLocate = ref<{
@@ -85,6 +92,14 @@ const structurePreview = ref<{
 })
 
 const allRecords = computed(() => libraryRecords.value)
+const activeLibraryEntityType = computed<'record' | 'candidate'>(() =>
+  props.entityTypeFilter === 'candidate' || props.focusEntityType === 'candidate' ? 'candidate' : 'record',
+)
+const diffusionLibraryScope = computed<'active' | 'all_visible'>(() =>
+  props.recordScope || 'all_visible',
+)
+
+const weakOnly = ref(false)
 
 const filteredRecords = computed(() => {
   const normalizedQuery = query.value.trim().toLowerCase()
@@ -92,6 +107,10 @@ const filteredRecords = computed(() => {
     if (ionicLiquidFilter.value !== 'all' && clean(record.ionic_liquid) !== ionicLiquidFilter.value) return false
     if (materialFilter.value !== 'all' && clean(record.confinement_material_class) !== materialFilter.value) return false
     if (geometryFilter.value !== 'all' && clean(record.confinement_geometry_class) !== geometryFilter.value) return false
+    // Triage: show only weak (low-confidence) candidates when requested.
+    if (weakOnly.value
+      && String(record.reviewEntityType || record.review_entity_type).toLowerCase() === 'candidate'
+      && Number((record as any).confidence ?? 1) >= 0.6) return false
     if (!normalizedQuery) return true
     return [
       record.system_name,
@@ -118,9 +137,83 @@ const finalRecordCount = computed(() =>
   allRecords.value.filter((record) => clean(record.reviewEntityType || record.review_entity_type) === 'record').length,
 )
 const candidateCount = computed(() =>
-  Number(librarySummary.value?.candidateCount ?? allRecords.value.length - finalRecordCount.value),
+  activeLibraryEntityType.value === 'record'
+    ? 0
+    : Number(librarySummary.value?.candidateCount ?? allRecords.value.length - finalRecordCount.value),
 )
 const coefficientReadyCount = computed(() => allRecords.value.filter(hasDiffusionCoefficient).length)
+
+// Bulk review: select candidates and approve/reject in one pass ────────────────
+const selectedDiffusionCandidateIds = ref<Set<number>>(new Set())
+const bulkReviewPending = ref(false)
+
+const selectableCandidateIds = computed(() =>
+  filteredRecords.value
+    .filter((record) => recordReviewEntityType(record) === 'candidate')
+    .map((record) => recordNumericId(record))
+    .filter((id): id is number => typeof id === 'number' && id > 0),
+)
+const selectedDiffusionCandidateCount = computed(() =>
+  selectableCandidateIds.value.filter((id) => selectedDiffusionCandidateIds.value.has(id)).length,
+)
+const allDiffusionCandidatesSelected = computed(() =>
+  selectableCandidateIds.value.length > 0 && selectedDiffusionCandidateCount.value === selectableCandidateIds.value.length,
+)
+
+function isDiffusionCandidateSelected(record: DiffusionLibraryRecord) {
+  const id = recordNumericId(record)
+  return Boolean(id && selectedDiffusionCandidateIds.value.has(id))
+}
+function toggleSelectDiffusionCandidate(record: DiffusionLibraryRecord) {
+  const id = recordNumericId(record)
+  if (!id) return
+  const next = new Set(selectedDiffusionCandidateIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  selectedDiffusionCandidateIds.value = next
+}
+function toggleSelectAllDiffusionCandidates(select: boolean) {
+  const next = new Set(selectedDiffusionCandidateIds.value)
+  for (const id of selectableCandidateIds.value) {
+    if (select) next.add(id)
+    else next.delete(id)
+  }
+  selectedDiffusionCandidateIds.value = next
+}
+function clearDiffusionSelection() {
+  selectedDiffusionCandidateIds.value = new Set()
+}
+
+// Drop selections for candidates no longer visible (filtered out / refetched).
+watch(selectableCandidateIds, (ids) => {
+  if (!selectedDiffusionCandidateIds.value.size) return
+  const visible = new Set(ids)
+  const pruned = new Set(Array.from(selectedDiffusionCandidateIds.value).filter((id) => visible.has(id)))
+  if (pruned.size !== selectedDiffusionCandidateIds.value.size) selectedDiffusionCandidateIds.value = pruned
+})
+
+async function runBulkDiffusionReview(action: 'approve' | 'reject') {
+  const ids = selectableCandidateIds.value.filter((id) => selectedDiffusionCandidateIds.value.has(id))
+  if (!ids.length || bulkReviewPending.value) return
+  if (!confirm(`${action === 'approve' ? 'Approve' : 'Reject'} ${ids.length} selected diffusion candidate${ids.length === 1 ? '' : 's'}?`)) return
+  bulkReviewPending.value = true
+  reviewActionError.value = ''
+  try {
+    for (const id of ids) {
+      try {
+        if (action === 'approve') await approveDiffusionReviewCandidate(id)
+        else await rejectDiffusionReviewCandidate(id)
+      } catch (err: any) {
+        reviewActionError.value = `Failed to ${action} candidate #${id}: ${err?.response?.data?.detail || err?.message || 'Unknown error'}`
+        break
+      }
+    }
+  } finally {
+    clearDiffusionSelection()
+    bulkReviewPending.value = false
+    await loadLibrary()
+  }
+}
 
 const exportRows = computed(() => filteredRecords.value.map((record) => ({
   id: record.libraryId || record.library_id || record.id,
@@ -159,7 +252,7 @@ watch(
   },
 )
 
-watch(() => [props.focusFileId, props.focusRecordId, props.focusEntityType, props.focusDoi], () => {
+watch(() => [props.focusFileId, props.focusRecordId, props.focusEntityType, props.entityTypeFilter, props.focusDoi], () => {
   void loadLibrary()
 })
 
@@ -174,7 +267,8 @@ async function loadLibrary() {
     const result = await listDiffusionLibrary('', 0, 1000, {
       literatureId: props.focusFileId || undefined,
       recordId: props.focusRecordId ?? undefined,
-      entityType: props.focusEntityType ?? undefined,
+      entityType: activeLibraryEntityType.value,
+      scope: diffusionLibraryScope.value,
     })
     libraryRecords.value = result.items || []
     librarySummary.value = result.summary || {}
@@ -186,6 +280,35 @@ async function loadLibrary() {
   } finally {
     loading.value = false
   }
+}
+
+// Diffusion review sheet: evidence-first verify before approve/reject ──────────
+const reviewSheetRecord = ref<DiffusionLibraryRecord | null>(null)
+const reviewSheetNextRecord = computed(() => {
+  const current = reviewSheetRecord.value
+  if (!current) return null
+  const candidates = filteredRecords.value.filter((record) => recordReviewEntityType(record) === 'candidate')
+  const currentId = recordNumericId(current)
+  const index = candidates.findIndex((record) => recordNumericId(record) === currentId)
+  if (index < 0) return null
+  return candidates[index + 1] || null
+})
+
+function openDiffusionReviewSheet(record: DiffusionLibraryRecord) {
+  if (recordReviewEntityType(record) !== 'candidate') return
+  reviewSheetRecord.value = record
+}
+
+function openNextDiffusionReviewSheet() {
+  if (!reviewSheetNextRecord.value) return
+  reviewSheetRecord.value = reviewSheetNextRecord.value
+}
+
+async function handleDiffusionReviewResolved() {
+  // Capture the next candidate before refetch so the sheet advances in place.
+  const next = reviewSheetNextRecord.value
+  reviewSheetRecord.value = next ?? null
+  await loadLibrary()
 }
 
 function clean(value: unknown) {
@@ -502,6 +625,16 @@ function exportData(format: 'json' | 'csv' | 'ndjson') {
         <div class="min-w-0">
           <p class="text-[11px] font-black uppercase tracking-[0.24em] text-[#0f7c82]">Diffusion Library</p>
           <h2 class="mt-1 text-[1.35rem] font-black tracking-[-0.04em] text-slate-950">Ionic liquid diffusion coefficient</h2>
+          <div class="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
+            <span class="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 font-black text-slate-700">
+              {{ activeLibraryEntityType === 'candidate' ? 'Review Queue' : 'Official Database' }}
+            </span>
+            <span>
+              {{ activeLibraryEntityType === 'candidate'
+                ? 'Diffusion candidates waiting for review.'
+                : 'Approved diffusion records only.' }}
+            </span>
+          </div>
         </div>
 
         <div class="grid grid-cols-3 gap-2 rounded-xl border border-slate-200 bg-[#f8fbfd] p-1.5 text-center">
@@ -517,6 +650,46 @@ function exportData(format: 'json' | 'csv' | 'ndjson') {
             <p class="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">D-ready</p>
             <p class="text-lg font-black text-slate-800">{{ coefficientReadyCount }}</p>
           </div>
+        </div>
+      </div>
+
+      <div v-if="activeLibraryEntityType === 'candidate'" class="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold" data-testid="diffusion-triage">
+        <button
+          type="button"
+          class="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 transition"
+          :class="weakOnly ? 'border-amber-300 bg-amber-50 text-amber-700' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'"
+          @click="weakOnly = !weakOnly"
+        >
+          Weak only
+        </button>
+        <div class="ml-auto flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2 py-1">
+          <button
+            type="button"
+            class="rounded-md px-2 py-1 font-black text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+            @click="toggleSelectAllDiffusionCandidates(!allDiffusionCandidatesSelected)"
+          >
+            {{ allDiffusionCandidatesSelected ? 'Clear page' : 'Select page' }}
+          </button>
+          <span class="px-1 font-black text-slate-500">Selected {{ selectedDiffusionCandidateCount }}</span>
+          <button
+            type="button"
+            class="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-3 font-black text-emerald-600 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-45"
+            :disabled="selectedDiffusionCandidateCount === 0 || bulkReviewPending"
+            @click="runBulkDiffusionReview('approve')"
+          >
+            <Check class="h-3.5 w-3.5 stroke-[3]" />
+            <span v-if="bulkReviewPending">Working...</span>
+            <span v-else>Approve selected</span>
+          </button>
+          <button
+            type="button"
+            class="inline-flex h-8 items-center gap-1.5 rounded-md border border-rose-200 bg-rose-50 px-3 font-black text-rose-500 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-45"
+            :disabled="selectedDiffusionCandidateCount === 0 || bulkReviewPending"
+            @click="runBulkDiffusionReview('reject')"
+          >
+            <X class="h-3.5 w-3.5" />
+            Reject selected
+          </button>
         </div>
       </div>
 
@@ -582,6 +755,12 @@ function exportData(format: 'json' | 'csv' | 'ndjson') {
           Clear
         </button>
       </div>
+      <p
+        v-if="reviewActionError"
+        class="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700"
+      >
+        {{ reviewActionError }}
+      </p>
     </div>
 
     <div class="min-h-0 flex-1 overflow-auto px-5 py-4">
@@ -717,6 +896,29 @@ function exportData(format: 'json' | 'csv' | 'ndjson') {
                   </span>
                   <ExternalLink class="h-3.5 w-3.5 shrink-0 text-slate-300 group-hover:text-[#0f7c82]" />
                 </button>
+                <div v-if="recordReviewEntityType(record) === 'candidate'" class="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    class="grid h-8 w-8 shrink-0 place-items-center rounded-md border transition"
+                    :class="isDiffusionCandidateSelected(record) ? 'border-[#0f7c82] bg-[#0f7c82] text-white' : 'border-slate-300 bg-white text-transparent hover:border-[#0f7c82]'"
+                    :aria-pressed="isDiffusionCandidateSelected(record)"
+                    title="Select candidate for bulk review"
+                    aria-label="Select candidate"
+                    @click.stop="toggleSelectDiffusionCandidate(record)"
+                  >
+                    <Check class="h-4 w-4 stroke-[3]" />
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg border border-[#0f7c82]/25 bg-[#eefafa] px-3 text-xs font-black text-[#0f7c82] transition hover:border-[#0f7c82]/45 hover:bg-white"
+                    title="Review this candidate's evidence before approving"
+                    aria-label="Review candidate"
+                    @click.stop="openDiffusionReviewSheet(record)"
+                  >
+                    <Check class="h-3.5 w-3.5 stroke-[3]" />
+                    Review
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -771,5 +973,16 @@ function exportData(format: 'json' | 'csv' | 'ndjson') {
         </div>
       </div>
     </Modal>
+
+    <DiffusionReviewSheet
+      :show="Boolean(reviewSheetRecord)"
+      :record="reviewSheetRecord"
+      :next-record="reviewSheetNextRecord"
+      :has-next-candidate="Boolean(reviewSheetNextRecord)"
+      @close="reviewSheetRecord = null"
+      @next-candidate="openNextDiffusionReviewSheet"
+      @approved="handleDiffusionReviewResolved"
+      @rejected="handleDiffusionReviewResolved"
+    />
   </div>
 </template>

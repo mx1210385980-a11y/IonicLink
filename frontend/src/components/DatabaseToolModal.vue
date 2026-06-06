@@ -7,6 +7,7 @@ import DiffusionExplorerWorkspace from '@/components/knowledge/DiffusionExplorer
 import { listDiffusionLibrary, searchRecords, type BatchFile } from '@/lib/api'
 
 type DatasetKey = 'tribology' | 'diffusion'
+type EntityTypeFilter = 'record' | 'candidate'
 
 const props = defineProps<{
   show: boolean
@@ -20,6 +21,7 @@ const props = defineProps<{
   focusDataset?: 'tribology' | 'diffusion' | null
   focusRecordId?: number | null
   focusEntityType?: 'record' | 'candidate' | null
+  entityTypeFilter?: 'record' | 'candidate' | null
 }>()
 
 const emit = defineEmits<{
@@ -30,11 +32,15 @@ const emit = defineEmits<{
 }>()
 
 const activeDataset = ref<DatasetKey>('tribology')
+const activeEntityTypeFilter = ref<EntityTypeFilter>('record')
 const datasetMenuOpen = ref(false)
 const exportRequestId = ref(0)
 const externalExportRequest = ref<{ id: number, format: 'json' | 'csv' | 'ndjson' } | null>(null)
 const filterRequestId = ref(0)
-const remoteCounts = ref<Partial<Record<DatasetKey, number>>>({})
+const remoteCounts = ref<Record<EntityTypeFilter, Partial<Record<DatasetKey, number>>>>({
+  record: {},
+  candidate: {},
+})
 const countsLoading = ref(false)
 
 function isDiffusionRecord(record: any) {
@@ -44,31 +50,51 @@ function isDiffusionRecord(record: any) {
     || record?.D_anion != null
 }
 
+function recordEntityType(record: any): EntityTypeFilter {
+  const value = String(record?.review_entity_type || record?.reviewEntityType || record?.entity_type || record?.entityType || '').trim().toLowerCase()
+  return value === 'candidate' ? 'candidate' : 'record'
+}
+
 const datasetCounts = computed<Record<DatasetKey, number>>(() => {
   let diffusion = 0
   let tribology = 0
 
   for (const file of props.files) {
     for (const record of file.records || []) {
+      if (recordEntityType(record) !== activeEntityTypeFilter.value) continue
       if (isDiffusionRecord(record)) diffusion += 1
       else tribology += 1
     }
   }
 
   return {
-    tribology: remoteCounts.value.tribology ?? tribology,
-    diffusion: remoteCounts.value.diffusion ?? diffusion,
+    tribology: remoteCounts.value[activeEntityTypeFilter.value].tribology ?? tribology,
+    diffusion: remoteCounts.value[activeEntityTypeFilter.value].diffusion ?? diffusion,
   }
 })
 
 const datasets = computed(() => [
-  { key: 'tribology' as const, label: 'Tribology', count: datasetCounts.value.tribology, hint: 'COF · IL structures' },
+  { key: 'tribology' as const, label: 'Lubrication', count: datasetCounts.value.tribology, hint: 'COF · IL structures' },
   { key: 'diffusion' as const, label: 'Diffusion', count: datasetCounts.value.diffusion, hint: 'D values · RDKit features' },
 ])
 
 const activeDatasetMeta = computed(() =>
   datasets.value.find((dataset) => dataset.key === activeDataset.value) || datasets.value[0]!,
 )
+const entityTypeModes = computed(() => [
+  {
+    key: 'record' as const,
+    label: 'Official Database',
+    count: remoteCounts.value.record[activeDataset.value] ?? 0,
+    hint: 'Approved library rows',
+  },
+  {
+    key: 'candidate' as const,
+    label: 'Review Queue',
+    count: remoteCounts.value.candidate[activeDataset.value] ?? 0,
+    hint: 'Candidates to approve',
+  },
+])
 const globalTribologyInitialDoi = computed(() => props.focusDoi || '')
 const globalTribologySelectedFileId = computed(() => props.focusFileId || null)
 const globalTribologyExplorerKey = computed(() => [
@@ -76,12 +102,19 @@ const globalTribologyExplorerKey = computed(() => [
   globalTribologySelectedFileId.value || 'global',
   props.focusRecordId ?? 'all',
   props.focusEntityType ?? 'entity-all',
+  activeEntityTypeFilter.value,
 ].join('-'))
-const databaseRecordScope = computed<'active' | 'group_library'>(() => 'active')
+const databaseRecordScope = computed<'active' | 'all_visible'>(() => {
+  return 'all_visible'
+})
 
 function selectDataset(key: DatasetKey) {
   activeDataset.value = key
   datasetMenuOpen.value = false
+}
+
+function selectEntityTypeFilter(entityType: 'record' | 'candidate') {
+  activeEntityTypeFilter.value = entityType
 }
 
 function requestExport(format: 'json' | 'csv' | 'ndjson' = 'csv') {
@@ -96,27 +129,42 @@ function requestFilters() {
 async function refreshDatasetCounts() {
   countsLoading.value = true
   try {
-    const [tribologyResult, diffusionResult] = await Promise.allSettled([
-      searchRecords({}, 0, 1),
-      listDiffusionLibrary('', 0, 1),
+    const [tribologyRecordResult, tribologyCandidateResult, diffusionRecordResult, diffusionCandidateResult] = await Promise.allSettled([
+      searchRecords({ entityType: 'record' }, 0, 1, { scope: databaseRecordScope.value }),
+      searchRecords({ entityType: 'candidate' }, 0, 1, { scope: databaseRecordScope.value }),
+      listDiffusionLibrary('', 0, 1, { scope: databaseRecordScope.value, entityType: 'record' }),
+      listDiffusionLibrary('', 0, 1, { scope: databaseRecordScope.value, entityType: 'candidate' }),
     ])
-    const nextCounts: Partial<Record<DatasetKey, number>> = {}
-    if (tribologyResult.status === 'fulfilled') {
-      nextCounts.tribology = Number(tribologyResult.value.total || 0)
+    const nextCounts: Record<EntityTypeFilter, Partial<Record<DatasetKey, number>>> = {
+      record: {},
+      candidate: {},
     }
-    if (diffusionResult.status === 'fulfilled') {
-      nextCounts.diffusion = Number(diffusionResult.value.total || 0)
+    if (tribologyRecordResult.status === 'fulfilled') {
+      nextCounts.record.tribology = Number(tribologyRecordResult.value.total || 0)
     }
-    remoteCounts.value = { ...remoteCounts.value, ...nextCounts }
+    if (tribologyCandidateResult.status === 'fulfilled') {
+      nextCounts.candidate.tribology = Number(tribologyCandidateResult.value.total || 0)
+    }
+    if (diffusionRecordResult.status === 'fulfilled') {
+      nextCounts.record.diffusion = Number(diffusionRecordResult.value.total || 0)
+    }
+    if (diffusionCandidateResult.status === 'fulfilled') {
+      nextCounts.candidate.diffusion = Number(diffusionCandidateResult.value.total || 0)
+    }
+    remoteCounts.value = {
+      record: { ...remoteCounts.value.record, ...nextCounts.record },
+      candidate: { ...remoteCounts.value.candidate, ...nextCounts.candidate },
+    }
   } finally {
     countsLoading.value = false
   }
 }
 
-watch(() => [props.show, props.focusDataset],
+watch(() => [props.show, props.focusDataset, props.entityTypeFilter, props.focusEntityType],
   ([show]) => {
     if (!show) return
     activeDataset.value = props.focusDataset === 'diffusion' ? 'diffusion' : 'tribology'
+    activeEntityTypeFilter.value = props.entityTypeFilter === 'candidate' || props.focusEntityType === 'candidate' ? 'candidate' : 'record'
     void refreshDatasetCounts()
   },
 )
@@ -137,8 +185,8 @@ watch(() => [props.show, props.focusDataset],
       @click.self="emit('close')"
     >
       <div class="flex h-[84vh] w-[min(94vw,1320px)] flex-col overflow-hidden rounded-[1.25rem] border border-slate-200 bg-[#f8fbfd] text-slate-950 shadow-[0_34px_90px_rgba(15,23,42,0.28)]">
-        <header class="flex shrink-0 items-center justify-between border-b border-slate-200 bg-white px-4 py-3.5">
-          <div class="flex min-w-0 items-center gap-3">
+        <header class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3.5">
+          <div class="flex min-w-0 flex-wrap items-center gap-3">
             <h2 class="shrink-0 text-[1.38rem] font-black leading-none tracking-[-0.035em] text-[#0f7c82]">Database</h2>
             <div class="relative">
               <button
@@ -174,6 +222,25 @@ watch(() => [props.show, props.focusDataset],
                   <span class="text-lg font-black text-[#0f7c82]">{{ countsLoading ? '--' : dataset.count }}</span>
                 </button>
               </div>
+            </div>
+            <div class="flex h-10 max-w-full shrink-0 items-center overflow-x-auto rounded-lg border border-slate-200 bg-[#fbfdff] p-1 shadow-sm">
+              <button
+                v-for="mode in entityTypeModes"
+                :key="mode.key"
+                type="button"
+                class="inline-flex h-8 items-center gap-2 rounded-md px-3 text-xs font-black transition"
+                :class="activeEntityTypeFilter === mode.key ? 'bg-[#0f7c82] text-white shadow-sm' : 'text-slate-500 hover:bg-white hover:text-slate-800'"
+                :title="mode.hint"
+                @click="selectEntityTypeFilter(mode.key)"
+              >
+                <span>{{ mode.label }}</span>
+                <span
+                  class="rounded-full px-1.5 py-0.5 text-[10px]"
+                  :class="activeEntityTypeFilter === mode.key ? 'bg-white/18 text-white' : 'bg-slate-100 text-slate-400'"
+                >
+                  {{ countsLoading ? '--' : mode.count }}
+                </span>
+              </button>
             </div>
           </div>
 
@@ -212,6 +279,7 @@ watch(() => [props.show, props.focusDataset],
               :selected-file-id="globalTribologySelectedFileId"
               :focus-record-id="focusRecordId ?? null"
               :focus-entity-type="focusEntityType || null"
+              :entity-type-filter="activeEntityTypeFilter"
               :record-scope="databaseRecordScope"
               :source-name="selectedFile?.name"
               :literature-metadata="selectedFile?.metadata"
@@ -231,11 +299,13 @@ watch(() => [props.show, props.focusDataset],
               :focus-doi="focusDoi || ''"
               :focus-record-id="focusRecordId ?? null"
               :focus-entity-type="focusEntityType || null"
-	              :external-export-request="externalExportRequest"
-	              :external-filter-request-id="filterRequestId"
-	              @open-literature="(payload) => emit('openLiterature', payload)"
-	            />
-	          </div>
+              :entity-type-filter="activeEntityTypeFilter"
+              :record-scope="databaseRecordScope"
+              :external-export-request="externalExportRequest"
+              :external-filter-request-id="filterRequestId"
+              @open-literature="(payload) => emit('openLiterature', payload)"
+            />
+          </div>
         </section>
       </div>
     </div>

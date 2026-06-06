@@ -4,7 +4,6 @@ import {
   Activity,
   ArrowRight,
   BookOpen,
-  ChevronDown,
   Check,
   CloudUpload,
   Clock3,
@@ -13,16 +12,13 @@ import {
   Github,
   HelpCircle,
   Loader2,
-  LogOut,
   PanelTop,
   Sparkles,
-  UserCog,
   Upload,
   X,
 } from 'lucide-vue-next'
 
 import AppSidebar from '@/components/AppSidebar.vue'
-import LoginScreen from '@/components/LoginScreen.vue'
 import type { HomeSuggestedAction } from '@/composables/useHomeSummary'
 import { useAppShell } from '@/composables/useAppShell'
 import { useI18n } from '@/composables/useI18n'
@@ -71,7 +67,6 @@ type UploadedPdfPaper = LiteratureMetadata & {
 const AdminPage = lazyComponent(() => import('@/pages/admin/AdminPage.vue'))
 const BlogView = lazyComponent(() => import('@/components/BlogView.vue'))
 const DatabaseToolModal = lazyComponent(() => import('@/components/DatabaseToolModal.vue'))
-const HelpPage = lazyComponent(() => import('@/pages/help/HelpPage.vue'))
 const HomePage = lazyComponent(() => import('@/pages/home/HomePage.vue'))
 const KnowledgePage = lazyComponent(() => import('@/pages/knowledge/KnowledgePage.vue'))
 const LibraryPage = lazyComponent(() => import('@/pages/library/LibraryPage.vue'))
@@ -80,16 +75,6 @@ const QualityMetricsPage = lazyComponent(() => import('@/pages/quality/QualityMe
 const SourceGroundingView = lazyComponent(() => import('@/components/SourceGroundingView.vue'))
 
 const ADMIN_ROLES = new Set(['principal_investigator', 'group_admin'])
-
-const roleLabelKeys = {
-  admin: 'role.admin',
-  group_admin: 'role.group_admin',
-  member: 'role.member',
-  principal_investigator: 'role.principal_investigator',
-  researcher: 'role.researcher',
-  viewer: 'role.viewer',
-  workspace_researcher: 'role.workspace_researcher',
-} as const
 
 const statusLabelKeys = {
   cancelled: 'status.cancelled',
@@ -118,16 +103,12 @@ type EvidenceTarget = {
 const {
   activeExtractionFileName,
   activeExtractionRun,
-  authError,
   availableScopes,
   batchFiles,
   currentSection,
   currentView,
   explorerDoi,
   handleExtract,
-  handleLogin,
-  handleLogout,
-  isAuthenticating,
   isDark,
   latestAgentWorkflow,
   navigateTo,
@@ -141,8 +122,8 @@ const {
 
 const canAccessAdmin = computed(() => ADMIN_ROLES.has(String(sessionState.user?.role || '')))
 const isBlogView = computed(() => currentView.value === 'blog')
-const elicitShellViews = ['home', 'library', 'admin']
-const chromeHiddenViews = ['home', 'library', 'admin']
+const elicitShellViews = ['home', 'library']
+const chromeHiddenViews = ['home', 'library']
 type ElicitTopNavItem = {
   label: string
   icon: Component
@@ -156,7 +137,6 @@ const elicitTopNavItems: ElicitTopNavItem[] = [
   { label: 'Extract', icon: Upload, modal: 'upload' },
   { label: 'Database', icon: Database, modal: 'database' },
   { label: 'Library', icon: BookOpen, view: 'library', section: 'explorer' },
-  { label: 'Monitor', icon: Activity, view: 'admin', section: 'runtime' },
 ]
 
 const viewTitle = computed(() => {
@@ -164,7 +144,6 @@ const viewTitle = computed(() => {
     const labels: Record<AppView, string> = {
       admin: '管理',
       blog: '内容',
-      help: '帮助',
       home: '检索与工作台',
       knowledge: '知识库',
       library: '文献库',
@@ -178,7 +157,6 @@ const viewTitle = computed(() => {
   const labels: Record<AppView, string> = {
     admin: 'Admin',
     blog: 'Content',
-    help: 'Help',
     home: 'Search & Home',
     knowledge: 'Knowledge',
     library: 'Library',
@@ -194,7 +172,6 @@ const viewSubtitle = computed(() => {
     const labels: Record<AppView, string> = {
       admin: '权限、运行和系统配置',
       blog: '内容与文档中心',
-      help: '上手指南与协作说明',
       home: '智能文献检索、抽取与分析助手',
       knowledge: '分类数据资产与来源追踪',
       library: '课题组已录入文献、提取状态及数据特征总览',
@@ -208,7 +185,6 @@ const viewSubtitle = computed(() => {
   const labels: Record<AppView, string> = {
     admin: 'Permissions, runtime, and system setup',
     blog: 'Content and documentation center',
-    help: 'Guides for onboarding and collaboration',
     home: 'AI-powered literature search, extraction, and synthesis',
     knowledge: 'Structured data assets and source traceability',
     library: 'Literature repository, extraction status, and key parameters',
@@ -220,9 +196,6 @@ const viewSubtitle = computed(() => {
 })
 
 const operatorName = computed(() => sessionState.user?.displayName || t('common.operator_default'))
-const operatorInitial = computed(() => operatorName.value.trim().charAt(0).toUpperCase() || 'U')
-const operatorAccountLine = computed(() => sessionState.user?.username || operatorRole.value)
-const accountMenuOpen = ref(false)
 const databaseToolOpen = ref(false)
 type DatabaseToolFocus = {
   fileId: string
@@ -253,7 +226,7 @@ const pdfUploadStatusMessage = ref('')
 const queuedPdfUploadFiles = ref<File[]>([])
 const pdfUploadUploadProgress = ref<Record<string, UploadProgressSnapshot>>({})
 const pdfUploadUploadErrors = ref<Record<string, string>>({})
-const pdfUploadModalStep = ref<'upload' | 'select' | 'setup' | 'extracting' | 'results'>('upload')
+const pdfUploadModalStep = ref<'upload' | 'select' | 'setup' | 'extracting'>('upload')
 const PDF_UPLOAD_EXTRACTION_PROFILE: ExtractionProfile = 'auto'
 const selectedPdfUploadFileIds = ref<string[]>([])
 const uploadedPdfPapers = ref<UploadedPdfPaper[]>([])
@@ -398,23 +371,27 @@ const pdfUploadVisibleExtractionPresetOptions = computed(() =>
   pdfUploadExtractionPresetOptions.filter((option) => option.value !== 'conductivity'),
 )
 
-const pdfUploadStepLabels = ['Add papers', 'Choose mode', 'Extracting', 'Review']
+const pdfUploadStepLabels = ['Add papers', 'Choose mode', 'Extracting']
+
+// Single source of truth for which modal step(s) each progress label represents,
+// so the indicator's active state isn't duplicated across two template bindings.
+const pdfUploadStepLabelStates: Record<string, readonly string[]> = {
+  'Add papers': ['upload'],
+  'Choose mode': ['select', 'setup'],
+  Extracting: ['extracting'],
+}
+
+function isPdfUploadStepActive(label: string): boolean {
+  return (pdfUploadStepLabelStates[label] ?? []).includes(pdfUploadModalStep.value)
+}
 
 const pdfUploadModalTitle = computed(() => 'Extract papers')
 
 const pdfUploadModalSubtitle = computed(() => {
-  if (pdfUploadModalStep.value === 'upload') return 'Add PDF papers and prepare them for extraction.'
-  if (pdfUploadModalStep.value === 'select' || pdfUploadModalStep.value === 'setup') return 'Choose what kind of data to extract from each paper.'
-  if (pdfUploadModalStep.value === 'extracting') return 'IonicLink is reading the papers and preparing rows for review.'
-  return 'Open the extracted rows in Database review.'
-})
-
-const pdfUploadReviewSummaryStats = computed(() => {
-  const processed = pdfUploadExtractionItems.value.length
-  const ready = pdfUploadExtractionItems.value.filter((item) => item.status === 'completed' && item.records > 0).length
-  const records = pdfUploadExtractionItems.value.reduce((sum, item) => sum + Math.max(0, Number(item.records || 0)), 0)
-  const recoverable = pdfUploadExtractionItems.value.filter((item) => ['no_data', 'failed', 'cancelled'].includes(item.status)).length
-  return { processed, ready, records, recoverable }
+  if (pdfUploadModalStep.value === 'upload') return 'Add PDFs to start an extraction run.'
+  if (pdfUploadModalStep.value === 'select' || pdfUploadModalStep.value === 'setup') return 'Choose what to extract from each paper.'
+  if (pdfUploadModalStep.value === 'extracting') return 'Reading papers, preparing rows for review.'
+  return 'Open the extracted rows in Database.'
 })
 
 function uploadedPdfPaperText(paper: LiteratureMetadata & { id?: string }) {
@@ -501,17 +478,6 @@ function metadataFromUploadFallback(file: File, response: Awaited<ReturnType<typ
     cachedExtractorType: response.extractor_type || response.metadata?.extractor_type || 'tribology',
   }
 }
-const operatorRole = computed(() => formatMappedLabel(String(sessionState.user?.role || 'member'), roleLabelKeys))
-function openAccountSettings() {
-  accountMenuOpen.value = false
-  navigateTo(canAccessAdmin.value ? 'admin' : 'help', canAccessAdmin.value ? 'users' : 'quick-start')
-}
-
-function logoutFromAccountMenu() {
-  accountMenuOpen.value = false
-  handleLogout()
-}
-
 const activeScopeLabel = computed(() => {
   return availableScopes.value.find((scope) => scope.key === selectedScopeKey.value)?.label || t('common.no_active_scope')
 })
@@ -1943,17 +1909,10 @@ function handleHomeAction(action: HomeSuggestedAction) {
     </div>
   </div>
 
-  <LoginScreen
-    v-else-if="!sessionState.user"
-    :loading="isAuthenticating"
-    :error="authError"
-    @submit="handleLogin"
-  />
-
   <BlogView
     v-else-if="isBlogView"
     :operator-name="operatorName"
-    @exit="navigateTo('help', 'content')"
+    @exit="navigateTo('home', 'today')"
   />
 
   <div v-else class="app-shell flex h-screen overflow-hidden text-foreground">
@@ -1971,7 +1930,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
       :selected-file-id="selectedFileId"
       :can-access-admin="canAccessAdmin"
       :operator-name="operatorName"
-      :operator-role="operatorRole"
+      operator-role="Extraction"
       :selected-scope-key="selectedScopeKey"
       :available-scopes="availableScopes"
       :is-dark="isDark"
@@ -1979,7 +1938,6 @@ function handleHomeAction(action: HomeSuggestedAction) {
       @navigate="navigateTo"
       @select-file="setSelectedFile"
       @toggle-dark="toggleDarkMode"
-      @logout="handleLogout"
       @update:selected-scope-key="(key) => { selectedScopeKey = key }"
     />
 
@@ -2014,76 +1972,10 @@ function handleHomeAction(action: HomeSuggestedAction) {
             </nav>
 
             <div class="ml-auto flex items-center gap-3">
-              <button
-                type="button"
-                class="hidden items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 hover:text-[#0f7c82] sm:inline-flex"
-                @click="navigateTo('help', 'quick-start')"
-              >
-                Help
-                <ChevronDown class="h-4 w-4 text-slate-500" />
-              </button>
-              <div class="relative">
-                <button
-                  type="button"
-                  class="inline-flex items-center gap-2 rounded-[9px] px-1.5 py-1 text-sm font-semibold text-slate-800 transition hover:bg-slate-50 hover:text-[#0f7c82]"
-                  :aria-expanded="accountMenuOpen"
-                  aria-label="Account menu"
-                  @click="accountMenuOpen = !accountMenuOpen"
-                >
-                  <span class="grid h-8 w-8 place-items-center rounded-full bg-[#0f7c82] text-xs font-black text-white shadow-[0_14px_30px_-20px_rgba(15,124,130,0.95)]">
-                    {{ operatorInitial }}
-                  </span>
-                  <span class="hidden max-w-[9rem] truncate text-left md:block">{{ operatorName }}</span>
-                  <ChevronDown
-                    class="hidden h-4 w-4 text-slate-400 transition md:block"
-                    :class="accountMenuOpen ? 'rotate-180 text-[#0f7c82]' : ''"
-                  />
-                </button>
-
-                <div
-                  v-if="accountMenuOpen"
-                  class="absolute right-0 top-[calc(100%+0.55rem)] z-50 w-[calc(100vw-2rem)] overflow-hidden rounded-[12px] border border-slate-200 bg-white p-2 text-slate-950 shadow-[0_22px_54px_-36px_rgba(15,23,42,0.75)] sm:w-[20rem]"
-                >
-                  <div class="flex min-w-0 items-center gap-3 px-2 py-2.5">
-                    <div class="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#0f7c82] text-sm font-black text-white">
-                      {{ operatorInitial }}
-                    </div>
-                    <div class="min-w-0 flex-1">
-                      <div class="flex min-w-0 items-baseline gap-2">
-                        <p class="truncate text-base font-semibold text-slate-900">{{ operatorName }}</p>
-                        <p class="truncate text-sm font-medium text-slate-400">{{ operatorAccountLine }}</p>
-                      </div>
-                      <p class="mt-0.5 text-[10px] font-black uppercase tracking-[0.16em] text-[#0f7c82]">{{ operatorRole }}</p>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    class="mt-1 flex h-10 w-full items-center gap-3 rounded-[9px] px-3 text-left text-sm font-semibold text-slate-800 transition hover:bg-slate-50 hover:text-[#0f7c82]"
-                    @click="openAccountSettings"
-                  >
-                    <UserCog class="h-4 w-4 text-slate-500" />
-                    Account settings
-                  </button>
-
-                  <button
-                    type="button"
-                    class="mt-1 flex h-10 w-full items-center gap-3 rounded-[9px] bg-slate-100 px-3 text-left text-sm font-semibold text-slate-800 transition hover:bg-rose-50 hover:text-rose-600"
-                    @click="logoutFromAccountMenu"
-                  >
-                    <LogOut class="h-4 w-4 text-slate-500" />
-                    Log out
-                  </button>
-                </div>
-              </div>
-              <button
-                type="button"
-                class="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-[#0f7c82] sm:hidden"
-                aria-label="Help"
-                @click="navigateTo('help', 'quick-start')"
-              >
-                <HelpCircle class="h-4 w-4" />
-              </button>
+              <span class="hidden max-w-[14rem] items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-600 lg:inline-flex">
+                <Database class="h-4 w-4 text-slate-400" />
+                <span class="truncate">{{ activeScopeLabel }}</span>
+              </span>
             </div>
           </header>
 
@@ -2133,7 +2025,6 @@ function handleHomeAction(action: HomeSuggestedAction) {
                 :active-run="activeExtractionRun"
                 :active-file-name="activeExtractionFileName"
                 @change-section="handleSectionChange"
-                @open-help="navigateTo('help', 'quick-start')"
                 @open-home="navigateTo('home', 'today')"
               />
             </main>
@@ -2207,7 +2098,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
           aria-labelledby="pdf-upload-modal-title"
           @click.self="closePdfUploadModal"
         >
-          <section class="w-full max-w-[72rem] rounded-xl border border-slate-200 bg-white p-4 shadow-2xl">
+          <section class="w-full max-w-[46rem] rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
             <!-- Extract papers -->
             <div class="flex items-center justify-between px-1 pb-3">
               <div class="min-w-0">
@@ -2230,7 +2121,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
             </div>
 
             <div
-              class="mb-4 grid grid-cols-4 gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-1.5 text-xs font-black text-slate-500"
+              class="mb-5 grid grid-cols-4 gap-1 rounded-lg bg-slate-100/70 p-1 text-[11px] font-bold text-slate-500"
               role="list"
               aria-label="Extraction progress"
             >
@@ -2239,18 +2130,8 @@ function handleHomeAction(action: HomeSuggestedAction) {
                 :key="label"
                 role="listitem"
                 class="rounded-xl px-3 py-2 text-center"
-                :aria-current="(
-                  (label === 'Add papers' && pdfUploadModalStep === 'upload')
-                  || (label === 'Choose mode' && ['select', 'setup'].includes(pdfUploadModalStep))
-                  || (label === 'Extracting' && pdfUploadModalStep === 'extracting')
-                  || (label === 'Review' && pdfUploadModalStep === 'results')
-                ) ? 'step' : undefined"
-                :class="(
-                  (label === 'Add papers' && pdfUploadModalStep === 'upload')
-                  || (label === 'Choose mode' && ['select', 'setup'].includes(pdfUploadModalStep))
-                  || (label === 'Extracting' && pdfUploadModalStep === 'extracting')
-                  || (label === 'Review' && pdfUploadModalStep === 'results')
-                ) ? 'bg-white text-[#0f7c82] shadow-sm' : 'text-slate-400'"
+                :aria-current="isPdfUploadStepActive(label) ? 'step' : undefined"
+                :class="isPdfUploadStepActive(label) ? 'bg-white text-[#0f7c82] shadow-sm' : 'text-slate-400'"
               >
                 {{ label }}
               </span>
@@ -2278,7 +2159,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
                 @keydown.space.prevent="choosePdfUploadFiles"
               >
                 <div class="flex flex-col items-center">
-                  <CloudUpload class="h-11 w-11 text-violet-500" />
+                  <CloudUpload class="h-11 w-11 text-[#0f7c82]" />
                   <p class="mt-4 text-base font-extrabold text-slate-900">Add PDF papers</p>
                   <p class="mt-1 text-sm font-semibold text-slate-500">Drop files here or click to browse.</p>
                   <p v-if="pdfUploadStatusMessage" class="mt-4 text-sm font-semibold text-slate-600">
@@ -2296,12 +2177,12 @@ function handleHomeAction(action: HomeSuggestedAction) {
                   :key="`${file.name}-${file.size}-${file.lastModified}`"
                   class="flex items-center gap-3 rounded-md px-2 py-1.5 text-sm font-semibold text-slate-700"
                 >
-                  <FileText class="h-5 w-5 shrink-0 text-violet-500" />
+                  <FileText class="h-5 w-5 shrink-0 text-[#0f7c82]" />
                   <span class="min-w-0 flex-1">
                     <span class="block truncate">{{ file.name }}</span>
                     <span
                       v-if="pdfUploadUploadProgress[pdfUploadFileKey(file)]?.percent != null"
-                      class="mt-1 block text-xs font-bold text-violet-500"
+                      class="mt-1 block text-xs font-bold text-[#0f7c82]"
                     >
                       Upload progress {{ pdfUploadUploadProgress[pdfUploadFileKey(file)]?.percent }}%
                     </span>
@@ -2326,7 +2207,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
               <div class="mt-4 flex items-center justify-end gap-4">
                 <button
                   type="button"
-                  class="inline-flex h-10 items-center rounded-md bg-violet-500 px-5 text-sm font-extrabold text-white shadow-sm shadow-violet-200 transition hover:bg-violet-600 disabled:cursor-not-allowed disabled:opacity-55"
+                  class="inline-flex h-10 items-center rounded-md border border-[#0f7c82]/30 bg-white px-5 text-sm font-extrabold text-[#0f7c82] transition hover:border-[#0f7c82]/60 hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-55"
                   :disabled="pdfUploadUploading || queuedPdfUploadFiles.length === 0"
                   @click="uploadQueuedPdfFiles"
                 >
@@ -2347,7 +2228,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
             </div>
 
             <div v-else-if="pdfUploadModalStep === 'select'">
-              <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+              <div>
                 <h3 class="text-xl font-extrabold text-slate-900">Choose papers</h3>
                 <p class="mt-2 max-w-3xl text-sm font-medium leading-6 text-slate-500">
                   {{ uploadedPdfPapers.length }} paper{{ uploadedPdfPapers.length === 1 ? '' : 's' }} ready<span v-if="pdfUploadPendingFileNames.length">, {{ pdfUploadPendingFileNames.length }} still parsing</span>. Select the papers to extract.
@@ -2356,7 +2237,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
                   <div class="flex items-center gap-3">
                     <button
                       type="button"
-                      class="h-10 rounded-md border border-slate-200 px-5 text-sm font-extrabold text-slate-600 transition hover:border-violet-300 hover:text-violet-600"
+                      class="h-10 rounded-md border border-slate-200 px-5 text-sm font-extrabold text-slate-600 transition hover:border-teal-300 hover:text-[#0f7c82]"
                       @click="pdfUploadModalStep = 'upload'"
                     >
                       + Upload papers
@@ -2364,18 +2245,18 @@ function handleHomeAction(action: HomeSuggestedAction) {
                   </div>
                   <div
                     v-if="shouldShowPdfUploadBatchProgress"
-                    class="ml-auto min-w-[17rem] rounded-lg border border-violet-100 bg-violet-50/60 px-4 py-2 shadow-sm"
+                    class="ml-auto min-w-[17rem] rounded-lg border border-teal-100 bg-teal-50/60 px-4 py-2 shadow-sm"
                     aria-label="Upload parsing progress"
                   >
                     <div class="flex items-center justify-between gap-3">
-                      <span class="text-xs font-black uppercase tracking-[0.14em] text-violet-500">
+                      <span class="text-xs font-black uppercase tracking-[0.14em] text-[#0f7c82]">
                         {{ pdfUploadUploading ? 'Parsing' : 'Parsed' }}
                       </span>
-                      <strong class="font-mono text-sm font-black text-violet-700">{{ pdfUploadBatchFinished }} / {{ pdfUploadBatchTotal }}</strong>
+                      <strong class="font-mono text-sm font-black text-slate-900">{{ pdfUploadBatchFinished }} / {{ pdfUploadBatchTotal }}</strong>
                     </div>
-                    <div class="mt-2 h-2 overflow-hidden rounded-full bg-white ring-1 ring-violet-100">
+                    <div class="mt-2 h-2 overflow-hidden rounded-full bg-white ring-1 ring-teal-100">
                       <div
-                        class="h-full rounded-full bg-gradient-to-r from-violet-500 to-teal-400 transition-all duration-500 ease-out"
+                        class="h-full rounded-full bg-gradient-to-r from-teal-400 to-teal-400 transition-all duration-500 ease-out"
                         :style="{ width: `${pdfUploadBatchProgressPercent}%` }"
                       ></div>
                     </div>
@@ -2412,17 +2293,17 @@ function handleHomeAction(action: HomeSuggestedAction) {
                     v-for="paper in uploadedPdfPapers"
                     :key="paper.id"
                     type="button"
-                    class="flex w-full items-start gap-4 border-b border-slate-100 px-5 py-4 text-left transition last:border-b-0 hover:bg-violet-50/45"
+                    class="flex w-full items-start gap-4 border-b border-slate-100 px-5 py-4 text-left transition last:border-b-0 hover:bg-teal-50/45"
                     @click="togglePdfUploadLibraryFile(paper.id)"
                   >
                     <span
                       class="mt-1 grid h-5 w-5 shrink-0 place-items-center rounded border"
-                      :class="selectedPdfUploadFileIds.includes(paper.id) ? 'border-violet-500 bg-violet-500 text-white' : 'border-slate-200 bg-white'"
+                      :class="selectedPdfUploadFileIds.includes(paper.id) ? 'border-[#0f7c82] bg-[#0f7c82] text-white' : 'border-slate-200 bg-white'"
                     >
                       <Check v-if="selectedPdfUploadFileIds.includes(paper.id)" class="h-3.5 w-3.5 stroke-[3]" />
                     </span>
                     <span class="min-w-0">
-                      <span class="block truncate text-base font-extrabold text-violet-700">
+                      <span class="block truncate text-base font-extrabold text-slate-900">
                         {{ paper.title }}
                       </span>
                       <span class="mt-1 block truncate text-sm font-semibold text-slate-500">
@@ -2431,7 +2312,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
                     </span>
                   </button>
                   <div v-if="uploadedPdfPapers.length === 0 && pdfUploadPendingFileNames.length > 0" key="parsing" class="px-5 py-8 text-center">
-                    <Loader2 class="mx-auto h-5 w-5 animate-spin text-violet-500" />
+                    <Loader2 class="mx-auto h-5 w-5 animate-spin text-[#0f7c82]" />
                     <p class="mt-3 text-sm font-semibold text-slate-500">Parsing metadata in the background</p>
                   </div>
                   <div v-if="uploadedPdfPapers.length === 0 && pdfUploadPendingFileNames.length === 0" key="empty" class="px-5 py-8 text-center text-sm font-semibold text-slate-400">
@@ -2444,7 +2325,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
                   </p>
                   <button
                     type="button"
-                    class="inline-flex h-11 items-center gap-2 rounded-md bg-violet-600 px-5 text-sm font-extrabold text-white shadow-lg shadow-violet-200 transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-55"
+                    class="inline-flex h-11 items-center gap-2 rounded-md bg-[#0f7c82] px-5 text-sm font-extrabold text-white shadow-lg shadow-teal-100 transition hover:bg-[#0b6870] disabled:cursor-not-allowed disabled:opacity-55"
                     :disabled="uploadedPdfPapers.length === 0"
                     @click="openPdfUploadExtractionSetup"
                   >
@@ -2456,13 +2337,13 @@ function handleHomeAction(action: HomeSuggestedAction) {
             </div>
 
             <div v-else-if="pdfUploadModalStep === 'setup'">
-              <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+              <div>
                 <div class="flex flex-wrap items-start justify-between gap-4">
                   <div>
                     <p class="text-xs font-black uppercase tracking-[0.18em] text-[#0f7c82]">Choose mode</p>
                     <h3 class="mt-1 text-xl font-extrabold text-slate-900">What should IonicLink extract?</h3>
                     <p class="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-500">
-                      Pick Lubrication for COF and tribological conditions, or Diffusion for confined transport values.
+                      Lubrication for COF and tribology, or Diffusion for confined transport.
                     </p>
                   </div>
                   <span class="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-black uppercase tracking-[0.14em] text-slate-500">
@@ -2489,7 +2370,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
                     :key="paper.id"
                     class="flex items-start gap-3 border-b border-slate-100 px-4 py-3 last:border-b-0"
                   >
-                    <FileText class="mt-0.5 h-5 w-5 shrink-0 text-violet-500" />
+                    <FileText class="mt-0.5 h-5 w-5 shrink-0 text-[#0f7c82]" />
                     <span class="min-w-0 flex-1">
                       <strong class="block truncate text-sm font-extrabold text-slate-900">{{ paper.title }}</strong>
                       <span class="mt-1 block truncate text-xs font-semibold text-slate-500">{{ compactAuthorLine(paper.authors) }}</span>
@@ -2497,7 +2378,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
                     <label class="shrink-0">
                       <span class="sr-only">Extraction preset</span>
                       <select
-                        class="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-700 shadow-sm transition hover:border-violet-300 focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100"
+                        class="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-extrabold text-slate-700 shadow-sm transition hover:border-teal-300 focus:border-teal-400 focus:outline-none focus:ring-2 focus:ring-teal-100"
                         :value="presetForPdfUploadedPaper(paper)"
                         @change="setPdfUploadedPaperExtractionPreset(paper.id, $event)"
                       >
@@ -2517,14 +2398,14 @@ function handleHomeAction(action: HomeSuggestedAction) {
                 <div class="mt-5 flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
                   <button
                     type="button"
-                    class="inline-flex h-10 items-center rounded-md border border-slate-200 px-4 text-sm font-extrabold text-slate-600 transition hover:border-violet-300 hover:text-violet-600"
+                    class="inline-flex h-10 items-center rounded-md border border-slate-200 px-4 text-sm font-extrabold text-slate-600 transition hover:border-teal-300 hover:text-[#0f7c82]"
                     @click="pdfUploadModalStep = 'select'"
                   >
                     Back
                   </button>
                   <button
                     type="button"
-                    class="inline-flex h-11 items-center gap-2 rounded-md bg-violet-600 px-5 text-sm font-extrabold text-white shadow-lg shadow-violet-200 transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-55"
+                    class="inline-flex h-11 items-center gap-2 rounded-md bg-[#0f7c82] px-5 text-sm font-extrabold text-white shadow-lg shadow-teal-100 transition hover:bg-[#0b6870] disabled:cursor-not-allowed disabled:opacity-55"
                     :disabled="papersSelectedForPdfUploadExtraction().length === 0 || pdfUploadSelectionHasUnsupportedPreset"
                     @click="startPdfUploadExtraction"
                   >
@@ -2536,7 +2417,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
             </div>
 
             <div v-else-if="pdfUploadModalStep === 'extracting'">
-              <div class="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+              <div>
                 <div class="flex flex-wrap items-center justify-between gap-4">
                   <div>
                     <h3 class="text-xl font-extrabold text-slate-900">Extracting data</h3>
@@ -2556,20 +2437,20 @@ function handleHomeAction(action: HomeSuggestedAction) {
                     <button
                       v-if="pdfUploadExtracting"
                       type="button"
-                      class="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-extrabold text-slate-600 transition hover:border-violet-300 hover:text-violet-700"
+                      class="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-extrabold text-slate-600 transition hover:border-teal-300 hover:text-[#0f7c82]"
                       @click="closePdfUploadModal"
                     >
                       Continue in background
                     </button>
                     <div class="text-right">
-                      <strong class="block text-2xl font-black text-violet-600">{{ pdfUploadExtractionProgress }}%</strong>
+                      <strong class="block text-2xl font-black text-[#0f7c82]">{{ pdfUploadExtractionProgress }}%</strong>
                       <span class="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Progress</span>
                     </div>
                   </div>
                 </div>
                 <div class="mt-5 h-2.5 overflow-hidden rounded-full bg-slate-100 shadow-inner">
                   <div
-                    class="h-full rounded-full bg-gradient-to-r from-violet-500 via-fuchsia-500 to-teal-500 shadow-[0_0_16px_rgba(124,58,237,0.25)] transition-all duration-700 ease-out"
+                    class="h-full rounded-full bg-gradient-to-r from-teal-400 via-teal-500 to-teal-500 shadow-[0_0_16px_rgba(13,148,136,0.25)] transition-all duration-700 ease-out"
                     :style="{ width: `${pdfUploadExtractionProgress}%` }"
                   ></div>
                 </div>
@@ -2587,7 +2468,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
                   >
                     <span
                       class="mt-1 grid h-8 w-8 shrink-0 place-items-center rounded-full"
-                      :class="item.status === 'extracting' ? 'bg-violet-100 text-violet-600' : item.status === 'failed' || item.status === 'cancelled' ? 'bg-red-50 text-red-500' : item.status === 'no_data' ? 'bg-amber-50 text-amber-700' : item.status === 'queued' ? 'bg-slate-100 text-slate-400' : 'bg-teal-50 text-teal-700'"
+                      :class="item.status === 'extracting' ? 'bg-teal-100 text-[#0f7c82]' : item.status === 'failed' || item.status === 'cancelled' ? 'bg-red-50 text-red-500' : item.status === 'no_data' ? 'bg-amber-50 text-amber-700' : item.status === 'queued' ? 'bg-slate-100 text-slate-400' : 'bg-teal-50 text-teal-700'"
                     >
                       <Loader2 v-if="item.status === 'extracting'" class="h-5 w-5 animate-spin" />
                       <X v-else-if="item.status === 'failed' || item.status === 'cancelled'" class="h-5 w-5" />
@@ -2665,7 +2546,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
                     </button>
                     <button
                       type="button"
-                      class="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-extrabold text-slate-600 transition hover:border-violet-300 hover:text-violet-700"
+                      class="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-extrabold text-slate-600 transition hover:border-teal-300 hover:text-[#0f7c82]"
                       @click="uploadAnotherPdfAfterExtraction"
                     >
                       Upload another PDF
@@ -2676,90 +2557,6 @@ function handleHomeAction(action: HomeSuggestedAction) {
               </div>
             </div>
 
-            <div v-else-if="pdfUploadModalStep === 'results'">
-              <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <div class="flex flex-wrap items-start justify-between gap-4">
-                  <div>
-                    <p class="text-xs font-black uppercase tracking-[0.16em] text-[#0f7c82]">Review</p>
-                    <h3 class="mt-1 text-2xl font-black tracking-tight text-slate-950">Extraction is ready</h3>
-                    <p class="mt-2 max-w-2xl text-sm font-semibold leading-6 text-slate-500">
-                      Open Database to review extracted rows, confirm evidence, and publish clean records.
-                    </p>
-                  </div>
-                  <span class="rounded-full bg-teal-50 px-3 py-1.5 text-xs font-black uppercase tracking-[0.12em] text-[#0f7c82]">
-                    {{ pdfUploadReviewSummaryStats.records }} rows to review
-                  </span>
-                </div>
-
-                <div class="mt-6 grid gap-3 sm:grid-cols-4">
-                  <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <span class="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Processed</span>
-                    <strong class="mt-1 block text-2xl font-black text-slate-950">{{ pdfUploadReviewSummaryStats.processed }}</strong>
-                  </div>
-                  <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <span class="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Ready</span>
-                    <strong class="mt-1 block text-2xl font-black text-slate-950">{{ pdfUploadReviewSummaryStats.ready }}</strong>
-                  </div>
-                  <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <span class="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Rows</span>
-                    <strong class="mt-1 block text-2xl font-black text-slate-950">{{ pdfUploadReviewSummaryStats.records }}</strong>
-                  </div>
-                  <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <span class="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Needs action</span>
-                    <strong class="mt-1 block text-2xl font-black text-slate-950">{{ pdfUploadReviewSummaryStats.recoverable }}</strong>
-                  </div>
-                </div>
-
-                <div v-if="pdfUploadRecoverableExtractionItems.length > 0" class="mt-5 rounded-2xl border border-amber-100 bg-amber-50/70 px-4 py-3">
-                  <p class="text-xs font-black uppercase tracking-[0.14em] text-amber-700">
-                    No reviewable data found
-                  </p>
-                  <p class="text-sm font-semibold text-amber-800">
-                    {{ pdfUploadRecoverableSummaryLabel }}
-                  </p>
-                </div>
-
-                <div class="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-5">
-                  <button
-                    type="button"
-                    class="inline-flex h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 text-sm font-extrabold text-slate-600 transition hover:border-teal-300 hover:text-[#0f7c82]"
-                    @click="uploadAnotherPdfAfterExtraction"
-                  >
-                    Upload another PDF
-                    <Upload class="h-4 w-4" />
-                  </button>
-
-                  <div class="flex flex-wrap items-center gap-2">
-                    <button
-                      v-if="pdfUploadRecoverableExtractionItems.length > 0"
-                      type="button"
-                      class="inline-flex h-11 items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-5 text-sm font-extrabold text-amber-800 transition hover:bg-amber-100"
-                      @click="changePdfUploadExtractionType"
-                    >
-                      Change mode
-                      <ArrowRight class="h-4 w-4" />
-                    </button>
-                    <button
-                      v-if="pdfUploadRecoverableExtractionItems.length > 0"
-                      type="button"
-                      class="inline-flex h-11 items-center gap-2 rounded-xl bg-amber-600 px-5 text-sm font-extrabold text-white shadow-sm transition hover:bg-amber-700"
-                      @click="retryPdfUploadRecoverableExtraction"
-                    >
-                      Retry failed
-                      <ArrowRight class="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      class="inline-flex h-11 items-center gap-2 rounded-xl bg-[#0f7c82] px-5 text-sm font-extrabold text-white shadow-lg shadow-teal-100 transition hover:bg-[#0b6870]"
-                      @click="openPdfUploadResultsInDatabase()"
-                    >
-                      Review in Database
-                      <ArrowRight class="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
           </section>
         </div>
       </template>
@@ -2903,18 +2700,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
             :active-run="activeExtractionRun"
             :active-file-name="activeExtractionFileName"
             @change-section="handleSectionChange"
-            @open-help="navigateTo('help', 'quick-start')"
             @open-home="navigateTo('home', 'today')"
-          />
-
-          <HelpPage
-            v-else
-            :current-section="currentSection"
-            :active-scope-label="activeScopeLabel"
-            :operator-name="operatorName"
-            @change-section="handleSectionChange"
-            @open-pipeline="navigateTo('library', 'explorer')"
-            @open-blog="navigateTo('blog', 'articles')"
           />
         </div>
       </main>

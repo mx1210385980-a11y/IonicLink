@@ -1,11 +1,13 @@
 import { computed, ref, type Ref } from 'vue'
 
 import {
+  correctRecord,
   deleteTribologyRecord,
   formatTribopairLabel,
   updateTribologyRecord,
   type EvidenceResult,
   type PaginatedRecordResponse,
+  type RecordCorrectionResult,
   type RecordResponse,
 } from '@/lib/api'
 import { applyLiveConfidence } from '@/lib/integratedExplorerHelpers'
@@ -72,10 +74,14 @@ export function useRecordEditing(options: UseRecordEditingOptions) {
   function openEditModal(record: RecordResponse) {
     resetEditingValues(record)
     editDrawerRecord.value = record
+    correctionPreview.value = null
+    correctionError.value = ''
   }
 
   function closeEditDrawer() {
     editDrawerRecord.value = null
+    correctionPreview.value = null
+    correctionError.value = ''
   }
 
   function updateEditingField(recordId: number, field: keyof EditableRecordValues, value: string) {
@@ -89,86 +95,147 @@ export function useRecordEditing(options: UseRecordEditingOptions) {
     updateEditingField(editDrawerRecord.value.id, field, value)
   }
 
+  type TrimmedEditValues = {
+    lubricant: string
+    temperature: string
+    potential: string
+    waterContent: string
+    speedValue: string
+    shearRate: string
+    loadValue: string
+    probeMaterial: string
+    probeGeometry: string
+    probeRadius: string
+    probeRoughness: string
+    substrateMaterial: string
+    substrateCoating: string
+    substrateRoughness: string
+    filmThickness: string
+    cofRaw: string
+    parsedCof: number | undefined
+  }
+
+  function trimEditValues(vals: EditableRecordValues): TrimmedEditValues {
+    const cofRaw = vals.cof.trim()
+    const parsed = cofRaw ? parseFloat(cofRaw.replace(/[<>~=]/g, '')) : undefined
+    return {
+      lubricant: vals.lubricant.trim(),
+      temperature: vals.temperature.trim(),
+      potential: vals.potential.trim(),
+      waterContent: vals.waterContent.trim(),
+      speedValue: vals.speedValue.trim(),
+      shearRate: vals.shearRate.trim(),
+      loadValue: vals.loadValue.trim(),
+      probeMaterial: vals.probeMaterial.trim(),
+      probeGeometry: vals.probeGeometry.trim(),
+      probeRadius: vals.probeRadius.trim(),
+      probeRoughness: vals.probeRoughness.trim(),
+      substrateMaterial: vals.substrateMaterial.trim(),
+      substrateCoating: vals.substrateCoating.trim(),
+      substrateRoughness: vals.substrateRoughness.trim(),
+      filmThickness: vals.filmThickness.trim(),
+      cofRaw,
+      parsedCof: isNaN(parsed as number) ? undefined : parsed,
+    }
+  }
+
+  // Map the reviewer's edits onto the live row so the table reflects the saved
+  // state without a refetch. Shared by the legacy PUT path and the correction path.
+  function applyTrimmedToRecord(record: RecordResponse, t: TrimmedEditValues) {
+    record.lubricant = t.lubricant
+    record.temperature = t.temperature
+    record.potential = t.potential
+    record.waterContent = t.waterContent
+    record.speedValue = t.speedValue
+    record.shearRate = t.shearRate
+    record.loadValue = t.loadValue
+    record.probeMaterial = t.probeMaterial || null
+    record.probeGeometry = t.probeGeometry || null
+    record.probeRadius = t.probeRadius || null
+    record.probeRoughness = t.probeRoughness || null
+    record.substrateMaterial = t.substrateMaterial || null
+    record.substrateCoating = t.substrateCoating || null
+    record.substrateRoughness = t.substrateRoughness || null
+    record.materialName = t.substrateMaterial || record.materialName
+    record.surfaceRoughness = t.substrateRoughness || null
+    record.tribopairLabel = formatTribopairLabel({
+      probeMaterial: record.probeMaterial,
+      substrateMaterial: record.substrateMaterial,
+      substrateCoating: record.substrateCoating,
+      materialName: record.materialName,
+    })
+    record.filmThickness = t.filmThickness
+    record.cofRaw = t.cofRaw
+    if (t.parsedCof !== undefined) {
+      record.cofValue = t.parsedCof
+    }
+    const evidence = options.evidenceData.value[recordEvidenceCacheKey(record)]
+    if (evidence) {
+      applyLiveConfidence(record, evidence)
+    }
+  }
+
+  // Build the {column: value} payload for the sanctioned correction service.
+  // Column names match the backend correctable-field allowlist.
+  function correctionFieldsFor(record: RecordResponse, t: TrimmedEditValues): Record<string, unknown> {
+    const fields: Record<string, unknown> = {
+      lubricant: t.lubricant,
+      temperature: t.temperature,
+      potential: t.potential,
+      water_content: t.waterContent,
+      speed_value: t.speedValue,
+      shear_rate: t.shearRate,
+      load_value: t.loadValue,
+      probe_material: t.probeMaterial,
+      probe_geometry: t.probeGeometry,
+      probe_radius: t.probeRadius,
+      probe_roughness: t.probeRoughness,
+      substrate_material: t.substrateMaterial,
+      material_name: t.substrateMaterial || (record.materialName ?? ''),
+      substrate_coating: t.substrateCoating,
+      substrate_roughness: t.substrateRoughness,
+      film_thickness: t.filmThickness,
+      cof_raw: t.cofRaw,
+    }
+    if (t.parsedCof !== undefined) {
+      fields.cof_value = t.parsedCof
+    }
+    return fields
+  }
+
   async function saveRecord(record: RecordResponse) {
     const vals = editingValues.value[record.id]
     if (!vals) return
 
     savingRowId.value = record.id
     try {
-      const cofRaw = vals.cof.trim()
-      const parsed = cofRaw ? parseFloat(cofRaw.replace(/[<>~=]/g, '')) : undefined
-      const lubricant = vals.lubricant.trim()
-      const temperature = vals.temperature.trim()
-      const potential = vals.potential.trim()
-      const waterContent = vals.waterContent.trim()
-      const speedValue = vals.speedValue.trim()
-      const shearRate = vals.shearRate.trim()
-      const loadValue = vals.loadValue.trim()
-      const probeMaterial = vals.probeMaterial.trim()
-      const probeGeometry = vals.probeGeometry.trim()
-      const probeRadius = vals.probeRadius.trim()
-      const probeRoughness = vals.probeRoughness.trim()
-      const substrateMaterial = vals.substrateMaterial.trim()
-      const substrateCoating = vals.substrateCoating.trim()
-      const substrateRoughness = vals.substrateRoughness.trim()
-      const filmThickness = vals.filmThickness.trim()
-
+      const t = trimEditValues(vals)
       const updated = await updateTribologyRecord(record.id, {
-        lubricant,
-        temperature,
-        potential,
-        waterContent,
-        speedValue,
-        shearRate,
-        loadValue,
-        probeMaterial,
-        probeGeometry,
-        probeRadius,
-        probeRoughness,
-        substrateMaterial,
-        substrateCoating,
-        substrateRoughness,
-        filmThickness,
-        cofRaw,
-        cofValue: isNaN(parsed as number) ? undefined : parsed,
+        lubricant: t.lubricant,
+        temperature: t.temperature,
+        potential: t.potential,
+        waterContent: t.waterContent,
+        speedValue: t.speedValue,
+        shearRate: t.shearRate,
+        loadValue: t.loadValue,
+        probeMaterial: t.probeMaterial,
+        probeGeometry: t.probeGeometry,
+        probeRadius: t.probeRadius,
+        probeRoughness: t.probeRoughness,
+        substrateMaterial: t.substrateMaterial,
+        substrateCoating: t.substrateCoating,
+        substrateRoughness: t.substrateRoughness,
+        filmThickness: t.filmThickness,
+        cofRaw: t.cofRaw,
+        cofValue: t.parsedCof,
       })
 
-      record.lubricant = lubricant
-      record.temperature = temperature
-      record.potential = potential
-      record.waterContent = waterContent
-      record.speedValue = speedValue
-      record.shearRate = shearRate
-      record.loadValue = loadValue
-      record.probeMaterial = probeMaterial || null
-      record.probeGeometry = probeGeometry || null
-      record.probeRadius = probeRadius || null
-      record.probeRoughness = probeRoughness || null
-      record.substrateMaterial = substrateMaterial || null
-      record.substrateCoating = substrateCoating || null
-      record.substrateRoughness = substrateRoughness || null
-      record.materialName = substrateMaterial || record.materialName
-      record.surfaceRoughness = substrateRoughness || null
-      record.tribopairLabel = formatTribopairLabel({
-        probeMaterial: record.probeMaterial,
-        substrateMaterial: record.substrateMaterial,
-        substrateCoating: record.substrateCoating,
-        materialName: record.materialName,
-      })
-      record.filmThickness = filmThickness
-      record.cofRaw = cofRaw
-      if (!isNaN(parsed as number)) {
-        record.cofValue = parsed as number
-      }
+      applyTrimmedToRecord(record, t)
       if (typeof updated?.confidence === 'number') {
         record.confidence = updated.confidence
       }
       if (updated?.confidenceDetails) {
         record.confidenceDetails = updated.confidenceDetails
-      }
-      const evidence = options.evidenceData.value[recordEvidenceCacheKey(record)]
-      if (evidence) {
-        applyLiveConfidence(record, evidence)
       }
       options.markGraphDirty()
       if (editDrawerRecord.value?.id === record.id) {
@@ -180,6 +247,60 @@ export function useRecordEditing(options: UseRecordEditingOptions) {
     } finally {
       savingRowId.value = null
     }
+  }
+
+  // --- Sanctioned correction flow (dry-run preview → confirm) -----------------
+  const correctionPending = ref(false)
+  const correctionError = ref('')
+  const correctionPreview = ref<RecordCorrectionResult | null>(null)
+  const correctionReviewMode = computed(() => correctionPreview.value !== null)
+
+  async function previewActiveCorrection() {
+    const record = editDrawerRecord.value
+    const vals = record ? editingValues.value[record.id] : null
+    if (!record || !vals) return
+    correctionPending.value = true
+    correctionError.value = ''
+    try {
+      const t = trimEditValues(vals)
+      correctionPreview.value = await correctRecord(
+        record.id,
+        { fields: correctionFieldsFor(record, t) },
+        { dryRun: true },
+      )
+    } catch (err: any) {
+      correctionError.value = err?.response?.data?.detail || err?.message || 'Could not preview changes'
+    } finally {
+      correctionPending.value = false
+    }
+  }
+
+  async function commitActiveCorrection() {
+    const record = editDrawerRecord.value
+    const vals = record ? editingValues.value[record.id] : null
+    if (!record || !vals) return
+    correctionPending.value = true
+    correctionError.value = ''
+    try {
+      const t = trimEditValues(vals)
+      const result = await correctRecord(record.id, { fields: correctionFieldsFor(record, t) })
+      applyTrimmedToRecord(record, t)
+      if (typeof result.confidence === 'number') {
+        record.confidence = result.confidence
+      }
+      options.markGraphDirty()
+      correctionPreview.value = null
+      closeEditDrawer()
+    } catch (err: any) {
+      correctionError.value = err?.response?.data?.detail || err?.message || 'Save failed'
+    } finally {
+      correctionPending.value = false
+    }
+  }
+
+  function cancelCorrectionReview() {
+    correctionPreview.value = null
+    correctionError.value = ''
   }
 
   function saveActiveEditRecord() {
@@ -231,5 +352,12 @@ export function useRecordEditing(options: UseRecordEditingOptions) {
     saveActiveEditRecord,
     isSavingActiveEditRecord,
     removeRecord,
+    correctionPending,
+    correctionError,
+    correctionPreview,
+    correctionReviewMode,
+    previewActiveCorrection,
+    commitActiveCorrection,
+    cancelCorrectionReview,
   }
 }

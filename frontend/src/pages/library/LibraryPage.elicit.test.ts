@@ -31,7 +31,8 @@ describe('LibraryPage Elicit-style extract workflow', () => {
     expect(source).toContain('extractMode.value = true')
     expect(source).not.toContain('function openExtractData() {\n  openUploadModal()')
     expect(source).toContain('presetExtractionColumns')
-    expect(source).toContain("'Tribology'")
+    expect(source).toContain("'Lubrication'")
+    expect(source).not.toContain("'Tribology'")
     expect(source).toContain("'Diffusion'")
     expect(source).toContain("'Conductivity'")
     expect(source).toContain('extractionTableColumns')
@@ -44,6 +45,8 @@ describe('LibraryPage Elicit-style extract workflow', () => {
 
   it('uses Lubrication as the default extraction template with only COF preset', () => {
     expect(source).toContain("const selectedTemplate = ref<ExtractTemplateKey>('lubrication')")
+    expect(source).toContain("{ value: 'tribology', label: 'Lubrication'")
+    expect(source).not.toContain("label: 'Tribology'")
     expect(source).toContain("columns: ['COF']")
     expect(source).not.toContain("columns: ['COF', 'COF type'")
     expect(source).toContain("key: 'diffusion'")
@@ -69,7 +72,7 @@ describe('LibraryPage Elicit-style extract workflow', () => {
     expect(source).toContain("import {")
     expect(source).toContain("extractorTypesForTemplate")
     expect(source).toContain("extractorTypesForTemplate(selectedTemplate.value)")
-    expect(source).not.toContain("if (labels.has('Tribology')) extractors.push('tribology')")
+    expect(source).not.toContain("if (labels.has('Lubrication')) extractors.push('tribology')")
     expect(source).not.toContain("if (labels.has('Diffusion')) extractors.push('diffusion')")
     expect(source).toContain("Conductivity extraction is not connected yet")
   })
@@ -310,6 +313,24 @@ describe('LibraryPage Elicit-style extract workflow', () => {
     expect(source).not.toContain('Approved')
   })
 
+  it('uses Lubrication rather than Tribology in user-facing extraction copy', () => {
+    expect(source).toContain("return uploadExtractionPresetOptions.find((option) => option.value === preset)?.label || 'Lubrication'")
+    expect(source).toContain('Choose Lubrication or Diffusion before starting.')
+    expect(source).toContain("type === 'diffusion' ? 'Diffusion' : 'Lubrication'")
+    expect(source).toContain('Lubrication, Diffusion, and Conductivity stay available as table columns.')
+    expect(source).not.toContain('Choose Tribology or Diffusion')
+    expect(source).not.toContain("'Tribology'")
+    expect(source).not.toContain(' : \'Tribology\'')
+    expect(source).not.toContain('Tribology, Diffusion')
+  })
+
+  it('puts the reviewed indicator directly beside literature titles', () => {
+    expect(source).toContain('CheckCircle')
+    expect(source).toContain('aria-label="Reviewed literature"')
+    expect(source).toContain('isPaperReviewed(item)')
+    expect(source).not.toContain('{{ badge.label }}')
+  })
+
   it('shows multi-extractor literature in every matching collection', () => {
     expect(source).toContain('function matchesCollection(item: Literature, collection: CollectionKey)')
     expect(source).toContain("items.value.filter((item) => matchesCollection(item, 'lubrication')).length")
@@ -344,6 +365,12 @@ describe('LibraryPage Elicit-style extract workflow', () => {
     expect(source).toContain('async function openSelectedPaperFromRoute()')
     expect(source).toContain('await openSelectedPaperFromRoute()')
     expect(source).toContain("watch(() => props.selectedFileId")
+  })
+
+  it('loads every admin-visible literature item instead of only the shared group library', () => {
+    expect(source).toContain("'all_visible' : 'group_library'")
+    expect(source).toContain('items.value = await listLiterature(0, 1000, { scope })')
+    expect(source).not.toContain("items.value = await listLiterature(0, 1000, { scope: 'group_library' })")
   })
 
   it('embeds admin crop correction into the figures list without a separate review page', () => {

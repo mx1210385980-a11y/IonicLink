@@ -5,6 +5,7 @@ import {
   type RecordFilterOptions,
   searchRecords,
   type PaginatedRecordResponse,
+  type RecordSortColumn,
   type SearchFilter,
 } from '@/lib/api'
 import { canonicalExperimentScaleValue } from '@/lib/experimentScale'
@@ -18,7 +19,8 @@ type UseRecordSearchOptions = {
   fixedExperimentScale?: Ref<string | null | undefined>
   targetRecordId?: Ref<string | number | null | undefined>
   targetEntityType?: Ref<'record' | 'candidate' | string | null | undefined>
-  scope?: Ref<'active' | 'group_library' | undefined>
+  entityTypeFilter?: Ref<'record' | 'candidate' | string | null | undefined>
+  scope?: Ref<'active' | 'group_library' | 'all_visible' | undefined>
   pageSize?: number
 }
 
@@ -70,6 +72,8 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
   const cofMin = ref('')
   const cofMax = ref('')
   const currentPage = ref(1)
+  const sortBy = ref<RecordSortColumn | ''>('')
+  const sortDir = ref<'asc' | 'desc'>('asc')
   const resultView = ref<'table' | 'graph'>('table')
   const graphRefreshKey = ref(0)
   let latestFetchRequestId = 0
@@ -161,6 +165,12 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null
   }
 
+  function normalizeEntityTypeFilter(value: string | null | undefined): 'record' | 'candidate' | undefined {
+    const normalized = String(value || '').trim().toLowerCase()
+    if (normalized === 'candidate') return 'candidate'
+    return 'record'
+  }
+
   function buildCurrentFilter(): SearchFilter {
     const targetRecordId = parseTargetRecordId(options.targetRecordId?.value)
     void targetRecordId
@@ -192,7 +202,28 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
       cof_max: parsedCofMax.value ?? dashboardCofMax,
       query: searchDoi.value || undefined,
       fileId: options.selectedFileId.value || undefined,
+      entityType: normalizeEntityTypeFilter(options.entityTypeFilter?.value),
+      sortBy: sortBy.value || undefined,
+      sortDir: sortBy.value ? sortDir.value : undefined,
     }
+  }
+
+  // Cycle a column through asc → desc → off. Picking a new column starts at asc.
+  function setSort(column: RecordSortColumn) {
+    if (sortBy.value === column) {
+      if (sortDir.value === 'asc') {
+        sortDir.value = 'desc'
+      } else {
+        sortBy.value = ''
+        sortDir.value = 'asc'
+      }
+    } else {
+      sortBy.value = column
+      sortDir.value = 'asc'
+    }
+    currentPage.value = 1
+    markGraphDirty()
+    void fetchData()
   }
 
   function markGraphDirty() {
@@ -291,6 +322,17 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
     )
   }
 
+  if (options.entityTypeFilter) {
+    watch(
+      options.entityTypeFilter,
+      () => {
+        currentPage.value = 1
+        markGraphDirty()
+        void fetchData()
+      },
+    )
+  }
+
   if (options.fixedExperimentScale) {
     watch(
       options.fixedExperimentScale,
@@ -334,6 +376,9 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
     cofMin,
     cofMax,
     currentPage,
+    sortBy,
+    sortDir,
+    setSort,
     resultView,
     graphRefreshKey,
     totalPages,

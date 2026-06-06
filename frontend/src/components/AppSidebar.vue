@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, type Component } from 'vue'
 import {
-  BookOpen,
   ChevronLeft,
   ChevronRight,
   Database,
@@ -66,7 +65,6 @@ const primaryNav: NavItem[] = [
 
 const secondaryNav: NavItem[] = [
   { key: 'admin', label: 'Admin', icon: Server,   adminOnly: true },
-  { key: 'help',  label: 'Help',  icon: BookOpen  },
 ]
 
 const visibleSecondaryNav = computed(() =>
@@ -136,7 +134,6 @@ function navLabel(item: NavItem): string {
   if (item.key === 'quality') return '质量'
   if (item.key === 'modeling') return '建模'
   if (item.key === 'admin') return '管理'
-  if (item.key === 'help') return '帮助'
   return item.label
 }
 

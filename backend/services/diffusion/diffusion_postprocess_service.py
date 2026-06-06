@@ -272,6 +272,12 @@ def _pick_evidence_measure_for_field(measures: list[dict[str, Any]], field_key: 
     for index, measure in enumerate(measures):
         prefix = str(measure.get("prefix") or "")
         suffix = str(measure.get("suffix") or "")
+        immediate_suffix = re.split(r"[-+]?\d+(?:\.\d+)?\s*(?:x|\*)\s*10", suffix, maxsplit=1)[0][:72]
+        if any(re.search(rf"\b(?:for|as)\s+(?:the\s+)?{re.escape(term)}\b", immediate_suffix) for term in field_terms):
+            candidate = (100000 - index, -index, measure)
+            if best is None or candidate[0] > best[0]:
+                best = candidate
+            continue
         prefix_score = max((prefix.rfind(term) for term in field_terms), default=-1)
         suffix_score = 1 if any(term in suffix[:36] for term in field_terms) else 0
         if field_key == "D_total" and any(term in prefix[-48:] for term in ion_terms):

@@ -31,4 +31,10 @@ describe('platform routing', () => {
     expect(resolveRoute('literature')).toEqual({ view: 'library', section: 'explorer' })
     expect(resolveRoute('grounding')).toEqual({ view: 'library', section: 'explorer' })
   })
+
+  it('removes help as a routable workspace and sends old guide links home', () => {
+    expect(DEFAULT_SECTION_BY_VIEW).not.toHaveProperty('help')
+    expect(resolveRoute('help')).toEqual({ view: 'home', section: 'today' })
+    expect(resolveRoute('guide')).toEqual({ view: 'home', section: 'today' })
+  })
 })

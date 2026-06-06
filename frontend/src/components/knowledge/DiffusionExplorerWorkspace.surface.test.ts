@@ -11,6 +11,11 @@ describe('DiffusionExplorerWorkspace database surface', () => {
     expect(source).toContain('listDiffusionLibrary')
     expect(source).toContain('const libraryRecords = ref<DiffusionLibraryRecord[]>([])')
     expect(source).toContain('await listDiffusionLibrary')
+    expect(source).toContain("recordScope?: 'active' | 'all_visible'")
+    expect(source).toContain('const diffusionLibraryScope = computed')
+    expect(source).toContain("props.recordScope || 'all_visible'")
+    expect(source).toContain('scope: diffusionLibraryScope.value')
+    expect(source).not.toContain("'group_library'")
     expect(source).not.toContain('props.selectedFile?.records || []')
   })
 
@@ -21,12 +26,43 @@ describe('DiffusionExplorerWorkspace database surface', () => {
     expect(source).toContain('focusEntityType?:')
     expect(source).toContain("literatureId: props.focusFileId || undefined")
     expect(source).toContain("recordId: props.focusRecordId ?? undefined")
-    expect(source).toContain("entityType: props.focusEntityType ?? undefined")
-    expect(source).toContain("watch(() => [props.focusFileId, props.focusRecordId, props.focusEntityType, props.focusDoi]")
+    expect(source).toContain("entityType: activeLibraryEntityType.value")
+    expect(source).toContain("watch(() => [props.focusFileId, props.focusRecordId, props.focusEntityType, props.entityTypeFilter, props.focusDoi]")
     expect(databaseModalSource).toContain(':focus-file-id="focusFileId || null"')
     expect(databaseModalSource).toContain(':focus-doi="focusDoi || \'\'"')
     expect(databaseModalSource).toContain(':focus-record-id="focusRecordId ?? null"')
     expect(databaseModalSource).toContain(':focus-entity-type="focusEntityType || null"')
+    expect(databaseModalSource).toContain(':entity-type-filter="activeEntityTypeFilter"')
+  })
+
+  it('keeps diffusion official records separate from the review queue', () => {
+    expect(source).toContain("entityTypeFilter?: 'record' | 'candidate' | null")
+    expect(source).toContain('const activeLibraryEntityType = computed')
+    expect(source).toContain("{{ activeLibraryEntityType === 'candidate' ? 'Review Queue' : 'Official Database' }}")
+  })
+
+  it('opens an evidence-first review sheet for diffusion candidates before approval', () => {
+    expect(source).toContain('approveDiffusionReviewCandidate')
+    expect(source).toContain("import DiffusionReviewSheet from '@/components/knowledge/DiffusionReviewSheet.vue'")
+    expect(source).toContain('<DiffusionReviewSheet')
+    expect(source).toContain('function openDiffusionReviewSheet(record: DiffusionLibraryRecord)')
+    expect(source).toContain("recordReviewEntityType(record) === 'candidate'")
+    expect(source).toContain('@click.stop="openDiffusionReviewSheet(record)"')
+    expect(source).toContain('const reviewSheetNextRecord = computed')
+    expect(source).toContain('@approved="handleDiffusionReviewResolved"')
+    expect(source).toContain('@rejected="handleDiffusionReviewResolved"')
+    expect(source).toContain('await loadLibrary()')
+  })
+
+  it('supports bulk approve/reject and a weak-only triage in the candidate queue', () => {
+    expect(source).toContain('rejectDiffusionReviewCandidate')
+    expect(source).toContain('data-testid="diffusion-triage"')
+    expect(source).toContain('const weakOnly = ref(false)')
+    expect(source).toContain('const selectedDiffusionCandidateIds = ref<Set<number>>')
+    expect(source).toContain("async function runBulkDiffusionReview(action: 'approve' | 'reject')")
+    expect(source).toContain("@click=\"runBulkDiffusionReview('approve')\"")
+    expect(source).toContain("@click=\"runBulkDiffusionReview('reject')\"")
+    expect(source).toContain('function toggleSelectDiffusionCandidate(record: DiffusionLibraryRecord)')
   })
 
   it('uses the diffusion architecture columns with coefficient as the target metric', () => {

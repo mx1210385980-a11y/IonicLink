@@ -13,6 +13,7 @@ import {
 const props = defineProps<{
   record: RecordResponse
   active?: boolean
+  compact?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -153,7 +154,7 @@ function openEvidence(fieldKey: string, event: MouseEvent | KeyboardEvent) {
       </div>
     </div>
 
-    <div v-if="visibleStructureCards.length" class="ion-structure-spread">
+    <div v-if="visibleStructureCards.length && !compact" class="ion-structure-spread">
       <button
         v-for="card in visibleStructureCards"
         :key="card.key"

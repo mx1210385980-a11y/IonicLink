@@ -9,6 +9,7 @@ import fitz
 from services.llm.utils import clean_and_parse_json
 from services.normalization import normalize_extraction_row
 from services.normalization.potential import normalize_potential_text
+from utils.pdf_utils import repair_pdf_text_unit_artifacts
 
 
 FAST_TABLE_RECORD_ORIGIN = "fast_table_extraction"
@@ -49,6 +50,78 @@ def _field_value(row: dict[str, Any], aliases: tuple[str, ...], *, exclude: tupl
             if text and text.lower() not in {"null", "none", "n/a", "na", "-", "--"}:
                 return text
     return ""
+
+
+def _tribopair_material_label(text: str) -> str:
+    cleaned = re.sub(
+        r"\b(?:colloid(?:al)?|afm|probe|tip|sphere|ball|pin|disk|disc|surface|substrate|electrode|counterface|sample|specimen)\b",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    normalized = re.sub(r"\s+", " ", cleaned).strip(" /,;:-")
+    lowered = text.lower()
+    if re.search(r"\bau\s*\(?111\)?\b|\bgold\b", lowered):
+        return "Au(111)"
+    if re.search(r"\bhopg\b|\bgraphite\b", lowered):
+        return "HOPG"
+    if re.search(r"\bmica\b", lowered):
+        return "Mica"
+    if re.search(r"\bsilica\b|\bsio2\b", lowered):
+        return "Silica"
+    if re.search(r"\bsilicon\s+nitride\b|\bsi3n4\b", lowered):
+        return "Silicon nitride"
+    if re.search(r"\bsilicon\b|\bsi\b", lowered):
+        return "Silicon"
+    if re.search(r"\bsteel\b|100cr6|52100|suj2", lowered):
+        return "Steel"
+    return normalized or text.strip()
+
+
+def _tribopair_probe_geometry(text: str) -> str | None:
+    lowered = text.lower()
+    if re.search(r"\bcolloid(?:al)?\s+probe\b|\bmicrosphere\b|\bsphere\b", lowered):
+        return "Colloid probe"
+    if re.search(r"\b(?:afm\s+)?(?:tip|probe)\b", lowered):
+        return "Tip"
+    if re.search(r"\bball\b", lowered):
+        return "Ball"
+    if re.search(r"\bpin\b", lowered):
+        return "Pin"
+    return None
+
+
+def _split_fast_table_friction_pair(value: str) -> dict[str, str]:
+    text = _filled(value)
+    if not text:
+        return {}
+    normalized = (
+        text.replace("−", "-")
+        .replace("–", " / ")
+        .replace("—", " / ")
+        .replace(" vs. ", " / ")
+        .replace(" vs ", " / ")
+    )
+    parts = [part.strip() for part in re.split(r"\s*/\s*", normalized) if part.strip()]
+    if len(parts) < 2:
+        return {}
+
+    first, second = parts[0], parts[1]
+    first_l = first.lower()
+    second_l = second.lower()
+    first_is_probe = bool(re.search(r"\b(?:colloid(?:al)?\s+probe|afm\s+tip|probe|tip|ball|pin|sphere)\b", first_l))
+    second_is_substrate = bool(re.search(r"\b(?:substrate|surface|disk|disc|plate|electrode|hopg|mica|au\s*\(?111\)?|gold|steel|silica|graphite)\b", second_l))
+    if not first_is_probe and not second_is_substrate:
+        return {}
+
+    result = {
+        "probe_material": _tribopair_material_label(first),
+        "substrate_material": _tribopair_material_label(second),
+    }
+    geometry = _tribopair_probe_geometry(first)
+    if geometry:
+        result["probe_geometry"] = geometry
+    return result
 
 
 def _split_markdown_row(line: str) -> list[str]:
@@ -150,9 +223,28 @@ def _extract_source_page(*values: Any) -> Optional[int]:
 
 def _extract_potential(conditions: str) -> Optional[str]:
     text = _filled(conditions).replace("＋", "+").replace("−", "-")
-    match = re.search(r"([+\-]?\s*\d+(?:\.\d+)?)\s*v\b", text, flags=re.IGNORECASE)
+    if not text:
+        return None
+    voltage_values = re.findall(
+        r"([+\-]?\s*\d+(?:\.\d+)?)\s*(?:mV|millivolts?|V|volts?)\b",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if len({re.sub(r"\s+", "", value) for value in voltage_values}) > 1:
+        return None
+    if re.search(r"\b(?:OCP|OCV|open[-\s]*circuit(?:\s+potential)?)\b", text, flags=re.IGNORECASE):
+        normalized = normalize_potential_text(text)
+        if normalized and normalized != text:
+            return normalized
+        if not voltage_values:
+            return "0 V vs OCP"
+    match = re.search(
+        r"([+\-]?\s*\d+(?:\.\d+)?)\s*(mV|millivolts?|V|volts?)\b",
+        text,
+        flags=re.IGNORECASE,
+    )
     if match:
-        raw = re.sub(r"\s+", "", match.group(1)) + " V"
+        raw = re.sub(r"\s+", "", match.group(1)) + f" {match.group(2)}"
         return normalize_potential_text(raw) or raw
     if any(token in text for token in ("未施加电压", "无偏置", "no bias", "without bias")):
         return "0 V"
@@ -171,16 +263,128 @@ def _extract_explicit_speed(*values: Any) -> Optional[str]:
     text = " ".join(_filled(value) for value in values if _filled(value))
     if not text:
         return None
-    normalized = text.replace("µ", "μ").replace("−", "-")
+    normalized = (
+        text.replace("µ", "μ")
+        .replace("−", "-")
+        .replace("–", "-")
+        .replace("\x02", "-")
+    )
     match = re.search(
-        r"([-+]?\d+(?:[.:]\d+)?)\s*(μm/s|um/s|m/s)\b",
+        r"([-+]?\d+(?:[.:]\d+)?)\s*(μm/s|um/s|mm/s|m/s)\b",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        match = re.search(
+            r"([-+]?\d+(?:[.:]\d+)?)\s*(μm|um|mm|m)\s*(?:[·⋅.]\s*|\s+)s\s*(?:\^-?1|-1|−1|⁻1|⁻¹)\b",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+    if not match:
+        return None
+    unit = match.group(2).replace("um", "μm")
+    if "/" not in unit:
+        unit = f"{unit}/s"
+    return f"{_compact_number(match.group(1))} {unit}"
+
+
+def _extract_explicit_load(*values: Any) -> Optional[str]:
+    text = " ".join(_filled(value) for value in values if _filled(value))
+    if not text:
+        return None
+    normalized = re.sub(r"\s+", " ", text.replace("−", "-"))
+    match = re.search(
+        r"\b(?:normal\s+)?load(?:\s*\([^)]+\))?"
+        r"(?:\s+(?:applied|applied\s+was|was|of))?\s*(?:=|:|was|of)?\s*"
+        r"([-+]?\d+(?:\.\d+)?)\s*(mN|μN|µN|uN|nN|N)\b",
         normalized,
         flags=re.IGNORECASE,
     )
     if not match:
         return None
-    unit = match.group(2).replace("um", "μm")
+    unit = match.group(2).replace("µ", "μ").replace("uN", "μN")
     return f"{_compact_number(match.group(1))} {unit}"
+
+
+def _format_kelvin_from_celsius(value: str) -> Optional[str]:
+    try:
+        celsius = float(value)
+    except ValueError:
+        return None
+    return f"{celsius + 273.15:.2f} K"
+
+
+def _extract_temperature_text(*values: Any) -> Optional[str]:
+    text = " ".join(_filled(value) for value in values if _filled(value))
+    if not text:
+        return None
+    normalized = re.sub(r"\s+", " ", text.replace("−", "-"))
+    number = r"[-+]?\d+(?:\.\d+)?"
+    separator = r"(?:\s*,\s*|\s*,?\s+(?:and|or)\s+)"
+    number_series = rf"{number}(?:{separator}{number})*"
+    temperatures: list[str] = []
+    seen: set[str] = set()
+
+    def add_series(series_text: str) -> None:
+        for raw_value in re.findall(number, series_text):
+            kelvin = _format_kelvin_from_celsius(raw_value)
+            if kelvin and kelvin not in seen:
+                temperatures.append(kelvin)
+                seen.add(kelvin)
+
+    for match in re.finditer(
+        rf"\b(?:temperature|temp|test\s+temperature)\s*,\s*(?:°\s*)?C\s+(?P<values>{number_series})\b",
+        normalized,
+        flags=re.IGNORECASE,
+    ):
+        add_series(match.group("values"))
+
+    for match in re.finditer(rf"(?P<values>{number_series})\s*(?:°\s*)?C\b", normalized, flags=re.IGNORECASE):
+        add_series(match.group("values"))
+
+    if temperatures:
+        return "; ".join(temperatures)
+    if re.search(r"\b(?:room|ambient)\s+temperature\b|\bRT\b", normalized, flags=re.IGNORECASE):
+        return "298.15 K"
+    return None
+
+
+def _extract_relative_humidity_text(*values: Any) -> Optional[str]:
+    text = " ".join(_filled(value) for value in values if _filled(value))
+    if not text:
+        return None
+    normalized = re.sub(r"\s+", " ", text.replace("−", "-"))
+    number = r"\d+(?:\.\d+)?"
+    separator = r"(?:\s*,\s*|\s*,?\s+(?:and|or)\s+)"
+    number_series = rf"{number}(?:{separator}{number})*"
+    humidity_values: list[str] = []
+    seen: set[str] = set()
+
+    def add_series(series_text: str) -> None:
+        for raw_value in re.findall(number, series_text):
+            compact = _compact_number(raw_value)
+            label = f"{compact}% RH"
+            if label not in seen:
+                humidity_values.append(label)
+                seen.add(label)
+
+    for match in re.finditer(
+        rf"(?P<values>{number_series})\s*%?\s*(?:RH|R\.H\.|relative\s+humidity)\b",
+        normalized,
+        flags=re.IGNORECASE,
+    ):
+        add_series(match.group("values"))
+
+    for match in re.finditer(
+        rf"\b(?:relative\s+humidity|RH|R\.H\.)\b[^.;]{{0,80}}?\(?\s*(?P<values>{number_series})\s*%?\)?",
+        normalized,
+        flags=re.IGNORECASE,
+    ):
+        add_series(match.group("values"))
+
+    if humidity_values:
+        return "; ".join(humidity_values)
+    return None
 
 
 def normalize_fast_table_rows(
@@ -231,6 +435,11 @@ def normalize_fast_table_rows(
             conditions,
             evidence,
         )
+        load = _extract_explicit_load(
+            _field_value(row, ("load", "normal load", "force", "载荷", "负载", "法向载荷")),
+            conditions,
+            evidence,
+        )
         source_page = _extract_source_page(
             _field_value(row, ("source_page", "page", "页码", "页")),
             source,
@@ -262,15 +471,28 @@ def normalize_fast_table_rows(
         )
         source_label = source or "Gemini Flash table"
         source_figure = source_label if re.search(r"\b(fig(?:ure)?|table)\b", source_label, re.IGNORECASE) else None
+        temperature_field = _field_value(row, ("temperature", "temp", "温度"))
+        temperature = _extract_temperature_text(temperature_field or conditions, "" if temperature_field else evidence_text)
+        water_content_field = _field_value(row, ("water_content", "water content", "humidity", "relative humidity", "rh", "湿度"))
+        water_content = _extract_relative_humidity_text(
+            water_content_field or conditions,
+            "" if water_content_field else evidence_text,
+        )
+        tribopair_parts = _split_fast_table_friction_pair(friction_pair)
+        substrate_material = tribopair_parts.get("substrate_material") or friction_pair
 
         item: dict[str, Any] = {
             "ionic_liquid": ionic_liquid,
             "material_name": friction_pair,
-            "substrate_material": friction_pair,
+            "probe_material": tribopair_parts.get("probe_material") or None,
+            "probe_geometry": tribopair_parts.get("probe_geometry") or None,
+            "substrate_material": substrate_material,
             "cof": cof,
             "potential": _extract_potential(conditions),
             "regime": conditions or None,
             "notes": notes or None,
+            "load": load,
+            "load_value": load,
             "speed": speed,
             "source": source_label,
             "source_page": source_page,
@@ -304,6 +526,13 @@ def normalize_fast_table_rows(
         normalized["review_status"] = "needs_review"
         normalized["assembly_notes"] = item["assembly_notes"]
         normalized["confidence"] = min(float(normalized.get("confidence") or 0.72), 0.72)
+        if load:
+            normalized["load"] = load
+            normalized["load_value"] = load
+        if temperature:
+            normalized["temperature"] = temperature
+        if water_content:
+            normalized["water_content"] = water_content
         normalized_rows.append(normalized)
 
     return normalized_rows
@@ -324,7 +553,8 @@ def build_fast_table_document_text(content: str = "", pdf_path: Optional[str] = 
             with fitz.open(pdf_path) as doc:
                 parts = []
                 for idx, page in enumerate(doc):
-                    page_text = re.sub(r"\s+", " ", page.get_text("text") or "").strip()
+                    page_text = repair_pdf_text_unit_artifacts(page.get_text("text") or "")
+                    page_text = re.sub(r"\s+", " ", page_text).strip()
                     if page_text:
                         parts.append(f"[Page {idx + 1}]\n{page_text}")
                 document_text = "\n\n".join(parts)
@@ -335,6 +565,7 @@ def build_fast_table_document_text(content: str = "", pdf_path: Optional[str] = 
         document_text = _filled(content)
 
     document_text = document_text.replace("\u00ad", "")
+    document_text = repair_pdf_text_unit_artifacts(document_text)
     if len(document_text) <= limit:
         return document_text
     return document_text[:limit]

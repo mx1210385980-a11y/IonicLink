@@ -16,6 +16,7 @@ from routers.extraction import (
     _build_record_field_evidence_payload,
     _clamp_pdf_highlight_bbox,
     _parse_bbox_json,
+    _refresh_visual_source_evidence,
     _sanitize_field_evidence_locations,
 )
 from utils.speed_conditions import derive_speed_conditions
@@ -1278,3 +1279,56 @@ def test_review_secondary_match_links_to_canonical_source_metadata():
     assert canonical_source["grounding_mode"] == "secondary_source"
     assert canonical_source["canonical"]["canonical_record"]["record_id"] == 141
     assert review_item["field_evidence_json"]["cof"]["canonical"]["kind"] == "review_secondary_source"
+
+
+def test_refresh_visual_source_keeps_text_grounded_location_despite_figure_label(monkeypatch):
+    # A textual value ("the load is higher than 20 nN") whose source_label cites a
+    # figure must keep its precise text bbox, not get anchored to the whole figure.
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("find_figure_bbox must not run for a text-grounded field")
+
+    monkeypatch.setattr("utils.pdf_coords.find_figure_bbox", _boom)
+
+    entry = {
+        "value": ">20 nN",
+        "evidence": {
+            "source_type": "figure",
+            "source_label": "Figure 2",
+            "page": 4,
+            "quote": "When the load is higher than 20 nN, the lateral force increases slowly but linearly.",
+            "matched_text": "load is higher than 20 nN",
+            "bbox": [90.0, 560.0, 320.0, 574.0],
+        },
+    }
+
+    refreshed = _refresh_visual_source_evidence(entry, pdf_path="/tmp/fake.pdf")
+
+    assert refreshed["evidence"]["bbox"] == [90.0, 560.0, 320.0, 574.0]
+    assert refreshed["evidence"]["matched_text"] == "load is higher than 20 nN"
+    assert refreshed["evidence"]["source_type"] == "figure"
+
+
+def test_refresh_visual_source_anchors_true_figure_value_without_text_match(monkeypatch):
+    # A genuine figure value (no matched text) still resolves to the figure region.
+    monkeypatch.setattr(
+        "utils.pdf_coords.find_figure_bbox",
+        lambda *_args, **_kwargs: (4, [40.0, 200.0, 540.0, 470.0]),
+    )
+    monkeypatch.setattr("utils.pdf_coords.normalize_source_label", lambda label: label)
+
+    entry = {
+        "value": "0.014",
+        "evidence": {
+            "source_type": "figure",
+            "source_label": "Figure 2",
+            "page": 4,
+            "quote": None,
+            "matched_text": None,
+            "bbox": None,
+        },
+    }
+
+    refreshed = _refresh_visual_source_evidence(entry, pdf_path="/tmp/fake.pdf")
+
+    assert refreshed["evidence"]["bbox"] == [40.0, 200.0, 540.0, 470.0]
+    assert refreshed["evidence"]["source_type"] == "figure"

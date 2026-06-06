@@ -56,7 +56,8 @@ describe('RecordTable structure thumbnails', () => {
     expect(source).toContain("@keydown.enter.prevent.stop=\"openEvidenceModal(record, 'cof', $event)\"")
     expect(workspaceSource).toContain('databaseEvidenceField')
     expect(workspaceSource).toContain('database-field-evidence-popover')
-    expect(workspaceSource).toContain('databaseEvidencePosition')
+    // evidence opens as a centered two-pane modal (no cell-anchored positioning)
+    expect(workspaceSource).toContain('@click.self="closeDatabaseEvidencePopover"')
     expect(workspaceSource).toContain('databaseEvidenceFocusedFieldKey')
     expect(workspaceSource).toContain('normalizeDatabaseEvidenceFieldKey')
     expect(workspaceSource).toContain('databaseEvidenceFocusedValue')
@@ -147,14 +148,26 @@ describe('RecordTable structure thumbnails', () => {
 	    expect(workspaceSource).toContain('if (!databaseEvidenceEntryHasContent(fieldKey, entry)) continue')
 	    expect(workspaceSource).toContain('.filter(({ fieldKey, entry }) => databaseEvidenceEntryHasContent(fieldKey, entry))')
 	    expect(workspaceSource).toContain('activeDatabaseEvidenceSlide(evidenceModalRecord)?.noteLabel')
-	    expect(workspaceSource).toContain('database-evidence-content-scroll')
-	    expect(workspaceSource).toContain('max-h-[min(72vh,44rem)]')
-	    expect(workspaceSource).toContain('database-evidence-image-frame')
-	    expect(workspaceSource).toContain('max-h-[min(42vh,26rem)]')
+	    // roomy two-pane modal: image pane + scrollable text/context pane shown together
+	    expect(workspaceSource).toContain('database-evidence-image-pane')
+	    expect(workspaceSource).toContain('database-evidence-content-scroll flex min-h-0 flex-col overflow-y-auto')
+	    expect(workspaceSource).toContain("'md:grid-cols-[1.3fr_1fr]'")
+	    expect(workspaceSource).toContain('cursor-zoom-in')
+	    expect(workspaceSource).toContain('openRecordPdf(evidenceModalRecord, { forcePdf: true })')
+	    expect(workspaceSource).not.toContain('database-evidence-image-frame')
+	    expect(workspaceSource).not.toContain('max-h-[min(42vh,26rem)]')
 	    expect(workspaceSource).toContain('databaseEvidenceSlideDedupeKey')
 	    expect(workspaceSource).not.toContain("slide.imageSrc ? 'image' : ''")
 	    expect(workspaceSource).toContain('databaseEvidenceShouldRenderPdfPreview')
 	    expect(workspaceSource).toContain("if (sourceType === 'text' && normalizeDatabaseEvidenceText(entry.evidence?.quote)) return false")
+	    // text-grounded values must not be classified as a figure just because their
+	    // source_label cites one, and must prefer the tight crop over the whole figure
+	    expect(workspaceSource).toContain('function databaseEntryHasTextMatch(entry: FieldEvidenceEntry)')
+	    expect(workspaceSource).not.toContain('/\\b(?:fig|figure|table|plot)\\.?\\s*\\d*/.test(sourceLabel)')
+	    expect(workspaceSource).toContain('isDatabaseVisualEvidenceEntry(entry) && !databaseEntryHasTextMatch(entry)')
+	    // click-to-open evidence aligns with inline display: source_type only, no label heuristic
+	    expect(workspaceSource).not.toContain("source.startsWith('fig')")
+	    expect(workspaceSource).not.toContain("source.startsWith('table')")
 	    expect(workspaceSource).toContain('databaseEvidenceShouldSuppressBareEvidence')
 	    expect(workspaceSource).toContain('isBareMatchedNumber && (!quoteText || isBareQuoteNumber)')
 	    expect(workspaceSource).toContain('if ((suppressBareEvidence || !primaryText) && note)')
@@ -187,13 +200,48 @@ describe('RecordTable structure thumbnails', () => {
 	    expect(workspaceSource).not.toContain("anion: ['anion', 'ionic_liquid']")
 	  })
 
-	  it('marks candidate rows and keeps candidate ids out of destructive batch selection', () => {
+	  it('routes candidate rows into the review sheet without table-level approval controls', () => {
 	    expect(source).toContain('isCandidateRecord(record)')
 	    expect(source).toContain('record.reviewEntityType || record.entityType')
 	    expect(source).toContain('Review candidates before batch deletion')
-	    expect(source).toContain('Candidate row, not yet promoted to library record')
+	    expect(source).toContain('reviewCandidateRecord?: (record: RecordResponse) => void')
+	    expect(source).toContain('Review candidate')
+	    expect(source).toContain('reviewCandidateRecord?.(record)')
+	    expect(source).toContain('candidateEvidenceQuality(record)')
+	    expect(source).toContain('candidateEvidenceQualityLabel(candidateEvidenceQuality(record))')
+	    expect(source).toContain('candidateEvidenceQualityShortLabel(record)')
+	    expect(source).toContain('Page-only')
 	    expect(source).toContain('.filter((record) => !isCandidateRecord(record))')
+	    expect(source).not.toContain('Candidate row, not yet promoted to library record')
+	    expect(source).not.toContain('approveCandidateRecord?: (record: RecordResponse) => void')
+	    expect(source).not.toContain('approveCandidateRecord?.(record)')
+	    expect(source).not.toContain('approvingCandidateId')
+	    expect(source).not.toContain('Approve candidate')
 	    expect(workspaceSource).toContain("databaseRecordEntityType(record) !== 'candidate'")
+	    expect(workspaceSource).toContain('CandidateReviewSheet')
+	    expect(workspaceSource).toContain('const reviewSheetRecord = ref<RecordResponse | null>(null)')
+	    expect(workspaceSource).toContain('function openCandidateReviewSheet(record: RecordResponse)')
+	    expect(workspaceSource).toContain(':review-candidate-record="openCandidateReviewSheet"')
+	    expect(workspaceSource).toContain('@saved-and-approved="handleCandidateReviewApproved"')
+	    // Per-row inline approval was abandoned; approval flows through the review sheet
+	    // (single) or the bulk toolbar (many), never a per-row approve button/state.
+	    expect(workspaceSource).not.toContain('reviewActionPendingId')
+	    expect(workspaceSource).not.toContain('reviewActionError')
+	    expect(workspaceSource).not.toContain('async function handleApproveCandidateRecord(record: RecordResponse)')
+	    expect(workspaceSource).not.toContain(':approving-candidate-id')
+	    expect(workspaceSource).not.toContain(':approve-candidate-record')
+	  })
+
+	  it('shows compact evidence grade badges for official database rows', () => {
+	    expect(source).toContain('recordEvidenceGrade(record)')
+	    expect(source).toContain('recordEvidenceGradeLabel(record)')
+	    expect(source).toContain('recordEvidenceGradeBadgeClass(record)')
+	    expect(source).toContain('Strong evidence')
+	    expect(source).toContain('Adequate evidence')
+	    expect(source).toContain('Weak evidence')
+	    expect(source).toContain('Missing evidence')
+	    expect(source).toContain("v-else-if=\"recordEvidenceGrade(record)\"")
+	    expect(source).toContain('record.evidenceScore')
 	  })
 
 	  it('threads focusRecordId from knowledge entry points to a highlighted virtual row', () => {
@@ -238,6 +286,13 @@ describe('RecordTable structure thumbnails', () => {
     expect(source).toContain('overflow-y-auto overflow-x-hidden')
   })
 
+  it('lets the record table fit the available database pane height', () => {
+    expect(source).toContain('database-record-table flex min-h-0 flex-1 flex-col')
+    expect(source).toContain('class="virtual-table-body min-w-[1264px] flex-1 overflow-y-auto overflow-x-hidden"')
+    expect(source).not.toContain('height: calc(100vh - 420px)')
+    expect(source).not.toContain('max-height: 600px')
+  })
+
   it('routes the Literature button through the app-level Source Grounding workspace', () => {
     expect(workspaceSource).toContain("emit('view-literature', {")
     expect(workspaceSource).toContain("mode: 'grounding'")
@@ -273,5 +328,42 @@ describe('RecordTable structure thumbnails', () => {
     expect(recipeCellSource).toContain('recipe-ratio-chip')
     expect(recipeCellSource).not.toContain('recipe-thumb-stack')
     expect(recipeCellSource).not.toContain('recipe-ion-stack')
+  })
+
+  it('lets reviewers bulk-select candidates without colliding with record delete selection', () => {
+    expect(source).toContain('reviewQueueMode?: boolean')
+    expect(source).toContain('selectedCandidateIds?: Set<string>')
+    expect(source).toContain("'toggle-select-candidate': [entityId: string]")
+    expect(source).toContain("'toggle-select-all-candidates': [select: boolean]")
+    expect(source).toContain('function candidateKey(record: RecordResponse)')
+    expect(source).toContain('const allCandidatesSelected = computed')
+    expect(source).toContain('v-if="reviewQueueMode && isCandidateRecord(record)"')
+    expect(source).toContain("emit('toggle-select-candidate', candidateKey(record))")
+  })
+
+  it('wires the workspace bulk review toolbar to the per-candidate review endpoints', () => {
+    expect(workspaceSource).toContain('const selectedCandidateIds = ref<Set<string>>')
+    expect(workspaceSource).toContain('function handleBulkApproveCandidates')
+    expect(workspaceSource).toContain('function handleBulkRejectCandidates')
+    expect(workspaceSource).toContain('approveReviewCandidate')
+    expect(workspaceSource).toContain('rejectReviewCandidate')
+    expect(workspaceSource).toContain('@click="handleBulkApproveCandidates"')
+    expect(workspaceSource).toContain('@click="handleBulkRejectCandidates"')
+    expect(workspaceSource).toContain(':review-queue-mode="isReviewQueue"')
+    expect(workspaceSource).toContain(':selected-candidate-ids="selectedCandidateIds"')
+  })
+
+  it('supports a compact density mode wired from the workspace toolbar to the cells', () => {
+    // RecordTable exposes density + drives a shorter virtual row in compact mode.
+    expect(source).toContain("density?: 'comfortable' | 'compact'")
+    expect(source).toContain('const COMPACT_ROW_HEIGHT')
+    expect(source).toContain('estimateSize: () => rowHeight.value')
+    expect(source).toContain(':compact="isCompact"')
+    // Compact mode drops the molecular-structure SVG spread (the main height driver).
+    expect(recipeCellSource).toContain('visibleStructureCards.length && !compact')
+    // Workspace persists the choice and passes it down.
+    expect(workspaceSource).toContain('function setTableDensity')
+    expect(workspaceSource).toContain("localStorage.setItem(TABLE_DENSITY_KEY")
+    expect(workspaceSource).toContain(':density="tableDensity"')
   })
 })

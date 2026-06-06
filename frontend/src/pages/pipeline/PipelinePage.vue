@@ -87,7 +87,7 @@ const searchQuery = ref('')
 const statusFilter = ref<PipelineFilter>('all')
 const fileInput = ref<HTMLInputElement | null>(null)
 const extractorOptions: Array<{ key: ExtractorType; label: string; helper: string }> = [
-  { key: 'tribology', label: 'Tribology Schema', helper: 'COF, tribopair, test conditions' },
+  { key: 'tribology', label: 'Lubrication Schema', helper: 'COF, tribopair, test conditions' },
   { key: 'diffusion', label: 'Diffusion Schema', helper: 'Confinement, D values, ionic liquid' },
 ]
 
@@ -553,7 +553,7 @@ function logToneClass(tone: InspectorLog['tone']) {
               {{ queueTitle }}
             </h2>
             <p class="mt-2 text-sm text-slate-500">
-              Current schema: <span class="font-semibold text-slate-800">{{ activeExtractorType === 'diffusion' ? 'Diffusion' : 'Tribology' }}</span>
+              Current schema: <span class="font-semibold text-slate-800">{{ activeExtractorType === 'diffusion' ? 'Diffusion' : 'Lubrication' }}</span>
             </p>
           </div>
           <div class="flex flex-wrap items-center justify-end gap-3">
@@ -600,7 +600,7 @@ function logToneClass(tone: InspectorLog['tone']) {
                     </p>
                     <p class="mt-1 truncate text-sm text-slate-500">{{ item.meta }}</p>
                     <p class="mt-1 text-xs font-medium text-slate-400">
-                      {{ (files.find((file) => file.id === item.id)?.extractor_type || defaultExtractorType) === 'diffusion' ? 'Diffusion schema' : 'Tribology schema' }}
+                      {{ (files.find((file) => file.id === item.id)?.extractor_type || defaultExtractorType) === 'diffusion' ? 'Diffusion schema' : 'Lubrication schema' }}
                     </p>
                   </div>
                 </div>

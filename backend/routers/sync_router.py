@@ -5,8 +5,8 @@ API endpoints for Literature and TribologyData synchronization.
 
 import logging
 from datetime import datetime
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
+from typing import List, Literal
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -172,7 +172,9 @@ async def sync_data_replace(
 async def list_literature(
     skip: int = 0,
     limit: int = 100,
+    scope_mode: Literal["active", "all_visible"] = Query("active", alias="scope_mode"),
     db: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
     scope: RequestScope = Depends(get_request_scope),
 ):
     """
@@ -186,6 +188,12 @@ async def list_literature(
         List of LiteratureSchema
     """
     try:
+        if scope_mode == "all_visible":
+            scope = RequestScope(
+                scope_type="all_visible",
+                group_id=principal.group.id,
+                scope_key="all_visible",
+            )
         payload = await list_literature_payload(db, scope=scope, skip=skip, limit=limit)
         return [LiteratureSchema(**item) for item in payload]
     except HTTPException:

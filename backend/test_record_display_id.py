@@ -53,6 +53,9 @@ async def test_search_records_returns_dense_display_ids_without_replacing_primar
                 lubricant="[A][B]",
                 cof_value=0.0032,
                 cof_raw="0.0032",
+                evidence="Figure reports COF = 0.0032.",
+                source_page=4,
+                review_status="approved",
             ),
             TribologyData(
                 id=353,
@@ -61,6 +64,9 @@ async def test_search_records_returns_dense_display_ids_without_replacing_primar
                 lubricant="[A][B]",
                 cof_value=0.0068,
                 cof_raw="0.0068",
+                evidence="Figure reports COF = 0.0068.",
+                source_page=4,
+                review_status="approved",
             ),
         ]
     )
@@ -104,6 +110,9 @@ async def test_search_records_query_matches_title_lubricant_material_and_partial
                 anion="[TFSI]-",
                 cof_value=0.11,
                 cof_raw="0.11",
+                evidence="Figure reports COF = 0.11 for [EMIM][TFSI] on mica.",
+                source_page=6,
+                review_status="approved",
             ),
             TribologyData(
                 id=602,
@@ -116,6 +125,9 @@ async def test_search_records_query_matches_title_lubricant_material_and_partial
                 anion="[BF4]-",
                 cof_value=0.21,
                 cof_raw="0.21",
+                evidence="Figure reports COF = 0.21 for [BMIM][BF4] on steel.",
+                source_page=7,
+                review_status="approved",
             ),
         ]
     )

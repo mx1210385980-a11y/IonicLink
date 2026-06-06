@@ -269,6 +269,45 @@ def test_build_weak_candidate_items_normalizes_negative_confidence():
     assert items[0]["confidence"] == 0.52
 
 
+def test_build_weak_candidate_items_discards_ratio_and_cof_exponent_load_noise():
+    trace_candidates = [
+        {
+            "modality": "text",
+            "page": 5,
+            "normalized": {
+                "ionic_liquid": "C18mimBr-C12F26 composite system",
+                "material_name": "AFM probe / graphite substrate",
+                "cof": "0.0001",
+                "normal_load": "1-50 nN",
+                "load": "1-50 nN",
+                "evidence": (
+                    "C12F26 displays the broadest superlubricity window spanning "
+                    "from 1:1 to 50:1 (IL:C12F26)."
+                ),
+            },
+        },
+        {
+            "modality": "text",
+            "page": 2,
+            "normalized": {
+                "ionic_liquid": "C18mimBr-CnF2n+2 composite system",
+                "material_name": "AFM probe / graphite substrate",
+                "cof": "0.0001",
+                "normal_load": "10-4 nN",
+                "load": "10-4 nN",
+                "evidence": "The system achieves friction coefficients reaching the order of 10-4.",
+            },
+        },
+    ]
+
+    items, summary = build_weak_candidate_items(trace_candidates)
+
+    assert summary == {"weak_candidate_count": 2}
+    assert all("normal_load" not in item for item in items)
+    assert all("load" not in item for item in items)
+    assert all("normal_load" in item["missing_fields"] for item in items)
+
+
 def test_build_weak_candidate_items_dedupes_before_applying_limit():
     trace_candidates = [
         {

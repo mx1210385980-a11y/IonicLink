@@ -35,7 +35,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'change-section': [section: string]
-  'open-help': []
   'open-home': []
 }>()
 
@@ -389,9 +388,6 @@ function modalTitle() {
         <div class="mt-4 flex justify-center gap-2">
           <button class="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700" @click="emit('open-home')">
             返回首页
-          </button>
-          <button class="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold text-slate-700" @click="emit('open-help')">
-            打开帮助
           </button>
         </div>
       </div>

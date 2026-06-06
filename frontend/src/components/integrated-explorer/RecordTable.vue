@@ -2,15 +2,18 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 
-import { BookOpen, Check } from 'lucide-vue-next'
+import { ArrowDown, ArrowUp, BookOpen, Check, ChevronsUpDown, Pencil } from 'lucide-vue-next'
 import ConditionMicrobar from '@/components/integrated-explorer/ConditionMicrobar.vue'
 import LubricantRecipeCell from '@/components/integrated-explorer/LubricantRecipeCell.vue'
 import TribopairCapsule from '@/components/integrated-explorer/TribopairCapsule.vue'
 import type { RecordResponse } from '@/lib/api'
 import {
+  candidateEvidenceQuality,
+  candidateEvidenceQualityLabel,
   cofDisplay,
   compactRecordDisplayId,
   recordDisplayId,
+  type CandidateEvidenceQuality,
 } from '@/lib/integratedExplorerHelpers'
 
 const props = defineProps<{
@@ -23,6 +26,11 @@ const props = defineProps<{
   structurePreviewOpen: boolean
   structurePreviewRowId: number | null
   selectedIds: Set<number>
+  reviewQueueMode?: boolean
+  density?: 'comfortable' | 'compact'
+  sortBy?: 'id' | 'cof' | 'load' | 'confidence' | 'date' | ''
+  sortDir?: 'asc' | 'desc'
+  selectedCandidateIds?: Set<string>
   openEvidenceModal: (
     record: RecordResponse,
     field?: 'ionic-liquid' | 'tribopair' | 'conditions' | 'cof',
@@ -30,16 +38,35 @@ const props = defineProps<{
     fieldKey?: string,
   ) => void
   openLiterature?: (record: RecordResponse) => void
+  reviewCandidateRecord?: (record: RecordResponse) => void
   openStructurePreview: (record: RecordResponse) => void
 }>()
 
 const emit = defineEmits<{
   'toggle-select': [recordId: number]
   'toggle-select-page': [select: boolean]
+  'toggle-select-candidate': [entityId: string]
+  'toggle-select-all-candidates': [select: boolean]
+  'sort': [column: 'id' | 'cof']
+  'edit-record': [record: RecordResponse]
 }>()
 
+// Sort headers are only meaningful in the Official Database view; the Review
+// Queue applies its own backlog ordering, so we render plain labels there.
+const sortable = computed(() => !props.reviewQueueMode)
+function sortStateFor(column: 'id' | 'cof'): 'asc' | 'desc' | 'none' {
+  if (props.sortBy !== column) return 'none'
+  return props.sortDir === 'desc' ? 'desc' : 'asc'
+}
+
 // Virtual scrolling configuration
-const ROW_HEIGHT = 160 // Estimated row height in pixels
+const COMFORTABLE_ROW_HEIGHT = 160 // Full row with structure drawings + microbars
+const COMPACT_ROW_HEIGHT = 72      // Dense row: formula chips + inline conditions
+const isCompact = computed(() => props.density === 'compact')
+const rowHeight = computed(() => (isCompact.value ? COMPACT_ROW_HEIGHT : COMFORTABLE_ROW_HEIGHT))
+// Vertical padding applied to data cells, tightened in compact mode.
+const cellPadY = computed(() => (isCompact.value ? 'py-2' : 'py-4'))
+const cellPadYTight = computed(() => (isCompact.value ? 'py-2' : 'py-3'))
 const OVERSCAN = 5     // Number of items to render outside visible area
 const COL_SELECT = 'w-[48px]'
 const COL_ID = 'w-[56px]'
@@ -56,7 +83,7 @@ const virtualizer = useVirtualizer(
   computed(() => ({
     count: props.loading ? 8 : props.records.length,
     getScrollElement: () => parentRef.value,
-    estimateSize: () => ROW_HEIGHT,
+    estimateSize: () => rowHeight.value,
     overscan: OVERSCAN,
     getItemKey: (index: number) => {
       if (props.loading) return `skeleton-${index}`
@@ -67,6 +94,12 @@ const virtualizer = useVirtualizer(
 
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
 const totalSize = computed(() => virtualizer.value.getTotalSize())
+
+// Re-measure rows when the density changes so the virtualizer drops the cached
+// comfortable/compact heights instead of overlapping or leaving gaps.
+watch(rowHeight, () => {
+  virtualizer.value.measure()
+})
 const visibleRecordRows = computed(() =>
   virtualRows.value.flatMap((virtualRow) => {
     const record = props.records[virtualRow.index]
@@ -103,6 +136,27 @@ const allPageSelected = computed(() =>
 const somePageSelected = computed(() =>
   selectedOnPageCount.value > 0 && !allPageSelected.value,
 )
+
+// Candidate (Review Queue) bulk selection — keyed by entity id, parallel to the
+// record-id delete selection so the two never collide.
+function candidateKey(record: RecordResponse) {
+  return String(record.entityId ?? record.id)
+}
+function isCandidateSelected(record: RecordResponse) {
+  return Boolean(props.selectedCandidateIds?.has(candidateKey(record)))
+}
+const pageCandidateKeys = computed(() =>
+  props.records.filter((record) => isCandidateRecord(record)).map((record) => candidateKey(record)),
+)
+const selectedCandidatesOnPage = computed(() =>
+  pageCandidateKeys.value.filter((key) => props.selectedCandidateIds?.has(key)).length,
+)
+const allCandidatesSelected = computed(() =>
+  pageCandidateKeys.value.length > 0 && selectedCandidatesOnPage.value === pageCandidateKeys.value.length,
+)
+const someCandidatesSelected = computed(() =>
+  selectedCandidatesOnPage.value > 0 && !allCandidatesSelected.value,
+)
 function isFocusedRecord(record: RecordResponse) {
   return props.focusRecordId != null && Number(record.id) === Number(props.focusRecordId) && recordMatchesFocusEntity(record)
 }
@@ -137,6 +191,66 @@ function literatureMeta(record: RecordResponse) {
   return journal || year || 'Open in library'
 }
 
+function candidateEvidenceQualityShortLabel(record: RecordResponse) {
+  const quality = candidateEvidenceQuality(record)
+  if (quality === 'exact') return 'Exact'
+  if (quality === 'page_only') return 'Page-only'
+  if (quality === 'text_only') return 'Text'
+  return 'Weak'
+}
+
+function candidateEvidenceQualityBadgeClass(record: RecordResponse) {
+  const quality = candidateEvidenceQuality(record)
+  const tones: Record<CandidateEvidenceQuality, string> = {
+    exact: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-400/10 dark:text-emerald-200',
+    page_only: 'border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-400/30 dark:bg-cyan-400/10 dark:text-cyan-200',
+    text_only: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-200',
+    weak: 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-200',
+  }
+  return tones[quality]
+}
+
+type RecordEvidenceGrade = 'strong' | 'adequate' | 'weak' | 'missing'
+
+function recordEvidenceGrade(record: RecordResponse): RecordEvidenceGrade | '' {
+  const explicit = String(record.evidenceGrade || '').trim().toLowerCase()
+  if (['strong', 'adequate', 'weak', 'missing'].includes(explicit)) return explicit as RecordEvidenceGrade
+  const score = Number(record.evidenceScore)
+  if (!Number.isFinite(score)) return ''
+  if (score >= 0.85) return 'strong'
+  if (score >= 0.65) return 'adequate'
+  if (score > 0) return 'weak'
+  return 'missing'
+}
+
+function recordEvidenceGradeLabel(record: RecordResponse) {
+  const grade = recordEvidenceGrade(record)
+  const score = Number(record.evidenceScore)
+  const suffix = Number.isFinite(score) ? ` · ${Math.round(score * 100)}%` : ''
+  if (grade === 'strong') return `Strong evidence${suffix}`
+  if (grade === 'adequate') return `Adequate evidence${suffix}`
+  if (grade === 'weak') return `Weak evidence${suffix}`
+  if (grade === 'missing') return `Missing evidence${suffix}`
+  return ''
+}
+
+function recordEvidenceGradeShortLabel(record: RecordResponse) {
+  const grade = recordEvidenceGrade(record)
+  if (grade === 'strong') return 'Strong'
+  if (grade === 'adequate') return 'Adeq'
+  if (grade === 'weak') return 'Weak'
+  if (grade === 'missing') return 'Miss'
+  return ''
+}
+
+function recordEvidenceGradeBadgeClass(record: RecordResponse) {
+  const grade = recordEvidenceGrade(record)
+  if (grade === 'strong') return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-400/10 dark:text-emerald-200'
+  if (grade === 'adequate') return 'border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-400/30 dark:bg-teal-400/10 dark:text-teal-200'
+  if (grade === 'weak') return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-200'
+  return 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-200'
+}
+
 // Expose scroll methods for external control
 defineExpose({
   scrollToIndex: (index: number) => virtualizer.value.scrollToIndex(index),
@@ -145,12 +259,26 @@ defineExpose({
 </script>
 
 <template>
-  <div class="virtual-table-container database-record-table flex flex-col overflow-x-auto overflow-y-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950/85 dark:shadow-[0_10px_30px_rgba(2,8,23,0.35)]">
+  <div class="virtual-table-container database-record-table flex min-h-0 flex-1 flex-col overflow-x-auto overflow-y-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950/85 dark:shadow-[0_10px_30px_rgba(2,8,23,0.35)]">
     <!-- Fixed Header -->
     <div class="virtual-table-header min-w-[1264px] shrink-0 border-b border-slate-200 bg-[linear-gradient(180deg,#fcfeff_0%,#f7fafc_100%)] text-[0.68rem] font-black uppercase tracking-[0.18em] text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
       <div class="flex items-center">
         <div :class="COL_SELECT" class="shrink-0 px-3 py-3.5">
           <button
+            v-if="reviewQueueMode"
+            type="button"
+            class="inline-flex h-7 w-7 items-center justify-center rounded-md border text-slate-400 transition hover:border-[#0f7c82] hover:bg-[#eefafa] hover:text-[#0f7c82] disabled:cursor-not-allowed disabled:opacity-40"
+            :class="allCandidatesSelected || someCandidatesSelected ? 'border-[#0f7c82] bg-[#eefafa] text-[#0f7c82]' : 'border-slate-300 bg-white'"
+            aria-label="Select all candidates on this page"
+            :aria-pressed="allCandidatesSelected"
+            :disabled="pageCandidateKeys.length === 0"
+            @click="emit('toggle-select-all-candidates', !allCandidatesSelected)"
+          >
+            <Check v-if="allCandidatesSelected" class="h-4 w-4 stroke-[3]" />
+            <span v-else-if="someCandidatesSelected" class="h-1.5 w-1.5 rounded-full bg-current" />
+          </button>
+          <button
+            v-else
             type="button"
             class="inline-flex h-7 w-7 items-center justify-center rounded-md border text-slate-400 transition hover:border-[#0f7c82] hover:bg-[#eefafa] hover:text-[#0f7c82]"
             :class="allPageSelected || somePageSelected ? 'border-[#0f7c82] bg-[#eefafa] text-[#0f7c82]' : 'border-slate-300 bg-white'"
@@ -162,11 +290,43 @@ defineExpose({
             <span v-else-if="somePageSelected" class="h-1.5 w-1.5 rounded-full bg-current" />
           </button>
         </div>
-        <div :class="COL_ID" class="shrink-0 px-3 py-3.5 text-center"><span class="column-ruler-label justify-center"><span class="column-ruler-mark" />#</span></div>
+        <div :class="COL_ID" class="shrink-0 px-3 py-3.5 text-center">
+          <button
+            v-if="sortable"
+            type="button"
+            class="column-sort-btn justify-center"
+            :class="sortStateFor('id') !== 'none' ? 'column-sort-btn--active' : ''"
+            :aria-sort="sortStateFor('id') === 'none' ? 'none' : (sortStateFor('id') === 'asc' ? 'ascending' : 'descending')"
+            :title="sortStateFor('id') === 'asc' ? 'Sorted by ID ascending — click for descending' : sortStateFor('id') === 'desc' ? 'Sorted by ID descending — click to clear' : 'Sort by ID'"
+            @click="emit('sort', 'id')"
+          >
+            <span class="column-ruler-label justify-center"><span class="column-ruler-mark" />#</span>
+            <ArrowUp v-if="sortStateFor('id') === 'asc'" class="h-3 w-3" />
+            <ArrowDown v-else-if="sortStateFor('id') === 'desc'" class="h-3 w-3" />
+            <ChevronsUpDown v-else class="h-3 w-3 opacity-40" />
+          </button>
+          <span v-else class="column-ruler-label justify-center"><span class="column-ruler-mark" />#</span>
+        </div>
         <div :class="COL_IONIC" class="shrink-0 px-4 py-3.5"><span class="column-ruler-label"><span class="column-ruler-mark" />IONIC LIQUID</span></div>
         <div :class="COL_TRIBOPAIR" class="shrink-0 px-4 py-3.5"><span class="column-ruler-label"><span class="column-ruler-mark" />TRIBOPAIR</span></div>
         <div :class="COL_CONDITIONS" class="shrink-0 px-3 py-3.5"><span class="column-ruler-label"><span class="column-ruler-mark" />CONDITIONS</span></div>
-        <div :class="COL_COF" class="shrink-0 px-4 py-3.5 text-[#0f7c82]"><span class="column-ruler-label column-ruler-label--metric"><span class="column-ruler-mark" />COF</span></div>
+        <div :class="COL_COF" class="shrink-0 px-4 py-3.5 text-[#0f7c82]">
+          <button
+            v-if="sortable"
+            type="button"
+            class="column-sort-btn"
+            :class="sortStateFor('cof') !== 'none' ? 'column-sort-btn--active' : ''"
+            :aria-sort="sortStateFor('cof') === 'none' ? 'none' : (sortStateFor('cof') === 'asc' ? 'ascending' : 'descending')"
+            :title="sortStateFor('cof') === 'asc' ? 'Sorted by COF ascending — click for descending' : sortStateFor('cof') === 'desc' ? 'Sorted by COF descending — click to clear' : 'Sort by COF'"
+            @click="emit('sort', 'cof')"
+          >
+            <span class="column-ruler-label column-ruler-label--metric"><span class="column-ruler-mark" />COF</span>
+            <ArrowUp v-if="sortStateFor('cof') === 'asc'" class="h-3 w-3" />
+            <ArrowDown v-else-if="sortStateFor('cof') === 'desc'" class="h-3 w-3" />
+            <ChevronsUpDown v-else class="h-3 w-3 opacity-40" />
+          </button>
+          <span v-else class="column-ruler-label column-ruler-label--metric"><span class="column-ruler-mark" />COF</span>
+        </div>
         <div :class="COL_LITERATURE" class="shrink-0 px-4 py-3.5"><span class="column-ruler-label"><span class="column-ruler-mark" />LITERATURE</span></div>
       </div>
     </div>
@@ -175,7 +335,6 @@ defineExpose({
     <div
       ref="parentRef"
       class="virtual-table-body min-w-[1264px] flex-1 overflow-y-auto overflow-x-hidden"
-      style="height: calc(100vh - 420px); min-height: 300px; max-height: 600px;"
     >
       <!-- Empty State -->
       <div v-if="!loading && records.length === 0" class="flex h-full items-center justify-center py-16">
@@ -253,8 +412,22 @@ defineExpose({
               }"
             >
               <!-- Selection Column -->
-              <div :class="COL_SELECT" class="shrink-0 self-center px-3 py-4">
+              <div :class="[COL_SELECT, cellPadY]" class="shrink-0 self-center px-3">
                 <button
+                  v-if="reviewQueueMode && isCandidateRecord(record)"
+                  type="button"
+                  class="inline-flex h-7 w-7 items-center justify-center rounded-md border transition hover:border-[#0f7c82] hover:bg-[#eefafa] hover:text-[#0f7c82]"
+                  :class="isCandidateSelected(record) ? 'border-[#0f7c82] bg-[#0f7c82] text-white shadow-sm' : 'border-slate-300 bg-white text-transparent'"
+                  aria-label="Select candidate"
+                  :aria-pressed="isCandidateSelected(record)"
+                  title="Select candidate for bulk review"
+                  @click.stop="emit('toggle-select-candidate', candidateKey(record))"
+                  @dblclick.stop
+                >
+                  <Check class="h-4 w-4 stroke-[3]" />
+                </button>
+                <button
+                  v-else
                   type="button"
                   class="inline-flex h-7 w-7 items-center justify-center rounded-md border transition hover:border-[#0f7c82] hover:bg-[#eefafa] hover:text-[#0f7c82]"
                   :class="selectedIds.has(Number(record.id)) ? 'border-[#0f7c82] bg-[#0f7c82] text-white shadow-sm' : 'border-slate-300 bg-white text-transparent'"
@@ -270,24 +443,55 @@ defineExpose({
               </div>
 
               <!-- ID Column -->
-              <div :class="COL_ID" class="shrink-0 self-center px-2 py-4 text-center">
+              <div :class="[COL_ID, cellPadY]" class="shrink-0 self-center px-2 text-center">
                 <span
                   class="inline-flex h-6 min-w-9 items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-1.5 text-[12px] font-bold leading-none text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400"
                   :title="recordDisplayId(record)"
                 >
                   {{ compactRecordDisplayId(record) }}
                 </span>
-                <span
+                <button
                   v-if="isCandidateRecord(record)"
-                  class="mt-1 inline-flex max-w-full items-center justify-center rounded border border-amber-200 bg-amber-50 px-1 text-[9px] font-black uppercase leading-4 text-amber-700"
-                  title="Candidate row, not yet promoted to library record"
+                  type="button"
+                  class="mt-2 inline-flex max-w-full items-center justify-center rounded-md border border-sky-200 bg-sky-50 px-1.5 py-1 text-[9px] font-black uppercase leading-4 text-sky-700 transition hover:border-sky-300 hover:bg-white"
+                  title="Review candidate"
+                  aria-label="Review candidate"
+                  @click.stop="reviewCandidateRecord?.(record)"
+                  @dblclick.stop
                 >
-                  Candidate
+                  Review
+                </button>
+                <button
+                  v-else
+                  type="button"
+                  class="mt-2 inline-flex max-w-full items-center justify-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 py-1 text-[9px] font-black uppercase leading-4 text-slate-500 transition hover:border-[#0f7c82] hover:bg-[#eefafa] hover:text-[#0f7c82]"
+                  title="Correct record fields"
+                  aria-label="Edit record"
+                  @click.stop="emit('edit-record', record)"
+                  @dblclick.stop
+                >
+                  <Pencil class="h-2.5 w-2.5" /> Edit
+                </button>
+                <span
+                  v-if="reviewQueueMode && isCandidateRecord(record)"
+                  class="mt-1.5 inline-flex max-w-full items-center justify-center truncate rounded-md border px-1.5 py-0.5 text-[9px] font-black leading-4"
+                  :class="candidateEvidenceQualityBadgeClass(record)"
+                  :title="candidateEvidenceQualityLabel(candidateEvidenceQuality(record))"
+                >
+                  {{ candidateEvidenceQualityShortLabel(record) }}
+                </span>
+                <span
+                  v-else-if="recordEvidenceGrade(record)"
+                  class="mt-1.5 inline-flex max-w-full items-center justify-center truncate rounded-md border px-1.5 py-0.5 text-[9px] font-black leading-4"
+                  :class="recordEvidenceGradeBadgeClass(record)"
+                  :title="recordEvidenceGradeLabel(record)"
+                >
+                  {{ recordEvidenceGradeShortLabel(record) }}
                 </span>
               </div>
 
               <!-- Ionic Liquid Column -->
-              <div :class="COL_IONIC" class="shrink-0 px-4 py-4">
+              <div :class="[COL_IONIC, cellPadY]" class="shrink-0 px-4">
                 <div
                   class="workspace-card cursor-pointer rounded-[9px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f7c82]/35"
                   tabindex="0"
@@ -298,6 +502,7 @@ defineExpose({
                 >
                   <LubricantRecipeCell
                     :record="record"
+                    :compact="isCompact"
                     :active="structurePreviewOpen && structurePreviewRowId === record.id"
                     @open-structure="openStructurePreview"
                     @open-evidence="(fieldKey, event) => openEvidenceModal(record, 'ionic-liquid', event, fieldKey)"
@@ -306,7 +511,7 @@ defineExpose({
               </div>
 
               <!-- Tribopair Column -->
-              <div :class="COL_TRIBOPAIR" class="shrink-0 px-4 py-3">
+              <div :class="[COL_TRIBOPAIR, cellPadYTight]" class="shrink-0 px-4">
                 <div
                   class="workspace-card cursor-pointer rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f7c82]/35"
                   tabindex="0"
@@ -317,13 +522,14 @@ defineExpose({
                 >
                   <TribopairCapsule
                     :record="record"
+                    :compact="isCompact"
                     @open-evidence="(fieldKey, event) => openEvidenceModal(record, 'tribopair', event, fieldKey)"
                   />
                 </div>
               </div>
 
               <!-- Conditions Column -->
-              <div :class="COL_CONDITIONS" class="flex shrink-0 justify-center px-3 py-3">
+              <div :class="[COL_CONDITIONS, cellPadYTight]" class="flex shrink-0 justify-center px-3">
                 <div
                   class="workspace-card block w-fit max-w-[296px] cursor-pointer rounded-[9px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f7c82]/35"
                   tabindex="0"
@@ -334,13 +540,14 @@ defineExpose({
                 >
                   <ConditionMicrobar
                     :record="record"
+                    :compact="isCompact"
                     @open-evidence="(fieldKey, event) => openEvidenceModal(record, 'conditions', event, fieldKey)"
                   />
                 </div>
               </div>
 
               <!-- COF Column -->
-              <div :class="COL_COF" class="shrink-0 self-center px-4 py-4">
+              <div :class="[COL_COF, cellPadY]" class="shrink-0 self-center px-4">
                 <div
                   class="workspace-card cursor-pointer rounded-lg px-1 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f7c82]/35"
                   tabindex="0"
@@ -354,7 +561,7 @@ defineExpose({
               </div>
 
               <!-- Literature Column -->
-              <div :class="COL_LITERATURE" class="shrink-0 self-center px-4 py-3">
+              <div :class="[COL_LITERATURE, cellPadYTight]" class="shrink-0 self-center px-4">
                 <button
                   type="button"
                   class="group flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left transition hover:border-[#0f7c82]/35 hover:bg-[#f3fbfc] dark:border-slate-700 dark:bg-slate-950 dark:hover:border-[#0f7c82]/40 dark:hover:bg-slate-900"
@@ -396,6 +603,29 @@ defineExpose({
 
 .database-record-table .virtual-table-header {
   font-size: clamp(0.72rem, 0.68rem + 0.16vw, 0.84rem);
+}
+
+.column-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  transition: color 0.15s ease, opacity 0.15s ease;
+}
+
+.column-sort-btn:hover {
+  color: #0f7c82;
+}
+
+.column-sort-btn--active {
+  color: #0f7c82;
 }
 
 .virtual-table-body {

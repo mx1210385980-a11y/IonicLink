@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -9,12 +10,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from database import get_db_session
-from models.db_models import User
+from models.db_models import ResearchGroup, User
 from security import (
     ALL_ROLES,
     AuthPrincipal,
+    DEFAULT_GROUP_NAME,
+    DEFAULT_GROUP_SLUG,
+    DEFAULT_PUBLIC_DISPLAY_NAME,
+    DEFAULT_PUBLIC_USERNAME,
     ROLE_GROUP_ADMIN,
     ROLE_PRINCIPAL_INVESTIGATOR,
+    ROLE_RESEARCHER,
     ROLE_WORKSPACE_RESEARCHER,
     create_access_token,
     ensure_personal_workspace,
@@ -122,6 +128,59 @@ async def login(payload: LoginRequest, request: Request, db: AsyncSession = Depe
         action_type="login",
         request=request,
     )
+
+    return {
+        "accessToken": create_access_token(user),
+        "tokenType": "bearer",
+        "user": _user_payload(principal, workspaces),
+    }
+
+
+@router.post("/public-session")
+async def public_session(db: AsyncSession = Depends(get_db_session)):
+    group = (
+        await db.execute(select(ResearchGroup).where(ResearchGroup.slug == DEFAULT_GROUP_SLUG))
+    ).scalar_one_or_none()
+    if not group:
+        group = ResearchGroup(name=DEFAULT_GROUP_NAME, slug=DEFAULT_GROUP_SLUG)
+        db.add(group)
+        await db.flush()
+
+    stmt = (
+        select(User)
+        .options(selectinload(User.group), selectinload(User.workspaces))
+        .where(User.username == DEFAULT_PUBLIC_USERNAME)
+    )
+    user = (await db.execute(stmt)).scalar_one_or_none()
+    if not user:
+        user = User(
+            username=DEFAULT_PUBLIC_USERNAME,
+            display_name=DEFAULT_PUBLIC_DISPLAY_NAME,
+            password_hash=hash_password(secrets.token_urlsafe(32)),
+            role=ROLE_RESEARCHER,
+            is_active=True,
+            group_id=group.id,
+        )
+        db.add(user)
+        await db.flush()
+    else:
+        user.display_name = DEFAULT_PUBLIC_DISPLAY_NAME
+        user.role = ROLE_RESEARCHER
+        user.is_active = True
+        user.group_id = group.id
+
+    workspace = await ensure_personal_workspace(
+        db,
+        user,
+        name="Public Extraction Workspace",
+        description="Shared workspace for no-login extraction sessions",
+    )
+    await db.commit()
+
+    await db.refresh(user, attribute_names=["group", "workspaces"])
+    personal_workspace = next((item for item in user.workspaces if item.is_personal), workspace)
+    principal = AuthPrincipal(user=user, group=user.group, personal_workspace=personal_workspace)
+    workspaces = await list_accessible_workspaces(db, principal)
 
     return {
         "accessToken": create_access_token(user),

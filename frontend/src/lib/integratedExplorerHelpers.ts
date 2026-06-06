@@ -1,4 +1,4 @@
-import { formatTribopairLabel, type EvidenceResult, type LubricantComponent, type RecordResponse, type RecordLiteratureDTO } from '@/lib/api'
+import { formatTribopairLabel, parseLegacyTribopairLabel, type EvidenceResult, type LubricantComponent, type RecordResponse, type RecordLiteratureDTO } from '@/lib/api'
 import { canonicalExperimentScaleValue } from '@/lib/experimentScale'
 import { normalizePotentialDisplayText } from '@/lib/potential'
 
@@ -713,15 +713,15 @@ export type TribopairExtras = {
 
 export function tribopairExtras(record: RecordResponse): TribopairExtras {
   const pieces: string[] = []
-  const geometry = String(record.probeGeometry || '').trim()
-  const radius = String(record.probeRadius || '').trim()
-  const probeRoughness = String(record.probeRoughness || '').trim()
+  const geometry = recordTextField(record, 'probeGeometry', 'probe_geometry')
+  const radius = recordTextField(record, 'probeRadius', 'probe_radius')
+  const probeRoughness = recordTextField(record, 'probeRoughness', 'probe_roughness')
   if (geometry) pieces.push(geometry)
   if (radius) pieces.push(radius)
   if (probeRoughness) pieces.push(probeRoughness)
   return {
     probeDetails: pieces.join(' · '),
-    filmThickness: String(record.filmThickness || '').trim(),
+    filmThickness: recordTextField(record, 'filmThickness', 'film_thickness'),
   }
 }
 
@@ -734,11 +734,15 @@ function normalizedContactKey(value: string | null | undefined): string {
     .replace(/^_+|_+$/g, '')
 }
 
+function recordTextField(record: RecordResponse, camelKey: keyof RecordResponse, snakeKey?: string): string {
+  return String((record as any)[camelKey] ?? (snakeKey ? (record as any)[snakeKey] : '') ?? '').trim()
+}
+
 function contactSystemText(record: RecordResponse): string {
   const system = (record.tribologicalSystem || {}) as NonNullable<RecordResponse['tribologicalSystem']>
   const profile = (record.experimentProfile || {}) as NonNullable<RecordResponse['experimentProfile']>
   return [
-    record.experimentMethod,
+    recordTextField(record, 'experimentMethod', 'experiment_method'),
     profile.method,
     profile.contact_geometry,
     profile.contactGeometry,
@@ -751,12 +755,12 @@ function contactSystemText(record: RecordResponse): string {
     system.trainingView,
     system.raw_text,
     system.rawText,
-    record.trainingView,
-    record.measurementType,
-    record.regime,
-    record.probeGeometry,
-    record.loadValue,
-    record.loadRaw,
+    recordTextField(record, 'trainingView', 'training_view'),
+    recordTextField(record, 'measurementType', 'measurement_type'),
+    recordTextField(record, 'regime'),
+    recordTextField(record, 'probeGeometry', 'probe_geometry'),
+    recordTextField(record, 'loadValue', 'load_value'),
+    recordTextField(record, 'loadRaw', 'load_raw'),
   ]
     .map((value) => String(value || '').trim())
     .filter(Boolean)
@@ -767,10 +771,10 @@ function contactScale(record: RecordResponse): ContactDisplayMode {
   const system = (record.tribologicalSystem || {}) as NonNullable<RecordResponse['tribologicalSystem']>
   const profile = (record.experimentProfile || {}) as NonNullable<RecordResponse['experimentProfile']>
   const candidates = [
-    record.experimentScale,
+    recordTextField(record, 'experimentScale', 'experiment_scale'),
     profile.scale,
     system.scale,
-    record.trainingView,
+    recordTextField(record, 'trainingView', 'training_view'),
     profile.training_view,
     profile.trainingView,
     system.training_view,
@@ -797,7 +801,7 @@ function macroContactPattern(record: RecordResponse): ContactDisplayPattern {
   if (/\bpin_on_disk\b|\bpin_disk\b/.test(text)) return 'pin_disk'
   if (/\bblock_on_ring\b|\bblock_ring\b/.test(text)) return 'block_ring'
   if (/\bball_on_disk\b|\bball_disk\b|\bball_on_flat\b/.test(text)) return 'ball_disk'
-  const geometry = normalizedContactKey(record.probeGeometry)
+  const geometry = normalizedContactKey(recordTextField(record, 'probeGeometry', 'probe_geometry'))
   if (geometry.includes('pin')) return 'pin_disk'
   if (geometry.includes('ball') || geometry.includes('sphere')) return 'ball_disk'
   return 'counterface_specimen'
@@ -876,18 +880,24 @@ export function contactDisplayModel(record: RecordResponse): ContactDisplayModel
   const mode = contactScale(record)
   const parts = tribopairParts(record)
   const extras = tribopairExtras(record)
+  const probeGeometry = recordTextField(record, 'probeGeometry', 'probe_geometry')
+  const probeRadius = recordTextField(record, 'probeRadius', 'probe_radius')
+  const probeRoughness = recordTextField(record, 'probeRoughness', 'probe_roughness')
+  const substrateRoughness = recordTextField(record, 'substrateRoughness', 'substrate_roughness')
+  const surfaceRoughness = recordTextField(record, 'surfaceRoughness', 'surface_roughness')
+  const filmThickness = recordTextField(record, 'filmThickness', 'film_thickness')
 
   if (mode === 'macro') {
     const pattern = macroContactPattern(record)
     const roles = macroRoles(pattern)
-    const primaryLabel = String(record.probeMaterial || '').trim() || `${roles.primary} N/A`
-    const secondaryLabel = String(record.substrateMaterial || record.materialName || '').trim() || `${roles.secondary} N/A`
+    const primaryLabel = parts.probe !== 'Probe N/A' ? parts.probe : `${roles.primary} N/A`
+    const secondaryLabel = parts.substrate !== 'Substrate N/A' ? parts.substrate : `${roles.secondary} N/A`
     const detailBadges = uniqueDisplayItems([
-      record.probeRadius || '',
-      contactRoughnessDetail('Counterface', record.probeRoughness),
+      probeRadius,
+      contactRoughnessDetail('Counterface', probeRoughness),
       parts.coating ? `Coat ${parts.coating}` : '',
-      contactRoughnessDetail('Specimen', record.substrateRoughness, record.surfaceRoughness),
-      record.filmThickness ? `Film ${record.filmThickness}` : '',
+      contactRoughnessDetail('Specimen', substrateRoughness, surfaceRoughness),
+      filmThickness ? `Film ${filmThickness}` : '',
     ])
     return {
       mode: 'macro',
@@ -908,11 +918,11 @@ export function contactDisplayModel(record: RecordResponse): ContactDisplayModel
 
   if (mode === 'nano') {
     const detailBadges = uniqueDisplayItems([
-      record.probeGeometry || '',
-      record.probeRadius || '',
-      contactRoughnessDetail('Probe', record.probeRoughness),
+      probeGeometry,
+      probeRadius,
+      contactRoughnessDetail('Probe', probeRoughness),
       parts.coating ? `Coat ${parts.coating}` : '',
-      contactRoughnessDetail('Substrate', record.substrateRoughness, record.surfaceRoughness),
+      contactRoughnessDetail('Substrate', substrateRoughness, surfaceRoughness),
       extras.filmThickness ? `Film ${extras.filmThickness}` : '',
     ])
     return {
@@ -932,13 +942,13 @@ export function contactDisplayModel(record: RecordResponse): ContactDisplayModel
     }
   }
 
-  const primaryLabel = String(record.probeMaterial || '').trim() || 'Counterface N/A'
-  const secondaryLabel = String(record.substrateMaterial || record.materialName || '').trim() || 'Specimen N/A'
+  const primaryLabel = parts.probe !== 'Probe N/A' ? parts.probe : 'Counterface N/A'
+  const secondaryLabel = parts.substrate !== 'Substrate N/A' ? parts.substrate : 'Specimen N/A'
   const detailBadges = uniqueDisplayItems([
-    record.probeGeometry || '',
-    record.probeRadius || '',
+    probeGeometry,
+    probeRadius,
     parts.coating ? `Coat ${parts.coating}` : '',
-    record.filmThickness ? `Film ${record.filmThickness}` : '',
+    filmThickness ? `Film ${filmThickness}` : '',
   ])
   return {
     mode: 'unknown',
@@ -974,19 +984,23 @@ function normalizeOptionalTagValue(value: string | null | undefined): string {
 }
 
 export function tribopairParts(record: RecordResponse): { probe: string, substrate: string, coating: string } {
+  const probe = recordTextField(record, 'probeMaterial', 'probe_material')
+  const substrate = recordTextField(record, 'substrateMaterial', 'substrate_material')
+  const material = recordTextField(record, 'materialName', 'material_name')
+  const legacyPair = !probe && !substrate ? parseLegacyTribopairLabel(material) : null
   return {
-    probe: String(record.probeMaterial || '').trim() || 'Probe N/A',
-    substrate: String(record.substrateMaterial || record.materialName || '').trim() || 'Substrate N/A',
-    coating: normalizeOptionalTagValue(record.substrateCoating),
+    probe: probe || legacyPair?.probe || 'Probe N/A',
+    substrate: substrate || legacyPair?.substrate || material || 'Substrate N/A',
+    coating: normalizeOptionalTagValue(recordTextField(record, 'substrateCoating', 'substrate_coating')),
   }
 }
 
 export function tribopairDisplay(record: RecordResponse): string {
   return formatTribopairLabel({
-    probeMaterial: record.probeMaterial,
-    substrateMaterial: record.substrateMaterial,
-    substrateCoating: record.substrateCoating,
-    materialName: record.materialName,
+    probeMaterial: recordTextField(record, 'probeMaterial', 'probe_material'),
+    substrateMaterial: recordTextField(record, 'substrateMaterial', 'substrate_material'),
+    substrateCoating: recordTextField(record, 'substrateCoating', 'substrate_coating'),
+    materialName: recordTextField(record, 'materialName', 'material_name'),
   })
 }
 
@@ -1078,9 +1092,9 @@ const ANION_STRUCTURE_SMILES: Record<string, string> = {
   tfsi: 'O=S(=O)([N-]S(=O)(=O)C(F)(F)F)C(F)(F)F',
   bob: '[B-]1(OC(=O)C(=O)O1)OC(=O)C(=O)O',
   bmb: '[B-]1(OC(=O)CC(=O)O1)OC(=O)CC(=O)O',
-  a4bmb: '[B-]1(OC(=O)CC(=O)O1)OC(=O)CC(=O)O',
-  a8bmb: '[B-]1(OC(=O)CC(=O)O1)OC(=O)CC(=O)O',
-  a12bmb: '[B-]1(OC(=O)CC(=O)O1)OC(=O)CC(=O)O',
+  a4bmb: '[B-]12(OC(=O)C(c3ccc(CCCC)cc3)O1)OC(=O)C(c4ccc(CCCC)cc4)O2',
+  a8bmb: '[B-]12(OC(=O)C(c3ccc(CCCCCCCC)cc3)O1)OC(=O)C(c4ccc(CCCCCCCC)cc4)O2',
+  a12bmb: '[B-]12(OC(=O)C(c3ccc(CCCCCCCCCCCC)cc3)O1)OC(=O)C(c4ccc(CCCCCCCCCCCC)cc4)O2',
   cl: '[Cl-]',
   br: '[Br-]',
   i: '[I-]',
@@ -1737,4 +1751,68 @@ export function formatIonicLiquidHtml(input: string | null | undefined): string 
     .join('')
 
   return `${mainHtml}${ratioBadge}`
+}
+
+// Review-queue triage helpers ───────────────────────────────────────────────
+// A candidate is "weak" when it was admitted for review despite missing/low-
+// confidence signals (see backend weak_candidate_service). Reviewers triage
+// these first, so the queue exposes a strong/weak split plus missing-field chips.
+export type CandidateTriageTier = 'weak' | 'strong'
+export type CandidateEvidenceQuality = 'exact' | 'page_only' | 'text_only' | 'weak'
+
+const MISSING_FIELD_LABELS: Record<string, string> = {
+  ionic_liquid: 'Ionic liquid',
+  material_name: 'Material',
+  cof: 'COF',
+  normal_load: 'Load',
+  speed: 'Speed',
+}
+
+export function missingFieldLabel(field: string): string {
+  const key = String(field || '').trim().toLowerCase()
+  if (!key) return ''
+  if (MISSING_FIELD_LABELS[key]) return MISSING_FIELD_LABELS[key]
+  return key.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+export function candidateMissingFields(record: RecordResponse): string[] {
+  const raw = (record as { missingFields?: unknown }).missingFields
+  if (!Array.isArray(raw)) return []
+  return raw.map((field) => String(field ?? '').trim().toLowerCase()).filter(Boolean)
+}
+
+export function candidateTriageTier(record: RecordResponse): CandidateTriageTier {
+  const origin = String((record as { recordOrigin?: unknown }).recordOrigin ?? '').trim().toLowerCase()
+  const tier = String((record as { confidenceTier?: unknown }).confidenceTier ?? '').trim().toLowerCase()
+  if (origin === 'weak_candidate' || tier === 'low') return 'weak'
+  return 'strong'
+}
+
+export function candidateEvidenceQuality(record: RecordResponse): CandidateEvidenceQuality {
+  const hasText = hasEvidenceText(record.evidence)
+  const hasPage = Boolean(record.evidencePage || record.sourcePage)
+  const hasBbox = hasEvidenceBBox(record.evidenceBbox)
+  if (hasText && hasPage && hasBbox) return 'exact'
+  if (hasText && hasPage) return 'page_only'
+  if (hasText) return 'text_only'
+  return 'weak'
+}
+
+export function candidateEvidenceQualityLabel(quality: CandidateEvidenceQuality): string {
+  if (quality === 'exact') return 'Exact evidence'
+  if (quality === 'page_only') return 'Page-only evidence'
+  if (quality === 'text_only') return 'Text-only evidence'
+  return 'Weak evidence'
+}
+
+// Whole days elapsed since the candidate was extracted, or null when the
+// payload carries no usable extractedAt timestamp. Drives the staleness triage.
+export function candidateAgeDays(record: RecordResponse): number | null {
+  const raw = (record as { extractedAt?: unknown }).extractedAt
+  if (!raw) return null
+  const timestamp = Date.parse(String(raw))
+  if (Number.isNaN(timestamp)) return null
+  const elapsedMs = Date.now() - timestamp
+  if (elapsedMs <= 0) return 0
+  return Math.floor(elapsedMs / 86_400_000)
 }

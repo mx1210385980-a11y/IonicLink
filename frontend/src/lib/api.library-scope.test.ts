@@ -79,4 +79,27 @@ describe('library API scope', () => {
     expect(headerValue(capturedHeaders, 'X-Scope-Type')).toBe('group_library')
     expect(headerValue(capturedHeaders, 'X-Workspace-Id')).toBeUndefined()
   })
+
+  it('can request all admin-visible literature without changing the active workspace header', async () => {
+    let capturedParams: any = null
+    let capturedHeaders: any = null
+    api.defaults.adapter = async (config) => {
+      capturedParams = config.params
+      capturedHeaders = config.headers
+      return {
+        data: [],
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+
+    await listLiterature(0, 1000, { scope: 'all_visible' })
+
+    expect(capturedParams.scope_mode).toBe('all_visible')
+    expect(headerValue(capturedHeaders, 'Authorization')).toBe('Bearer test-token')
+    expect(headerValue(capturedHeaders, 'X-Scope-Type')).toBe('workspace')
+    expect(headerValue(capturedHeaders, 'X-Workspace-Id')).toBe('1')
+  })
 })

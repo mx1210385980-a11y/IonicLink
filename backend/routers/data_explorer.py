@@ -25,6 +25,10 @@ from security import (
     scope_filters,
 )
 from services.activity_logging_service import log_activity
+from services.record_correction_service import (
+    RecordCorrection,
+    apply_tribology_record_correction,
+)
 from services.score_service import calculate_confidence, calculate_confidence_details
 from services.agent_runtime_service import get_agent_runtime
 from services.file_service import (
@@ -142,7 +146,13 @@ class SearchFilter(BaseModel):
     query: Optional[str] = Field(None, alias="q", description="Broad text search over DOI, title, ions, surfaces, and lubricants")
     doi: Optional[str] = Field(None, description="Literature DOI")
     file_id: Optional[str] = Field(None, alias="fileId", description="File ID to filter by a specific uploaded file")
-    
+    sort_by: Optional[Literal["id", "cof", "load", "confidence", "date"]] = Field(
+        None, alias="sortBy", description="Column to sort by; omit for default review ordering"
+    )
+    sort_dir: Optional[Literal["asc", "desc"]] = Field(
+        None, alias="sortDir", description="Sort direction (defaults to asc when sortBy is set)"
+    )
+
     class Config:
         populate_by_name = True
 
@@ -230,10 +240,14 @@ class RecordResponse(BaseModel):
     field_evidence_json: dict = Field(default_factory=dict, alias="fieldEvidenceJson")
     
     confidence: float
+    evidence_score: Optional[float] = Field(None, alias="evidenceScore")
+    evidence_grade: Optional[str] = Field(None, alias="evidenceGrade")
+    evidence_summary: dict = Field(default_factory=dict, alias="evidenceSummary")
     confidence_details: dict = Field(default_factory=dict, alias="confidenceDetails")
     review_status: Optional[str] = Field(None, alias="reviewStatus")
     record_origin: Optional[str] = Field(None, alias="recordOrigin")
     assembly_notes: Optional[str] = Field(None, alias="assemblyNotes")
+    extracted_at: Optional[str] = Field(None, alias="extractedAt")
     literature_id: int = Field(..., alias="literatureId")
     literature: Optional[LiteratureDTO] = None
 
@@ -373,6 +387,22 @@ class RelationshipGraphDrilldownResponse(BaseModel):
     limit: int
     items: List[RecordResponse]
     literature_summaries: List[RelationshipGraphLiteratureSummary] = Field(default_factory=list, alias="literatureSummaries")
+
+    class Config:
+        populate_by_name = True
+
+
+class RecordCorrectionPayload(BaseModel):
+    """A reviewer's curated correction to a tribology record.
+
+    Mirrors what the ``scripts/data-fixes/*.py`` scripts did with raw SQL: a flat map of
+    corrected column values, optional curated per-field evidence, and duplicate candidate
+    ids to link. Field validation against the correctable allowlist happens in the service.
+    """
+
+    fields: dict[str, Any] = Field(default_factory=dict)
+    field_evidence_patch: Optional[dict[str, Any]] = Field(None, alias="fieldEvidencePatch")
+    link_candidate_ids: List[int] = Field(default_factory=list, alias="linkCandidateIds")
 
     class Config:
         populate_by_name = True
@@ -761,6 +791,7 @@ def _record_to_response(r: TribologyData) -> RecordResponse:
         "confidence": runtime_confidence,
         "confidence_details": runtime_details,
         "review_status": getattr(r, "review_status", None),
+        "extracted_at": r.extracted_at.isoformat() if getattr(r, "extracted_at", None) else None,
         "literature_id": r.literature_id,
         "literature": lit_dto.model_dump() if lit_dto else None,
     }
@@ -888,11 +919,46 @@ def _diffusion_library_matches_focus(
 
 # --- API Endpoints ---
 
+def _scope_filter_values_for_mode(
+    *,
+    scope_mode: Literal["active", "all_visible"],
+    principal: AuthPrincipal,
+    scope: RequestScope,
+) -> dict[str, Any]:
+    if scope_mode == "all_visible":
+        return {
+            "group_id": principal.group.id,
+            "scope_type": "all_visible",
+            "scope_key": "all_visible",
+            "workspace_id": None,
+        }
+    return scope_filters(scope)
+
+
+def _trusted_final_record_condition(model: Any):
+    page_conditions = []
+    if hasattr(model, "evidence_page"):
+        page_conditions.append(model.evidence_page.is_not(None))
+    if hasattr(model, "source_page"):
+        page_conditions.append(model.source_page.is_not(None))
+    page_locator_condition = or_(*page_conditions) if page_conditions else False
+    return and_(
+        or_(
+            model.review_status.is_(None),
+            func.trim(model.review_status) == "",
+            func.lower(model.review_status) == "approved",
+        ),
+        func.length(func.trim(model.evidence)) > 0,
+        page_locator_condition,
+    )
+
+
 @router.post("/search", response_model=PaginatedRecordResponse, response_model_by_alias=True)
 async def search_records(
     filter_params: SearchFilter,
     skip: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(20, ge=1, le=200, description="Max records to return"),
+    scope_mode: Literal["active", "all_visible"] = Query("active", alias="scope_mode"),
     session: AsyncSession = Depends(get_db_session),
     principal: AuthPrincipal = Depends(get_current_principal),
     scope: RequestScope = Depends(get_request_scope),
@@ -920,7 +986,11 @@ async def search_records(
             filter_params=filter_params,
             skip=skip,
             limit=limit,
-            scope_filter_values=scope_filters(scope),
+            scope_filter_values=_scope_filter_values_for_mode(
+                scope_mode=scope_mode,
+                principal=principal,
+                scope=scope,
+            ),
         )
         return PaginatedRecordResponse(
             total=result.get("total", 0),
@@ -942,19 +1012,21 @@ async def list_diffusion_library(
     entity_type: Literal["record", "candidate"] | None = Query(None, description="Limit focus to a final record or review candidate"),
     skip: int = Query(0, ge=0, description="Number of rows to skip"),
     limit: int = Query(500, ge=1, le=1000, description="Max rows to return"),
+    scope_mode: Literal["active", "all_visible"] = Query("active", alias="scope_mode"),
     session: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
     scope: RequestScope = Depends(get_request_scope),
 ):
     """Return a unified diffusion library across final records and unpromoted review candidates."""
     try:
-        filters = scope_filters(scope)
+        filters = _scope_filter_values_for_mode(scope_mode=scope_mode, principal=principal, scope=scope)
         scope_conditions = literature_scope_conditions(filters)
 
         record_result = await session.execute(
             select(DiffusionRecord)
             .options(selectinload(DiffusionRecord.literature))
             .join(DiffusionRecord.literature)
-            .where(*scope_conditions)
+            .where(*scope_conditions, _trusted_final_record_condition(DiffusionRecord))
             .order_by(desc(DiffusionRecord.extracted_at), desc(DiffusionRecord.id))
         )
         final_records = list(record_result.scalars().all())
@@ -963,7 +1035,14 @@ async def list_diffusion_library(
             select(DiffusionCandidate)
             .options(selectinload(DiffusionCandidate.literature), selectinload(DiffusionCandidate.promoted_record))
             .join(DiffusionCandidate.literature)
-            .where(*scope_conditions, DiffusionCandidate.promoted_record_id.is_(None))
+            .where(
+                *scope_conditions,
+                DiffusionCandidate.promoted_record_id.is_(None),
+                or_(
+                    DiffusionCandidate.review_status.is_(None),
+                    func.lower(DiffusionCandidate.review_status) != "rejected",
+                ),
+            )
             .order_by(desc(DiffusionCandidate.extracted_at), desc(DiffusionCandidate.id))
         )
         candidate_records = list(candidate_result.scalars().all())
@@ -1012,14 +1091,23 @@ async def list_diffusion_library(
 
 @router.get("/options", response_model=dict)
 async def get_filter_options(
+    scope_mode: Literal["active", "all_visible"] = Query("active", alias="scope_mode"),
     session: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
     scope: RequestScope = Depends(get_request_scope),
 ):
     """
     鑾峰彇鍙敤鐨勮繃婊ら€夐」锛堟潗鏂欏垪琛ㄣ€佹鼎婊戝墏鍒楄〃绛夛級
     """
     try:
-        return await get_agent_runtime().get_filter_options(session=session, scope_filter_values=scope_filters(scope))
+        return await get_agent_runtime().get_filter_options(
+            session=session,
+            scope_filter_values=_scope_filter_values_for_mode(
+                scope_mode=scope_mode,
+                principal=principal,
+                scope=scope,
+            ),
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -1299,6 +1387,79 @@ async def promote_record_confidence(
         _raise_internal_error("Promote record confidence", exc)
 
 
+@router.post("/{record_id}/correct", response_model=dict, response_model_by_alias=True)
+async def correct_record(
+    record_id: int,
+    payload: RecordCorrectionPayload,
+    request: Request,
+    dry_run: bool = Query(False, alias="dryRun"),
+    session: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    """Apply a reviewer's curated correction to a record and its linked candidates.
+
+    With ``?dryRun=true`` the correction is applied in-memory and rolled back, returning
+    the before/after diff so the reviewer can preview exactly what would change before
+    committing. This is the validated, audited replacement for the ad-hoc data-fix scripts.
+    """
+    # Authorization: 404s if the record is not write-accessible to this principal.
+    await require_record_access(session, principal, record_id, write=True)
+
+    correction = RecordCorrection(
+        fields=payload.fields,
+        field_evidence_patch=payload.field_evidence_patch,
+        link_candidate_ids=payload.link_candidate_ids,
+    )
+
+    def _confidence_fn(rec: TribologyData) -> float:
+        return float(calculate_confidence_details(_confidence_input_from_record(rec)).get("score") or 0.0)
+
+    try:
+        result = await apply_tribology_record_correction(
+            session,
+            record_id,
+            correction,
+            dry_run=dry_run,
+            confidence_fn=_confidence_fn,
+        )
+    except ValueError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=422, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await session.rollback()
+        _raise_internal_error("Correct record", exc)
+
+    if not dry_run:
+        await log_activity(
+            db=session,
+            user_id=principal.user.id,
+            group_id=principal.group.id,
+            action_type="edit_record",
+            action_detail={
+                "record_id": record_id,
+                "correction": True,
+                "corrected_fields": sorted(payload.fields.keys()),
+                "linked_candidate_ids": result.candidate_ids,
+                "confidence": result.confidence,
+            },
+            resource_type="record",
+            resource_id=record_id,
+            request=request,
+        )
+
+    return {
+        "success": True,
+        "id": record_id,
+        "committed": result.committed,
+        "dryRun": dry_run,
+        "diff": result.record_diff,
+        "candidateIds": result.candidate_ids,
+        "confidence": result.confidence,
+    }
+
+
 @router.delete("/{record_id}", response_model=dict)
 async def delete_record(
     record_id: int,
@@ -1319,6 +1480,76 @@ async def delete_record(
     except Exception as exc:
         await session.rollback()
         _raise_internal_error("Delete record", exc)
+
+
+class BatchDeletePayload(BaseModel):
+    """Request body for deleting many records in a single transaction."""
+    ids: List[int] = Field(default_factory=list, description="Record ids to delete")
+
+    class Config:
+        populate_by_name = True
+
+
+_BATCH_DELETE_MAX = 500
+
+
+@router.post("/batch-delete", response_model=dict)
+async def batch_delete_records(
+    payload: BatchDeletePayload,
+    session: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    """Delete multiple records atomically, returning a per-id outcome summary.
+
+    Each id is access-checked individually; ids the caller cannot write (missing
+    or out of scope) are reported under ``failed`` instead of aborting the batch.
+    All authorized deletes commit together in one transaction.
+    """
+    seen: set[int] = set()
+    unique_ids: list[int] = []
+    for raw in payload.ids or []:
+        try:
+            rid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if rid in seen:
+            continue
+        seen.add(rid)
+        unique_ids.append(rid)
+
+    if not unique_ids:
+        raise HTTPException(status_code=400, detail="No record ids provided")
+    if len(unique_ids) > _BATCH_DELETE_MAX:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many records in one batch (max {_BATCH_DELETE_MAX})",
+        )
+
+    deleted: list[int] = []
+    failed: list[dict[str, Any]] = []
+    for rid in unique_ids:
+        try:
+            record = await require_record_access(session, principal, rid, write=True)
+            await session.delete(record)
+            deleted.append(rid)
+        except HTTPException as exc:
+            failed.append({"id": rid, "reason": str(exc.detail)})
+        except Exception as exc:  # noqa: BLE001 - report, don't abort the batch
+            failed.append({"id": rid, "reason": str(exc)})
+
+    try:
+        await session.commit()
+    except Exception as exc:
+        await session.rollback()
+        _raise_internal_error("Batch delete records", exc)
+
+    return {
+        "success": True,
+        "requested": len(unique_ids),
+        "deletedCount": len(deleted),
+        "deleted": deleted,
+        "failed": failed,
+    }
 
 
 @router.get("/il/resolve", response_model=dict)

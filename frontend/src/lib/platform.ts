@@ -6,7 +6,6 @@ export type AppView =
   | 'quality'
   | 'modeling'
   | 'admin'
-  | 'help'
   | 'blog'
 
 export type LegacyAppView =
@@ -62,7 +61,6 @@ export const DEFAULT_SECTION_BY_VIEW: Record<AppView, AppSection> = {
   quality: 'overview',
   modeling: 'training',
   admin: 'runtime',
-  help: 'quick-start',
   blog: 'articles',
 }
 
@@ -74,7 +72,6 @@ export const SECTION_OPTIONS_BY_VIEW: Record<AppView, AppSection[]> = {
   quality: ['overview'],
   modeling: ['training', 'nanofriction', 'evaluation', 'registry'],
   admin: ['runtime', 'users', 'metrics'],
-  help: ['quick-start', 'workflow', 'content'],
   blog: ['articles'],
 }
 
@@ -86,7 +83,7 @@ const LEGACY_ROUTE_MAP: Record<LegacyAppView, AppRoute> = {
   monitor: { view: 'admin', section: 'runtime' },
   literature: { view: 'library', section: 'explorer' },
   grounding: { view: 'library', section: 'explorer' },
-  guide: { view: 'help', section: 'quick-start' },
+  guide: { view: 'home', section: 'today' },
   mentor: { view: 'home', section: 'alerts' },
   blog: { view: 'blog', section: 'articles' },
 }

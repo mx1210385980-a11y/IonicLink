@@ -317,17 +317,17 @@ ANION_DB: Dict[str, Dict[str, Any]] = {
         "aliases": ["bmb", "BMB-"],
     },
     "A4BMB": {
-        "smiles": None,
+        "smiles": "[B-]12(OC(=O)C(c3ccc(CCCC)cc3)O1)OC(=O)C(c4ccc(CCCC)cc4)O2",
         "full_name": "bis(4-butylmandelato)borate",
         "aliases": ["a4bmb", "A4BMB-", "[A4BMB]-", "bis(4-butylmandelato)borate"],
     },
     "A8BMB": {
-        "smiles": None,
+        "smiles": "[B-]12(OC(=O)C(c3ccc(CCCCCCCC)cc3)O1)OC(=O)C(c4ccc(CCCCCCCC)cc4)O2",
         "full_name": "bis(4-octylmandelato)borate",
         "aliases": ["a8bmb", "A8BMB-", "[A8BMB]-", "bis(4-octylmandelato)borate"],
     },
     "A12BMB": {
-        "smiles": None,
+        "smiles": "[B-]12(OC(=O)C(c3ccc(CCCCCCCCCCCC)cc3)O1)OC(=O)C(c4ccc(CCCCCCCCCCCC)cc4)O2",
         "full_name": "bis(4-dodecylmandelato)borate",
         "aliases": ["a12bmb", "A12BMB-", "[A12BMB]-", "bis(4-dodecylmandelato)borate"],
     },
@@ -446,6 +446,11 @@ def _build_lookup(db: Dict[str, Dict]) -> Dict[str, str]:
 
 _cation_lookup = _build_lookup(CATION_DB)
 _anion_lookup = _build_lookup(ANION_DB)
+
+
+def _strip_component_edge_punctuation(value: Any) -> str:
+    text = str(value or "").strip()
+    return re.sub(r"^[\s\[\]{};:,]+|[\s\[\]{};:,]+$", "", text)
 
 _PALACIO_ALIAS_DB: list[Dict[str, Any]] = [
     {
@@ -657,6 +662,7 @@ def _apply_alias_resolution(result: Dict[str, Any], alias_entry: Dict[str, Any])
 
 def _find_cation(name: str) -> Optional[str]:
     """Find canonical cation name from input string."""
+    name = _strip_component_edge_punctuation(name)
     clean = name.replace("+", "").replace("[", "").replace("]", "").strip().lower()
     # Also try normalizing phosphonium-style: P6,6,6,14 → p66614
     clean_no_comma = clean.replace(",", "").replace(" ", "")
@@ -670,6 +676,7 @@ def _find_cation(name: str) -> Optional[str]:
 
 def _find_anion(name: str) -> Optional[str]:
     """Find canonical anion name from input string."""
+    name = _strip_component_edge_punctuation(name)
     clean = name.replace("-", "").replace("[", "").replace("]", "").strip().lower()
     
     if clean in _anion_lookup:

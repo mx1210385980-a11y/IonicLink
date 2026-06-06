@@ -7,7 +7,7 @@ import {
   extractData,
   getLatestExtractionRun,
   getCurrentUser,
-  login,
+  startPublicSession,
   syncBatchData,
   uploadFile,
   type AgentWorkflow,
@@ -91,7 +91,6 @@ export function useAppShell(
   const activeExtractionRun = ref<ExtractionRunDetail | null>(null)
   const preferredTrainingDatasetId = ref<number | null>(null)
   const isChatting = ref(false)
-  const isAuthenticating = ref(false)
   const authError = ref('')
   const groundingHighlightData = ref<HighlightRect[]>([])
   const defaultExtractorType = ref<ExtractorType>('tribology')
@@ -265,39 +264,32 @@ export function useAppShell(
   }
 
   async function initializeSession() {
-    if (!sessionState.token) {
-      markSessionReady()
-      return
-    }
-
     try {
-      const user = await Promise.race([
-        getCurrentUser(),
-        new Promise<never>((_, reject) => {
-          window.setTimeout(() => reject(new Error('Session restore timed out')), SESSION_RESTORE_TIMEOUT_MS)
-        }),
-      ])
-      setCurrentUser(user)
+      if (sessionState.token) {
+        const user = await Promise.race([
+          getCurrentUser(),
+          new Promise<never>((_, reject) => {
+            window.setTimeout(() => reject(new Error('Session restore timed out')), SESSION_RESTORE_TIMEOUT_MS)
+          }),
+        ])
+        setCurrentUser(user)
+        return
+      }
+
+      const response = await startPublicSession()
+      setSession(response.accessToken, response.user)
     } catch (error) {
       console.warn('[Auth] Session restore failed:', error)
       clearSession()
-      authError.value = t('auth.session_expired')
+      try {
+        const response = await startPublicSession()
+        setSession(response.accessToken, response.user)
+      } catch (publicSessionError: any) {
+        console.warn('[Auth] Public extraction session failed:', publicSessionError)
+        authError.value = publicSessionError?.response?.data?.detail || publicSessionError?.message || t('auth.session_expired')
+      }
     } finally {
       markSessionReady()
-    }
-  }
-
-  async function handleLogin(credentials: { username: string; password: string }) {
-    try {
-      isAuthenticating.value = true
-      authError.value = ''
-      const response = await login(credentials.username, credentials.password)
-      setSession(response.accessToken, response.user)
-      resetWorkspaceSessionState()
-    } catch (error: any) {
-      authError.value = error?.response?.data?.detail || error?.message || t('auth.sign_in_failed')
-    } finally {
-      isAuthenticating.value = false
     }
   }
 
@@ -1359,12 +1351,10 @@ export function useAppShell(
     handleExploreData,
     handleExtract,
     handleLiteratureView,
-    handleLogin,
     handleLogout,
     handleRemoveFile,
     handleUpload,
     prepareFileForReview,
-    isAuthenticating,
     isChatting,
     isDark,
     latestAgentWorkflow,

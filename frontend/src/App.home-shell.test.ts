@@ -13,28 +13,45 @@ const sourceSliceAfter = (start: string, end: string) => {
 }
 
 describe('App home shell', () => {
-  it('uses one compact shell for home, library, and monitor', () => {
-    expect(source).toContain("const elicitShellViews = ['home', 'library', 'admin']")
-    expect(source).toContain("const chromeHiddenViews = ['home', 'library', 'admin']")
+  it('uses one compact no-login shell for extraction and review', () => {
+    expect(source).not.toContain('LoginScreen')
+    expect(source).not.toContain('v-else-if="!sessionState.user"')
+    expect(source).not.toContain('handleLogin')
+    expect(source).toContain("const elicitShellViews = ['home', 'library']")
+    expect(source).toContain("const chromeHiddenViews = ['home', 'library']")
     expect(source).toContain('elicitShellViews.includes(currentView)')
     expect(source).toContain('/ioniclink.png')
     expect(source).toContain("{ label: 'Home', icon: Clock3, view: 'home', section: 'today' }")
     expect(source).toContain("{ label: 'Extract', icon: Upload, modal: 'upload' }")
     expect(source).toContain("{ label: 'Database', icon: Database, modal: 'database' }")
     expect(source).toContain('Library')
-    expect(source).toContain('Monitor')
-    expect(source).toContain("{ label: 'Monitor', icon: Activity, view: 'admin', section: 'runtime' }")
+    expect(source).not.toContain("{ label: 'Monitor', icon: Activity, view: 'admin', section: 'runtime' }")
     expect(source.indexOf("{ label: 'Extract', icon: Upload, modal: 'upload' }")).toBeLessThan(source.indexOf("{ label: 'Library', icon: BookOpen"))
     expect(source.indexOf("{ label: 'Database', icon: Database, modal: 'database' }")).toBeLessThan(source.indexOf("{ label: 'Library', icon: BookOpen"))
     expect(source).toContain('openElicitTopNavItem')
     expect(source).toContain('v-else-if="currentView === \'library\'"')
-    expect(source).toContain('<AdminPage')
     expect(source).not.toContain('elicitWorkflowItems')
     expect(source).not.toContain('elicitToolItems')
     expect(source).not.toContain('isElicitItemLocked')
     expect(source).not.toContain("{ label: 'Research agent', icon: LayoutGrid, active: false, locked: false }")
     expect(source).not.toContain("{ label: 'Extract data', icon: Upload, modal: 'upload', locked: false }")
     expect(source).not.toContain("{ label: 'Alerts', icon: Bell, view: 'review', section: 'inbox' }")
+  })
+
+  it('does not expose a Help page or Help navigation target', () => {
+    expect(source).not.toContain("import('@/pages/help/HelpPage.vue')")
+    expect(source).not.toContain('<HelpPage')
+    expect(source).not.toContain("navigateTo('help'")
+    expect(source).not.toContain('aria-label="Help"')
+  })
+
+  it('removes account chrome so extraction is the front door', () => {
+    expect(source).not.toContain('accountMenuOpen')
+    expect(source).not.toContain('Account settings')
+    expect(source).not.toContain('Log out')
+    expect(source).not.toContain('aria-label="Account menu"')
+    expect(source).not.toContain('logoutFromAccountMenu')
+    expect(source).not.toContain('openAccountSettings')
   })
 
   it('opens the database tool as a table modal from the top navigation', () => {
@@ -235,15 +252,16 @@ describe('App home shell', () => {
       '<!-- Workspace top bar -->',
     )
 
-    expect(source).toContain("const pdfUploadStepLabels = ['Add papers', 'Choose mode', 'Extracting', 'Review']")
+    expect(source).toContain("const pdfUploadStepLabels = ['Add papers', 'Choose mode', 'Extracting']")
     expect(source).toContain('const pdfUploadVisibleExtractionPresetOptions')
-    expect(source).toContain('const pdfUploadReviewSummaryStats')
     expect(modalSource).toContain('Extract papers')
-    expect(modalSource).toContain('Add papers')
-    expect(modalSource).toContain('Choose mode')
-    expect(modalSource).toContain('Review')
-    expect(modalSource).toContain('Review in Database')
-    expect(modalSource).toContain('No reviewable data found')
+    // Step indicator renders the labels data-driven from pdfUploadStepLabels (asserted above)
+    // with a single shared active-state helper instead of duplicated inline conditions.
+    expect(modalSource).toContain('v-for="label in pdfUploadStepLabels"')
+    expect(modalSource).toContain('isPdfUploadStepActive(label)')
+    // Completion hands off straight to Database from the extracting step (no separate results step).
+    expect(modalSource).toContain('Open Database')
+    expect(source).not.toContain("pdfUploadModalStep === 'results'")
     expect(modalSource).not.toContain('Explore the scientific literature')
     expect(modalSource).not.toContain('Find papers')
     expect(modalSource).not.toContain('List of concepts')
@@ -264,18 +282,18 @@ describe('App home shell', () => {
   })
 
   it('keeps failed and empty extraction outcomes actionable without a table-first results page', () => {
-    const resultsSource = sourceSliceAfter(
-      'v-else-if="pdfUploadModalStep === \'results\'"',
+    const extractingSource = sourceSliceAfter(
+      'v-else-if="pdfUploadModalStep === \'extracting\'"',
       '<!-- Workspace top bar -->',
     )
 
-    expect(resultsSource).toContain('Review in Database')
-    expect(resultsSource).toContain('Retry failed')
-    expect(resultsSource).toContain('Change mode')
-    expect(resultsSource).toContain('Upload another PDF')
-    expect(resultsSource).not.toContain('<table')
-    expect(resultsSource).not.toContain('Extracted table')
-    expect(resultsSource).not.toContain('Review status')
+    expect(extractingSource).toContain('Open Database')
+    expect(extractingSource).toContain('Retry failed')
+    expect(extractingSource).toContain('Change mode')
+    expect(extractingSource).toContain('Upload another PDF')
+    expect(extractingSource).not.toContain('<table')
+    expect(extractingSource).not.toContain('Extracted table')
+    expect(extractingSource).not.toContain('Review status')
   })
 
   it('keeps the home shell unframed without the legacy Elicit sidebar', () => {
@@ -290,18 +308,17 @@ describe('App home shell', () => {
   })
 
   it('hands upload results to Database review instead of showing publish controls in the modal', () => {
-    const resultsSource = sourceSliceAfter(
-      'v-else-if="pdfUploadModalStep === \'results\'"',
+    const extractingSource = sourceSliceAfter(
+      'v-else-if="pdfUploadModalStep === \'extracting\'"',
       '<!-- Workspace top bar -->',
     )
 
-    expect(resultsSource).toContain('Review in Database')
-    expect(resultsSource).toContain('pdfUploadReviewSummaryStats.records')
-    expect(resultsSource).toContain('openPdfUploadResultsInDatabase()')
-    expect(resultsSource).not.toContain('Publish ready records')
-    expect(resultsSource).not.toContain('Confirm')
-    expect(resultsSource).not.toContain('Flag')
-    expect(resultsSource).not.toContain('Review status')
+    expect(extractingSource).toContain('Open Database')
+    expect(extractingSource).toContain('openPdfUploadResultsInDatabase()')
+    expect(extractingSource).not.toContain('Publish ready records')
+    expect(extractingSource).not.toContain('Confirm')
+    expect(extractingSource).not.toContain('Flag')
+    expect(extractingSource).not.toContain('Review status')
     expect(source).not.toContain('publishReadyPdfUploadRecords')
     expect(source).not.toContain('approveReviewRecord')
     expect(source).not.toContain('approveDiffusionReviewRecord')

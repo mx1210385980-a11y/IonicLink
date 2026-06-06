@@ -8,9 +8,11 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db_session
+from models.db_models import DiffusionCandidate, DiffusionRecord, Literature, RecordCandidate, TribologyData
 from security import AuthPrincipal, get_current_principal, is_admin
 from services.activity_logging_service import (
     ACTION_TYPES,
@@ -24,6 +26,9 @@ from services.llm_service import llm_service
 
 router = APIRouter(prefix="/api/monitor", tags=["monitoring"])
 
+APPROVED_REVIEW_STATUSES = {"approved", "accepted"}
+NEGATIVE_REVIEW_STATUSES = {"flagged", "needs_evidence", "rejected"}
+
 
 def _assert_admin(principal: AuthPrincipal) -> None:
     """检查管理员权限"""
@@ -32,6 +37,252 @@ def _assert_admin(principal: AuthPrincipal) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin permission required"
         )
+
+
+def _iso(value: Any) -> str | None:
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def _review_completion_rate(
+    approved_records: int,
+    flagged_or_rejected_records: int,
+    unpromoted_candidates: int,
+) -> float:
+    denominator = approved_records + flagged_or_rejected_records + unpromoted_candidates
+    if denominator <= 0:
+        return 0.0
+    return round(approved_records / denominator, 4)
+
+
+async def build_extraction_review_progress(db: AsyncSession, group_id: int) -> dict[str, Any]:
+    """Build a compact review-progress snapshot for the Monitor page.
+
+    The main progress value is not a scientific accuracy score. It is a
+    completion rate for the current review surface: approved records divided by
+    approved records plus unresolved candidates plus explicitly negative review
+    outcomes.
+    """
+    library_filter = (
+        Literature.group_id == group_id,
+        Literature.scope_type == "group_library",
+        Literature.scope_key == "group_library",
+    )
+    approved_statuses = tuple(APPROVED_REVIEW_STATUSES)
+    negative_statuses = tuple(NEGATIVE_REVIEW_STATUSES)
+
+    library_literature = int(
+        (
+            await db.execute(
+                select(func.count(Literature.id)).where(*library_filter)
+            )
+        ).scalar()
+        or 0
+    )
+    reviewed_literature = int(
+        (
+            await db.execute(
+                select(func.count(Literature.id)).where(
+                    *library_filter,
+                    (Literature.reviewed_at.is_not(None)) | (func.lower(Literature.submission_status).in_(approved_statuses)),
+                )
+            )
+        ).scalar()
+        or 0
+    )
+
+    async def _record_count(model: Any, statuses: tuple[str, ...]) -> int:
+        return int(
+            (
+                await db.execute(
+                    select(func.count(model.id))
+                    .join(Literature, Literature.id == model.literature_id)
+                    .where(*library_filter, func.lower(model.review_status).in_(statuses))
+                )
+            ).scalar()
+            or 0
+        )
+
+    approved_tribology = await _record_count(TribologyData, approved_statuses)
+    approved_diffusion = await _record_count(DiffusionRecord, approved_statuses)
+    flagged_tribology = await _record_count(TribologyData, negative_statuses)
+    flagged_diffusion = await _record_count(DiffusionRecord, negative_statuses)
+    approved_records = approved_tribology + approved_diffusion
+    flagged_or_rejected_records = flagged_tribology + flagged_diffusion
+
+    async def _unpromoted_candidate_count(model: Any) -> int:
+        return int(
+            (
+                await db.execute(
+                    select(func.count(model.id))
+                    .join(Literature, Literature.id == model.literature_id)
+                    .where(*library_filter, model.promoted_record_id.is_(None))
+                )
+            ).scalar()
+            or 0
+        )
+
+    unpromoted_tribology_candidates = await _unpromoted_candidate_count(RecordCandidate)
+    unpromoted_diffusion_candidates = await _unpromoted_candidate_count(DiffusionCandidate)
+    unpromoted_candidates = unpromoted_tribology_candidates + unpromoted_diffusion_candidates
+
+    reviewed_by_day_rows = (
+        await db.execute(
+            select(func.date(Literature.reviewed_at).label("day"), func.count(Literature.id))
+            .where(*library_filter, Literature.reviewed_at.is_not(None))
+            .group_by(func.date(Literature.reviewed_at))
+            .order_by(func.date(Literature.reviewed_at))
+        )
+    ).all()
+    trend_map: dict[str, dict[str, Any]] = {
+        str(day): {
+            "date": str(day),
+            "reviewedLiterature": int(count or 0),
+            "approvedRecords": 0,
+            "unpromotedCandidates": unpromoted_candidates,
+            "reviewCompletionRate": 0.0,
+        }
+        for day, count in reviewed_by_day_rows
+        if day
+    }
+
+    async def _approved_records_by_day(model: Any) -> list[tuple[Any, int]]:
+        return (
+            await db.execute(
+                select(func.date(model.extracted_at).label("day"), func.count(model.id))
+                .join(Literature, Literature.id == model.literature_id)
+                .where(*library_filter, func.lower(model.review_status).in_(approved_statuses))
+                .group_by(func.date(model.extracted_at))
+                .order_by(func.date(model.extracted_at))
+            )
+        ).all()
+
+    for rows in [await _approved_records_by_day(TribologyData), await _approved_records_by_day(DiffusionRecord)]:
+        for day, count in rows:
+            if not day:
+                continue
+            key = str(day)
+            trend_map.setdefault(
+                key,
+                {
+                    "date": key,
+                    "reviewedLiterature": 0,
+                    "approvedRecords": 0,
+                    "unpromotedCandidates": unpromoted_candidates,
+                    "reviewCompletionRate": 0.0,
+                },
+            )
+            trend_map[key]["approvedRecords"] += int(count or 0)
+
+    running_approved = 0
+    for item in sorted(trend_map.values(), key=lambda entry: entry["date"]):
+        running_approved += int(item["approvedRecords"])
+        item["reviewCompletionRate"] = _review_completion_rate(
+            running_approved,
+            flagged_or_rejected_records,
+            unpromoted_candidates,
+        )
+
+    recent_literature_rows = (
+        await db.execute(
+            select(Literature)
+            .where(
+                *library_filter,
+                (Literature.reviewed_at.is_not(None)) | (func.lower(Literature.submission_status).in_(approved_statuses)),
+            )
+            .order_by(Literature.reviewed_at.desc().nullslast(), Literature.created_at.desc())
+            .limit(8)
+        )
+    ).scalars().all()
+
+    async def _counts_by_literature(model: Any, *, unpromoted_only: bool = False) -> dict[int, int]:
+        stmt = (
+            select(model.literature_id, func.count(model.id))
+            .join(Literature, Literature.id == model.literature_id)
+            .where(*library_filter)
+            .group_by(model.literature_id)
+        )
+        if unpromoted_only:
+            stmt = stmt.where(model.promoted_record_id.is_(None))
+        return {int(lit_id): int(count or 0) for lit_id, count in (await db.execute(stmt)).all()}
+
+    tribology_by_literature = await _counts_by_literature(TribologyData)
+    diffusion_by_literature = await _counts_by_literature(DiffusionRecord)
+    tribology_backlog_by_literature = await _counts_by_literature(RecordCandidate, unpromoted_only=True)
+    diffusion_backlog_by_literature = await _counts_by_literature(DiffusionCandidate, unpromoted_only=True)
+
+    recent_reviewed_literature = [
+        {
+            "id": literature.id,
+            "title": literature.title,
+            "doi": literature.doi,
+            "journal": literature.journal,
+            "year": literature.year,
+            "reviewedAt": _iso(literature.reviewed_at),
+            "reviewNote": literature.review_note,
+            "submissionStatus": literature.submission_status,
+            "approvedRecords": tribology_by_literature.get(literature.id, 0)
+            + diffusion_by_literature.get(literature.id, 0),
+            "unpromotedCandidates": tribology_backlog_by_literature.get(literature.id, 0)
+            + diffusion_backlog_by_literature.get(literature.id, 0),
+        }
+        for literature in recent_literature_rows
+    ]
+
+    backlog_rows = (
+        await db.execute(
+            select(Literature)
+            .where(*library_filter)
+            .order_by(Literature.created_at.desc())
+        )
+    ).scalars().all()
+    candidate_backlog = []
+    for literature in backlog_rows:
+        backlog = tribology_backlog_by_literature.get(literature.id, 0) + diffusion_backlog_by_literature.get(
+            literature.id, 0
+        )
+        if backlog <= 0:
+            continue
+        candidate_backlog.append(
+            {
+                "id": literature.id,
+                "title": literature.title,
+                "doi": literature.doi,
+                "journal": literature.journal,
+                "year": literature.year,
+                "unpromotedCandidates": backlog,
+            }
+        )
+    candidate_backlog.sort(key=lambda item: (-item["unpromotedCandidates"], item["id"]))
+
+    denominator = approved_records + flagged_or_rejected_records + unpromoted_candidates
+    return {
+        "summary": {
+            "libraryLiterature": library_literature,
+            "reviewedLiterature": reviewed_literature,
+            "approvedRecords": approved_records,
+            "approvedTribologyRecords": approved_tribology,
+            "approvedDiffusionRecords": approved_diffusion,
+            "flaggedOrRejectedRecords": flagged_or_rejected_records,
+            "unpromotedCandidates": unpromoted_candidates,
+            "unpromotedTribologyCandidates": unpromoted_tribology_candidates,
+            "unpromotedDiffusionCandidates": unpromoted_diffusion_candidates,
+            "reviewCompletionRate": _review_completion_rate(
+                approved_records,
+                flagged_or_rejected_records,
+                unpromoted_candidates,
+            ),
+            "reviewCompletionNumerator": approved_records,
+            "reviewCompletionDenominator": denominator,
+            "reviewCompletionLabel": "Approved final records / review work surface",
+        },
+        "trend": sorted(trend_map.values(), key=lambda entry: entry["date"]),
+        "recentReviewedLiterature": recent_reviewed_literature,
+        "candidateBacklog": candidate_backlog[:8],
+    }
 
 
 class UserUsageStatsResponse(BaseModel):
@@ -193,6 +444,15 @@ async def get_group_summary(
     summary = await get_group_activity_summary(db, principal.group.id)
 
     return summary
+
+
+@router.get("/extraction-review-progress")
+async def get_extraction_review_progress(
+    principal: AuthPrincipal = Depends(get_current_principal),
+    db: AsyncSession = Depends(get_db_session),
+):
+    _assert_admin(principal)
+    return await build_extraction_review_progress(db, principal.group.id)
 
 
 @router.get("/action-types")

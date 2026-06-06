@@ -7,6 +7,7 @@ import { contactDisplayModel } from '@/lib/integratedExplorerHelpers'
 
 const props = defineProps<{
   record: RecordResponse
+  compact?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -52,6 +53,39 @@ function openFieldEvidence(fieldKey: string, event: MouseEvent | KeyboardEvent) 
 
 <template>
   <div
+    v-if="compact"
+    class="flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden rounded-md border bg-white px-2 py-1 text-[11px] dark:bg-slate-950"
+    :class="contact.mode === 'macro'
+      ? 'border-orange-200 dark:border-orange-500/20'
+      : 'border-slate-200 dark:border-slate-800'"
+    :title="contact.title"
+  >
+    <span
+      class="shrink-0 rounded-[4px] px-1 py-0.5 text-[8px] font-black uppercase leading-none tracking-[0.1em]"
+      :class="contact.mode === 'macro'
+        ? 'bg-orange-100 text-orange-700 dark:bg-orange-400/15 dark:text-orange-300'
+        : 'bg-[#e9fbf8] text-[#0f7c82] dark:bg-cyan-400/10 dark:text-cyan-300'"
+    >{{ contact.primaryRole }}</span>
+    <button
+      type="button"
+      class="min-w-0 truncate text-left font-bold leading-4 text-slate-800 underline-offset-2 transition hover:text-[#0f7c82] hover:underline dark:text-slate-100 dark:hover:text-cyan-300"
+      :aria-label="`Open ${contact.primaryRole} evidence`"
+      @click.stop="openFieldEvidence(primaryEvidenceFieldKey, $event)"
+      @keydown.enter.prevent.stop="openFieldEvidence(primaryEvidenceFieldKey, $event)"
+    ><ChemicalText :text="contact.primaryLabel" /></button>
+    <span class="shrink-0 text-slate-300 dark:text-slate-600">/</span>
+    <span class="shrink-0 rounded-[4px] bg-slate-100 px-1 py-0.5 text-[8px] font-black uppercase leading-none tracking-[0.1em] text-slate-500 dark:bg-slate-800 dark:text-slate-400">{{ contact.secondaryRole }}</span>
+    <button
+      type="button"
+      class="min-w-0 truncate text-left font-semibold leading-4 text-slate-700 underline-offset-2 transition hover:text-[#0f7c82] hover:underline dark:text-slate-200 dark:hover:text-cyan-300"
+      :aria-label="`Open ${contact.secondaryRole} evidence`"
+      @click.stop="openFieldEvidence(secondaryEvidenceFieldKey, $event)"
+      @keydown.enter.prevent.stop="openFieldEvidence(secondaryEvidenceFieldKey, $event)"
+    ><ChemicalText :text="contact.secondaryLabel" /></button>
+  </div>
+
+  <div
+    v-else
     class="tribopair-capsule group relative flex min-w-0 max-w-full items-stretch gap-2 overflow-hidden rounded-md border bg-white px-2 py-1.5 shadow-[0_8px_18px_-18px_rgba(15,23,42,0.55)] transition-colors dark:bg-slate-950"
     :class="contact.mode === 'macro'
       ? 'border-orange-200 hover:border-orange-300 hover:bg-orange-50/35 dark:border-orange-500/20 dark:hover:border-orange-400/35 dark:hover:bg-orange-500/10'

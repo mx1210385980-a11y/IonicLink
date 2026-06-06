@@ -287,6 +287,35 @@ def test_normalization_uses_raw_source_value_and_unit_when_canonical_is_missing(
     assert payload["primary"]["value_m2_s"] == 1.2e-10
 
 
+def test_maps_suffix_labeled_diffusion_values_to_correct_species():
+    rows = [
+        {
+            "system_name": "COF-confined [Bmim][PF6]",
+            "ionic_liquid": "[Bmim][PF6]",
+            "D_total": 0.47,
+            "D_cation": 0.42,
+            "D_anion": 0.52,
+            "D_unit": "10^-13 m2/s",
+            "evidence": (
+                "Table 1 reports the self-diffusion coefficients of [Bmim][PF6] "
+                "in confined COF as 0.47 x 10^-13 m2/s for total, "
+                "0.42 x 10^-13 m2/s for cation, and 0.52 x 10^-13 m2/s for anion."
+            ),
+        }
+    ]
+
+    normalized = _normalize(rows)
+
+    assert len(normalized) == 1
+    assert normalized[0]["D_total"] == 0.047
+    assert normalized[0]["D_cation"] == 0.042
+    assert normalized[0]["D_anion"] == 0.052
+    source_values = normalized[0]["novel_features_json"]["source_values"]
+    assert source_values["D_total"]["raw_value"] == "0.47 x 10^-13"
+    assert source_values["D_cation"]["raw_value"] == "0.42 x 10^-13"
+    assert source_values["D_anion"]["raw_value"] == "0.52 x 10^-13"
+
+
 def test_diffusion_approval_blockers_require_unit_and_confidence():
     unsupported_unit_row = {
         "system_name": "Graphene slit pore",

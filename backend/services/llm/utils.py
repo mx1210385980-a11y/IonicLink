@@ -1,6 +1,7 @@
 ﻿import base64
 import io
 import json
+import logging
 import os
 import re
 from typing import Any, List, Optional, Union
@@ -9,68 +10,163 @@ from PIL import Image
 
 from services.normalization.potential import normalize_potential_text
 
+logger = logging.getLogger(__name__)
+
+
+def _payload_row_count(parsed: Union[List, dict, None]) -> Optional[int]:
+    """Best-effort count of recovered rows, for diagnostics logging."""
+    if isinstance(parsed, list):
+        return len(parsed)
+    if isinstance(parsed, dict):
+        for key in ("data", "records", "rows"):
+            value = parsed.get(key)
+            if isinstance(value, list):
+                return len(value)
+    return None
+
+
+_TRAILING_COMMA_RE = re.compile(r",(\s*[}\]])")
+
+
+def _strip_trailing_commas(text: str) -> str:
+    """Remove commas that directly precede a closing brace/bracket."""
+    prev = None
+    while prev != text:
+        prev = text
+        text = _TRAILING_COMMA_RE.sub(r"\1", text)
+    return text
+
+
+def _loads_or_none(text: str) -> Union[List, dict, None]:
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+
+def _scan_json(text: str, start: int) -> dict:
+    """String-aware scan of the JSON value beginning at ``text[start]``.
+
+    Unlike a naive brace counter, braces/brackets that appear *inside* quoted
+    strings are ignored, so an evidence quote like ``"missing } brace"`` no
+    longer truncates the payload at the wrong place.
+
+    Returns:
+      - complete: structure closed (balanced) before EOF
+      - end:      index just past the closing bracket when complete, else len(text)
+      - in_string: EOF was reached while still inside a string
+      - stack:    closing chars still open at the stop point (LIFO; last = innermost)
+      - closes:   (index_after_close, stack_copy) for every close that left at
+                  least one container open — i.e. safe truncation cut points
+    """
+    stack: List[str] = []
+    closes: List[tuple] = []
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            stack.append("}")
+        elif ch == "[":
+            stack.append("]")
+        elif ch in "}]":
+            if stack:
+                stack.pop()
+            if not stack:
+                return {"complete": True, "end": i + 1, "in_string": False, "stack": [], "closes": closes}
+            closes.append((i + 1, list(stack)))
+    return {"complete": False, "end": len(text), "in_string": in_str, "stack": stack, "closes": closes}
+
+
+def _recover_json(span: str, scan: dict) -> Union[List, dict, None]:
+    """Best-effort parse of a possibly-truncated JSON span."""
+    # 1) As-is, then with trailing commas stripped.
+    for candidate in (span, _strip_trailing_commas(span)):
+        parsed = _loads_or_none(candidate)
+        if parsed is not None:
+            return parsed
+
+    if scan["complete"]:
+        return None
+
+    # 2) Truncated output: rebuild from the last fully-closed sub-structure.
+    #    This keeps every complete element (e.g. all finished rows in `data`)
+    #    and drops only the partially-written trailing one. Highest index first
+    #    so we recover the most rows possible.
+    for cut, stack in reversed(scan["closes"]):
+        repaired = _strip_trailing_commas(span[:cut].rstrip()) + "".join(reversed(stack))
+        parsed = _loads_or_none(repaired)
+        if parsed is not None:
+            logger.warning(
+                "Recovered truncated LLM payload: model output was cut off "
+                "(%d chars); kept %s complete row(s), dropped the partial trailing one. "
+                "Frequent occurrences suggest raising the extraction max_tokens.",
+                len(span),
+                _payload_row_count(parsed),
+            )
+            return parsed
+
+    # 3) Last resort: close whatever is still open at EOF (recovers a final row
+    #    that was cut right after a complete value, e.g. `{"a":1,"b":2`).
+    tail = span + ('"' if scan["in_string"] else "")
+    tail = _strip_trailing_commas(tail.rstrip().rstrip(",").rstrip())
+    parsed = _loads_or_none(tail + "".join(reversed(scan["stack"])))
+    if parsed is not None:
+        logger.warning(
+            "Recovered truncated LLM payload by closing open containers (%d chars); "
+            "kept %s row(s). Frequent occurrences suggest raising the extraction max_tokens.",
+            len(span),
+            _payload_row_count(parsed),
+        )
+    return parsed
+
 
 def clean_and_parse_json(text: str) -> Union[List, dict, None]:
-    """Robust JSON cleaning and parsing function."""
+    """Robustly extract JSON from (possibly messy or truncated) LLM output."""
     if not text:
         return None
 
     original_text = text
     text = text.strip()
 
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
+    # Fast path: already-valid JSON.
+    parsed = _loads_or_none(text)
+    if parsed is not None:
+        return parsed
 
+    # Strip a ```json ... ``` code fence if present; parse or continue within it.
     match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
     if match:
-        candidate = match.group(1).strip()
-        try:
-            return json.loads(candidate)
-        except json.JSONDecodeError:
-            pass
+        fenced = match.group(1).strip()
+        parsed = _loads_or_none(fenced)
+        if parsed is not None:
+            return parsed
+        if fenced:
+            text = fenced
 
+    # Locate the first JSON value and scan it string-aware, with truncation recovery.
     first_brace = text.find("{")
     first_bracket = text.find("[")
-    if first_brace == -1 and first_bracket == -1:
+    starts = [idx for idx in (first_brace, first_bracket) if idx != -1]
+    if not starts:
         print(f"[clean_and_parse_json] No JSON delimiters found. Text: {text[:200]}...")
         return None
 
-    if first_bracket != -1 and (first_brace == -1 or first_bracket < first_brace):
-        start_idx = first_bracket
-        balance = 0
-        end_idx = -1
-        for i, ch in enumerate(text[start_idx:]):
-            if ch == "[":
-                balance += 1
-            elif ch == "]":
-                balance -= 1
-                if balance == 0:
-                    end_idx = start_idx + i
-                    break
-        if end_idx != -1:
-            try:
-                return json.loads(text[start_idx : end_idx + 1])
-            except json.JSONDecodeError:
-                pass
-    else:
-        start_idx = first_brace
-        balance = 0
-        end_idx = -1
-        for i, ch in enumerate(text[start_idx:]):
-            if ch == "{":
-                balance += 1
-            elif ch == "}":
-                balance -= 1
-                if balance == 0:
-                    end_idx = start_idx + i
-                    break
-        if end_idx != -1:
-            try:
-                return json.loads(text[start_idx : end_idx + 1])
-            except json.JSONDecodeError:
-                pass
+    start = min(starts)
+    scan = _scan_json(text, start)
+    parsed = _recover_json(text[start : scan["end"]], scan)
+    if parsed is not None:
+        return parsed
 
     print(f"[clean_and_parse_json] All parsing failed. Original length: {len(original_text)}")
     return None

@@ -86,6 +86,7 @@ from services.candidate_promotion_service import (
     promote_diffusion_candidate,
     promote_tribology_candidate,
 )
+from services.record_correction_service import apply_tribology_candidate_correction
 from services.score_service import calculate_confidence_details
 from services.tribology_review_quality import (
     annotate_tribology_payload_quality,
@@ -1380,6 +1381,87 @@ def _expand_short_field_evidence_context(
     return expanded
 
 
+def _attach_long_field_evidence_context(
+    field_map: dict[str, Any],
+    *,
+    pdf_path: str | None,
+) -> dict[str, Any]:
+    if not pdf_path:
+        return field_map
+    contextualized: dict[str, Any] = {}
+    for key, entry in field_map.items():
+        if not isinstance(entry, dict):
+            contextualized[key] = entry
+            continue
+        evidence = entry.get("evidence") if isinstance(entry.get("evidence"), dict) else {}
+        page_num = int(evidence.get("page") or 0)
+        bbox = evidence.get("bbox")
+        if not page_num or not isinstance(bbox, list) or len(bbox) < 4 or evidence.get("context"):
+            contextualized[key] = entry
+            continue
+        try:
+            snippet = _extract_text_snippet(
+                pdf_path,
+                page_num,
+                bbox,
+                fallback_term=(
+                    evidence.get("matched_text")
+                    or evidence.get("matchedText")
+                    or evidence.get("quote")
+                    or entry.get("value")
+                    or ""
+                ),
+                prefer_term_context=False,
+            )
+        except Exception:
+            snippet = None
+        context = re.sub(r"\s+", " ", str(snippet or "")).strip()
+        quote = re.sub(r"\s+", " ", str(evidence.get("quote") or "")).strip()
+        if len(context) <= max(len(quote), 40):
+            contextualized[key] = entry
+            continue
+        if not _long_context_supports_field_evidence(str(key), entry, context):
+            contextualized[key] = entry
+            continue
+        updated = dict(entry)
+        updated["evidence"] = {
+            **evidence,
+            "context": context,
+        }
+        contextualized[key] = updated
+    return contextualized
+
+
+def _normalized_evidence_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip().lower()
+
+
+def _long_context_contains_evidence_anchor(evidence: dict[str, Any], context: str) -> bool:
+    normalized_context = _normalized_evidence_text(context)
+    if not normalized_context:
+        return False
+    for key in ("matched_text", "matchedText", "quote"):
+        anchor = _normalized_evidence_text(evidence.get(key))
+        if anchor and len(anchor) >= 8 and anchor in normalized_context:
+            return True
+    return False
+
+
+def _long_context_supports_field_evidence(field_key: str, entry: dict[str, Any], context: str) -> bool:
+    evidence = entry.get("evidence") if isinstance(entry.get("evidence"), dict) else {}
+    if not _normalized_evidence_text(context):
+        return False
+    if _entry_is_derived_speed_context(
+        field_key,
+        entry,
+        {"quote": context, "matched_text": context},
+    ):
+        return True
+    if _long_context_contains_evidence_anchor(evidence, context):
+        return True
+    return _text_matches_field_or_alias(field_key, entry.get("value"), entry, context)
+
+
 def _relocate_bare_numeric_roughness_evidence(
     field_key: str,
     entry: dict[str, Any],
@@ -1452,6 +1534,15 @@ def _refresh_visual_source_evidence(entry: dict[str, Any], *, pdf_path: str | No
     source_label = str((evidence or {}).get("source_label") or "").strip()
     page_num = int((evidence or {}).get("page") or 0)
     if source_type in {"text", "table"} or "caption" in source_label.lower():
+        return entry
+    # A value that already resolves to selectable PDF text (a matched phrase with a
+    # tight bbox) is text-grounded — keep that precise location instead of replacing
+    # it with the whole figure, even when its source_label cites a figure. Otherwise
+    # textual values (e.g. "the load is higher than 20 nN") get anchored to an entire
+    # figure crop that pinpoints nothing for the reviewer.
+    matched_text = str((evidence or {}).get("matched_text") or "").strip()
+    existing_bbox = (evidence or {}).get("bbox")
+    if matched_text and isinstance(existing_bbox, list) and len(existing_bbox) >= 4:
         return entry
     if (
         not pdf_path
@@ -1669,6 +1760,9 @@ def _build_record_field_evidence_payload(record: Any) -> dict[str, Any]:
         for index, component in enumerate(components):
             if _is_separate_lubricant_compound(component):
                 field_keys.append(_component_field_key(component, index))
+    for key in field_map:
+        if key not in field_keys:
+            field_keys.append(key)
 
     speed_conditions = normalize_speed_conditions(getattr(record, "speed_conditions_json", None))
     if not speed_conditions:
@@ -1751,6 +1845,7 @@ def _build_record_field_evidence_payload(record: Any) -> dict[str, Any]:
         normalized_fields[key] = normalized_entry
 
     normalized_fields = _sanitize_field_evidence_locations(normalized_fields, pdf_path=pdf_path)
+    normalized_fields = _attach_long_field_evidence_context(normalized_fields, pdf_path=pdf_path)
     normalized_fields["conditions"] = _build_conditions_entry(normalized_fields, record)
     normalized_fields = _refine_potential_evidence_from_metric_context_with_pdf(
         normalized_fields,
@@ -1918,6 +2013,10 @@ class ManualDiffusionCandidatePayload(BaseModel):
 
     class Config:
         populate_by_name = True
+
+
+class CandidateFieldCorrectionPayload(BaseModel):
+    fields: dict[str, Any] = Field(default_factory=dict)
 
 
 def _dump_manual_diffusion_payload(payload: ManualDiffusionCandidatePayload) -> dict[str, Any]:
@@ -2965,22 +3064,16 @@ async def serve_pdf_text(
         raise HTTPException(status_code=404, detail="PDF file not available on disk")
 
     try:
-        import fitz
+        from utils.pdf_utils import extract_pdf_plain_text_pages
 
-        chunks: list[str] = []
-        with fitz.open(pdf_path) as doc:
-            for page_index, page in enumerate(doc, start=1):
-                text = page.get_text("text").strip()
-                if text:
-                    chunks.append(f"Page {page_index}\n{text}")
-            page_count = len(doc)
+        page_count, text = extract_pdf_plain_text_pages(pdf_path)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to read PDF text: {exc}") from exc
 
     return {
         "literature_id": literature_id,
         "page_count": page_count,
-        "text": "\n\n".join(chunks),
+        "text": text,
     }
 
 
@@ -5351,6 +5444,37 @@ async def get_candidate_field_evidence_for_field(
     }
 
 
+@router.patch("/review/candidates/{candidate_id}/fields")
+async def update_candidate_review_fields(
+    candidate_id: int,
+    payload: CandidateFieldCorrectionPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    candidate = await require_candidate_access(db, principal, candidate_id, write=True)
+    try:
+        await apply_tribology_candidate_correction(db, candidate.id, payload.fields)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    await db.refresh(candidate)
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="review_update_candidate_fields",
+        action_detail={
+            "candidate_id": candidate.id,
+            "literature_id": candidate.literature_id,
+            "fields": sorted(payload.fields.keys()),
+        },
+        resource_type="record_candidate",
+        resource_id=candidate.id,
+        request=request,
+    )
+    return _build_record_field_evidence_payload(candidate)
+
+
 @router.post("/review/candidates/{candidate_id}/fields/{field_key}/confirm")
 async def confirm_candidate_field_evidence(
     candidate_id: int,
@@ -5521,6 +5645,36 @@ async def approve_candidate_review(
             "promoted_record_id": candidate.promoted_record_id,
             "literature_id": candidate.literature_id,
             "review_action": "approve_candidate",
+        },
+        resource_type="candidate",
+        resource_id=candidate.id,
+        request=request,
+    )
+    return _build_record_field_evidence_payload(candidate)
+
+
+@router.post("/review/candidates/{candidate_id}/reject")
+async def reject_candidate_review(
+    candidate_id: int,
+    payload: ReviewFieldActionPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    candidate = await require_candidate_access(db, principal, candidate_id, write=True)
+    candidate.review_status = "rejected"
+    await db.commit()
+    await db.refresh(candidate)
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="edit_record",
+        action_detail={
+            "candidate_id": candidate.id,
+            "literature_id": candidate.literature_id,
+            "review_action": "reject_candidate",
+            "note": payload.note,
         },
         resource_type="candidate",
         resource_id=candidate.id,
@@ -6124,6 +6278,36 @@ async def approve_diffusion_candidate_review(
             "promoted_record_id": candidate.promoted_record_id,
             "literature_id": candidate.literature_id,
             "review_action": "approve_diffusion_candidate",
+        },
+        resource_type="diffusion_candidate",
+        resource_id=candidate.id,
+        request=request,
+    )
+    return _build_diffusion_field_evidence_payload(candidate)
+
+
+@router.post("/review/diffusion-candidates/{candidate_id}/reject")
+async def reject_diffusion_candidate_review(
+    candidate_id: int,
+    payload: ReviewFieldActionPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    candidate = await require_diffusion_candidate_access(db, principal, candidate_id, write=True)
+    candidate.review_status = "rejected"
+    await db.commit()
+    await db.refresh(candidate)
+    await log_activity(
+        db=db,
+        user_id=principal.user.id,
+        group_id=principal.group.id,
+        action_type="edit_record",
+        action_detail={
+            "candidate_id": candidate.id,
+            "literature_id": candidate.literature_id,
+            "review_action": "reject_diffusion_candidate",
+            "note": payload.note,
         },
         resource_type="diffusion_candidate",
         resource_id=candidate.id,

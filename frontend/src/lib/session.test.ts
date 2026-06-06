@@ -105,6 +105,21 @@ describe('session state', () => {
     expect(sessionState.user).toBeNull()
   })
 
+  it('can bootstrap a public extraction session without stored credentials', () => {
+    const user = {
+      ...createUser(),
+      username: 'public-extractor',
+      displayName: 'IonicLink Extraction',
+      role: 'researcher',
+    }
+
+    setSession('public-token', user)
+
+    expect(sessionState.token).toBe('public-token')
+    expect(sessionState.user?.username).toBe('public-extractor')
+    expect(getAuthHeaders().Authorization).toBe('Bearer public-token')
+  })
+
   it('recomputes scope when the current user changes', () => {
     const user = createUser()
     setSession('secret-token', user)

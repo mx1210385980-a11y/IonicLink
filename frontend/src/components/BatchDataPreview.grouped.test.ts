@@ -36,4 +36,10 @@ describe('BatchDataPreview database-style preview table', () => {
     expect(source).toContain('No extractable records were found for this mode.')
     expect(source).toContain('@click="handleReprocess()"')
   })
+
+  it('keeps camelCase extraction preview probe fields out of the substrate fallback', () => {
+    expect(source).toContain("previewField(record, 'probe_material', 'probeMaterial')")
+    expect(source).toContain("previewField(record, 'substrate_material', 'substrateMaterial')")
+    expect(source).toContain("previewField(record, 'material_name', 'materialName')")
+  })
 })

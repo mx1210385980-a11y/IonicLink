@@ -97,3 +97,12 @@ def test_diffusion_library_rows_put_latest_candidates_before_records():
     )
 
     assert [row["library_id"] for row in rows] == ["candidate:9", "candidate:7", "record:3"]
+
+
+def test_diffusion_candidate_reject_route_is_registered():
+    # Diffusion gains a reject endpoint at parity with tribology.
+    from routers.extraction import router
+
+    paths = {getattr(route, "path", "") for route in router.routes}
+    assert "/api/review/diffusion-candidates/{candidate_id}/reject" in paths
+    assert "/api/review/candidates/{candidate_id}/reject" in paths

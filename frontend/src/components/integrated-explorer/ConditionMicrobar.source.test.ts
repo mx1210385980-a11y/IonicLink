@@ -72,7 +72,14 @@ describe('ConditionMicrobar source', () => {
     expect(virtualRowSource).not.toContain('ROUGH')
   })
 
-  it('gives virtual rows enough vertical space for the larger condition tile', () => {
-    expect(recordTableSource).toContain('const ROW_HEIGHT = 160')
+  it('gives comfortable virtual rows enough vertical space for the larger condition tile', () => {
+    expect(recordTableSource).toContain('const COMFORTABLE_ROW_HEIGHT = 160')
+  })
+
+  it('offers a compact density that the condition tile collapses into a single line for', () => {
+    expect(recordTableSource).toContain('const COMPACT_ROW_HEIGHT')
+    expect(recordTableSource).toContain(":compact=\"isCompact\"")
+    const conditionSource = readFileSync(componentPath, 'utf-8')
+    expect(conditionSource).toContain('compactItems')
   })
 })

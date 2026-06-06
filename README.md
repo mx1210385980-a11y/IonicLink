@@ -17,6 +17,63 @@
 
 ---
 
+## Quickstart (English)
+
+> 中文文档紧随其后 — see [项目概述](#项目概述) below.
+
+**What this is.** IonicLink turns ionic-liquid tribology PDFs into a
+searchable, evidence-grounded database. Upload a paper, the multimodal LLM
+pipeline extracts friction / diffusion records, every value links back to
+the page, paragraph, or figure it came from, and the result is reviewable
+and queryable in the workbench.
+
+**Who it's for.** Tribology researchers building structured datasets from
+literature. You bring the PDFs and an LLM API key; you get back rows with
+provenance.
+
+### Run it locally
+
+```bash
+# 1. Backend — FastAPI on :8000
+cd backend
+pip install -r requirements.txt
+cp ../.env.docker.example ../.env          # then fill in OPENAI_API_KEY (or OPENROUTER_API_KEY)
+uvicorn main:app --reload
+
+# 2. Frontend — Vite dev server on :5173
+cd frontend
+npm install
+npm run dev
+```
+
+Open <http://localhost:5173>, sign in with the bootstrap admin
+(`IONICLINK_ADMIN_USERNAME` / `IONICLINK_ADMIN_PASSWORD` from your `.env` —
+**change these before exposing the app**), and you land on the home screen
+with a single **Upload PDF papers** action.
+
+### First five minutes
+
+1. **Upload** a tribology or diffusion PDF on the home screen.
+2. Watch the extraction run in **Monitor** — stages, candidate counts, and
+   per-paper progress show live.
+3. Open **Library → Database** to see the extracted rows; click any row to
+   jump to the highlighted source region in the PDF.
+4. Use the **Integrated Explorer** to filter by material, lubricant, DOI,
+   or numeric ranges.
+5. If a row is wrong, edit it inline — the change persists and the audit
+   trail is preserved.
+
+### Operational notes
+
+- DB lives at `backend/data/ioniclink.db` (SQLite). No migration tool yet
+  — schema changes are applied at startup.
+- One-off per-paper data corrections live under
+  [`scripts/data-fixes/`](scripts/data-fixes/README.md) with a backup-first
+  convention.
+- Docker: `docker compose up` brings the stack up once `.env` is filled.
+
+---
+
 ## 项目概述
 
 IonicLink 是一个聚焦 **离子液体摩擦学文献** 的智能抽取系统。项目采用 Vue 3 前端分析工作台与 FastAPI 后端服务协同，将 PDF 论文转化为可追溯、可审阅、可检索的结构化实验数据。

@@ -55,7 +55,7 @@ export const STARTER_PRESETS = [
 
 function defaultBundleName() {
   const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ')
-  return `Tribology Builder ${stamp}`
+  return `Lubrication Builder ${stamp}`
 }
 
 function csvEscape(value: unknown) {

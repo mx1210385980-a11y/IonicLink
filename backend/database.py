@@ -40,12 +40,17 @@ async def _ensure_bootstrap_security_state() -> None:
         DEFAULT_ADMIN_DISPLAY_NAME,
         DEFAULT_ADMIN_PASSWORD,
         DEFAULT_ADMIN_USERNAME,
+        EXAMPLE_ADMIN_PASSWORD,
         DEFAULT_GROUP_NAME,
         DEFAULT_GROUP_SLUG,
         ROLE_PRINCIPAL_INVESTIGATOR,
         build_scope_key,
         hash_password,
+        validate_bootstrap_admin_password,
+        verify_password,
     )
+
+    validate_bootstrap_admin_password(os.getenv("IONICLINK_ADMIN_PASSWORD"))
 
     async with async_session_maker() as session:
         group = (
@@ -70,8 +75,11 @@ async def _ensure_bootstrap_security_state() -> None:
             )
             session.add(admin)
             await session.flush()
-        elif not admin.group_id:
-            admin.group_id = group.id
+        else:
+            if not admin.group_id:
+                admin.group_id = group.id
+            if verify_password(EXAMPLE_ADMIN_PASSWORD, admin.password_hash):
+                admin.password_hash = hash_password(DEFAULT_ADMIN_PASSWORD)
 
         await session.execute(
             text(

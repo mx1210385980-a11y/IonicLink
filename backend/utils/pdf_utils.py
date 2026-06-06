@@ -15,6 +15,23 @@ _TABLE_KEYWORDS  = {'table', 'tab.'}
 # Min fraction of page area that image blocks must cover to count as a "visual page"
 _IMAGE_AREA_THRESHOLD = 0.03  # 3% of page area
 
+_NANO_TRIBOLOGY_CONTEXT_RE = re.compile(
+    r"\b(?:AFM|atomic\s+force\s+microscopy|colloid(?:al)?\s+probe|nanotribology)\b",
+    flags=re.IGNORECASE,
+)
+_NANO_FORCE_CONTEXT_RE = re.compile(
+    r"\b(?:nN|lateral\s+force|normal\s+force|Au\s*\(?111\)?|surface\s+potential)\b",
+    flags=re.IGNORECASE,
+)
+_SPEED_CONTEXT_RE = re.compile(
+    r"\b(?:sliding\s+(?:speeds?|velocities)|scan\s+speeds?|speeds?|velocities|friction\s+coefficients?|lateral\s+force)\b",
+    flags=re.IGNORECASE,
+)
+_MICRO_SPEED_ARTIFACT_RE = re.compile(
+    r"(?P<value>\b\d+(?:[.:]\d+)?)\s*mm(?P<suffix>\s*/\s*s|\s+s\s*(?:\x02|[-−–—])?1|\s+s\s*(?:\^\s*[-−]?1|⁻1|⁻¹))",
+    flags=re.IGNORECASE,
+)
+
 
 def _format_byte_size(byte_count: int) -> str:
     value = float(max(0, byte_count))
@@ -75,6 +92,46 @@ def validate_pdf_file(pdf_path: str, filename: str | None = None) -> Optional[st
         return f"{filename or pdf_path} cannot be read from disk ({exc}). Please upload the PDF again."
 
 
+def _has_nano_tribology_context(text: str) -> bool:
+    return bool(_NANO_TRIBOLOGY_CONTEXT_RE.search(text) and _NANO_FORCE_CONTEXT_RE.search(text))
+
+
+def _micro_speed_artifact_is_contextual(text: str, start: int, end: int) -> bool:
+    window = text[max(0, start - 700):min(len(text), end + 260)]
+    return bool(_SPEED_CONTEXT_RE.search(window))
+
+
+def repair_pdf_text_unit_artifacts(text: str) -> str:
+    """
+    Repair narrow PDF text-layer unit artifacts before LLM/table extraction.
+
+    Some journal PDFs render "μm s−1" correctly, but expose selectable text as
+    "mm s<control>1" because the embedded font maps the micro glyph poorly.
+    Only fix this in nanotribology/AFM contexts so genuine macro "mm/s" values
+    from tribometers remain untouched.
+    """
+    raw = str(text or "")
+    if not raw or not _has_nano_tribology_context(raw):
+        return raw
+
+    def replace_match(match: re.Match[str]) -> str:
+        try:
+            value = float((match.group("value") or "").replace(":", "."))
+        except ValueError:
+            return match.group(0)
+        if not (0 < abs(value) <= 100):
+            return match.group(0)
+        if not _micro_speed_artifact_is_contextual(raw, match.start(), match.end()):
+            return match.group(0)
+
+        suffix = match.group("suffix") or ""
+        if "/" in suffix:
+            return f"{match.group('value')} μm/s"
+        return f"{match.group('value')} μm s−1"
+
+    return _MICRO_SPEED_ARTIFACT_RE.sub(replace_match, raw)
+
+
 def classify_pdf_pages(pdf_path: str) -> dict:
     """
     Classify each page of a PDF as either 'visual' (contains figures/tables)
@@ -120,7 +177,7 @@ def classify_pdf_pages(pdf_path: str) -> dict:
             has_large_image = (image_area / page_area) >= _IMAGE_AREA_THRESHOLD
 
             # ── 2. Keyword scan in text blocks ────────────────────────────
-            full_text = page.get_text()
+            full_text = repair_pdf_text_unit_artifacts(page.get_text())
             text_lower = full_text.lower()
             has_figure_keyword = any(kw in text_lower for kw in _FIGURE_KEYWORDS)
 
@@ -176,7 +233,7 @@ def process_pdf_to_base64(content: bytes, file_prefix: str = "page") -> List[str
             for i, page in enumerate(doc):
                 # Smart Filter Logic
                 # 1. Extract text (fast)
-                text = page.get_text().lower()
+                text = repair_pdf_text_unit_artifacts(page.get_text()).lower()
                 
                 # 2. Check for keywords
                 has_keyword = any(k in text for k in KEYWORDS)
@@ -253,11 +310,26 @@ def extract_pdf_text_fitz(content: bytes) -> str:
     """
     try:
         with fitz.open(stream=content, filetype="pdf") as doc:
-            text_parts = [page.get_text() for page in doc]
+            text_parts = [repair_pdf_text_unit_artifacts(page.get_text()) for page in doc]
             return "\n\n".join(text_parts)
     except Exception as e:
         print(f"[PDF Text] Error extracting text: {e}")
         return ""
+
+
+def extract_pdf_plain_text_pages(pdf_path: str) -> tuple[int, str]:
+    """
+    Extract selectable PDF text for Library detail views with the same text-layer
+    artifact repair used by upload and fast-table extraction.
+    """
+    chunks: list[str] = []
+    with fitz.open(pdf_path) as doc:
+        page_count = len(doc)
+        for page_index, page in enumerate(doc, start=1):
+            text = repair_pdf_text_unit_artifacts(page.get_text("text")).strip()
+            if text:
+                chunks.append(f"Page {page_index}\n{text}")
+    return page_count, repair_pdf_text_unit_artifacts("\n\n".join(chunks))
 
 
 def crop_region_to_base64(

@@ -14,11 +14,13 @@ import {
   getMentorProgress,
   listCleanedDatasets,
   listLiterature,
+  searchRecords,
   type AgentWorkflow,
   type BatchFile,
   type ExtractionRunDetail,
   type MentorProgressResponse,
 } from '@/lib/api'
+import { sessionState } from '@/lib/session'
 
 type DashboardStatsSnapshot = Awaited<ReturnType<typeof getDashboardStats>>
 type DatasetListSnapshot = Awaited<ReturnType<typeof listCleanedDatasets>>
@@ -28,6 +30,7 @@ const FAILED_STATUSES = new Set(['cancelled', 'error', 'failed'])
 const SUCCESS_STATUSES = new Set(['completed', 'success'])
 const RECENT_RUN_LOOKUP_LIMIT = 12
 const HOME_REFRESH_INTERVAL_MS = 60_000
+const REVIEW_DATA_CHANGED_EVENT = 'ioniclink:review-data-changed'
 
 export type HomeActionType = 'route' | 'retry_run' | 'open_record'
 export type HomeActionPriority = 'high' | 'medium' | 'low'
@@ -63,6 +66,7 @@ export interface HomeSummary {
     evidenceCoverageRate: number | null
     reviewCompletionRate: number | null
     datasetReadyRecords: number
+    officialDatabaseRecords: number
   }
 }
 
@@ -71,6 +75,11 @@ type HomeRemoteSnapshot = {
   mentor: MentorProgressResponse | null
   datasets: DatasetListSnapshot['items']
   recentRuns: HomeRecentRun[]
+  literatureReviewableRows: number
+  literatureRecordRows: number
+  literatureCandidateRows: number
+  searchRecordRows: number | null
+  searchCandidateRows: number | null
   runningRuns: number
   failedRuns: number
   successRuns: number
@@ -88,6 +97,11 @@ const EMPTY_REMOTE_SNAPSHOT: HomeRemoteSnapshot = {
   mentor: null,
   datasets: [],
   recentRuns: [],
+  literatureReviewableRows: 0,
+  literatureRecordRows: 0,
+  literatureCandidateRows: 0,
+  searchRecordRows: null,
+  searchCandidateRows: null,
   runningRuns: 0,
   failedRuns: 0,
   successRuns: 0,
@@ -105,17 +119,22 @@ export function useHomeSummary(options: UseHomeSummaryOptions) {
     loading.value = true
     error.value = ''
 
-    const [statsResult, literatureResult, mentorResult, datasetsResult] = await Promise.allSettled([
+    const homeScope = homeRecordScope()
+    const [statsResult, literatureResult, mentorResult, datasetsResult, officialRecordsResult, reviewCandidatesResult] = await Promise.allSettled([
       getDashboardStats(),
       listLiterature(0, RECENT_RUN_LOOKUP_LIMIT),
       getMentorProgress(),
       listCleanedDatasets(),
+      searchRecords({ entityType: 'record' }, 0, 1, { scope: homeScope }),
+      searchRecords({ entityType: 'candidate' }, 0, 1, { scope: homeScope }),
     ])
 
     const stats = statsResult.status === 'fulfilled' ? statsResult.value : null
     const literature = literatureResult.status === 'fulfilled' ? literatureResult.value : []
     const mentor = mentorResult.status === 'fulfilled' ? mentorResult.value : null
     const datasets = datasetsResult.status === 'fulfilled' ? datasetsResult.value.items : []
+    const searchRecordRows = officialRecordsResult.status === 'fulfilled' ? Number(officialRecordsResult.value.total || 0) : null
+    const searchCandidateRows = reviewCandidatesResult.status === 'fulfilled' ? Number(reviewCandidatesResult.value.total || 0) : null
 
     const runResults = await Promise.allSettled(
       [...literature]
@@ -148,12 +167,20 @@ export function useHomeSummary(options: UseHomeSummaryOptions) {
     const runningRuns = recentRuns.filter((item) => isRunningStatus(item.status)).length
     const failedRuns = recentRuns.filter((item) => isFailedStatus(item.status)).length
     const successRuns = recentRuns.filter((item) => isSuccessStatus(item.status)).length
+    const literatureReviewableRows = literature.reduce((sum, item) => sum + literatureReviewableCount(item), 0)
+    const literatureRecordRows = literature.reduce((sum, item) => sum + literatureOfficialRecordCount(item), 0)
+    const literatureCandidateRows = literature.reduce((sum, item) => sum + literatureCandidateCount(item), 0)
 
     remoteSnapshot.value = {
       stats,
       mentor,
       datasets,
       recentRuns: recentRuns.slice(0, 5),
+      literatureReviewableRows,
+      literatureRecordRows,
+      literatureCandidateRows,
+      searchRecordRows,
+      searchCandidateRows,
       runningRuns,
       failedRuns,
       successRuns,
@@ -166,6 +193,8 @@ export function useHomeSummary(options: UseHomeSummaryOptions) {
       || literatureResult.status === 'rejected'
       || mentorResult.status === 'rejected'
       || datasetsResult.status === 'rejected'
+      || officialRecordsResult.status === 'rejected'
+      || reviewCandidatesResult.status === 'rejected'
       || runResults.some((result) => result.status === 'rejected')
     ) {
       error.value = isChinese.value ? 'Home 使用了部分回退数据。' : 'Home is showing partial fallback data.'
@@ -195,14 +224,30 @@ export function useHomeSummary(options: UseHomeSummaryOptions) {
       + Number(remoteStats?.confidence_stats?.breakdown?.figure_grounded?.count || 0)
 
     const totalRecords = Number(remoteStats?.total_records || 0)
-    const reviewPending = Math.max(inferredCount, localReviewPending)
+    const reviewPending = remoteSnapshot.value.searchCandidateRows !== null
+      ? remoteSnapshot.value.searchCandidateRows
+      : Math.max(
+          inferredCount,
+          localReviewPending,
+          remoteSnapshot.value.literatureCandidateRows,
+        )
     const reviewedToday = Math.max(countRemoteReviewedToday(mentor), localReviewedToday)
 
     const remoteDatasetReadyRecords =
       Number(mentor?.latest_ready_dataset?.usable_records || 0)
       || Math.max(0, ...remoteSnapshot.value.datasets.map((item) => Number(item.row_count || 0)))
     const localModelReadyRecords = Math.max(0, files.reduce((sum, file) => sum + (file.records?.length || 0), 0) - localReviewPending)
-    const datasetReadyRecords = Math.max(remoteDatasetReadyRecords, localModelReadyRecords)
+    const datasetReadyRecords = Math.max(
+      remoteDatasetReadyRecords,
+      localModelReadyRecords,
+      remoteSnapshot.value.literatureReviewableRows,
+    )
+    const officialDatabaseRecords = remoteSnapshot.value.searchRecordRows !== null
+      ? remoteSnapshot.value.searchRecordRows
+      : Math.max(
+          totalRecords,
+          remoteSnapshot.value.literatureRecordRows,
+        )
 
     const remoteTerminalRuns = remoteSnapshot.value.successRuns + remoteSnapshot.value.failedRuns
     const extractionSuccessRate =
@@ -248,18 +293,25 @@ export function useHomeSummary(options: UseHomeSummaryOptions) {
         evidenceCoverageRate: evidenceCoverageRate === null ? null : clampRate(evidenceCoverageRate),
         reviewCompletionRate: reviewCompletionRate === null ? null : clampRate(reviewCompletionRate),
         datasetReadyRecords,
+        officialDatabaseRecords,
       },
     }
   })
 
+  function handleReviewDataChanged() {
+    void refresh()
+  }
+
   onMounted(() => {
     void refresh()
+    window.addEventListener(REVIEW_DATA_CHANGED_EVENT, handleReviewDataChanged)
     refreshTimer = setInterval(() => {
       void refresh()
     }, HOME_REFRESH_INTERVAL_MS)
   })
 
   onBeforeUnmount(() => {
+    window.removeEventListener(REVIEW_DATA_CHANGED_EVENT, handleReviewDataChanged)
     if (refreshTimer) {
       clearInterval(refreshTimer)
       refreshTimer = null
@@ -278,6 +330,7 @@ export function useHomeSummary(options: UseHomeSummaryOptions) {
         || value.today.failedRuns > 0
         || value.today.reviewPending > 0
         || value.today.reviewedToday > 0
+        || value.health.officialDatabaseRecords > 0
         || value.health.datasetReadyRecords > 0
     }),
   }
@@ -369,6 +422,35 @@ function actionPriorityWeight(priority: HomeActionPriority) {
     default:
       return 1
   }
+}
+
+function literatureCandidateCount(item: any): number {
+  const typedCandidates = Number(item?.tribologyCandidateCount ?? 0) + Number(item?.diffusionCandidateCount ?? 0)
+  if (typedCandidates > 0) return typedCandidates
+  return Number(item?.candidateCount ?? 0)
+}
+
+function homeRecordScope(): 'active' | 'all_visible' {
+  const role = String(sessionState.user?.role || '').trim().toLowerCase()
+  return role === 'principal_investigator' || role === 'group_admin' ? 'all_visible' : 'active'
+}
+
+function literatureOfficialRecordCount(item: any): number {
+  const typedRecords = Number(item?.tribologyRecordCount ?? 0) + Number(item?.diffusionRecordCount ?? 0)
+  if (typedRecords > 0) return typedRecords
+  return Number(item?.recordCount ?? 0)
+}
+
+function literatureReviewableCount(item: any): number {
+  const explicitTotal = Number(item?.totalCount ?? 0)
+  if (explicitTotal > 0) return explicitTotal
+  const typedTotal =
+    Number(item?.tribologyRecordCount ?? 0)
+    + Number(item?.tribologyCandidateCount ?? 0)
+    + Number(item?.diffusionRecordCount ?? 0)
+    + Number(item?.diffusionCandidateCount ?? 0)
+  if (typedTotal > 0) return typedTotal
+  return Number(item?.recordCount ?? 0) + Number(item?.candidateCount ?? 0)
 }
 
 function countLocalReviewPending(files: BatchFile[], workflow: AgentWorkflow | null) {
