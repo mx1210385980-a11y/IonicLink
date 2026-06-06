@@ -23,6 +23,7 @@ import {
   Save,
   Trash2,
   Ban,
+  BookOpen,
   X,
   Check,
   Layers,
@@ -862,6 +863,30 @@ function setTableDensity(value: 'comfortable' | 'compact') {
     /* ignore persistence failures (private mode, etc.) */
   }
 }
+
+// Group-by-paper: collapse same-source records under one citation header. Only
+// meaningful when not actively sorting by a data column (sorting flattens the
+// list, which would scatter papers) and only in the record-centric view.
+const TABLE_GROUP_KEY = 'ioniclink:db-group-by-paper'
+const tableGroupByPaper = ref<boolean>((() => {
+  try {
+    return localStorage.getItem(TABLE_GROUP_KEY) === '1'
+  } catch {
+    return false
+  }
+})())
+function setGroupByPaper(value: boolean) {
+  tableGroupByPaper.value = value
+  try {
+    localStorage.setItem(TABLE_GROUP_KEY, value ? '1' : '0')
+  } catch {
+    /* ignore persistence failures */
+  }
+}
+const groupingDisabledBySort = computed(() => Boolean(sortBy.value))
+const effectiveGroupByPaper = computed(
+  () => tableGroupByPaper.value && !groupingDisabledBySort.value && !isReviewQueue.value,
+)
 
 // 批量选择 + 批量操作 ─────────────────────────────────────────
 const selectedIds = ref<Set<number>>(new Set())
@@ -2432,8 +2457,25 @@ onBeforeUnmount(() => {
             </button>
           </div>
 
+          <button
+            v-if="!isReviewQueue"
+            type="button"
+            class="ml-auto flex h-10 shrink-0 items-center gap-1.5 rounded-[9px] border px-3 text-xs font-black shadow-sm transition disabled:cursor-not-allowed disabled:opacity-45"
+            :class="effectiveGroupByPaper
+              ? 'border-[#0f7c82] bg-[#0f7c82] text-white'
+              : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400 dark:hover:bg-slate-800'"
+            :aria-pressed="effectiveGroupByPaper"
+            :disabled="groupingDisabledBySort"
+            :title="groupingDisabledBySort ? 'Clear the column sort to group by paper' : 'Group records under their source paper'"
+            @click="setGroupByPaper(!tableGroupByPaper)"
+          >
+            <BookOpen class="h-3.5 w-3.5" />
+            Group by paper
+          </button>
+
           <div
-            class="ml-auto flex h-10 shrink-0 items-center gap-0.5 rounded-[9px] border border-slate-200 bg-white px-1 shadow-sm dark:border-slate-700 dark:bg-slate-950"
+            class="flex h-10 shrink-0 items-center gap-0.5 rounded-[9px] border border-slate-200 bg-white px-1 shadow-sm dark:border-slate-700 dark:bg-slate-950"
+            :class="isReviewQueue ? 'ml-auto' : ''"
             role="group"
             aria-label="Row density"
           >
@@ -3047,6 +3089,7 @@ onBeforeUnmount(() => {
         :selected-ids="selectedIds"
         :review-queue-mode="isReviewQueue"
         :density="tableDensity"
+        :group-by-paper="effectiveGroupByPaper"
         :sort-by="sortBy"
         :sort-dir="sortDir"
         :selected-candidate-ids="selectedCandidateIds"

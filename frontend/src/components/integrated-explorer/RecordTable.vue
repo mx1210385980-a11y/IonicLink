@@ -28,6 +28,7 @@ const props = defineProps<{
   selectedIds: Set<number>
   reviewQueueMode?: boolean
   density?: 'comfortable' | 'compact'
+  groupByPaper?: boolean
   sortBy?: 'id' | 'cof' | 'load' | 'confidence' | 'date' | ''
   sortDir?: 'asc' | 'desc'
   selectedCandidateIds?: Set<string>
@@ -68,6 +69,41 @@ const rowHeight = computed(() => (isCompact.value ? COMPACT_ROW_HEIGHT : COMFORT
 const cellPadY = computed(() => (isCompact.value ? 'py-2' : 'py-4'))
 const cellPadYTight = computed(() => (isCompact.value ? 'py-2' : 'py-3'))
 const OVERSCAN = 5     // Number of items to render outside visible area
+const HEADER_HEIGHT = 40 // "Group by paper" header row height
+
+type DisplayRow =
+  | { kind: 'record'; record: RecordResponse }
+  | { kind: 'header'; literatureId: number; title: string; meta: string; count: number }
+
+// Flatten records into the rendered row stream. When grouping is on (record mode
+// only) consecutive records from the same paper are gathered under one header row,
+// which also collapses the otherwise-repeated trailing literature cell.
+const displayRows = computed<DisplayRow[]>(() => {
+  if (!props.groupByPaper || props.reviewQueueMode) {
+    return props.records.map((record) => ({ kind: 'record', record }))
+  }
+  const groups = new Map<number, RecordResponse[]>()
+  for (const record of props.records) {
+    const lit = Number(record.literatureId || 0)
+    if (!groups.has(lit)) groups.set(lit, [])
+    groups.get(lit)!.push(record)
+  }
+  const rows: DisplayRow[] = []
+  for (const [literatureId, recs] of groups) {
+    const first = recs[0]
+    if (!first) continue
+    rows.push({
+      kind: 'header',
+      literatureId,
+      title: literatureTitle(first),
+      meta: literatureMeta(first),
+      count: recs.length,
+    })
+    for (const record of recs) rows.push({ kind: 'record', record })
+  }
+  return rows
+})
+
 const COL_SELECT = 'w-[48px]'
 const COL_ID = 'w-[56px]'
 const COL_IONIC = 'w-[280px]'
@@ -81,13 +117,18 @@ const parentRef = ref<HTMLElement | null>(null)
 // Create virtualizer instance
 const virtualizer = useVirtualizer(
   computed(() => ({
-    count: props.loading ? 8 : props.records.length,
+    count: props.loading ? 8 : displayRows.value.length,
     getScrollElement: () => parentRef.value,
-    estimateSize: () => rowHeight.value,
+    estimateSize: (index: number) => {
+      if (props.loading) return rowHeight.value
+      return displayRows.value[index]?.kind === 'header' ? HEADER_HEIGHT : rowHeight.value
+    },
     overscan: OVERSCAN,
     getItemKey: (index: number) => {
       if (props.loading) return `skeleton-${index}`
-      return props.records[index]?.id ?? index
+      const row = displayRows.value[index]
+      if (!row) return index
+      return row.kind === 'header' ? `hdr-${row.literatureId}` : (row.record.id ?? index)
     },
   })),
 )
@@ -95,15 +136,15 @@ const virtualizer = useVirtualizer(
 const virtualRows = computed(() => virtualizer.value.getVirtualItems())
 const totalSize = computed(() => virtualizer.value.getTotalSize())
 
-// Re-measure rows when the density changes so the virtualizer drops the cached
-// comfortable/compact heights instead of overlapping or leaving gaps.
-watch(rowHeight, () => {
+// Re-measure rows when density or grouping changes so the virtualizer drops the
+// cached heights instead of overlapping or leaving gaps.
+watch([rowHeight, () => props.groupByPaper], () => {
   virtualizer.value.measure()
 })
-const visibleRecordRows = computed(() =>
+const visibleDisplayRows = computed(() =>
   virtualRows.value.flatMap((virtualRow) => {
-    const record = props.records[virtualRow.index]
-    return record ? [{ virtualRow, record }] : []
+    const row = displayRows.value[virtualRow.index]
+    return row ? [{ virtualRow, row }] : []
   }),
 )
 function isCandidateRecord(record: RecordResponse) {
@@ -118,7 +159,12 @@ function recordMatchesFocusEntity(record: RecordResponse) {
 }
 const focusedRecordIndex = computed(() => {
   if (props.focusRecordId == null) return -1
-  return props.records.findIndex((record) => Number(record.id) === Number(props.focusRecordId) && recordMatchesFocusEntity(record))
+  return displayRows.value.findIndex(
+    (row) =>
+      row.kind === 'record' &&
+      Number(row.record.id) === Number(props.focusRecordId) &&
+      recordMatchesFocusEntity(row.record),
+  )
 })
 const pageRecordIds = computed(() =>
   props.records
@@ -401,7 +447,25 @@ defineExpose({
         </template>
 
         <template v-else>
-          <template v-for="{ virtualRow, record } in visibleRecordRows" :key="String(virtualRow.key)">
+          <template v-for="{ virtualRow, row } in visibleDisplayRows" :key="String(virtualRow.key)">
+            <div
+              v-if="row.kind === 'header'"
+              class="virtual-group-header absolute left-0 top-0 flex w-full items-center gap-2 border-b border-slate-200 bg-slate-50/90 px-4 dark:border-slate-800 dark:bg-slate-900/70"
+              :style="{
+                height: `${virtualRow.size}px`,
+                transform: `translateY(${virtualRow.start}px)`,
+              }"
+            >
+              <span class="h-5 w-1 shrink-0 rounded-full bg-[#0f7c82]" aria-hidden="true" />
+              <BookOpen class="h-3.5 w-3.5 shrink-0 text-[#0f7c82]" />
+              <span class="min-w-0 truncate text-[12.5px] font-extrabold text-slate-700 dark:text-slate-200" :title="row.title">{{ row.title }}</span>
+              <span class="shrink-0 truncate text-[11px] font-semibold text-slate-400 dark:text-slate-500">{{ row.meta }}</span>
+              <span class="ml-auto shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10.5px] font-black text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400">
+                {{ row.count }} {{ row.count === 1 ? 'record' : 'records' }}
+              </span>
+            </div>
+            <template v-else-if="row.kind === 'record'">
+              <template v-for="record in [row.record]" :key="`rec-${record.id}`">
             <div
               class="virtual-record-row group absolute left-0 top-0 flex w-full items-start border-b border-slate-100 transition-colors hover:bg-[#f8fcfd] dark:border-slate-800 dark:hover:bg-slate-900/70"
               :class="isFocusedRecord(record) ? 'database-focus-record bg-amber-50/80 ring-2 ring-amber-300/70 ring-inset dark:bg-amber-400/10 dark:ring-amber-300/35' : ''"
@@ -577,6 +641,8 @@ defineExpose({
                 </button>
               </div>
             </div>
+              </template>
+            </template>
           </template>
         </template>
       </div>

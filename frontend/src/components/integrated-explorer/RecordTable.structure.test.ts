@@ -357,7 +357,7 @@ describe('RecordTable structure thumbnails', () => {
     // RecordTable exposes density + drives a shorter virtual row in compact mode.
     expect(source).toContain("density?: 'comfortable' | 'compact'")
     expect(source).toContain('const COMPACT_ROW_HEIGHT')
-    expect(source).toContain('estimateSize: () => rowHeight.value')
+    expect(source).toContain('rowHeight.value')
     expect(source).toContain(':compact="isCompact"')
     // Compact mode drops the molecular-structure SVG spread (the main height driver).
     expect(recipeCellSource).toContain('visibleStructureCards.length && !compact')
@@ -365,5 +365,19 @@ describe('RecordTable structure thumbnails', () => {
     expect(workspaceSource).toContain('function setTableDensity')
     expect(workspaceSource).toContain("localStorage.setItem(TABLE_DENSITY_KEY")
     expect(workspaceSource).toContain(':density="tableDensity"')
+  })
+
+  it('groups records under paper headers, disabled while a column sort is active', () => {
+    // RecordTable builds a header|record display stream and renders header rows.
+    expect(source).toContain('groupByPaper?: boolean')
+    expect(source).toContain('const displayRows = computed')
+    expect(source).toContain("kind: 'header'")
+    expect(source).toContain('virtual-group-header')
+    expect(source).toContain('visibleDisplayRows')
+    // Workspace owns the toggle and forces it off when sorting.
+    expect(workspaceSource).toContain('const effectiveGroupByPaper = computed')
+    expect(workspaceSource).toContain('!groupingDisabledBySort.value')
+    expect(workspaceSource).toContain(':group-by-paper="effectiveGroupByPaper"')
+    expect(workspaceSource).toContain('@click="setGroupByPaper(!tableGroupByPaper)"')
   })
 })
