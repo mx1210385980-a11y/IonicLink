@@ -258,9 +258,15 @@ describe('IntegratedExplorerWorkspace filters surface', () => {
   })
 
   it('keeps Review Queue source counts honest when the source list request fails', () => {
+    expect(source).toContain("import { sessionState } from '@/lib/session'")
     expect(source).toContain('const reviewBacklogError = ref')
+    expect(source).toContain('const canLoadReviewBacklog = computed')
+    expect(source).toContain('sessionState.ready && Boolean(sessionState.token)')
     expect(source).toContain('const reviewQueueTotalCount = computed')
     expect(source).toContain('Math.max(reviewBacklogTotal.value, triageTierCounts.value.all')
+    expect(source).toContain('if (!canLoadReviewBacklog.value) return')
+    expect(source).toContain('() => sessionState.ready')
+    expect(source).toContain('() => sessionState.token')
     expect(source).toContain("reviewBacklogError.value = 'Source list could not be loaded.'")
     expect(source).toContain('Source list unavailable. Showing all candidates.')
     expect(source).toContain('{{ reviewQueueTotalCount }}')

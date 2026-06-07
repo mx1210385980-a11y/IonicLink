@@ -65,6 +65,7 @@ import {
 } from '@/lib/integratedExplorerHelpers'
 import { normalizePotentialDisplayText } from '@/lib/potential'
 import { lazyComponent } from '@/lib/lazyComponent'
+import { sessionState } from '@/lib/session'
 
 const props = defineProps<{
   initialDoi?: string
@@ -155,6 +156,7 @@ const activeLibraryEntityType = computed<'record' | 'candidate'>(() =>
   props.entityTypeFilter === 'candidate' ? 'candidate' : 'record',
 )
 const isReviewQueue = computed(() => activeLibraryEntityType.value === 'candidate')
+const canLoadReviewBacklog = computed(() => sessionState.ready && Boolean(sessionState.token))
 
 // Track 2: review-queue triage ───────────────────────────────────────────────
 // Client-side narrowing + backlog ordering over the candidate rows the queue
@@ -303,11 +305,11 @@ const displayedCandidateCount = computed(() =>
   displayedRecords.value.filter((record) => databaseRecordEntityType(record) === 'candidate').length,
 )
 
-watch(isReviewQueue, (inQueue) => {
+watch([isReviewQueue, () => sessionState.ready, () => sessionState.token, () => props.recordScope], ([inQueue]) => {
   if (!inQueue) {
     clearTriageFilters()
     selectedReviewLiteratureId.value = null
-  } else {
+  } else if (canLoadReviewBacklog.value) {
     void loadReviewBacklog()
   }
 }, { immediate: true })
@@ -927,6 +929,7 @@ const selectedReviewPaper = computed(() =>
 )
 
 async function loadReviewBacklog() {
+  if (!canLoadReviewBacklog.value) return
   reviewBacklogLoading.value = true
   reviewBacklogError.value = ''
   try {
