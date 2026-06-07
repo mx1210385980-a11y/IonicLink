@@ -1260,6 +1260,86 @@ function displayAnionToken(token: string, key = normalizeAnionStructureKey(token
   return ANION_STRUCTURE_DISPLAY_TOKENS[key] || token
 }
 
+type CationAliasNoteInfo = {
+  canonical: string
+  fullName: string
+  aliases: string[]
+}
+
+const CATION_ALIAS_NOTES: Record<string, CationAliasNoteInfo> = {
+  emim: {
+    canonical: 'EMIM',
+    fullName: '1-ethyl-3-methylimidazolium',
+    aliases: ['C2MIM', 'C2mim'],
+  },
+  bmim: {
+    canonical: 'BMIM',
+    fullName: '1-butyl-3-methylimidazolium',
+    aliases: ['C4MIM', 'C4mim'],
+  },
+  hmim: {
+    canonical: 'HMIM',
+    fullName: '1-hexyl-3-methylimidazolium',
+    aliases: ['C6MIM', 'C6mim'],
+  },
+  omim: {
+    canonical: 'OMIM',
+    fullName: '1-octyl-3-methylimidazolium',
+    aliases: ['C8MIM', 'C8mim'],
+  },
+}
+
+function escapeRegExp(input: string): string {
+  return String(input).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function bracketedIonLabel(input: string): string {
+  const trimmed = String(input || '').trim().replace(/^\[|\]$/g, '')
+  return trimmed ? `[${trimmed}]` : ''
+}
+
+function recordCationAliasKey(record: RecordResponse): string {
+  const explicitKey = recordCationKey(record)
+  if (CATION_ALIAS_NOTES[explicitKey]) return explicitKey
+
+  const candidates = [
+    recordLubricantRaw(record),
+    String(record.ionicLiquidDisplay ?? (record as any).ionic_liquid_display ?? '').trim(),
+    lubricantDisplay(record),
+  ]
+
+  for (const candidate of candidates) {
+    const match = canonicalIonicLiquidLabel(candidate).match(/\[([^\]]+)\]\s*\[[^\]]+\]/)
+    const key = normalizeCationStructureKey(match?.[1] || '')
+    if (CATION_ALIAS_NOTES[key]) return key
+  }
+
+  return ''
+}
+
+export function ionicLiquidCationAliasNote(record: RecordResponse, evidenceText: string | null | undefined): string {
+  const aliasKey = recordCationAliasKey(record)
+  const info = CATION_ALIAS_NOTES[aliasKey]
+  if (!info) return ''
+
+  const evidence = String(evidenceText || '')
+  if (!evidence.trim()) return ''
+
+  const canonicalToken = normalizeStructureIonKey(info.canonical)
+  for (const alias of info.aliases) {
+    if (normalizeStructureIonKey(alias) === canonicalToken) continue
+    const match = evidence.match(new RegExp(`\\[?${escapeRegExp(alias)}\\]?`, 'i'))
+    if (!match) continue
+
+    const aliasLabel = bracketedIonLabel(match[0])
+    const canonicalLabel = `[${info.canonical}]`
+    if (!aliasLabel || aliasLabel.toLowerCase() === canonicalLabel.toLowerCase()) continue
+    return `阳离子说明: ${aliasLabel} 是 ${canonicalLabel} 的文献写法，均指 ${info.fullName}.`
+  }
+
+  return ''
+}
+
 function resolveCompoundStructureSmiles(key: string): string | null {
   return COMPOUND_STRUCTURE_SMILES[key] || null
 }

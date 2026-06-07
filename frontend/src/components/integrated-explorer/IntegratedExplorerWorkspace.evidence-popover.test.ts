@@ -34,4 +34,11 @@ describe('IntegratedExplorerWorkspace field evidence popover', () => {
     expect(source).toContain('const quote = trustedContext || normalizeDatabaseEvidenceText(entry.evidence?.quote)')
     expect(source).not.toContain('const quote = context || normalizeDatabaseEvidenceText(entry.evidence?.quote)')
   })
+
+  it('shows cation alias explanations in ionic-liquid evidence popovers', () => {
+    expect(source).toContain('ionicLiquidCationAliasNote')
+    expect(source).toContain('databaseEvidenceCationAliasNote')
+    expect(source).toContain('activeDatabaseEvidenceSlide(evidenceModalRecord)?.aliasNote')
+    expect(source).toContain('Cation note')
+  })
 })

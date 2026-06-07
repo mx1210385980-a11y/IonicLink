@@ -19,6 +19,7 @@ import {
   detailedConditionChips,
   formatIonicLiquidPartHtml,
   formatIonicLiquidHtml,
+  ionicLiquidCationAliasNote,
   ionicLiquidParts,
   lubricantAliasDisplay,
   lubricantDisplay,
@@ -714,6 +715,24 @@ describe('integratedExplorerHelpers', () => {
   it('renders ionic liquids as escaped HTML with subscripts', () => {
     expect(formatIonicLiquidHtml('[C8MIM][BF4]')).toBe('[C<sub>8</sub>MIM][BF<sub>4</sub>]')
     expect(formatIonicLiquidHtml('<tag>')).toBe('&lt;tag&gt;')
+  })
+
+  it('explains imidazolium cation aliases used in evidence text', () => {
+    const note = ionicLiquidCationAliasNote(
+      createRecord({ lubricant: '[EMIM][BF4]', cation: 'EMIM' }),
+      '1-ethyl-3-methylimidazolium tetrafluoroborate ([C2MIM][BF4]) was the IL chosen.',
+    )
+
+    expect(note).toContain('[C2MIM]')
+    expect(note).toContain('[EMIM]')
+    expect(note).toContain('1-ethyl-3-methylimidazolium')
+  })
+
+  it('does not add cation alias notes when evidence already uses the canonical label', () => {
+    expect(ionicLiquidCationAliasNote(
+      createRecord({ lubricant: '[EMIM][BF4]', cation: 'EMIM' }),
+      '[EMIM][BF4] was the ionic liquid.',
+    )).toBe('')
   })
 
   it('renders phosphonium aliases with a full numeric subscript and exposes bracketed ionic liquid parts', () => {

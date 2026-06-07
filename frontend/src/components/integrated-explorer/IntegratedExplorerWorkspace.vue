@@ -53,6 +53,7 @@ import {
   confidenceDisplay,
   confidenceValueFor,
   formatIonicLiquidHtml,
+  ionicLiquidCationAliasNote,
   lubricantDisplay,
   lubricantStructureItems,
   missingFieldLabel,
@@ -733,6 +734,7 @@ type DatabaseEvidenceSlide = {
   page: number | null
   value: string
   quote: DatabaseEvidenceQuote | null
+  aliasNote?: string
   note?: string
   noteLabel?: string
   locatorKey?: string
@@ -2050,9 +2052,31 @@ function databaseEvidenceEntryHasDisplayValue(entry: FieldEvidenceEntry) {
 function databaseEvidenceSlideHasContent(slide: DatabaseEvidenceSlide) {
   return Boolean(
     normalizeDatabaseEvidenceText(slide.quote?.text)
+      || normalizeDatabaseEvidenceText(slide.aliasNote)
       || normalizeDatabaseEvidenceText(slide.note)
       || slide.imageSrc
   )
+}
+
+function databaseEvidenceCationAliasNote(
+  record: RecordResponse,
+  fieldKey: string,
+  entry: FieldEvidenceEntry,
+  quote: DatabaseEvidenceQuote | null,
+) {
+  const semanticKey = databaseEvidenceSemanticKey(fieldKey)
+  if (!['ionic_liquid', 'cation'].includes(semanticKey)) return ''
+
+  const evidenceText = [
+    quote?.text,
+    entry.evidence?.quote,
+    entry.evidence?.matched_text,
+    (entry.evidence as any)?.matchedText,
+    entry.evidence?.context,
+    entry.value,
+  ].map((part) => normalizeDatabaseEvidenceText(part)).filter(Boolean).join(' ')
+
+  return ionicLiquidCationAliasNote(record, evidenceText)
 }
 
 function databaseEvidenceSlides(record: RecordResponse): DatabaseEvidenceSlide[] {
@@ -2071,6 +2095,7 @@ function databaseEvidenceSlides(record: RecordResponse): DatabaseEvidenceSlide[]
       ? databaseEvidenceFigurePreviewKey(record, entry)
       : ''
     const quote = databaseEvidenceQuoteFromEntry(fieldKey, entry)[0] || null
+    const aliasNote = databaseEvidenceCationAliasNote(record, fieldKey, entry, quote)
     const isDerived = String(entry.grounding_mode || '').toLowerCase() === 'derived'
     const bboxOnlyNote = !quote && page && bbox
       ? 'PDF locator available; quote text was not stored for this field.'
@@ -2082,6 +2107,7 @@ function databaseEvidenceSlides(record: RecordResponse): DatabaseEvidenceSlide[]
 	      page,
 	      value: databaseEvidenceEntryValue(entry),
 	      quote,
+	      aliasNote,
 	      note: isDerived
 	        ? normalizeDatabaseEvidenceText(entry.grounding_note)
 	        : bboxOnlyNote,
@@ -2129,6 +2155,7 @@ function databaseEvidenceSlideDedupeKey(slide: DatabaseEvidenceSlide) {
     slide.locatorKey || slide.page || '',
     normalizeDatabaseEvidenceText(slide.value),
     normalizeDatabaseEvidenceText(slide.quote?.text),
+    normalizeDatabaseEvidenceText(slide.aliasNote),
     normalizeDatabaseEvidenceText(slide.note),
   ].join('|')
 }
@@ -3407,6 +3434,15 @@ onBeforeUnmount(() => {
                     <div class="text-xs font-bold text-slate-500">
                       {{ activeDatabaseEvidenceSlide(evidenceModalRecord)?.page ? `Page ${activeDatabaseEvidenceSlide(evidenceModalRecord)?.page}` : 'Text evidence' }}
                     </div>
+                  </div>
+                  <div
+                    v-if="activeDatabaseEvidenceSlide(evidenceModalRecord)?.aliasNote"
+                    class="mt-3 rounded-lg border border-cyan-100 bg-cyan-50 px-3.5 py-2.5 text-sm font-semibold leading-6 text-cyan-900"
+                  >
+                    <div class="text-[11px] font-black uppercase tracking-[0.14em] text-cyan-600">
+                      Cation note
+                    </div>
+                    <ChemicalText :text="activeDatabaseEvidenceSlide(evidenceModalRecord)?.aliasNote || ''" />
                   </div>
                   <p
                     v-if="activeDatabaseEvidenceQuote(evidenceModalRecord)"
