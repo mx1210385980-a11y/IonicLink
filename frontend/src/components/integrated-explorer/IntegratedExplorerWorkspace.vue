@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import {
   batchDeleteTribologyRecords,
+  extractData,
   getCandidateFieldEvidence,
   getPdfBboxPreview,
   getPdfFigurePreviews,
@@ -33,6 +34,7 @@ import {
   FileText,
   ChevronsLeft,
   ChevronsRight,
+  RefreshCw,
 } from 'lucide-vue-next'
 import ChemicalText from '@/components/ChemicalText.vue'
 import CandidateReviewSheet from '@/components/integrated-explorer/CandidateReviewSheet.vue'
@@ -891,6 +893,47 @@ const reviewBacklogEmptyMessage = computed(() => {
 const selectedReviewPaper = computed(() =>
   reviewBacklog.value.find((paper) => paper.literatureId === selectedReviewLiteratureId.value) || null,
 )
+const reviewReextractConfirmOpen = ref(false)
+const reviewReextractPending = ref(false)
+const reviewReextractError = ref('')
+const reviewReextractSuccess = ref('')
+
+function closeReviewReextractConfirm() {
+  if (reviewReextractPending.value) return
+  reviewReextractConfirmOpen.value = false
+}
+
+function openReviewReextractConfirm() {
+  if (reviewReextractPending.value) return
+  reviewReextractError.value = ''
+  reviewReextractSuccess.value = ''
+  reviewReextractConfirmOpen.value = true
+}
+
+async function confirmReviewReextract() {
+  const literatureId = selectedReviewLiteratureId.value
+  if (!literatureId || reviewReextractPending.value) return
+  reviewReextractPending.value = true
+  reviewReextractError.value = ''
+  reviewReextractSuccess.value = ''
+  try {
+    await extractData(String(literatureId), true, 'auto', undefined, 'tribology')
+    await loadReviewBacklog()
+    const paper = reviewBacklog.value.find((item) => item.literatureId === literatureId)
+    selectedReviewLiteratureId.value = literatureId
+    selectedReviewLiteratureIds.value = (paper?.literatureIds?.length ? paper.literatureIds : [literatureId])
+      .map((item) => Number(item))
+      .filter((item) => Number.isFinite(item) && item > 0)
+    if (currentPage.value !== 1) currentPage.value = 1
+    await fetchData()
+    reviewReextractSuccess.value = 'Review candidates refreshed.'
+    reviewReextractConfirmOpen.value = false
+  } catch (err: any) {
+    reviewReextractError.value = err?.response?.data?.detail || err?.message || 'Could not re-extract this paper.'
+  } finally {
+    reviewReextractPending.value = false
+  }
+}
 
 function shouldLoadReviewBacklogFromVisibleQueue() {
   return isReviewQueue.value
@@ -931,6 +974,9 @@ watch([() => result.value.total, () => result.value.items.length, isReviewQueue,
 })
 
 function selectReviewPaper(literatureId: number | null) {
+  reviewReextractConfirmOpen.value = false
+  reviewReextractError.value = ''
+  reviewReextractSuccess.value = ''
   if (selectedReviewLiteratureId.value === literatureId || literatureId == null) {
     selectedReviewLiteratureId.value = null
     selectedReviewLiteratureIds.value = []
@@ -3227,9 +3273,73 @@ onBeforeUnmount(() => {
           >
             <BookOpen class="h-3.5 w-3.5 shrink-0 text-[#0f7c82]" />
             <span class="min-w-0 truncate font-bold text-slate-700 dark:text-slate-200" :title="selectedReviewPaper.title">{{ selectedReviewPaper.title }}</span>
+            <span
+              v-if="reviewReextractSuccess"
+              class="hidden shrink-0 text-[11px] font-bold text-emerald-600 dark:text-emerald-300 sm:inline"
+            >
+              {{ reviewReextractSuccess }}
+            </span>
+            <div class="relative ml-auto shrink-0">
+              <button
+                type="button"
+                data-testid="review-reextract-button"
+                class="inline-flex h-7 items-center gap-1.5 rounded-[6px] border border-[#8bd9df] bg-white px-2.5 text-[11px] font-black text-[#0f7c82] shadow-sm transition hover:border-[#0f7c82] hover:bg-[#eefafa] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#0f7c82]/60 dark:bg-slate-950 dark:text-[#8bd9df] dark:hover:bg-[#0f7c82]/10"
+                :aria-expanded="reviewReextractConfirmOpen ? 'true' : 'false'"
+                aria-haspopup="dialog"
+                aria-label="Re-extract selected review paper"
+                :disabled="reviewReextractPending"
+                @click="openReviewReextractConfirm"
+              >
+                <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': reviewReextractPending }" />
+                <span>{{ reviewReextractPending ? 'Extracting' : 'Re-extract' }}</span>
+              </button>
+              <div
+                v-if="reviewReextractConfirmOpen"
+                class="absolute right-0 top-[calc(100%+0.35rem)] z-30 w-72 rounded-[8px] border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 dark:border-slate-700 dark:bg-slate-950"
+                role="dialog"
+                aria-label="Confirm review paper re-extraction"
+              >
+                <div class="flex items-start gap-2">
+                  <div class="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#e8f8f8] text-[#0f7c82] dark:bg-[#0f7c82]/15 dark:text-[#8bd9df]">
+                    <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': reviewReextractPending }" />
+                  </div>
+                  <div class="min-w-0">
+                    <div class="text-[13px] font-black text-slate-800 dark:text-slate-100">Re-extract this paper?</div>
+                    <p class="mt-1 text-[11px] font-semibold leading-4 text-slate-500 dark:text-slate-400">
+                      Regenerate pending review candidates from the source PDF. Official records stay unchanged.
+                    </p>
+                  </div>
+                </div>
+                <p
+                  v-if="reviewReextractError"
+                  class="mt-2 rounded-[6px] border border-rose-200 bg-rose-50 px-2 py-1.5 text-[11px] font-semibold text-rose-600 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300"
+                >
+                  {{ reviewReextractError }}
+                </p>
+                <div class="mt-3 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    class="h-7 rounded-[6px] px-2.5 text-[11px] font-black text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 disabled:opacity-60 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                    :disabled="reviewReextractPending"
+                    @click="closeReviewReextractConfirm"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    class="inline-flex h-7 items-center gap-1.5 rounded-[6px] bg-[#0f7c82] px-2.5 text-[11px] font-black text-white shadow-sm transition hover:bg-[#0b666b] disabled:cursor-not-allowed disabled:opacity-60"
+                    :disabled="reviewReextractPending"
+                    @click="confirmReviewReextract"
+                  >
+                    <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': reviewReextractPending }" />
+                    {{ reviewReextractPending ? 'Extracting' : 'Re-extract' }}
+                  </button>
+                </div>
+              </div>
+            </div>
             <button
               type="button"
-              class="ml-auto shrink-0 rounded-[6px] px-2 py-0.5 font-black text-slate-500 transition hover:bg-slate-200 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-700"
+              class="shrink-0 rounded-[6px] px-2 py-0.5 font-black text-slate-500 transition hover:bg-slate-200 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-700"
               @click="selectReviewPaper(null)"
             >
               Clear ✕
