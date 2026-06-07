@@ -40,6 +40,13 @@ from services.tribology_review_quality import (
 )
 from services.weak_candidate_service import build_weak_candidate_items
 from services.fallback_extraction_service import extract_metadata_fallback, extract_table_fallback_records
+from services.flexible_field_integration import (
+    RESERVED_FLEXIBLE_REVIEW_QUEUE_KEY,
+    extract_raw_flexible_fields,
+    merge_into_field_evidence_json,
+    normalize_flexible_fields,
+)
+from services.flexible_field_key_normalizer import KeyNormalizer
 from services.il_resolver_service import (
     ANION_DB,
     CATION_DB,
@@ -3490,6 +3497,13 @@ def _build_field_evidence_map(item: dict, db_record: TribologyData, *, confidenc
                 entry["grounding_note"] = (
                     "Stored evidence text does not include roughness/unit context; location needs re-extraction."
                 )
+
+    raw_flexible_fields = extract_raw_flexible_fields(item)
+    if raw_flexible_fields:
+        flexible_payload, flexible_review_queue = normalize_flexible_fields(raw_flexible_fields, KeyNormalizer())
+        entries = merge_into_field_evidence_json(entries, flexible_payload)
+        if flexible_review_queue:
+            entries[RESERVED_FLEXIBLE_REVIEW_QUEUE_KEY] = flexible_review_queue
 
     return {key: value for key, value in entries.items() if value}
 

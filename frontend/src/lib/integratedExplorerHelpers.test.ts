@@ -255,6 +255,28 @@ describe('integratedExplorerHelpers', () => {
     expect(microbar.title).not.toContain('mol%')
   })
 
+  it('shows current from flexible fields as an experimental condition', () => {
+    const microbar = conditionMicrobarItems(createRecord({
+      fieldEvidenceJson: {
+        _flexible_fields: {
+          current: {
+            label: 'Current',
+            value: '0.5',
+            unit: 'A',
+            category: 'condition',
+          },
+        },
+      } as any,
+    }), 8)
+
+    const current = microbar.items.find((item) => item.key === 'current')
+    expect(current).toMatchObject({
+      label: 'current',
+      value: '0.5',
+      unit: 'A',
+    })
+  })
+
   it('keeps high-load squeeze-out conditions compact instead of inferring nN', () => {
     const chips = detailedConditionChips(createRecord({
       loadValue: 'high load after n = 3 squeeze-out',

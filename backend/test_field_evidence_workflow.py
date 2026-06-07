@@ -1367,3 +1367,32 @@ def test_refresh_visual_source_anchors_true_figure_value_without_text_match(monk
 
     assert refreshed["evidence"]["bbox"] == [40.0, 200.0, 540.0, 470.0]
     assert refreshed["evidence"]["source_type"] == "figure"
+
+
+def test_field_evidence_map_preserves_current_and_iron_oxide_flexible_fields():
+    item = {
+        "material_name": "304 stainless steel",
+        "ionic_liquid": "[EMIM][BF4]",
+        "cof": "0.04",
+        "Current": "0.5 A",
+        "Fe2O3 loading": "1 wt%",
+        "source": "Table 2",
+        "source_page": 4,
+        "evidence": "Current was 0.5 A and Fe2O3 nanoparticles were added at 1 wt%.",
+    }
+    record = SimpleNamespace(
+        source="Table 2",
+        source_figure=None,
+        source_page=4,
+        evidence_page=None,
+        evidence_bbox=None,
+        sample_id=None,
+    )
+
+    field_map = _build_field_evidence_map(item, record, confidence=0.9, file_path=None)
+
+    flexible = field_map["_flexible_fields"]
+    assert flexible["current"]["value"] == "0.5 A"
+    assert flexible["current"]["_raw_key"] == "Current"
+    assert flexible["iron_oxide_additive_ratio"]["value"] == "1 wt%"
+    assert flexible["iron_oxide_additive_ratio"]["category"] == "lubricant_component"

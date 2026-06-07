@@ -1698,7 +1698,7 @@ function databaseEvidenceFocusedValue(record: RecordResponse) {
   const focusedKey = databaseEvidenceFocusedFieldKey.value
   if (!focusedKey) return ''
   const fields = databaseFieldEvidence.value[databaseRecordCacheKey(record)]?.fields || {}
-  const entry = fields[focusedKey]
+  const entry = databaseEvidenceEntryForKey(fields, focusedKey)
   const entryValue = normalizeDatabaseEvidenceText(entry?.value)
   if (entryValue) return entryValue
   const fallbacks: Record<string, unknown> = {
@@ -1719,6 +1719,8 @@ function databaseEvidenceFocusedValue(record: RecordResponse) {
     speed: record.speedValue,
     shear_rate: record.shearRate,
     potential: record.potential,
+    current: entryValue,
+    current_density: entryValue,
     temperature: record.temperature,
     water_content: record.waterContent,
     cof: cofDisplay(record),
@@ -1743,7 +1745,7 @@ function databaseEvidenceFieldKeys(field = databaseEvidenceField.value) {
     'material_name',
   ]
   if (field === 'cof') return ['cof', 'cof_extracted', 'friction_force', 'wear_rate']
-	  return ['temperature', 'load', 'normal_load', 'speed', 'shear_rate', 'potential', 'water_content']
+	  return ['temperature', 'load', 'normal_load', 'speed', 'shear_rate', 'current', 'current_density', 'potential', 'water_content']
 }
 
 function databaseEvidenceSemanticTypes(field = databaseEvidenceField.value) {
@@ -1751,7 +1753,7 @@ function databaseEvidenceSemanticTypes(field = databaseEvidenceField.value) {
   if (field === 'ionic-liquid') return new Set(['lubricant', 'ionic_liquid', 'cation', 'anion'])
 		  if (field === 'tribopair') return new Set(['material', 'probe_material', 'substrate_material', 'substrate_coating', 'surface_roughness', 'film_thickness'])
   if (field === 'cof') return new Set(['cof', 'friction_force', 'wear_rate'])
-		  return new Set(['temperature', 'load', 'speed', 'shear_rate', 'potential', 'water_content'])
+		  return new Set(['temperature', 'load', 'speed', 'shear_rate', 'current', 'current_density', 'potential', 'water_content'])
 }
 
 function databaseEvidenceEntryQualityScore(fieldKey: string, entry: FieldEvidenceEntry) {
@@ -1793,17 +1795,47 @@ function databaseEvidenceFocusedFieldKeys(fieldKey: string) {
     substrate_roughness: ['substrate_roughness'],
     surface_roughness: ['surface_roughness'],
     load: ['load', 'normal_load'],
+    current: ['current'],
+    current_density: ['current_density'],
     water_content: ['water_content', 'water'],
     cof: ['cof', 'cof_extracted'],
   }
   return Array.from(new Set(fallbackKeys[normalized] || [normalized]))
 }
 
+function databaseEvidenceFlexibleEntryValue(entry: any) {
+  const value = normalizeDatabaseEvidenceText(entry?.value)
+  const unit = normalizeDatabaseEvidenceText(entry?.unit)
+  if (!value) return ''
+  if (unit && !value.toLowerCase().includes(unit.toLowerCase())) return `${value} ${unit}`
+  return value
+}
+
+function databaseEvidenceEntryForKey(fields: Record<string, FieldEvidenceEntry | undefined>, fieldKey: string): FieldEvidenceEntry | undefined {
+  const directEntry = fields[fieldKey]
+  if (directEntry) return directEntry
+  const flexibleFields = (fields as any)?._flexible_fields
+  if (!flexibleFields || typeof flexibleFields !== 'object' || Array.isArray(flexibleFields)) return undefined
+  const rawEntry = flexibleFields[fieldKey]
+  const entry = Array.isArray(rawEntry) ? rawEntry.find(Boolean) : rawEntry
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return undefined
+  const value = databaseEvidenceFlexibleEntryValue(entry)
+  if (!value) return undefined
+  return {
+    value,
+    confidence: typeof entry.confidence === 'number' ? entry.confidence : entry._norm?.confidence,
+    evidence: entry.evidence && typeof entry.evidence === 'object' ? entry.evidence : null,
+    status: entry._norm?.resolved === false ? 'partial' : 'grounded',
+    grounding_mode: entry._norm?.stage || 'flexible',
+    grounding_note: entry._norm?.notes || null,
+  }
+}
+
 function databaseEvidenceFocusedEntries(fields: Record<string, FieldEvidenceEntry | undefined>) {
   const focusedKey = databaseEvidenceFocusedFieldKey.value
   if (!focusedKey) return null
   const entries = databaseEvidenceFocusedFieldKeys(focusedKey)
-    .map((fieldKey) => ({ fieldKey, entry: fields[fieldKey] }))
+    .map((fieldKey) => ({ fieldKey, entry: databaseEvidenceEntryForKey(fields, fieldKey) }))
     .filter((item): item is { fieldKey: string, entry: FieldEvidenceEntry } => Boolean(item.entry))
   const exact = entries.filter(({ fieldKey, entry }) => (
     databaseEvidenceSemanticKey(fieldKey) === databaseEvidenceSemanticKey(focusedKey)
@@ -1818,7 +1850,7 @@ function databaseEvidenceSelectedEntries(record: RecordResponse) {
   const focusedEntries = databaseEvidenceFocusedEntries(fields)
   if (focusedEntries) return focusedEntries
   const entries = databaseEvidenceFieldKeys()
-    .map((fieldKey) => ({ fieldKey, entry: fields[fieldKey] }))
+    .map((fieldKey) => ({ fieldKey, entry: databaseEvidenceEntryForKey(fields, fieldKey) }))
     .filter((item): item is { fieldKey: string, entry: FieldEvidenceEntry } => Boolean(item.entry))
   if (databaseEvidenceField.value !== 'tribopair') return databaseEvidenceBestEntriesBySemanticKey(entries)
 
@@ -1830,12 +1862,12 @@ function databaseEvidenceSelectedEntries(record: RecordResponse) {
   return databaseEvidenceBestEntriesBySemanticKey(selectedEntries)
 }
 
-const databaseEvidenceConditionBaseKeys = ['temperature', 'load', 'speed', 'shear_rate', 'potential', 'water_content']
+const databaseEvidenceConditionBaseKeys = ['temperature', 'load', 'speed', 'shear_rate', 'current', 'current_density', 'potential', 'water_content']
 
 function databaseEvidenceConditionSwitchEntry(record: RecordResponse, fieldKey: string) {
   const fields = databaseFieldEvidence.value[databaseRecordCacheKey(record)]?.fields || {}
   return databaseEvidenceFocusedFieldKeys(fieldKey)
-    .map((candidateKey) => ({ fieldKey: candidateKey, entry: fields[candidateKey] }))
+    .map((candidateKey) => ({ fieldKey: candidateKey, entry: databaseEvidenceEntryForKey(fields, candidateKey) }))
     .find((item): item is { fieldKey: string, entry: FieldEvidenceEntry } =>
       Boolean(item.entry && databaseEvidenceEntryHasContent(item.fieldKey, item.entry)),
     ) || null

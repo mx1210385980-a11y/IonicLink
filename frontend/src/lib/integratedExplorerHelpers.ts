@@ -443,6 +443,8 @@ export function conditionChipDisplayParts(chip: DetailedConditionChip, fallback?
     speed: 'speed',
     shear_rate: 'shear rate',
     potential: 'potential',
+    current: 'current',
+    current_density: 'current density',
     temperature: 'temperature',
     water: 'water',
   }
@@ -487,6 +489,8 @@ export function conditionChipDisplayParts(chip: DetailedConditionChip, fallback?
   const parsed = splitNumberAndUnit(raw)
   const inferredUnits: Partial<Record<string, string>> = {
     potential: 'V',
+    current: 'A',
+    current_density: 'mA/cm²',
     speed: 'μm/s',
     shear_rate: 's^-1',
     load: 'nN',
@@ -513,6 +517,8 @@ const CONDITION_MICROBAR_SYMBOLS: Record<string, string> = {
   speed: 'V',
   shear_rate: 'γ̇',
   potential: 'ψ',
+  current: 'I',
+  current_density: 'J',
   temperature: 'T',
   water: 'H₂O',
 }
@@ -526,9 +532,11 @@ const CONDITION_MICROBAR_PRIORITY: Record<string, number> = {
   load: 0,
   speed: 1,
   shear_rate: 2,
-  potential: 3,
-  temperature: 4,
-  water: 5,
+  current: 3,
+  current_density: 4,
+  potential: 5,
+  temperature: 6,
+  water: 7,
 }
 
 function isQuietPotential(chip: DetailedConditionChip, display: DetailedConditionChipDisplay): boolean {
@@ -547,7 +555,7 @@ function isQuietPotential(chip: DetailedConditionChip, display: DetailedConditio
 
 function conditionMicrobarEmphasis(chip: DetailedConditionChip, display: DetailedConditionChipDisplay): ConditionMicrobarItem['emphasis'] {
   if (isQuietPotential(chip, display)) return 'muted'
-  if (chip.key === 'load' || chip.key === 'speed' || chip.key === 'shear_rate' || chip.key === 'potential') return 'primary'
+  if (chip.key === 'load' || chip.key === 'speed' || chip.key === 'shear_rate' || chip.key === 'potential' || chip.key === 'current' || chip.key === 'current_density') return 'primary'
   if (chip.key === 'temperature' && chip.shortcut === 'RT') return 'muted'
   if (chip.key === 'temperature') return 'primary'
   return 'secondary'
@@ -664,6 +672,49 @@ function waterShortcut(text: string): string | undefined {
   return undefined
 }
 
+type FlexibleFieldEntry = {
+  label?: string | null
+  value?: string | number | null
+  unit?: string | null
+  category?: string | null
+}
+
+function flexibleFieldEntries(record: RecordResponse): Array<{ key: string, entry: FlexibleFieldEntry }> {
+  const fieldMap = record.fieldEvidenceJson as Record<string, unknown> | null | undefined
+  const flexible = fieldMap?._flexible_fields
+  if (!flexible || typeof flexible !== 'object' || Array.isArray(flexible)) return []
+  const out: Array<{ key: string, entry: FlexibleFieldEntry }> = []
+  for (const [key, rawEntry] of Object.entries(flexible as Record<string, unknown>)) {
+    const entries = Array.isArray(rawEntry) ? rawEntry : [rawEntry]
+    for (const entry of entries) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+      out.push({ key, entry: entry as FlexibleFieldEntry })
+    }
+  }
+  return out
+}
+
+function flexibleConditionChips(record: RecordResponse): DetailedConditionChip[] {
+  const supported = new Set(['current', 'current_density'])
+  const chips: DetailedConditionChip[] = []
+  for (const { key, entry } of flexibleFieldEntries(record)) {
+    if (!supported.has(key)) continue
+    if (String(entry.category || '').trim().toLowerCase() !== 'condition') continue
+    const rawValue = String(entry.value ?? '').trim()
+    if (!rawValue) continue
+    const unit = String(entry.unit || '').trim()
+    const full = normalizeTraceDisplayText(unit && !rawValue.toLowerCase().includes(unit.toLowerCase()) ? `${rawValue} ${unit}` : rawValue)
+    chips.push({
+      key,
+      label: key === 'current_density' ? '电流密度' : '电流',
+      full,
+      tone: 'env',
+      title: String(entry.label || (key === 'current_density' ? 'Current density' : 'Current')),
+    })
+  }
+  return chips
+}
+
 export function detailedConditionChips(record: RecordResponse): DetailedConditionChip[] {
   const chips: DetailedConditionChip[] = []
 
@@ -699,6 +750,8 @@ export function detailedConditionChips(record: RecordResponse): DetailedConditio
   if (load) {
     chips.push({ key: 'load', label: '载荷', full: normalizeTraceDisplayText(load), tone: 'dyn', title: '法向载荷' })
   }
+
+  chips.push(...flexibleConditionChips(record))
 
   // 注意：探针几何 / 探针半径 / 探针粗糙度 / 膜厚 不再放在"实验条件"里，
   // 它们逻辑上属于探针/基底物理属性，由 RecordTable 的"摩擦副"列负责渲染。

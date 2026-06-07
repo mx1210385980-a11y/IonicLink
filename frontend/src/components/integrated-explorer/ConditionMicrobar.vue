@@ -46,6 +46,8 @@ const conditionIcons: Record<string, Component> = {
   speed: Gauge,
   shear_rate: Activity,
   potential: Zap,
+  current: Zap,
+  current_density: Zap,
   temperature: Thermometer,
   water: Droplets,
 }
