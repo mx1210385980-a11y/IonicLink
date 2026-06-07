@@ -2018,9 +2018,20 @@ function startExtractionPoll() {
 
 async function finishExtractionPolling() {
   clearExtractionPollTimer()
+  const completedExtractionItems = progressItems.value.filter((item) => (
+    item.status === 'completed'
+    && (Number(item.candidateCount || 0) > 0 || Number(item.finalCount || 0) > 0)
+  ))
   runningExtraction.value = false
   await refreshCofPreviewForPapers(progressScopeIds.value)
   await fetchPapers()
+  window.dispatchEvent(new CustomEvent('ioniclink:review-data-changed', {
+    detail: { dataset: extractionDisplayTemplate.value === 'diffusion' ? 'diffusion' : 'lubrication' },
+  }))
+  if (completedExtractionItems.length > 0) {
+    extractMode.value = false
+    emit('open-database', libraryExtractionDatabaseTarget())
+  }
   activeExtractionTemplate.value = null
 }
 

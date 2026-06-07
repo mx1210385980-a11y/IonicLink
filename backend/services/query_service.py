@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections import defaultdict
 from typing import Any, Optional
 
 from sqlalchemy import and_, desc, func, or_, select
@@ -91,21 +92,54 @@ def _candidate_dedupe_key(record: RecordCandidate) -> tuple[str, ...]:
     )
 
 
-def _dedupe_merged_source_candidates(records: list[Any], filter_params: Any) -> list[Any]:
-    if len(_parse_literature_id_filter(getattr(filter_params, "file_id", None))) <= 1:
-        return records
-    seen_candidate_keys: set[tuple[str, ...]] = set()
-    deduped: list[Any] = []
+def _candidate_source_group_key(record: RecordCandidate) -> tuple[str, str, str, str]:
+    literature = getattr(record, "literature", None)
+    title = re.sub(r"\s+", " ", str(getattr(literature, "title", "") or "").strip().lower())
+    journal = re.sub(r"\s+", " ", str(getattr(literature, "journal", "") or "").strip().lower())
+    year = str(getattr(literature, "year", "") or "").strip()
+    if title:
+        return ("title", title, journal, year)
+    doi = str(getattr(literature, "doi", "") or "").strip().lower()
+    if doi:
+        return ("doi", doi, "", "")
+    return ("literature", str(getattr(record, "literature_id", "") or ""), "", "")
+
+
+def _dedupe_duplicate_literature_candidates(records: list[Any]) -> list[Any]:
+    candidate_groups: dict[tuple[str, str, str, str], list[RecordCandidate]] = defaultdict(list)
     for record in records:
-        if not isinstance(record, RecordCandidate):
-            deduped.append(record)
+        if isinstance(record, RecordCandidate):
+            candidate_groups[_candidate_source_group_key(record)].append(record)
+
+    keep_candidate_ids: set[int] = set()
+    for group_records in candidate_groups.values():
+        literature_ids = {int(getattr(record, "literature_id", 0) or 0) for record in group_records}
+        if len(literature_ids) <= 1:
+            keep_candidate_ids.update(int(record.id) for record in group_records if getattr(record, "id", None) is not None)
             continue
-        key = _candidate_dedupe_key(record)
-        if key in seen_candidate_keys:
-            continue
-        seen_candidate_keys.add(key)
-        deduped.append(record)
-    return deduped
+
+        signature_groups: dict[tuple[str, ...], list[RecordCandidate]] = defaultdict(list)
+        for record in group_records:
+            signature_groups[_candidate_dedupe_key(record)].append(record)
+
+        for signature_records in signature_groups.values():
+            by_literature: dict[int, int] = defaultdict(int)
+            for record in signature_records:
+                by_literature[int(getattr(record, "literature_id", 0) or 0)] += 1
+            keep_count = max(by_literature.values(), default=0)
+            keep_candidate_ids.update(
+                int(record.id)
+                for record in signature_records[:keep_count]
+                if getattr(record, "id", None) is not None
+            )
+
+    return [
+        record
+        for record in records
+        if not isinstance(record, RecordCandidate)
+        or getattr(record, "id", None) is None
+        or int(record.id) in keep_candidate_ids
+    ]
 
 
 def _trusted_final_record_condition(model: Any):
@@ -806,7 +840,7 @@ async def search_records(
             filtered_records = _apply_explicit_sort(filtered_records, sort_by, sort_dir)
         else:
             filtered_records.sort(key=_database_review_order)
-        filtered_records = _dedupe_merged_source_candidates(filtered_records, filter_params)
+        filtered_records = _dedupe_duplicate_literature_candidates(filtered_records)
         total = len(filtered_records)
         records = filtered_records[skip : skip + limit]
     else:
@@ -818,7 +852,7 @@ async def search_records(
             all_records = _apply_explicit_sort(all_records, sort_by, sort_dir)
         else:
             all_records.sort(key=_database_review_order)
-        all_records = _dedupe_merged_source_candidates(all_records, filter_params)
+        all_records = _dedupe_duplicate_literature_candidates(all_records)
         total = len(all_records)
         records = all_records[skip : skip + limit]
 

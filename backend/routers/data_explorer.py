@@ -40,7 +40,13 @@ from services.file_service import (
 from services.il_resolver_service import ANION_DB, CATION_DB, resolve_il
 from services.insight_service import get_pattern_discovery, save_pattern_discovery_report
 from services.quality_service import get_quality_asset_summary
-from services.query_service import _ion_component_filter_terms, _record_to_payload, format_record_display_id
+from services.query_service import (
+    _candidate_source_group_key,
+    _dedupe_duplicate_literature_candidates,
+    _ion_component_filter_terms,
+    _record_to_payload,
+    format_record_display_id,
+)
 from services.sync_facade_service import _diffusion_record_to_payload
 from services.relationship_graph_service import (
     build_relationship_graph,
@@ -1524,17 +1530,10 @@ async def review_backlog(
         scope_conditions = literature_scope_conditions(
             _scope_filter_values_for_mode(scope_mode=scope_mode, principal=principal, scope=scope)
         )
-        pending_count = func.count(RecordCandidate.id)
         stmt = (
-            select(
-                Literature.id,
-                Literature.title,
-                Literature.journal,
-                Literature.year,
-                Literature.doi,
-                pending_count.label("pending_count"),
-            )
+            select(RecordCandidate)
             .join(RecordCandidate.literature)
+            .options(selectinload(RecordCandidate.literature))
             .where(
                 *scope_conditions,
                 RecordCandidate.promoted_record_id.is_(None),
@@ -1543,32 +1542,38 @@ async def review_backlog(
                     func.lower(RecordCandidate.review_status) != "rejected",
                 ),
             )
-            .group_by(Literature.id, Literature.title, Literature.journal, Literature.year, Literature.doi)
-            .order_by(desc(pending_count), Literature.id)
+            .order_by(desc(RecordCandidate.id))
         )
-        rows = (await session.execute(stmt)).all()
+        candidates = list((await session.execute(stmt)).scalars().all())
+        deduped_candidates = _dedupe_duplicate_literature_candidates(candidates)
         merged: dict[tuple[str, str, str, str], dict[str, Any]] = {}
-        for row in rows:
-            key = _review_source_group_key(row)
+        for candidate in candidates:
+            literature = candidate.literature
+            key = _candidate_source_group_key(candidate)
             item = merged.get(key)
-            row_id = int(row.id)
+            row_id = int(candidate.literature_id)
             if not item:
                 item = {
                     "literatureId": row_id,
                     "literatureIds": [row_id],
-                    "title": row.title or f"Literature {row.id}",
-                    "journal": row.journal or "",
-                    "year": row.year,
-                    "doi": row.doi or "",
+                    "title": getattr(literature, "title", None) or f"Literature {row_id}",
+                    "journal": getattr(literature, "journal", None) or "",
+                    "year": getattr(literature, "year", None),
+                    "doi": getattr(literature, "doi", None) or "",
                     "pendingCount": 0,
                 }
                 merged[key] = item
             else:
                 item["literatureIds"].append(row_id)
                 item["literatureId"] = min(int(item["literatureId"]), row_id)
-                if not item.get("doi") and row.doi:
-                    item["doi"] = row.doi
-            item["pendingCount"] += int(row.pending_count or 0)
+                if not item.get("doi") and getattr(literature, "doi", None):
+                    item["doi"] = literature.doi
+        for candidate in deduped_candidates:
+            if not isinstance(candidate, RecordCandidate):
+                continue
+            key = _candidate_source_group_key(candidate)
+            if key in merged:
+                merged[key]["pendingCount"] += 1
         for item in merged.values():
             item["literatureIds"] = sorted({int(lit_id) for lit_id in item["literatureIds"]})
         papers = sorted(

@@ -175,6 +175,16 @@ async def test_search_records_deduplicates_equivalent_candidates_from_merged_sou
     assert result["total"] == 2
     assert sorted(item["cof_value"] for item in result["items"]) == [0.24, 1.0]
 
+    all_review_result = await search_records(
+        db_session,
+        SearchFilter(entityType="candidate"),
+        skip=0,
+        limit=20,
+    )
+
+    assert all_review_result["total"] == 2
+    assert sorted(item["cof_value"] for item in all_review_result["items"]) == [0.24, 1.0]
+
 
 @pytest.mark.anyio
 async def test_search_records_includes_final_record_evidence_quality(db_session):

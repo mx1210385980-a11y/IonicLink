@@ -29,7 +29,7 @@ async def _seed(db_session):
             literature_id=lit.id,
             material_name="Mica",
             lubricant="[BMIM][BF4]",
-            cof_value=0.1,
+            cof_value=kw.get("cof_value", 0.1),
             field_evidence_json="{}",
             review_status=kw.get("review_status", "needs_review"),
             record_origin="weak_candidate",
@@ -37,7 +37,7 @@ async def _seed(db_session):
         )
 
     # Paper A: 3 pending; Paper B: 1 pending + 1 rejected + 1 promoted (excluded).
-    db_session.add_all([candidate(lit_a), candidate(lit_a), candidate(lit_a)])
+    db_session.add_all([candidate(lit_a, cof_value=0.1), candidate(lit_a, cof_value=0.2), candidate(lit_a, cof_value=0.3)])
     db_session.add_all([
         candidate(lit_b),
         candidate(lit_b, review_status="rejected"),
@@ -132,10 +132,10 @@ async def test_review_backlog_deduplicates_duplicate_literature_sources(db_sessi
 
     matching = [paper for paper in result["papers"] if paper["doi"] == lit_a.doi]
     assert len(matching) == 1
-    assert matching[0]["pendingCount"] == 5
+    assert matching[0]["pendingCount"] == 4
     assert matching[0]["literatureIds"] == [lit_a.id, duplicate.id]
     assert result["paperCount"] == 2
-    assert result["totalPending"] == 6
+    assert result["totalPending"] == 5
 
 
 def test_review_backlog_scope_mode_annotation_accepts_project_scopes():

@@ -170,6 +170,14 @@ describe('LibraryPage Elicit-style extract workflow', () => {
     expect(uploadExtractionSource).toContain('uploadModalOpen.value = false')
   })
 
+  it('opens cached selected-library extraction results directly in Database after polling finishes', () => {
+    const finishExtractionSource = sourceSlice('async function finishExtractionPolling()', 'function clearExtractionPollTimer()')
+
+    expect(finishExtractionSource).toContain('const completedExtractionItems = progressItems.value.filter')
+    expect(finishExtractionSource).toContain("emit('open-database', libraryExtractionDatabaseTarget())")
+    expect(finishExtractionSource).toContain("window.dispatchEvent(new CustomEvent('ioniclink:review-data-changed'")
+  })
+
   it('lets each uploaded paper choose the correct extraction preset before starting', () => {
     expect(source).toContain("type UploadExtractionPreset = 'tribology' | 'diffusion' | 'conductivity'")
     expect(source).toContain('uploadedPaperExtractionPresets')
