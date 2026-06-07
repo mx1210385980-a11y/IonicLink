@@ -918,15 +918,23 @@ const reviewSourceCountLabel = computed(() =>
 const reviewBacklogEmptyMessage = computed(() => {
   if (reviewBacklogError.value) {
     return reviewQueueTotalCount.value > 0
-      ? 'Source list unavailable. Showing all candidates.'
+      ? 'Could not load sources. Showing all candidates.'
       : reviewBacklogError.value
   }
-  if (reviewQueueTotalCount.value > 0) return 'Source list unavailable. Showing all candidates.'
+  if (reviewQueueTotalCount.value > 0) return 'Loading sources for these candidates...'
   return 'No candidates waiting for review.'
 })
 const selectedReviewPaper = computed(() =>
   reviewBacklog.value.find((paper) => paper.literatureId === selectedReviewLiteratureId.value) || null,
 )
+
+function shouldLoadReviewBacklogFromVisibleQueue() {
+  return isReviewQueue.value
+    && canLoadReviewBacklog.value
+    && reviewQueueTotalCount.value > 0
+    && !reviewBacklog.value.length
+    && !reviewBacklogLoading.value
+}
 
 async function loadReviewBacklog() {
   if (!canLoadReviewBacklog.value) return
@@ -934,11 +942,12 @@ async function loadReviewBacklog() {
   reviewBacklogError.value = ''
   try {
     const response = await getReviewBacklog({ scope: props.recordScope })
-    reviewBacklog.value = response.papers
+    const papers = Array.isArray(response.papers) ? response.papers : []
+    reviewBacklog.value = papers
     // Drop the scoping if the selected paper no longer has pending candidates.
     if (
       selectedReviewLiteratureId.value != null &&
-      !response.papers.some((paper) => paper.literatureId === selectedReviewLiteratureId.value)
+      !papers.some((paper) => paper.literatureId === selectedReviewLiteratureId.value)
     ) {
       selectedReviewLiteratureId.value = null
     }
@@ -949,6 +958,12 @@ async function loadReviewBacklog() {
     reviewBacklogLoading.value = false
   }
 }
+
+watch([() => result.value.total, () => result.value.items.length, isReviewQueue, canLoadReviewBacklog], () => {
+  if (shouldLoadReviewBacklogFromVisibleQueue()) {
+    void loadReviewBacklog()
+  }
+})
 
 function selectReviewPaper(literatureId: number | null) {
   selectedReviewLiteratureId.value =
@@ -2450,6 +2465,9 @@ watch(
 onMounted(async () => {
   await loadOptions()
   await fetchData()
+  if (shouldLoadReviewBacklogFromVisibleQueue()) {
+    await loadReviewBacklog()
+  }
   appliedAdvancedFilterState.value = captureAdvancedFilterState()
   window.addEventListener('keydown', onGlobalKeydown)
 })
@@ -3201,12 +3219,12 @@ onBeforeUnmount(() => {
             <div v-else-if="!reviewBacklog.length" class="px-2.5 py-3">
               <p class="text-[12px] font-semibold text-slate-400">{{ reviewBacklogEmptyMessage }}</p>
               <button
-                v-if="reviewBacklogError"
+                v-if="reviewQueueTotalCount > 0"
                 type="button"
                 class="mt-2 rounded-[7px] border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-500 transition hover:border-[#0f7c82] hover:bg-[#eefafa] hover:text-[#0f7c82] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
                 @click="loadReviewBacklog"
               >
-                Retry sources
+                Refresh sources
               </button>
             </div>
           </div>
