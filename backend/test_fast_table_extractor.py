@@ -1,6 +1,7 @@
 import pytest
 
 from models.db_models import RecordCandidate
+from models.tribology import TribologyData
 from services import file_service
 from services.llm import runtime_service
 from services.file_service import _build_db_record_from_item
@@ -70,6 +71,44 @@ async def test_extract_with_metadata_uses_fast_table_without_legacy_page_pipelin
     assert result["data"][0]["review_status"] == "needs_review"
     assert result["extraction_summary"]["pipeline"] == "fast_table"
     assert result["extraction_summary"]["candidate_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_review_figure_estimate_profile_skips_fast_table_for_visual_pipeline(monkeypatch):
+    monkeypatch.setenv("LLM_FAST_TABLE_ENABLED", "1")
+    service = LLMService()
+    captured = {}
+
+    async def fail_fast_table(_document_text: str):
+        raise AssertionError("review_figure_estimate should not be short-circuited by fast table extraction")
+
+    async def fake_metadata(*_args, **_kwargs):
+        return {}
+
+    async def fake_legacy_pipeline(**kwargs):
+        captured.update(kwargs)
+        return [
+            TribologyData(
+                material_name="Steel",
+                ionic_liquid="[EMIM][BF4]",
+                cof="0.12",
+                value_origin="figure_estimate",
+                source="Fig. 9",
+            )
+        ]
+
+    monkeypatch.setattr(service, "_call_fast_table_model", fail_fast_table, raising=False)
+    monkeypatch.setattr(service, "_extract_metadata_only", fake_metadata)
+    monkeypatch.setattr(service, "extract_tribology_data", fake_legacy_pipeline)
+
+    result = await service.extract_with_metadata(
+        content="Fig. 9 reports average friction coefficients under different currents.",
+        extraction_profile="review_figure_estimate",
+    )
+
+    assert captured["profile"] == "review_figure_estimate"
+    assert result["data"][0]["value_origin"] == "figure_estimate"
+    assert result["extraction_summary"]["requested_profile"] == "review_figure_estimate"
 
 
 def test_runtime_config_can_hot_swap_fast_table_model(monkeypatch, tmp_path):

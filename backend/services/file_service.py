@@ -5772,7 +5772,8 @@ async def process_file_safe(
     Handles caching logic internally.
     """
     requested_profile = (profile or "auto").strip().lower()
-    profile = "auto"
+    allowed_profiles = {"auto", "high_accuracy", "standard", VISUAL_FALLBACK_PROFILE}
+    profile = requested_profile if requested_profile in allowed_profiles else "auto"
     resolved_strict_cof_mode = False if strict_cof_mode is None else bool(strict_cof_mode)
     logger.info(
         "Starting isolated processing literature_id=%s profile=%s strict_cof_mode=%s force=%s",

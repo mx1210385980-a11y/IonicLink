@@ -104,6 +104,27 @@ async def test_enqueue_after_active_cancel_does_not_reuse_cancelled_run(monkeypa
 
 
 @pytest.mark.anyio
+async def test_enqueue_preserves_review_figure_estimate_profile(monkeypatch):
+    service = ExtractionQueueService()
+    created_jobs: list[ExtractionQueueJob] = []
+
+    async def fake_create_queued_run(next_job: ExtractionQueueJob):
+        created_jobs.append(next_job)
+
+    monkeypatch.setattr(service, "_create_queued_run", fake_create_queued_run)
+
+    snapshot = await service.enqueue(
+        literature_id=144,
+        extractor_type="tribology",
+        force=True,
+        profile="review_figure_estimate",
+    )
+
+    assert snapshot["profile"] == "review_figure_estimate"
+    assert created_jobs[0].profile == "review_figure_estimate"
+
+
+@pytest.mark.anyio
 async def test_retry_after_active_cancel_waits_for_old_worker_before_processing(monkeypatch):
     service = ExtractionQueueService()
     job = _job()

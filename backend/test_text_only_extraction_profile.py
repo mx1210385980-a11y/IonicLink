@@ -77,6 +77,65 @@ async def test_legacy_standard_profile_auto_uses_vision_when_text_has_no_records
 
 
 @pytest.mark.asyncio
+async def test_review_figure_estimate_caps_visual_estimate_confidence(monkeypatch, tmp_path):
+    pdf_path = tmp_path / "figure-estimate.pdf"
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 72), "Fig. 9. Average friction coefficients under current and Fe3O4 loading.")
+    doc.save(pdf_path)
+    doc.close()
+
+    monkeypatch.setattr(
+        runtime_service,
+        "classify_pdf_pages",
+        lambda _path: {
+            "visual_pages": [0],
+            "text_pages": [],
+            "page_texts": {
+                0: "Fig. 9. Average friction coefficients under current and Fe3O4 loading.",
+            },
+        },
+    )
+
+    service = LLMService()
+
+    async def fake_abbrev_map(_page_texts):
+        return {}
+
+    async def fake_process_text(_text_chunk, _prompt):
+        return []
+
+    async def fake_process_vision(_images, _prompt, content="", **_kwargs):
+        return [
+            {
+                "source_page": 1,
+                "source": "Fig. 9",
+                "source_figure": "Fig. 9",
+                "material_name": "304 stainless steel / Q345 steel",
+                "ionic_liquid": "[EMIM][BF4]",
+                "cof": "0.1049",
+                "evidence": "Graph-estimated trace for 20 A and 30 wt% Fe3O4.",
+                "confidence": 0.95,
+            }
+        ]
+
+    monkeypatch.setattr(service, "_extract_abbrev_map", fake_abbrev_map)
+    monkeypatch.setattr(service, "_process_vision_timeout", fake_process_vision)
+    monkeypatch.setattr(service, "_process_text", fake_process_text)
+    monkeypatch.setattr(runtime_service, "resolve_and_enrich_records", lambda rows: rows)
+    monkeypatch.setattr(
+        runtime_service,
+        "filter_to_supported_ionic_liquid_records",
+        lambda rows, allow_likely=False: (rows, []),
+    )
+
+    records = await service.extract_tribology_data(pdf_path=str(pdf_path), profile="review_figure_estimate")
+
+    assert records
+    assert {record.value_origin for record in records} == {"figure_estimate"}
+    assert all(record.confidence == pytest.approx(runtime_service.FIGURE_ESTIMATE_CONFIDENCE_CAP) for record in records)
+
+
+@pytest.mark.asyncio
 async def test_text_page_extraction_uses_bounded_concurrency_without_reordering_candidates(
     monkeypatch,
     tmp_path,

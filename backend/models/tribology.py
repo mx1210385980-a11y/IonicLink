@@ -96,6 +96,7 @@ class TribologyData(BaseModel):
     source: Optional[str] = None
     notes: Optional[str] = None
     value_origin: Optional[str] = None
+    confidence: Optional[float] = None
     evidence: Optional[str] = None
     source_page: Optional[int] = None
     source_figure: Optional[str] = None

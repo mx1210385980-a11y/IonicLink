@@ -430,7 +430,7 @@ describe('RecordTable structure thumbnails', () => {
     expect(workspaceSource).toContain('reviewReextractProgress')
     expect(workspaceSource).toContain('getLatestExtractionRun')
     expect(workspaceSource).toContain('async function confirmReviewReextract')
-    expect(workspaceSource).toContain("await extractData(String(literatureId), true, 'auto', undefined, 'tribology')")
+    expect(workspaceSource).toContain("await extractData(String(literatureId), true, 'review_figure_estimate', undefined, 'tribology')")
     expect(workspaceSource).toContain('await waitForReviewReextractRun(literatureId)')
     expect(workspaceSource).toContain("getLatestExtractionRun(literatureId, 'tribology')")
     expect(workspaceSource).toContain('await loadReviewBacklog()')

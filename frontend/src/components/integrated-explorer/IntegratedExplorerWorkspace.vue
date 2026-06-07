@@ -1029,7 +1029,7 @@ async function confirmReviewReextract() {
   reviewReextractStage.value = 'stage_a.queued'
   reviewReextractCandidateCount.value = 0
   try {
-    const response = await extractData(String(literatureId), true, 'auto', undefined, 'tribology')
+    const response = await extractData(String(literatureId), true, 'review_figure_estimate', undefined, 'tribology')
     if (token !== reviewReextractRunToken) return
     applyReviewReextractInitialResponse(response)
     await waitForReviewReextractRun(literatureId)

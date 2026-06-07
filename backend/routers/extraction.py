@@ -6510,8 +6510,9 @@ async def extract_data(
             raise HTTPException(status_code=400, detail="Invalid File ID format (expected integer)")
 
         literature = await require_literature_access(db, principal, lit_id, write=True)
-        requested_profile = profile
-        profile = "auto"
+        requested_profile = str(profile or "auto").strip().lower()
+        allowed_profiles = {"auto", "high_accuracy", "standard", "review_figure_estimate"}
+        profile = requested_profile if requested_profile in allowed_profiles else "auto"
 
         # 记录提取活动
         await log_activity(

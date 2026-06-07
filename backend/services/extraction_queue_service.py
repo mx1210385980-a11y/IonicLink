@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 def _normalize_queue_profile(value: Any) -> str:
     normalized = str(value or "auto").strip().lower()
     if normalized in {"auto", "standard", "high_accuracy", "review_figure_estimate"}:
-        return "auto"
+        return normalized
     return "auto"
 
 

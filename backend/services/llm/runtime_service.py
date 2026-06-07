@@ -74,6 +74,7 @@ DEFAULT_VISION_MODEL = "Qwen/Qwen3-VL-32B-Instruct"
 DEFAULT_FAST_TABLE_MODEL = "claude-sonnet-4-6"
 DEFAULT_TEXT_PAGE_CONCURRENCY = 4
 DEFAULT_TEXT_PAGE_TIMEOUT_SECONDS = 120.0
+FIGURE_ESTIMATE_CONFIDENCE_CAP = 0.60
 AUTO_EXTRACTION_PROFILE = "auto"
 LEGACY_EXTRACTION_PROFILES = {"standard", "high_accuracy", "review_figure_estimate", AUTO_EXTRACTION_PROFILE}
 
@@ -1322,7 +1323,7 @@ class LLMService:
                     figure_estimate_count += 1
                     norm["value_origin"] = "figure_estimate"
                     norm["figure_estimate_reason"] = quality_drop
-                    norm["confidence"] = min(float(norm.get("confidence") or 0.72), 0.72)
+                    norm["confidence"] = min(float(norm.get("confidence") or FIGURE_ESTIMATE_CONFIDENCE_CAP), FIGURE_ESTIMATE_CONFIDENCE_CAP)
                     norm.setdefault(
                         "notes",
                         "COF value is an image-derived estimate retained for review; verify against the figure before promotion.",
@@ -1646,7 +1647,8 @@ class LLMService:
         strict_cof_mode: bool = False,
         visual_page_hints: Optional[List[int]] = None,
     ) -> dict:
-        if self._fast_table_enabled():
+        requested_profile = str(extraction_profile or AUTO_EXTRACTION_PROFILE).strip().lower()
+        if self._fast_table_enabled() and requested_profile != "review_figure_estimate":
             try:
                 return await self._extract_fast_table_with_metadata(
                     content=content,
