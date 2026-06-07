@@ -114,8 +114,8 @@ describe('useHomeSummary', () => {
 
     expect(result.summary.value.health.officialDatabaseRecords).toBe(409)
     expect(result.summary.value.today.reviewPending).toBe(101)
-    expect(searchRecords).toHaveBeenCalledWith({ entityType: 'candidate' }, 0, 1, { scope: 'active' })
-    expect(searchRecords).toHaveBeenCalledWith({ entityType: 'record' }, 0, 1, { scope: 'active' })
+    expect(searchRecords).toHaveBeenCalledWith({ entityType: 'candidate' }, 0, 1, { scope: 'all_visible' })
+    expect(searchRecords).toHaveBeenCalledWith({ entityType: 'record' }, 0, 1, { scope: 'all_visible' })
 
     app.unmount()
     root.remove()

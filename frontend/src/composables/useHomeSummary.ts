@@ -20,7 +20,6 @@ import {
   type ExtractionRunDetail,
   type MentorProgressResponse,
 } from '@/lib/api'
-import { sessionState } from '@/lib/session'
 
 type DashboardStatsSnapshot = Awaited<ReturnType<typeof getDashboardStats>>
 type DatasetListSnapshot = Awaited<ReturnType<typeof listCleanedDatasets>>
@@ -431,8 +430,7 @@ function literatureCandidateCount(item: any): number {
 }
 
 function homeRecordScope(): 'active' | 'all_visible' {
-  const role = String(sessionState.user?.role || '').trim().toLowerCase()
-  return role === 'principal_investigator' || role === 'group_admin' ? 'all_visible' : 'active'
+  return 'all_visible'
 }
 
 function literatureOfficialRecordCount(item: any): number {
