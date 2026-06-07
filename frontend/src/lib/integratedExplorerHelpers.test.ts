@@ -591,6 +591,32 @@ describe('integratedExplorerHelpers', () => {
     expect(model.detailBadges).toContain('6 mm')
   })
 
+  it('keeps macro tribometer rows macro when extracted scale conflicts with macro profile cues', () => {
+    const model = contactDisplayModel(createRecord({
+      materialName: '304 stainless steel ball / Q345 steel plate',
+      probeMaterial: '304 stainless steel',
+      probeGeometry: 'Ball',
+      probeRadius: '3 mm',
+      substrateMaterial: 'Q345 steel',
+      loadValue: '10 N',
+      loadRaw: '10 N',
+      experimentScale: null,
+      experimentMethod: null,
+      tribologicalSystem: {
+        scale: 'nanoscale',
+        profile: 'macro',
+        training_view: 'macro_performance',
+        raw_text: 'reciprocating frequency 1 Hz, stroke 5 mm, load 10 N',
+      },
+    }))
+
+    expect(model.mode).toBe('macro')
+    expect(model.pattern).toBe('ball_disk')
+    expect(model.primaryRole).toBe('Ball')
+    expect(model.secondaryRole).toBe('Disk')
+    expect(model.detailBadges).toContain('3 mm')
+  })
+
   it('renders pin-on-disk records with macro engineering roles', () => {
     const model = contactDisplayModel(createRecord({
       probeMaterial: 'Al2O3',

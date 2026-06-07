@@ -18,6 +18,16 @@ const contact = computed(() => contactDisplayModel(props.record))
 const primaryDetails = computed(() => contact.value.detailBadges.slice(0, 2).join(' · '))
 const secondaryDetails = computed(() => contact.value.detailBadges.slice(2).join(' · '))
 const hasCoating = computed(() => contact.value.detailBadges.some((item) => /^Coat\b/i.test(item)))
+const macroCounterfaceClass = computed(() => {
+  if (contact.value.pattern === 'pin_disk') return 'macro-rig__counterface--pin'
+  if (contact.value.pattern === 'block_ring') return 'macro-rig__counterface--block'
+  return 'macro-rig__counterface--ball'
+})
+const macroSpecimenClass = computed(() => {
+  if (contact.value.pattern === 'four_ball') return 'macro-rig__specimen--balls'
+  if (contact.value.pattern === 'block_ring') return 'macro-rig__specimen--ring'
+  return 'macro-rig__specimen--flat'
+})
 const primaryEvidenceFieldKey = computed(() => {
   const role = contact.value.primaryRole.toLowerCase()
   if (role.includes('probe') || role.includes('counterface') || role.includes('pin') || role.includes('ball')) {
@@ -94,28 +104,14 @@ function openFieldEvidence(fieldKey: string, event: MouseEvent | KeyboardEvent) 
   >
     <div
       v-if="contact.mode === 'macro'"
-      class="relative flex w-10 shrink-0 items-center justify-center py-0.5"
+      class="macro-rig"
+      :data-pattern="contact.pattern"
       aria-hidden="true"
     >
-      <div class="flex w-full items-center">
-        <span
-          class="shrink-0 bg-white shadow-[inset_0_0_0_2px_rgba(234,88,12,0.75)] dark:bg-slate-950"
-          :class="contact.pattern === 'pin_disk'
-            ? 'h-4 w-1.5 rounded-[2px]'
-            : contact.pattern === 'block_ring'
-              ? 'h-3.5 w-4 rounded-[3px]'
-              : 'h-4 w-4 rounded-full'"
-        />
-        <span class="h-px flex-1 bg-gradient-to-r from-orange-300 via-slate-300 to-orange-300 dark:from-orange-400/80 dark:via-slate-700 dark:to-orange-400/80" />
-        <span
-          class="shrink-0 bg-slate-800 dark:bg-slate-100"
-          :class="contact.pattern === 'four_ball'
-            ? 'h-4 w-4 rounded-full shadow-[6px_4px_0_-2px_rgba(15,23,42,0.85),6px_-4px_0_-2px_rgba(15,23,42,0.85)] dark:shadow-[6px_4px_0_-2px_rgba(241,245,249,0.85),6px_-4px_0_-2px_rgba(241,245,249,0.85)]'
-            : contact.pattern === 'block_ring'
-              ? 'h-4 w-4 rounded-full'
-              : 'h-2 w-5 rounded-[3px]'"
-        />
-      </div>
+      <span class="macro-rig__motion" />
+      <span class="macro-rig__counterface" :class="macroCounterfaceClass" />
+      <span class="macro-rig__contact" />
+      <span class="macro-rig__specimen" :class="macroSpecimenClass" />
     </div>
 
     <div v-else class="relative flex w-5 shrink-0 flex-col items-center py-0.5" aria-hidden="true">
@@ -137,6 +133,17 @@ function openFieldEvidence(fieldKey: string, event: MouseEvent | KeyboardEvent) 
     </div>
 
     <div class="min-w-0 flex-1">
+      <div
+        v-if="contact.mode === 'macro'"
+        class="mb-1 flex min-w-0 items-center gap-1.5"
+      >
+        <span class="rounded-[4px] bg-orange-100 px-1.5 py-0.5 text-[8px] font-black leading-none tracking-[0.12em] text-orange-700 dark:bg-orange-400/15 dark:text-orange-300">
+          MACRO
+        </span>
+        <span class="min-w-0 truncate text-[9.5px] font-black uppercase leading-3 tracking-[0.08em] text-slate-500 dark:text-slate-400">
+          {{ contact.relationLabel }}
+        </span>
+      </div>
       <div class="flex min-w-0 items-center gap-1.5">
         <span
           class="shrink-0 rounded-[4px] px-1 py-0.5 text-[8.5px] font-black uppercase leading-none tracking-[0.12em]"
@@ -202,3 +209,136 @@ function openFieldEvidence(fieldKey: string, event: MouseEvent | KeyboardEvent) 
     </div>
   </div>
 </template>
+
+<style scoped>
+.macro-rig {
+  position: relative;
+  width: 2.75rem;
+  min-width: 2.75rem;
+  min-height: 3.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.macro-rig__motion {
+  position: absolute;
+  left: 0.35rem;
+  right: 0.35rem;
+  top: 1.25rem;
+  height: 0.35rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(251, 146, 60, 0), rgba(251, 146, 60, 0.7), rgba(251, 146, 60, 0));
+  animation: macro-motion 1.8s ease-in-out infinite;
+}
+
+.macro-rig__counterface {
+  position: absolute;
+  top: 0.58rem;
+  z-index: 2;
+  background: #fff7ed;
+  border: 2px solid #f97316;
+  box-shadow: 0 5px 12px -8px rgba(194, 65, 12, 0.9);
+  animation: macro-contact 1.8s ease-in-out infinite;
+}
+
+.macro-rig__counterface--ball {
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 999px;
+}
+
+.macro-rig__counterface--pin {
+  width: 0.45rem;
+  height: 1.1rem;
+  border-radius: 0.2rem;
+}
+
+.macro-rig__counterface--block {
+  width: 1.1rem;
+  height: 0.75rem;
+  border-radius: 0.25rem;
+}
+
+.macro-rig__contact {
+  position: absolute;
+  top: 1.52rem;
+  z-index: 1;
+  width: 0.34rem;
+  height: 0.34rem;
+  border-radius: 999px;
+  background: #ea580c;
+  box-shadow: 0 0 0 0.35rem rgba(251, 146, 60, 0.16);
+  animation: macro-contact-pulse 1.8s ease-in-out infinite;
+}
+
+.macro-rig__specimen {
+  position: absolute;
+  top: 1.72rem;
+  z-index: 1;
+  background: #1e293b;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 8px 14px -12px rgba(15, 23, 42, 0.95);
+}
+
+.macro-rig__specimen--flat {
+  width: 1.85rem;
+  height: 0.42rem;
+  border-radius: 0.18rem;
+}
+
+.macro-rig__specimen--ring {
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 999px;
+  background: radial-gradient(circle, transparent 38%, #1e293b 40%);
+}
+
+.macro-rig__specimen--balls {
+  width: 0.86rem;
+  height: 0.86rem;
+  border-radius: 999px;
+  box-shadow:
+    -0.45rem 0.28rem 0 -0.08rem #1e293b,
+    0.45rem 0.28rem 0 -0.08rem #1e293b,
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+@keyframes macro-contact {
+  0%, 100% {
+    transform: translateX(-0.18rem);
+  }
+  50% {
+    transform: translateX(0.18rem);
+  }
+}
+
+@keyframes macro-motion {
+  0%, 100% {
+    opacity: 0.45;
+    transform: scaleX(0.78);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes macro-contact-pulse {
+  0%, 100% {
+    opacity: 0.6;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .macro-rig__motion,
+  .macro-rig__counterface,
+  .macro-rig__contact {
+    animation: none;
+  }
+}
+</style>

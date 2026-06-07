@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 const source = readFileSync(resolve(__dirname, 'RecordTable.vue'), 'utf-8')
 const workspaceSource = readFileSync(resolve(__dirname, 'IntegratedExplorerWorkspace.vue'), 'utf-8')
 const recipeCellSource = readFileSync(resolve(__dirname, 'LubricantRecipeCell.vue'), 'utf-8')
+const tribopairCapsuleSource = readFileSync(resolve(__dirname, 'TribopairCapsule.vue'), 'utf-8')
 const virtualRowSource = readFileSync(resolve(__dirname, 'VirtualRecordRow.vue'), 'utf-8')
 const knowledgePageSource = readFileSync(resolve(__dirname, '../../pages/knowledge/KnowledgePage.vue'), 'utf-8')
 const integratedExplorerSource = readFileSync(resolve(__dirname, '../IntegratedExplorer.vue'), 'utf-8')
@@ -233,7 +234,7 @@ describe('RecordTable structure thumbnails', () => {
 	    expect(workspaceSource).not.toContain(':approve-candidate-record')
 	  })
 
-	  it('keeps evidence quality labels out of database and review table rows', () => {
+  it('keeps evidence quality labels out of database and review table rows', () => {
 	    expect(source).not.toContain('recordEvidenceGrade(record)')
 	    expect(source).not.toContain('recordEvidenceGradeLabel(record)')
 	    expect(source).not.toContain('recordEvidenceGradeBadgeClass(record)')
@@ -269,6 +270,17 @@ describe('RecordTable structure thumbnails', () => {
 	    expect(source).toContain('database-focus-record')
 	    expect(source).toContain(':aria-current="isFocusedRecord(record) ? \'true\' : undefined"')
 	  })
+
+  it('makes macro tribopairs readable as an animated contact rig', () => {
+    expect(tribopairCapsuleSource).toContain('macro-rig')
+    expect(tribopairCapsuleSource).toContain('macro-rig__counterface')
+    expect(tribopairCapsuleSource).toContain('macro-rig__specimen')
+    expect(tribopairCapsuleSource).toContain('macro-rig__motion')
+    expect(tribopairCapsuleSource).toContain('@keyframes macro-contact')
+    expect(tribopairCapsuleSource).toContain('prefers-reduced-motion')
+    expect(tribopairCapsuleSource).toContain('MACRO')
+    expect(tribopairCapsuleSource).not.toContain(':global(.dark)')
+  })
 
   it('keeps header column widths aligned with body column widths', () => {
     expect(source).toContain('const COL_SELECT = \'w-[48px]\'')

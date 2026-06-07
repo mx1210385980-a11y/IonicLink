@@ -767,6 +767,48 @@ function contactSystemText(record: RecordResponse): string {
     .join(' ')
 }
 
+function normalizedContactKeyHasAny(text: string, tokens: string[]): boolean {
+  return tokens.some((token) => text === token || text.includes(token))
+}
+
+function hasMacroContactCue(text: string): boolean {
+  if (normalizedContactKeyHasAny(text, [
+    'macro',
+    'macro_performance',
+    'ball_on',
+    'ball_disk',
+    'pin_on',
+    'pin_disk',
+    'four_ball',
+    'block_on',
+    'block_ring',
+    'tribometer',
+    'reciprocating',
+    'wear_scar',
+    'stroke',
+  ])) {
+    return true
+  }
+
+  const hasEngineeringLoad = /(?:^|_)\d+(?:_\d+)?_n(?:_|$)/.test(text)
+  const hasMillimeterGeometry = /(?:^|_)(?:mm|cm)(?:_|$)/.test(text)
+    && /(?:^|_)(?:ball|pin|disk|disc|plate|ring)(?:_|$)/.test(text)
+  return hasEngineeringLoad || hasMillimeterGeometry
+}
+
+function hasNanoContactCue(text: string): boolean {
+  return normalizedContactKeyHasAny(text, [
+    'afm',
+    'ffm',
+    'sfb',
+    'colloid',
+    'tip_radius',
+    'sharp_tip',
+    'surface_force',
+    'lateral_force',
+  ])
+}
+
 function contactScale(record: RecordResponse): ContactDisplayMode {
   const system = (record.tribologicalSystem || {}) as NonNullable<RecordResponse['tribologicalSystem']>
   const profile = (record.experimentProfile || {}) as NonNullable<RecordResponse['experimentProfile']>
@@ -780,17 +822,13 @@ function contactScale(record: RecordResponse): ContactDisplayMode {
     system.training_view,
     system.trainingView,
   ]
-  for (const candidate of candidates) {
-    const canonical = canonicalExperimentScaleValue(String(candidate || ''))
-    if (canonical === 'macroscale') return 'macro'
-    if (canonical === 'nanoscale') return 'nano'
-  }
-
+  const canonicalSignals = candidates.map((candidate) => canonicalExperimentScaleValue(String(candidate || '')))
   const text = normalizedContactKey(contactSystemText(record))
-  if (/\b(ball_on|pin_on|four_ball|block_on|tribometer|reciprocating|wear_scar)\b/.test(text)) return 'macro'
-  if (/\b(afm|ffm|sfb|colloid|tip_radius|sharp_tip|surface_force|lateral_force)\b/.test(text)) return 'nano'
-  if (/\bnm\b|\bn_n\b|\bnn\b|\bµn\b|\bun\b/.test(text)) return 'nano'
-  if (/\bn\b/.test(text)) return 'macro'
+
+  if (canonicalSignals.includes('macroscale')) return 'macro'
+  if (hasMacroContactCue(text)) return 'macro'
+  if (canonicalSignals.includes('nanoscale')) return 'nano'
+  if (hasNanoContactCue(text)) return 'nano'
   return 'unknown'
 }
 
