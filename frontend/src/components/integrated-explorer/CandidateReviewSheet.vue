@@ -845,26 +845,26 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
         @click="emit('close')"
       />
 
-      <aside class="relative flex h-full w-full max-w-[760px] flex-col border-l border-slate-200 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.7)]">
-        <header class="shrink-0 border-b border-slate-100 bg-[linear-gradient(180deg,#ffffff_0%,#f7fbfc_100%)] px-5 py-4">
-          <div class="flex items-start justify-between gap-4">
+      <aside class="relative flex h-full w-full max-w-[680px] flex-col border-l border-slate-200 bg-white shadow-[0_20px_64px_-30px_rgba(15,23,42,0.62)]">
+        <header class="shrink-0 border-b border-slate-100 bg-white px-4 py-3">
+          <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <p class="text-[11px] font-black uppercase tracking-[0.22em] text-[#0f7c82]">Candidate Review</p>
-              <h2 class="mt-1 truncate text-2xl font-black leading-tight text-slate-950">
+              <p class="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#0f7c82]">Candidate Review</p>
+              <h2 class="mt-1 truncate text-[1.05rem] font-semibold leading-tight text-slate-950">
                 {{ lubricantDisplay(record) || recordDisplayId(record) }}
               </h2>
-              <p class="mt-1 truncate text-sm font-semibold text-slate-500">
+              <p class="mt-0.5 truncate text-xs font-medium text-slate-500">
                 {{ record.literature?.title || `Literature ${record.literatureId || '--'}` }}
               </p>
             </div>
             <div class="flex shrink-0 items-center gap-2">
-              <span class="inline-flex h-8 items-center rounded-full border px-3 text-xs font-black" :class="readinessTone">
+              <span class="inline-flex h-7 items-center rounded-full border px-2.5 text-[11px] font-semibold" :class="readinessTone">
                 {{ readinessLabel }}
               </span>
               <button
                 v-if="hasNextCandidate"
                 type="button"
-                class="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition hover:border-[#8fe5e7] hover:text-[#0f7c82]"
+                class="inline-flex h-8 items-center justify-center gap-1.5 rounded-[8px] border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 transition hover:border-[#8fe5e7] hover:text-[#0f7c82]"
                 @click="emit('next-candidate')"
               >
                 Next candidate
@@ -872,7 +872,7 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
               </button>
               <button
                 type="button"
-                class="grid h-9 w-9 place-items-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-900"
+                class="grid h-8 w-8 place-items-center rounded-[8px] border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-900"
                 aria-label="Close review sheet"
                 @click="emit('close')"
               >
@@ -883,14 +883,14 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
 
           <div
             v-if="localBlockers.length"
-            class="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800"
+            class="mt-2 flex items-start gap-2 rounded-[8px] border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800"
           >
             <AlertTriangle class="mt-0.5 h-4 w-4 shrink-0" />
             <span><span class="font-black">Needs your attention:</span> {{ localBlockers.join(' · ') }}</span>
           </div>
         </header>
 
-        <div class="min-h-0 flex-1 overflow-y-auto bg-[#fbfdfd] px-5 py-4">
+        <div class="min-h-0 flex-1 overflow-y-auto bg-[#fbfdfd] px-4 py-3">
           <div v-if="evidenceLoading" class="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-3 text-sm font-bold text-slate-500">
             <Loader2 class="h-4 w-4 animate-spin" />
             Loading evidence...
@@ -900,11 +900,12 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
           </div>
 
           <template v-else>
-            <div class="grid gap-3">
+            <div class="grid gap-2">
               <section
                 v-for="card in cardModels"
                 :key="card.key"
-                class="rounded-xl border bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] transition"
+                data-testid="review-evidence-card"
+                class="rounded-[9px] border bg-white p-3 shadow-[0_1px_2px_rgba(15,23,42,0.035)] transition"
                 :class="card.status === 'flagged'
                   ? 'border-rose-200'
                   : card.status === 'check'
@@ -914,9 +915,9 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
               >
                 <div class="flex items-center justify-between gap-3">
                   <div class="flex min-w-0 items-center gap-2">
-                    <h3 class="text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">{{ card.label }}</h3>
+                    <h3 class="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">{{ card.label }}</h3>
                     <span
-                      class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em]"
+                      class="inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em]"
                       :class="card.status === 'confirmed'
                         ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                         : card.status === 'grounded'
@@ -933,7 +934,7 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
                   </div>
                   <button
                     type="button"
-                    class="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-black transition"
+                    class="inline-flex h-8 shrink-0 items-center justify-center gap-1.5 rounded-[8px] border px-2.5 text-xs font-semibold transition"
                     :class="isCardEditing(card.key)
                       ? 'border-[#8fe5e7] bg-[#eefafa] text-[#0f7c82]'
                       : 'border-slate-200 bg-white text-slate-600 hover:border-[#8fe5e7] hover:text-[#0f7c82]'"
@@ -946,17 +947,17 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
 
                 <!-- Read view -->
                 <div v-if="!isCardEditing(card.key)" class="mt-2">
-                  <p v-if="card.value" class="truncate text-xl font-black text-slate-950">{{ card.value }}</p>
-                  <div v-if="card.subValues.length" class="flex flex-wrap gap-x-5 gap-y-1">
-                    <span v-for="sv in card.subValues" :key="sv.label" class="text-base font-bold text-slate-800">
-                      <span class="text-[11px] font-black uppercase tracking-[0.1em] text-slate-400">{{ sv.label }}</span>
+                  <p v-if="card.value" class="truncate text-[1.05rem] font-semibold text-slate-950">{{ card.value }}</p>
+                  <div v-if="card.subValues.length" class="flex flex-wrap gap-x-4 gap-y-1">
+                    <span v-for="sv in card.subValues" :key="sv.label" class="text-sm font-semibold text-slate-800">
+                      <span class="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">{{ sv.label }}</span>
                       <span class="ml-1.5">{{ sv.value }}</span>
                     </span>
                   </div>
                 </div>
 
                 <!-- Edit view -->
-                <div v-else class="mt-3 grid gap-3" :class="card.key === 'ionic_liquid' ? '' : 'md:grid-cols-2'">
+                <div v-else class="mt-3 grid gap-2" :class="card.key === 'ionic_liquid' ? '' : 'md:grid-cols-2'">
                   <template v-if="card.key === 'ionic_liquid'">
                     <label class="grid gap-1.5 text-sm font-bold text-slate-700">
                       Ionic liquid
@@ -1008,7 +1009,7 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
                 </div>
 
                 <!-- Evidence inline -->
-                <div v-if="card.hasEvidence" class="mt-3 rounded-lg border border-slate-100 bg-[#f6fbfc] p-3">
+                <div v-if="card.hasEvidence" class="mt-2 rounded-[8px] border border-slate-100 bg-[#f6fbfc] p-2.5">
                   <button
                     v-if="card.imageSrc"
                     type="button"
@@ -1016,7 +1017,7 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
                     aria-label="Open source image preview"
                     @click="openImagePreview(card.imageSrc)"
                   >
-                    <img :src="card.imageSrc" :alt="`Evidence for ${card.label}`" class="max-h-56 w-full object-contain">
+                    <img :src="card.imageSrc" :alt="`Evidence for ${card.label}`" class="max-h-36 w-full object-contain">
                     <span class="pointer-events-none absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-md bg-slate-950/70 text-white opacity-0 shadow-sm transition group-hover:opacity-100 group-focus-visible:opacity-100">
                       <Maximize2 class="h-3.5 w-3.5" />
                     </span>
@@ -1029,7 +1030,7 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
                   </div>
                   <blockquote
                     v-if="card.quote"
-                    class="rounded-md border-l-[3px] border-[#0f7c82] bg-white px-3 py-2 text-sm font-semibold leading-6 text-slate-700"
+                    class="rounded-md border-l-[3px] border-[#0f7c82] bg-white px-3 py-2 text-sm font-medium leading-6 text-slate-700"
                     v-html="highlightQuote(card.quote, card.matchedText)"
                   />
                   <p v-if="card.note" class="mt-2 rounded-md bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700">
@@ -1043,7 +1044,7 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
                     <div class="flex items-center gap-1.5">
                       <button
                         type="button"
-                        class="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] font-black transition disabled:cursor-not-allowed disabled:opacity-55"
+                        class="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-55"
                         :class="card.isConfirmed
                           ? 'border-emerald-300 bg-emerald-50 text-emerald-700'
                           : 'border-slate-200 bg-white text-slate-600 hover:border-emerald-300 hover:text-emerald-700'"
@@ -1057,7 +1058,7 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
                       <button
                         v-if="!card.isFlagged"
                         type="button"
-                        class="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-black text-slate-600 transition hover:border-amber-300 hover:text-amber-700 disabled:cursor-not-allowed disabled:opacity-55"
+                        class="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-600 transition hover:border-amber-300 hover:text-amber-700 disabled:cursor-not-allowed disabled:opacity-55"
                         :disabled="Boolean(evidenceActionPending)"
                         @click="runEvidenceAction('flag', card.actionKey)"
                       >
@@ -1068,7 +1069,7 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
                       <button
                         v-else
                         type="button"
-                        class="inline-flex h-7 items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 text-[11px] font-black text-amber-700 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-55"
+                        class="inline-flex h-7 items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 text-[11px] font-semibold text-amber-700 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-55"
                         :disabled="Boolean(evidenceActionPending)"
                         @click="runEvidenceAction('unflag', card.actionKey)"
                       >
@@ -1086,14 +1087,14 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
             </div>
 
             <!-- Advanced details -->
-            <section class="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
+            <section class="mt-3 overflow-hidden rounded-[9px] border border-slate-200 bg-white">
               <button
                 type="button"
                 class="flex w-full items-center justify-between px-4 py-3 text-left"
                 :aria-expanded="advancedOpen"
                 @click="advancedOpen = !advancedOpen"
               >
-                <span class="text-sm font-black text-slate-700">Advanced details</span>
+                <span class="text-sm font-semibold text-slate-700">Advanced details</span>
                 <ChevronDown class="h-4 w-4 text-slate-400 transition" :class="advancedOpen ? 'rotate-180' : ''" />
               </button>
               <div v-if="advancedOpen" class="grid gap-3 border-t border-slate-100 px-4 py-4 md:grid-cols-2">
@@ -1134,7 +1135,7 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
           </template>
         </div>
 
-        <footer class="shrink-0 border-t border-slate-100 bg-white px-5 py-4">
+        <footer class="shrink-0 border-t border-slate-100 bg-white px-4 py-3">
           <p v-if="saveError" class="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">
             {{ saveError }}
           </p>
@@ -1153,7 +1154,7 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
             <div class="flex items-center gap-2">
               <button
                 type="button"
-                class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-rose-200 bg-white px-4 text-sm font-black text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-55"
+                class="inline-flex h-9 items-center justify-center gap-1.5 rounded-[8px] border border-rose-200 bg-white px-3 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-55"
                 :disabled="saving || rejecting"
                 @click="rejectCandidate"
               >
@@ -1163,7 +1164,7 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
               </button>
               <button
                 type="button"
-                class="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-[#0f7c82] px-4 text-sm font-black text-white transition hover:bg-[#0b6870] disabled:cursor-not-allowed disabled:opacity-55"
+                class="inline-flex h-9 items-center justify-center gap-1.5 rounded-[8px] bg-[#0f7c82] px-3 text-sm font-semibold text-white transition hover:bg-[#0b6870] disabled:cursor-not-allowed disabled:opacity-55"
                 :disabled="saving || rejecting"
                 @click="saveAndApprove"
               >

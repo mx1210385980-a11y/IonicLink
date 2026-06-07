@@ -20,6 +20,7 @@ type UseRecordSearchOptions = {
   targetRecordId?: Ref<string | number | null | undefined>
   targetEntityType?: Ref<'record' | 'candidate' | string | null | undefined>
   entityTypeFilter?: Ref<'record' | 'candidate' | string | null | undefined>
+  reviewLiteratureId?: Ref<number | null | undefined>
   scope?: Ref<'active' | 'group_library' | 'all_visible' | undefined>
   pageSize?: number
 }
@@ -201,7 +202,9 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
       cof_min: parsedCofMin.value ?? dashboardCofMin,
       cof_max: parsedCofMax.value ?? dashboardCofMax,
       query: searchDoi.value || undefined,
-      fileId: options.selectedFileId.value || undefined,
+      fileId:
+        options.selectedFileId.value ||
+        (options.reviewLiteratureId?.value != null ? String(options.reviewLiteratureId.value) : undefined),
       entityType: normalizeEntityTypeFilter(options.entityTypeFilter?.value),
       sortBy: sortBy.value || undefined,
       sortDir: sortBy.value ? sortDir.value : undefined,
@@ -325,6 +328,17 @@ export function useRecordSearch(options: UseRecordSearchOptions) {
   if (options.entityTypeFilter) {
     watch(
       options.entityTypeFilter,
+      () => {
+        currentPage.value = 1
+        markGraphDirty()
+        void fetchData()
+      },
+    )
+  }
+
+  if (options.reviewLiteratureId) {
+    watch(
+      options.reviewLiteratureId,
       () => {
         currentPage.value = 1
         markGraphDirty()

@@ -15,4 +15,18 @@ describe('DatabaseToolModal scope', () => {
     expect(source).toContain("listDiffusionLibrary('', 0, 1, { scope: databaseRecordScope.value, entityType: 'candidate' })")
     expect(source).not.toContain("searchRecords({}, 0, 1, { scope: 'group_library' })")
   })
+
+  it('keeps the Database modal as a compact tool shell with icon-first actions', () => {
+    expect(source).toContain('DatabaseIcon')
+    expect(source).toContain('Download')
+    expect(source).toContain('SlidersHorizontal')
+    expect(source).toContain('data-testid="database-tool-shell"')
+    expect(source).toContain('h-[88vh] w-[min(96vw,1360px)]')
+    expect(source).toContain('rounded-[14px]')
+    expect(source).toContain('text-[1rem] font-semibold')
+    expect(source).toContain('aria-label="Export database as CSV"')
+    expect(source).toContain('aria-label="Open database filters"')
+    expect(source).not.toContain('rounded-[1.25rem]')
+    expect(source).not.toContain('text-[1.38rem]')
+  })
 })

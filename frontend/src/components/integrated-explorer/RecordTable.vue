@@ -481,7 +481,7 @@ defineExpose({
                   v-if="reviewQueueMode && isCandidateRecord(record)"
                   type="button"
                   class="inline-flex h-7 w-7 items-center justify-center rounded-md border transition hover:border-[#0f7c82] hover:bg-[#eefafa] hover:text-[#0f7c82]"
-                  :class="isCandidateSelected(record) ? 'border-[#0f7c82] bg-[#0f7c82] text-white shadow-sm' : 'border-slate-300 bg-white text-transparent'"
+	                  :class="isCandidateSelected(record) ? 'border-[#0f7c82] bg-[#e7f6f5] text-[#0f7c82] shadow-sm' : 'border-slate-300 bg-white text-transparent'"
                   aria-label="Select candidate"
                   :aria-pressed="isCandidateSelected(record)"
                   title="Select candidate for bulk review"
@@ -494,7 +494,7 @@ defineExpose({
                   v-else
                   type="button"
                   class="inline-flex h-7 w-7 items-center justify-center rounded-md border transition hover:border-[#0f7c82] hover:bg-[#eefafa] hover:text-[#0f7c82]"
-                  :class="selectedIds.has(Number(record.id)) ? 'border-[#0f7c82] bg-[#0f7c82] text-white shadow-sm' : 'border-slate-300 bg-white text-transparent'"
+	                  :class="selectedIds.has(Number(record.id)) ? 'border-[#0f7c82] bg-[#e7f6f5] text-[#0f7c82] shadow-sm' : 'border-slate-300 bg-white text-transparent'"
                   aria-label="Select record"
                   :aria-pressed="selectedIds.has(Number(record.id))"
                   :disabled="isCandidateRecord(record)"

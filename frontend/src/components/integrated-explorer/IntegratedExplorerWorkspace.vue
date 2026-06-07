@@ -6,7 +6,9 @@ import {
   getPdfBboxPreview,
   getPdfFigurePreviews,
   getRecordFieldEvidence,
+  getReviewBacklog,
   searchRecords,
+  type ReviewBacklogPaper,
   type RecordResponse,
   type EvidenceResult,
   type FieldEvidenceEntry,
@@ -92,6 +94,10 @@ const PAGE_SIZE = 10
 const exporting = ref(false)
 type ExportFormat = 'json' | 'csv' | 'ndjson'
 
+// Review master-detail: which paper's candidates the right pane is scoped to
+// (null = all papers). Declared before useRecordSearch so it can drive the query.
+const selectedReviewLiteratureId = ref<number | null>(null)
+
 const {
   loading,
   error: searchError,
@@ -139,6 +145,7 @@ const {
   targetRecordId: toRef(props, 'focusRecordId'),
   targetEntityType: toRef(props, 'focusEntityType'),
   entityTypeFilter: toRef(props, 'entityTypeFilter'),
+  reviewLiteratureId: selectedReviewLiteratureId,
   scope: toRef(props, 'recordScope'),
   fixedExperimentScale: toRef(props, 'fixedExperimentScale'),
   pageSize: PAGE_SIZE,
@@ -297,8 +304,13 @@ const displayedCandidateCount = computed(() =>
 )
 
 watch(isReviewQueue, (inQueue) => {
-  if (!inQueue) clearTriageFilters()
-})
+  if (!inQueue) {
+    clearTriageFilters()
+    selectedReviewLiteratureId.value = null
+  } else {
+    void loadReviewBacklog()
+  }
+}, { immediate: true })
 
 // Drop a missing-field filter once no queued candidate is missing that field.
 watch(triageMissingFieldOptions, (options) => {
@@ -888,6 +900,40 @@ const effectiveGroupByPaper = computed(
   () => tableGroupByPaper.value && !groupingDisabledBySort.value && !isReviewQueue.value,
 )
 
+// Review master-detail paper rail: whole-queue per-paper pending counts.
+const reviewBacklog = ref<ReviewBacklogPaper[]>([])
+const reviewBacklogLoading = ref(false)
+const reviewBacklogTotal = computed(() =>
+  reviewBacklog.value.reduce((sum, paper) => sum + paper.pendingCount, 0),
+)
+const selectedReviewPaper = computed(() =>
+  reviewBacklog.value.find((paper) => paper.literatureId === selectedReviewLiteratureId.value) || null,
+)
+
+async function loadReviewBacklog() {
+  reviewBacklogLoading.value = true
+  try {
+    const response = await getReviewBacklog({ scope: props.recordScope })
+    reviewBacklog.value = response.papers
+    // Drop the scoping if the selected paper no longer has pending candidates.
+    if (
+      selectedReviewLiteratureId.value != null &&
+      !response.papers.some((paper) => paper.literatureId === selectedReviewLiteratureId.value)
+    ) {
+      selectedReviewLiteratureId.value = null
+    }
+  } catch (err) {
+    console.error('Failed to load review backlog', err)
+  } finally {
+    reviewBacklogLoading.value = false
+  }
+}
+
+function selectReviewPaper(literatureId: number | null) {
+  selectedReviewLiteratureId.value =
+    selectedReviewLiteratureId.value === literatureId ? null : literatureId
+}
+
 // 批量选择 + 批量操作 ─────────────────────────────────────────
 const selectedIds = ref<Set<number>>(new Set())
 const batchActionPending = ref(false)
@@ -1018,6 +1064,7 @@ async function runBulkCandidateReview(
         detail: { dataset: 'lubrication', entityType: 'candidate' },
       }))
       await fetchData()
+      void loadReviewBacklog()
     }
     bulkReviewPending.value = false
   }
@@ -1093,6 +1140,7 @@ function advancePastReviewedCandidate(reviewedRecord: RecordResponse | null) {
     detail: { dataset: 'lubrication', entityType: 'candidate' },
   }))
   void fetchData()
+  void loadReviewBacklog()
 }
 
 function optimisticallyRemoveApprovedCandidate(record: RecordResponse) {
@@ -2462,7 +2510,7 @@ onBeforeUnmount(() => {
             type="button"
             class="ml-auto flex h-10 shrink-0 items-center gap-1.5 rounded-[9px] border px-3 text-xs font-black shadow-sm transition disabled:cursor-not-allowed disabled:opacity-45"
             :class="effectiveGroupByPaper
-              ? 'border-[#0f7c82] bg-[#0f7c82] text-white'
+              ? 'border-[#b7e6e1] bg-[#e7f6f5] text-[#0f7c82]'
               : 'border-slate-200 bg-white text-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400 dark:hover:bg-slate-800'"
             :aria-pressed="effectiveGroupByPaper"
             :disabled="groupingDisabledBySort"
@@ -2482,7 +2530,7 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="rounded-[7px] px-2.5 py-1 text-xs font-black transition"
-              :class="tableDensity === 'comfortable' ? 'bg-[#0f7c82] text-white' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'"
+              :class="tableDensity === 'comfortable' ? 'bg-[#e7f6f5] text-[#0f7c82]' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'"
               :aria-pressed="tableDensity === 'comfortable'"
               title="Comfortable rows"
               @click="setTableDensity('comfortable')"
@@ -2492,7 +2540,7 @@ onBeforeUnmount(() => {
             <button
               type="button"
               class="rounded-[7px] px-2.5 py-1 text-xs font-black transition"
-              :class="tableDensity === 'compact' ? 'bg-[#0f7c82] text-white' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'"
+              :class="tableDensity === 'compact' ? 'bg-[#e7f6f5] text-[#0f7c82]' : 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'"
               :aria-pressed="tableDensity === 'compact'"
               title="Compact rows — fit more on screen"
               @click="setTableDensity('compact')"
@@ -2577,7 +2625,7 @@ onBeforeUnmount(() => {
 
         <div
           v-if="isReviewQueue"
-          class="mt-3 flex flex-wrap items-center gap-2 text-xs font-semibold"
+          class="mt-2 flex items-center gap-1.5 overflow-x-auto text-xs font-semibold"
           data-testid="review-queue-triage"
         >
           <span class="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Triage</span>
@@ -2592,14 +2640,14 @@ onBeforeUnmount(() => {
               type="button"
               class="inline-flex items-center gap-1.5 px-3 py-1.5 transition"
               :class="triageTierFilter === tier.key
-                ? 'bg-[#0f7c82] text-white'
+                ? 'bg-[#e7f6f5] text-[#0f7c82]'
                 : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'"
               @click="setTriageTier(tier.key)"
             >
               {{ tier.label }}
               <span
                 class="rounded-full px-1.5 text-[10px] font-black"
-                :class="triageTierFilter === tier.key ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'"
+                :class="triageTierFilter === tier.key ? 'bg-white text-[#0f7c82]' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'"
               >{{ tier.count }}</span>
             </button>
           </div>
@@ -3077,33 +3125,107 @@ onBeforeUnmount(() => {
           Retry
         </button>
       </div>
-      <RecordTable
-        :loading="loading"
-        :records="displayedRecords"
-        :row-number-start="rangeStart || 1"
-        :deleting-row-id="deletingRowId"
-        :structure-preview-open="structurePreview.open"
-        :structure-preview-row-id="structurePreview.rowId"
-        :focus-record-id="focusRecordId ?? null"
-        :focus-entity-type="focusEntityType || null"
-        :selected-ids="selectedIds"
-        :review-queue-mode="isReviewQueue"
-        :density="tableDensity"
-        :group-by-paper="effectiveGroupByPaper"
-        :sort-by="sortBy"
-        :sort-dir="sortDir"
-        :selected-candidate-ids="selectedCandidateIds"
-        :open-evidence-modal="handleOpenEvidenceModal"
-        :open-literature="handleOpenLiteratureRecord"
-        :review-candidate-record="openCandidateReviewSheet"
-        :open-structure-preview="openStructurePreview"
-        @toggle-select="toggleSelectOne"
-        @toggle-select-page="toggleSelectPage"
-        @toggle-select-candidate="toggleSelectCandidate"
-        @toggle-select-all-candidates="toggleSelectAllCandidates"
-        @sort="setSort"
-        @edit-record="openEditModal"
-      />
+      <div class="flex min-h-0 flex-1 gap-2.5">
+        <!-- Review master-detail: paper rail -->
+        <aside
+          v-if="isReviewQueue"
+          data-testid="review-paper-rail"
+          class="flex w-[14.5rem] shrink-0 flex-col overflow-hidden rounded-[8px] border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950"
+          aria-label="Papers in review queue"
+        >
+          <div class="flex items-center justify-between border-b border-slate-200 px-2.5 py-2 dark:border-slate-800">
+            <span class="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">Papers</span>
+            <span class="text-[11px] font-semibold text-slate-400 dark:text-slate-500">{{ reviewBacklog.length }}</span>
+          </div>
+          <div class="flex-1 overflow-y-auto p-1">
+            <button
+              type="button"
+              class="mb-1 flex w-full items-center justify-between gap-2 rounded-[7px] px-2 py-1.5 text-left transition"
+              :class="selectedReviewLiteratureId === null
+                ? 'border-l-2 border-l-[#0f7c82] bg-[#f1fbfa] text-[#0f7c82]'
+                : 'border-l-2 border-l-transparent font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'"
+              :aria-pressed="selectedReviewLiteratureId === null"
+              @click="selectReviewPaper(null)"
+            >
+              <span class="text-[12px] font-semibold">All candidates</span>
+              <span
+                class="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+                :class="selectedReviewLiteratureId === null ? 'bg-white text-[#0f7c82]' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-200'"
+              >{{ reviewBacklogTotal }}</span>
+            </button>
+            <button
+              v-for="paper in reviewBacklog"
+              :key="paper.literatureId"
+              type="button"
+              class="mb-1 flex w-full items-start gap-2 rounded-[7px] px-2 py-1.5 text-left transition"
+              :class="selectedReviewLiteratureId === paper.literatureId
+                ? 'border-l-2 border-l-[#0f7c82] bg-[#f1fbfa] text-[#0f7c82]'
+                : 'border-l-2 border-l-transparent font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'"
+              :aria-pressed="selectedReviewLiteratureId === paper.literatureId"
+              :title="paper.title"
+              @click="selectReviewPaper(paper.literatureId)"
+            >
+              <span class="min-w-0 flex-1">
+                <span class="block truncate text-[12px] font-semibold leading-4">{{ paper.title }}</span>
+                <span class="block truncate text-[10.5px] font-semibold leading-4 opacity-70">
+                  {{ paper.journal }}{{ paper.year ? ` (${paper.year})` : '' }}
+                </span>
+              </span>
+              <span
+                class="mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+                :class="selectedReviewLiteratureId === paper.literatureId ? 'bg-white text-[#0f7c82]' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-200'"
+              >{{ paper.pendingCount }}</span>
+            </button>
+            <p v-if="reviewBacklogLoading && !reviewBacklog.length" class="px-2.5 py-3 text-[12px] text-slate-400">Loading papers…</p>
+            <p v-else-if="!reviewBacklog.length" class="px-2.5 py-3 text-[12px] text-slate-400">No pending candidates.</p>
+          </div>
+        </aside>
+
+        <div class="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div
+            v-if="isReviewQueue && selectedReviewPaper"
+            data-testid="review-queue-scope-pill"
+            class="mb-2 flex items-center gap-2 rounded-[7px] border border-slate-200 bg-slate-50/80 px-2.5 py-1.5 text-xs dark:border-slate-800 dark:bg-slate-900/60"
+          >
+            <BookOpen class="h-3.5 w-3.5 shrink-0 text-[#0f7c82]" />
+            <span class="min-w-0 truncate font-bold text-slate-700 dark:text-slate-200" :title="selectedReviewPaper.title">{{ selectedReviewPaper.title }}</span>
+            <button
+              type="button"
+              class="ml-auto shrink-0 rounded-[6px] px-2 py-0.5 font-black text-slate-500 transition hover:bg-slate-200 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-700"
+              @click="selectReviewPaper(null)"
+            >
+              Clear ✕
+            </button>
+          </div>
+          <RecordTable
+            :loading="loading"
+            :records="displayedRecords"
+            :row-number-start="rangeStart || 1"
+            :deleting-row-id="deletingRowId"
+            :structure-preview-open="structurePreview.open"
+            :structure-preview-row-id="structurePreview.rowId"
+            :focus-record-id="focusRecordId ?? null"
+            :focus-entity-type="focusEntityType || null"
+            :selected-ids="selectedIds"
+            :review-queue-mode="isReviewQueue"
+            :density="tableDensity"
+            :group-by-paper="effectiveGroupByPaper"
+            :sort-by="sortBy"
+            :sort-dir="sortDir"
+            :selected-candidate-ids="selectedCandidateIds"
+            :open-evidence-modal="handleOpenEvidenceModal"
+            :open-literature="handleOpenLiteratureRecord"
+            :review-candidate-record="openCandidateReviewSheet"
+            :open-structure-preview="openStructurePreview"
+            @toggle-select="toggleSelectOne"
+            @toggle-select-page="toggleSelectPage"
+            @toggle-select-candidate="toggleSelectCandidate"
+            @toggle-select-all-candidates="toggleSelectAllCandidates"
+            @sort="setSort"
+            @edit-record="openEditModal"
+          />
+        </div>
+      </div>
       <CandidateReviewSheet
         :show="Boolean(reviewSheetRecord)"
         :record="reviewSheetRecord"
@@ -3226,7 +3348,7 @@ onBeforeUnmount(() => {
               type="button"
               class="inline-flex h-8 shrink-0 items-center rounded-md border px-3 text-xs font-black transition"
               :class="!databaseEvidenceFocusedFieldKey
-                ? 'border-[#0f7c82] bg-[#0f7c82] text-white shadow-sm'
+                ? 'border-[#b7e6e1] bg-[#e7f6f5] text-[#0f7c82] shadow-sm'
                 : 'border-slate-200 bg-white text-slate-500 hover:border-teal-200 hover:text-[#0f7c82]'"
               @click="focusDatabaseEvidenceConditionKey(evidenceModalRecord, null)"
             >
@@ -3660,7 +3782,7 @@ onBeforeUnmount(() => {
                     </button>
                     <button
                       type="button"
-                      class="inline-flex h-10 items-center gap-1.5 rounded-md bg-[#0f7c82] px-4 text-sm font-medium text-white transition hover:bg-[#0c656a] disabled:opacity-60"
+                      class="inline-flex h-10 items-center gap-1.5 rounded-md bg-slate-900 px-4 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60"
                       :disabled="correctionPending || correctionDiffEntries.length === 0"
                       @click="commitActiveCorrection"
                     >

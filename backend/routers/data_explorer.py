@@ -84,6 +84,7 @@ router = APIRouter(
     responses={404: {"description": "Not found"}},
 )
 logger = logging.getLogger(__name__)
+ScopeMode = Literal["active", "group_library", "all_visible"]
 
 
 def _raise_internal_error(action: str, exc: Exception) -> None:
@@ -921,7 +922,7 @@ def _diffusion_library_matches_focus(
 
 def _scope_filter_values_for_mode(
     *,
-    scope_mode: Literal["active", "all_visible"],
+    scope_mode: ScopeMode,
     principal: AuthPrincipal,
     scope: RequestScope,
 ) -> dict[str, Any]:
@@ -1480,6 +1481,67 @@ async def delete_record(
     except Exception as exc:
         await session.rollback()
         _raise_internal_error("Delete record", exc)
+
+
+@router.get("/review-backlog", response_model=dict)
+async def review_backlog(
+    scope_mode: ScopeMode = Query("active", alias="scope_mode"),
+    session: AsyncSession = Depends(get_db_session),
+    principal: AuthPrincipal = Depends(get_current_principal),
+    scope: RequestScope = Depends(get_request_scope),
+):
+    """Per-literature pending review-candidate counts across the whole queue.
+
+    Powers the Review Queue's master-detail paper rail: each paper with its
+    number of unpromoted, non-rejected candidates. Independent of pagination.
+    """
+    try:
+        scope_conditions = literature_scope_conditions(
+            _scope_filter_values_for_mode(scope_mode=scope_mode, principal=principal, scope=scope)
+        )
+        pending_count = func.count(RecordCandidate.id)
+        stmt = (
+            select(
+                Literature.id,
+                Literature.title,
+                Literature.journal,
+                Literature.year,
+                Literature.doi,
+                pending_count.label("pending_count"),
+            )
+            .join(RecordCandidate.literature)
+            .where(
+                *scope_conditions,
+                RecordCandidate.promoted_record_id.is_(None),
+                or_(
+                    RecordCandidate.review_status.is_(None),
+                    func.lower(RecordCandidate.review_status) != "rejected",
+                ),
+            )
+            .group_by(Literature.id, Literature.title, Literature.journal, Literature.year, Literature.doi)
+            .order_by(desc(pending_count), Literature.id)
+        )
+        rows = (await session.execute(stmt)).all()
+        papers = [
+            {
+                "literatureId": int(row.id),
+                "title": row.title or f"Literature {row.id}",
+                "journal": row.journal or "",
+                "year": row.year,
+                "doi": row.doi or "",
+                "pendingCount": int(row.pending_count or 0),
+            }
+            for row in rows
+        ]
+        return {
+            "papers": papers,
+            "totalPending": sum(paper["pendingCount"] for paper in papers),
+            "paperCount": len(papers),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_internal_error("Review backlog", exc)
 
 
 class BatchDeletePayload(BaseModel):

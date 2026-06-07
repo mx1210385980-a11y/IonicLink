@@ -131,4 +131,16 @@ describe('CandidateReviewSheet structure', () => {
     expect(source).toContain('approvalError')
     expect(source).toContain('saveError')
   })
+
+  it('keeps the candidate review sheet compact, quiet, and evidence-dense', () => {
+    expect(source).toContain('max-w-[680px]')
+    expect(source).toContain('data-testid="review-evidence-card"')
+    expect(source).toContain('grid gap-2')
+    expect(source).toContain('text-[1.05rem] font-semibold')
+    expect(source).toContain('max-h-36 w-full object-contain')
+    expect(source).toContain('h-8 items-center justify-center gap-1.5')
+    expect(source).not.toContain('text-2xl font-black')
+    expect(source).not.toContain('rounded-xl border bg-white p-4')
+    expect(source).not.toContain('max-h-56 w-full object-contain')
+  })
 })

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ChevronDown, X } from 'lucide-vue-next'
+import { ChevronDown, Database as DatabaseIcon, Download, SlidersHorizontal, X } from 'lucide-vue-next'
 
 import IntegratedExplorer from '@/components/IntegratedExplorer.vue'
 import DiffusionExplorerWorkspace from '@/components/knowledge/DiffusionExplorerWorkspace.vue'
@@ -184,14 +184,17 @@ watch(() => [props.show, props.focusDataset, props.entityTypeFilter, props.focus
       class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-4 backdrop-blur-[2px]"
       @click.self="emit('close')"
     >
-      <div class="flex h-[84vh] w-[min(94vw,1320px)] flex-col overflow-hidden rounded-[1.25rem] border border-slate-200 bg-[#f8fbfd] text-slate-950 shadow-[0_34px_90px_rgba(15,23,42,0.28)]">
-        <header class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3.5">
+      <div data-testid="database-tool-shell" class="flex h-[88vh] w-[min(96vw,1360px)] flex-col overflow-hidden rounded-[14px] border border-slate-200 bg-[#f8fbfd] text-slate-950 shadow-[0_24px_72px_rgba(15,23,42,0.22)]">
+        <header class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-2.5">
           <div class="flex min-w-0 flex-wrap items-center gap-3">
-            <h2 class="shrink-0 text-[1.38rem] font-black leading-none tracking-[-0.035em] text-[#0f7c82]">Database</h2>
+            <h2 class="inline-flex shrink-0 items-center gap-2 text-[1rem] font-semibold leading-none text-slate-800">
+              <DatabaseIcon class="h-4 w-4 text-[#0f7c82]" />
+              Database
+            </h2>
             <div class="relative">
               <button
                 type="button"
-                class="inline-flex min-w-[10rem] items-center justify-between gap-3 rounded-lg border border-slate-200 bg-[#fbfdff] px-3 py-2 text-sm font-bold text-slate-800 transition hover:border-[#0f7c82]/35 hover:bg-white"
+                class="inline-flex min-w-[9.25rem] items-center justify-between gap-2 rounded-[8px] border border-slate-200 bg-[#fbfdff] px-2.5 py-1.5 text-sm font-semibold text-slate-700 transition hover:border-[#0f7c82]/35 hover:bg-white"
                 aria-haspopup="menu"
                 :aria-expanded="datasetMenuOpen"
                 @click="datasetMenuOpen = !datasetMenuOpen"
@@ -203,14 +206,14 @@ watch(() => [props.show, props.focusDataset, props.entityTypeFilter, props.focus
 
               <div
                 v-if="datasetMenuOpen"
-                class="absolute left-0 top-[calc(100%+0.5rem)] z-20 w-[16rem] rounded-xl border border-slate-200 bg-white p-1.5 shadow-[0_24px_60px_rgba(15,23,42,0.18)]"
+                class="absolute left-0 top-[calc(100%+0.4rem)] z-20 w-[15rem] rounded-[10px] border border-slate-200 bg-white p-1.5 shadow-[0_20px_48px_rgba(15,23,42,0.16)]"
                 role="menu"
               >
                 <button
                   v-for="dataset in datasets"
                   :key="dataset.key"
                   type="button"
-                  class="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left transition hover:bg-slate-50"
+                  class="flex w-full items-center justify-between gap-3 rounded-[8px] px-2.5 py-2 text-left transition hover:bg-slate-50"
                   :class="activeDataset === dataset.key ? 'bg-[#eefafa] text-[#0f7c82]' : 'text-slate-800'"
                   role="menuitem"
                   @click="selectDataset(dataset.key)"
@@ -223,13 +226,13 @@ watch(() => [props.show, props.focusDataset, props.entityTypeFilter, props.focus
                 </button>
               </div>
             </div>
-            <div class="flex h-10 max-w-full shrink-0 items-center overflow-x-auto rounded-lg border border-slate-200 bg-[#fbfdff] p-1 shadow-sm">
+            <div class="flex h-9 max-w-full shrink-0 items-center overflow-x-auto rounded-[8px] border border-slate-200 bg-[#fbfdff] p-1">
               <button
                 v-for="mode in entityTypeModes"
                 :key="mode.key"
                 type="button"
-                class="inline-flex h-8 items-center gap-2 rounded-md px-3 text-xs font-black transition"
-                :class="activeEntityTypeFilter === mode.key ? 'bg-[#0f7c82] text-white shadow-sm' : 'text-slate-500 hover:bg-white hover:text-slate-800'"
+                class="inline-flex h-7 items-center gap-1.5 rounded-[6px] px-2.5 text-xs font-semibold transition"
+                :class="activeEntityTypeFilter === mode.key ? 'bg-[#e7f6f5] text-[#0f7c82]' : 'text-slate-500 hover:bg-white hover:text-slate-800'"
                 :title="mode.hint"
                 @click="selectEntityTypeFilter(mode.key)"
               >
@@ -247,21 +250,25 @@ watch(() => [props.show, props.focusDataset, props.entityTypeFilter, props.focus
           <div class="flex shrink-0 items-center gap-2">
             <button
               type="button"
-              class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+              class="inline-flex h-9 items-center justify-center gap-1.5 rounded-[8px] border border-slate-200 bg-white px-2.5 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+              aria-label="Export database as CSV"
               @click="requestExport('csv')"
             >
-              Export
+              <Download class="h-4 w-4" />
+              CSV
             </button>
             <button
               type="button"
-              class="rounded-lg bg-[#0f7c82] px-3 py-2 text-sm font-extrabold text-white transition hover:bg-[#0b6870]"
+              class="inline-flex h-9 items-center justify-center gap-1.5 rounded-[8px] border border-[#b7e6e1] bg-[#e7f6f5] px-2.5 text-sm font-semibold text-[#0f7c82] transition hover:border-[#8fdad5] hover:bg-[#dff5f2]"
+              aria-label="Open database filters"
               @click="requestFilters"
             >
+              <SlidersHorizontal class="h-4 w-4" />
               Filters
             </button>
             <button
               type="button"
-              class="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+              class="flex h-9 w-9 items-center justify-center rounded-[8px] border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
               aria-label="Close database"
               @click="emit('close')"
             >
@@ -270,8 +277,8 @@ watch(() => [props.show, props.focusDataset, props.entityTypeFilter, props.focus
           </div>
         </header>
 
-        <section class="min-h-0 flex-1 p-3">
-          <div class="h-full min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+        <section class="min-h-0 flex-1 p-2.5">
+          <div class="h-full min-h-0 overflow-hidden rounded-[10px] border border-slate-200 bg-white">
             <IntegratedExplorer
               v-if="activeDataset === 'tribology'"
               :key="globalTribologyExplorerKey"

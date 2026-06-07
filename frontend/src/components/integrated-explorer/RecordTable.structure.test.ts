@@ -380,4 +380,17 @@ describe('RecordTable structure thumbnails', () => {
     expect(workspaceSource).toContain(':group-by-paper="effectiveGroupByPaper"')
     expect(workspaceSource).toContain('@click="setGroupByPaper(!tableGroupByPaper)"')
   })
+
+  it('renders the Review Queue as a master-detail paper rail scoped via literatureId', () => {
+    // Whole-queue backlog drives the rail; selecting a paper scopes the query.
+    expect(workspaceSource).toContain('getReviewBacklog')
+    expect(workspaceSource).toContain('const selectedReviewLiteratureId = ref<number | null>')
+    expect(workspaceSource).toContain('function selectReviewPaper')
+    expect(workspaceSource).toContain('reviewLiteratureId: selectedReviewLiteratureId')
+    expect(workspaceSource).toContain('Papers in review queue')
+    expect(workspaceSource).toContain('@click="selectReviewPaper(paper.literatureId)"')
+    // The composable scopes candidates to one paper through the file_id filter.
+    const composableSource = readFileSync(resolve(__dirname, '../../composables/useRecordSearch.ts'), 'utf-8')
+    expect(composableSource).toContain('reviewLiteratureId')
+  })
 })

@@ -1130,6 +1130,30 @@ export async function batchDeleteTribologyRecords(ids: number[]): Promise<BatchD
     return response.data
 }
 
+export interface ReviewBacklogPaper {
+    literatureId: number
+    title: string
+    journal: string
+    year: number | null
+    doi: string
+    pendingCount: number
+}
+
+export interface ReviewBacklogResponse {
+    papers: ReviewBacklogPaper[]
+    totalPending: number
+    paperCount: number
+}
+
+export async function getReviewBacklog(options?: ApiScopeOption): Promise<ReviewBacklogResponse> {
+    const params = new URLSearchParams({ ...scopeParams(options) })
+    const qs = params.toString()
+    const response = await api.get(`/api/records/review-backlog${qs ? `?${qs}` : ''}`, {
+        headers: scopeHeaders(options),
+    })
+    return response.data
+}
+
 // --- Types ---
 
 export type ValidationStatus = 'unverified' | 'verified' | 'modified' | 'warning'
