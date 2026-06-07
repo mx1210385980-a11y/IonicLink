@@ -119,6 +119,64 @@ async def test_search_records_accepts_multiple_literature_ids_for_merged_review_
 
 
 @pytest.mark.anyio
+async def test_search_records_deduplicates_equivalent_candidates_from_merged_sources(db_session):
+    lit_a = Literature(
+        doi="10.0000/merged-duplicate-a",
+        title="Merged duplicate source",
+        authors="Test Author",
+        journal="Test Journal",
+        year=2026,
+    )
+    lit_b = Literature(
+        doi="10.0000/merged-duplicate-b",
+        title="Merged duplicate source",
+        authors="Test Author",
+        journal="Test Journal",
+        year=2026,
+    )
+    db_session.add_all([lit_a, lit_b])
+    await db_session.flush()
+
+    shared = {
+        "material_name": "Silicon nitride",
+        "lubricant": "[Li(G4)][NO3]",
+        "cof_value": 1.0,
+        "cof_raw": "1.0",
+        "load_value": "8-50 nN",
+        "speed_value": "0.06 μm/s",
+        "temperature": "298.15 K",
+        "probe_material": "Silicon nitride",
+        "substrate_material": "Au(111)",
+        "field_evidence_json": "{}",
+        "review_status": "needs_review",
+        "record_origin": "weak_candidate",
+    }
+    db_session.add_all([
+        RecordCandidate(literature_id=lit_a.id, **shared),
+        RecordCandidate(literature_id=lit_b.id, **shared),
+        RecordCandidate(
+            literature_id=lit_b.id,
+            **{
+                **shared,
+                "cof_value": 0.24,
+                "cof_raw": "0.24",
+            },
+        ),
+    ])
+    await db_session.flush()
+
+    result = await search_records(
+        db_session,
+        SearchFilter(fileId=f"{lit_a.id},{lit_b.id}", entityType="candidate"),
+        skip=0,
+        limit=20,
+    )
+
+    assert result["total"] == 2
+    assert sorted(item["cof_value"] for item in result["items"]) == [0.24, 1.0]
+
+
+@pytest.mark.anyio
 async def test_search_records_includes_final_record_evidence_quality(db_session):
     literature = Literature(
         doi="10.0000/final-evidence-quality",

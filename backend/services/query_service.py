@@ -56,6 +56,58 @@ def _parse_literature_id_filter(value: Any) -> list[int]:
     return ids
 
 
+def _signature_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def _signature_number(value: Any) -> str:
+    try:
+        return f"{float(value):.8g}"
+    except (TypeError, ValueError):
+        return _signature_text(value)
+
+
+def _candidate_dedupe_key(record: RecordCandidate) -> tuple[str, ...]:
+    cof_key = _signature_number(getattr(record, "cof_value", None))
+    if not cof_key:
+        cof_key = _signature_text(getattr(record, "cof_raw", None))
+    return (
+        _signature_text(getattr(record, "material_name", None)),
+        _signature_text(getattr(record, "lubricant", None)),
+        _signature_text(getattr(record, "cation", None)),
+        _signature_text(getattr(record, "anion", None)),
+        cof_key,
+        _signature_text(getattr(record, "load_value", None) or getattr(record, "load_raw", None)),
+        _signature_text(getattr(record, "speed_value", None)),
+        _signature_text(getattr(record, "shear_rate", None)),
+        _signature_text(getattr(record, "temperature", None)),
+        _signature_text(getattr(record, "potential", None)),
+        _signature_text(getattr(record, "water_content", None)),
+        _signature_text(getattr(record, "probe_material", None)),
+        _signature_text(getattr(record, "probe_geometry", None)),
+        _signature_text(getattr(record, "probe_radius", None)),
+        _signature_text(getattr(record, "substrate_material", None)),
+        _signature_text(getattr(record, "substrate_coating", None)),
+    )
+
+
+def _dedupe_merged_source_candidates(records: list[Any], filter_params: Any) -> list[Any]:
+    if len(_parse_literature_id_filter(getattr(filter_params, "file_id", None))) <= 1:
+        return records
+    seen_candidate_keys: set[tuple[str, ...]] = set()
+    deduped: list[Any] = []
+    for record in records:
+        if not isinstance(record, RecordCandidate):
+            deduped.append(record)
+            continue
+        key = _candidate_dedupe_key(record)
+        if key in seen_candidate_keys:
+            continue
+        seen_candidate_keys.add(key)
+        deduped.append(record)
+    return deduped
+
+
 def _trusted_final_record_condition(model: Any):
     page_conditions = []
     if hasattr(model, "evidence_page"):
@@ -754,6 +806,7 @@ async def search_records(
             filtered_records = _apply_explicit_sort(filtered_records, sort_by, sort_dir)
         else:
             filtered_records.sort(key=_database_review_order)
+        filtered_records = _dedupe_merged_source_candidates(filtered_records, filter_params)
         total = len(filtered_records)
         records = filtered_records[skip : skip + limit]
     else:
@@ -765,6 +818,7 @@ async def search_records(
             all_records = _apply_explicit_sort(all_records, sort_by, sort_dir)
         else:
             all_records.sort(key=_database_review_order)
+        all_records = _dedupe_merged_source_candidates(all_records, filter_params)
         total = len(all_records)
         records = all_records[skip : skip + limit]
 
