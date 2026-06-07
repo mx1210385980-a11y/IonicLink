@@ -292,6 +292,7 @@ describe('RecordTable structure thumbnails', () => {
     expect(tribopairCapsuleSource).toContain('@keyframes nano-scan')
     expect(tribopairCapsuleSource).toContain('NANO')
     expect(tribopairCapsuleSource).toContain('prefers-reduced-motion')
+    expect(tribopairCapsuleSource).not.toContain('nano-rig__cantilever')
   })
 
   it('keeps header column widths aligned with body column widths', () => {

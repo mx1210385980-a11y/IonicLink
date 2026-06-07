@@ -129,7 +129,6 @@ function openFieldEvidence(fieldKey: string, event: MouseEvent | KeyboardEvent) 
           ]"
         />
       </div>
-      <span class="nano-rig__cantilever" />
       <span v-if="hasCoating" class="nano-rig__film" />
       <span class="nano-rig__substrate" />
     </div>
@@ -280,7 +279,7 @@ function openFieldEvidence(fieldKey: string, event: MouseEvent | KeyboardEvent) 
 
 .nano-rig__probe {
   position: absolute;
-  top: 0.45rem;
+  top: 0.5rem;
   z-index: 3;
   display: flex;
   width: 1.32rem;
@@ -301,7 +300,7 @@ function openFieldEvidence(fieldKey: string, event: MouseEvent | KeyboardEvent) 
   border-left: 0.36rem solid transparent;
   border-right: 0.36rem solid transparent;
   border-top: 0.82rem solid #64748b;
-  filter: drop-shadow(0 3px 4px rgba(15, 23, 42, 0.18));
+  filter: drop-shadow(0 4px 5px rgba(15, 23, 42, 0.14));
 }
 
 .nano-rig__probe-shape--sphere {
@@ -319,17 +318,6 @@ function openFieldEvidence(fieldKey: string, event: MouseEvent | KeyboardEvent) 
   border-radius: 0.18rem;
   background: #64748b;
   box-shadow: 0 4px 10px -8px rgba(15, 23, 42, 0.9);
-}
-
-.nano-rig__cantilever {
-  position: absolute;
-  top: 0.52rem;
-  left: 0.88rem;
-  width: 1rem;
-  height: 1px;
-  transform: rotate(-22deg);
-  transform-origin: right center;
-  background: linear-gradient(90deg, rgba(100, 116, 139, 0), rgba(100, 116, 139, 0.75));
 }
 
 .nano-rig__film {
