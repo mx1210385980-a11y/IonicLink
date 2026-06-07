@@ -72,23 +72,21 @@ def _candidate_dedupe_key(record: RecordCandidate) -> tuple[str, ...]:
     cof_key = _signature_number(getattr(record, "cof_value", None))
     if not cof_key:
         cof_key = _signature_text(getattr(record, "cof_raw", None))
+    surface_key = _signature_text(getattr(record, "substrate_material", None))
+    if not surface_key:
+        surface_key = _signature_text(getattr(record, "material_name", None))
     return (
-        _signature_text(getattr(record, "material_name", None)),
         _signature_text(getattr(record, "lubricant", None)),
         _signature_text(getattr(record, "cation", None)),
         _signature_text(getattr(record, "anion", None)),
         cof_key,
         _signature_text(getattr(record, "load_value", None) or getattr(record, "load_raw", None)),
-        _signature_text(getattr(record, "speed_value", None)),
         _signature_text(getattr(record, "shear_rate", None)),
         _signature_text(getattr(record, "temperature", None)),
         _signature_text(getattr(record, "potential", None)),
         _signature_text(getattr(record, "water_content", None)),
-        _signature_text(getattr(record, "probe_material", None)),
         _signature_text(getattr(record, "probe_geometry", None)),
-        _signature_text(getattr(record, "probe_radius", None)),
-        _signature_text(getattr(record, "substrate_material", None)),
-        _signature_text(getattr(record, "substrate_coating", None)),
+        surface_key,
     )
 
 

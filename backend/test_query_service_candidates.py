@@ -187,6 +187,75 @@ async def test_search_records_deduplicates_equivalent_candidates_from_merged_sou
 
 
 @pytest.mark.anyio
+async def test_search_records_deduplicates_partial_cache_variants_from_duplicate_literature(db_session):
+    lit_a = Literature(
+        doi="10.1039/c6fd00236f",
+        title="Boundary layer friction of solvate ionic liquids as a function of potential",
+        authors="Test Author",
+        journal="Faraday Discussions",
+        year=2017,
+    )
+    lit_b = Literature(
+        doi="10.1039/c6fd00236f",
+        title="Boundary layer friction of solvate ionic liquids as a function of potential",
+        authors="Test Author",
+        journal="Faraday Discussions",
+        year=2017,
+    )
+    db_session.add_all([lit_a, lit_b])
+    await db_session.flush()
+
+    shared = {
+        "lubricant": "[Li(G4)][NO3]",
+        "cation": "Li(G4)",
+        "anion": "NO3",
+        "cof_value": 1.3,
+        "cof_raw": "1.3",
+        "load_value": "8-50 nN",
+        "load_raw": "8-50 nN",
+        "temperature": "298.15 K",
+        "potential": "+1 V",
+        "substrate_material": "Au(111)",
+        "field_evidence_json": "{}",
+        "review_status": "needs_review",
+        "record_origin": "fast_table_extraction",
+    }
+    db_session.add_all([
+        RecordCandidate(
+            literature_id=lit_a.id,
+            material_name="Li(G4) NO3 boundary layer / Au(111) surface",
+            speed_value="6 μm/s",
+            probe_material="Sharp silicon",
+            probe_geometry="Tip",
+            probe_radius="8 nm",
+            substrate_coating="Li(G4) NO3 boundary layer",
+            **shared,
+        ),
+        RecordCandidate(
+            literature_id=lit_b.id,
+            material_name="Au(111)",
+            speed_value=None,
+            probe_material="Silicon",
+            probe_geometry="Tip",
+            probe_radius=None,
+            substrate_coating=None,
+            **shared,
+        ),
+    ])
+    await db_session.flush()
+
+    result = await search_records(
+        db_session,
+        SearchFilter(entityType="candidate"),
+        skip=0,
+        limit=20,
+    )
+
+    assert result["total"] == 1
+    assert result["items"][0]["cof_value"] == 1.3
+
+
+@pytest.mark.anyio
 async def test_search_records_includes_final_record_evidence_quality(db_session):
     literature = Literature(
         doi="10.0000/final-evidence-quality",
