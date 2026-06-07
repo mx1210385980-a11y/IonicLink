@@ -150,14 +150,66 @@ type UploadExtractionItem = LiteratureMetadata & {
   status: UploadExtractionStatus
   message: string
   records: number
+  percent?: number
+  stage?: string
+  candidateCount?: number
+}
+
+// Frontend mirror of the backend pipeline stages (extraction_trace_service.py)
+// for the progress stepper.
+const EXTRACTION_STAGES = [
+  { prefix: 'stage_a', label: 'Queued' },
+  { prefix: 'stage_b', label: 'Scanning PDF' },
+  { prefix: 'stage_c', label: 'Extracting' },
+  { prefix: 'stage_d', label: 'Validating' },
+  { prefix: 'stage_e', label: 'Finalizing' },
+] as const
+function extractionStageIndex(stage?: string): number {
+  const normalized = String(stage || '').toLowerCase()
+  return EXTRACTION_STAGES.findIndex((entry) => normalized.startsWith(entry.prefix))
+}
+function extractionStageLabel(stage?: string): string {
+  const index = extractionStageIndex(stage)
+  return index >= 0 ? EXTRACTION_STAGES[index]?.label ?? '' : ''
+}
+function formatBytes(bytes: number): string {
+  if (!bytes || bytes < 1024) return `${bytes || 0} B`
+  const units = ['KB', 'MB', 'GB']
+  let value = bytes / 1024
+  let unitIndex = 0
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex += 1
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unitIndex]}`
+}
+// Effective percent for one paper: terminal success = 100, otherwise the live
+// backend percent (falling back to a small floor so the bar is never empty).
+function uploadItemEffectivePercent(item: UploadExtractionItem): number {
+  if (item.status === 'completed') return 100
+  if (item.status === 'no_data') return 100
+  if (item.status === 'failed' || item.status === 'cancelled') return item.percent ?? 0
+  if (typeof item.percent === 'number') return Math.max(0, Math.min(99, item.percent))
+  return item.status === 'queued' ? 2 : 5
 }
 const uploadExtractionItems = ref<UploadExtractionItem[]>([])
 const uploadExtracting = ref(false)
 const uploadExtractionProgress = computed(() => {
   if (uploadExtractionItems.value.length === 0) return 0
-  const finished = uploadExtractionItems.value.filter((item) => ['completed', 'no_data', 'failed', 'cancelled'].includes(item.status)).length
-  return Math.round((finished / uploadExtractionItems.value.length) * 100)
+  const sum = uploadExtractionItems.value.reduce((acc, item) => acc + uploadItemEffectivePercent(item), 0)
+  return Math.round(sum / uploadExtractionItems.value.length)
 })
+// The paper currently being worked on — drives the stage stepper + activity line.
+const activeExtractionItem = computed(() =>
+  uploadExtractionItems.value.find((item) => item.status === 'extracting')
+  || uploadExtractionItems.value.find((item) => item.status === 'queued')
+  || null,
+)
+const activeExtractionStageIndex = computed(() => {
+  if (!activeExtractionItem.value) return -1
+  return Math.max(0, extractionStageIndex(activeExtractionItem.value.stage))
+})
+const activeExtractionCandidateCount = computed(() => activeExtractionItem.value?.candidateCount ?? 0)
 const uploadBatchProgressPercent = computed(() => {
   if (uploadBatchTotal.value <= 0) return 0
   return Math.min(100, Math.round((uploadBatchFinished.value / uploadBatchTotal.value) * 100))
@@ -1394,13 +1446,20 @@ async function waitForUploadExtractionRun(
     const runStatus = String(run.status || '').toLowerCase()
     const records = uploadRunFinalCount(run)
     const runningMessage = uploadRunMessage(run) || `${label} extraction is running...`
+    const runSummary = run.summary as ExtractionSummary | undefined
     const activitySignature = uploadExtractionRunActivitySignature(run)
     if (activitySignature !== lastActivitySignature) {
       lastActivitySignature = activitySignature
       lastActivityAt = Date.now()
     }
 
-    updateUploadExtractionItem(paperId, { records, message: runningMessage })
+    updateUploadExtractionItem(paperId, {
+      records,
+      message: runningMessage,
+      percent: typeof runSummary?.progress_percent === 'number' ? runSummary.progress_percent : undefined,
+      stage: runSummary?.current_stage,
+      candidateCount: Number(runSummary?.candidate_count ?? 0),
+    })
 
     if (isUploadRunActiveStatus(runStatus)) {
       if (Date.now() - lastActivityAt > UPLOAD_EXTRACTION_STALLED_HEARTBEAT_MS) {
@@ -2969,10 +3028,13 @@ watch(() => props.selectedFileId, () => {
             @change="handleUploadInputChange"
           />
           <div
-            class="flex min-h-[13rem] cursor-pointer items-center justify-center rounded-lg border border-dashed px-6 text-center transition"
-            :class="uploadDragging ? 'border-teal-500 bg-teal-50' : 'border-slate-300 bg-[#fbfaff] hover:border-teal-300 hover:bg-teal-50/40'"
+            class="group relative flex min-h-[16rem] cursor-pointer flex-col items-center justify-center overflow-hidden rounded-2xl border-2 border-dashed px-6 text-center transition-all duration-200"
+            :class="uploadDragging
+              ? 'scale-[1.01] border-violet-500 bg-violet-50 ring-4 ring-violet-200'
+              : 'border-slate-300 bg-gradient-to-b from-violet-50/40 to-white hover:border-violet-400 hover:from-violet-50/70'"
             role="button"
             tabindex="0"
+            aria-label="Upload PDFs by dragging here or clicking to browse"
             @dragover.prevent="uploadDragging = true"
             @dragleave.prevent="uploadDragging = false"
             @drop.prevent="handleUploadDrop"
@@ -2980,36 +3042,58 @@ watch(() => props.selectedFileId, () => {
             @keydown.enter.prevent="chooseUploadFiles"
             @keydown.space.prevent="chooseUploadFiles"
           >
-            <div class="flex flex-col items-center">
-              <CloudUpload class="h-11 w-11 text-violet-500" />
-              <p class="mt-4 text-base font-extrabold text-violet-600">Drag and drop PDFs</p>
-              <p class="mt-1 text-sm font-semibold text-violet-500/80">Or click to browse files</p>
-              <p v-if="uploadStatusMessage" class="mt-4 text-sm font-semibold text-slate-600">
-                {{ uploadStatusMessage }}
-              </p>
+            <div
+              class="grid h-16 w-16 place-items-center rounded-2xl bg-violet-100 text-violet-600 shadow-sm transition-transform duration-200"
+              :class="uploadDragging ? 'scale-110' : 'group-hover:-translate-y-0.5'"
+            >
+              <CloudUpload class="h-8 w-8" :class="uploadDragging ? 'animate-bounce' : ''" />
             </div>
+            <p class="mt-4 text-lg font-black text-slate-800">
+              {{ uploadDragging ? 'Drop to add PDFs' : 'Drag & drop your PDFs' }}
+            </p>
+            <p class="mt-1 text-sm font-semibold text-slate-500">
+              or <span class="text-violet-600 underline underline-offset-2">browse files</span> on your computer
+            </p>
+            <span class="mt-4 inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-500">
+              <FileText class="h-3.5 w-3.5" /> PDF only · multiple files supported
+            </span>
+            <p v-if="uploadStatusMessage" class="mt-4 text-sm font-semibold text-slate-600">
+              {{ uploadStatusMessage }}
+            </p>
           </div>
           <div
             v-if="queuedUploadFiles.length"
-            class="mt-4 max-h-32 space-y-2 overflow-y-auto pr-1"
+            class="mt-4 space-y-2"
             aria-label="Selected PDF files"
           >
-            <div
-              v-for="(file, index) in queuedUploadFiles"
-              :key="`${file.name}-${file.size}-${file.lastModified}`"
-              class="flex items-center gap-3 rounded-md px-2 py-1.5 text-sm font-semibold text-slate-700"
-            >
-              <FileText class="h-5 w-5 shrink-0 text-violet-500" />
-              <span class="min-w-0 flex-1 truncate">{{ file.name }}</span>
-              <button
-                type="button"
-                class="grid h-7 w-7 shrink-0 place-items-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
-                :aria-label="`Remove ${file.name}`"
-                :disabled="uploadUploading"
-                @click.stop="removeQueuedUploadFile(index)"
+            <div class="flex items-center justify-between px-1">
+              <span class="text-xs font-black uppercase tracking-[0.14em] text-slate-400">
+                {{ queuedUploadFiles.length }} file{{ queuedUploadFiles.length === 1 ? '' : 's' }} ready
+              </span>
+            </div>
+            <div class="max-h-48 space-y-2 overflow-y-auto pr-1">
+              <div
+                v-for="(file, index) in queuedUploadFiles"
+                :key="`${file.name}-${file.size}-${file.lastModified}`"
+                class="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm transition hover:border-violet-200"
               >
-                <X class="h-5 w-5 stroke-[1.8]" />
-              </button>
+                <span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-violet-50 text-violet-500">
+                  <FileText class="h-5 w-5" />
+                </span>
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-sm font-bold text-slate-800">{{ file.name }}</span>
+                  <span class="block text-xs font-semibold text-slate-400">{{ formatBytes(file.size) }}</span>
+                </span>
+                <button
+                  type="button"
+                  class="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition hover:bg-rose-50 hover:text-rose-500 disabled:opacity-50"
+                  :aria-label="`Remove ${file.name}`"
+                  :disabled="uploadUploading"
+                  @click.stop="removeQueuedUploadFile(index)"
+                >
+                  <X class="h-4 w-4 stroke-[2]" />
+                </button>
+              </div>
             </div>
           </div>
           <div class="mt-4 flex items-center justify-end gap-4">
@@ -3285,8 +3369,43 @@ watch(() => props.selectedFileId, () => {
               </button>
             </div>
             <div class="mt-5 h-2 overflow-hidden rounded-full bg-slate-100">
-              <div class="h-full rounded-full bg-violet-500 transition-all duration-500" :style="{ width: `${uploadExtractionProgress}%` }"></div>
+              <div class="h-full rounded-full bg-violet-500 transition-all duration-500 ease-out" :style="{ width: `${uploadExtractionProgress}%` }"></div>
             </div>
+
+            <!-- Real stage stepper, driven by the backend run stage -->
+            <div v-if="uploadExtracting && activeExtractionStageIndex >= 0" class="mt-4 flex items-center gap-1.5" aria-label="Extraction stages">
+              <template v-for="(stage, idx) in EXTRACTION_STAGES" :key="stage.prefix">
+                <div class="flex shrink-0 items-center gap-1.5">
+                  <span
+                    class="grid h-5 w-5 place-items-center rounded-full text-[10px] font-black transition-colors"
+                    :class="idx < activeExtractionStageIndex
+                      ? 'bg-violet-500 text-white'
+                      : idx === activeExtractionStageIndex
+                        ? 'bg-violet-100 text-violet-700 ring-2 ring-violet-400'
+                        : 'bg-slate-100 text-slate-400'"
+                  >
+                    <Check v-if="idx < activeExtractionStageIndex" class="h-3 w-3 stroke-[3]" />
+                    <span v-else>{{ idx + 1 }}</span>
+                  </span>
+                  <span class="text-xs font-bold" :class="idx <= activeExtractionStageIndex ? 'text-slate-700' : 'text-slate-400'">{{ stage.label }}</span>
+                </div>
+                <span
+                  v-if="idx < EXTRACTION_STAGES.length - 1"
+                  class="h-px min-w-[10px] flex-1 transition-colors"
+                  :class="idx < activeExtractionStageIndex ? 'bg-violet-300' : 'bg-slate-200'"
+                />
+              </template>
+            </div>
+
+            <!-- Live activity line for the paper currently being worked on -->
+            <p v-if="activeExtractionItem" class="mt-3 flex items-center gap-2 text-sm font-semibold text-slate-600">
+              <Loader2 class="h-4 w-4 shrink-0 animate-spin text-violet-500" />
+              <span class="min-w-0 truncate">{{ activeExtractionItem.message }}</span>
+              <span v-if="activeExtractionCandidateCount > 0" class="shrink-0 rounded-full bg-violet-50 px-2 py-0.5 text-xs font-black text-violet-700">
+                {{ activeExtractionCandidateCount }} found
+              </span>
+            </p>
+
             <div class="mt-5 max-h-[24rem] space-y-3 overflow-y-auto pr-1">
               <div
                 v-for="item in uploadExtractionItems"
@@ -3312,6 +3431,15 @@ watch(() => props.selectedFileId, () => {
                   </div>
                   <p class="mt-1 truncate text-sm font-semibold text-slate-500">{{ compactAuthorLine(item.authors) }}</p>
                   <p class="mt-2 text-sm font-medium text-slate-600">{{ item.message }}</p>
+                  <div v-if="item.status === 'extracting'" class="mt-2">
+                    <div class="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                      <div class="h-full rounded-full bg-violet-400 transition-all duration-500 ease-out" :style="{ width: `${uploadItemEffectivePercent(item)}%` }"></div>
+                    </div>
+                    <p class="mt-1 flex items-center gap-1.5 text-xs font-bold text-slate-400">
+                      <span v-if="extractionStageLabel(item.stage)">{{ extractionStageLabel(item.stage) }}</span>
+                      <span v-if="(item.candidateCount ?? 0) > 0">· {{ item.candidateCount }} candidates</span>
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>

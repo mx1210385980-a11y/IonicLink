@@ -15,6 +15,55 @@ from models.db_models import ExtractionCandidate, ExtractionRun, Literature
 CANCELLED_EXTRACTION_MESSAGE = "Extraction cancelled by user."
 TERMINAL_EXTRACTION_STATUSES = {"completed", "failed", "error", "cancelled", "no_data"}
 
+# Ordered pipeline stages mapped to a percent band. The bar moves through real
+# milestones instead of jumping finished/total, and the candidate-extraction
+# stage interpolates page-by-page so a single paper still advances smoothly.
+_STAGE_BANDS: list[tuple[str, float, float]] = [
+    ("stage_a", 2.0, 8.0),    # queued / start
+    ("stage_b", 8.0, 30.0),   # PDF scan
+    ("stage_c", 30.0, 78.0),  # candidate extraction (page-by-page)
+    ("stage_d", 78.0, 90.0),  # validation
+    ("stage_e", 90.0, 99.0),  # finalize / review queue
+]
+
+# User-facing labels for each pipeline stage prefix (for the progress stepper).
+EXTRACTION_STAGE_LABELS: list[tuple[str, str]] = [
+    ("stage_a", "Queued"),
+    ("stage_b", "Scanning PDF"),
+    ("stage_c", "Extracting"),
+    ("stage_d", "Validating"),
+    ("stage_e", "Finalizing"),
+]
+
+
+def compute_extraction_progress_percent(
+    current_stage: str | None,
+    *,
+    page_coverage: dict[str, Any] | None = None,
+    page_candidate_counts: dict[str, Any] | None = None,
+) -> int:
+    """Map a run's current stage (+ page coverage) to a monotonic 1–99 percent.
+
+    Returns a running percentage only; terminal states (completed/no_data) are
+    rendered as 100 by the caller based on run status, never here.
+    """
+    stage = str(current_stage or "").strip().lower()
+    band = next(((lo, hi) for prefix, lo, hi in _STAGE_BANDS if stage.startswith(prefix)), None)
+    if band is None:
+        return 3
+    lo, hi = band
+    frac = 0.0
+    # Interpolate within the extraction stage by how many pages have been processed.
+    if stage.startswith("stage_c"):
+        try:
+            total_pages = int((page_coverage or {}).get("total_pages") or 0)
+        except (TypeError, ValueError):
+            total_pages = 0
+        processed_pages = len(page_candidate_counts or {})
+        if total_pages > 0:
+            frac = max(0.0, min(1.0, processed_pages / total_pages))
+    return max(1, min(99, int(round(lo + (hi - lo) * frac))))
+
 
 class ExtractionCancelledError(Exception):
     """Raised inside extraction workers when a persisted cancel request is observed."""

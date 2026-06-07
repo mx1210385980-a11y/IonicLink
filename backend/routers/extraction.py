@@ -69,6 +69,7 @@ from services.extraction_queue_service import get_extraction_queue
 from services.extraction_trace_service import (
     CANCELLED_EXTRACTION_MESSAGE,
     cancel_latest_extraction_run,
+    compute_extraction_progress_percent,
     finalize_extraction_run,
     get_extraction_run,
     list_extraction_candidates,
@@ -618,6 +619,17 @@ def _build_processing_summary(
     if not isinstance(progress_log, list) or not progress_log:
         progress_log = [{"stage": "stage_a.queued", "message": current_message}]
 
+    current_stage = summary.get("current_stage") or "stage_a.queued"
+    effective_page_coverage = page_coverage or summary.get("page_coverage") or {}
+    page_candidate_counts = summary.get("page_candidate_counts") or {}
+    progress_percent = summary.get("progress_percent")
+    if not isinstance(progress_percent, (int, float)):
+        progress_percent = compute_extraction_progress_percent(
+            current_stage,
+            page_coverage=effective_page_coverage,
+            page_candidate_counts=page_candidate_counts,
+        )
+
     return {
         "run_id": getattr(run, "run_id", None),
         "extractor_type": extractor_type,
@@ -626,11 +638,12 @@ def _build_processing_summary(
         "candidate_count": int(getattr(run, "candidate_count", 0) or summary.get("candidate_count") or 0),
         "final_count": int(getattr(run, "final_count", 0) or summary.get("final_count") or 0),
         "dropped_by_reason": dropped_by_reason or summary.get("dropped_by_reason") or {"in_progress": 1},
-        "page_coverage": page_coverage or summary.get("page_coverage") or {},
-        "page_candidate_counts": summary.get("page_candidate_counts") or {},
+        "page_coverage": effective_page_coverage,
+        "page_candidate_counts": page_candidate_counts,
         "progress_log": progress_log,
-        "current_stage": summary.get("current_stage") or "stage_a.queued",
+        "current_stage": current_stage,
         "current_message": current_message,
+        "progress_percent": int(progress_percent),
     }
 
 

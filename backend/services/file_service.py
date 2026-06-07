@@ -51,6 +51,7 @@ from services.extraction_trace_service import (
     CANCELLED_EXTRACTION_MESSAGE,
     ExtractionCancelledError,
     add_extraction_candidates,
+    compute_extraction_progress_percent,
     create_extraction_run,
     finalize_extraction_run,
     get_extraction_run,
@@ -5935,6 +5936,11 @@ async def process_file_safe(
                     "current_page": progress_event.get("page"),
                     "last_progress_at": datetime.utcnow().isoformat(),
                 }
+                summary_patch["progress_percent"] = compute_extraction_progress_percent(
+                    summary_patch["current_stage"],
+                    page_coverage=summary_patch["page_coverage"],
+                    page_candidate_counts=summary_patch["page_candidate_counts"],
+                )
 
                 try:
                     async with async_session_maker() as progress_db:

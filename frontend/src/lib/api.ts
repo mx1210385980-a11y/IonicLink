@@ -1448,6 +1448,7 @@ export interface ExtractionSummary {
     page_coverage: Record<string, any>
     current_stage?: string
     current_message?: string
+    progress_percent?: number
     no_data_reason?: string
     review_status?: string
     weak_candidate_count?: number
