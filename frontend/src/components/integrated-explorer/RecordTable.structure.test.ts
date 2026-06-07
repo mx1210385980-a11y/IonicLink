@@ -426,8 +426,13 @@ describe('RecordTable structure thumbnails', () => {
   it('offers a scoped re-extract action for the selected review paper', () => {
     expect(workspaceSource).toContain('review-reextract-button')
     expect(workspaceSource).toContain('reviewReextractConfirmOpen')
+    expect(workspaceSource).toContain('review-reextract-progressbar')
+    expect(workspaceSource).toContain('reviewReextractProgress')
+    expect(workspaceSource).toContain('getLatestExtractionRun')
     expect(workspaceSource).toContain('async function confirmReviewReextract')
     expect(workspaceSource).toContain("await extractData(String(literatureId), true, 'auto', undefined, 'tribology')")
+    expect(workspaceSource).toContain('await waitForReviewReextractRun(literatureId)')
+    expect(workspaceSource).toContain("getLatestExtractionRun(literatureId, 'tribology')")
     expect(workspaceSource).toContain('await loadReviewBacklog()')
     expect(workspaceSource).toContain('await fetchData()')
   })

@@ -4,11 +4,14 @@ import {
   batchDeleteTribologyRecords,
   extractData,
   getCandidateFieldEvidence,
+  getLatestExtractionRun,
   getPdfBboxPreview,
   getPdfFigurePreviews,
   getRecordFieldEvidence,
   getReviewBacklog,
   searchRecords,
+  type ExtractionRunDetail,
+  type ExtractionSummary,
   type ReviewBacklogPaper,
   type RecordResponse,
   type EvidenceResult,
@@ -893,10 +896,18 @@ const reviewBacklogEmptyMessage = computed(() => {
 const selectedReviewPaper = computed(() =>
   reviewBacklog.value.find((paper) => paper.literatureId === selectedReviewLiteratureId.value) || null,
 )
+const REVIEW_REEXTRACT_POLL_DELAY_MS = 1400
+const REVIEW_REEXTRACT_MAX_POLLS = 1280
 const reviewReextractConfirmOpen = ref(false)
 const reviewReextractPending = ref(false)
 const reviewReextractError = ref('')
 const reviewReextractSuccess = ref('')
+const reviewReextractProgress = ref(0)
+const reviewReextractMessage = ref('')
+const reviewReextractRunId = ref<string | null>(null)
+const reviewReextractStage = ref('')
+const reviewReextractCandidateCount = ref(0)
+let reviewReextractRunToken = 0
 
 function closeReviewReextractConfirm() {
   if (reviewReextractPending.value) return
@@ -907,17 +918,122 @@ function openReviewReextractConfirm() {
   if (reviewReextractPending.value) return
   reviewReextractError.value = ''
   reviewReextractSuccess.value = ''
+  reviewReextractProgress.value = 0
+  reviewReextractMessage.value = ''
+  reviewReextractRunId.value = null
+  reviewReextractStage.value = ''
+  reviewReextractCandidateCount.value = 0
   reviewReextractConfirmOpen.value = true
+}
+
+function clampReviewReextractProgress(value: unknown) {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) return 0
+  return Math.max(0, Math.min(100, numeric))
+}
+
+function isReviewReextractActiveStatus(status: string) {
+  return ['queued', 'running', 'processing', 'extracting'].includes(status.toLowerCase())
+}
+
+function reviewReextractRunMessage(run: ExtractionRunDetail | null | undefined) {
+  const summary = (run?.summary || {}) as ExtractionSummary
+  const progressLog = Array.isArray(run?.progress_log) ? run.progress_log : []
+  const latestProgress = progressLog.length ? progressLog[progressLog.length - 1] : null
+  return String(
+    summary.current_message
+    || run?.error_message
+    || latestProgress?.message
+    || summary.no_data_reason
+    || '',
+  )
+}
+
+function applyReviewReextractInitialResponse(response: Awaited<ReturnType<typeof extractData>>) {
+  const summary = response.extraction_summary as ExtractionSummary | undefined
+  const status = String(response.status || '').toLowerCase()
+  reviewReextractRunId.value = summary?.run_id || null
+  reviewReextractStage.value = String(summary?.current_stage || '')
+  reviewReextractCandidateCount.value = Number(summary?.candidate_count ?? 0)
+  reviewReextractProgress.value = clampReviewReextractProgress(
+    typeof summary?.progress_percent === 'number'
+      ? summary.progress_percent
+      : (isReviewReextractActiveStatus(status) ? 6 : 100),
+  )
+  reviewReextractMessage.value = String(
+    summary?.current_message
+    || response.message
+    || (isReviewReextractActiveStatus(status) ? 'Extraction queued. Waiting for progress...' : 'Extraction finished.'),
+  )
+}
+
+function applyReviewReextractRun(run: ExtractionRunDetail) {
+  const summary = (run.summary || {}) as ExtractionSummary
+  const status = String(run.status || '').toLowerCase()
+  reviewReextractRunId.value = run.run_id || reviewReextractRunId.value
+  reviewReextractStage.value = String(summary.current_stage || '')
+  reviewReextractCandidateCount.value = Number(summary.candidate_count ?? run.candidate_count ?? 0)
+  reviewReextractProgress.value = clampReviewReextractProgress(
+    typeof summary.progress_percent === 'number'
+      ? summary.progress_percent
+      : (isReviewReextractActiveStatus(status) ? Math.max(reviewReextractProgress.value, 10) : 100),
+  )
+  reviewReextractMessage.value = reviewReextractRunMessage(run)
+    || (isReviewReextractActiveStatus(status) ? 'Extraction is running...' : 'Extraction finished.')
+}
+
+function waitForReviewReextractPollDelay() {
+  return new Promise((resolve) => window.setTimeout(resolve, REVIEW_REEXTRACT_POLL_DELAY_MS))
+}
+
+async function waitForReviewReextractRun(literatureId: number) {
+  const token = reviewReextractRunToken
+  let pollFailures = 0
+  for (let attempt = 0; attempt < REVIEW_REEXTRACT_MAX_POLLS; attempt += 1) {
+    await waitForReviewReextractPollDelay()
+    if (token !== reviewReextractRunToken) return
+    let run: ExtractionRunDetail
+    try {
+      run = await getLatestExtractionRun(literatureId, 'tribology')
+      pollFailures = 0
+    } catch (err: any) {
+      pollFailures += 1
+      reviewReextractMessage.value = 'Status check delayed, retrying...'
+      if (pollFailures >= 5) {
+        throw new Error(err?.message || 'Extraction status check failed repeatedly.')
+      }
+      continue
+    }
+    if (token !== reviewReextractRunToken) return
+    applyReviewReextractRun(run)
+    const status = String(run.status || '').toLowerCase()
+    if (isReviewReextractActiveStatus(status)) continue
+    if (status === 'failed' || status === 'error' || status === 'cancelled' || status === 'canceled') {
+      throw new Error(reviewReextractRunMessage(run) || `Extraction ended with status: ${run.status || 'failed'}.`)
+    }
+    return
+  }
+  throw new Error('Extraction is still running after a long status check window.')
 }
 
 async function confirmReviewReextract() {
   const literatureId = selectedReviewLiteratureId.value
   if (!literatureId || reviewReextractPending.value) return
+  const token = ++reviewReextractRunToken
   reviewReextractPending.value = true
   reviewReextractError.value = ''
   reviewReextractSuccess.value = ''
+  reviewReextractProgress.value = 4
+  reviewReextractMessage.value = 'Submitting fresh extraction...'
+  reviewReextractRunId.value = null
+  reviewReextractStage.value = 'stage_a.queued'
+  reviewReextractCandidateCount.value = 0
   try {
-    await extractData(String(literatureId), true, 'auto', undefined, 'tribology')
+    const response = await extractData(String(literatureId), true, 'auto', undefined, 'tribology')
+    if (token !== reviewReextractRunToken) return
+    applyReviewReextractInitialResponse(response)
+    await waitForReviewReextractRun(literatureId)
+    if (token !== reviewReextractRunToken) return
     await loadReviewBacklog()
     const paper = reviewBacklog.value.find((item) => item.literatureId === literatureId)
     selectedReviewLiteratureId.value = literatureId
@@ -926,12 +1042,16 @@ async function confirmReviewReextract() {
       .filter((item) => Number.isFinite(item) && item > 0)
     if (currentPage.value !== 1) currentPage.value = 1
     await fetchData()
+    reviewReextractProgress.value = 100
     reviewReextractSuccess.value = 'Review candidates refreshed.'
     reviewReextractConfirmOpen.value = false
   } catch (err: any) {
     reviewReextractError.value = err?.response?.data?.detail || err?.message || 'Could not re-extract this paper.'
+    reviewReextractMessage.value = reviewReextractError.value
   } finally {
-    reviewReextractPending.value = false
+    if (token === reviewReextractRunToken) {
+      reviewReextractPending.value = false
+    }
   }
 }
 
@@ -974,9 +1094,16 @@ watch([() => result.value.total, () => result.value.items.length, isReviewQueue,
 })
 
 function selectReviewPaper(literatureId: number | null) {
+  if (reviewReextractPending.value) reviewReextractRunToken += 1
+  reviewReextractPending.value = false
   reviewReextractConfirmOpen.value = false
   reviewReextractError.value = ''
   reviewReextractSuccess.value = ''
+  reviewReextractProgress.value = 0
+  reviewReextractMessage.value = ''
+  reviewReextractRunId.value = null
+  reviewReextractStage.value = ''
+  reviewReextractCandidateCount.value = 0
   if (selectedReviewLiteratureId.value === literatureId || literatureId == null) {
     selectedReviewLiteratureId.value = null
     selectedReviewLiteratureIds.value = []
@@ -2549,6 +2676,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  reviewReextractRunToken += 1
   window.removeEventListener('keydown', onGlobalKeydown)
 })
 </script>
@@ -3291,7 +3419,7 @@ onBeforeUnmount(() => {
                 @click="openReviewReextractConfirm"
               >
                 <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': reviewReextractPending }" />
-                <span>{{ reviewReextractPending ? 'Extracting' : 'Re-extract' }}</span>
+                <span>{{ reviewReextractPending ? `${Math.round(reviewReextractProgress)}%` : 'Re-extract' }}</span>
               </button>
               <div
                 v-if="reviewReextractConfirmOpen"
@@ -3308,6 +3436,36 @@ onBeforeUnmount(() => {
                     <p class="mt-1 text-[11px] font-semibold leading-4 text-slate-500 dark:text-slate-400">
                       Regenerate pending review candidates from the source PDF. Official records stay unchanged.
                     </p>
+                  </div>
+                </div>
+                <div
+                  v-if="reviewReextractPending || reviewReextractProgress > 0"
+                  class="mt-3 rounded-[7px] border border-[#d5eeee] bg-[#f2fbfb] p-2 dark:border-[#0f7c82]/30 dark:bg-[#0f7c82]/10"
+                >
+                  <div class="mb-1.5 flex items-center justify-between gap-2 text-[10px] font-black uppercase tracking-[0.14em] text-[#0f7c82] dark:text-[#8bd9df]">
+                    <span class="truncate">{{ reviewReextractStage || 'Queued' }}</span>
+                    <span>{{ Math.round(reviewReextractProgress) }}%</span>
+                  </div>
+                  <div
+                    class="h-1.5 overflow-hidden rounded-full bg-white shadow-inner dark:bg-slate-900"
+                    role="progressbar"
+                    :aria-valuenow="Math.round(reviewReextractProgress)"
+                    aria-valuemin="0"
+                    aria-valuemax="100"
+                    aria-label="Review paper re-extraction progress"
+                    data-testid="review-reextract-progressbar"
+                  >
+                    <div
+                      class="h-full rounded-full bg-[#0f7c82] transition-all duration-300 ease-out"
+                      :style="{ width: `${reviewReextractProgress}%` }"
+                    ></div>
+                  </div>
+                  <div class="mt-1.5 flex items-center justify-between gap-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                    <span class="min-w-0 truncate">{{ reviewReextractMessage || 'Waiting for extraction status...' }}</span>
+                    <span v-if="reviewReextractCandidateCount" class="shrink-0 tabular-nums">{{ reviewReextractCandidateCount }} candidates</span>
+                  </div>
+                  <div v-if="reviewReextractRunId" class="mt-1 truncate text-[10px] font-semibold text-slate-400 dark:text-slate-500">
+                    run {{ reviewReextractRunId.slice(0, 8) }}
                   </div>
                 </div>
                 <p
