@@ -189,6 +189,21 @@ describe('App home shell', () => {
     expect(source).not.toContain('const result = await waitForPdfUploadExtractionRun')
   })
 
+  it('uses backend progress percent and elapsed timing in the top-nav Extract modal', () => {
+    const progressSource = sourceSlice('function pdfUploadRunProgress', 'function pdfUploadInitialResponseProgress')
+    const modalSource = sourceSliceAfter(
+      'v-else-if="pdfUploadModalStep === \'extracting\'"',
+      'v-if="pdfUploadCompletedExtractionItems.length > 0 && !pdfUploadExtracting"',
+    )
+
+    expect(progressSource).toContain('typeof summary?.progress_percent === \'number\'')
+    expect(progressSource).toContain('return clampPdfUploadProgress(summary.progress_percent)')
+    expect(source).toContain('pdfUploadElapsedMs')
+    expect(source).toContain('pdfUploadEtaMs')
+    expect(modalSource).toContain('formatDuration(pdfUploadElapsedMs)')
+    expect(modalSource).toContain('formatDuration(pdfUploadEtaMs)')
+  })
+
   it('keeps PDF upload progress and failed files visible without duplicating successful uploads', () => {
     expect(source).toContain('pdfUploadFileKey(file)')
     expect(source).toContain('pdfUploadUploadProgress')

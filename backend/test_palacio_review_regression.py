@@ -8,7 +8,11 @@ from services.normalization.row_normalizer import normalize_extraction_row
 from utils.document_context import extract_experimental_document_context
 from utils.cof_guard import unsupported_figure_cof_reason
 
-PALACIO_PDF = Path("Reference/2010-Palacio M, Bhushan B. A review of ionic liquids for green molecular lubrication in nanotechnology[J]. Tribology Letters, 2010, 40(2) 247-268.pdf")
+_PALACIO_PDF_RELATIVE = "Reference/2010-Palacio M, Bhushan B. A review of ionic liquids for green molecular lubrication in nanotechnology[J]. Tribology Letters, 2010, 40(2) 247-268.pdf"
+# Resolve against the repo root (this file lives in backend/) so the fixture is
+# found regardless of whether pytest runs from the repo root or from backend/.
+_REPO_ROOT_PALACIO_PDF = Path(__file__).resolve().parent.parent / _PALACIO_PDF_RELATIVE
+PALACIO_PDF = _REPO_ROOT_PALACIO_PDF if _REPO_ROOT_PALACIO_PDF.exists() else Path(_PALACIO_PDF_RELATIVE)
 
 
 def test_coefficient_of_friction_phrase_is_valid_metric_context():

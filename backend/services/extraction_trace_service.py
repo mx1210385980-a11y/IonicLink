@@ -16,8 +16,9 @@ CANCELLED_EXTRACTION_MESSAGE = "Extraction cancelled by user."
 TERMINAL_EXTRACTION_STATUSES = {"completed", "failed", "error", "cancelled", "no_data"}
 
 # Ordered pipeline stages mapped to a percent band. The bar moves through real
-# milestones instead of jumping finished/total, and the candidate-extraction
-# stage interpolates page-by-page so a single paper still advances smoothly.
+# milestones instead of jumping finished/total; within each band it advances on
+# every real sub-stage transition (and page-by-page during extraction), so the
+# back half (validating/finalizing) is no longer flat.
 _STAGE_BANDS: list[tuple[str, float, float]] = [
     ("stage_a", 2.0, 8.0),    # queued / start
     ("stage_b", 8.0, 30.0),   # PDF scan
@@ -25,6 +26,23 @@ _STAGE_BANDS: list[tuple[str, float, float]] = [
     ("stage_d", 78.0, 90.0),  # validation
     ("stage_e", 90.0, 99.0),  # finalize / review queue
 ]
+
+# Real emitted sub-stages, in execution order, used to interpolate within a band.
+# Each sub-stage maps to an evenly-spaced position so the bar nudges forward on
+# every transition the extractor actually emits.
+_SUBSTAGE_ORDER: dict[str, list[str]] = {
+    "stage_a": ["queued", "start", "context", "profile"],
+    "stage_b": ["abbrev"],
+    "stage_c": [
+        "fast_text_start", "fast_text_done", "fast_table", "text",
+        "visual_route", "figure", "figure_retry", "visual_retry_start",
+    ],
+    "stage_d": ["post_model", "page_counts", "il_filter", "validation"],
+    "stage_e": [
+        "before_finalize", "canonical_cache", "weak_candidates",
+        "before_persistence", "finalize", "review_queue",
+    ],
+}
 
 # User-facing labels for each pipeline stage prefix (for the progress stepper).
 EXTRACTION_STAGE_LABELS: list[tuple[str, str]] = [
@@ -36,25 +54,41 @@ EXTRACTION_STAGE_LABELS: list[tuple[str, str]] = [
 ]
 
 
+def _substage_fraction(stage: str, prefix: str) -> float:
+    """Position of a sub-stage within its band, in (0, 1); 0 when unrecognized."""
+    order = _SUBSTAGE_ORDER.get(prefix) or []
+    suffix = stage[len(prefix):].lstrip(".")
+    if not suffix or not order:
+        return 0.0
+    index = next((i for i, name in enumerate(order) if suffix == name), -1)
+    if index < 0:
+        index = next((i for i, name in enumerate(order) if suffix.startswith(name)), -1)
+    if index < 0:
+        return 0.0
+    return (index + 1) / (len(order) + 1)
+
+
 def compute_extraction_progress_percent(
     current_stage: str | None,
     *,
     page_coverage: dict[str, Any] | None = None,
     page_candidate_counts: dict[str, Any] | None = None,
 ) -> int:
-    """Map a run's current stage (+ page coverage) to a monotonic 1–99 percent.
+    """Map a run's current stage (+ sub-stage / page coverage) to a 1–99 percent.
 
     Returns a running percentage only; terminal states (completed/no_data) are
     rendered as 100 by the caller based on run status, never here.
     """
     stage = str(current_stage or "").strip().lower()
-    band = next(((lo, hi) for prefix, lo, hi in _STAGE_BANDS if stage.startswith(prefix)), None)
+    band = next(((prefix, lo, hi) for prefix, lo, hi in _STAGE_BANDS if stage.startswith(prefix)), None)
     if band is None:
         return 3
-    lo, hi = band
+    prefix, lo, hi = band
+
     frac = 0.0
-    # Interpolate within the extraction stage by how many pages have been processed.
-    if stage.startswith("stage_c"):
+    if prefix == "stage_c":
+        # Page-by-page is the best signal during extraction; fall back to the
+        # sub-stage position when page coverage isn't populated yet.
         try:
             total_pages = int((page_coverage or {}).get("total_pages") or 0)
         except (TypeError, ValueError):
@@ -62,6 +96,11 @@ def compute_extraction_progress_percent(
         processed_pages = len(page_candidate_counts or {})
         if total_pages > 0:
             frac = max(0.0, min(1.0, processed_pages / total_pages))
+        else:
+            frac = _substage_fraction(stage, prefix)
+    else:
+        frac = _substage_fraction(stage, prefix)
+
     return max(1, min(99, int(round(lo + (hi - lo) * frac))))
 
 

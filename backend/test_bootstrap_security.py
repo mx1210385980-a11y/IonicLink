@@ -23,7 +23,12 @@ def test_bootstrap_admin_password_has_no_example_runtime_default() -> None:
 
 
 def test_bootstrap_rotates_existing_example_admin_password() -> None:
-    source = Path("backend/database.py").read_text(encoding="utf-8")
+    # Resolve relative to this test file so the check is independent of the
+    # working directory (pytest may run from the repo root or from backend/).
+    database_path = Path(__file__).resolve().parent / "database.py"
+    if not database_path.exists():
+        database_path = Path("backend/database.py")
+    source = database_path.read_text(encoding="utf-8")
 
     assert "verify_password(EXAMPLE_ADMIN_PASSWORD, admin.password_hash)" in source
     assert "admin.password_hash = hash_password(DEFAULT_ADMIN_PASSWORD)" in source

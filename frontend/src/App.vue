@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, type Component } from 'vue'
+import { computed, onUnmounted, ref, watch, type Component } from 'vue'
 import {
   Activity,
   ArrowRight,
@@ -274,6 +274,47 @@ const pdfUploadExtractionProgress = computed(() => {
   const totalProgress = pdfUploadExtractionItems.value.reduce((sum, item) => sum + pdfUploadItemProgress(item), 0)
   return Math.round(totalProgress / pdfUploadExtractionItems.value.length)
 })
+const pdfUploadExtractionStartedAt = ref<number | null>(null)
+const pdfUploadExtractionNow = ref(Date.now())
+let pdfUploadExtractionClock: ReturnType<typeof setInterval> | null = null
+
+function stopPdfUploadExtractionClock() {
+  if (!pdfUploadExtractionClock) return
+  clearInterval(pdfUploadExtractionClock)
+  pdfUploadExtractionClock = null
+}
+
+watch(pdfUploadExtracting, (active) => {
+  if (active) {
+    pdfUploadExtractionStartedAt.value = Date.now()
+    pdfUploadExtractionNow.value = Date.now()
+    stopPdfUploadExtractionClock()
+    pdfUploadExtractionClock = setInterval(() => {
+      pdfUploadExtractionNow.value = Date.now()
+    }, 1000)
+    return
+  }
+  stopPdfUploadExtractionClock()
+})
+onUnmounted(stopPdfUploadExtractionClock)
+
+const pdfUploadElapsedMs = computed(() =>
+  pdfUploadExtractionStartedAt.value ? Math.max(0, pdfUploadExtractionNow.value - pdfUploadExtractionStartedAt.value) : 0,
+)
+const pdfUploadEtaMs = computed(() => {
+  const percent = pdfUploadExtractionProgress.value
+  if (!pdfUploadExtractionStartedAt.value || percent < 5 || percent >= 100) return null
+  const elapsed = pdfUploadElapsedMs.value
+  if (elapsed < 1500) return null
+  return Math.round((elapsed * (100 - percent)) / percent)
+})
+
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
+}
 const pdfUploadBatchProgressPercent = computed(() => {
   if (pdfUploadBatchTotal.value <= 0) return 0
   return Math.min(100, Math.round((pdfUploadBatchFinished.value / pdfUploadBatchTotal.value) * 100))
@@ -1059,6 +1100,7 @@ function extractionRunActivitySignature(run: ExtractionRunDetail) {
     run.final_count || 0,
     summary.current_stage || latestProgress?.stage || '',
     summary.current_message || latestProgress?.message || '',
+    summary.progress_percent ?? '',
     progressLog.length,
   ].join('|')
 }
@@ -1235,6 +1277,10 @@ function pdfUploadStageProgress(stage?: string | null, status?: string | null, m
 
 function pdfUploadRunProgress(run: ExtractionRunDetail | null | undefined) {
   const summary = run?.summary as ExtractionSummary | undefined
+  const normalizedStatus = String(run?.status || '').toLowerCase()
+  if (!['completed', 'no_data', 'failed', 'error', 'cancelled'].includes(normalizedStatus) && typeof summary?.progress_percent === 'number') {
+    return clampPdfUploadProgress(summary.progress_percent)
+  }
   const progressLog = Array.isArray(run?.progress_log) ? run.progress_log : []
   const latestProgress = progressLog.length > 0 ? progressLog[progressLog.length - 1] : null
   const stage = String(summary?.current_stage || latestProgress?.stage || '')
@@ -1249,9 +1295,12 @@ function pdfUploadRunProgress(run: ExtractionRunDetail | null | undefined) {
 
 function pdfUploadInitialResponseProgress(initialResponse: Awaited<ReturnType<typeof extractData>>) {
   const summary = initialResponse.extraction_summary as ExtractionSummary | undefined
+  const status = String(initialResponse.status || '')
+  if (!['completed', 'no_data', 'failed', 'error', 'cancelled'].includes(status.toLowerCase()) && typeof summary?.progress_percent === 'number') {
+    return clampPdfUploadProgress(summary.progress_percent)
+  }
   const progressLog = Array.isArray(summary?.progress_log) ? summary.progress_log : []
   const latestProgress = progressLog.length > 0 ? progressLog[progressLog.length - 1] : null
-  const status = String(initialResponse.status || '')
   return pdfUploadStageProgress(
     String(summary?.current_stage || latestProgress?.stage || ''),
     status,
@@ -2445,6 +2494,9 @@ function handleHomeAction(action: HomeSuggestedAction) {
                     <div class="text-right">
                       <strong class="block text-2xl font-black text-[#0f7c82]">{{ pdfUploadExtractionProgress }}%</strong>
                       <span class="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Progress</span>
+                      <span v-if="pdfUploadExtracting" class="mt-1 block text-xs font-semibold text-slate-400">
+                        {{ formatDuration(pdfUploadElapsedMs) }} elapsed<template v-if="pdfUploadEtaMs !== null"> · ~{{ formatDuration(pdfUploadEtaMs) }} left</template>
+                      </span>
                     </div>
                   </div>
                 </div>
