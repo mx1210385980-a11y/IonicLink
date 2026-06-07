@@ -8,12 +8,9 @@ import LubricantRecipeCell from '@/components/integrated-explorer/LubricantRecip
 import TribopairCapsule from '@/components/integrated-explorer/TribopairCapsule.vue'
 import type { RecordResponse } from '@/lib/api'
 import {
-  candidateEvidenceQuality,
-  candidateEvidenceQualityLabel,
   cofDisplay,
   compactRecordDisplayId,
   recordDisplayId,
-  type CandidateEvidenceQuality,
 } from '@/lib/integratedExplorerHelpers'
 
 const props = defineProps<{
@@ -235,66 +232,6 @@ function literatureMeta(record: RecordResponse) {
   const year = record.literature?.year ? String(record.literature.year) : ''
   if (journal && year) return `${journal} (${year})`
   return journal || year || 'Open in library'
-}
-
-function candidateEvidenceQualityShortLabel(record: RecordResponse) {
-  const quality = candidateEvidenceQuality(record)
-  if (quality === 'exact') return 'Located'
-  if (quality === 'page_only') return 'Page'
-  if (quality === 'text_only') return 'Quote'
-  return 'Check'
-}
-
-function candidateEvidenceQualityBadgeClass(record: RecordResponse) {
-  const quality = candidateEvidenceQuality(record)
-  const tones: Record<CandidateEvidenceQuality, string> = {
-    exact: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-400/10 dark:text-emerald-200',
-    page_only: 'border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-400/30 dark:bg-cyan-400/10 dark:text-cyan-200',
-    text_only: 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-200',
-    weak: 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-200',
-  }
-  return tones[quality]
-}
-
-type RecordEvidenceGrade = 'strong' | 'adequate' | 'weak' | 'missing'
-
-function recordEvidenceGrade(record: RecordResponse): RecordEvidenceGrade | '' {
-  const explicit = String(record.evidenceGrade || '').trim().toLowerCase()
-  if (['strong', 'adequate', 'weak', 'missing'].includes(explicit)) return explicit as RecordEvidenceGrade
-  const score = Number(record.evidenceScore)
-  if (!Number.isFinite(score)) return ''
-  if (score >= 0.85) return 'strong'
-  if (score >= 0.65) return 'adequate'
-  if (score > 0) return 'weak'
-  return 'missing'
-}
-
-function recordEvidenceGradeLabel(record: RecordResponse) {
-  const grade = recordEvidenceGrade(record)
-  const score = Number(record.evidenceScore)
-  const suffix = Number.isFinite(score) ? ` · ${Math.round(score * 100)}%` : ''
-  if (grade === 'strong') return `Strong evidence${suffix}`
-  if (grade === 'adequate') return `Adequate evidence${suffix}`
-  if (grade === 'weak') return `Weak evidence${suffix}`
-  if (grade === 'missing') return `Missing evidence${suffix}`
-  return ''
-}
-
-function recordEvidenceGradeShortLabel(record: RecordResponse) {
-  const grade = recordEvidenceGrade(record)
-  if (grade === 'strong') return 'Strong'
-  if (grade === 'adequate') return 'Adeq'
-  if (grade === 'weak') return 'Weak'
-  if (grade === 'missing') return 'Miss'
-  return ''
-}
-
-function recordEvidenceGradeBadgeClass(record: RecordResponse) {
-  const grade = recordEvidenceGrade(record)
-  if (grade === 'strong') return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-400/10 dark:text-emerald-200'
-  if (grade === 'adequate') return 'border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-400/30 dark:bg-teal-400/10 dark:text-teal-200'
-  if (grade === 'weak') return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-200'
-  return 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-200'
 }
 
 // Expose scroll methods for external control
@@ -536,22 +473,6 @@ defineExpose({
                 >
                   <Pencil class="h-2.5 w-2.5" /> Edit
                 </button>
-                <span
-                  v-if="reviewQueueMode && isCandidateRecord(record)"
-                  class="mt-1.5 inline-flex max-w-full items-center justify-center truncate rounded-md border px-1.5 py-0.5 text-[9px] font-black leading-4"
-                  :class="candidateEvidenceQualityBadgeClass(record)"
-                  :title="candidateEvidenceQualityLabel(candidateEvidenceQuality(record))"
-                >
-                  {{ candidateEvidenceQualityShortLabel(record) }}
-                </span>
-                <span
-                  v-else-if="recordEvidenceGrade(record)"
-                  class="mt-1.5 inline-flex max-w-full items-center justify-center truncate rounded-md border px-1.5 py-0.5 text-[9px] font-black leading-4"
-                  :class="recordEvidenceGradeBadgeClass(record)"
-                  :title="recordEvidenceGradeLabel(record)"
-                >
-                  {{ recordEvidenceGradeShortLabel(record) }}
-                </span>
               </div>
 
               <!-- Ionic Liquid Column -->

@@ -203,28 +203,22 @@ describe('IntegratedExplorerWorkspace filters surface', () => {
     expect(source).toContain('databaseEvidenceFigureLabelKey(preview.label)')
   })
 
-  it('triages the review queue by confidence tier and missing field, client-side', () => {
+  it('triages the review queue by missing field and age without visible quality labels', () => {
     expect(source).toContain('const isReviewQueue = computed')
-    expect(source).toContain("type ConfidenceTierFilter = 'all' | 'weak' | 'strong'")
-    expect(source).toContain("type EvidenceQualityFilter = 'all' | CandidateEvidenceQuality")
-    expect(source).toContain('const triageTierFilter = ref<ConfidenceTierFilter>')
-    expect(source).toContain('const triageEvidenceQuality = ref<EvidenceQualityFilter>')
     expect(source).toContain('const triageMissingField = ref')
-    expect(source).toContain('candidateTriageTier(record)')
-    expect(source).toContain('candidateEvidenceQuality(record)')
     expect(source).toContain('candidateMissingFields(record)')
     expect(source).toContain('function candidateMatchesTriage(record: RecordResponse)')
     expect(source).toContain('const displayedRecords = computed')
     expect(source).toContain('v-if="isReviewQueue"')
     expect(source).toContain('data-testid="review-queue-triage"')
+    expect(source).not.toContain("label: 'Weak'")
+    expect(source).not.toContain("label: 'Strong'")
+    expect(source).not.toContain('Page located')
+    expect(source).not.toContain('Evidence</span>')
   })
 
-  it('exposes triage chips as clickable filter entry points and a backlog sort', () => {
-    expect(source).toContain('@click="setTriageTier(tier.key)"')
-    expect(source).toContain('@click="setTriageEvidenceQuality(option.key)"')
+  it('exposes only action-oriented review filter entry points and a backlog sort', () => {
     expect(source).toContain('@click="toggleTriageMissingField(option.key)"')
-    expect(source).toContain('triageTierCounts')
-    expect(source).toContain('triageEvidenceQualityOptions')
     expect(source).toContain('triageMissingFieldOptions')
     expect(source).toContain('const queueBacklogByLiterature = computed')
     expect(source).toContain('EVIDENCE_QUALITY_SORT_RANK[leftQuality] - EVIDENCE_QUALITY_SORT_RANK[rightQuality]')

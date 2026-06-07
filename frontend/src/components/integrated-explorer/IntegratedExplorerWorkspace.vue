@@ -46,9 +46,7 @@ import type { HighlightRect } from '@/types/pdf-highlight'
 import {
   candidateAgeDays,
   candidateEvidenceQuality,
-  candidateEvidenceQualityLabel,
   candidateMissingFields,
-  candidateTriageTier,
   cofDisplay,
   compactRecordDisplayId,
   conditionGroups,
@@ -162,10 +160,6 @@ const canLoadReviewBacklog = computed(() => sessionState.ready && Boolean(sessio
 // Client-side narrowing + backlog ordering over the candidate rows the queue
 // already returns. Triage fields (confidenceTier, missingFields, recordOrigin)
 // ride along on each candidate payload, so no extra query is needed.
-type ConfidenceTierFilter = 'all' | 'weak' | 'strong'
-type EvidenceQualityFilter = 'all' | CandidateEvidenceQuality
-const triageTierFilter = ref<ConfidenceTierFilter>('all')
-const triageEvidenceQuality = ref<EvidenceQualityFilter>('all')
 const triageMissingField = ref('')
 // Staleness presets (whole days). 0 = off; a candidate matches when its age in
 // days is >= the selected threshold.
@@ -177,12 +171,8 @@ const queueCandidateItems = computed(() =>
 )
 
 const triageTierCounts = computed(() => {
-  let weak = 0
-  for (const record of queueCandidateItems.value) {
-    if (candidateTriageTier(record) === 'weak') weak += 1
-  }
   const all = queueCandidateItems.value.length
-  return { all, weak, strong: all - weak }
+  return { all }
 })
 
 const triageMissingFieldOptions = computed(() => {
@@ -197,24 +187,12 @@ const triageMissingFieldOptions = computed(() => {
     .map(([key, count]) => ({ key, count, label: missingFieldLabel(key) }))
 })
 
-const EVIDENCE_QUALITY_ORDER: CandidateEvidenceQuality[] = ['weak', 'text_only', 'page_only', 'exact']
 const EVIDENCE_QUALITY_SORT_RANK: Record<CandidateEvidenceQuality, number> = {
   weak: 0,
   text_only: 1,
   page_only: 2,
   exact: 3,
 }
-
-const triageEvidenceQualityOptions = computed(() => {
-  const counts = new Map<CandidateEvidenceQuality, number>()
-  for (const record of queueCandidateItems.value) {
-    const quality = candidateEvidenceQuality(record)
-    counts.set(quality, (counts.get(quality) || 0) + 1)
-  }
-  return EVIDENCE_QUALITY_ORDER
-    .map((key) => ({ key, count: counts.get(key) || 0, label: candidateEvidenceQualityLabel(key) }))
-    .filter((option) => option.count > 0)
-})
 
 const triageStaleOptions = computed(() =>
   STALE_DAY_PRESETS.map((days) => ({
@@ -229,30 +207,18 @@ const triageStaleOptions = computed(() =>
 const hasTriageFilters = computed(() =>
   isReviewQueue.value &&
   (
-    triageTierFilter.value !== 'all' ||
-    triageEvidenceQuality.value !== 'all' ||
     Boolean(triageMissingField.value) ||
     triageStaleDays.value > 0
   ),
 )
 
 function candidateMatchesTriage(record: RecordResponse) {
-  if (triageTierFilter.value !== 'all' && candidateTriageTier(record) !== triageTierFilter.value) return false
-  if (triageEvidenceQuality.value !== 'all' && candidateEvidenceQuality(record) !== triageEvidenceQuality.value) return false
   if (triageMissingField.value && !candidateMissingFields(record).includes(triageMissingField.value)) return false
   if (triageStaleDays.value > 0) {
     const age = candidateAgeDays(record)
     if (age === null || age < triageStaleDays.value) return false
   }
   return true
-}
-
-function setTriageTier(tier: ConfidenceTierFilter) {
-  triageTierFilter.value = triageTierFilter.value === tier ? 'all' : tier
-}
-
-function setTriageEvidenceQuality(quality: CandidateEvidenceQuality) {
-  triageEvidenceQuality.value = triageEvidenceQuality.value === quality ? 'all' : quality
 }
 
 function toggleTriageMissingField(field: string) {
@@ -264,8 +230,6 @@ function setTriageStaleDays(days: number) {
 }
 
 function clearTriageFilters() {
-  triageTierFilter.value = 'all'
-  triageEvidenceQuality.value = 'all'
   triageMissingField.value = ''
   triageStaleDays.value = 0
 }
@@ -318,13 +282,6 @@ watch([isReviewQueue, () => sessionState.ready, () => sessionState.token, () => 
 watch(triageMissingFieldOptions, (options) => {
   if (triageMissingField.value && !options.some((option) => option.key === triageMissingField.value)) {
     triageMissingField.value = ''
-  }
-})
-
-// Drop an evidence-quality filter once no queued candidate matches it.
-watch(triageEvidenceQualityOptions, (options) => {
-  if (triageEvidenceQuality.value !== 'all' && !options.some((option) => option.key === triageEvidenceQuality.value)) {
-    triageEvidenceQuality.value = 'all'
   }
 })
 
@@ -2668,47 +2625,6 @@ onBeforeUnmount(() => {
           data-testid="review-queue-triage"
         >
           <span class="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Triage</span>
-          <div class="inline-flex overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
-            <button
-              v-for="tier in ([
-                { key: 'all', label: 'All', count: triageTierCounts.all },
-                { key: 'weak', label: 'Weak', count: triageTierCounts.weak },
-                { key: 'strong', label: 'Strong', count: triageTierCounts.strong },
-              ] as const)"
-              :key="tier.key"
-              type="button"
-              class="inline-flex items-center gap-1.5 px-3 py-1.5 transition"
-              :class="triageTierFilter === tier.key
-                ? 'bg-[#e7f6f5] text-[#0f7c82]'
-                : 'bg-white text-slate-600 hover:bg-slate-50 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'"
-              @click="setTriageTier(tier.key)"
-            >
-              {{ tier.label }}
-              <span
-                class="rounded-full px-1.5 text-[10px] font-black"
-                :class="triageTierFilter === tier.key ? 'bg-white text-[#0f7c82]' : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'"
-              >{{ tier.count }}</span>
-            </button>
-          </div>
-
-          <template v-if="triageEvidenceQualityOptions.length">
-            <span class="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Evidence</span>
-            <button
-              v-for="option in triageEvidenceQualityOptions"
-              :key="option.key"
-              type="button"
-              class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 transition"
-              :title="option.label"
-              :class="triageEvidenceQuality === option.key
-                ? 'border-[#0f7c82] bg-[#eefafa] text-[#0f7c82] dark:border-cyan-400/40 dark:bg-cyan-400/10 dark:text-cyan-200'
-                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'"
-              @click="setTriageEvidenceQuality(option.key)"
-            >
-              {{ option.label.replace(' evidence', '') }}
-              <span class="text-[10px] font-black opacity-70">{{ option.count }}</span>
-            </button>
-          </template>
-
           <template v-if="triageMissingFieldOptions.length">
             <span class="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Missing</span>
             <button
