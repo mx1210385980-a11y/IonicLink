@@ -67,6 +67,58 @@ async def test_search_records_includes_unpromoted_tribology_candidates(db_sessio
 
 
 @pytest.mark.anyio
+async def test_search_records_accepts_multiple_literature_ids_for_merged_review_sources(db_session):
+    lit_a = Literature(
+        doi="10.0000/merged-source-a",
+        title="Merged source A",
+        authors="Test Author",
+        journal="Test Journal",
+        year=2026,
+    )
+    lit_b = Literature(
+        doi="10.0000/merged-source-b",
+        title="Merged source B",
+        authors="Test Author",
+        journal="Test Journal",
+        year=2026,
+    )
+    db_session.add_all([lit_a, lit_b])
+    await db_session.flush()
+
+    db_session.add_all([
+        RecordCandidate(
+            literature_id=lit_a.id,
+            material_name="Mica",
+            lubricant="[BMIM][BF4]",
+            cof_value=0.11,
+            field_evidence_json="{}",
+            review_status="needs_review",
+            record_origin="weak_candidate",
+        ),
+        RecordCandidate(
+            literature_id=lit_b.id,
+            material_name="Silica",
+            lubricant="[EMIM][TFSI]",
+            cof_value=0.22,
+            field_evidence_json="{}",
+            review_status="needs_review",
+            record_origin="weak_candidate",
+        ),
+    ])
+    await db_session.flush()
+
+    result = await search_records(
+        db_session,
+        SearchFilter(fileId=f"{lit_a.id},{lit_b.id}", entityType="candidate"),
+        skip=0,
+        limit=20,
+    )
+
+    assert result["total"] == 2
+    assert {item["literature_id"] for item in result["items"]} == {lit_a.id, lit_b.id}
+
+
+@pytest.mark.anyio
 async def test_search_records_includes_final_record_evidence_quality(db_session):
     literature = Literature(
         doi="10.0000/final-evidence-quality",

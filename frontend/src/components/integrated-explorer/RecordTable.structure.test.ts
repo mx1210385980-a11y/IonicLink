@@ -384,8 +384,10 @@ describe('RecordTable structure thumbnails', () => {
     // Whole-queue backlog drives the rail; selecting a paper scopes the query.
     expect(workspaceSource).toContain('getReviewBacklog')
     expect(workspaceSource).toContain('const selectedReviewLiteratureId = ref<number | null>')
+    expect(workspaceSource).toContain('const selectedReviewLiteratureIds = ref<number[]>')
+    expect(workspaceSource).toContain("selectedReviewLiteratureIds.value.join(',')")
     expect(workspaceSource).toContain('function selectReviewPaper')
-    expect(workspaceSource).toContain('reviewLiteratureId: selectedReviewLiteratureId')
+    expect(workspaceSource).toContain('reviewLiteratureId: selectedReviewLiteratureFileId')
     expect(workspaceSource).toContain('Sources in review queue')
     expect(workspaceSource).toContain('@click="selectReviewPaper(paper.literatureId)"')
     // The composable scopes candidates to one paper through the file_id filter.

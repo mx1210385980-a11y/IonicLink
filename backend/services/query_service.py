@@ -41,6 +41,21 @@ from utils.tribopair import compose_tribopair_label, composite_roughness_label
 logger = logging.getLogger(__name__)
 
 
+def _parse_literature_id_filter(value: Any) -> list[int]:
+    ids: list[int] = []
+    seen: set[int] = set()
+    for token in str(value or "").split(","):
+        try:
+            item = int(token.strip())
+        except (TypeError, ValueError):
+            continue
+        if item <= 0 or item in seen:
+            continue
+        seen.add(item)
+        ids.append(item)
+    return ids
+
+
 def _trusted_final_record_condition(model: Any):
     page_conditions = []
     if hasattr(model, "evidence_page"):
@@ -281,9 +296,10 @@ def _build_conditions(filter_params: Any, model: Any = TribologyData):
     if text_condition is not None:
         conditions.append(text_condition)
     if getattr(filter_params, "file_id", None):
-        try:
-            conditions.append(model.literature_id == int(filter_params.file_id))
-        except (TypeError, ValueError):
+        lit_ids = _parse_literature_id_filter(filter_params.file_id)
+        if lit_ids:
+            conditions.append(model.literature_id.in_(lit_ids))
+        else:
             conditions.append(Literature.file_path.like(f"%{filter_params.file_id}%"))
     return conditions
 

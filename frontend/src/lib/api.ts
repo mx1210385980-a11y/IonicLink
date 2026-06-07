@@ -1132,6 +1132,7 @@ export async function batchDeleteTribologyRecords(ids: number[]): Promise<BatchD
 
 export interface ReviewBacklogPaper {
     literatureId: number
+    literatureIds?: number[]
     title: string
     journal: string
     year: number | null

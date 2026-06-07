@@ -96,6 +96,10 @@ type ExportFormat = 'json' | 'csv' | 'ndjson'
 // Review master-detail: which paper's candidates the right pane is scoped to
 // (null = all papers). Declared before useRecordSearch so it can drive the query.
 const selectedReviewLiteratureId = ref<number | null>(null)
+const selectedReviewLiteratureIds = ref<number[]>([])
+const selectedReviewLiteratureFileId = computed(() =>
+  selectedReviewLiteratureIds.value.length ? selectedReviewLiteratureIds.value.join(',') : null,
+)
 
 const {
   loading,
@@ -144,7 +148,7 @@ const {
   targetRecordId: toRef(props, 'focusRecordId'),
   targetEntityType: toRef(props, 'focusEntityType'),
   entityTypeFilter: toRef(props, 'entityTypeFilter'),
-  reviewLiteratureId: selectedReviewLiteratureId,
+  reviewLiteratureId: selectedReviewLiteratureFileId,
   scope: toRef(props, 'recordScope'),
   fixedExperimentScale: toRef(props, 'fixedExperimentScale'),
   pageSize: PAGE_SIZE,
@@ -273,6 +277,7 @@ watch([isReviewQueue, () => sessionState.ready, () => sessionState.token, () => 
   if (!inQueue) {
     clearTriageFilters()
     selectedReviewLiteratureId.value = null
+    selectedReviewLiteratureIds.value = []
   } else if (canLoadReviewBacklog.value) {
     void loadReviewBacklog()
   }
@@ -907,6 +912,7 @@ async function loadReviewBacklog() {
       !papers.some((paper) => paper.literatureId === selectedReviewLiteratureId.value)
     ) {
       selectedReviewLiteratureId.value = null
+      selectedReviewLiteratureIds.value = []
     }
   } catch (err) {
     reviewBacklogError.value = 'Source list could not be loaded.'
@@ -923,8 +929,16 @@ watch([() => result.value.total, () => result.value.items.length, isReviewQueue,
 })
 
 function selectReviewPaper(literatureId: number | null) {
-  selectedReviewLiteratureId.value =
-    selectedReviewLiteratureId.value === literatureId ? null : literatureId
+  if (selectedReviewLiteratureId.value === literatureId || literatureId == null) {
+    selectedReviewLiteratureId.value = null
+    selectedReviewLiteratureIds.value = []
+    return
+  }
+  const paper = reviewBacklog.value.find((item) => item.literatureId === literatureId)
+  selectedReviewLiteratureId.value = literatureId
+  selectedReviewLiteratureIds.value = (paper?.literatureIds?.length ? paper.literatureIds : [literatureId])
+    .map((item) => Number(item))
+    .filter((item) => Number.isFinite(item) && item > 0)
 }
 
 // 批量选择 + 批量操作 ─────────────────────────────────────────

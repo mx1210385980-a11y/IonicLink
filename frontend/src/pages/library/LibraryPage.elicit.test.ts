@@ -57,7 +57,7 @@ describe('LibraryPage Elicit-style extract workflow', () => {
 
   it('starts extraction through the background queue and polls run progress', () => {
     expect(source).toContain('extractData(')
-    expect(source).toContain("extractData(String(paper.id), true")
+    expect(source).toContain("extractData(String(paper.id), false")
     expect(source).toContain('for (const paper of papersToExtract)')
     expect(source).toContain("const UPLOAD_EXTRACTION_PROFILE: ExtractionProfile = 'auto'")
     expect(source).toContain('uploadModalStep.value = \'extracting\'')
@@ -180,7 +180,7 @@ describe('LibraryPage Elicit-style extract workflow', () => {
     expect(source).toContain('if (uploadExtractionSetupBlocker.value)')
     expect(source).toContain('{{ uploadExtractionSetupBlocker }}')
     expect(source).toContain('@change="setUploadedPaperExtractionPreset')
-    expect(source).toContain("extractData(String(paper.id), true, UPLOAD_EXTRACTION_PROFILE, undefined, extractorType)")
+    expect(source).toContain("extractData(String(paper.id), false, UPLOAD_EXTRACTION_PROFILE, undefined, extractorType)")
     expect(source).not.toContain("extractData(String(paper.id), true, extractionProfile, strictCofMode, 'tribology')")
   })
 

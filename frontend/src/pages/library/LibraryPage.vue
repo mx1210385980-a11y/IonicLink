@@ -210,6 +210,47 @@ const activeExtractionStageIndex = computed(() => {
   return Math.max(0, extractionStageIndex(activeExtractionItem.value.stage))
 })
 const activeExtractionCandidateCount = computed(() => activeExtractionItem.value?.candidateCount ?? 0)
+
+// Elapsed + ETA for the running extraction. Both derive from real signals (actual
+// start time + the real progress percent), so neither is a fake timer.
+const uploadExtractionStartedAt = ref<number | null>(null)
+const uploadExtractionNow = ref(Date.now())
+let uploadExtractionClock: ReturnType<typeof setInterval> | null = null
+function stopExtractionClock() {
+  if (uploadExtractionClock) {
+    clearInterval(uploadExtractionClock)
+    uploadExtractionClock = null
+  }
+}
+watch(uploadExtracting, (active) => {
+  if (active) {
+    uploadExtractionStartedAt.value = Date.now()
+    uploadExtractionNow.value = Date.now()
+    stopExtractionClock()
+    uploadExtractionClock = setInterval(() => {
+      uploadExtractionNow.value = Date.now()
+    }, 1000)
+  } else {
+    stopExtractionClock()
+  }
+})
+onUnmounted(stopExtractionClock)
+const uploadElapsedMs = computed(() =>
+  uploadExtractionStartedAt.value ? Math.max(0, uploadExtractionNow.value - uploadExtractionStartedAt.value) : 0,
+)
+const uploadEtaMs = computed(() => {
+  const percent = uploadExtractionProgress.value
+  if (!uploadExtractionStartedAt.value || percent < 5 || percent >= 100) return null
+  const elapsed = uploadElapsedMs.value
+  if (elapsed < 1500) return null // too early to project a meaningful estimate
+  return Math.round((elapsed * (100 - percent)) / percent)
+})
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${minutes}:${String(seconds).padStart(2, '0')}`
+}
 const uploadBatchProgressPercent = computed(() => {
   if (uploadBatchTotal.value <= 0) return 0
   return Math.min(100, Math.round((uploadBatchFinished.value / uploadBatchTotal.value) * 100))
@@ -1569,7 +1610,7 @@ async function startUploadedPaperExtraction() {
       if (!extractorType) {
         throw new Error('Conductivity preset is selected, but the unified conductivity extractor is not connected yet.')
       }
-      const response = await extractData(String(paper.id), true, UPLOAD_EXTRACTION_PROFILE, undefined, extractorType)
+      const response = await extractData(String(paper.id), false, UPLOAD_EXTRACTION_PROFILE, undefined, extractorType)
       const result = await waitForUploadExtractionRun(paper.id, extractorType, response, preset)
       if (result.status === 'completed') completed += 1
       if (result.status === 'cancelled') cancelled += 1
@@ -1670,7 +1711,7 @@ async function runExtraction() {
     const results = await Promise.allSettled(
       extractionActivePaperIds.value.flatMap((id) => extractorTypes.map(async (extractorType) => {
         try {
-          const response = await extractData(String(id), true, UPLOAD_EXTRACTION_PROFILE, undefined, extractorType)
+          const response = await extractData(String(id), false, UPLOAD_EXTRACTION_PROFILE, undefined, extractorType)
           applyExtractionSummary(id, response.status || 'processing', response.extraction_summary, response.message)
         } catch (err: any) {
           markExtractionFailed(id, err?.message || 'Failed to start extraction.')
@@ -3355,6 +3396,9 @@ watch(() => props.selectedFileId, () => {
               <div class="text-right">
                 <strong class="block text-2xl font-black text-violet-600">{{ uploadExtractionProgress }}%</strong>
                 <span class="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">Progress</span>
+                <span v-if="uploadExtracting" class="mt-1 block text-xs font-semibold text-slate-400">
+                  {{ formatDuration(uploadElapsedMs) }} elapsed<template v-if="uploadEtaMs !== null"> · ~{{ formatDuration(uploadEtaMs) }} left</template>
+                </span>
               </div>
               <button
                 v-if="uploadExtracting"

@@ -1,7 +1,7 @@
 import pytest
 from typing import get_args
 
-from models.db_models import Literature, RecordCandidate, ResearchGroup, TribologyData, User
+from models.db_models import Literature, RecordCandidate, ResearchGroup, TribologyData, User, Workspace
 from routers.data_explorer import _scope_filter_values_for_mode, review_backlog
 from security import AuthPrincipal, RequestScope
 
@@ -72,6 +72,70 @@ async def test_review_backlog_counts_pending_candidates_per_paper(db_session):
     # Sorted by pending count descending → Paper A first.
     assert result["papers"][0]["literatureId"] == lit_a.id
     assert result["papers"][0]["title"] == "Paper A"
+
+
+@pytest.mark.anyio
+async def test_review_backlog_deduplicates_duplicate_literature_sources(db_session):
+    principal, lit_a, _lit_b = await _seed(db_session)
+    duplicate = Literature(
+        doi=lit_a.doi,
+        title=lit_a.title,
+        authors="x",
+        journal=lit_a.journal,
+        year=lit_a.year,
+        group_id=principal.group.id,
+        scope_type="workspace",
+        scope_key="workspace:1",
+        workspace_id=None,
+    )
+    workspace = Workspace(
+        group_id=principal.group.id,
+        owner_user_id=principal.user.id,
+        name="Personal cache",
+        slug="personal-cache",
+        is_personal=True,
+    )
+    db_session.add(workspace)
+    await db_session.flush()
+    duplicate.scope_key = f"workspace:{workspace.id}"
+    duplicate.workspace_id = workspace.id
+    db_session.add(duplicate)
+    await db_session.flush()
+    db_session.add_all([
+        RecordCandidate(
+            literature_id=duplicate.id,
+            material_name="Mica",
+            lubricant="[BMIM][BF4]",
+            cof_value=0.2,
+            field_evidence_json="{}",
+            review_status="needs_review",
+            record_origin="weak_candidate",
+        ),
+        RecordCandidate(
+            literature_id=duplicate.id,
+            material_name="Silica",
+            lubricant="[BMIM][BF4]",
+            cof_value=0.3,
+            field_evidence_json="{}",
+            review_status="needs_review",
+            record_origin="weak_candidate",
+        ),
+    ])
+    await db_session.flush()
+
+    result = await review_backlog(
+        scope_mode="all_visible",
+        session=db_session,
+        principal=principal,
+        scope=None,
+    )
+
+    matching = [paper for paper in result["papers"] if paper["doi"] == lit_a.doi]
+    assert len(matching) == 1
+    assert matching[0]["pendingCount"] == 5
+    assert matching[0]["literatureIds"] == [lit_a.id, duplicate.id]
+    assert result["paperCount"] == 2
+    assert result["totalPending"] == 6
 
 
 def test_review_backlog_scope_mode_annotation_accepts_project_scopes():

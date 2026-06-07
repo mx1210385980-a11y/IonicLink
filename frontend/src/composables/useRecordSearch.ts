@@ -20,7 +20,7 @@ type UseRecordSearchOptions = {
   targetRecordId?: Ref<string | number | null | undefined>
   targetEntityType?: Ref<'record' | 'candidate' | string | null | undefined>
   entityTypeFilter?: Ref<'record' | 'candidate' | string | null | undefined>
-  reviewLiteratureId?: Ref<number | null | undefined>
+  reviewLiteratureId?: Ref<string | number | null | undefined>
   scope?: Ref<'active' | 'group_library' | 'all_visible' | undefined>
   pageSize?: number
 }

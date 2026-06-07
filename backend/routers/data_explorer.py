@@ -113,6 +113,31 @@ def _normalized_json_filter_terms(values: list[str] | tuple[str, ...] | set[str]
     return sorted({str(value or "").strip().lower() for value in values or [] if str(value or "").strip()})
 
 
+def _parse_literature_id_filter(value: str | None) -> list[int]:
+    ids: list[int] = []
+    seen: set[int] = set()
+    for token in str(value or "").split(","):
+        try:
+            item = int(token.strip())
+        except (TypeError, ValueError):
+            continue
+        if item <= 0 or item in seen:
+            continue
+        seen.add(item)
+        ids.append(item)
+    return ids
+
+
+def _review_source_group_key(row: Any) -> tuple[str, str, str, str]:
+    doi = str(getattr(row, "doi", "") or "").strip().lower()
+    if doi:
+        return ("doi", doi, "", "")
+    title = re.sub(r"\s+", " ", str(getattr(row, "title", "") or "").strip().lower())
+    journal = re.sub(r"\s+", " ", str(getattr(row, "journal", "") or "").strip().lower())
+    year = str(getattr(row, "year", "") or "").strip()
+    return ("title", title, journal, year)
+
+
 def _json_text(path: str):
     return func.lower(func.coalesce(func.json_extract(TribologyData.tribological_system_json, path), ""))
 
@@ -568,10 +593,10 @@ def _build_conditions(filter_params: SearchFilter):
         conditions.append(text_condition)
     if filter_params.file_id:
         # Try to filter by Literature.id directly (most reliable since file_id IS the lit id)
-        try:
-            lit_id = int(filter_params.file_id)
-            conditions.append(TribologyData.literature_id == lit_id)
-        except (ValueError, TypeError):
+        lit_ids = _parse_literature_id_filter(filter_params.file_id)
+        if lit_ids:
+            conditions.append(TribologyData.literature_id.in_(lit_ids))
+        else:
             # Fallback: match against file_path stored in Literature table
             conditions.append(Literature.file_path.like(f"%{filter_params.file_id}%"))
     return conditions
@@ -1522,17 +1547,34 @@ async def review_backlog(
             .order_by(desc(pending_count), Literature.id)
         )
         rows = (await session.execute(stmt)).all()
-        papers = [
-            {
-                "literatureId": int(row.id),
-                "title": row.title or f"Literature {row.id}",
-                "journal": row.journal or "",
-                "year": row.year,
-                "doi": row.doi or "",
-                "pendingCount": int(row.pending_count or 0),
-            }
-            for row in rows
-        ]
+        merged: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+        for row in rows:
+            key = _review_source_group_key(row)
+            item = merged.get(key)
+            row_id = int(row.id)
+            if not item:
+                item = {
+                    "literatureId": row_id,
+                    "literatureIds": [row_id],
+                    "title": row.title or f"Literature {row.id}",
+                    "journal": row.journal or "",
+                    "year": row.year,
+                    "doi": row.doi or "",
+                    "pendingCount": 0,
+                }
+                merged[key] = item
+            else:
+                item["literatureIds"].append(row_id)
+                item["literatureId"] = min(int(item["literatureId"]), row_id)
+                if not item.get("doi") and row.doi:
+                    item["doi"] = row.doi
+            item["pendingCount"] += int(row.pending_count or 0)
+        for item in merged.values():
+            item["literatureIds"] = sorted({int(lit_id) for lit_id in item["literatureIds"]})
+        papers = sorted(
+            merged.values(),
+            key=lambda paper: (-int(paper["pendingCount"] or 0), int(paper["literatureId"] or 0)),
+        )
         return {
             "papers": papers,
             "totalPending": sum(paper["pendingCount"] for paper in papers),
