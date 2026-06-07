@@ -256,4 +256,14 @@ describe('IntegratedExplorerWorkspace filters surface', () => {
     expect(source).toContain('font-semibold text-slate-600')
     expect(source).not.toContain('bg-[#0f7c82] text-white')
   })
+
+  it('keeps Review Queue source counts honest when the source list request fails', () => {
+    expect(source).toContain('const reviewBacklogError = ref')
+    expect(source).toContain('const reviewQueueTotalCount = computed')
+    expect(source).toContain('Math.max(reviewBacklogTotal.value, triageTierCounts.value.all')
+    expect(source).toContain("reviewBacklogError.value = 'Source list could not be loaded.'")
+    expect(source).toContain('Source list unavailable. Showing all candidates.')
+    expect(source).toContain('{{ reviewQueueTotalCount }}')
+    expect(source).not.toContain('No pending candidates.')
+  })
 })

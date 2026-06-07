@@ -1799,10 +1799,10 @@ export function candidateEvidenceQuality(record: RecordResponse): CandidateEvide
 }
 
 export function candidateEvidenceQualityLabel(quality: CandidateEvidenceQuality): string {
-  if (quality === 'exact') return 'Exact evidence'
-  if (quality === 'page_only') return 'Page-only evidence'
-  if (quality === 'text_only') return 'Text-only evidence'
-  return 'Weak evidence'
+  if (quality === 'exact') return 'Quote + page located'
+  if (quality === 'page_only') return 'Page located'
+  if (quality === 'text_only') return 'Quote only'
+  return 'Needs evidence check'
 }
 
 // Whole days elapsed since the candidate was extracted, or null when the

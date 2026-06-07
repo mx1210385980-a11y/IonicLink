@@ -239,10 +239,10 @@ function literatureMeta(record: RecordResponse) {
 
 function candidateEvidenceQualityShortLabel(record: RecordResponse) {
   const quality = candidateEvidenceQuality(record)
-  if (quality === 'exact') return 'Exact'
-  if (quality === 'page_only') return 'Page-only'
-  if (quality === 'text_only') return 'Text'
-  return 'Weak'
+  if (quality === 'exact') return 'Located'
+  if (quality === 'page_only') return 'Page'
+  if (quality === 'text_only') return 'Quote'
+  return 'Check'
 }
 
 function candidateEvidenceQualityBadgeClass(record: RecordResponse) {

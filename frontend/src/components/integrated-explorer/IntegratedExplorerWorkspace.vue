@@ -903,15 +903,32 @@ const effectiveGroupByPaper = computed(
 // Review master-detail paper rail: whole-queue per-paper pending counts.
 const reviewBacklog = ref<ReviewBacklogPaper[]>([])
 const reviewBacklogLoading = ref(false)
+const reviewBacklogError = ref('')
 const reviewBacklogTotal = computed(() =>
   reviewBacklog.value.reduce((sum, paper) => sum + paper.pendingCount, 0),
 )
+const reviewQueueTotalCount = computed(() =>
+  Math.max(reviewBacklogTotal.value, triageTierCounts.value.all, Number(result.value.total || 0)),
+)
+const reviewSourceCountLabel = computed(() =>
+  reviewBacklogError.value && !reviewBacklog.value.length ? '--' : String(reviewBacklog.value.length),
+)
+const reviewBacklogEmptyMessage = computed(() => {
+  if (reviewBacklogError.value) {
+    return reviewQueueTotalCount.value > 0
+      ? 'Source list unavailable. Showing all candidates.'
+      : reviewBacklogError.value
+  }
+  if (reviewQueueTotalCount.value > 0) return 'Source list unavailable. Showing all candidates.'
+  return 'No candidates waiting for review.'
+})
 const selectedReviewPaper = computed(() =>
   reviewBacklog.value.find((paper) => paper.literatureId === selectedReviewLiteratureId.value) || null,
 )
 
 async function loadReviewBacklog() {
   reviewBacklogLoading.value = true
+  reviewBacklogError.value = ''
   try {
     const response = await getReviewBacklog({ scope: props.recordScope })
     reviewBacklog.value = response.papers
@@ -923,6 +940,7 @@ async function loadReviewBacklog() {
       selectedReviewLiteratureId.value = null
     }
   } catch (err) {
+    reviewBacklogError.value = 'Source list could not be loaded.'
     console.error('Failed to load review backlog', err)
   } finally {
     reviewBacklogLoading.value = false
@@ -3131,11 +3149,11 @@ onBeforeUnmount(() => {
           v-if="isReviewQueue"
           data-testid="review-paper-rail"
           class="flex w-[14.5rem] shrink-0 flex-col overflow-hidden rounded-[8px] border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950"
-          aria-label="Papers in review queue"
+          aria-label="Sources in review queue"
         >
           <div class="flex items-center justify-between border-b border-slate-200 px-2.5 py-2 dark:border-slate-800">
-            <span class="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">Papers</span>
-            <span class="text-[11px] font-semibold text-slate-400 dark:text-slate-500">{{ reviewBacklog.length }}</span>
+            <span class="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500">Sources</span>
+            <span class="text-[11px] font-semibold text-slate-400 dark:text-slate-500">{{ reviewSourceCountLabel }}</span>
           </div>
           <div class="flex-1 overflow-y-auto p-1">
             <button
@@ -3151,7 +3169,7 @@ onBeforeUnmount(() => {
               <span
                 class="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
                 :class="selectedReviewLiteratureId === null ? 'bg-white text-[#0f7c82]' : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-200'"
-              >{{ reviewBacklogTotal }}</span>
+              >{{ reviewQueueTotalCount }}</span>
             </button>
             <button
               v-for="paper in reviewBacklog"
@@ -3177,7 +3195,17 @@ onBeforeUnmount(() => {
               >{{ paper.pendingCount }}</span>
             </button>
             <p v-if="reviewBacklogLoading && !reviewBacklog.length" class="px-2.5 py-3 text-[12px] text-slate-400">Loading papers…</p>
-            <p v-else-if="!reviewBacklog.length" class="px-2.5 py-3 text-[12px] text-slate-400">No pending candidates.</p>
+            <div v-else-if="!reviewBacklog.length" class="px-2.5 py-3">
+              <p class="text-[12px] font-semibold text-slate-400">{{ reviewBacklogEmptyMessage }}</p>
+              <button
+                v-if="reviewBacklogError"
+                type="button"
+                class="mt-2 rounded-[7px] border border-slate-200 bg-white px-2 py-1 text-[11px] font-semibold text-slate-500 transition hover:border-[#0f7c82] hover:bg-[#eefafa] hover:text-[#0f7c82] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+                @click="loadReviewBacklog"
+              >
+                Retry sources
+              </button>
+            </div>
           </div>
         </aside>
 

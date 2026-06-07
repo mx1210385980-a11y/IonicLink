@@ -1050,7 +1050,9 @@ describe('review-queue triage helpers', () => {
       evidencePage: null,
       evidenceBbox: null,
     } as Partial<RecordResponse>))).toBe('weak')
-    expect(candidateEvidenceQualityLabel('exact')).toBe('Exact evidence')
-    expect(candidateEvidenceQualityLabel('page_only')).toBe('Page-only evidence')
+    expect(candidateEvidenceQualityLabel('exact')).toBe('Quote + page located')
+    expect(candidateEvidenceQualityLabel('page_only')).toBe('Page located')
+    expect(candidateEvidenceQualityLabel('text_only')).toBe('Quote only')
+    expect(candidateEvidenceQualityLabel('weak')).toBe('Needs evidence check')
   })
 })
