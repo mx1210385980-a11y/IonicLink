@@ -114,18 +114,29 @@ function openFieldEvidence(fieldKey: string, event: MouseEvent | KeyboardEvent) 
       <span class="macro-rig__specimen" :class="macroSpecimenClass" />
     </div>
 
-    <div v-else class="relative flex w-5 shrink-0 flex-col items-center py-0.5" aria-hidden="true">
-      <div class="relative z-10 flex h-4 w-4 items-center justify-center">
+    <div v-else-if="contact.mode === 'nano'" class="nano-rig" aria-hidden="true">
+      <span class="nano-rig__field" />
+      <span class="nano-rig__scanline" />
+      <div class="nano-rig__probe">
         <span
-          class="block border-slate-500 dark:border-slate-300"
+          class="nano-rig__probe-shape"
           :class="[
             /colloid|sphere/i.test(primaryDetails)
-              ? 'h-3 w-3 rounded-full border-2 bg-white dark:bg-slate-950'
+              ? 'nano-rig__probe-shape--sphere'
               : /surface pair/i.test(primaryDetails)
-                ? 'h-1.5 w-4 rounded-sm bg-slate-500 dark:bg-slate-300'
-                : 'h-0 w-0 border-x-[5px] border-t-[10px] border-x-transparent bg-transparent'
+                ? 'nano-rig__probe-shape--plate'
+                : 'nano-rig__probe-shape--tip'
           ]"
         />
+      </div>
+      <span class="nano-rig__cantilever" />
+      <span v-if="hasCoating" class="nano-rig__film" />
+      <span class="nano-rig__substrate" />
+    </div>
+
+    <div v-else class="relative flex w-5 shrink-0 flex-col items-center py-0.5" aria-hidden="true">
+      <div class="relative z-10 flex h-4 w-4 items-center justify-center">
+        <span class="block h-0 w-0 border-x-[5px] border-t-[10px] border-x-transparent border-slate-500 bg-transparent dark:border-slate-300" />
       </div>
       <div class="my-0.5 h-2.5 w-px bg-gradient-to-b from-slate-300 via-[#0f7c82] to-slate-300 dark:from-slate-700 dark:via-cyan-400 dark:to-slate-700" />
       <div v-if="hasCoating" class="mb-0.5 h-1 w-4 rounded-full bg-amber-300 shadow-[0_0_0_1px_rgba(217,119,6,0.18)] dark:bg-amber-400/80" />
@@ -139,6 +150,17 @@ function openFieldEvidence(fieldKey: string, event: MouseEvent | KeyboardEvent) 
       >
         <span class="rounded-[4px] bg-orange-100 px-1.5 py-0.5 text-[8px] font-black leading-none tracking-[0.12em] text-orange-700 dark:bg-orange-400/15 dark:text-orange-300">
           MACRO
+        </span>
+        <span class="min-w-0 truncate text-[9.5px] font-black uppercase leading-3 tracking-[0.08em] text-slate-500 dark:text-slate-400">
+          {{ contact.relationLabel }}
+        </span>
+      </div>
+      <div
+        v-else-if="contact.mode === 'nano'"
+        class="mb-1 flex min-w-0 items-center gap-1.5"
+      >
+        <span class="rounded-[4px] bg-cyan-50 px-1.5 py-0.5 text-[8px] font-black leading-none tracking-[0.12em] text-[#0f7c82] dark:bg-cyan-400/10 dark:text-cyan-300">
+          NANO
         </span>
         <span class="min-w-0 truncate text-[9.5px] font-black uppercase leading-3 tracking-[0.08em] text-slate-500 dark:text-slate-400">
           {{ contact.relationLabel }}
@@ -219,6 +241,120 @@ function openFieldEvidence(fieldKey: string, event: MouseEvent | KeyboardEvent) 
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.nano-rig {
+  position: relative;
+  width: 2.75rem;
+  min-width: 2.75rem;
+  min-height: 3.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.nano-rig__field {
+  position: absolute;
+  left: 0.62rem;
+  right: 0.62rem;
+  top: 1.1rem;
+  bottom: 1.14rem;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(14, 165, 233, 0), rgba(15, 124, 130, 0.18), rgba(14, 165, 233, 0));
+  box-shadow: 0 0 18px rgba(14, 165, 233, 0.18);
+  animation: nano-field-pulse 2.2s ease-in-out infinite;
+}
+
+.nano-rig__scanline {
+  position: absolute;
+  left: 0.62rem;
+  top: 2.1rem;
+  z-index: 2;
+  width: 1.55rem;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(34, 211, 238, 0), rgba(34, 211, 238, 0.9), rgba(34, 211, 238, 0));
+  animation: nano-scan 1.9s ease-in-out infinite;
+}
+
+.nano-rig__probe {
+  position: absolute;
+  top: 0.45rem;
+  z-index: 3;
+  display: flex;
+  width: 1.32rem;
+  height: 1.35rem;
+  align-items: center;
+  justify-content: center;
+  animation: nano-probe-hover 2.2s ease-in-out infinite;
+}
+
+.nano-rig__probe-shape {
+  display: block;
+  border-color: #64748b;
+}
+
+.nano-rig__probe-shape--tip {
+  width: 0;
+  height: 0;
+  border-left: 0.36rem solid transparent;
+  border-right: 0.36rem solid transparent;
+  border-top: 0.82rem solid #64748b;
+  filter: drop-shadow(0 3px 4px rgba(15, 23, 42, 0.18));
+}
+
+.nano-rig__probe-shape--sphere {
+  width: 0.86rem;
+  height: 0.86rem;
+  border-radius: 999px;
+  border: 2px solid #0f7c82;
+  background: #ecfeff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 4px 10px -8px rgba(15, 23, 42, 0.9);
+}
+
+.nano-rig__probe-shape--plate {
+  width: 1.15rem;
+  height: 0.34rem;
+  border-radius: 0.18rem;
+  background: #64748b;
+  box-shadow: 0 4px 10px -8px rgba(15, 23, 42, 0.9);
+}
+
+.nano-rig__cantilever {
+  position: absolute;
+  top: 0.52rem;
+  left: 0.88rem;
+  width: 1rem;
+  height: 1px;
+  transform: rotate(-22deg);
+  transform-origin: right center;
+  background: linear-gradient(90deg, rgba(100, 116, 139, 0), rgba(100, 116, 139, 0.75));
+}
+
+.nano-rig__film {
+  position: absolute;
+  top: 2.34rem;
+  z-index: 2;
+  width: 1.72rem;
+  height: 0.22rem;
+  border-radius: 999px;
+  background: #fbbf24;
+  box-shadow: 0 0 0 1px rgba(217, 119, 6, 0.12), 0 -5px 12px -10px rgba(217, 119, 6, 0.9);
+}
+
+.nano-rig__substrate {
+  position: absolute;
+  top: 2.52rem;
+  z-index: 1;
+  width: 2rem;
+  height: 0.46rem;
+  border-radius: 0.2rem;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.18) 0 10%, transparent 10% 20%),
+    #1e293b;
+  background-size: 0.42rem 100%, auto;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 8px 14px -12px rgba(15, 23, 42, 0.95);
 }
 
 .macro-rig__motion {
@@ -334,10 +470,44 @@ function openFieldEvidence(fieldKey: string, event: MouseEvent | KeyboardEvent) 
   }
 }
 
+@keyframes nano-probe-hover {
+  0%, 100% {
+    transform: translateY(-0.08rem);
+  }
+  50% {
+    transform: translateY(0.14rem);
+  }
+}
+
+@keyframes nano-scan {
+  0%, 100% {
+    opacity: 0.35;
+    transform: translateX(-0.28rem) scaleX(0.76);
+  }
+  50% {
+    opacity: 1;
+    transform: translateX(0.28rem) scaleX(1);
+  }
+}
+
+@keyframes nano-field-pulse {
+  0%, 100% {
+    opacity: 0.45;
+    transform: scaleY(0.78);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .macro-rig__motion,
   .macro-rig__counterface,
-  .macro-rig__contact {
+  .macro-rig__contact,
+  .nano-rig__field,
+  .nano-rig__scanline,
+  .nano-rig__probe {
     animation: none;
   }
 }

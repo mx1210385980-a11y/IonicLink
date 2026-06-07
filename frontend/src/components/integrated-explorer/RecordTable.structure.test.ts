@@ -282,6 +282,18 @@ describe('RecordTable structure thumbnails', () => {
     expect(tribopairCapsuleSource).not.toContain(':global(.dark)')
   })
 
+  it('makes nano tribopairs feel like a live probe over a substrate', () => {
+    expect(tribopairCapsuleSource).toContain('nano-rig')
+    expect(tribopairCapsuleSource).toContain('nano-rig__probe')
+    expect(tribopairCapsuleSource).toContain('nano-rig__field')
+    expect(tribopairCapsuleSource).toContain('nano-rig__scanline')
+    expect(tribopairCapsuleSource).toContain('nano-rig__substrate')
+    expect(tribopairCapsuleSource).toContain('@keyframes nano-probe-hover')
+    expect(tribopairCapsuleSource).toContain('@keyframes nano-scan')
+    expect(tribopairCapsuleSource).toContain('NANO')
+    expect(tribopairCapsuleSource).toContain('prefers-reduced-motion')
+  })
+
   it('keeps header column widths aligned with body column widths', () => {
     expect(source).toContain('const COL_SELECT = \'w-[48px]\'')
     expect(source).toContain('const COL_ID = \'w-[56px]\'')
