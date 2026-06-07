@@ -533,7 +533,7 @@ def test_build_field_evidence_map_prefers_field_specific_hits(monkeypatch):
     assert field_map["material"]["evidence"]["page"] == 3
     assert field_map["material"]["evidence"]["quote"] == "Au(111) electrode surface"
     assert field_map["cof"]["evidence"]["bbox"] == [100.0, 120.0, 145.0, 130.0]
-    assert field_map["ionic_liquid"]["evidence"]["quote"] == "Generic figure caption"
+    assert field_map["ionic_liquid"]["evidence"]["quote"] is None
 
 
 def test_field_evidence_map_generic_detection_flags_cloned_entries():

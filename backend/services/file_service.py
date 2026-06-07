@@ -1935,6 +1935,29 @@ def _all_numeric_values_match(term: str, matched_text: str) -> bool:
     return True
 
 
+def _temperature_value_matches_celsius_evidence(value: Any, text: Optional[str]) -> bool:
+    value_text = _filled_text(value)
+    source_text = _filled_text(text)
+    kelvin_match = re.search(r"([-+]?\d+(?:\.\d+)?)\s*k\b", value_text, flags=re.IGNORECASE)
+    if not kelvin_match or not source_text:
+        return False
+    try:
+        kelvin_value = float(kelvin_match.group(1))
+    except ValueError:
+        return False
+
+    number = r"[-+]?\d+(?:\.\d+)?"
+    uncertainty = rf"(?:\s*(?:±|\+/-|\+∕-)\s*{number})?"
+    for match in re.finditer(rf"(?P<celsius>{number}){uncertainty}\s*(?:°\s*)?c\b", source_text, flags=re.IGNORECASE):
+        try:
+            celsius_value = float(match.group("celsius"))
+        except ValueError:
+            continue
+        if abs(kelvin_value - (celsius_value + 273.15)) <= 0.15:
+            return True
+    return False
+
+
 def _field_exact_query_variants(field_key: str, value: Any) -> list[str]:
     from services.pdf_service import build_term_query_variants
 
@@ -1971,6 +1994,9 @@ def _text_explicitly_matches_field_value(field_key: str, value: Any, text: Optio
     value_text = _filled_text(value)
     if not source_text or not value_text:
         return False
+
+    if field_key == "temperature" and _temperature_value_matches_celsius_evidence(value_text, source_text):
+        return True
 
     if field_key == "potential":
         magnitude_match = re.search(r"(\d+(?:\.\d+)?)", value_text)
@@ -2017,6 +2043,8 @@ def _derive_grounding_metadata(
         and any(token in combined_lower for token in ("room temperature", "room-temperature", "ambient temperature"))
     ):
         return "derived", 'Normalized from room-temperature wording.'
+    if field_key == "temperature" and _temperature_value_matches_celsius_evidence(value_text, combined):
+        return "derived", "Normalized from Celsius temperature evidence."
 
     if not _evidence_has_location(evidence_map):
         return None, None
@@ -2641,11 +2669,82 @@ def _field_location_match_is_reliable(field_key: str, value: Any, evidence: dict
     combined = " ".join(part for part in [matched_text, quote] if part).lower()
     value_text = _filled_text(value).strip().lower()
     source_is_precise = _source_label_has_precise_region(evidence.get("source_type"), evidence.get("source_label"))
-    if field_key == "temperature" and source_is_precise and value_text in {"298 k", "298k", "293 k", "293k"}:
+    if field_key == "temperature" and source_is_precise and value_text in {"298.15 k", "298.15k", "298 k", "298k", "293 k", "293k"}:
         return any(token in combined for token in ("room temperature", "room-temperature", "ambient temperature"))
     if field_key == "potential" and source_is_precise and re.search(r"\bocp\b|open circuit potential", value_text, flags=re.IGNORECASE):
         return "ocp" in combined or "open circuit potential" in combined
     return False
+
+
+def _clear_unmatched_generic_field_evidence(field_key: str, entry: dict[str, Any]) -> dict[str, Any]:
+    if field_key not in {
+        "material",
+        "ionic_liquid",
+        "regime",
+        "load",
+        "temperature",
+        "water_content",
+        "potential",
+        "surface_roughness",
+        "probe_roughness",
+        "substrate_roughness",
+    }:
+        return entry
+    evidence = entry.get("evidence") if isinstance(entry.get("evidence"), dict) else {}
+    if not evidence:
+        return entry
+    if not (_filled_text(evidence.get("quote")) or _filled_text(evidence.get("matched_text") or evidence.get("matchedText"))):
+        return entry
+    if _field_location_match_is_reliable(field_key, entry.get("value"), evidence):
+        return entry
+
+    cleaned = dict(evidence)
+    cleaned["quote"] = None
+    cleaned["matched_text"] = None
+    cleaned["bbox"] = None
+    entry["evidence"] = cleaned
+    entry["grounding_note"] = "Stored evidence text does not explicitly match this field value; source needs re-extraction."
+    return entry
+
+
+def _contextual_field_evidence_quote(item: dict[str, Any], field_key: str) -> Optional[str]:
+    if field_key == "regime":
+        return _filled_text(item.get("regime")) or None
+    if field_key in {"load", "temperature", "water_content", "potential"}:
+        return _filled_text(item.get("regime")) or _filled_text(item.get("notes")) or None
+    return None
+
+
+def _apply_contextual_field_evidence_fallback(
+    field_key: str,
+    entry: dict[str, Any],
+    item: dict[str, Any],
+) -> dict[str, Any]:
+    evidence = entry.get("evidence") if isinstance(entry.get("evidence"), dict) else {}
+    if not evidence:
+        return entry
+    if _filled_text(evidence.get("quote")) or _filled_text(evidence.get("matched_text") or evidence.get("matchedText")):
+        return entry
+    context_quote = _contextual_field_evidence_quote(item, field_key)
+    if not context_quote:
+        return entry
+    contextual_evidence = {
+        **evidence,
+        "quote": context_quote,
+        "matched_text": None,
+        "bbox": None,
+    }
+    if not _field_location_match_is_reliable(field_key, entry.get("value"), contextual_evidence):
+        return entry
+    entry["evidence"] = contextual_evidence
+    if field_key == "temperature":
+        entry["grounding_mode"] = "derived"
+        entry["grounding_note"] = "Normalized from Celsius temperature evidence."
+    else:
+        existing_note = _filled_text(entry.get("grounding_note"))
+        if existing_note == "Stored evidence text does not explicitly match this field value; source needs re-extraction.":
+            entry.pop("grounding_note", None)
+    return entry
 
 
 def _select_best_field_hit(
@@ -3344,8 +3443,12 @@ def _build_field_evidence_map(item: dict, db_record: TribologyData, *, confidenc
         if field_key == "temperature" and _is_default_temperature_value(entry.get("value")):
             evidence = entry.get("evidence") or {}
             if not _evidence_has_location(evidence):
-                entries[field_key] = _temperature_default_evidence_entry(entry.get("value"), confidence)
-                continue
+                context_quote = _contextual_field_evidence_quote(item, field_key)
+                if context_quote and _temperature_value_matches_celsius_evidence(entry.get("value"), context_quote):
+                    pass
+                else:
+                    entries[field_key] = _temperature_default_evidence_entry(entry.get("value"), confidence)
+                    continue
         grounding_mode, grounding_note = _derive_grounding_metadata(
             field_key,
             entry.get("value"),
@@ -3374,6 +3477,8 @@ def _build_field_evidence_map(item: dict, db_record: TribologyData, *, confidenc
                 evidence["matched_text"] = raw_text
                 evidence["bbox"] = None
             entry["evidence"] = evidence
+        entry = _clear_unmatched_generic_field_evidence(field_key, entry)
+        entry = _apply_contextual_field_evidence_fallback(field_key, entry, item)
         if field_key in {"surface_roughness", "probe_roughness", "substrate_roughness"}:
             evidence = entry.get("evidence") if isinstance(entry.get("evidence"), dict) else {}
             if evidence and not _field_location_match_is_reliable(field_key, entry.get("value"), evidence):

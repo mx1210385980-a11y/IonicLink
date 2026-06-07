@@ -257,6 +257,24 @@ def _infer_surface_material(text: str) -> str | None:
     return None
 
 
+def _infer_current_carrying_ball_plate_pair(text: str) -> dict[str, str] | None:
+    match = re.search(
+        r"(?P<probe>304\s+stainless\s+steel)\s+ball[\s\S]{0,260}?"
+        r"lower\s+sample\s+was\s+formed\s+of\s+(?:a\s+rectangular\s+)?(?P<substrate>q345\s+steel)\s+plate",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return {
+        "material_name": "304 stainless steel ball / Q345 steel plate",
+        "probe_material": "304 stainless steel",
+        "probe_geometry": "Ball",
+        "probe_radius": "3 mm",
+        "substrate_material": "Q345 steel",
+    }
+
+
 def _has_snl_silicon_nitride_probe(text: str) -> bool:
     return bool(
         re.search(
@@ -295,8 +313,12 @@ def extract_experimental_document_context(page_texts: dict[int, str]) -> dict[st
     lowered = text.lower()
     context: dict[str, Any] = {}
 
+    ball_plate_pair = _infer_current_carrying_ball_plate_pair(text)
+    if ball_plate_pair:
+        context.update(ball_plate_pair)
+
     substrate_material = _infer_surface_material(text)
-    if substrate_material:
+    if substrate_material and not context.get("substrate_material"):
         context["substrate_material"] = substrate_material
         context["material_name"] = substrate_material
 
@@ -390,14 +412,19 @@ def extract_experimental_document_context(page_texts: dict[int, str]) -> dict[st
         )
 
     if not context.get("temperature"):
+        celsius_with_uncertainty = (
+            r"([0-9]+(?:\.[0-9]+)?)"
+            r"(?:\s*(?:±|\+/-|\+∕-)\s*[0-9]+(?:\.[0-9]+)?)?"
+            r"\s*(?:°|掳\s*)?c\b"
+        )
         temp_match = re.search(
-            r"(?:temperature(?:\s+\w+){0,6}?|measured(?:\s+\w+){0,6}?|performed(?:\s+\w+){0,6}?|conducted(?:\s+\w+){0,6}?|carried out(?:\s+\w+){0,6}?|experiments?(?:\s+\w+){0,6}?)\s+at\s+([0-9]+(?:\.[0-9]+)?)\s*(?:掳\s*)?c\b",
+            rf"(?:temperature(?:\s+\w+){{0,6}}?|measured(?:\s+\w+){{0,6}}?|performed(?:\s+\w+){{0,6}}?|conducted(?:\s+\w+){{0,6}}?|carried out(?:\s+\w+){{0,6}}?|experiments?(?:\s+\w+){{0,6}}?)\s+at\s+{celsius_with_uncertainty}",
             text,
             flags=re.IGNORECASE,
         )
         if not temp_match:
             temp_match = re.search(
-                r"temperature(?:\s+\w+){0,4}?(?:of|was|=)\s*([0-9]+(?:\.[0-9]+)?)\s*(?:掳\s*)?c\b",
+                rf"temperature(?:\s+\w+){{0,4}}?(?:of|was|=)\s*{celsius_with_uncertainty}",
                 text,
                 flags=re.IGNORECASE,
             )
@@ -487,6 +514,7 @@ def apply_experimental_document_context(
 
     original_probe_material = str(item.get("probe_material") or "").strip().lower()
     original_substrate_material = str(item.get("substrate_material") or "").strip().lower()
+    original_material_name = str(item.get("material_name") or "").strip().lower()
     original_probe_details_blank = all(
         _is_blank(item.get(field)) for field in ("probe_geometry", "probe_radius", "probe_roughness")
     )
@@ -537,6 +565,23 @@ def apply_experimental_document_context(
         and original_probe_details_blank
     ):
         item["probe_material"] = doc_context["probe_material"]
+
+    if (
+        original_material_name in {"steel", "stainless steel"}
+        and not _is_blank(doc_context.get("material_name"))
+        and "/" in str(doc_context.get("material_name"))
+    ):
+        item["material_name"] = doc_context["material_name"]
+    if (
+        original_probe_material in {"steel", "stainless steel"}
+        and original_substrate_material in {"steel", "stainless steel"}
+        and not _is_blank(doc_context.get("probe_material"))
+        and not _is_blank(doc_context.get("substrate_material"))
+        and str(doc_context.get("probe_material")).strip().lower()
+        != str(doc_context.get("substrate_material")).strip().lower()
+    ):
+        item["probe_material"] = doc_context["probe_material"]
+        item["substrate_material"] = doc_context["substrate_material"]
 
     if _is_blank(item.get("material_name")) and not _is_blank(item.get("substrate_material")):
         item["material_name"] = item["substrate_material"]

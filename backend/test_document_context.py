@@ -33,6 +33,51 @@ def test_extract_experimental_document_context_recovers_shared_conditions():
     assert context["substrate_coating"] == "Chromium oxide"
 
 
+def test_extract_experimental_document_context_uses_main_temperature_not_uncertainty():
+    page_texts = {
+        3: """
+        The friction test was conducted at 25 ± 3 °C.
+        The reciprocating frequency was 1 Hz under a normal load of 10 N.
+        """,
+    }
+
+    context = extract_experimental_document_context(page_texts)
+
+    assert context["temperature"] == "298.15 K"
+
+
+def test_document_context_recovers_current_carrying_ball_plate_pair_and_overrides_generic_steel():
+    page_texts = {
+        2: """
+        2.3. Friction tests
+        For the friction pair, a 304 stainless steel ball with a diameter of 6 mm was selected
+        as the upper sample. The lower sample was formed of a rectangular Q345 steel plate
+        with a size of 10 x 10 x 5 mm.
+        """,
+    }
+
+    context = extract_experimental_document_context(page_texts)
+
+    assert context["material_name"] == "304 stainless steel ball / Q345 steel plate"
+    assert context["probe_material"] == "304 stainless steel"
+    assert context["probe_geometry"] == "Ball"
+    assert context["probe_radius"] == "3 mm"
+    assert context["substrate_material"] == "Q345 steel"
+
+    enriched = apply_experimental_document_context(
+        {
+            "material_name": "Steel",
+            "probe_material": "Steel",
+            "substrate_material": "Steel",
+        },
+        context,
+    )
+
+    assert enriched["material_name"] == "304 stainless steel ball / Q345 steel plate"
+    assert enriched["probe_material"] == "304 stainless steel"
+    assert enriched["substrate_material"] == "Q345 steel"
+
+
 def test_apply_experimental_document_context_overrides_false_probe_default():
     context = {
         "probe_material": "Silicon",

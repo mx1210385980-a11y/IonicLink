@@ -1180,6 +1180,41 @@ def test_build_field_evidence_map_clears_provided_bare_numeric_roughness_locatio
     assert "roughness/unit context" in roughness["grounding_note"]
 
 
+def test_build_field_evidence_map_clears_unmatched_generic_quote_for_source_anchored_fields(monkeypatch):
+    monkeypatch.setattr("services.file_service._resolve_existing_path", lambda path: path)
+    monkeypatch.setattr("services.file_service._locate_field_evidence_for_value", lambda **kwargs: None)
+
+    record = SimpleNamespace(
+        source="Fig. 3",
+        source_figure="Fig. 3",
+        source_page=3,
+        evidence_page=3,
+        evidence_bbox=None,
+        sample_id=None,
+    )
+    item = {
+        "material_name": "Steel",
+        "ionic_liquid": "[EMIM][BF4]",
+        "cof": "0.0688",
+        "temperature": "298.15 K",
+        "regime": "temperature 25 ± 3 °C; load 10 N",
+        "evidence": (
+            "the average friction coefficients are 0.0688 and 0.0723 "
+            "under the low-intensity and no current-carrying conditions"
+        ),
+        "source": "Fig. 3",
+        "source_page": 3,
+    }
+
+    field_map = _build_field_evidence_map(item, record, confidence=0.91, file_path="/tmp/fake.pdf")
+
+    assert field_map["cof"]["evidence"]["quote"] is not None
+    assert field_map["ionic_liquid"]["evidence"]["quote"] is None
+    assert field_map["material"]["evidence"]["quote"] is None
+    assert field_map["regime"]["evidence"]["quote"] == "temperature 25 ± 3 °C; load 10 N"
+    assert field_map["temperature"]["evidence"]["quote"] == "temperature 25 ± 3 °C; load 10 N"
+
+
 def test_roughness_query_variants_never_search_for_bare_numeric_value():
     queries = _field_query_variants("probe_roughness", "2")
 

@@ -224,6 +224,28 @@ def test_fast_table_extracts_multiple_temperature_conditions():
     assert rows[0]["temperature"] == "298.15 K; 323.15 K; 353.15 K"
 
 
+def test_fast_table_uses_main_celsius_value_not_plus_minus_uncertainty():
+    rows = normalize_fast_table_rows(
+        [
+            {
+                "ionic_liquid": "[EMIM][BF4]",
+                "friction_pair": "steel ball / steel disk",
+                "conditions": (
+                    "IL lubrication; reciprocating frequency 1 Hz; stroke 5 mm; "
+                    "load 10 N; test temperature was 25 ± 3 °C"
+                ),
+                "cof": "0.0688",
+                "source": "Fig. 3",
+                "evidence": (
+                    "The test was conducted at room temperature, which was 25 ± 3 °C."
+                ),
+            }
+        ]
+    )
+
+    assert rows[0]["temperature"] == "298.15 K"
+
+
 def test_fast_table_extracts_relative_humidity_series_as_water_content():
     rows = normalize_fast_table_rows(
         [

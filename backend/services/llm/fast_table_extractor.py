@@ -322,11 +322,13 @@ def _extract_temperature_text(*values: Any) -> Optional[str]:
     number = r"[-+]?\d+(?:\.\d+)?"
     separator = r"(?:\s*,\s*|\s*,?\s+(?:and|or)\s+)"
     number_series = rf"{number}(?:{separator}{number})*"
+    uncertainty = rf"(?:\s*(?:±|\+/-|\+∕-)\s*{number})?"
     temperatures: list[str] = []
     seen: set[str] = set()
 
     def add_series(series_text: str) -> None:
-        for raw_value in re.findall(number, series_text):
+        cleaned = re.sub(rf"({number})\s*(?:±|\+/-|\+∕-)\s*{number}", r"\1", series_text)
+        for raw_value in re.findall(number, cleaned):
             kelvin = _format_kelvin_from_celsius(raw_value)
             if kelvin and kelvin not in seen:
                 temperatures.append(kelvin)
@@ -339,8 +341,12 @@ def _extract_temperature_text(*values: Any) -> Optional[str]:
     ):
         add_series(match.group("values"))
 
-    for match in re.finditer(rf"(?P<values>{number_series})\s*(?:°\s*)?C\b", normalized, flags=re.IGNORECASE):
-        add_series(match.group("values"))
+    for match in re.finditer(
+        rf"(?P<value>{number}){uncertainty}\s*(?:°\s*)?C\b",
+        normalized,
+        flags=re.IGNORECASE,
+    ):
+        add_series(match.group("value"))
 
     if temperatures:
         return "; ".join(temperatures)
