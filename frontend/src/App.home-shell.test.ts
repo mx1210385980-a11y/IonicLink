@@ -56,10 +56,20 @@ describe('App home shell', () => {
 
   it('shows account language in the shell instead of exposing scope terminology', () => {
     expect(source).toContain('const activeAccountLabel = computed')
+    expect(source).toContain('const accountSwitcherOpen = ref(false)')
+    expect(source).toContain('async function switchToAccount()')
+    expect(source).toContain('async function switchToPublicAccount()')
+    expect(source).toContain('const response = await loginAccount(username, password)')
+    expect(source).toContain('const response = await startPublicSession()')
+    expect(source).toContain('setSession(response.accessToken, response.user)')
     expect(source).toContain('{{ activeAccountLabel }}')
     expect(source).toContain("isChinese.value ? '公共账户' : 'Public account'")
     expect(source).toContain("isChinese.value ? '团队账户' : 'Group account'")
     expect(source).toContain(".replace(/\\bWorkspace\\b/gi, 'Account')")
+    expect(source).toContain('aria-label="Account switcher"')
+    expect(source).toContain('@submit.prevent="switchToAccount"')
+    expect(source).toContain('@click="switchToPublicAccount"')
+    expect(source).toContain("{{ accountSwitching ? '切换中...' : '切换登录' }}")
     expect(source).not.toContain('<span class="truncate">{{ activeScopeLabel }}</span>')
   })
 

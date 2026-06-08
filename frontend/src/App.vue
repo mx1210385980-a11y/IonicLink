@@ -12,6 +12,7 @@ import {
   Loader2,
   PanelTop,
   Rows3,
+  Shield,
   Upload,
   X,
 } from 'lucide-vue-next'
@@ -29,7 +30,9 @@ import {
   getLatestExtractionRun,
   getLiteratureDetails,
   getPdfHighlights,
+  login as loginAccount,
   getReadingReport,
+  startPublicSession,
   startReadingReport,
   updateReadingReport,
   uploadFile,
@@ -49,6 +52,7 @@ import { resolveCandidatePublishTarget } from '@/lib/extractionPublish'
 import { buildPdfUploadExtractionItems } from '@/lib/extractionWorkspace'
 import { lazyComponent } from '@/lib/lazyComponent'
 import type { AppSection, AppView } from '@/lib/platform'
+import { setSession } from '@/lib/session'
 import type { HighlightRect } from '@/types/pdf-highlight'
 
 type FileUploadBridge = {
@@ -202,6 +206,12 @@ const viewSubtitle = computed(() => {
 })
 
 const operatorName = computed(() => sessionState.user?.displayName || t('common.operator_default'))
+const accountSwitcherOpen = ref(false)
+const accountLoginUsername = ref('')
+const accountLoginPassword = ref('')
+const accountSwitching = ref(false)
+const accountSwitchError = ref('')
+const accountLoginPasswordInputRef = ref<HTMLInputElement | null>(null)
 const databaseToolOpen = ref(false)
 type DatabaseToolFocus = {
   fileId: string
@@ -699,6 +709,11 @@ const activeAccountLabel = computed(() => {
     .replace(/工作区/g, '账户')
     .trim() || fallback
 })
+const activeAccountSubtitle = computed(() => {
+  const user = sessionState.user
+  if (!user) return isChinese.value ? '未登录' : 'Not signed in'
+  return `${user.username} · ${String(user.role || '').replace(/_/g, ' ')}`
+})
 const selectedFile = computed(() => batchFiles.value.find((file) => file.id === selectedFileId.value) || null)
 const selectedFileName = computed(() => selectedFile.value?.name || t('common.no_file_selected'))
 const runStateLabel = computed(() => {
@@ -725,6 +740,52 @@ function formatLabel(value: string) {
 function formatMappedLabel(value: string, map: Record<string, Parameters<typeof t>[0]>) {
   const normalized = String(value || '').trim().toLowerCase()
   return normalized && map[normalized] ? t(map[normalized]) : formatLabel(value)
+}
+
+function openAccountSwitcher() {
+  accountSwitcherOpen.value = !accountSwitcherOpen.value
+  accountSwitchError.value = ''
+  if (accountSwitcherOpen.value) {
+    accountLoginUsername.value = sessionState.user?.username === 'public-extractor' ? '' : (sessionState.user?.username || '')
+    window.setTimeout(() => accountLoginPasswordInputRef.value?.focus(), 30)
+  }
+}
+
+async function switchToAccount() {
+  const username = accountLoginUsername.value.trim()
+  const password = accountLoginPassword.value
+  if (!username || !password) {
+    accountSwitchError.value = isChinese.value ? '请输入用户名和密码。' : 'Enter username and password.'
+    return
+  }
+  accountSwitching.value = true
+  accountSwitchError.value = ''
+  try {
+    const response = await loginAccount(username, password)
+    setSession(response.accessToken, response.user)
+    accountLoginPassword.value = ''
+    accountSwitcherOpen.value = false
+  } catch (error: any) {
+    accountSwitchError.value = error?.response?.data?.detail || error?.message || (isChinese.value ? '账户切换失败。' : 'Account switch failed.')
+  } finally {
+    accountSwitching.value = false
+  }
+}
+
+async function switchToPublicAccount() {
+  accountSwitching.value = true
+  accountSwitchError.value = ''
+  try {
+    const response = await startPublicSession()
+    setSession(response.accessToken, response.user)
+    accountLoginUsername.value = ''
+    accountLoginPassword.value = ''
+    accountSwitcherOpen.value = false
+  } catch (error: any) {
+    accountSwitchError.value = error?.response?.data?.detail || error?.message || (isChinese.value ? '无法切回公共账户。' : 'Could not switch to public account.')
+  } finally {
+    accountSwitching.value = false
+  }
 }
 
 function handleSectionChange(section: string) {
@@ -2486,11 +2547,70 @@ function handleHomeAction(action: HomeSuggestedAction) {
               </button>
             </nav>
 
-            <div class="ml-auto flex items-center gap-3">
-              <span class="hidden max-w-[14rem] items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-600 lg:inline-flex">
+            <div class="relative ml-auto flex items-center gap-3">
+              <button
+                type="button"
+                class="hidden max-w-[16rem] items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 hover:text-[#0f7c82] lg:inline-flex"
+                :aria-expanded="accountSwitcherOpen"
+                aria-haspopup="dialog"
+                @click="openAccountSwitcher"
+              >
                 <Database class="h-4 w-4 text-slate-400" />
                 <span class="truncate">{{ activeAccountLabel }}</span>
-              </span>
+              </button>
+              <div
+                v-if="accountSwitcherOpen"
+                class="absolute right-0 top-12 z-50 w-[320px] rounded-lg border border-slate-200 bg-white p-4 text-left shadow-xl shadow-slate-950/10"
+                role="dialog"
+                aria-label="Account switcher"
+                @keydown.esc="accountSwitcherOpen = false"
+              >
+                <div class="flex items-start gap-3 border-b border-slate-100 pb-3">
+                  <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-[#e9fbf8] text-[#0f7c82]">
+                    <Shield class="h-4 w-4" />
+                  </span>
+                  <div class="min-w-0">
+                    <p class="truncate text-sm font-black text-slate-950">{{ activeAccountLabel }}</p>
+                    <p class="mt-0.5 truncate text-xs font-semibold text-slate-500">{{ activeAccountSubtitle }}</p>
+                  </div>
+                </div>
+
+                <form class="mt-3 space-y-2" @submit.prevent="switchToAccount">
+                  <input
+                    v-model="accountLoginUsername"
+                    type="text"
+                    autocomplete="username"
+                    class="h-10 w-full rounded-md border border-slate-200 px-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-[#0f7c82] focus:ring-2 focus:ring-[#0f7c82]/15"
+                    placeholder="Username"
+                  />
+                  <input
+                    ref="accountLoginPasswordInputRef"
+                    v-model="accountLoginPassword"
+                    type="password"
+                    autocomplete="current-password"
+                    class="h-10 w-full rounded-md border border-slate-200 px-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-[#0f7c82] focus:ring-2 focus:ring-[#0f7c82]/15"
+                    placeholder="Password"
+                  />
+                  <p v-if="accountSwitchError" class="text-xs font-semibold text-rose-600">{{ accountSwitchError }}</p>
+                  <div class="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      type="button"
+                      class="h-10 rounded-md border border-slate-200 text-sm font-black text-slate-600 transition hover:border-[#0f7c82]/30 hover:text-[#0f7c82]"
+                      :disabled="accountSwitching"
+                      @click="switchToPublicAccount"
+                    >
+                      公共账户
+                    </button>
+                    <button
+                      type="submit"
+                      class="h-10 rounded-md bg-[#0f7c82] text-sm font-black text-white shadow-sm transition hover:bg-[#0b6870] disabled:cursor-wait disabled:opacity-60"
+                      :disabled="accountSwitching"
+                    >
+                      {{ accountSwitching ? '切换中...' : '切换登录' }}
+                    </button>
+                  </div>
+                </form>
+              </div>
             </div>
           </header>
 
