@@ -71,34 +71,36 @@ function openEvidence(fieldKey: string, event: MouseEvent | KeyboardEvent) {
 
 <template>
   <div class="lubricant-recipe-cell ion-pair-signature min-w-0" :title="recipe.title">
-    <div class="ion-pair-header flex min-w-0 items-center gap-2">
-      <div class="ion-role-rail shrink-0">
-        <button
-          type="button"
-          class="ion-role-button ion-role-button--cation"
-          :class="[active && cationStructure ? 'ring-2 ring-blue-500 ring-offset-1 ring-offset-white dark:ring-offset-slate-950' : '', !cationStructure ? 'ion-role-button--muted' : '']"
-          :disabled="!cationStructure"
-          :title="cationStructure ? `Show ${cationStructure.label} structure` : 'Cation'"
-          @click.stop="openStructure(cationStructure)"
-        >
-          C+
-        </button>
-        <button
-          type="button"
-          class="ion-role-button ion-role-button--anion"
-          :class="[active && anionStructure ? 'ring-2 ring-blue-500 ring-offset-1 ring-offset-white dark:ring-offset-slate-950' : '', !anionStructure ? 'ion-role-button--muted' : '']"
-          :disabled="!anionStructure"
-          :title="anionStructure ? `Show ${anionStructure.label} structure` : 'Anion'"
-          @click.stop="openStructure(anionStructure)"
-        >
-          A-
-        </button>
-      </div>
-
+    <div class="ion-pair-header min-w-0">
       <div
-        class="ion-pair-lines min-w-0 flex-1 rounded-[9px] border border-slate-200 bg-white/95 px-2.5 py-1.5 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.9)] dark:border-slate-800 dark:bg-slate-950"
+        class="ion-pair-lines min-w-0 rounded-[9px] border border-slate-200 bg-white/95 px-2.5 py-1.5 shadow-[0_10px_24px_-24px_rgba(15,23,42,0.9)] dark:border-slate-800 dark:bg-slate-950"
         :class="recipe.kind === 'blend' ? 'ion-pair-lines--blend' : ''"
       >
+        <div class="ion-charge-orbit">
+          <button
+            type="button"
+            class="ion-charge-node ion-charge-node--positive"
+            :class="[active && cationStructure ? 'ring-2 ring-sky-400/80 ring-offset-1 ring-offset-white dark:ring-offset-slate-950' : '', !cationStructure ? 'ion-charge-node--muted' : '']"
+            :disabled="!cationStructure"
+            :title="cationStructure ? `Show ${cationStructure.label} structure` : 'Cation'"
+            aria-label="Show cation structure"
+            @click.stop="openStructure(cationStructure)"
+          >
+            +
+          </button>
+          <button
+            type="button"
+            class="ion-charge-node ion-charge-node--negative"
+            :class="[active && anionStructure ? 'ring-2 ring-emerald-400/80 ring-offset-1 ring-offset-white dark:ring-offset-slate-950' : '', !anionStructure ? 'ion-charge-node--muted' : '']"
+            :disabled="!anionStructure"
+            :title="anionStructure ? `Show ${anionStructure.label} structure` : 'Anion'"
+            aria-label="Show anion structure"
+            @click.stop="openStructure(anionStructure)"
+          >
+            -
+          </button>
+        </div>
+
         <div class="flex min-w-0 items-center gap-1.5">
           <span class="ion-row-label ion-row-label--cation">cation</span>
           <button
@@ -174,7 +176,7 @@ function openEvidence(fieldKey: string, event: MouseEvent | KeyboardEvent) {
 <style scoped>
 .ion-pair-lines {
   position: relative;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .ion-pair-lines::before {
@@ -193,45 +195,78 @@ function openEvidence(fieldKey: string, event: MouseEvent | KeyboardEvent) {
   background: linear-gradient(90deg, rgba(15, 124, 130, 0.65), rgba(16, 185, 129, 0.1));
 }
 
-.ion-role-rail {
+.ion-charge-orbit {
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  z-index: 2;
   display: grid;
-  gap: 3px;
-  width: 31px;
+  gap: 5px;
+  transform: translateY(-50%);
 }
 
-.ion-role-button {
+.ion-charge-orbit::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 4px;
+  bottom: 4px;
+  width: 1px;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, rgba(14, 165, 233, 0.22), rgba(15, 124, 130, 0.4), rgba(16, 185, 129, 0.24));
+  box-shadow: 0 0 10px rgba(15, 124, 130, 0.18);
+}
+
+.ion-charge-node {
+  position: relative;
   display: inline-flex;
-  height: 21px;
-  width: 31px;
+  height: 15px;
+  width: 15px;
   align-items: center;
   justify-content: center;
-  border-radius: 7px;
+  border-radius: 999px;
   border: 1px solid transparent;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 950;
   line-height: 1;
-  transition: transform 140ms ease, border-color 140ms ease, background-color 140ms ease;
+  box-shadow: 0 8px 18px -12px rgba(15, 23, 42, 0.8);
+  transition: transform 160ms ease, border-color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+  animation: ionChargePulse 2.6s ease-in-out infinite;
 }
 
-.ion-role-button:not(:disabled):hover {
-  transform: translateY(-1px);
+.ion-charge-node:not(:disabled):hover {
+  transform: translateY(-1px) scale(1.08);
 }
 
-.ion-role-button--cation {
+.ion-charge-node--positive {
   border-color: rgba(56, 189, 248, 0.46);
-  background: rgba(236, 254, 255, 0.96);
+  background: radial-gradient(circle at 35% 30%, #ffffff 0 22%, #dff8ff 23% 62%, #b8eefb 100%);
   color: #036780;
 }
 
-.ion-role-button--anion {
+.ion-charge-node--negative {
+  animation-delay: 1.15s;
   border-color: rgba(52, 211, 153, 0.46);
-  background: rgba(236, 253, 245, 0.96);
+  background: radial-gradient(circle at 35% 30%, #ffffff 0 22%, #dcfce7 23% 62%, #b8f7d9 100%);
   color: #047857;
 }
 
-.ion-role-button--muted {
+.ion-charge-node--muted {
   cursor: default;
-  opacity: 0.58;
+  opacity: 0.42;
+  animation: none;
+}
+
+@keyframes ionChargePulse {
+  0%, 100% {
+    box-shadow: 0 8px 18px -12px rgba(15, 23, 42, 0.8), 0 0 0 0 rgba(15, 124, 130, 0);
+  }
+  45% {
+    box-shadow: 0 10px 20px -13px rgba(15, 23, 42, 0.78), 0 0 0 4px rgba(15, 124, 130, 0.08);
+  }
+  60% {
+    transform: translateX(1px);
+  }
 }
 
 .ion-row-label {
@@ -297,7 +332,6 @@ function openEvidence(fieldKey: string, event: MouseEvent | KeyboardEvent) {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.35rem;
-  margin-left: 39px;
   margin-top: 0.45rem;
 }
 

@@ -87,7 +87,7 @@ describe('App home shell', () => {
   })
 
   it('opens completed PDF upload extraction directly in Database instead of the results preview', () => {
-    const startExtractionSource = sourceSlice('async function startPdfUploadExtraction()', 'function compactAuthorLine')
+    const startExtractionSource = sourceSlice('async function startPdfUploadExtraction()', 'function pdfUploadJournalYearLine')
 
     expect(source).toContain('async function openCompletedPdfUploadItemsInDatabase')
     expect(startExtractionSource).toContain('await openCompletedPdfUploadItemsInDatabase(completedItems)')
@@ -132,7 +132,7 @@ describe('App home shell', () => {
     expect(source).toContain('Stop request failed on')
     expect(source).toContain('Stopping took too long')
     expect(source).toContain('pdfUploadExtractionAbortRequested')
-    expect(source).toContain('Stop extraction')
+    expect(source).toContain("{{ pdfUploadExtractionCancelling ? 'Stopping...' : 'Stop' }}")
     expect(source).toContain('Continue in background')
     expect(source).not.toContain('Stop and upload new PDF')
     expect(source).not.toContain('stopPdfUploadExtractionAndUploadNew')
@@ -185,7 +185,9 @@ describe('App home shell', () => {
     expect(source).toContain('Math.max(weakCandidateCount, candidateCount)')
     expect(source).toContain("status: records > 0 ? 'completed' : 'no_data'")
     expect(source).toMatch(/if \(\['no_data', 'completed'\]\.includes\(normalizedStatus\) && !pdfUploadRunHasReviewableData\(run\)\)[\s\S]*summary\?\.no_data_reason/)
-    expect(source).toContain(":role=\"item.status === 'completed' && item.records > 0 ? 'button' : undefined\"")
+    expect(source).toContain('<ReadingReportPanel')
+    expect(source).toContain('@click="generatePdfUploadCandidateDraft"')
+    expect(source).toContain('@click="startPdfUploadExtraction"')
     expect(source).not.toContain('const result = await waitForPdfUploadExtractionRun')
   })
 
@@ -267,7 +269,7 @@ describe('App home shell', () => {
       '<!-- Workspace top bar -->',
     )
 
-    expect(source).toContain("const pdfUploadStepLabels = ['Add papers', 'Choose mode', 'Extracting']")
+    expect(source).toContain("const pdfUploadStepLabels = ['Add papers', 'Read', 'Review']")
     expect(source).toContain('const pdfUploadVisibleExtractionPresetOptions')
     expect(modalSource).toContain('Extract papers')
     // Step indicator renders the labels data-driven from pdfUploadStepLabels (asserted above)

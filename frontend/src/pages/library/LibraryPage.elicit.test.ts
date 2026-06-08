@@ -4,15 +4,27 @@ import { resolve } from 'node:path'
 
 const source = readFileSync(resolve(__dirname, 'LibraryPage.vue'), 'utf-8')
 const apiSource = readFileSync(resolve(__dirname, '../../lib/api.ts'), 'utf-8')
+const previewSource = readFileSync(resolve(__dirname, '../../../public/previews/elicit-library-table.html'), 'utf-8')
 const sourceSlice = (start: string, end: string) => source.slice(source.indexOf(start), source.indexOf(end))
 
 describe('LibraryPage Elicit-style extract workflow', () => {
-  it('keeps Extract data embedded in the Library selection panel', () => {
-    expect(source).toContain('New from selection')
+  it('keeps Library focused by removing the selection action panel', () => {
+    expect(source).not.toContain('New from selection')
+    expect(source).not.toContain('Start systematic review')
+    expect(source).not.toContain('<span>Open</span>')
+    expect(source).toContain('grid-cols-[270px_minmax(760px,1fr)]')
+    expect(source).toContain('data-library-layout="compact-no-selection-panel"')
+    expect(source).toContain('data-library-ui-version="selection-panel-removed-20260608"')
     expect(source).toContain('Extract data')
-    expect(source).toContain('Start systematic review')
     expect(source).toContain('extractMode')
     expect(source).toContain('selectedPaperIds')
+  })
+
+  it('removes the same selection panel from the public Library preview', () => {
+    expect(previewSource).not.toContain('New from selection')
+    expect(previewSource).not.toContain('Start systematic review')
+    expect(previewSource).not.toContain('id="extractAction"')
+    expect(previewSource).toContain('grid-template-columns: 270px minmax(760px, 1fr);')
   })
 
   it('opens extraction workflow as a modal over Library', () => {
@@ -26,10 +38,9 @@ describe('LibraryPage Elicit-style extract workflow', () => {
     expect(source).not.toContain('<main v-else')
   })
 
-  it('opens Extract data directly into the column extraction table', () => {
-    expect(source).toContain('function openExtractData()')
+  it('keeps the Extract data workspace as a modal column extraction table', () => {
+    expect(source).not.toContain('function openExtractData()')
     expect(source).toContain('extractMode.value = true')
-    expect(source).not.toContain('function openExtractData() {\n  openUploadModal()')
     expect(source).toContain('presetExtractionColumns')
     expect(source).toContain("'Lubrication'")
     expect(source).not.toContain("'Tribology'")
@@ -358,7 +369,7 @@ describe('LibraryPage Elicit-style extract workflow', () => {
 
   it('keeps Library as a sidebar-led paper shelf instead of the Database filter deck', () => {
     expect(source).toContain('Collections')
-    expect(source).toContain('grid-cols-[270px_minmax(680px,1fr)_462px]')
+    expect(source).toContain('grid-cols-[270px_minmax(760px,1fr)]')
     expect(source).toContain('placeholder="Search papers"')
     expect(source).toContain('@click="selectedCollection = collection.key"')
     expect(source).toContain("libraryViewMode === 'detail'")

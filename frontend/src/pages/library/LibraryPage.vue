@@ -34,9 +34,11 @@ import {
   getPdfPlainText,
   getLiteratureDetails,
   getLatestExtractionRun,
+  getReadingReport,
   listLiterature,
   resetFigureCropOverride,
   saveFigureCropOverride,
+  updateReadingReport,
   uploadFile,
   type ExtractionRunDetail,
   type ExtractionSummary,
@@ -46,6 +48,7 @@ import {
   type PdfPageImageResponse,
   type Literature,
   type LiteratureMetadata,
+  type ReadingReportResponse,
 } from '@/lib/api'
 import {
   extractionSaveStatus,
@@ -59,6 +62,8 @@ import {
 } from '@/lib/libraryExtractionWorkflow'
 import { sessionState } from '@/lib/session'
 import ChemicalText from '@/components/ChemicalText.vue'
+import EmbeddedExtractionProcess from '@/components/extraction/EmbeddedExtractionProcess.vue'
+import ReadingReportPanel from '@/components/extraction/ReadingReportPanel.vue'
 import PdfViewerWithHighlight from '@/components/PdfViewerWithHighlight.vue'
 import { isPaperReviewed, reviewBadgesForPaper, type ReviewBadge } from './reviewBadges'
 
@@ -210,6 +215,23 @@ const activeExtractionStageIndex = computed(() => {
   return Math.max(0, extractionStageIndex(activeExtractionItem.value.stage))
 })
 const activeExtractionCandidateCount = computed(() => activeExtractionItem.value?.candidateCount ?? 0)
+const selectedUploadRawPaperId = ref<string | null>(null)
+const uploadRawOutputOpen = ref(true)
+const selectedUploadRawItem = computed(() =>
+  uploadExtractionItems.value.find((item) => item.id === selectedUploadRawPaperId.value)
+  || activeExtractionItem.value
+  || uploadExtractionItems.value[0]
+  || null,
+)
+const selectedUploadRawLiteratureId = computed(() => {
+  const n = Number(selectedUploadRawItem.value?.id)
+  return Number.isFinite(n) && n > 0 ? n : null
+})
+const selectedUploadRawExtractorType = computed<ExtractorType>(() => (
+  selectedUploadRawItem.value && presetForUploadedPaper(selectedUploadRawItem.value) === 'diffusion'
+    ? 'diffusion'
+    : 'tribology'
+))
 
 // Elapsed + ETA for the running extraction. Both derive from real signals (actual
 // start time + the real progress percent), so neither is a fake timer.
@@ -381,7 +403,14 @@ function upsertUploadedPaperInLibrary(paper: LiteratureMetadata & { id: string }
 
 const selectedPaper = ref<Literature | null>(null)
 const selectedPaperDetails = ref<any | null>(null)
-const paperDetailTab = ref<'plain' | 'pdf' | 'figures'>('plain')
+const paperDetailTab = ref<'report' | 'plain' | 'pdf' | 'figures'>('report')
+
+function syncSelectedPaperFromDetails(details: Partial<Literature> | null | undefined) {
+  if (!selectedPaper.value || !details) return
+  const merged = { ...selectedPaper.value, ...details }
+  selectedPaper.value = merged
+  items.value = items.value.map((item) => item.id === merged.id ? { ...item, ...merged } : item)
+}
 
 // Per-paper hub: turn the detail view into a working dashboard (status, key
 // parameters, and jump-into-Database actions) rather than a read-only reader.
@@ -393,7 +422,7 @@ function paperHubFirstNumber(value: any): number | null {
 }
 
 const paperHubStats = computed(() => {
-  const paper = selectedPaper.value as any
+  const paper = { ...(selectedPaper.value as any), ...(selectedPaperDetails.value || {}) }
   if (!paper) return { records: 0, candidates: 0, status: '' }
   const records = Number(paper.tribologyRecordCount || 0) + Number(paper.diffusionRecordCount || 0)
     || Number(paper.recordCount || 0)
@@ -403,7 +432,7 @@ const paperHubStats = computed(() => {
 })
 
 const paperPrimaryDataset = computed<'tribology' | 'diffusion'>(() => {
-  const paper = selectedPaper.value as any
+  const paper = { ...(selectedPaper.value as any), ...(selectedPaperDetails.value || {}) }
   const diffusion = Number(paper?.diffusionRecordCount || 0) + Number(paper?.diffusionCandidateCount || 0)
   const tribology = Number(paper?.tribologyRecordCount || 0) + Number(paper?.tribologyCandidateCount || 0)
   return diffusion > tribology ? 'diffusion' : 'tribology'
@@ -448,6 +477,12 @@ const paperDetailLoading = ref(false)
 const paperDetailError = ref('')
 const paperPlainText = ref('')
 const paperFigures = ref<PdfFigurePreview[]>([])
+const paperReadingReport = ref<ReadingReportResponse | null>(null)
+const paperReadingReportLoading = ref(false)
+const paperReadingReportError = ref('')
+const paperReadingReportSaving = ref(false)
+const paperReadingReportSaveError = ref('')
+const paperReadingReportSaveMessage = ref('')
 const expandedFigure = ref<PdfFigurePreview | null>(null)
 const serverCanAdjustCrops = ref(false)
 const cropEditorFigure = ref<PdfFigurePreview | null>(null)
@@ -597,6 +632,18 @@ const extractionDisplayTemplate = computed(() => activeExtractionTemplate.value 
 const progressScopeIds = computed(() => extractionActivePaperIds.value.length ? extractionActivePaperIds.value : selectedPaperIds.value)
 const progressItems = computed(() => progressScopeIds.value.map((id) => extractionProgress.value[id])
   .filter((item): item is ExtractionProgressItem => Boolean(item)))
+const selectedLibraryRawPaperId = ref<number | null>(null)
+const libraryRawOutputOpen = ref(true)
+const selectedLibraryRawItem = computed(() =>
+  progressItems.value.find((item) => item.paperId === selectedLibraryRawPaperId.value)
+  || progressItems.value.find((item) => !isTerminalStatus(item.status))
+  || progressItems.value[0]
+  || null,
+)
+const selectedLibraryRawLiteratureId = computed(() => selectedLibraryRawItem.value?.paperId ?? null)
+const selectedLibraryRawExtractorType = computed<ExtractorType>(() =>
+  extractionProcessExtractorType(activeExtractionTemplate.value || extractionDisplayTemplate.value),
+)
 const finishedProgressCount = computed(() => progressItems.value.filter((item) => isTerminalStatus(item.status)).length)
 const extractionProgressPercent = computed(() => {
   if (progressScopeIds.value.length === 0) return 0
@@ -827,13 +874,20 @@ function plainTextParagraphs(text: string) {
 async function openPaperDetail(paper: Literature) {
   selectedPaper.value = paper
   selectedPaperDetails.value = null
-  paperDetailTab.value = 'plain'
+  paperDetailTab.value = 'report'
   paperPlainText.value = ''
   paperFigures.value = []
+  paperReadingReport.value = null
+  paperReadingReportError.value = ''
+  paperReadingReportSaveError.value = ''
+  paperReadingReportSaveMessage.value = ''
   serverCanAdjustCrops.value = false
   closeCropEditor()
   paperDetailError.value = ''
-  await loadPaperDetail()
+  await Promise.all([
+    loadPaperDetail(),
+    loadPaperReadingReport(),
+  ])
 }
 
 function closePaperDetail() {
@@ -841,6 +895,10 @@ function closePaperDetail() {
   selectedPaperDetails.value = null
   paperPlainText.value = ''
   paperFigures.value = []
+  paperReadingReport.value = null
+  paperReadingReportError.value = ''
+  paperReadingReportSaveError.value = ''
+  paperReadingReportSaveMessage.value = ''
   expandedFigure.value = null
   serverCanAdjustCrops.value = false
   closeCropEditor()
@@ -857,6 +915,7 @@ async function loadPaperDetail() {
       getPdfPlainText(selectedPaper.value.id).catch(() => null),
     ])
     selectedPaperDetails.value = details
+    syncSelectedPaperFromDetails(details)
     if (textResponse?.text) paperPlainText.value = textResponse.text
   } catch (err: any) {
     paperDetailError.value = err?.message || 'Failed to load paper.'
@@ -865,10 +924,67 @@ async function loadPaperDetail() {
   }
 }
 
-async function switchPaperDetailTab(tab: 'plain' | 'pdf' | 'figures') {
+function paperReadingReportTypes(): ExtractorType[] {
+  return paperPrimaryDataset.value === 'diffusion'
+    ? ['diffusion', 'tribology']
+    : ['tribology', 'diffusion']
+}
+
+async function loadPaperReadingReport() {
+  if (!selectedPaper.value) return
+  paperReadingReportLoading.value = true
+  paperReadingReportError.value = ''
+  paperReadingReportSaveMessage.value = ''
+  try {
+    let fallbackReport: ReadingReportResponse | null = null
+    for (const extractorType of paperReadingReportTypes()) {
+      const report = await getReadingReport(selectedPaper.value.id, extractorType)
+      if (report.status !== 'missing') {
+        paperReadingReport.value = report
+        return
+      }
+      fallbackReport = fallbackReport || report
+    }
+    paperReadingReport.value = fallbackReport
+  } catch (err: any) {
+    paperReadingReport.value = null
+    paperReadingReportError.value = err?.message || 'Failed to load reading report.'
+  } finally {
+    paperReadingReportLoading.value = false
+  }
+}
+
+async function savePaperReadingReport(markdown: string) {
+  if (!selectedPaper.value || paperReadingReportSaving.value) return
+  const extractorType = paperReadingReport.value?.extractor_type || paperPrimaryDataset.value
+  const reportChanged = markdown.trim() !== (paperReadingReport.value?.report_markdown || '').trim()
+  paperReadingReportSaving.value = true
+  paperReadingReportSaveError.value = ''
+  paperReadingReportSaveMessage.value = ''
+  try {
+    paperReadingReport.value = await updateReadingReport(selectedPaper.value.id, markdown, extractorType)
+    paperReadingReportSaveMessage.value = reportChanged
+      ? 'Report saved to Library. Generate candidates again from the edited report.'
+      : 'Report saved to Library.'
+    if (reportChanged) {
+      await loadPaperDetail()
+    }
+  } catch (err: any) {
+    paperReadingReportSaveError.value = err?.response?.data?.detail || err?.message || 'Failed to save reading report.'
+  } finally {
+    paperReadingReportSaving.value = false
+  }
+}
+
+async function switchPaperDetailTab(tab: 'report' | 'plain' | 'pdf' | 'figures') {
   paperDetailTab.value = tab
-  if (!selectedPaper.value || tab !== 'figures') return
-  await loadPaperFigures()
+  if (!selectedPaper.value) return
+  if (tab === 'report' && !paperReadingReport.value) {
+    await loadPaperReadingReport()
+  }
+  if (tab === 'figures') {
+    await loadPaperFigures()
+  }
 }
 
 async function loadPaperFigures() {
@@ -1129,13 +1245,6 @@ function toggleAllVisible() {
     : Array.from(new Set([...selectedPaperIds.value, ...visibleIds]))
 }
 
-function openExtractData() {
-  extractMode.value = true
-  statusMessage.value = selectedPaperIds.value.length > 0
-    ? 'Choose columns, then run extraction to populate a new Database table.'
-    : 'Select papers in Library, then add columns and run extraction.'
-}
-
 function addExtractionColumn() {
   const label = newExtractionColumnName.value.trim()
   if (!label) return
@@ -1198,6 +1307,18 @@ function libraryExtractionEvidenceDatabaseTarget(row: { id: number, doi?: string
   }
 }
 
+function extractionProcessExtractorType(template: ExtractTemplateKey | null = extractionDisplayTemplate.value): ExtractorType {
+  const types = extractorTypesForTemplate(template || 'lubrication')
+  return types.includes('diffusion') ? 'diffusion' : 'tribology'
+}
+
+function inspectLibraryRawOutput(item?: ExtractionProgressItem) {
+  const paperId = item?.paperId ?? selectedPaperIds.value[0]
+  if (!paperId) return
+  selectedLibraryRawPaperId.value = paperId
+  libraryRawOutputOpen.value = true
+}
+
 function uploadExtractionDatabaseTarget(items: UploadExtractionItem[] = uploadExtractionItems.value): LibraryDatabaseTarget | undefined {
   const target = items.find((item) => item.status === 'completed' && item.records > 0)
   if (!target) return undefined
@@ -1206,6 +1327,15 @@ function uploadExtractionDatabaseTarget(items: UploadExtractionItem[] = uploadEx
     doi: target.doi || '',
     dataset: presetForUploadedPaper(target) === 'diffusion' ? 'diffusion' : 'tribology',
   }
+}
+
+function inspectUploadRawOutput(item?: UploadExtractionItem) {
+  const target = item
+    || uploadExtractionItems.value.find((entry) => ['extracting', 'queued'].includes(entry.status))
+    || uploadExtractionItems.value[0]
+  if (!target) return
+  selectedUploadRawPaperId.value = target.id
+  uploadRawOutputOpen.value = true
 }
 
 function openUploadModal() {
@@ -1594,6 +1724,8 @@ async function startUploadedPaperExtraction() {
     message: 'Queued for Smart extraction.',
     records: 0,
   }))
+  selectedUploadRawPaperId.value = papersToExtract[0]?.id || null
+  uploadRawOutputOpen.value = true
 
   let completed = 0
   let failed = 0
@@ -1702,6 +1834,8 @@ async function runExtraction() {
   extractionRunExtractorTypes.value = extractorTypes
   activeExtractionTemplate.value = selectedTemplate.value
   extractionActivePaperIds.value = [...selectedPaperIds.value]
+  selectedLibraryRawPaperId.value = extractionActivePaperIds.value[0] || null
+  libraryRawOutputOpen.value = true
   runningExtraction.value = true
   cancellingExtraction.value = false
   statusMessage.value = `Extraction submitted for ${extractorTypes.map((type) => type === 'diffusion' ? 'Diffusion' : 'Lubrication').join(' + ')} columns.`
@@ -2098,7 +2232,7 @@ watch(() => props.selectedFileId, () => {
             Back
           </button>
 
-          <div class="mx-auto max-w-5xl">
+          <div class="paper-detail-shell mx-auto max-w-[54rem]">
             <h1 class="flex min-w-0 items-start gap-2 text-xl font-extrabold leading-snug tracking-tight text-slate-900">
               <span class="min-w-0">{{ titleFor(selectedPaper) }}</span>
               <CheckCircle
@@ -2107,7 +2241,7 @@ watch(() => props.selectedFileId, () => {
                 class="mt-0.5 h-5 w-5 shrink-0 text-emerald-600"
               />
             </h1>
-            <p class="mt-4 max-w-4xl text-sm leading-6 text-slate-500">
+            <p class="mt-4 max-w-3xl text-sm leading-6 text-slate-500">
               {{ detailAuthors((selectedPaperDetails || selectedPaper).authors) }}
             </p>
             <p v-if="paperMetaLine(selectedPaper)" class="mt-1 text-sm text-slate-500">
@@ -2125,6 +2259,14 @@ watch(() => props.selectedFileId, () => {
                 Source
               </a>
               <div class="ml-auto inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1">
+                <button
+                  type="button"
+                  class="h-8 rounded-md px-4 text-sm font-extrabold transition"
+                  :class="paperDetailTab === 'report' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-700 hover:bg-white/70'"
+                  @click="switchPaperDetailTab('report')"
+                >
+                  Report
+                </button>
                 <button
                   type="button"
                   class="h-8 rounded-md px-4 text-sm font-extrabold transition"
@@ -2152,70 +2294,57 @@ watch(() => props.selectedFileId, () => {
               </div>
             </div>
 
-            <!-- Per-paper hub: extraction status, key parameters, jump-into-Database actions -->
-            <div class="mt-6 grid gap-3 sm:grid-cols-2" data-testid="paper-hub">
-              <div class="rounded-xl border border-slate-200 bg-white p-4">
-                <div class="text-[11px] font-black uppercase tracking-[0.14em] text-slate-400">Extraction</div>
-                <div class="mt-2 flex flex-wrap items-baseline gap-x-6 gap-y-1">
-                  <div>
-                    <span class="text-2xl font-black text-slate-900">{{ paperHubStats.records }}</span>
-                    <span class="ml-1 text-xs font-bold text-slate-500">records</span>
-                  </div>
-                  <div>
-                    <span class="text-2xl font-black" :class="paperHubStats.candidates > 0 ? 'text-amber-600' : 'text-slate-900'">{{ paperHubStats.candidates }}</span>
-                    <span class="ml-1 text-xs font-bold text-slate-500">need review</span>
-                  </div>
-                </div>
-                <div v-if="paperHubStats.status" class="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-slate-500">
-                  <span
-                    class="h-2 w-2 rounded-full"
-                    :class="paperHubStats.status === 'completed' ? 'bg-emerald-500' : paperHubStats.status === 'failed' ? 'bg-rose-500' : 'bg-amber-500'"
-                  />
-                  {{ paperHubStats.status }}
-                </div>
-              </div>
-
-              <div class="rounded-xl border border-slate-200 bg-white p-4">
-                <div class="text-[11px] font-black uppercase tracking-[0.14em] text-slate-400">Key parameters</div>
-                <dl v-if="paperKeyParams.hasAny" class="mt-2 grid grid-cols-2 gap-x-5 gap-y-1.5 text-sm">
-                  <div v-if="paperKeyParams.cof" class="flex items-baseline justify-between gap-2">
-                    <dt class="font-bold text-slate-400">COF</dt>
-                    <dd class="font-black text-slate-700">{{ paperKeyParams.cof }}</dd>
-                  </div>
-                  <div v-if="paperKeyParams.temp" class="flex items-baseline justify-between gap-2">
-                    <dt class="font-bold text-slate-400">Temp</dt>
-                    <dd class="font-black text-slate-700">{{ paperKeyParams.temp }} °C</dd>
-                  </div>
-                  <div v-if="paperKeyParams.load" class="flex items-baseline justify-between gap-2">
-                    <dt class="font-bold text-slate-400">Load</dt>
-                    <dd class="font-black text-slate-700">{{ paperKeyParams.load }}</dd>
-                  </div>
-                  <div v-if="paperKeyParams.commonIl" class="col-span-2 flex items-baseline justify-between gap-2">
-                    <dt class="font-bold text-slate-400">IL</dt>
-                    <dd class="min-w-0 truncate text-right font-black text-slate-700"><ChemicalText :text="paperKeyParams.commonIl" /></dd>
-                  </div>
-                </dl>
-                <p v-else class="mt-2 text-sm font-semibold text-slate-400">No extracted records yet.</p>
-              </div>
-            </div>
-
-            <div class="mt-3 flex flex-wrap items-center gap-2">
+            <!-- Per-paper hub: compact so PDF/figure content stays close to the top. -->
+            <div
+              class="paper-detail-compact-hub mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"
+              data-testid="paper-hub"
+            >
+              <span class="inline-flex items-center gap-1.5 rounded-md bg-slate-50 px-2.5 py-1 text-xs font-black text-slate-700">
+                <Database class="h-3.5 w-3.5 text-[#0f7c82]" />
+                {{ paperHubStats.records }} records
+              </span>
+              <span
+                class="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-black"
+                :class="paperHubStats.candidates > 0 ? 'bg-amber-50 text-amber-700' : 'bg-slate-50 text-slate-500'"
+              >
+                {{ paperHubStats.candidates }} need review
+              </span>
+              <span v-if="paperHubStats.status" class="inline-flex items-center gap-1.5 rounded-md bg-slate-50 px-2.5 py-1 text-xs font-black text-slate-500">
+                <span
+                  class="h-2 w-2 rounded-full"
+                  :class="paperHubStats.status === 'completed' ? 'bg-emerald-500' : paperHubStats.status === 'failed' ? 'bg-rose-500' : 'bg-amber-500'"
+                />
+                {{ paperHubStats.status }}
+              </span>
+              <span v-if="paperKeyParams.cof" class="inline-flex items-center gap-1.5 rounded-md bg-slate-50 px-2.5 py-1 text-xs font-black text-slate-700">
+                <span class="text-slate-400">COF</span>{{ paperKeyParams.cof }}
+              </span>
+              <span v-if="paperKeyParams.temp" class="inline-flex items-center gap-1.5 rounded-md bg-slate-50 px-2.5 py-1 text-xs font-black text-slate-700">
+                <span class="text-slate-400">Temp</span>{{ paperKeyParams.temp }} °C
+              </span>
+              <span v-if="paperKeyParams.load" class="inline-flex items-center gap-1.5 rounded-md bg-slate-50 px-2.5 py-1 text-xs font-black text-slate-700">
+                <span class="text-slate-400">Load</span>{{ paperKeyParams.load }}
+              </span>
+              <span v-if="paperKeyParams.commonIl" class="inline-flex min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md bg-slate-50 px-2.5 py-1 text-xs font-black text-slate-700">
+                <span class="shrink-0 text-slate-400">IL</span>
+                <span class="min-w-0 truncate"><ChemicalText :text="paperKeyParams.commonIl" /></span>
+              </span>
               <button
                 type="button"
-                class="inline-flex h-10 items-center gap-2 rounded-lg bg-[#0f7c82] px-4 text-sm font-black text-white transition hover:bg-[#0b6870] disabled:cursor-not-allowed disabled:opacity-55"
+                class="ml-auto inline-flex h-8 items-center gap-2 rounded-md bg-[#0f7c82] px-3 text-xs font-black text-white transition hover:bg-[#0b6870] disabled:cursor-not-allowed disabled:opacity-55"
                 :disabled="paperHubStats.records === 0 && paperHubStats.candidates === 0"
                 @click="openPaperInDatabase('record')"
               >
-                <Database class="h-4 w-4" />
+                <Database class="h-3.5 w-3.5" />
                 Open in Database
               </button>
               <button
                 v-if="paperHubStats.candidates > 0"
                 type="button"
-                class="inline-flex h-10 items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 text-sm font-black text-amber-700 transition hover:bg-amber-100"
+                class="inline-flex h-8 items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 text-xs font-black text-amber-700 transition hover:bg-amber-100"
                 @click="openPaperInDatabase('candidate')"
               >
-                <ArrowRight class="h-4 w-4" />
+                <ArrowRight class="h-3.5 w-3.5" />
                 Review {{ paperHubStats.candidates }}
               </button>
             </div>
@@ -2226,7 +2355,38 @@ watch(() => props.selectedFileId, () => {
           <div v-if="paperDetailError" class="mx-auto mt-16 max-w-3xl rounded-lg border border-red-200 bg-red-50 p-5 text-sm font-semibold text-red-700">
             {{ paperDetailError }}
           </div>
-          <div v-else-if="paperDetailTab === 'plain'" class="mx-auto max-w-4xl py-10">
+          <div v-else-if="paperDetailTab === 'report'" class="paper-detail-shell mx-auto max-w-[54rem] py-8">
+            <div v-if="paperReadingReportLoading" class="flex h-52 items-center justify-center gap-2 text-slate-500">
+              <Loader2 class="h-5 w-5 animate-spin" />
+              Loading report...
+            </div>
+            <template v-else-if="paperReadingReport?.status === 'completed' && paperReadingReport.report_markdown">
+              <ReadingReportPanel
+                :reader="true"
+                :editable="true"
+                :report="paperReadingReport"
+                :loading="false"
+                :saving="paperReadingReportSaving"
+                :save-error="paperReadingReportSaveError"
+                save-label="Save to Library"
+                @save="savePaperReadingReport"
+              />
+              <p
+                v-if="paperReadingReportSaveMessage"
+                class="mt-3 rounded-md border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700"
+              >
+                {{ paperReadingReportSaveMessage }}
+              </p>
+            </template>
+            <div v-else class="flex h-52 flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50/70 px-5 text-center text-slate-400">
+              <Sparkles class="h-9 w-9" />
+              <p class="mt-3 text-sm font-extrabold text-slate-600">No reading report yet.</p>
+              <p class="mt-1 max-w-md text-sm font-medium leading-6">
+                {{ paperReadingReportError || 'Run Extract to generate a readable report for this paper.' }}
+              </p>
+            </div>
+          </div>
+          <div v-else-if="paperDetailTab === 'plain'" class="paper-detail-shell mx-auto max-w-[54rem] py-8">
             <div v-if="paperDetailLoading && !paperPlainText" class="flex h-52 items-center justify-center gap-2 text-slate-500">
               <Loader2 class="h-5 w-5 animate-spin" />
               Loading plain text...
@@ -2244,7 +2404,7 @@ watch(() => props.selectedFileId, () => {
           <div
             v-else-if="paperDetailTab === 'pdf'"
             data-testid="paper-detail-pdf-pane"
-            class="h-full min-h-[calc(100vh-17rem)] bg-slate-100 py-3"
+            class="paper-detail-shell mx-auto h-full min-h-[calc(100vh-17rem)] max-w-[54rem] bg-slate-100 py-3"
           >
             <PdfViewerWithHighlight
               v-if="selectedPaper.hasPdf !== false"
@@ -2256,7 +2416,7 @@ watch(() => props.selectedFileId, () => {
               <p class="mt-3 text-sm font-semibold">No PDF preview available.</p>
             </div>
           </div>
-          <div v-else class="mx-auto max-w-[62rem] py-10">
+          <div v-else class="paper-detail-shell mx-auto max-w-[54rem] py-8">
             <div v-if="paperDetailLoading && paperFigures.length === 0" class="flex h-52 items-center justify-center gap-2 text-slate-500">
               <Loader2 class="h-5 w-5 animate-spin" />
               Loading figures...
@@ -2318,12 +2478,12 @@ watch(() => props.selectedFileId, () => {
                   <div class="bg-white p-4">
                     <div class="mx-auto flex w-fit max-w-full justify-center overflow-hidden border border-slate-200 bg-white px-3 py-3 shadow-sm">
                       <img
-                        class="h-auto max-h-[24rem] max-w-[54rem] object-contain"
+                        class="h-auto max-h-[24rem] max-w-full object-contain"
                         :src="figureImageSrc(figure)"
                         :alt="`${figure.label} page ${figure.page}`"
                       />
                     </div>
-                    <p class="mx-auto mt-4 max-w-[54rem] text-[15px] leading-6 text-slate-700">{{ figure.caption }}</p>
+                    <p class="mx-auto mt-4 max-w-full text-[15px] leading-6 text-slate-700">{{ figure.caption }}</p>
                   </div>
                 </article>
               </div>
@@ -2357,7 +2517,11 @@ watch(() => props.selectedFileId, () => {
         </div>
       </div>
 
-      <section class="grid h-[calc(100vh-10rem)] grid-cols-[270px_minmax(680px,1fr)_462px] gap-3">
+      <section
+        class="grid h-[calc(100vh-10rem)] grid-cols-[270px_minmax(760px,1fr)] gap-3"
+        data-library-layout="compact-no-selection-panel"
+        data-library-ui-version="selection-panel-removed-20260608"
+      >
         <aside class="overflow-hidden rounded-lg border border-slate-200 bg-white">
           <div class="border-b border-slate-200 px-4 py-3">
             <p class="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Collections</p>
@@ -2580,26 +2744,6 @@ watch(() => props.selectedFileId, () => {
           </div>
         </section>
 
-        <aside class="grid grid-rows-[68px_1fr] rounded-lg border border-slate-200 bg-white">
-          <div class="flex items-center border-b border-slate-200 px-5 text-base font-extrabold">
-            New from selection
-          </div>
-          <div class="p-4">
-            <p class="mb-4 text-sm font-semibold text-slate-500">{{ selectedCountLabel }}</p>
-            <button type="button" class="mb-3 flex min-h-12 w-full items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 text-left text-sm font-extrabold text-slate-500">
-              <span>Start systematic review</span>
-              <span>Open</span>
-            </button>
-            <button
-              type="button"
-              class="flex min-h-12 w-full items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 text-left text-sm font-extrabold text-slate-500"
-              @click="openExtractData"
-            >
-              <span>Extract data</span>
-              <span>Open</span>
-            </button>
-          </div>
-        </aside>
       </section>
       </template>
     </main>
@@ -2626,6 +2770,15 @@ watch(() => props.selectedFileId, () => {
               @click="columnComposerOpen = !columnComposerOpen"
             >
               Add column
+            </button>
+            <button
+              v-if="selectedPaperIds.length > 0 || progressItems.length > 0"
+              type="button"
+              class="inline-flex h-10 items-center gap-2 rounded-lg border border-teal-200 bg-teal-50 px-4 text-sm font-bold text-teal-800 transition hover:bg-teal-100"
+              @click="libraryRawOutputOpen = !libraryRawOutputOpen"
+            >
+              <FileText class="h-4 w-4" />
+              {{ libraryRawOutputOpen ? 'Hide raw output' : 'Show raw output' }}
             </button>
             <button
               type="button"
@@ -2768,9 +2921,25 @@ watch(() => props.selectedFileId, () => {
                   <p class="mt-2 text-xs font-bold text-slate-500">
                     {{ item.candidateCount || 0 }} candidates / {{ item.finalCount || 0 }} records
                   </p>
+                  <button
+                    type="button"
+                    class="mt-3 inline-flex h-8 items-center gap-2 rounded-md border border-teal-200 bg-white px-3 text-xs font-extrabold text-teal-800 transition hover:bg-teal-50"
+                    @click="inspectLibraryRawOutput(item)"
+                  >
+                    <FileText class="h-3.5 w-3.5" />
+                    Raw output
+                  </button>
                 </article>
               </div>
             </div>
+            <EmbeddedExtractionProcess
+              v-if="progressItems.length > 0 && libraryRawOutputOpen"
+              :key="`library:${selectedLibraryRawLiteratureId || 'none'}:${selectedLibraryRawExtractorType}`"
+              class="mb-4"
+              :literature-id="selectedLibraryRawLiteratureId"
+              :extractor-type="selectedLibraryRawExtractorType"
+              title="Extract raw output"
+            />
             <button
               v-for="template in templates"
               :key="template.key"
@@ -3427,6 +3596,25 @@ watch(() => props.selectedFileId, () => {
               <div class="h-full rounded-full bg-violet-500 transition-all duration-500 ease-out" :style="{ width: `${uploadExtractionProgress}%` }"></div>
             </div>
 
+            <button
+              v-if="uploadExtractionItems.length > 0"
+              type="button"
+              class="mt-4 inline-flex h-9 items-center gap-2 rounded-md border border-violet-200 bg-violet-50 px-3 text-sm font-extrabold text-violet-700 transition hover:bg-violet-100"
+              @click="uploadRawOutputOpen = !uploadRawOutputOpen"
+            >
+              <FileText class="h-4 w-4" />
+              {{ uploadRawOutputOpen ? 'Hide raw output' : 'Show raw output' }}
+            </button>
+
+            <EmbeddedExtractionProcess
+              v-if="uploadExtractionItems.length > 0 && uploadRawOutputOpen"
+              :key="`upload:${selectedUploadRawLiteratureId || 'none'}:${selectedUploadRawExtractorType}`"
+              class="mt-4"
+              :literature-id="selectedUploadRawLiteratureId"
+              :extractor-type="selectedUploadRawExtractorType"
+              title="Extract raw output"
+            />
+
             <!-- Real stage stepper, driven by the backend run stage -->
             <div v-if="uploadExtracting && activeExtractionStageIndex >= 0" class="mt-4 flex items-center gap-1.5" aria-label="Extraction stages">
               <template v-for="(stage, idx) in EXTRACTION_STAGES" :key="stage.prefix">
@@ -3486,6 +3674,14 @@ watch(() => props.selectedFileId, () => {
                   </div>
                   <p class="mt-1 truncate text-sm font-semibold text-slate-500">{{ compactAuthorLine(item.authors) }}</p>
                   <p class="mt-2 text-sm font-medium text-slate-600">{{ item.message }}</p>
+                  <button
+                    type="button"
+                    class="mt-3 inline-flex h-8 items-center gap-2 rounded-md border border-violet-200 bg-white px-3 text-xs font-extrabold text-violet-700 transition hover:bg-violet-50"
+                    @click="inspectUploadRawOutput(item)"
+                  >
+                    <FileText class="h-3.5 w-3.5" />
+                    Raw output
+                  </button>
                   <div v-if="item.status === 'extracting'" class="mt-2">
                     <div class="h-1.5 overflow-hidden rounded-full bg-slate-100">
                       <div class="h-full rounded-full bg-violet-400 transition-all duration-500 ease-out" :style="{ width: `${uploadItemEffectivePercent(item)}%` }"></div>

@@ -20,6 +20,8 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.db_models import RecordCandidate, TribologyData
+from utils.cof_extraction import normalize_cof_extracted
+from utils.structured_conditions import normalize_load_conditions
 
 # Scalar columns a reviewer may correct directly. Deliberately excludes identity and
 # relationship columns (id, literature_id, extracted_at, source_candidates).
@@ -93,6 +95,8 @@ CANDIDATE_REVIEW_CORRECTABLE_FIELDS: frozenset[str] = frozenset(
         "material_name",
         "lubricant",
         "lubricant_alias",
+        "cation",
+        "anion",
         "probe_material",
         "probe_geometry",
         "probe_radius",
@@ -100,6 +104,7 @@ CANDIDATE_REVIEW_CORRECTABLE_FIELDS: frozenset[str] = frozenset(
         "substrate_material",
         "substrate_coating",
         "substrate_roughness",
+        "surface_roughness",
         "temperature",
         "potential",
         "water_content",
@@ -114,6 +119,8 @@ CANDIDATE_FIELD_EVIDENCE_KEYS: dict[str, str] = {
     "material_name": "material",
     "lubricant": "lubricant",
     "lubricant_alias": "lubricant",
+    "cation": "cation",
+    "anion": "anion",
     "probe_material": "probe_material",
     "probe_geometry": "probe_geometry",
     "probe_radius": "probe_radius",
@@ -121,11 +128,50 @@ CANDIDATE_FIELD_EVIDENCE_KEYS: dict[str, str] = {
     "substrate_material": "substrate_material",
     "substrate_coating": "substrate_coating",
     "substrate_roughness": "substrate_roughness",
+    "surface_roughness": "surface_roughness",
     "temperature": "temperature",
     "potential": "potential",
     "water_content": "water_content",
     "evidence": "evidence",
     "source_page": "source",
+}
+
+STRICT_CORE_SCHEMA_FIELDS: tuple[dict[str, str], ...] = (
+    {"key": "cation", "label": "Cation"},
+    {"key": "anion", "label": "Anion"},
+    {"key": "substrate_material", "label": "Substrate"},
+    {"key": "temperature", "label": "Temperature"},
+    {"key": "load", "label": "Load"},
+    {"key": "cof", "label": "COF"},
+)
+
+DEFAULT_EXTENDED_SCHEMA_FIELDS: tuple[dict[str, str], ...] = (
+    {"key": "material_name", "label": "Paper / system"},
+    {"key": "lubricant", "label": "Ionic liquid label"},
+    {"key": "speed", "label": "Speed"},
+    {"key": "additive", "label": "Additive"},
+    {"key": "surface_roughness", "label": "Roughness"},
+    {"key": "test_duration", "label": "Test duration"},
+    {"key": "tribological_system", "label": "Method"},
+    {"key": "potential", "label": "Potential"},
+)
+
+_EMPTY_SCHEMA_VALUES = {
+    "",
+    "-",
+    "--",
+    "n/a",
+    "na",
+    "none",
+    "null",
+    "not specified",
+    "not stated",
+    "not reported",
+    "not provided",
+    "not given",
+    "unspecified",
+    "unknown",
+    "review required",
 }
 
 
@@ -192,6 +238,257 @@ def _candidate_review_status_from_field_map(field_map: Mapping[str, Any]) -> str
         if isinstance(entry, Mapping) and str(entry.get("review_state") or "").strip().lower() == "flagged":
             return "flagged"
     return "needs_review"
+
+
+def _schema_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value).strip()
+
+
+def _schema_has_value(value: Any) -> bool:
+    text = _schema_text(value)
+    return bool(text and text.lower() not in _EMPTY_SCHEMA_VALUES)
+
+
+def _json_value(value: Any) -> Any:
+    if value in (None, ""):
+        return None
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _raw_flexible_json_from_record(record: TribologyData | RecordCandidate) -> dict[str, Any]:
+    field_map = _parse_field_evidence_json(getattr(record, "field_evidence_json", None))
+    schema_layers = field_map.get("_schema_layers")
+    if not isinstance(schema_layers, Mapping):
+        return {}
+    raw_flexible_json = schema_layers.get("raw_flexible_json")
+    return dict(raw_flexible_json) if isinstance(raw_flexible_json, Mapping) else {}
+
+
+def _field_evidence_entry_from_record(record: TribologyData | RecordCandidate, *keys: str) -> Any:
+    field_map = _parse_field_evidence_json(getattr(record, "field_evidence_json", None))
+    raw_flexible_json = _raw_flexible_json_from_record(record)
+    for key in keys:
+        entry = raw_flexible_json.get(key)
+        if _schema_has_value(entry):
+            return entry
+        entry = field_map.get(key)
+        if isinstance(entry, Mapping):
+            for value_key in ("value", "raw_text", "text", "reported_value"):
+                value = entry.get(value_key)
+                if _schema_has_value(value):
+                    return value
+        elif _schema_has_value(entry):
+            return entry
+    return None
+
+
+def _additive_value_from_record(record: TribologyData | RecordCandidate) -> str | None:
+    components = _json_value(getattr(record, "lubricant_components_json", None))
+    if isinstance(components, Mapping):
+        components = [components]
+    additive_parts: list[str] = []
+    if isinstance(components, list):
+        for component in components:
+            if not isinstance(component, Mapping):
+                continue
+            role = str(component.get("role") or "").strip().lower()
+            if "additive" not in role:
+                continue
+            compound = _schema_text(component.get("compound") or component.get("name") or component.get("label"))
+            fraction = _schema_text(component.get("fraction") or component.get("value"))
+            unit = _schema_text(component.get("unit"))
+            amount = f"{fraction} {unit}".strip()
+            additive_parts.append(" ".join(part for part in (compound, amount) if part).strip())
+    if additive_parts:
+        return "; ".join(part for part in additive_parts if part)
+    fallback = _field_evidence_entry_from_record(
+        record,
+        "additive",
+        "additive_loading",
+        "additive_concentration",
+    )
+    return _schema_text(fallback) if _schema_has_value(fallback) else None
+
+
+def _structured_load_schema_value(value: Any) -> str | None:
+    load = normalize_load_conditions(value)
+    if not load:
+        return None
+    raw_text = _schema_text(load.get("raw_text"))
+    if _schema_has_value(raw_text):
+        return raw_text
+    load_min = load.get("load_min_N")
+    load_max = load.get("load_max_N")
+    if load_min is not None and load_max is not None:
+        return str(load_min) if load_min == load_max else f"{load_min}-{load_max} N"
+    for key in ("system_total_load_N", "contact_load_per_unit_N"):
+        if load.get(key) is not None:
+            return f"{load[key]} N"
+    return None
+
+
+def _structured_cof_schema_value(value: Any) -> str | None:
+    cof = normalize_cof_extracted(value)
+    if not cof:
+        return None
+    raw_text = _schema_text(cof.get("raw_text"))
+    if _schema_has_value(raw_text):
+        return raw_text
+    for key in ("cof_average", "cof_min", "cof_max"):
+        if cof.get(key) is not None:
+            return str(cof[key])
+    for segment in cof.get("segments") or []:
+        segment_value = _structured_cof_schema_value(segment)
+        if segment_value:
+            return segment_value
+    return None
+
+
+def _schema_value_from_record(record: TribologyData | RecordCandidate, key: str) -> Any:
+    if key == "load":
+        return (
+            getattr(record, "load_raw", None)
+            or getattr(record, "load_value", None)
+            or _structured_load_schema_value(getattr(record, "load_conditions_json", None))
+        )
+    if key == "cof":
+        return (
+            getattr(record, "cof_raw", None)
+            or getattr(record, "cof_value", None)
+            or _structured_cof_schema_value(getattr(record, "cof_extracted_json", None))
+        )
+    if key == "speed":
+        return getattr(record, "speed_value", None) or getattr(record, "shear_rate", None)
+    if key == "surface_roughness":
+        return (
+            getattr(record, "surface_roughness", None)
+            or getattr(record, "substrate_roughness", None)
+            or getattr(record, "probe_roughness", None)
+        )
+    if key == "additive":
+        return _additive_value_from_record(record)
+    if key == "test_duration":
+        return _field_evidence_entry_from_record(record, "test_duration", "duration", "test_time")
+    if key == "tribological_system":
+        return (
+            getattr(record, "tribological_system_json", None)
+            or getattr(record, "regime", None)
+            or getattr(record, "probe_geometry", None)
+        )
+    if key == "source_location":
+        return (
+            getattr(record, "source_figure", None)
+            or getattr(record, "source", None)
+            or (f"Page {getattr(record, 'source_page', None)}" if getattr(record, "source_page", None) else None)
+        )
+    return getattr(record, key, None)
+
+
+def _existing_schema_fields(schema_layers: Mapping[str, Any], key: str) -> list[dict[str, Any]]:
+    fields = schema_layers.get(key)
+    if not isinstance(fields, list):
+        return []
+    return [dict(field) for field in fields if isinstance(field, Mapping)]
+
+
+def _refresh_schema_field(
+    record: TribologyData | RecordCandidate,
+    *,
+    definition: Mapping[str, str],
+    existing: Mapping[str, Any] | None = None,
+    layer: str,
+) -> dict[str, Any]:
+    key = str(definition.get("key") or existing.get("key") if existing else definition.get("key") or "").strip()
+    current_value = _schema_value_from_record(record, key)
+    has_current = _schema_has_value(current_value)
+    return {
+        "key": key,
+        "label": str((existing or {}).get("label") or definition.get("label") or key).strip(),
+        "layer": layer,
+        "status": "ready" if has_current else "review",
+        "value": _schema_text(current_value) if has_current else "",
+        "note": str((existing or {}).get("note") or definition.get("note") or "").strip(),
+    }
+
+
+def _core_schema_summary(core_fields: list[dict[str, Any]]) -> dict[str, Any]:
+    missing_fields = [
+        field
+        for field in core_fields
+        if str(field.get("status") or "").strip().lower() != "ready"
+    ]
+    return {
+        "total": len(core_fields),
+        "ready": len(core_fields) - len(missing_fields),
+        "missing_keys": [str(field.get("key") or "").strip() for field in missing_fields],
+        "missing_labels": [str(field.get("label") or field.get("key") or "").strip() for field in missing_fields],
+        "can_promote": not missing_fields,
+    }
+
+
+def refresh_tribology_schema_layers(
+    field_map: dict[str, Any],
+    record: TribologyData | RecordCandidate,
+) -> dict[str, Any]:
+    schema_layers = field_map.get("_schema_layers")
+    if not isinstance(schema_layers, Mapping):
+        schema_layers = {}
+
+    existing_core = {
+        str(field.get("key") or "").strip(): field
+        for field in _existing_schema_fields(schema_layers, "core_fields")
+    }
+    existing_extended = {
+        str(field.get("key") or "").strip(): field
+        for field in _existing_schema_fields(schema_layers, "extended_fields")
+    }
+
+    core_fields = [
+        _refresh_schema_field(
+            record,
+            definition=definition,
+            existing=existing_core.get(definition["key"]),
+            layer="core",
+        )
+        for definition in STRICT_CORE_SCHEMA_FIELDS
+    ]
+
+    extended_definitions = list(DEFAULT_EXTENDED_SCHEMA_FIELDS)
+    known_extended_keys = {definition["key"] for definition in extended_definitions}
+    for key, field in existing_extended.items():
+        if key and key not in known_extended_keys:
+            extended_definitions.append({"key": key, "label": str(field.get("label") or key)})
+    extended_fields = [
+        _refresh_schema_field(
+            record,
+            definition=definition,
+            existing=existing_extended.get(definition["key"]),
+            layer="extended",
+        )
+        for definition in extended_definitions
+    ]
+
+    raw_flexible_json = schema_layers.get("raw_flexible_json")
+    if not isinstance(raw_flexible_json, Mapping):
+        raw_flexible_json = {}
+    record_raw_flexible_json = _raw_flexible_json_from_record(record)
+
+    refreshed = dict(schema_layers)
+    refreshed["core_fields"] = core_fields
+    refreshed["core_summary"] = _core_schema_summary(core_fields)
+    refreshed["extended_fields"] = extended_fields
+    refreshed["raw_flexible_json"] = {**record_raw_flexible_json, **dict(raw_flexible_json)}
+    field_map["_schema_layers"] = refreshed
+    return field_map
 
 
 def _validate_correction(correction: RecordCorrection) -> None:
@@ -361,6 +658,7 @@ async def apply_tribology_candidate_correction(
         entry["review_note"] = None
         field_map[evidence_key] = entry
 
+    field_map = refresh_tribology_schema_layers(field_map, candidate)
     candidate.field_evidence_json = json.dumps(field_map, ensure_ascii=False, separators=(",", ":"))
     candidate.review_status = _candidate_review_status_from_field_map(field_map)
 

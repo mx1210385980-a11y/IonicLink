@@ -125,6 +125,7 @@ async def init_db():
             ExtractionRun,
             FigureCropOverride,
             Literature,
+            LiteratureReadingReport,
             ModelPredictionRun,
             ModelTrainingRun,
             RegisteredModel,

@@ -8,7 +8,7 @@ import re
 from typing import Any
 
 from fastapi import HTTPException, UploadFile
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.db_models import DiffusionCandidate, DiffusionRecord, RecordCandidate, TribologyData
@@ -83,6 +83,16 @@ def _literature_missing_metadata(literature) -> bool:
         or not _safe_year(getattr(literature, "year", None))
         or not _present_text(getattr(literature, "doi", ""))
         or _is_temporary_identifier(getattr(literature, "doi", ""))
+    )
+
+
+def _active_candidate_count_condition(model: Any) -> tuple[Any, ...]:
+    return (
+        model.promoted_record_id.is_(None),
+        or_(
+            model.review_status.is_(None),
+            func.lower(model.review_status) != "rejected",
+        ),
     )
 
 
@@ -381,13 +391,23 @@ async def list_literature_payload(
             await db.execute(select(func.count(TribologyData.id)).where(TribologyData.literature_id == item.id))
         ).scalar() or 0
         candidate_count = (
-            await db.execute(select(func.count(RecordCandidate.id)).where(RecordCandidate.literature_id == item.id))
+            await db.execute(
+                select(func.count(RecordCandidate.id)).where(
+                    RecordCandidate.literature_id == item.id,
+                    *_active_candidate_count_condition(RecordCandidate),
+                )
+            )
         ).scalar() or 0
         diffusion_record_count = (
             await db.execute(select(func.count(DiffusionRecord.id)).where(DiffusionRecord.literature_id == item.id))
         ).scalar() or 0
         diffusion_candidate_count = (
-            await db.execute(select(func.count(DiffusionCandidate.id)).where(DiffusionCandidate.literature_id == item.id))
+            await db.execute(
+                select(func.count(DiffusionCandidate.id)).where(
+                    DiffusionCandidate.literature_id == item.id,
+                    *_active_candidate_count_condition(DiffusionCandidate),
+                )
+            )
         ).scalar() or 0
         payload.append(
             _literature_to_payload(
@@ -414,7 +434,14 @@ async def get_literature_detail_payload(db: AsyncSession, literature_id: int, *,
     if not records:
         candidate_result = await db.execute(
             select(RecordCandidate)
-            .where(RecordCandidate.literature_id == literature_id)
+            .where(
+                RecordCandidate.literature_id == literature_id,
+                RecordCandidate.promoted_record_id.is_(None),
+                or_(
+                    RecordCandidate.review_status.is_(None),
+                    func.lower(RecordCandidate.review_status) != "rejected",
+                ),
+            )
             .order_by(RecordCandidate.id.asc())
         )
         records = list(candidate_result.scalars().all())

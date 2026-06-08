@@ -38,16 +38,20 @@ backend/data/literature_monitor_pdfs/
 
 # Local tool worktrees
 .claude/worktrees/
+.claude/launch.json
 .superpowers/
 .worktrees/
+skills/
 
 # Backend runtime data
 backend/data/.idea/
 backend/data/*.db
 backend/data/*.db-*
+backend/data/*.db.bak-*
 backend/data/*.sqlite
 backend/data/*.sqlite3
 backend/data/backups/*.db
+backend/data/llm_runtime_config.json
 backend/temp_uploads/
 
 # Frontend local outputs
@@ -58,6 +62,13 @@ frontend/errors.txt
 frontend/tmp.pdf
 frontend/tsc-errors.txt
 frontend/tsc-errors-utf8.txt
+
+# Local reference/intake and presentation outputs
+reference/
+standalone/
+ionic-intro.html
+ionic-intro.mp4
+docs/superpowers/plans/
 
 # OS files
 .DS_Store

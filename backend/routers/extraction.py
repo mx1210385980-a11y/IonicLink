@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import re
+import asyncio
 from datetime import datetime, timedelta
 from time import perf_counter
 from typing import Any, List
@@ -10,7 +11,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query, 
 import base64
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +22,7 @@ from models.db_models import (
     ExtractionRun,
     FigureCropOverride,
     Literature,
+    LiteratureReadingReport,
     RecordCandidate,
     TribologyData as TribologyDataDB,
 )
@@ -32,6 +34,7 @@ from services.literature_chat_service import (
     retrieve_literature_chat_sources,
 )
 from database import get_db
+from database import async_session_maker
 from security import (
     AuthPrincipal,
     RequestScope,
@@ -54,8 +57,10 @@ from services.file_service import (
     _derived_speed_locator_text,
     _extract_field_quote_from_bbox,
     _field_location_match_is_reliable,
+    _find_graphical_abstract_image_bbox,
     _is_default_temperature_value,
     _is_derived_speed_conditions,
+    _looks_like_graphical_abstract_source,
     _locate_field_evidence_for_value,
     _normalize_legacy_no_data_state,
     _refine_potential_evidence_from_metric_context_with_pdf,
@@ -87,7 +92,7 @@ from services.candidate_promotion_service import (
     promote_diffusion_candidate,
     promote_tribology_candidate,
 )
-from services.record_correction_service import apply_tribology_candidate_correction
+from services.record_correction_service import apply_tribology_candidate_correction, refresh_tribology_schema_layers
 from services.score_service import calculate_confidence_details
 from services.tribology_review_quality import (
     annotate_tribology_payload_quality,
@@ -95,6 +100,7 @@ from services.tribology_review_quality import (
     field_grounding_status,
     tribology_payload_dedupe_key,
 )
+from services.reading_report_service import READING_REPORT_PROMPT_VERSION, reading_report_service
 from services.pdf_service import (
     build_term_query_variants as _build_term_query_variants,
     build_visual_focus_queries as _build_visual_focus_queries,
@@ -258,6 +264,69 @@ def _pdf_label_for_raw_caption(raw_label: str) -> str:
         return normalized.title()
     prefix = "Figure" if parts[0].lower().startswith("fig") else "Table"
     return f"{prefix} {parts[1]}"
+
+
+def _serialize_reading_report(report: Any | None, literature_id: int, extractor_type: str = "tribology") -> dict[str, Any]:
+    if report is None:
+        return {
+            "success": True,
+            "literature_id": literature_id,
+            "extractor_type": extractor_type,
+            "status": "missing",
+            "report_markdown": "",
+            "prompt_version": READING_REPORT_PROMPT_VERSION,
+            "model": None,
+            "provider": None,
+            "error_message": None,
+            "created_at": None,
+            "updated_at": None,
+        }
+    return {
+        "success": report.status != "failed",
+        "id": report.id,
+        "literature_id": report.literature_id,
+        "extractor_type": report.extractor_type,
+        "status": report.status,
+        "report_markdown": report.report_markdown or "",
+        "prompt_version": report.prompt_version,
+        "model": report.model,
+        "provider": report.provider,
+        "error_message": report.error_message,
+        "created_at": report.created_at.isoformat() if report.created_at else None,
+        "updated_at": report.updated_at.isoformat() if report.updated_at else None,
+    }
+
+
+class ReadingReportUpdatePayload(BaseModel):
+    report_markdown: str = Field(..., min_length=1)
+
+
+async def _run_reading_report_background(report_id: int, literature_id: int, extractor_type: str) -> None:
+    try:
+        async with async_session_maker() as session:
+            report = await session.get(LiteratureReadingReport, report_id)
+            literature = await session.get(Literature, literature_id)
+            if not report or not literature:
+                return
+            await reading_report_service.run_report(session, report, literature)
+            await session.commit()
+    except Exception as exc:
+        logger.exception(
+            "Reading report background job failed literature_id=%s report_id=%s extractor_type=%s",
+            literature_id,
+            report_id,
+            extractor_type,
+        )
+        try:
+            async with async_session_maker() as session:
+                report = await session.get(LiteratureReadingReport, report_id)
+                if report:
+                    report.status = "failed"
+                    report.error_message = str(exc) or exc.__class__.__name__
+                    report.report_markdown = ""
+                    await session.commit()
+        except Exception:
+            logger.exception("Failed to persist reading report background failure report_id=%s", report_id)
 
 
 def _match_pdf_caption_start(
@@ -918,9 +987,13 @@ def _field_value_from_record(record: Any, field_key: str) -> Any:
     if field_key.startswith("compound_") or field_key.startswith("lubricant_component_"):
         return _component_field_value_from_record(record, field_key)
     if field_key == "material":
-        return record.material_name
+        return getattr(record, "material_name", None)
     if field_key == "material_name":
-        return record.material_name
+        return getattr(record, "material_name", None)
+    if field_key == "cation":
+        return getattr(record, "cation", None)
+    if field_key == "anion":
+        return getattr(record, "anion", None)
     if field_key in {
         "probe_material",
         "probe_geometry",
@@ -932,9 +1005,17 @@ def _field_value_from_record(record: Any, field_key: str) -> Any:
     }:
         return getattr(record, field_key, None)
     if field_key == "ionic_liquid":
-        return record.lubricant
+        return getattr(record, "lubricant", None)
     if field_key == "cof":
-        return record.cof_raw or record.cof_value
+        cof = normalize_cof_extracted(getattr(record, "cof_extracted_json", None))
+        return _first_tribology_payload_value(
+            getattr(record, "cof_raw", None),
+            getattr(record, "cof_value", None),
+            cof.get("raw_text"),
+            cof.get("cof_average"),
+            cof.get("cof_min"),
+            cof.get("cof_max"),
+        )
     if field_key == "friction_force":
         return getattr(record, "friction_force", None)
     if field_key == "wear_rate":
@@ -950,19 +1031,29 @@ def _field_value_from_record(record: Any, field_key: str) -> Any:
     if field_key == "surface_roughness":
         return getattr(record, "surface_roughness", None)
     if field_key == "load":
-        return record.load_raw or record.load_value
+        load = normalize_load_conditions(getattr(record, "load_conditions_json", None))
+        return _first_tribology_payload_value(
+            getattr(record, "load_raw", None),
+            getattr(record, "load_value", None),
+            load.get("raw_text"),
+            load.get("system_total_load_N"),
+            load.get("contact_load_per_unit_N"),
+            load.get("load_min_N"),
+            load.get("load_max_N"),
+        )
     if field_key == "speed":
-        return record.speed_value
+        return getattr(record, "speed_value", None)
     if field_key == "shear_rate":
         return getattr(record, "shear_rate", None)
     if field_key == "temperature":
-        return record.temperature
+        return getattr(record, "temperature", None)
     if field_key == "water_content":
         return getattr(record, "water_content", None)
     if field_key == "potential":
         return getattr(record, "potential", None)
     if field_key == "source_page":
-        return f"Page {record.source_page}" if record.source_page else None
+        source_page = getattr(record, "source_page", None)
+        return f"Page {source_page}" if source_page else None
     return None
 
 
@@ -973,7 +1064,14 @@ def _tribology_payload_has_value(value: Any) -> bool:
         return any(_tribology_payload_has_value(item) for item in value.values())
     if isinstance(value, list):
         return any(_tribology_payload_has_value(item) for item in value)
-    return str(value or "").strip().lower() not in _TRIBOLOGY_DEDUPE_EMPTY_VALUES
+    return str(value).strip().lower() not in _TRIBOLOGY_DEDUPE_EMPTY_VALUES
+
+
+def _first_tribology_payload_value(*values: Any) -> Any:
+    for value in values:
+        if _tribology_payload_has_value(value):
+            return value
+    return None
 
 
 def _confidence_tier(score: Any) -> str:
@@ -1548,6 +1646,29 @@ def _refresh_visual_source_evidence(entry: dict[str, Any], *, pdf_path: str | No
     page_num = int((evidence or {}).get("page") or 0)
     if source_type in {"text", "table"} or "caption" in source_label.lower():
         return entry
+    if _looks_like_graphical_abstract_source(source_type or "image", source_label):
+        graphical_anchor = _find_graphical_abstract_image_bbox(pdf_path or "", page_hint=page_num or 1)
+        if graphical_anchor:
+            anchor_page, anchor_bbox = graphical_anchor
+            refreshed = dict(entry)
+            refreshed_evidence = dict(evidence)
+            refreshed_evidence.update(
+                {
+                    "source_type": source_type or "image",
+                    "page": int(anchor_page),
+                    "source_label": source_label,
+                    "quote": "Graphical abstract image.",
+                    "bbox": [float(value) for value in anchor_bbox],
+                    "matched_text": None,
+                }
+            )
+            refreshed["evidence"] = refreshed_evidence
+            refreshed.setdefault("grounding_mode", "source_anchor")
+            refreshed.setdefault(
+                "grounding_note",
+                "Value is anchored to the graphical abstract image; exact numeric text may be read from the image rather than selectable PDF text.",
+            )
+            return refreshed
     # A value that already resolves to selectable PDF text (a matched phrase with a
     # tight bbox) is text-grounded — keep that precise location instead of replacing
     # it with the whole figure, even when its source_label cites a figure. Otherwise
@@ -1749,6 +1870,8 @@ def _build_record_field_evidence_payload(record: Any) -> dict[str, Any]:
         "substrate_coating",
         "substrate_roughness",
         "ionic_liquid",
+        "cation",
+        "anion",
         "cof",
         "friction_force",
         "wear_rate",
@@ -2100,6 +2223,8 @@ def _apply_cof_extracted_update(record: Any, payload: CofExtractedUpdatePayload)
     average = cof_average_from_extracted(cof_extracted)
     if average is not None:
         record.cof_value = average
+        if not cof_extracted.get("raw_text"):
+            record.cof_raw = None
 
     field_map = _parse_field_evidence_map(record.field_evidence_json)
     cof_entry = field_map.get("cof") if isinstance(field_map.get("cof"), dict) else {}
@@ -2112,6 +2237,32 @@ def _apply_cof_extracted_update(record: Any, payload: CofExtractedUpdatePayload)
     return cof_extracted
 
 
+def _load_conditions_have_structured_value(load_conditions: dict[str, Any]) -> bool:
+    return any(
+        load_conditions.get(key) is not None
+        for key in (
+            "system_total_load_N",
+            "contact_load_per_unit_N",
+            "load_min_N",
+            "load_max_N",
+        )
+    )
+
+
+def _load_conditions_display_value(load_conditions: dict[str, Any]) -> str | None:
+    raw_text = str(load_conditions.get("raw_text") or "").strip()
+    if raw_text:
+        return raw_text
+    load_min = load_conditions.get("load_min_N")
+    load_max = load_conditions.get("load_max_N")
+    if load_min is not None and load_max is not None:
+        return str(load_min) if load_min == load_max else f"{load_min}-{load_max} N"
+    for key in ("system_total_load_N", "contact_load_per_unit_N"):
+        if load_conditions.get(key) is not None:
+            return f"{load_conditions[key]} N"
+    return None
+
+
 def _apply_load_conditions_update(record: Any, payload: LoadConditionsUpdatePayload) -> dict[str, Any]:
     load_conditions = normalize_load_conditions(payload.load_conditions)
     if not load_conditions:
@@ -2122,10 +2273,13 @@ def _apply_load_conditions_update(record: Any, payload: LoadConditionsUpdatePayl
         raw_text = str(load_conditions.get("raw_text"))
         record.load_raw = raw_text
         record.load_value = raw_text
+    elif _load_conditions_have_structured_value(load_conditions):
+        record.load_raw = None
+        record.load_value = None
 
     field_map = _parse_field_evidence_map(record.field_evidence_json)
     load_entry = field_map.get("load") if isinstance(field_map.get("load"), dict) else {}
-    load_entry["value"] = record.load_raw or record.load_value
+    load_entry["value"] = record.load_raw or record.load_value or _load_conditions_display_value(load_conditions)
     load_entry["review_state"] = None
     load_entry["review_note"] = None
     field_map["load"] = load_entry
@@ -2191,8 +2345,25 @@ def _required_field_missing(field_map: dict[str, Any]) -> list[str]:
     return [key for key in _required_field_keys(field_map) if _field_grounding_status(field_map.get(key) or {}) != "grounded"]
 
 
+_STRICT_CORE_FIELD_KEYS = ("cation", "anion", "substrate_material", "temperature", "load", "cof")
+
+
+def _strict_core_field_missing(record: Any) -> list[str]:
+    missing: list[str] = []
+    for key in _STRICT_CORE_FIELD_KEYS:
+        if not _tribology_payload_has_value(_field_value_from_record(record, key)):
+            missing.append(key)
+    return missing
+
+
 def _persist_field_map(record: Any, field_map: dict[str, Any]) -> None:
     record.field_evidence_json = json.dumps(field_map, ensure_ascii=False)
+
+
+def _refresh_record_schema_layers(record: Any) -> None:
+    field_map = _parse_field_evidence_map(getattr(record, "field_evidence_json", None))
+    refreshed = refresh_tribology_schema_layers(field_map, record)
+    _persist_field_map(record, refreshed)
 
 
 def _target_field_keys_for_action(field_key: str, field_map: dict[str, Any]) -> list[str]:
@@ -5035,6 +5206,7 @@ async def update_record_cof_extracted(
 ):
     record = await require_record_access(db, principal, record_id, write=True)
     _apply_cof_extracted_update(record, payload)
+    _refresh_record_schema_layers(record)
     await db.commit()
     await log_activity(
         db=db,
@@ -5059,6 +5231,7 @@ async def update_record_load_conditions(
 ):
     record = await require_record_access(db, principal, record_id, write=True)
     _apply_load_conditions_update(record, payload)
+    _refresh_record_schema_layers(record)
     await db.commit()
     await log_activity(
         db=db,
@@ -5083,6 +5256,7 @@ async def update_record_speed_conditions(
 ):
     record = await require_record_access(db, principal, record_id, write=True)
     _apply_speed_conditions_update(record, payload)
+    _refresh_record_schema_layers(record)
     await db.commit()
     await log_activity(
         db=db,
@@ -5107,6 +5281,7 @@ async def update_record_tribological_system(
 ):
     record = await require_record_access(db, principal, record_id, write=True)
     _apply_tribological_system_update(record, payload)
+    _refresh_record_schema_layers(record)
     await db.commit()
     await log_activity(
         db=db,
@@ -5284,6 +5459,13 @@ async def approve_record_review(
 ):
     record = await require_record_access(db, principal, record_id, write=True)
     field_map = _parse_field_evidence_map(record.field_evidence_json)
+    missing_core = _strict_core_field_missing(record)
+    if missing_core:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Record cannot be approved. Missing core field values for: {', '.join(missing_core)}",
+        )
+
     missing_required = _required_field_missing(field_map)
     if missing_required:
         raise HTTPException(
@@ -5301,6 +5483,8 @@ async def approve_record_review(
             detail=f"Record cannot be approved while flagged fields remain: {', '.join(flagged_required)}",
         )
 
+    field_map = refresh_tribology_schema_layers(field_map, record)
+    _persist_field_map(record, field_map)
     _recompute_review_status(record, field_map, approved=True)
     await db.commit()
     await db.refresh(record)
@@ -5344,6 +5528,7 @@ async def update_candidate_cof_extracted(
 ):
     candidate = await require_candidate_access(db, principal, candidate_id, write=True)
     _apply_cof_extracted_update(candidate, payload)
+    _refresh_record_schema_layers(candidate)
     await db.commit()
     await log_activity(
         db=db,
@@ -5368,6 +5553,7 @@ async def update_candidate_load_conditions(
 ):
     candidate = await require_candidate_access(db, principal, candidate_id, write=True)
     _apply_load_conditions_update(candidate, payload)
+    _refresh_record_schema_layers(candidate)
     await db.commit()
     await log_activity(
         db=db,
@@ -5392,6 +5578,7 @@ async def update_candidate_speed_conditions(
 ):
     candidate = await require_candidate_access(db, principal, candidate_id, write=True)
     _apply_speed_conditions_update(candidate, payload)
+    _refresh_record_schema_layers(candidate)
     await db.commit()
     await log_activity(
         db=db,
@@ -5416,6 +5603,7 @@ async def update_candidate_tribological_system(
 ):
     candidate = await require_candidate_access(db, principal, candidate_id, write=True)
     _apply_tribological_system_update(candidate, payload)
+    _refresh_record_schema_layers(candidate)
     await db.commit()
     await log_activity(
         db=db,
@@ -5627,11 +5815,11 @@ async def approve_candidate_review(
 ):
     candidate = await require_candidate_access(db, principal, candidate_id, write=True)
     field_map = _parse_field_evidence_map(candidate.field_evidence_json)
-    missing_required = _required_field_missing(field_map)
-    if missing_required:
+    missing_core = _strict_core_field_missing(candidate)
+    if missing_core:
         raise HTTPException(
             status_code=422,
-            detail=f"Candidate cannot be approved. Missing field evidence for: {', '.join(missing_required)}",
+            detail=f"Candidate cannot be approved. Missing core field values for: {', '.join(missing_core)}",
         )
 
     flagged_required = [
@@ -6486,6 +6674,145 @@ async def cancel_extraction(
         _raise_internal_error("Cancel extraction", exc)
 
 
+@router.get("/literature/{literature_id}/reading-report")
+async def get_reading_report(
+    literature_id: int,
+    extractor_type: str = Query("tribology", pattern="^(tribology|diffusion)$"),
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    try:
+        literature = await require_literature_access(db, principal, literature_id, write=False)
+        report = await reading_report_service.get_latest(db, literature.id, extractor_type=extractor_type)
+        return _serialize_reading_report(report, literature.id, extractor_type)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_internal_error("Get reading report", exc)
+
+
+@router.post("/literature/{literature_id}/reading-report")
+async def start_reading_report(
+    literature_id: int,
+    request: Request,
+    extractor_type: str = Query("tribology", pattern="^(tribology|diffusion)$"),
+    force: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    try:
+        literature = await require_literature_access(db, principal, literature_id, write=True)
+        report, should_start = await reading_report_service.start_for_literature(
+            db,
+            literature,
+            extractor_type=extractor_type,
+            force=force,
+        )
+        await log_activity(
+            db=db,
+            user_id=principal.user.id,
+            group_id=principal.group.id,
+            action_type="reading_report",
+            action_detail={
+                "literature_id": literature.id,
+                "extractor_type": extractor_type,
+                "force": force,
+                "status": report.status,
+            },
+            resource_type="literature",
+            resource_id=literature.id,
+            request=request,
+        )
+        await db.commit()
+        if should_start:
+            asyncio.create_task(_run_reading_report_background(report.id, literature.id, extractor_type))
+        return _serialize_reading_report(report, literature.id, extractor_type)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await db.rollback()
+        _raise_internal_error("Start reading report", exc)
+
+
+@router.patch("/literature/{literature_id}/reading-report")
+async def update_reading_report(
+    literature_id: int,
+    payload: ReadingReportUpdatePayload,
+    request: Request,
+    extractor_type: str = Query("tribology", pattern="^(tribology|diffusion)$"),
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    try:
+        literature = await require_literature_access(db, principal, literature_id, write=True)
+        report = await reading_report_service.update_markdown(
+            db,
+            literature,
+            markdown=payload.report_markdown,
+            extractor_type=extractor_type,
+        )
+        await log_activity(
+            db=db,
+            user_id=principal.user.id,
+            group_id=principal.group.id,
+            action_type="reading_report_edit",
+            action_detail={
+                "literature_id": literature.id,
+                "extractor_type": extractor_type,
+                "status": report.status,
+            },
+            resource_type="literature",
+            resource_id=literature.id,
+            request=request,
+        )
+        await db.commit()
+        return _serialize_reading_report(report, literature.id, extractor_type)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await db.rollback()
+        _raise_internal_error("Update reading report", exc)
+
+
+@router.post("/literature/{literature_id}/candidate-draft")
+async def generate_candidate_draft(
+    literature_id: int,
+    request: Request,
+    extractor_type: str = Query("tribology", pattern="^(tribology|diffusion)$"),
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    try:
+        literature = await require_literature_access(db, principal, literature_id, write=True)
+        result = await reading_report_service.generate_candidate_draft(
+            db,
+            literature,
+            extractor_type=extractor_type,
+        )
+        await log_activity(
+            db=db,
+            user_id=principal.user.id,
+            group_id=principal.group.id,
+            action_type="candidate_draft",
+            action_detail={
+                "literature_id": literature.id,
+                "extractor_type": extractor_type,
+                "candidate_count": result.get("candidate_count"),
+                "status": result.get("status"),
+            },
+            resource_type="literature",
+            resource_id=literature.id,
+            request=request,
+        )
+        await db.commit()
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await db.rollback()
+        _raise_internal_error("Generate candidate draft", exc)
+
+
 @router.post("/extract/{file_id}")
 async def extract_data(
     file_id: str,
@@ -6733,7 +7060,14 @@ async def get_extracted_data(
         literature = await require_literature_access(db, principal, lit_id)
         candidate_stmt = (
             sa_select(RecordCandidate)
-            .where(RecordCandidate.literature_id == lit_id)
+            .where(
+                RecordCandidate.literature_id == lit_id,
+                RecordCandidate.promoted_record_id.is_(None),
+                or_(
+                    RecordCandidate.review_status.is_(None),
+                    func.lower(RecordCandidate.review_status) != "rejected",
+                ),
+            )
             .order_by(RecordCandidate.id.asc())
         )
         candidate_result = await db.execute(candidate_stmt)
@@ -7061,6 +7395,102 @@ async def get_extraction_run_candidates(
             }
             for r in rows
         ],
+    }
+
+
+@router.get("/extract/{literature_id}/raw-candidates")
+async def get_literature_raw_candidates(
+    literature_id: int,
+    extractor_type: str = Query("tribology", pattern="^(tribology|diffusion)$"),
+    status: str = Query("all", pattern="^(all|kept|dropped)$"),
+    skip: int = 0,
+    limit: int = Query(1000, ge=1, le=5000),
+    db: AsyncSession = Depends(get_db),
+    principal: AuthPrincipal = Depends(get_current_principal),
+):
+    """Direct raw view of the model's per-page/figure responses for a file.
+
+    Collapses the two existing calls (latest run -> candidates) into one and adds a
+    kept-vs-dropped rollup so you can see exactly what the model returned and what
+    the cleaning/validation gates removed, before worrying about normalization.
+    """
+    await require_literature_access(db, principal, literature_id)
+    run = await get_latest_extraction_run_by_literature(db, literature_id, extractor_type=extractor_type)
+    if not run:
+        return {
+            "literature_id": literature_id,
+            "run_id": None,
+            "extractor_type": extractor_type,
+            "status": "not_started",
+            "total": 0,
+            "rollup": {"kept": 0, "dropped": 0, "dropped_by_reason": {}, "by_page": {}},
+            "items": [],
+        }
+
+    total, rows = await list_extraction_candidates(db, run.run_id, skip=skip, limit=limit)
+
+    def _parse_json(value):
+        if not value:
+            return None
+        try:
+            return json.loads(value)
+        except Exception:
+            return value
+
+    kept = 0
+    dropped = 0
+    dropped_by_reason: dict[str, int] = {}
+    by_page: dict[str, dict[str, int]] = {}
+    items: list[dict[str, Any]] = []
+    for r in rows:
+        is_kept = r.drop_reason is None
+        if is_kept:
+            kept += 1
+        else:
+            dropped += 1
+            reason = str(r.drop_reason)
+            dropped_by_reason[reason] = dropped_by_reason.get(reason, 0) + 1
+        page_key = str(r.page) if r.page is not None else "unknown"
+        bucket = by_page.setdefault(page_key, {"kept": 0, "dropped": 0})
+        bucket["kept" if is_kept else "dropped"] += 1
+        if status == "kept" and not is_kept:
+            continue
+        if status == "dropped" and is_kept:
+            continue
+        items.append(
+            {
+                "id": r.id,
+                "stage": r.stage,
+                "modality": r.modality,
+                "page": r.page,
+                "source_figure": r.source_figure,
+                "panel_label": r.panel_label,
+                "raw": _parse_json(r.raw_json),
+                "normalized": _parse_json(r.normalized_json),
+                "drop_reason": r.drop_reason,
+                "merged_into": r.merged_into,
+                "created_at": r.created_at,
+            }
+        )
+
+    return {
+        "literature_id": literature_id,
+        "run_id": run.run_id,
+        "extractor_type": extractor_type,
+        "status": str(getattr(run, "status", "") or ""),
+        "profile": getattr(run, "profile", None),
+        "total": total,
+        "returned": len(items),
+        "skip": skip,
+        "limit": limit,
+        "filter": status,
+        "rollup": {
+            "kept": kept,
+            "dropped": dropped,
+            "dropped_by_reason": dropped_by_reason,
+            "by_page": by_page,
+        },
+        "items": items,
     }
 
 

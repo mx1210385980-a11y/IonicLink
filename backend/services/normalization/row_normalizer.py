@@ -8,6 +8,7 @@ from services.cleaning_service import normalize_temperature
 from services.normalization.potential import normalize_potential_text
 from utils.document_context import normalize_surface_roughness_value
 from utils.experiment_profile import build_experiment_profile
+from utils.load_values import looks_like_afm_setpoint_voltage_load, looks_like_non_mechanical_load, sanitized_mechanical_load
 from utils.speed_conditions import derive_speed_conditions, normalize_speed_conditions, speed_value_from_conditions
 from utils.structured_conditions import derive_tribological_system, normalize_tribological_system
 
@@ -67,6 +68,36 @@ def _sanitize_thickness_fields(item: dict[str, Any]) -> None:
     for field in ("film_thickness", "residual_film_thickness_d", "layer_spacing_delta"):
         if field in item:
             item[field] = _normalize_quantitative_thickness(item.get(field))
+
+
+def _preserve_rejected_load_value(item: dict[str, Any], value: Any) -> None:
+    text = str(value or "").strip()
+    if not text:
+        return
+    raw_fields = item.get("_flexible_fields")
+    if not isinstance(raw_fields, dict):
+        raw_fields = {}
+        item["_flexible_fields"] = raw_fields
+    key = "afm_setpoint_voltage" if looks_like_afm_setpoint_voltage_load(text) else "non_mechanical_load_value"
+    raw_fields.setdefault(
+        key,
+        {
+            "label": "AFM setpoint voltage" if key == "afm_setpoint_voltage" else "Non-mechanical load value",
+            "value": text,
+            "category": "condition",
+            "note": "Captured from the load field but not stored as mechanical load.",
+        },
+    )
+
+
+def _sanitize_load_fields(item: dict[str, Any]) -> None:
+    for key in ("load", "normal_load", "load_value", "load_raw"):
+        if key not in item:
+            continue
+        value = item.get(key)
+        if looks_like_non_mechanical_load(value):
+            _preserve_rejected_load_value(item, value)
+            item[key] = None
 
 
 def _has_snl_silicon_nitride_probe(text: str) -> bool:
@@ -385,6 +416,7 @@ def normalize_extraction_row(
                 break
     if not item.get("load") and item.get("load_value") not in (None, ""):
         item["load"] = item.get("load_value")
+    _sanitize_load_fields(item)
     if not item.get("speed") and item.get("speed_value") not in (None, ""):
         item["speed"] = item.get("speed_value")
     speed_conditions = normalize_speed_conditions(item.get("speed_conditions") or item.get("speedConditions"))
@@ -703,9 +735,10 @@ def normalize_extraction_row(
             item["load"] = load_range
 
     if not item.get("normal_load") and item.get("load"):
-        item["normal_load"] = item.get("load")
+        item["normal_load"] = sanitized_mechanical_load(item.get("load"))
     if not item.get("load") and item.get("normal_load"):
-        item["load"] = item.get("normal_load")
+        item["load"] = sanitized_mechanical_load(item.get("normal_load"))
+    _sanitize_load_fields(item)
     for key in ("cof", "load", "normal_load", "speed", "shear_rate", "temperature", "film_thickness", "friction_force", "potential"):
         if key in item and item[key] is not None:
             item[key] = re.sub(r"\s+", " ", str(item[key]).replace("µ", "μ").replace("渭", "μ").replace("碌", "μ")).strip()

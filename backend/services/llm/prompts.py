@@ -347,11 +347,15 @@ Return ONLY:
       "ionic_liquid": string|null,
       "lubricant_components": [{"compound": string, "fraction": number|null, "unit": string|null, "role": string|null}]|null,
       "cof": string|null,
+      "cof_delta": string|null,
       "friction_force": string|null,
       "normal_load": string|null,
       "load": string|null,
       "speed": string|null,
       "temperature": string|null,
+      "current": string|null,
+      "baseline_current": string|null,
+      "iron_oxide_additive_ratio": string|null,
       "wear_rate": string|null,
       "film_thickness": string|null,
       "residual_film_thickness_d": string|null,
@@ -379,6 +383,9 @@ Rules:
 - Evidence must quote or closely copy the local phrase tying the value to the condition.
 - No evidence, no row. Trend-only descriptions do not become rows.
 - Figure values that require visual estimation, slope reading, or point interpolation must be skipped.
+- If the figure/caption prints a relative friction coefficient change, keep core `cof` null and put the printed change in `cof_delta`.
+- If current-carrying conditions are shown, extract `current` (for example "20 A") and `baseline_current` when the value is relative to a no-current/0 A baseline.
+- If Fe3O4/Fe2O3 additive percentages are shown in a legend or label, extract them as `iron_oxide_additive_ratio` (for example "15 wt%") instead of hiding them in `material_name`.
 - Split distinct samples, potentials, humidity/water content, loads, speeds, or mixtures into separate rows.
 - Keep unknown fields null; do not infer chemistry, materials, units, or missing numeric values.
 - Never put scan frequency into `speed`; use speed only for linear distance/time values.
@@ -434,3 +441,175 @@ CHAT_SYSTEM_PROMPT = """
 You are IonicLink AI Assistant for ionic-liquid tribology literature analysis.
 Be concise, technical, and practical.
 """
+
+
+READING_REPORT_PROMPT = """
+You are IonicLink's literature reading assistant. Read the uploaded scientific paper and write a normal
+large-model style response in readable Markdown. Do not output strict JSON or a rigid extraction schema.
+
+Audience: researchers who want to understand the paper first, then decide later whether structured database
+candidates are worth generating.
+
+Write a broadly useful paper-reading report. Prefer sections such as:
+
+## Snapshot table
+| Topic | What to capture |
+| --- | --- |
+| Research question | What problem the paper studies and why it matters. |
+| System studied | The material, interface, lubricant, or model system at a useful general level. |
+| Method / setup | The methods used and the comparison logic. |
+| Main results | Key trends, values, mechanisms, and evidence. |
+| Evidence to verify | Figures, tables, or claims worth checking before structured extraction. |
+
+## Overview
+- The main contribution or claim in a few bullets.
+
+## Study Design
+- The materials or systems studied, the methods used, and the comparison logic.
+- Mention experimental or computational details only when they help explain the results.
+
+## Main Findings
+- The key trends, values, mechanisms, and evidence reported by the paper.
+- Use compact Markdown tables only when they improve readability.
+
+## Reliability Notes
+- What is directly supported, what is inferred from figures/tables, and what remains uncertain.
+
+## Possible Follow-up Extraction
+- Only include likely structured values if the paper clearly contains them.
+- Keep this section short and optional in spirit; it should not dominate the reading report.
+
+Rules:
+- Be technical and direct.
+- Do not invent numbers.
+- If the supplied text does not support a value, say it is not stated.
+- Keep the response useful even when the paper has few extractable structured rows.
+- Do not force template-specific checklists into the report.
+- Do not create dedicated sections for narrow domain variables or unusual operating details unless the paper
+  itself makes them central to the contribution.
+- Do not create dedicated sections named "Operating conditions", "Additives", "Electric/current",
+  "Water/humidity", or similar narrow buckets; only mention those details inside the general system,
+  method, results, or evidence rows when they are actually important.
+"""
+
+
+# ---------------------------------------------------------------------------
+# Claude native full-PDF extraction (capture phase)
+#
+# Claude receives the ENTIRE PDF (text + per-page images) in one call and
+# returns metadata + every quantitative tribology row. Field rules mirror the
+# legacy per-page prompts so the downstream refine stage is unchanged; the JSON
+# shape is enforced by CLAUDE_PDF_OUTPUT_SCHEMA (structured outputs), not by the
+# prompt text.
+# ---------------------------------------------------------------------------
+
+CLAUDE_PDF_EXTRACTION_PROMPT = (
+    """You are given the COMPLETE PDF of a scientific paper on ionic-liquid tribology (text and page images).
+
+Extract EVERY quantitative tribology measurement reported anywhere in the document — body text, tables, figures, captions, legends, and supplementary panels.
+
+Row granularity: emit one row per (sample × experimental condition × reported metric). Split distinct samples, potentials, humidity/water content, loads, speeds, temperatures, or mixtures into separate rows.
+
+Because you can see the whole document, cross-reference captions, table headers, axis labels, and the methods section to fill in the conditions for each row. Use the printed PDF page number (as shown in the viewer) for source_page.
+
+Also extract the paper metadata (title, authors, doi, journal, issn, year, volume, issue, pages); use null/empty for anything not printed.
+"""
+    + _COMPACT_EVIDENCE_RULES
+    + """
+Whole-document rules:
+- Return EVERY candidate row. Do not pre-filter for importance, confidence, or novelty — a separate stage validates, scores, and de-duplicates.
+- Keep unknown fields null; never infer chemistry, materials, units, or missing numeric values.
+- Provenance is mandatory: each row needs source, source_page, and evidence (a quoted/closely-copied local phrase tying the value to its condition).
+"""
+)
+
+
+def _nullable(json_type: str) -> dict:
+    return {"anyOf": [{"type": json_type}, {"type": "null"}]}
+
+
+_CLAUDE_PDF_STRING_FIELDS = (
+    "material_name",
+    "ionic_liquid",
+    "cof",
+    "cof_delta",
+    "friction_force",
+    "normal_load",
+    "load",
+    "speed",
+    "temperature",
+    "current",
+    "baseline_current",
+    "iron_oxide_additive_ratio",
+    "wear_rate",
+    "film_thickness",
+    "residual_film_thickness_d",
+    "layer_spacing_delta",
+    "surface_roughness",
+    "probe_material",
+    "probe_geometry",
+    "substrate_material",
+    "potential",
+    "water_content",
+    "sample_id",
+    "source",
+    "source_figure",
+    "evidence",
+)
+
+_CLAUDE_PDF_ROW_PROPERTIES: dict = {field: _nullable("string") for field in _CLAUDE_PDF_STRING_FIELDS}
+_CLAUDE_PDF_ROW_PROPERTIES["source_page"] = _nullable("integer")
+_CLAUDE_PDF_ROW_PROPERTIES["lubricant_components"] = {
+    "anyOf": [
+        {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "compound": _nullable("string"),
+                    "fraction": _nullable("number"),
+                    "unit": _nullable("string"),
+                    "role": _nullable("string"),
+                },
+                "required": ["compound", "fraction", "unit", "role"],
+                "additionalProperties": False,
+            },
+        },
+        {"type": "null"},
+    ]
+}
+
+_CLAUDE_PDF_METADATA_PROPERTIES: dict = {
+    "title": _nullable("string"),
+    "authors": _nullable("string"),
+    "doi": _nullable("string"),
+    "journal": _nullable("string"),
+    "issn": _nullable("string"),
+    "year": _nullable("integer"),
+    "volume": _nullable("string"),
+    "issue": _nullable("string"),
+    "pages": _nullable("string"),
+}
+
+CLAUDE_PDF_OUTPUT_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "metadata": {
+            "type": "object",
+            "properties": _CLAUDE_PDF_METADATA_PROPERTIES,
+            "required": list(_CLAUDE_PDF_METADATA_PROPERTIES.keys()),
+            "additionalProperties": False,
+        },
+        "rows": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": _CLAUDE_PDF_ROW_PROPERTIES,
+                "required": list(_CLAUDE_PDF_ROW_PROPERTIES.keys()),
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["metadata", "rows"],
+    "additionalProperties": False,
+}

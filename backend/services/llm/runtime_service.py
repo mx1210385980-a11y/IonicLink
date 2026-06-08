@@ -15,6 +15,11 @@ import fitz
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
+try:  # Optional at import time; only the claude_pdf extraction path requires it.
+    from anthropic import AsyncAnthropic
+except Exception:  # pragma: no cover - exercised only when the dep is absent
+    AsyncAnthropic = None  # type: ignore[assignment]
+
 from models.tribology import TribologyData
 from services.cleaning_service import (
     calculate_missing_cof,
@@ -36,6 +41,7 @@ from services.llm.prompts import (
     FAST_TABLE_TRIBOLOGY_SYSTEM_PROMPT,
     FIGURE_LEGEND_COF_PROMPT,
     FIGURE_TABLE_EXTRACTION_PROMPT,
+    READING_REPORT_PROMPT,
     METADATA_EXTRACTION_PROMPT,
     TEXT_EXTRACTION_PROMPT,
 )
@@ -46,6 +52,7 @@ from services.llm.fast_table_extractor import (
     parse_fast_table_response,
 )
 from services.normalization import normalize_extraction_row
+from services.llm import claude_pdf_extractor
 from services.llm.utils import (
     clean_and_parse_json,
     has_core_quantitative_signal,
@@ -54,6 +61,7 @@ from services.llm.utils import (
     prepare_image_input,
 )
 from utils.cof_guard import unsupported_figure_cof_reason
+from utils.cof_delta import COF_DELTA_REASON, apply_cof_delta_policy
 from utils.document_context import (
     apply_experimental_document_context,
     extract_experimental_document_context,
@@ -72,6 +80,9 @@ DEFAULT_OPENROUTER_APP_NAME = "IonicLink"
 DEFAULT_TEXT_MODEL = "Pro/deepseek-ai/DeepSeek-V3.2"
 DEFAULT_VISION_MODEL = "Qwen/Qwen3-VL-32B-Instruct"
 DEFAULT_FAST_TABLE_MODEL = "claude-sonnet-4-6"
+DEFAULT_ANTHROPIC_EXTRACTION_MODEL = "claude-sonnet-4-6"
+DEFAULT_ANTHROPIC_EFFORT = "high"
+DEFAULT_EXTRACTION_MODE = "claude_pdf"
 DEFAULT_TEXT_PAGE_CONCURRENCY = 4
 DEFAULT_TEXT_PAGE_TIMEOUT_SECONDS = 120.0
 FIGURE_ESTIMATE_CONFIDENCE_CAP = 0.60
@@ -88,6 +99,13 @@ def _serialize_llm_provider(value: Any) -> str:
     if normalized == "openrouter":
         return "openrouter"
     return DEFAULT_LLM_PROVIDER
+
+
+def _serialize_extraction_mode(value: Any) -> str:
+    normalized = _normalize_runtime_string(value).lower()
+    if normalized in {"claude_pdf", "legacy"}:
+        return normalized
+    return DEFAULT_EXTRACTION_MODE
 
 
 def normalize_extraction_profile(value: Any) -> str:
@@ -174,6 +192,13 @@ class LLMService:
                 or DEFAULT_FAST_TABLE_MODEL
             ),
             "vision_api_key": _normalize_runtime_string(os.getenv("LLM_VISION_API_KEY", "")),
+            "anthropic_api_key": _normalize_runtime_string(os.getenv("ANTHROPIC_API_KEY", "")),
+            "anthropic_extraction_model": (
+                _normalize_runtime_string(os.getenv("ANTHROPIC_EXTRACTION_MODEL"))
+                or DEFAULT_ANTHROPIC_EXTRACTION_MODEL
+            ),
+            "anthropic_effort": _normalize_runtime_string(os.getenv("ANTHROPIC_EFFORT", DEFAULT_ANTHROPIC_EFFORT)) or DEFAULT_ANTHROPIC_EFFORT,
+            "extraction_mode": _serialize_extraction_mode(os.getenv("LLM_EXTRACTION_MODE", DEFAULT_EXTRACTION_MODE)),
             "updated_at": None,
         }
 
@@ -199,6 +224,12 @@ class LLMService:
         elif raw.get("vision_api_key") is not None and _normalize_runtime_string(raw.get("vision_api_key")):
             vision_api_key = _normalize_runtime_string(raw.get("vision_api_key"))
 
+        anthropic_api_key = current.get("anthropic_api_key", "")
+        if raw.get("clear_anthropic_api_key"):
+            anthropic_api_key = ""
+        elif raw.get("anthropic_api_key") is not None and _normalize_runtime_string(raw.get("anthropic_api_key")):
+            anthropic_api_key = _normalize_runtime_string(raw.get("anthropic_api_key"))
+
         return {
             "provider": _serialize_llm_provider(raw.get("provider", current.get("provider"))),
             "openai_base_url": _normalize_runtime_string(raw.get("openai_base_url", current.get("openai_base_url", DEFAULT_OPENAI_BASE_URL))) or DEFAULT_OPENAI_BASE_URL,
@@ -211,6 +242,10 @@ class LLMService:
             "vision_model": _normalize_runtime_string(raw.get("vision_model", current.get("vision_model", DEFAULT_VISION_MODEL))) or DEFAULT_VISION_MODEL,
             "fast_table_model": _normalize_runtime_string(raw.get("fast_table_model", current.get("fast_table_model", DEFAULT_FAST_TABLE_MODEL))) or DEFAULT_FAST_TABLE_MODEL,
             "vision_api_key": vision_api_key,
+            "anthropic_api_key": anthropic_api_key,
+            "anthropic_extraction_model": _normalize_runtime_string(raw.get("anthropic_extraction_model", current.get("anthropic_extraction_model", DEFAULT_ANTHROPIC_EXTRACTION_MODEL))) or DEFAULT_ANTHROPIC_EXTRACTION_MODEL,
+            "anthropic_effort": _normalize_runtime_string(raw.get("anthropic_effort", current.get("anthropic_effort", DEFAULT_ANTHROPIC_EFFORT))) or DEFAULT_ANTHROPIC_EFFORT,
+            "extraction_mode": _serialize_extraction_mode(raw.get("extraction_mode", current.get("extraction_mode", DEFAULT_EXTRACTION_MODE))),
             "updated_at": current.get("updated_at"),
         }
 
@@ -253,6 +288,11 @@ class LLMService:
         self.vision_api_key = _normalize_runtime_string(config.get("vision_api_key")) or self.default_api_key
         self.default_headers = self._build_default_headers()
 
+        self.anthropic_api_key = _normalize_runtime_string(config.get("anthropic_api_key"))
+        self.anthropic_extraction_model = _normalize_runtime_string(config.get("anthropic_extraction_model")) or DEFAULT_ANTHROPIC_EXTRACTION_MODEL
+        self.anthropic_effort = _normalize_runtime_string(config.get("anthropic_effort")) or DEFAULT_ANTHROPIC_EFFORT
+        self.extraction_mode = _serialize_extraction_mode(config.get("extraction_mode"))
+
         self.vision_client = AsyncOpenAI(
             api_key=self.vision_api_key,
             base_url=self.base_url,
@@ -266,14 +306,32 @@ class LLMService:
             default_headers=self.default_headers,
         )
 
+        # Native-PDF extraction client (Anthropic). Built lazily; absent SDK or key
+        # leaves it None and _claude_pdf_available() returns False.
+        self.anthropic_client = None
+        if self.anthropic_api_key and AsyncAnthropic is not None:
+            try:
+                self.anthropic_client = AsyncAnthropic(
+                    api_key=self.anthropic_api_key,
+                    timeout=600.0,
+                    max_retries=2,
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("Failed to init Anthropic client: %s", exc)
+                self.anthropic_client = None
+
         logger.info(
-            "LLM service initialized provider=%s text_model=%s vision_model=%s fast_table_model=%s base_url=%s",
+            "LLM service initialized provider=%s extraction_mode=%s text_model=%s vision_model=%s anthropic_model=%s base_url=%s",
             self.provider,
+            self.extraction_mode,
             self.text_model,
             self.vision_model,
-            self.fast_table_model,
+            self.anthropic_extraction_model,
             self.base_url,
         )
+
+    def _claude_pdf_available(self) -> bool:
+        return bool(self.anthropic_client is not None and self.anthropic_api_key)
 
     def get_runtime_snapshot(self) -> Dict[str, Any]:
         with self._config_lock:
@@ -288,9 +346,13 @@ class LLMService:
                 "text_model": config.get("text_model", DEFAULT_TEXT_MODEL),
                 "vision_model": config.get("vision_model", DEFAULT_VISION_MODEL),
                 "fast_table_model": config.get("fast_table_model", DEFAULT_FAST_TABLE_MODEL),
+                "anthropic_extraction_model": config.get("anthropic_extraction_model", DEFAULT_ANTHROPIC_EXTRACTION_MODEL),
+                "anthropic_effort": config.get("anthropic_effort", DEFAULT_ANTHROPIC_EFFORT),
+                "extraction_mode": _serialize_extraction_mode(config.get("extraction_mode")),
                 "has_openai_api_key": bool(config.get("openai_api_key")),
                 "has_openrouter_api_key": bool(config.get("openrouter_api_key")),
                 "has_vision_api_key": bool(config.get("vision_api_key")),
+                "has_anthropic_api_key": bool(config.get("anthropic_api_key")),
                 "updated_at": config.get("updated_at"),
             },
             "runtime": {
@@ -299,6 +361,9 @@ class LLMService:
                 "active_text_model": self.text_model,
                 "active_vision_model": self.vision_model,
                 "active_fast_table_model": self.fast_table_model,
+                "active_extraction_mode": self.extraction_mode,
+                "active_anthropic_model": self.anthropic_extraction_model,
+                "claude_pdf_available": self._claude_pdf_available(),
                 "default_headers": copy.deepcopy(self.default_headers),
             },
             "notes": [
@@ -573,6 +638,20 @@ class LLMService:
 
         return None
 
+    def _extract_plain_page_texts(self, pdf_path: str) -> dict[int, str]:
+        """Cheap per-page plain text (no rendering) for context/profile enrichment."""
+        page_texts: dict[int, str] = {}
+        try:
+            with fitz.open(pdf_path) as doc:
+                for idx in range(doc.page_count):
+                    try:
+                        page_texts[idx] = doc[idx].get_text() or ""
+                    except Exception:
+                        page_texts[idx] = ""
+        except Exception as exc:
+            logger.warning("Plain page-text extraction failed for %s: %s", pdf_path, exc)
+        return page_texts
+
     def _build_document_profile(self, pdf_path: str, page_texts: dict[int, str]) -> dict[str, Any]:
         total_pages = len(page_texts or {})
         profile: dict[str, Any] = {
@@ -688,6 +767,44 @@ class LLMService:
             selected.add(p)
         return [p for p in visual_idxs if p in selected]
 
+    # A page can only yield a tribology row if it carries a numeric value tied to a
+    # tribology signal, or a figure/table caption. Pages that have neither (reference
+    # lists, acknowledgments, pure intro prose) cannot produce an extractable row, so
+    # skipping their LLM call cuts cost without losing recall.
+    _TEXT_PAGE_SIGNAL_RE = re.compile(
+        r"\b(?:cof|friction|wear|load|sliding|speed|velocit|viscosit|lubric|tribolog|"
+        r"film\s*thickness|roughness|diffusion|nanofriction|shear|torque|"
+        r"\d+\s*(?:n|mn|nn|kn|mpa|gpa|pa|rpm|hz|wt%|at%|mol%|m/s|mm/s|μm/s|um/s|°c|nm|μm|um))\b",
+        re.IGNORECASE,
+    )
+    _TEXT_PAGE_CAPTION_RE = re.compile(
+        r"\bfig(?:ure)?\.?\s*\d+|\btable\s*\d+\b", re.IGNORECASE
+    )
+
+    def _select_text_pages(
+        self,
+        text_idxs: List[int],
+        page_texts: dict[int, str],
+        *,
+        always_include: Optional[set[int]] = None,
+    ) -> List[int]:
+        if not _bounded_int_env("LLM_TEXT_PAGE_SIGNAL_FILTER", 1, 0, 1):
+            return list(text_idxs)
+        always = always_include or set()
+        number_re = re.compile(r"\d")
+        selected: List[int] = []
+        for pidx in text_idxs:
+            if pidx in always:
+                selected.append(pidx)
+                continue
+            text = (page_texts.get(pidx, "") or "").strip()
+            if not text:
+                continue
+            has_signal = bool(number_re.search(text)) and bool(self._TEXT_PAGE_SIGNAL_RE.search(text))
+            if has_signal or self._TEXT_PAGE_CAPTION_RE.search(text):
+                selected.append(pidx)
+        return selected
+
     async def extract_tribology_data(
         self,
         content: str = "",
@@ -785,17 +902,103 @@ class LLMService:
             if dropped:
                 bucket["dropped_after_validation"] += 1
 
+        # Claude native full-PDF capture (default). One call over the whole PDF →
+        # raw rows + metadata; the local refine stage does the rest. Replaces the
+        # per-page vision/text pipeline below.
+        if self.extraction_mode == "claude_pdf" and self._claude_pdf_available() and pdf_path and os.path.exists(pdf_path):
+            await _log_progress("stage_a.claude_pdf", "capturing full PDF via Claude", force_emit=True)
+            page_texts = self._extract_plain_page_texts(pdf_path)
+            page_coverage = {
+                "total_pages": len(page_texts),
+                "visual_pages": [],
+                "text_pages": [i + 1 for i in sorted(page_texts.keys())],
+            }
+            document_context = extract_experimental_document_context(page_texts)
+
+            async def _capture_log(stage: str, message: str) -> None:
+                await _log_progress(stage, message, force_emit=True)
+
+            capture = await claude_pdf_extractor.capture(
+                self.anthropic_client,
+                pdf_path,
+                model=self.anthropic_extraction_model,
+                effort=self.anthropic_effort,
+                max_tokens=_bounded_int_env("CLAUDE_PDF_MAX_TOKENS", 32000, 4096, 64000),
+                use_files_api=_truthy_env("CLAUDE_PDF_USE_FILES_API", True),
+                log=_capture_log,
+            )
+            await _log_progress(
+                "stage_c.claude_pdf.rows",
+                f"raw_rows={len(capture.raw_rows)} stop={capture.stop_reason} source={capture.document_source}",
+                force_emit=True,
+            )
+
+            records, trace_candidates, refine_debug = self.refine_raw_rows(
+                capture.raw_rows,
+                document_context=document_context,
+                page_texts=page_texts,
+                strict_cof_mode=strict_cof_mode,
+                allow_figure_estimates=allow_figure_estimates,
+            )
+            candidates = trace_candidates
+            dropped_by_reason = refine_debug["dropped_by_reason"]
+            page_candidate_counts = refine_debug["page_candidate_counts"]
+            await _log_progress(
+                "stage_d.validation",
+                f"candidates={len(trace_candidates)}, kept={refine_debug['kept_count']}, "
+                f"dropped={len(trace_candidates) - refine_debug['kept_count']}",
+            )
+
+            document_profile = self._build_document_profile(pdf_path, page_texts)
+            self._last_extraction_debug = {
+                "candidate_count": len(trace_candidates),
+                "kept_count": len(records),
+                "dropped_by_reason": dropped_by_reason,
+                "candidates": trace_candidates,
+                "page_coverage": page_coverage,
+                "abbrev_map": {},
+                "document_context": document_context,
+                "document_profile": document_profile,
+                "page_candidate_counts": page_candidate_counts,
+                "progress_log": progress_log[-300:],
+                "strict_cof_mode": bool(strict_cof_mode),
+                "profile": profile,
+                "requested_profile": requested_profile,
+                "figure_estimate_count": refine_debug["figure_estimate_count"],
+                "allow_figure_estimates": allow_figure_estimates,
+                "claude_metadata": capture.metadata,
+                "claude_pdf": {
+                    "model": capture.model,
+                    "document_source": capture.document_source,
+                    "page_count": capture.page_count,
+                    "chunk_count": capture.chunk_count,
+                    "stop_reason": capture.stop_reason,
+                    "usage": capture.usage,
+                    "raw_response_json": capture.raw_response_json,
+                    "error": capture.error,
+                },
+            }
+            await _log_progress("stage_e.finalize", f"validated_records={len(records)}", force_emit=True)
+            return records
+
         if pdf_path and os.path.exists(pdf_path):
             cls = classify_pdf_pages(pdf_path)
             visual_idxs = sorted(cls.get("visual_pages", []))
             page_texts = cls.get("page_texts", {}) or {}
-            text_idxs = sorted(set(cls.get("text_pages", [])) | set(visual_idxs) | set(page_texts.keys()))
+            all_text_idxs = sorted(set(cls.get("text_pages", [])) | set(visual_idxs) | set(page_texts.keys()))
             selected_visual_idxs = self._select_visual_pages(
                 visual_idxs,
                 page_texts,
                 high_accuracy,
                 profile=requested_profile if requested_profile == "review_figure_estimate" else profile,
                 visual_page_hints=visual_page_hints,
+            )
+            # Only spend a text-extraction LLM call on pages that can actually yield a
+            # row; figure pages are always kept so their captions/text still feed routing.
+            text_idxs = self._select_text_pages(
+                all_text_idxs,
+                page_texts,
+                always_include=set(selected_visual_idxs),
             )
 
             page_coverage = {
@@ -807,7 +1010,12 @@ class LLMService:
             document_context = extract_experimental_document_context(page_texts)
             await _log_progress(
                 "stage_a.profile",
-                f"total_pages={len(page_texts)}, visual={len(visual_idxs)}, selected_visual={len(selected_visual_idxs)}, text_only={len(text_idxs)}",
+                (
+                    f"total_pages={len(page_texts)}, visual={len(visual_idxs)}, "
+                    f"selected_visual={len(selected_visual_idxs)}, "
+                    f"text_pages={len(text_idxs)}/{len(all_text_idxs)} "
+                    f"(skipped={len(all_text_idxs) - len(text_idxs)} no-signal)"
+                ),
                 force_emit=True,
             )
             if document_context:
@@ -1274,7 +1482,122 @@ class LLMService:
                     "raw": dict(row or {}),
                 })
 
-        # Stage D normalize + validate
+        # Stage D: refine candidates → records (normalize/validate/enrich/dedupe).
+        # Accumulators are shared so Stage C add-counts merge with Stage D kept/dropped.
+        valid_records, refine_debug = self._refine_candidates(
+            candidates,
+            document_context=document_context,
+            page_texts=page_texts,
+            abbrev_map=abbrev_map,
+            strict_cof_mode=strict_cof_mode,
+            allow_figure_estimates=allow_figure_estimates,
+            dropped_by_reason=dropped_by_reason,
+            page_candidate_counts=page_candidate_counts,
+        )
+        figure_estimate_count = refine_debug["figure_estimate_count"]
+        await _log_progress(
+            "stage_d.validation",
+            f"candidates={len(candidates)}, kept={refine_debug['normalized_count']}, dropped={len(candidates) - refine_debug['normalized_count']}",
+        )
+        for page_key in sorted(page_candidate_counts.keys(), key=lambda x: int(x)):
+            stats = page_candidate_counts[page_key]
+            await _log_progress(
+                "stage_d.page_counts",
+                (
+                    f"total={stats.get('total', 0)}, figure={stats.get('figure', 0)}, "
+                    f"text={stats.get('text', 0)}, kept={stats.get('kept_after_validation', 0)}, "
+                    f"dropped={stats.get('dropped_after_validation', 0)}"
+                ),
+                page=int(page_key),
+            )
+        if refine_debug.get("dropped_non_il"):
+            await _log_progress(
+                "stage_d.il_filter",
+                f"dropped_non_il={refine_debug['dropped_non_il']}, kept_il={refine_debug['kept_count']}",
+            )
+
+        # Stage A profile for tracing
+        document_profile = self._build_document_profile(pdf_path, page_texts) if (pdf_path and os.path.exists(pdf_path)) else {}
+        self._last_extraction_debug = {
+            "candidate_count": len(candidates),
+            "kept_count": len(valid_records),
+            "dropped_by_reason": dropped_by_reason,
+            "candidates": candidates,
+            "page_coverage": page_coverage,
+            "abbrev_map": abbrev_map,
+            "document_context": document_context,
+            "document_profile": document_profile,
+            "page_candidate_counts": page_candidate_counts,
+            "progress_log": progress_log[-300:],
+            "strict_cof_mode": bool(strict_cof_mode),
+            "profile": profile,
+            "requested_profile": requested_profile,
+            "figure_estimate_count": figure_estimate_count,
+            "allow_figure_estimates": allow_figure_estimates,
+        }
+        await _log_progress(
+            "stage_e.finalize",
+            f"validated_records={len(valid_records)}",
+            force_emit=True,
+        )
+
+        return valid_records
+
+    def _refine_candidates(
+        self,
+        candidates: List[dict],
+        *,
+        document_context: Optional[dict] = None,
+        page_texts: Optional[dict] = None,
+        abbrev_map: Optional[dict] = None,
+        strict_cof_mode: bool = False,
+        allow_figure_estimates: bool = False,
+        dropped_by_reason: Optional[Dict[str, int]] = None,
+        page_candidate_counts: Optional[Dict[str, Dict[str, int]]] = None,
+    ) -> tuple[List[TribologyData], Dict[str, Any]]:
+        """Phase 2 refine: normalize, validate, enrich, dedupe raw candidates → records.
+
+        Pure (no LLM, no network, no progress I/O) so it can be re-run from
+        persisted raw rows without re-capturing. Mutates each candidate dict in
+        place with ``normalized``/``drop_reason``/``admission_reason`` for tracing.
+        ``dropped_by_reason``/``page_candidate_counts`` may be passed in to
+        accumulate onto counters populated by an earlier capture stage.
+        """
+        page_texts = page_texts or {}
+        abbrev_map = abbrev_map or {}
+        document_context = document_context or {}
+        dropped_by_reason = dropped_by_reason if dropped_by_reason is not None else {}
+        page_candidate_counts = page_candidate_counts if page_candidate_counts is not None else {}
+        figure_estimate_count = 0
+
+        def _bump_page_count(page: Optional[int], modality: str, *, kept: bool = False, dropped: bool = False) -> None:
+            if page is None:
+                return
+            key = str(int(page))
+            bucket = page_candidate_counts.setdefault(
+                key,
+                {
+                    "total": 0,
+                    "figure": 0,
+                    "text": 0,
+                    "other": 0,
+                    "kept_after_validation": 0,
+                    "dropped_after_validation": 0,
+                },
+            )
+            mod = str(modality or "").lower()
+            if mod.startswith("figure"):
+                bucket["figure"] += 1
+            elif mod.startswith("text"):
+                bucket["text"] += 1
+            else:
+                bucket["other"] += 1
+            bucket["total"] += 1
+            if kept:
+                bucket["kept_after_validation"] += 1
+            if dropped:
+                bucket["dropped_after_validation"] += 1
+
         normalized_rows: List[dict] = []
         for c in candidates:
             page_num = c.get("page")
@@ -1290,6 +1613,7 @@ class LLMService:
                 page_context=page_context,
             )
             norm["_modality"] = c.get("modality")
+            delta_admitted = bool(allow_figure_estimates and apply_cof_delta_policy(norm, confidence_cap=FIGURE_ESTIMATE_CONFIDENCE_CAP))
             c["normalized"] = norm
             if not has_core_quantitative_signal(norm):
                 reason = "no_core_quant_signal"
@@ -1301,9 +1625,10 @@ class LLMService:
             needs_target_metric = bool(strict_cof_mode or modality_l.startswith("figure"))
             if needs_target_metric:
                 has_cof = has_explicit_numeric_value(norm.get("cof"))
+                has_cof_delta = has_explicit_numeric_value(norm.get("cof_delta"))
                 has_force = has_explicit_numeric_value(norm.get("friction_force"))
                 has_load = has_explicit_numeric_value(norm.get("normal_load") or norm.get("load"))
-                if (not has_cof) and (not (has_force and has_load)):
+                if (not has_cof) and (not has_cof_delta) and (not (has_force and has_load)):
                     reason = "no_target_metric"
                     c["drop_reason"] = reason
                     dropped_by_reason[reason] = dropped_by_reason.get(reason, 0) + 1
@@ -1337,23 +1662,11 @@ class LLMService:
                 dropped_by_reason[quality_drop] = dropped_by_reason.get(quality_drop, 0) + 1
                 _bump_page_count(c.get("page"), str(c.get("modality") or "unknown"), dropped=True)
                 continue
+            if delta_admitted:
+                figure_estimate_count += 1
+                c["admission_reason"] = COF_DELTA_REASON
             _bump_page_count(c.get("page"), str(c.get("modality") or "unknown"), kept=True)
             normalized_rows.append(norm)
-        await _log_progress(
-            "stage_d.validation",
-            f"candidates={len(candidates)}, kept={len(normalized_rows)}, dropped={len(candidates) - len(normalized_rows)}",
-        )
-        for page_key in sorted(page_candidate_counts.keys(), key=lambda x: int(x)):
-            stats = page_candidate_counts[page_key]
-            await _log_progress(
-                "stage_d.page_counts",
-                (
-                    f"total={stats.get('total', 0)}, figure={stats.get('figure', 0)}, "
-                    f"text={stats.get('text', 0)}, kept={stats.get('kept_after_validation', 0)}, "
-                    f"dropped={stats.get('dropped_after_validation', 0)}"
-                ),
-                page=int(page_key),
-            )
 
         converted_data = calculate_missing_cof(normalized_rows)
         converted_data = set_default_temperature(converted_data)
@@ -1398,11 +1711,6 @@ class LLMService:
             converted_data,
             allow_likely=allow_figure_estimates,
         )
-        if dropped_non_il:
-            await _log_progress(
-                "stage_d.il_filter",
-                f"dropped_non_il={len(dropped_non_il)}, kept_il={len(converted_data)}",
-            )
 
         valid_records: List[TribologyData] = []
         for item in converted_data:
@@ -1415,32 +1723,81 @@ class LLMService:
             except Exception as e:
                 print(f"[LLM Skip] {e}")
 
-        # Stage A profile for tracing
-        document_profile = self._build_document_profile(pdf_path, page_texts) if (pdf_path and os.path.exists(pdf_path)) else {}
-        self._last_extraction_debug = {
+        debug: Dict[str, Any] = {
             "candidate_count": len(candidates),
             "kept_count": len(valid_records),
+            "normalized_count": len(normalized_rows),
             "dropped_by_reason": dropped_by_reason,
-            "candidates": candidates,
-            "page_coverage": page_coverage,
-            "abbrev_map": abbrev_map,
-            "document_context": document_context,
-            "document_profile": document_profile,
             "page_candidate_counts": page_candidate_counts,
-            "progress_log": progress_log[-300:],
-            "strict_cof_mode": bool(strict_cof_mode),
-            "profile": profile,
-            "requested_profile": requested_profile,
             "figure_estimate_count": figure_estimate_count,
-            "allow_figure_estimates": allow_figure_estimates,
+            "dropped_non_il": len(dropped_non_il),
         }
-        await _log_progress(
-            "stage_e.finalize",
-            f"validated_records={len(valid_records)}",
-            force_emit=True,
-        )
+        return valid_records, debug
 
-        return valid_records
+    def refine_raw_rows(
+        self,
+        raw_rows: List[dict],
+        *,
+        document_context: Optional[dict] = None,
+        page_texts: Optional[dict] = None,
+        modality: str = "claude_pdf",
+        stage: str = "stage_c.claude_pdf",
+        strict_cof_mode: bool = False,
+        allow_figure_estimates: bool = False,
+    ) -> tuple[List[TribologyData], List[dict], Dict[str, Any]]:
+        """Refine bare raw rows (e.g. from Claude capture or persisted trace) into records.
+
+        Wraps each raw row as a trace candidate and runs the pure refine pipeline,
+        so this can be called from a fresh capture or re-run from stored
+        ``ExtractionCandidate.raw`` with no LLM call. Returns
+        ``(records, trace_candidates, refine_debug)``.
+        """
+        candidates: List[dict] = []
+        for row in raw_rows or []:
+            row = dict(row or {})
+            candidates.append(
+                {
+                    "stage": stage,
+                    "modality": modality,
+                    "page": row.get("source_page"),
+                    "source_figure": row.get("source_figure"),
+                    "raw": row,
+                }
+            )
+        records, debug = self._refine_candidates(
+            candidates,
+            document_context=document_context,
+            page_texts=page_texts,
+            strict_cof_mode=strict_cof_mode,
+            allow_figure_estimates=allow_figure_estimates,
+        )
+        return records, candidates, debug
+
+    @staticmethod
+    def _coerce_claude_metadata(meta: dict) -> dict:
+        """Map Claude's metadata sub-object into the legacy metadata dict shape."""
+        meta = meta or {}
+
+        def _s(value: Any) -> str:
+            return str(value).strip() if value not in (None, "") else ""
+
+        year = meta.get("year")
+        try:
+            year = int(year) if year not in (None, "") else None
+        except Exception:
+            year = None
+
+        return {
+            "title": _s(meta.get("title")),
+            "authors": _s(meta.get("authors")),
+            "doi": _s(meta.get("doi")),
+            "journal": _s(meta.get("journal")),
+            "issn": meta.get("issn") or None,
+            "year": year,
+            "volume": meta.get("volume") or None,
+            "issue": meta.get("issue") or None,
+            "pages": meta.get("pages") or None,
+        }
 
     async def _extract_metadata_only(self, content: str, images: Optional[List[str]] = None) -> dict:
         header = (content or "")[:4500]
@@ -1648,19 +2005,25 @@ class LLMService:
         visual_page_hints: Optional[List[int]] = None,
     ) -> dict:
         requested_profile = str(extraction_profile or AUTO_EXTRACTION_PROFILE).strip().lower()
-        if self._fast_table_enabled() and requested_profile != "review_figure_estimate":
-            try:
-                return await self._extract_fast_table_with_metadata(
-                    content=content,
-                    pdf_path=pdf_path,
-                    progress_callback=progress_callback,
-                )
-            except Exception as exc:
-                logger.warning("Fast table extraction failed: %s", exc)
-                if not self._fast_table_legacy_fallback_enabled():
-                    raise
+        normalized_profile = normalize_extraction_profile(extraction_profile)
+        records = await self.extract_tribology_data(
+            content=content,
+            images=images,
+            pdf_path=pdf_path,
+            profile=extraction_profile,
+            progress_callback=progress_callback,
+            strict_cof_mode=strict_cof_mode,
+            visual_page_hints=visual_page_hints,
+        )
 
-        metadata = await self._extract_metadata_only(content, images)
+        # Metadata: the Claude full-PDF call already returns it; only fall back to a
+        # separate metadata pass for the legacy pipeline.
+        debug = self._last_extraction_debug or {}
+        claude_metadata = debug.get("claude_metadata") if isinstance(debug, dict) else None
+        if claude_metadata:
+            metadata = self._coerce_claude_metadata(claude_metadata)
+        else:
+            metadata = await self._extract_metadata_only(content, images)
         final_metadata = metadata.copy()
 
         doi = (metadata.get("doi") or "").strip()
@@ -1682,17 +2045,6 @@ class LLMService:
             except Exception as e:
                 print(f"[DOI Resolve] {e}")
 
-        normalized_profile = normalize_extraction_profile(extraction_profile)
-        records = await self.extract_tribology_data(
-            content=content,
-            images=images,
-            pdf_path=pdf_path,
-            profile=extraction_profile,
-            progress_callback=progress_callback,
-            strict_cof_mode=strict_cof_mode,
-            visual_page_hints=visual_page_hints,
-        )
-
         data = []
         for r in records:
             row = {
@@ -1710,6 +2062,7 @@ class LLMService:
                 "shear_rate": r.shear_rate,
                 "temperature": r.temperature,
                 "cof": r.cof,
+                "cof_delta": r.cof_delta,
                 "cof_extracted": r.cof_extracted,
                 "wear_rate": r.wear_rate,
                 "test_duration": r.test_duration,
@@ -1747,6 +2100,7 @@ class LLMService:
                 "notes": r.notes,
                 "friction_force": r.friction_force,
                 "value_origin": r.value_origin,
+                "field_evidence_json": r.field_evidence_json,
                 "evidence": r.evidence,
             }
             computed_confidence = calculate_confidence(row)
@@ -1773,7 +2127,14 @@ class LLMService:
             "requested_profile": debug.get("requested_profile") or extraction_profile,
             "figure_estimate_count": int(debug.get("figure_estimate_count") or 0),
             "allow_figure_estimates": bool(debug.get("allow_figure_estimates")),
+            "pipeline": "claude_pdf" if debug.get("claude_pdf") else "legacy",
         }
+        if debug.get("claude_pdf"):
+            # Keep the run summary lean: the raw model rows are already persisted as
+            # trace candidates, so drop the bulky verbatim response text here.
+            extraction_summary["claude_pdf"] = {
+                k: v for k, v in (debug.get("claude_pdf") or {}).items() if k != "raw_response_json"
+            }
 
         return {
             "metadata": final_metadata,
@@ -1801,6 +2162,38 @@ class LLMService:
             strict_cof_mode=strict_cof_mode,
             visual_page_hints=visual_page_hints,
         )
+
+    async def generate_reading_report(
+        self,
+        *,
+        prompt: str,
+        content: str,
+        pdf_path: Optional[str] = None,
+    ) -> dict[str, Any]:
+        text = str(content or "")
+        if pdf_path and os.path.exists(pdf_path) and not text.strip():
+            page_texts = self._extract_plain_page_texts(pdf_path)
+            text = "\n\n".join(
+                f"[Page {page + 1}]\n{page_text}"
+                for page, page_text in sorted(page_texts.items())
+                if page_text
+            )
+
+        clipped_text = text[:120_000]
+        resp = await self.text_client.chat.completions.create(
+            model=self.text_model,
+            messages=[
+                {"role": "system", "content": READING_REPORT_PROMPT},
+                {"role": "user", "content": f"{prompt}\n\nDocument text:\n{clipped_text}"},
+            ],
+            temperature=0.2,
+            max_tokens=6000,
+        )
+        return {
+            "report_markdown": resp.choices[0].message.content or "",
+            "model": self.text_model,
+            "provider": self.provider,
+        }
 
     async def chat(self, message: str, context: Optional[str] = None) -> str:
         messages = [{"role": "system", "content": CHAT_SYSTEM_PROMPT}]

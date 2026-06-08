@@ -50,6 +50,7 @@ class TribologyData(BaseModel):
     shear_rate: Optional[str] = None
     temperature: Optional[str] = None
     cof: Optional[str] = None
+    cof_delta: Optional[str] = None
 
     # Database-compatible fields
     cof_value: Optional[float] = None
@@ -102,7 +103,7 @@ class TribologyData(BaseModel):
     source_figure: Optional[str] = None
     sample_id: Optional[str] = None
     series_id: Optional[str] = None
-    field_evidence_json: Dict[str, FieldEvidence] = Field(default_factory=dict)
+    field_evidence_json: Dict[str, Any] = Field(default_factory=dict)
     review_status: Optional[str] = None
     record_origin: Optional[str] = None
     review_entity_type: Optional[str] = None

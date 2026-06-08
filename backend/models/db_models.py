@@ -366,6 +366,11 @@ class Literature(Base):
         back_populates="literature",
         cascade="all, delete-orphan",
     )
+    reading_reports: Mapped[List["LiteratureReadingReport"]] = relationship(
+        "LiteratureReadingReport",
+        back_populates="literature",
+        cascade="all, delete-orphan",
+    )
     diffusion_candidates: Mapped[List["DiffusionCandidate"]] = relationship(
         "DiffusionCandidate",
         back_populates="literature",
@@ -386,6 +391,33 @@ class Literature(Base):
         back_populates="literature",
         cascade="all, delete-orphan",
     )
+
+
+class LiteratureReadingReport(Base):
+    __tablename__ = "literature_reading_reports"
+    __table_args__ = (
+        UniqueConstraint(
+            "literature_id",
+            "extractor_type",
+            "prompt_version",
+            name="uq_literature_reading_report_version",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    literature_id: Mapped[int] = mapped_column(ForeignKey("literature.id"), nullable=False, index=True)
+    extractor_type: Mapped[str] = mapped_column(String(32), default="tribology", index=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="running", index=True, nullable=False)
+    report_markdown: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    model: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    provider: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    source_summary_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(default=func.now(), onupdate=func.now())
+
+    literature: Mapped["Literature"] = relationship("Literature", back_populates="reading_reports")
 
 
 class TribologyData(Base):

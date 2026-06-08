@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 const source = readFileSync(resolve(__dirname, 'IntegratedExplorerWorkspace.vue'), 'utf-8')
 const databaseModalSource = readFileSync(resolve(__dirname, '../DatabaseToolModal.vue'), 'utf-8')
 const recordSearchSource = readFileSync(resolve(__dirname, '../../composables/useRecordSearch.ts'), 'utf-8')
+const recordTableSource = readFileSync(resolve(__dirname, 'RecordTable.vue'), 'utf-8')
 
 describe('IntegratedExplorerWorkspace filters surface', () => {
 	  it('keeps the Database header as the only visible Filters entry', () => {
@@ -163,7 +164,8 @@ describe('IntegratedExplorerWorkspace filters surface', () => {
     expect(source).toContain("entityTypeFilter: toRef(props, 'entityTypeFilter')")
     expect(recordSearchSource).toContain("entityTypeFilter?: Ref<'record' | 'candidate' | string | null | undefined>")
     expect(recordSearchSource).toContain("entityType: normalizeEntityTypeFilter(options.entityTypeFilter?.value)")
-    expect(source).toContain("{{ activeLibraryEntityType === 'candidate' ? 'Review Queue' : 'Official Database' }}")
+    expect(source).not.toContain("{{ activeLibraryEntityType === 'candidate' ? 'Review Queue' : 'Official Database' }}")
+    expect(source).not.toContain('Candidates waiting for review before entering the official library.')
   })
 
   it('opens a candidate review sheet from the Review Queue and refreshes after approval', () => {
@@ -175,13 +177,13 @@ describe('IntegratedExplorerWorkspace filters surface', () => {
     expect(source).toContain("if (databaseRecordEntityType(record) !== 'candidate') return")
     expect(source).toContain('reviewSheetRecord.value = record')
     expect(source).toContain('reviewSheetRecord.value = reviewSheetNextRecord.value')
-    expect(source).toContain('async function handleCandidateReviewApproved()')
+    expect(source).toContain('async function handleCandidateSavedToDatabase()')
     expect(source).toContain('async function handleCandidateReviewRejected()')
     expect(source).toContain('function advancePastReviewedCandidate(reviewedRecord: RecordResponse | null)')
     expect(source).toContain('const nextRecord = reviewSheetNextRecord.value')
     expect(source).toContain('reviewSheetRecord.value = nextRecord ?? null')
-    expect(source).toContain('optimisticallyRemoveApprovedCandidate(reviewedRecord)')
-    expect(source).toContain('function optimisticallyRemoveApprovedCandidate(record: RecordResponse)')
+    expect(source).toContain('optimisticallyRemoveSavedCandidate(reviewedRecord)')
+    expect(source).toContain('function optimisticallyRemoveSavedCandidate(record: RecordResponse)')
     expect(source).toContain("window.dispatchEvent(new CustomEvent('ioniclink:review-data-changed'")
     expect(source).toContain('void fetchData()')
     expect(source).toContain(':show="Boolean(reviewSheetRecord)"')
@@ -189,8 +191,22 @@ describe('IntegratedExplorerWorkspace filters surface', () => {
     expect(source).toContain(':next-record="reviewSheetNextRecord"')
     expect(source).toContain(':has-next-candidate="Boolean(reviewSheetNextRecord)"')
     expect(source).toContain('@next-candidate="openNextCandidateReviewSheet"')
-    expect(source).toContain('@saved-and-approved="handleCandidateReviewApproved"')
+    expect(source).toContain('@saved-to-database="handleCandidateSavedToDatabase"')
+    expect(source).not.toContain('@saved-and-approved="handleCandidateReviewApproved"')
     expect(source).toContain('@rejected="handleCandidateReviewRejected"')
+  })
+
+  it('opens the review sheet automatically when Database is focused on a generated candidate', () => {
+    expect(source).toContain('function openFocusedCandidateReviewSheet(record: RecordResponse)')
+    expect(source).toContain("if (props.focusEntityType !== 'candidate') return")
+    expect(source).toContain('openFocusedCandidateReviewSheet(foundCandidate)')
+    expect(source).toContain('reviewSheetRecord.value = record')
+  })
+
+  it('matches focused candidate rows by entity id instead of only the table row id', () => {
+    expect(source).toContain('Number(databaseRecordEntityId(row)) === Number(id)')
+    expect(recordTableSource).toContain('Number(recordEntityId(record)) === Number(props.focusRecordId)')
+    expect(recordTableSource).toContain('function recordEntityId(record: RecordResponse)')
   })
 
   it('matches numeric visual source labels to library figure preview labels', () => {
@@ -211,6 +227,7 @@ describe('IntegratedExplorerWorkspace filters surface', () => {
     expect(source).toContain('const displayedRecords = computed')
     expect(source).toContain('v-if="isReviewQueue"')
     expect(source).toContain('data-testid="review-queue-triage"')
+    expect(source).not.toContain('>Triage<')
     expect(source).not.toContain("label: 'Weak'")
     expect(source).not.toContain("label: 'Strong'")
     expect(source).not.toContain('Page located')

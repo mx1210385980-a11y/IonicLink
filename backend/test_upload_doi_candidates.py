@@ -3,10 +3,10 @@ from io import BytesIO
 import pytest
 from fastapi import UploadFile
 
-from models.db_models import ResearchGroup, User
+from models.db_models import Literature, ResearchGroup, User
 from security import AuthPrincipal, RequestScope
 from services.doi_service import DOIMetadata, DOIService
-from services.file_service import _extract_doi_candidates, save_upload_entry
+from services.file_service import _clean_upload_metadata, _extract_doi_candidates, _resolve_upload_metadata, save_upload_entry
 
 
 def test_upload_doi_candidates_prefer_front_matter_spaced_doi():
@@ -33,6 +33,44 @@ References
 """
 
     assert _extract_doi_candidates(text, "paper.pdf") == []
+
+
+def test_clean_upload_metadata_rejects_obvious_non_journal_values():
+    cleaned = _clean_upload_metadata(
+        {
+            "journal": "Ionic Liquid Lubrication of Stainless Steel: Friction is Inversely Correlated with Interfacial Liquid Structure",
+            "year": "2020",
+        }
+    )
+
+    assert cleaned == {"year": 2020}
+
+    short_topic_pollution = _clean_upload_metadata({"journal": "Ionic liquid", "year": "2022"})
+    assert short_topic_pollution == {"year": 2022}
+
+    valid = _clean_upload_metadata({"journal": "Faraday Discussions", "year": "2017"})
+    assert valid == {"journal": "Faraday Discussions", "year": 2017}
+
+
+@pytest.mark.anyio
+async def test_resolve_upload_metadata_uses_filename_year_when_journal_is_polluted(monkeypatch):
+    def fake_fallback(_text: str):
+        return {
+            "title": "Boundary layer friction of solvate ionic liquids as a function of potential",
+            "journal": "Peter K. Cooper +3",
+        }
+
+    monkeypatch.setattr("services.file_service.extract_metadata_fallback", fake_fallback)
+
+    metadata = await _resolve_upload_metadata(
+        "front matter without visible DOI",
+        "2020-boundary-layer-friction.pdf",
+        [],
+    )
+
+    assert metadata["title"].startswith("Boundary layer friction")
+    assert "journal" not in metadata
+    assert metadata["year"] == 2020
 
 
 @pytest.mark.anyio
@@ -104,3 +142,71 @@ https://doi.org/10.26599/FRICT.2025.9440976
     assert literature.issue == "6"
     assert literature.pages == "9440976"
     assert literature.issn == "2223-7690"
+
+
+@pytest.mark.anyio
+async def test_save_upload_entry_reuses_existing_literature_when_metadata_resolves_existing_doi(
+    db_session,
+    monkeypatch,
+    tmp_path,
+):
+    group = ResearchGroup(name="Upload Dedupe Group", slug="upload-dedupe-group")
+    db_session.add(group)
+    await db_session.flush()
+    user = User(
+        username="upload-dedupe-user",
+        display_name="Upload Dedupe User",
+        password_hash="test",
+        role="researcher",
+        group_id=group.id,
+    )
+    db_session.add(user)
+    await db_session.flush()
+    existing = Literature(
+        doi="10.1021/acssuschemeng.5c10210",
+        title="High-Load-Triggered Nanoscale Superlubricity in Long-Chain Borate Ionic Liquids",
+        authors="Muqiu Wu; Guobing Zhou; Rong An",
+        journal="ACS Sustainable Chemistry & Engineering",
+        year=2026,
+        content="old content",
+        group_id=group.id,
+        scope_type="group_library",
+        scope_key="group_library",
+        created_by_user_id=user.id,
+        status="completed",
+    )
+    db_session.add(existing)
+    await db_session.commit()
+    await db_session.refresh(existing)
+
+    async def fake_resolve_upload_metadata(*_args, **_kwargs):
+        return {
+            "doi": "10.1021/acssuschemeng.5c10210",
+            "title": existing.title,
+            "authors": existing.authors,
+            "journal": existing.journal,
+            "year": existing.year,
+        }
+
+    monkeypatch.setattr("services.file_service.TEMP_UPLOAD_DIR", str(tmp_path / "uploads"))
+    monkeypatch.setattr("services.file_service.validate_pdf_bytes", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("services.file_service.extract_pdf_text_fitz", lambda _bytes: "Title page without DOI text")
+    monkeypatch.setattr("services.file_service._extract_doi_candidates", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr("services.file_service._resolve_upload_metadata", fake_resolve_upload_metadata)
+
+    upload = UploadFile(filename="2026-muqiu-high-load.pdf", file=BytesIO(b"%PDF-1.4\nfake-new-copy"))
+    principal = AuthPrincipal(user=user, group=group, personal_workspace=None)
+    scope = RequestScope(scope_type="group_library", group_id=group.id, scope_key="group_library")
+
+    literature = await save_upload_entry(db_session, upload, principal=principal, scope=scope)
+
+    assert literature.id == existing.id
+    assert literature.doi == existing.doi
+    assert literature.content == "Title page without DOI text"
+
+    rows = (
+        await db_session.execute(
+            Literature.__table__.select().where(Literature.doi == "10.1021/acssuschemeng.5c10210")
+        )
+    ).all()
+    assert len(rows) == 1

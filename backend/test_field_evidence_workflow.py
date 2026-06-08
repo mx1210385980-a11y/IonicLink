@@ -1,6 +1,9 @@
+import io
+import json
 from types import SimpleNamespace
 
 import fitz
+from PIL import Image, ImageDraw
 
 from services.file_service import (
     _annotate_review_record_with_canonical_match,
@@ -13,9 +16,14 @@ from services.file_service import (
     _review_canonical_match_score,
 )
 from routers.extraction import (
+    CofExtractedUpdatePayload,
+    LoadConditionsUpdatePayload,
+    _apply_cof_extracted_update,
+    _apply_load_conditions_update,
     _build_record_field_evidence_payload,
     _clamp_pdf_highlight_bbox,
     _parse_bbox_json,
+    _refresh_record_schema_layers,
     _refresh_visual_source_evidence,
     _sanitize_field_evidence_locations,
 )
@@ -131,6 +139,123 @@ def test_record_field_evidence_payload_maps_normal_load_alias_to_load():
     assert load["evidence"]["quote"] == "Normal load was 30 nN during the AFM measurement."
     assert load["evidence"]["matched_text"] == "30 nN"
     assert load["status"] == "grounded"
+
+
+def test_structured_load_update_replaces_stale_voltage_raw_in_schema():
+    record = SimpleNamespace(
+        id=611,
+        literature_id=120,
+        material_name="A12 ionic liquid film",
+        lubricant="[N88812][A12BMB]",
+        cation="[N88812]+",
+        anion="[A12BMB]-",
+        substrate_material="HOPG",
+        temperature="298 K",
+        load_raw="0-3.5 V AFM setpoint",
+        load_value="0-3.5 V AFM setpoint",
+        load_conditions_json=None,
+        cof_raw="0.0013",
+        cof_value=0.0013,
+        cof_extracted_json=None,
+        speed_value=None,
+        speed_conditions_json=None,
+        surface_roughness=None,
+        substrate_roughness=None,
+        probe_roughness=None,
+        potential=None,
+        tribological_system_json=None,
+        regime=None,
+        probe_geometry=None,
+        source=None,
+        source_page=None,
+        source_figure=None,
+        review_status="needs_review",
+        assembly_notes=None,
+        field_evidence_json='{"load":{"value":"0-3.5 V AFM setpoint","review_state":"flagged"}}',
+    )
+
+    _apply_load_conditions_update(
+        record,
+        LoadConditionsUpdatePayload(
+            loadConditions={
+                "valueType": "range",
+                "loadMinN": 1.5e-8,
+                "loadMaxN": 3e-8,
+                "note": "Abstract figure reports 15-30 nN before the transition.",
+            }
+        ),
+    )
+    _refresh_record_schema_layers(record)
+
+    field_map = json.loads(record.field_evidence_json)
+    load_field = next(
+        field for field in field_map["_schema_layers"]["core_fields"]
+        if field["key"] == "load"
+    )
+
+    assert record.load_raw is None
+    assert record.load_value is None
+    assert load_field["status"] == "ready"
+    assert "0-3.5 V" not in load_field["value"]
+    assert load_field["value"] == "1.5e-08-3e-08 N"
+
+
+def test_structured_cof_update_replaces_stale_delta_raw_in_schema():
+    record = SimpleNamespace(
+        id=612,
+        literature_id=120,
+        material_name="A12 ionic liquid film",
+        lubricant="[N88812][A12BMB]",
+        cation="[N88812]+",
+        anion="[A12BMB]-",
+        substrate_material="HOPG",
+        temperature="298 K",
+        load_raw="30 nN",
+        load_value="30 nN",
+        load_conditions_json=None,
+        cof_raw="increase by 0.0837",
+        cof_value=None,
+        cof_extracted_json=None,
+        speed_value=None,
+        speed_conditions_json=None,
+        surface_roughness=None,
+        substrate_roughness=None,
+        probe_roughness=None,
+        potential=None,
+        tribological_system_json=None,
+        regime=None,
+        probe_geometry=None,
+        source=None,
+        source_page=None,
+        source_figure=None,
+        review_status="needs_review",
+        assembly_notes=None,
+        field_evidence_json='{"cof":{"value":"increase by 0.0837","review_state":"flagged"}}',
+    )
+
+    _apply_cof_extracted_update(
+        record,
+        CofExtractedUpdatePayload(
+            cofExtracted={
+                "valueType": "single",
+                "cofAverage": 0.0013,
+                "note": "Correct COF from the graphical abstract.",
+            }
+        ),
+    )
+    _refresh_record_schema_layers(record)
+
+    field_map = json.loads(record.field_evidence_json)
+    cof_field = next(
+        field for field in field_map["_schema_layers"]["core_fields"]
+        if field["key"] == "cof"
+    )
+
+    assert record.cof_raw is None
+    assert record.cof_value == 0.0013
+    assert cof_field["status"] == "ready"
+    assert "0.0837" not in cof_field["value"]
+    assert cof_field["value"] == "0.0013"
 
 
 def test_record_field_evidence_payload_maps_camel_load_alias_to_load():
@@ -971,6 +1096,48 @@ def test_record_field_evidence_keeps_probe_and_substrate_evidence_separate():
     assert payload["fields"]["substrate_material"]["evidence"]["matched_text"] == "mica"
 
 
+def test_sanitize_field_evidence_reanchors_graphical_abstract_image(tmp_path):
+    pdf_path = tmp_path / "legacy_graphical_abstract_bbox.pdf"
+    image = Image.new("RGB", (360, 230), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((12, 12, 348, 218), outline="black", width=3)
+    draw.text((64, 160), "Normal Load, nN", fill="black")
+    image_buffer = io.BytesIO()
+    image.save(image_buffer, format="PNG")
+
+    doc = fitz.open()
+    page = doc.new_page(width=620, height=800)
+    page.insert_text(
+        (50, 280),
+        "ABSTRACT: The normal load exceeds 30 nN in the transition regime.",
+        fontsize=11,
+    )
+    page.insert_image(fitz.Rect(390, 250, 560, 365), stream=image_buffer.getvalue())
+    doc.save(pdf_path)
+    doc.close()
+
+    field_map = {
+        "load": {
+            "value": "30 nN",
+            "evidence": {
+                "source_type": "figure",
+                "source_label": "Graphical abstract",
+                "page": 1,
+                "quote": "The normal load exceeds 30 nN in the transition regime.",
+                "bbox": [185, 267, 220, 284],
+                "matched_text": "30 nN",
+            },
+        }
+    }
+
+    sanitized = _sanitize_field_evidence_locations(field_map, pdf_path=str(pdf_path))
+
+    evidence = sanitized["load"]["evidence"]
+    assert evidence["matched_text"] is None
+    assert evidence["bbox"][0] >= 380
+    assert evidence["bbox"][2] <= 570
+
+
 def test_sanitizer_preserves_derived_speed_scan_condition_bbox(monkeypatch):
     monkeypatch.setattr(
         "routers.extraction._extract_text_from_bbox",
@@ -1396,3 +1563,43 @@ def test_field_evidence_map_preserves_current_and_iron_oxide_flexible_fields():
     assert flexible["current"]["_raw_key"] == "Current"
     assert flexible["iron_oxide_additive_ratio"]["value"] == "1 wt%"
     assert flexible["iron_oxide_additive_ratio"]["category"] == "lubricant_component"
+
+
+def test_field_evidence_map_preserves_provided_cof_delta_flexible_fields():
+    item = {
+        "material_name": "304 stainless steel",
+        "ionic_liquid": "[EMIM][BF4]",
+        "cof": None,
+        "cof_delta": "0.0837",
+        "source": "Fig. 9",
+        "source_page": 7,
+        "evidence": "The increase range of friction coefficient was 0.0837 at 20 A.",
+        "field_evidence_json": {
+            "_flexible_fields": {
+                "cof_delta": {
+                    "label": "COF delta",
+                    "value": "0.0837",
+                    "raw_value": "increase by 0.0837",
+                    "category": "derived_metric",
+                },
+                "current": {"label": "Current", "value": "20 A", "category": "condition"},
+                "baseline_current": {"label": "Baseline current", "value": "0 A", "category": "condition"},
+            }
+        },
+    }
+    record = SimpleNamespace(
+        source="Fig. 9",
+        source_figure="Fig. 9",
+        source_page=7,
+        evidence_page=None,
+        evidence_bbox=None,
+        sample_id=None,
+    )
+
+    field_map = _build_field_evidence_map(item, record, confidence=0.6, file_path=None)
+
+    flexible = field_map["_flexible_fields"]
+    assert flexible["cof_delta"]["value"] == "0.0837"
+    assert flexible["cof_delta"]["category"] == "derived_metric"
+    assert flexible["current"]["value"] == "20 A"
+    assert flexible["baseline_current"]["value"] == "0 A"

@@ -50,6 +50,11 @@ import {
   uploadErrorMessage,
 } from '@/lib/extractionWorkspace'
 import { shouldHydrateReviewFile } from '@/lib/reviewNoData'
+import {
+  isActiveRunStatus,
+  isTerminalRunStatus,
+  mapStageToProgress,
+} from '@/lib/extractionStages'
 import { useI18n } from '@/composables/useI18n'
 import type { HighlightRect } from '@/types/pdf-highlight'
 type SidebarTab = 'chat' | 'agents'
@@ -62,8 +67,6 @@ type ChatPanelBridge = {
   addMessage: (role: 'user' | 'assistant', message: string) => void
 }
 
-const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'error', 'cancelled', 'no_data'])
-const ACTIVE_RUN_STATUSES = new Set(['queued', 'running', 'processing', 'extracting'])
 const DARK_MODE_STORAGE_KEY = 'ioniclink-theme'
 const DEFAULT_EXTRACTOR_STORAGE_KEY = 'ioniclink-default-extractor-type'
 const BATCH_EXTRACTION_CONCURRENCY = 3
@@ -339,14 +342,6 @@ export function useAppShell(
     }
   }
 
-  function isTerminalRunStatus(status?: string | null): boolean {
-    return TERMINAL_RUN_STATUSES.has(String(status || '').toLowerCase())
-  }
-
-  function isActiveRunStatus(status?: string | null): boolean {
-    return ACTIVE_RUN_STATUSES.has(String(status || '').toLowerCase())
-  }
-
   function requestFailureMessage(error: any, fallback: string) {
     const status = Number(error?.response?.status || 0)
     const detail = error?.response?.data?.detail || error?.response?.data?.message
@@ -375,24 +370,6 @@ export function useAppShell(
     if (normalized.startsWith('stage_d')) return t('stage.validating_candidates')
     if (normalized.startsWith('stage_e')) return t('stage.finalizing_records')
     return String(stage || '').replace(/[_\.]+/g, ' ')
-  }
-
-  function mapStageToProgress(stage?: string | null, status?: string | null): number {
-    if (String(status || '').toLowerCase() === 'completed') return 100
-    if (String(status || '').toLowerCase() === 'no_data') return 100
-
-    const normalized = String(stage || '').trim().toLowerCase()
-    if (!normalized) return 8
-    if (normalized.startsWith('stage_a')) return 14
-    if (normalized.startsWith('stage_b')) return 24
-    if (normalized.startsWith('stage_c.fast_text')) return 62
-    if (normalized.startsWith('stage_c.figure_retry')) return 50
-    if (normalized.startsWith('stage_c.figure')) return 44
-    if (normalized.startsWith('stage_c.text')) return 62
-    if (normalized.startsWith('fallback_table')) return 74
-    if (normalized.startsWith('stage_d')) return 82
-    if (normalized.startsWith('stage_e')) return 94
-    return 18
   }
 
   function getRunSnapshot(run?: ExtractionRunDetail | null) {

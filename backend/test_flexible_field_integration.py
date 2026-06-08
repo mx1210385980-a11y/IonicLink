@@ -67,3 +67,28 @@ def test_extract_raw_flexible_fields_preserves_structured_flexible_pool():
 
     assert raw["interfacial_shear_strength"]["value"] == "12"
     assert raw["interfacial_shear_strength"]["category"] == "metric"
+
+
+def test_cof_delta_alias_normalizes_to_flexible_metric():
+    raw = extract_raw_flexible_fields(
+        {
+            "material_name": "304 stainless steel",
+            "ionic_liquid": "[EMIM][BF4]",
+            "cof": None,
+            "cof_delta": "0.0837",
+            "baseline_current": "0 A",
+            "current": "20 A",
+            "Fe3O4 loading": "15 wt%",
+            "source": "Fig. 9",
+            "source_page": 7,
+            "evidence": "The increase range of friction coefficient was 0.0837 at 20 A.",
+        }
+    )
+    payload, review_queue = normalize_flexible_fields(raw, KeyNormalizer())
+
+    assert review_queue == []
+    assert payload["cof_delta"]["value"] == "0.0837"
+    assert payload["cof_delta"]["category"] == "derived_metric"
+    assert payload["current"]["value"] == "20 A"
+    assert payload["baseline_current"]["value"] == "0 A"
+    assert payload["iron_oxide_additive_ratio"]["value"] == "15 wt%"

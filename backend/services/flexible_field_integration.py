@@ -57,6 +57,11 @@ _CURRENT_KEYS = {
     "applied_current",
     "electric_current",
     "test_current",
+    "current_intensity",
+    "baseline_current",
+    "reference_current",
+    "control_current",
+    "zero_current",
     "current_density",
     "areal_current",
 }
@@ -67,12 +72,26 @@ _ADDITIVE_KEYS = {
     "iron_oxide_content",
     "ferric_oxide_ratio",
     "fe2o3_mass_fraction",
+    "fe3o4_loading",
+    "fe3o4_mass_fraction",
+    "magnetite_loading",
     "additive_ratio",
     "additive_loading",
     "mass_fraction",
     "additive_concentration",
     "additive_wt",
     "additive_wt_percent",
+}
+
+_COF_DELTA_KEYS = {
+    "cof_delta",
+    "delta_cof",
+    "cof_increase",
+    "coefficient_of_friction_increase",
+    "friction_coefficient_increase",
+    "friction_coefficient_change",
+    "friction_coefficient_increase_range",
+    "increase_range_of_friction_coefficient",
 }
 
 _FLEXIBLE_CONTAINER_KEYS = {
@@ -126,6 +145,8 @@ def _category_for_cleaned_key(cleaned_key: str) -> str | None:
         return "condition"
     if cleaned_key in _ADDITIVE_KEYS:
         return "lubricant_component"
+    if cleaned_key in _COF_DELTA_KEYS:
+        return "derived_metric"
     return None
 
 

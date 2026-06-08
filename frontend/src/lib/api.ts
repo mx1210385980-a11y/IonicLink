@@ -194,6 +194,100 @@ export async function cancelExtraction(
     return response.data
 }
 
+export interface ReadingReportResponse {
+    success: boolean
+    id?: number
+    literature_id: number
+    extractor_type: ExtractorType
+    status: 'missing' | 'running' | 'completed' | 'failed' | string
+    report_markdown: string
+    prompt_version: string
+    model: string | null
+    provider: string | null
+    error_message: string | null
+    created_at: string | null
+    updated_at: string | null
+}
+
+export async function getReadingReport(
+    literatureId: number | string,
+    extractorType: ExtractorType = 'tribology',
+): Promise<ReadingReportResponse> {
+    const response = await api.get(`/api/literature/${literatureId}/reading-report`, {
+        params: { extractor_type: extractorType },
+    })
+    return response.data
+}
+
+export async function startReadingReport(
+    literatureId: number | string,
+    extractorType: ExtractorType = 'tribology',
+    force = false,
+): Promise<ReadingReportResponse> {
+    const response = await api.post(`/api/literature/${literatureId}/reading-report`, null, {
+        params: { extractor_type: extractorType, force },
+        timeout: 20000,
+    })
+    return response.data
+}
+
+export async function updateReadingReport(
+    literatureId: number | string,
+    reportMarkdown: string,
+    extractorType: ExtractorType = 'tribology',
+): Promise<ReadingReportResponse> {
+    const response = await api.patch(`/api/literature/${literatureId}/reading-report`, {
+        report_markdown: reportMarkdown,
+    }, {
+        params: { extractor_type: extractorType },
+        timeout: 30000,
+    })
+    return response.data
+}
+
+export interface CandidateDraftResponse {
+    success: boolean
+    candidate_count: number
+    official_record_count?: number
+    status: string
+    candidate_ids?: number[]
+    cleaning_preview?: CandidateDraftCleaningPreview
+    message?: string
+}
+
+export interface CandidateDraftCleaningField {
+    key: string
+    label: string
+    layer: 'core' | 'extended' | string
+    status: 'ready' | 'review' | string
+    value?: string | null
+    note?: string | null
+}
+
+export interface CandidateDraftCleaningPreview {
+    core_fields: CandidateDraftCleaningField[]
+    core_summary?: {
+        total: number
+        ready: number
+        missing_keys?: string[]
+        missing_labels?: string[]
+        can_promote?: boolean
+    }
+    extended_fields: CandidateDraftCleaningField[]
+    raw_flexible_json: Record<string, unknown>
+}
+
+export async function generateCandidateDraft(
+    literatureId: number | string,
+    extractorType: ExtractorType = 'tribology',
+): Promise<CandidateDraftResponse> {
+    const response = await api.post(`/api/literature/${literatureId}/candidate-draft`, null, {
+        params: { extractor_type: extractorType },
+        timeout: 300000,
+    })
+    return response.data
+}
+
 // Get Extracted Data
 export async function getData(fileId?: string) {
     const url = fileId ? `/api/data/${fileId}` : '/api/data'
@@ -457,6 +551,35 @@ export interface ReviewFieldEvidencePatchPayload {
     note?: string | null
 }
 
+export interface ClaudePdfSummary {
+    model?: string
+    document_source?: string
+    page_count?: number
+    chunk_count?: number
+    stop_reason?: string | null
+    usage?: {
+        input_tokens?: number
+        output_tokens?: number
+        [key: string]: number | undefined
+    }
+    error?: string | null
+    [key: string]: unknown
+}
+
+export interface ExtractionRunSummary {
+    progress_percent?: number
+    current_stage?: string
+    current_message?: string
+    pipeline?: 'claude_pdf' | 'legacy' | string
+    claude_pdf?: ClaudePdfSummary
+    progress_log?: Array<{ stage: string; message: string; page?: number }>
+    page_coverage?: Record<string, unknown>
+    page_candidate_counts?: Record<string, unknown>
+    // The run summary carries many ad-hoc keys across pipelines; keep it open so
+    // existing summary.* reads keep compiling.
+    [key: string]: unknown
+}
+
 export interface ExtractionRunDetail {
     run_id: string | null
     literature_id: number
@@ -480,6 +603,9 @@ export interface ExtractionRunDetail {
         message: string
         page?: number
     }>
+    // Kept as an open record for back-compat with existing `summary as ExtractionSummary`
+    // casts across the app; new process-viewer code casts to ExtractionRunSummary for
+    // typed access to pipeline/claude_pdf/progress fields.
     summary: Record<string, any>
     error_message?: string | null
     created_at?: string
@@ -503,6 +629,44 @@ export interface ExtractionRunCandidatesResponse {
         drop_reason: string | null
         merged_into: string | null
     }>
+}
+
+export type RawCandidateStatusFilter = 'all' | 'kept' | 'dropped'
+
+export interface RawCandidateItem {
+    id: number
+    stage: string
+    modality: string
+    page: number | null
+    source_figure: string | null
+    panel_label?: string | null
+    raw: unknown
+    normalized: unknown | null
+    drop_reason: string | null
+    merged_into: string | null
+    created_at?: string | null
+}
+
+export interface RawCandidatesRollup {
+    kept: number
+    dropped: number
+    dropped_by_reason: Record<string, number>
+    by_page: Record<string, { kept: number; dropped: number }>
+}
+
+export interface RawCandidatesResponse {
+    literature_id: number
+    run_id: string | null
+    extractor_type?: ExtractorType
+    status: string
+    profile?: string | null
+    total: number
+    returned: number
+    skip: number
+    limit: number
+    filter: RawCandidateStatusFilter
+    rollup: RawCandidatesRollup
+    items: RawCandidateItem[]
 }
 
 export async function getRecordEvidence(litId: number, recordId: number): Promise<EvidenceResult> {
@@ -767,6 +931,26 @@ export async function getExtractionRunCandidates(
     limit: number = 200,
 ): Promise<ExtractionRunCandidatesResponse> {
     const response = await api.get(`/api/extraction-runs/${runId}/candidates?skip=${skip}&limit=${limit}`)
+    return response.data
+}
+
+// Raw model output + kept/dropped rollup for the latest run of a literature.
+// Powers the process viewer's raw-content panel.
+export async function getRawCandidates(
+    literatureId: number,
+    opts: {
+        status?: RawCandidateStatusFilter
+        skip?: number
+        limit?: number
+        extractorType?: ExtractorType
+    } = {},
+): Promise<RawCandidatesResponse> {
+    const params = new URLSearchParams()
+    params.set('status', opts.status ?? 'all')
+    params.set('extractor_type', opts.extractorType ?? 'tribology')
+    if (opts.skip != null) params.set('skip', String(opts.skip))
+    if (opts.limit != null) params.set('limit', String(opts.limit))
+    const response = await api.get(`/api/extract/${literatureId}/raw-candidates?${params.toString()}`)
     return response.data
 }
 

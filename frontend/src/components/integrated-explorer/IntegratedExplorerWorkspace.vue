@@ -2,16 +2,13 @@
 import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import {
   batchDeleteTribologyRecords,
-  extractData,
+  generateCandidateDraft,
   getCandidateFieldEvidence,
-  getLatestExtractionRun,
   getPdfBboxPreview,
   getPdfFigurePreviews,
   getRecordFieldEvidence,
   getReviewBacklog,
   searchRecords,
-  type ExtractionRunDetail,
-  type ExtractionSummary,
   type ReviewBacklogPaper,
   type RecordResponse,
   type EvidenceResult,
@@ -896,15 +893,12 @@ const reviewBacklogEmptyMessage = computed(() => {
 const selectedReviewPaper = computed(() =>
   reviewBacklog.value.find((paper) => paper.literatureId === selectedReviewLiteratureId.value) || null,
 )
-const REVIEW_REEXTRACT_POLL_DELAY_MS = 1400
-const REVIEW_REEXTRACT_MAX_POLLS = 1280
 const reviewReextractConfirmOpen = ref(false)
 const reviewReextractPending = ref(false)
 const reviewReextractError = ref('')
 const reviewReextractSuccess = ref('')
 const reviewReextractProgress = ref(0)
 const reviewReextractMessage = ref('')
-const reviewReextractRunId = ref<string | null>(null)
 const reviewReextractStage = ref('')
 const reviewReextractCandidateCount = ref(0)
 let reviewReextractRunToken = 0
@@ -920,7 +914,6 @@ function openReviewReextractConfirm() {
   reviewReextractSuccess.value = ''
   reviewReextractProgress.value = 0
   reviewReextractMessage.value = ''
-  reviewReextractRunId.value = null
   reviewReextractStage.value = ''
   reviewReextractCandidateCount.value = 0
   reviewReextractConfirmOpen.value = true
@@ -932,90 +925,6 @@ function clampReviewReextractProgress(value: unknown) {
   return Math.max(0, Math.min(100, numeric))
 }
 
-function isReviewReextractActiveStatus(status: string) {
-  return ['queued', 'running', 'processing', 'extracting'].includes(status.toLowerCase())
-}
-
-function reviewReextractRunMessage(run: ExtractionRunDetail | null | undefined) {
-  const summary = (run?.summary || {}) as ExtractionSummary
-  const progressLog = Array.isArray(run?.progress_log) ? run.progress_log : []
-  const latestProgress = progressLog.length ? progressLog[progressLog.length - 1] : null
-  return String(
-    summary.current_message
-    || run?.error_message
-    || latestProgress?.message
-    || summary.no_data_reason
-    || '',
-  )
-}
-
-function applyReviewReextractInitialResponse(response: Awaited<ReturnType<typeof extractData>>) {
-  const summary = response.extraction_summary as ExtractionSummary | undefined
-  const status = String(response.status || '').toLowerCase()
-  reviewReextractRunId.value = summary?.run_id || null
-  reviewReextractStage.value = String(summary?.current_stage || '')
-  reviewReextractCandidateCount.value = Number(summary?.candidate_count ?? 0)
-  reviewReextractProgress.value = clampReviewReextractProgress(
-    typeof summary?.progress_percent === 'number'
-      ? summary.progress_percent
-      : (isReviewReextractActiveStatus(status) ? 6 : 100),
-  )
-  reviewReextractMessage.value = String(
-    summary?.current_message
-    || response.message
-    || (isReviewReextractActiveStatus(status) ? 'Extraction queued. Waiting for progress...' : 'Extraction finished.'),
-  )
-}
-
-function applyReviewReextractRun(run: ExtractionRunDetail) {
-  const summary = (run.summary || {}) as ExtractionSummary
-  const status = String(run.status || '').toLowerCase()
-  reviewReextractRunId.value = run.run_id || reviewReextractRunId.value
-  reviewReextractStage.value = String(summary.current_stage || '')
-  reviewReextractCandidateCount.value = Number(summary.candidate_count ?? run.candidate_count ?? 0)
-  reviewReextractProgress.value = clampReviewReextractProgress(
-    typeof summary.progress_percent === 'number'
-      ? summary.progress_percent
-      : (isReviewReextractActiveStatus(status) ? Math.max(reviewReextractProgress.value, 10) : 100),
-  )
-  reviewReextractMessage.value = reviewReextractRunMessage(run)
-    || (isReviewReextractActiveStatus(status) ? 'Extraction is running...' : 'Extraction finished.')
-}
-
-function waitForReviewReextractPollDelay() {
-  return new Promise((resolve) => window.setTimeout(resolve, REVIEW_REEXTRACT_POLL_DELAY_MS))
-}
-
-async function waitForReviewReextractRun(literatureId: number) {
-  const token = reviewReextractRunToken
-  let pollFailures = 0
-  for (let attempt = 0; attempt < REVIEW_REEXTRACT_MAX_POLLS; attempt += 1) {
-    await waitForReviewReextractPollDelay()
-    if (token !== reviewReextractRunToken) return
-    let run: ExtractionRunDetail
-    try {
-      run = await getLatestExtractionRun(literatureId, 'tribology')
-      pollFailures = 0
-    } catch (err: any) {
-      pollFailures += 1
-      reviewReextractMessage.value = 'Status check delayed, retrying...'
-      if (pollFailures >= 5) {
-        throw new Error(err?.message || 'Extraction status check failed repeatedly.')
-      }
-      continue
-    }
-    if (token !== reviewReextractRunToken) return
-    applyReviewReextractRun(run)
-    const status = String(run.status || '').toLowerCase()
-    if (isReviewReextractActiveStatus(status)) continue
-    if (status === 'failed' || status === 'error' || status === 'cancelled' || status === 'canceled') {
-      throw new Error(reviewReextractRunMessage(run) || `Extraction ended with status: ${run.status || 'failed'}.`)
-    }
-    return
-  }
-  throw new Error('Extraction is still running after a long status check window.')
-}
-
 async function confirmReviewReextract() {
   const literatureId = selectedReviewLiteratureId.value
   if (!literatureId || reviewReextractPending.value) return
@@ -1023,17 +932,24 @@ async function confirmReviewReextract() {
   reviewReextractPending.value = true
   reviewReextractError.value = ''
   reviewReextractSuccess.value = ''
-  reviewReextractProgress.value = 4
-  reviewReextractMessage.value = 'Submitting fresh extraction...'
-  reviewReextractRunId.value = null
-  reviewReextractStage.value = 'stage_a.queued'
+  reviewReextractProgress.value = 12
+  reviewReextractMessage.value = 'Regenerating candidates from the saved report...'
+  reviewReextractStage.value = 'Candidate draft'
   reviewReextractCandidateCount.value = 0
   try {
-    const response = await extractData(String(literatureId), true, 'review_figure_estimate', undefined, 'tribology')
+    const response = await generateCandidateDraft(String(literatureId), 'tribology')
     if (token !== reviewReextractRunToken) return
-    applyReviewReextractInitialResponse(response)
-    await waitForReviewReextractRun(literatureId)
-    if (token !== reviewReextractRunToken) return
+    const alreadyPromoted = response.status === 'already_promoted'
+    reviewReextractProgress.value = clampReviewReextractProgress(100)
+    reviewReextractCandidateCount.value = Number(response.candidate_count || 0)
+    reviewReextractMessage.value = alreadyPromoted
+      ? 'Official records already exist.'
+      : response.message || 'Candidate draft regenerated.'
+    if (!response.success || (!alreadyPromoted && reviewReextractCandidateCount.value <= 0)) {
+      reviewReextractError.value = response.message || 'No candidate draft was generated from the saved report.'
+      reviewReextractMessage.value = reviewReextractError.value
+      return
+    }
     await loadReviewBacklog()
     const paper = reviewBacklog.value.find((item) => item.literatureId === literatureId)
     selectedReviewLiteratureId.value = literatureId
@@ -1042,11 +958,10 @@ async function confirmReviewReextract() {
       .filter((item) => Number.isFinite(item) && item > 0)
     if (currentPage.value !== 1) currentPage.value = 1
     await fetchData()
-    reviewReextractProgress.value = 100
-    reviewReextractSuccess.value = 'Review candidates refreshed.'
+    reviewReextractSuccess.value = alreadyPromoted ? 'Already in Library.' : 'Candidates regenerated.'
     reviewReextractConfirmOpen.value = false
   } catch (err: any) {
-    reviewReextractError.value = err?.response?.data?.detail || err?.message || 'Could not re-extract this paper.'
+    reviewReextractError.value = err?.response?.data?.detail || err?.message || 'Could not regenerate candidates for this paper.'
     reviewReextractMessage.value = reviewReextractError.value
   } finally {
     if (token === reviewReextractRunToken) {
@@ -1101,7 +1016,6 @@ function selectReviewPaper(literatureId: number | null) {
   reviewReextractSuccess.value = ''
   reviewReextractProgress.value = 0
   reviewReextractMessage.value = ''
-  reviewReextractRunId.value = null
   reviewReextractStage.value = ''
   reviewReextractCandidateCount.value = 0
   if (selectedReviewLiteratureId.value === literatureId || literatureId == null) {
@@ -1221,8 +1135,9 @@ async function runBulkCandidateReview(
 ) {
   const targets = selectedCandidateRecords()
   if (!targets.length || bulkReviewPending.value) return
-  const verb = action === 'approve' ? 'Approve' : 'Reject'
-  if (!confirm(`${verb} ${targets.length} selected candidate${targets.length === 1 ? '' : 's'}?`)) return
+  const verb = action === 'approve' ? 'Save' : 'Reject'
+  const destination = action === 'approve' ? ' to Database' : ''
+  if (!confirm(`${verb} ${targets.length} selected candidate${targets.length === 1 ? '' : 's'}${destination}?`)) return
   bulkReviewPending.value = true
   bulkReviewError.value = ''
   let processed = 0
@@ -1234,7 +1149,8 @@ async function runBulkCandidateReview(
         await apiCall(candidateId)
         processed += 1
       } catch (e: any) {
-        bulkReviewError.value = `Failed to ${action} candidate #${candidateId}: ${e?.response?.data?.detail || e?.message || 'Unknown error'}`
+        const failedAction = action === 'approve' ? 'save' : action
+        bulkReviewError.value = `Failed to ${failedAction} candidate #${candidateId}: ${e?.response?.data?.detail || e?.message || 'Unknown error'}`
         break
       }
     }
@@ -1295,13 +1211,23 @@ function openCandidateReviewSheet(record: RecordResponse) {
   reviewSheetRecord.value = record
 }
 
+function openFocusedCandidateReviewSheet(record: RecordResponse) {
+  if (props.focusEntityType !== 'candidate') return
+  if (databaseRecordEntityType(record) !== 'candidate') return
+  const focusedId = String(databaseRecordEntityId(record))
+  const currentId = reviewSheetRecord.value ? String(databaseRecordEntityId(reviewSheetRecord.value)) : ''
+  if (focusedId === currentId) return
+  closeDatabaseEvidencePopover()
+  reviewSheetRecord.value = record
+}
+
 function openNextCandidateReviewSheet() {
   if (!reviewSheetNextRecord.value) return
   closeDatabaseEvidencePopover()
   reviewSheetRecord.value = reviewSheetNextRecord.value
 }
 
-async function handleCandidateReviewApproved() {
+async function handleCandidateSavedToDatabase() {
   advancePastReviewedCandidate(reviewSheetRecord.value)
 }
 
@@ -1315,7 +1241,7 @@ function advancePastReviewedCandidate(reviewedRecord: RecordResponse | null) {
   const nextRecord = reviewSheetNextRecord.value
   closeDatabaseEvidencePopover()
   if (reviewedRecord) {
-    optimisticallyRemoveApprovedCandidate(reviewedRecord)
+    optimisticallyRemoveSavedCandidate(reviewedRecord)
   }
   reviewSheetRecord.value = nextRecord ?? null
   window.dispatchEvent(new CustomEvent('ioniclink:review-data-changed', {
@@ -1325,12 +1251,12 @@ function advancePastReviewedCandidate(reviewedRecord: RecordResponse | null) {
   void loadReviewBacklog()
 }
 
-function optimisticallyRemoveApprovedCandidate(record: RecordResponse) {
-  const approvedId = String(record.entityId ?? record.id)
+function optimisticallyRemoveSavedCandidate(record: RecordResponse) {
+  const savedId = String(record.entityId ?? record.id)
   result.value = {
     ...result.value,
     total: Math.max(0, result.value.total - 1),
-    items: result.value.items.filter((item) => String(item.entityId ?? item.id) !== approvedId),
+    items: result.value.items.filter((item) => String(item.entityId ?? item.id) !== savedId),
   }
 }
 
@@ -2645,11 +2571,12 @@ watch(
   ([id, entityType, items, isLoading]) => {
     if (id == null || isLoading) return
     const targetEntityType = String(entityType || '').trim().toLowerCase()
-    const found = (items as any[]).some((row) => {
+    const foundCandidate = (items as RecordResponse[]).find((row) => {
       const rowEntityType = String(row?.reviewEntityType || row?.entityType || 'record').trim().toLowerCase()
-      return Number(row?.id) === Number(id) && (!targetEntityType || rowEntityType === targetEntityType)
+      return Number(databaseRecordEntityId(row)) === Number(id) && (!targetEntityType || rowEntityType === targetEntityType)
     })
-    if (found) {
+    if (foundCandidate) {
+      openFocusedCandidateReviewSheet(foundCandidate)
       focusHopsRemaining.value = 0
       return
     }
@@ -2804,7 +2731,7 @@ onBeforeUnmount(() => {
             >
               <Check class="h-3.5 w-3.5 stroke-[3]" />
               <span v-if="bulkReviewPending">Working...</span>
-              <span v-else>Approve selected</span>
+              <span v-else>Save selected</span>
             </button>
             <button
               type="button"
@@ -2855,14 +2782,12 @@ onBeforeUnmount(() => {
           {{ batchError }}
         </p>
 
-        <div class="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
+        <div v-if="!isReviewQueue" class="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
           <span class="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 font-black text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
-            {{ activeLibraryEntityType === 'candidate' ? 'Review Queue' : 'Official Database' }}
+            Official Database
           </span>
           <span>
-            {{ activeLibraryEntityType === 'candidate'
-              ? 'Candidates waiting for review before entering the official library.'
-              : 'Approved library records only; review candidates are kept separate.' }}
+            Approved library records only; review candidates are kept separate.
           </span>
         </div>
 
@@ -2871,7 +2796,6 @@ onBeforeUnmount(() => {
           class="mt-2 flex items-center gap-1.5 overflow-x-auto text-xs font-semibold"
           data-testid="review-queue-triage"
         >
-          <span class="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Triage</span>
           <template v-if="triageMissingFieldOptions.length">
             <span class="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Missing</span>
             <button
@@ -3414,27 +3338,27 @@ onBeforeUnmount(() => {
                 class="inline-flex h-7 items-center gap-1.5 rounded-[6px] border border-[#8bd9df] bg-white px-2.5 text-[11px] font-black text-[#0f7c82] shadow-sm transition hover:border-[#0f7c82] hover:bg-[#eefafa] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#0f7c82]/60 dark:bg-slate-950 dark:text-[#8bd9df] dark:hover:bg-[#0f7c82]/10"
                 :aria-expanded="reviewReextractConfirmOpen ? 'true' : 'false'"
                 aria-haspopup="dialog"
-                aria-label="Re-extract selected review paper"
+                aria-label="Regenerate candidates for selected review paper"
                 :disabled="reviewReextractPending"
                 @click="openReviewReextractConfirm"
               >
                 <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': reviewReextractPending }" />
-                <span>{{ reviewReextractPending ? `${Math.round(reviewReextractProgress)}%` : 'Re-extract' }}</span>
+                <span>{{ reviewReextractPending ? `${Math.round(reviewReextractProgress)}%` : 'Regenerate' }}</span>
               </button>
               <div
                 v-if="reviewReextractConfirmOpen"
                 class="absolute right-0 top-[calc(100%+0.35rem)] z-30 w-72 rounded-[8px] border border-slate-200 bg-white p-3 text-left shadow-xl shadow-slate-900/10 dark:border-slate-700 dark:bg-slate-950"
                 role="dialog"
-                aria-label="Confirm review paper re-extraction"
+                aria-label="Confirm candidate regeneration"
               >
                 <div class="flex items-start gap-2">
                   <div class="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#e8f8f8] text-[#0f7c82] dark:bg-[#0f7c82]/15 dark:text-[#8bd9df]">
                     <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': reviewReextractPending }" />
                   </div>
                   <div class="min-w-0">
-                    <div class="text-[13px] font-black text-slate-800 dark:text-slate-100">Re-extract this paper?</div>
+                    <div class="text-[13px] font-black text-slate-800 dark:text-slate-100">Regenerate candidates?</div>
                     <p class="mt-1 text-[11px] font-semibold leading-4 text-slate-500 dark:text-slate-400">
-                      Regenerate pending review candidates from the source PDF. Official records stay unchanged.
+                      Use the saved reading report to rebuild pending candidates. Official records stay unchanged.
                     </p>
                   </div>
                 </div>
@@ -3452,7 +3376,7 @@ onBeforeUnmount(() => {
                     :aria-valuenow="Math.round(reviewReextractProgress)"
                     aria-valuemin="0"
                     aria-valuemax="100"
-                    aria-label="Review paper re-extraction progress"
+                    aria-label="Candidate regeneration progress"
                     data-testid="review-reextract-progressbar"
                   >
                     <div
@@ -3461,11 +3385,8 @@ onBeforeUnmount(() => {
                     ></div>
                   </div>
                   <div class="mt-1.5 flex items-center justify-between gap-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                    <span class="min-w-0 truncate">{{ reviewReextractMessage || 'Waiting for extraction status...' }}</span>
+                    <span class="min-w-0 truncate">{{ reviewReextractMessage || 'Waiting for candidate draft...' }}</span>
                     <span v-if="reviewReextractCandidateCount" class="shrink-0 tabular-nums">{{ reviewReextractCandidateCount }} candidates</span>
-                  </div>
-                  <div v-if="reviewReextractRunId" class="mt-1 truncate text-[10px] font-semibold text-slate-400 dark:text-slate-500">
-                    run {{ reviewReextractRunId.slice(0, 8) }}
                   </div>
                 </div>
                 <p
@@ -3490,7 +3411,7 @@ onBeforeUnmount(() => {
                     @click="confirmReviewReextract"
                   >
                     <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': reviewReextractPending }" />
-                    {{ reviewReextractPending ? 'Extracting' : 'Re-extract' }}
+                    {{ reviewReextractPending ? 'Generating' : 'Regenerate' }}
                   </button>
                 </div>
               </div>
@@ -3539,7 +3460,7 @@ onBeforeUnmount(() => {
         :has-next-candidate="Boolean(reviewSheetNextRecord)"
         @close="reviewSheetRecord = null"
         @next-candidate="openNextCandidateReviewSheet"
-        @saved-and-approved="handleCandidateReviewApproved"
+        @saved-to-database="handleCandidateSavedToDatabase"
         @rejected="handleCandidateReviewRejected"
       />
     </div>

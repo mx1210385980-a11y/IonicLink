@@ -334,6 +334,16 @@ def has_core_quantitative_signal(record: dict[str, Any]) -> bool:
     if not record:
         return False
 
+    if has_explicit_numeric_value(record.get("cof_delta")):
+        return True
+    field_evidence = record.get("field_evidence_json") or record.get("fieldEvidenceJson") or {}
+    if isinstance(field_evidence, dict):
+        flexible = field_evidence.get("_flexible_fields") or {}
+        if isinstance(flexible, dict):
+            cof_delta = flexible.get("cof_delta")
+            if isinstance(cof_delta, dict) and has_explicit_numeric_value(cof_delta.get("value")):
+                return True
+
     primary_fields = (
         "cof",
         "friction_force",

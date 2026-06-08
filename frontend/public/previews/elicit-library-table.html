@@ -40,7 +40,7 @@
     .btn { border: 1px solid var(--line); background: #fff; color: #111827; border-radius: 7px; min-height: 40px; padding: 0 15px; font-weight: 760; }
     .btn.teal { background: var(--teal); border-color: var(--teal); color: #fff; }
     .icon-btn { width: 48px; padding: 0; display: inline-grid; place-items: center; color: #4b5563; }
-    .workspace { display: grid; grid-template-columns: 270px minmax(720px, 1fr) 462px; gap: 14px; min-height: calc(100vh - 150px); }
+    .workspace { display: grid; grid-template-columns: 270px minmax(760px, 1fr); gap: 14px; min-height: calc(100vh - 150px); }
     .panel { background: #fff; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
     .sidebar { padding: 10px; }
     .side-row { display: flex; justify-content: space-between; align-items: center; border-radius: 8px; padding: 12px 10px; font-weight: 760; color: #111827; }
@@ -171,13 +171,6 @@
             <div class="scrollbar"></div>
           </section>
 
-          <aside class="panel right-panel">
-            <div class="right-head">New from selection</div>
-            <div class="right-body">
-              <button class="selection-action"><span>Start systematic review</span><span>Open</span></button>
-              <button class="selection-action" id="extractAction"><span>Extract data</span><span>Open</span></button>
-            </div>
-          </aside>
         </section>
       </div>
 
@@ -263,10 +256,6 @@
   <script>
     const libraryView = document.getElementById('libraryView');
     const extractView = document.getElementById('extractView');
-    document.getElementById('extractAction').addEventListener('click', () => {
-      libraryView.classList.remove('active');
-      extractView.classList.add('active');
-    });
     document.getElementById('backToLibrary').addEventListener('click', () => {
       extractView.classList.remove('active');
       libraryView.classList.add('active');

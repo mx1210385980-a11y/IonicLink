@@ -70,13 +70,15 @@ const HEADER_HEIGHT = 40 // "Group by paper" header row height
 
 type DisplayRow =
   | { kind: 'record'; record: RecordResponse }
-  | { kind: 'header'; literatureId: number; title: string; meta: string; count: number }
+  | { kind: 'header'; literatureId: number; title: string; meta: string; count: number; record: RecordResponse }
+
+const paperGroupedRows = computed(() => Boolean(props.groupByPaper && !props.reviewQueueMode))
 
 // Flatten records into the rendered row stream. When grouping is on (record mode
 // only) consecutive records from the same paper are gathered under one header row,
 // which also collapses the otherwise-repeated trailing literature cell.
 const displayRows = computed<DisplayRow[]>(() => {
-  if (!props.groupByPaper || props.reviewQueueMode) {
+  if (!paperGroupedRows.value) {
     return props.records.map((record) => ({ kind: 'record', record }))
   }
   const groups = new Map<number, RecordResponse[]>()
@@ -95,6 +97,7 @@ const displayRows = computed<DisplayRow[]>(() => {
       title: literatureTitle(first),
       meta: literatureMeta(first),
       count: recs.length,
+      record: first,
     })
     for (const record of recs) rows.push({ kind: 'record', record })
   }
@@ -105,9 +108,17 @@ const COL_SELECT = 'w-[48px]'
 const COL_ID = 'w-[56px]'
 const COL_IONIC = 'w-[280px]'
 const COL_TRIBOPAIR = 'w-[240px]'
+const COL_TRIBOPAIR_GROUPED = 'w-[360px]'
 const COL_CONDITIONS = 'w-[304px]'
 const COL_COF = 'w-[126px]'
 const COL_LITERATURE = 'w-[210px]'
+const activeTribopairColumn = computed(() => (paperGroupedRows.value ? COL_TRIBOPAIR_GROUPED : COL_TRIBOPAIR))
+const showLiteratureColumn = computed(() => !paperGroupedRows.value && !props.reviewQueueMode)
+const tableMinWidthClass = computed(() => {
+  if (props.reviewQueueMode) return 'min-w-[1054px]'
+  if (paperGroupedRows.value) return 'min-w-[1180px]'
+  return 'min-w-[1264px]'
+})
 
 const parentRef = ref<HTMLElement | null>(null)
 
@@ -150,6 +161,9 @@ function isCandidateRecord(record: RecordResponse) {
 function recordEntityType(record: RecordResponse) {
   return String(record.reviewEntityType || record.entityType || 'record').trim().toLowerCase()
 }
+function recordEntityId(record: RecordResponse) {
+  return record.entityId ?? record.id
+}
 function recordMatchesFocusEntity(record: RecordResponse) {
   const targetEntityType = String(props.focusEntityType || '').trim().toLowerCase()
   return !targetEntityType || recordEntityType(record) === targetEntityType
@@ -159,7 +173,7 @@ const focusedRecordIndex = computed(() => {
   return displayRows.value.findIndex(
     (row) =>
       row.kind === 'record' &&
-      Number(row.record.id) === Number(props.focusRecordId) &&
+      Number(recordEntityId(row.record)) === Number(props.focusRecordId) &&
       recordMatchesFocusEntity(row.record),
   )
 })
@@ -183,7 +197,7 @@ const somePageSelected = computed(() =>
 // Candidate (Review Queue) bulk selection — keyed by entity id, parallel to the
 // record-id delete selection so the two never collide.
 function candidateKey(record: RecordResponse) {
-  return String(record.entityId ?? record.id)
+  return String(recordEntityId(record))
 }
 function isCandidateSelected(record: RecordResponse) {
   return Boolean(props.selectedCandidateIds?.has(candidateKey(record)))
@@ -201,7 +215,7 @@ const someCandidatesSelected = computed(() =>
   selectedCandidatesOnPage.value > 0 && !allCandidatesSelected.value,
 )
 function isFocusedRecord(record: RecordResponse) {
-  return props.focusRecordId != null && Number(record.id) === Number(props.focusRecordId) && recordMatchesFocusEntity(record)
+  return props.focusRecordId != null && Number(recordEntityId(record)) === Number(props.focusRecordId) && recordMatchesFocusEntity(record)
 }
 
 watch(
@@ -244,7 +258,10 @@ defineExpose({
 <template>
   <div class="virtual-table-container database-record-table flex min-h-0 flex-1 flex-col overflow-x-auto overflow-y-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-950/85 dark:shadow-[0_10px_30px_rgba(2,8,23,0.35)]">
     <!-- Fixed Header -->
-    <div class="virtual-table-header min-w-[1264px] shrink-0 border-b border-slate-200 bg-[linear-gradient(180deg,#fcfeff_0%,#f7fafc_100%)] text-[0.68rem] font-black uppercase tracking-[0.18em] text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+    <div
+      class="virtual-table-header shrink-0 border-b border-slate-200 bg-[linear-gradient(180deg,#fcfeff_0%,#f7fafc_100%)] text-[0.68rem] font-black uppercase tracking-[0.18em] text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
+      :class="tableMinWidthClass"
+    >
       <div class="flex items-center">
         <div :class="COL_SELECT" class="shrink-0 px-3 py-3.5">
           <button
@@ -291,7 +308,7 @@ defineExpose({
           <span v-else class="column-ruler-label justify-center"><span class="column-ruler-mark" />#</span>
         </div>
         <div :class="COL_IONIC" class="shrink-0 px-4 py-3.5"><span class="column-ruler-label"><span class="column-ruler-mark" />IONIC LIQUID</span></div>
-        <div :class="COL_TRIBOPAIR" class="shrink-0 px-4 py-3.5"><span class="column-ruler-label"><span class="column-ruler-mark" />TRIBOPAIR</span></div>
+        <div :class="activeTribopairColumn" class="shrink-0 px-4 py-3.5"><span class="column-ruler-label"><span class="column-ruler-mark" />TRIBOPAIR</span></div>
         <div :class="COL_CONDITIONS" class="shrink-0 px-3 py-3.5"><span class="column-ruler-label"><span class="column-ruler-mark" />CONDITIONS</span></div>
         <div :class="COL_COF" class="shrink-0 px-4 py-3.5 text-[#0f7c82]">
           <button
@@ -310,14 +327,15 @@ defineExpose({
           </button>
           <span v-else class="column-ruler-label column-ruler-label--metric"><span class="column-ruler-mark" />COF</span>
         </div>
-        <div :class="COL_LITERATURE" class="shrink-0 px-4 py-3.5"><span class="column-ruler-label"><span class="column-ruler-mark" />LITERATURE</span></div>
+        <div v-if="showLiteratureColumn" :class="COL_LITERATURE" class="shrink-0 px-4 py-3.5"><span class="column-ruler-label"><span class="column-ruler-mark" />LITERATURE</span></div>
       </div>
     </div>
 
     <!-- Scrollable Body with Virtual Scrolling -->
     <div
       ref="parentRef"
-      class="virtual-table-body min-w-[1264px] flex-1 overflow-y-auto overflow-x-hidden"
+      class="virtual-table-body flex-1 overflow-y-auto overflow-x-hidden"
+      :class="tableMinWidthClass"
     >
       <!-- Empty State -->
       <div v-if="!loading && records.length === 0" class="flex h-full items-center justify-center py-16">
@@ -355,7 +373,7 @@ defineExpose({
                   </div>
                 </div>
                 <!-- Tribopair skeleton -->
-                <div :class="COL_TRIBOPAIR" class="shrink-0">
+                <div :class="activeTribopairColumn" class="shrink-0">
                   <div class="flex flex-col gap-1.5">
                     <div class="h-6 w-32 rounded-md bg-slate-200 dark:bg-slate-700" />
                     <div class="h-6 w-36 rounded-md bg-slate-200 dark:bg-slate-700" />
@@ -374,7 +392,7 @@ defineExpose({
                   <div class="h-5 w-14 rounded bg-slate-200 dark:bg-slate-700" />
                 </div>
                 <!-- Literature skeleton -->
-                <div :class="COL_LITERATURE" class="shrink-0">
+                <div v-if="showLiteratureColumn" :class="COL_LITERATURE" class="shrink-0">
                   <div class="h-4 w-32 rounded bg-slate-200 dark:bg-slate-700" />
                   <div class="mt-2 h-3 w-24 rounded bg-slate-200 dark:bg-slate-700" />
                 </div>
@@ -394,9 +412,17 @@ defineExpose({
               }"
             >
               <span class="h-5 w-1 shrink-0 rounded-full bg-[#0f7c82]" aria-hidden="true" />
-              <BookOpen class="h-3.5 w-3.5 shrink-0 text-[#0f7c82]" />
-              <span class="min-w-0 truncate text-[12.5px] font-extrabold text-slate-700 dark:text-slate-200" :title="row.title">{{ row.title }}</span>
-              <span class="shrink-0 truncate text-[11px] font-semibold text-slate-400 dark:text-slate-500">{{ row.meta }}</span>
+              <button
+                type="button"
+                class="group flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left transition hover:bg-white/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f7c82]/30 dark:hover:bg-slate-950/70"
+                :title="row.title"
+                aria-label="Open paper in Library"
+                @click.stop="openLiterature?.(row.record)"
+              >
+                <BookOpen class="h-3.5 w-3.5 shrink-0 text-[#0f7c82]" />
+                <span class="min-w-0 truncate text-[13px] font-extrabold text-slate-700 group-hover:text-[#0f7c82] dark:text-slate-200" :title="row.title">{{ row.title }}</span>
+                <span class="shrink-0 truncate text-[11px] font-semibold text-slate-400 dark:text-slate-500">{{ row.meta }}</span>
+              </button>
               <span class="ml-auto shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10.5px] font-black text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-400">
                 {{ row.count }} {{ row.count === 1 ? 'record' : 'records' }}
               </span>
@@ -444,9 +470,10 @@ defineExpose({
               </div>
 
               <!-- ID Column -->
-              <div :class="[COL_ID, cellPadY]" class="shrink-0 self-center px-2 text-center">
+              <div :class="[COL_ID, cellPadY]" class="shrink-0 self-center px-1.5">
+                <div class="flex items-center justify-center gap-1">
                 <span
-                  class="inline-flex h-6 min-w-9 items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-1.5 text-[12px] font-bold leading-none text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400"
+                  class="inline-flex h-6 min-w-8 items-center justify-center rounded-md border border-slate-200 bg-slate-50 px-1.5 text-[12px] font-bold leading-none text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400"
                   :title="recordDisplayId(record)"
                 >
                   {{ compactRecordDisplayId(record) }}
@@ -454,25 +481,26 @@ defineExpose({
                 <button
                   v-if="isCandidateRecord(record)"
                   type="button"
-                  class="mt-2 inline-flex max-w-full items-center justify-center rounded-md border border-sky-200 bg-sky-50 px-1.5 py-1 text-[9px] font-black uppercase leading-4 text-sky-700 transition hover:border-sky-300 hover:bg-white"
+                  class="row-action-icon row-action-icon--review"
                   title="Review candidate"
                   aria-label="Review candidate"
                   @click.stop="reviewCandidateRecord?.(record)"
                   @dblclick.stop
                 >
-                  Review
+                  <Check class="h-3.5 w-3.5 stroke-[3]" />
                 </button>
                 <button
                   v-else
                   type="button"
-                  class="mt-2 inline-flex max-w-full items-center justify-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 py-1 text-[9px] font-black uppercase leading-4 text-slate-500 transition hover:border-[#0f7c82] hover:bg-[#eefafa] hover:text-[#0f7c82]"
+                  class="row-action-icon"
                   title="Correct record fields"
                   aria-label="Edit record"
                   @click.stop="emit('edit-record', record)"
                   @dblclick.stop
                 >
-                  <Pencil class="h-2.5 w-2.5" /> Edit
+                  <Pencil class="h-3.5 w-3.5" />
                 </button>
+                </div>
               </div>
 
               <!-- Ionic Liquid Column -->
@@ -496,7 +524,7 @@ defineExpose({
               </div>
 
               <!-- Tribopair Column -->
-              <div :class="[COL_TRIBOPAIR, cellPadYTight]" class="shrink-0 px-4">
+              <div :class="[activeTribopairColumn, cellPadYTight]" class="shrink-0 px-4">
                 <div
                   class="workspace-card cursor-pointer rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0f7c82]/35"
                   tabindex="0"
@@ -546,7 +574,7 @@ defineExpose({
               </div>
 
               <!-- Literature Column -->
-              <div :class="[COL_LITERATURE, cellPadYTight]" class="shrink-0 self-center px-4">
+              <div v-if="showLiteratureColumn" :class="[COL_LITERATURE, cellPadYTight]" class="shrink-0 self-center px-4">
                 <button
                   type="button"
                   class="group flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left transition hover:border-[#0f7c82]/35 hover:bg-[#f3fbfc] dark:border-slate-700 dark:bg-slate-950 dark:hover:border-[#0f7c82]/40 dark:hover:bg-slate-900"
@@ -644,6 +672,42 @@ defineExpose({
 
 .workspace-card:hover {
   transform: translateY(-1px);
+}
+
+.row-action-icon {
+  display: inline-flex;
+  width: 1.35rem;
+  height: 1.35rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.4rem;
+  border: 1px solid rgba(203, 213, 225, 0.9);
+  background: rgba(255, 255, 255, 0.76);
+  color: #64748b;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.035);
+  transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease, transform 140ms ease;
+}
+
+.row-action-icon:hover,
+.row-action-icon:focus-visible {
+  border-color: rgba(15, 124, 130, 0.38);
+  background: #eefafa;
+  color: #0f7c82;
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.row-action-icon--review {
+  border-color: rgba(125, 211, 252, 0.72);
+  background: rgba(240, 249, 255, 0.82);
+  color: #0369a1;
+}
+
+.row-action-icon--review:hover,
+.row-action-icon--review:focus-visible {
+  border-color: rgba(14, 165, 233, 0.42);
+  background: #f8fcff;
+  color: #0369a1;
 }
 
 .column-ruler-label {

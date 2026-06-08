@@ -2,6 +2,10 @@
 
 This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
+## Principles
+
+The project focuses on data accumulation and infrastructure building, characterized by a compact yet refined approach.
+
 ## Project Structure
 
 This repository contains a monorepo setup with a `frontend` (Vue 3, TypeScript, Vite) and a `backend` (FastAPI, Python) application.

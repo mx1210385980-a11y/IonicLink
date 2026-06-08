@@ -41,6 +41,7 @@ from services.tribology_review_quality import (
 from services.weak_candidate_service import build_weak_candidate_items
 from services.fallback_extraction_service import extract_metadata_fallback, extract_table_fallback_records
 from services.flexible_field_integration import (
+    RESERVED_FLEXIBLE_FIELDS_KEY,
     RESERVED_FLEXIBLE_REVIEW_QUEUE_KEY,
     extract_raw_flexible_fields,
     merge_into_field_evidence_json,
@@ -77,6 +78,7 @@ from utils.lubricant_mixture import (
     serialize_lubricant_components,
 )
 from utils.no_data_reason import build_no_data_reason, is_generic_no_data_message
+from utils.load_values import looks_like_afm_setpoint_voltage_load, looks_like_non_mechanical_load, sanitized_mechanical_load
 from utils.structured_conditions import (
     derive_load_conditions,
     derive_tribological_system,
@@ -110,6 +112,42 @@ REJECTED_REVIEW_STATUSES = {"rejected", "flagged", "needs_evidence", "needs_revi
 class InvalidUploadError(ValueError):
     """Raised when an uploaded file is readable enough to identify but not usable."""
 _SOURCE_ANCHOR_CACHE: dict[tuple[str, str, int, str], Optional[dict[str, Any]]] = {}
+
+
+def _preserve_rejected_load_as_flexible_field(item: dict[str, Any], value: Any) -> None:
+    text = _filled_text(value)
+    if not text:
+        return
+    raw_fields = item.get(RESERVED_FLEXIBLE_FIELDS_KEY)
+    if not isinstance(raw_fields, dict):
+        raw_fields = {}
+        item[RESERVED_FLEXIBLE_FIELDS_KEY] = raw_fields
+    key = "afm_setpoint_voltage" if looks_like_afm_setpoint_voltage_load(text) else "non_mechanical_load_value"
+    raw_fields.setdefault(
+        key,
+        {
+            "label": "AFM setpoint voltage" if key == "afm_setpoint_voltage" else "Non-mechanical load value",
+            "value": text,
+            "category": "condition",
+            "evidence": {
+                "quote": item.get("evidence") or item.get("notes"),
+                "page": item.get("source_page"),
+                "source_label": item.get("source") or item.get("source_figure"),
+                "bbox": item.get("evidence_bbox"),
+            },
+            "note": "Captured from load/normal_load but excluded from mechanical load.",
+        },
+    )
+
+
+def _sanitize_item_load_fields(item: dict[str, Any]) -> None:
+    for key in ("load", "normal_load", "load_value", "load_raw"):
+        if key not in item:
+            continue
+        value = item.get(key)
+        if looks_like_non_mechanical_load(value):
+            _preserve_rejected_load_as_flexible_field(item, value)
+            item[key] = None
 
 
 def _resolve_confidence(raw: object, record_like: dict) -> float:
@@ -619,6 +657,45 @@ def _doi_metadata_to_upload_payload(metadata: Any) -> dict[str, Any]:
     }
 
 
+def _looks_like_polluted_upload_journal(value: Any) -> bool:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if not text:
+        return True
+    lowered = text.lower()
+    if re.search(r"\+\s*\d+\s*$", text):
+        return True
+    if re.search(r"\bet\s+al\.?\b", lowered):
+        return True
+    if "," in text and re.search(r"\b[A-Z][A-Za-z'-]+\s+[A-Z][A-Za-z'-]+", text):
+        return True
+    if len(text) > 90:
+        return True
+    if lowered in {
+        "ionic liquid",
+        "ionic liquids",
+        "ionic liquid lubrication",
+        "ionic liquids lubrication",
+    }:
+        return True
+    if len(text) > 55 and (
+        lowered.startswith(("ionic liquid ", "ionic liquids ", "boundary layer friction "))
+        or re.search(r"\b(friction|lubrication|superlubricity)\b", lowered)
+    ):
+        return True
+    return False
+
+
+def _upload_filename_year(filename: str) -> Optional[int]:
+    for match in re.finditer(r"(?<!\d)((?:19|20)\d{2})(?!\d)", str(filename or "")):
+        try:
+            year = int(match.group(1))
+        except ValueError:
+            continue
+        if 1900 <= year <= 2100:
+            return year
+    return None
+
+
 def _clean_upload_metadata(payload: dict[str, Any]) -> dict[str, Any]:
     cleaned: dict[str, Any] = {}
     for key, value in (payload or {}).items():
@@ -629,6 +706,11 @@ def _clean_upload_metadata(payload: dict[str, Any]) -> dict[str, Any]:
                 cleaned[key] = int(value)
             except (TypeError, ValueError):
                 continue
+        elif key == "journal":
+            text = str(value).strip()
+            if _looks_like_polluted_upload_journal(text):
+                continue
+            cleaned[key] = text
         else:
             cleaned[key] = str(value).strip()
     return cleaned
@@ -653,6 +735,7 @@ async def _resolve_upload_metadata(
         except Exception as exc:
             logger.warning("Upload DOI metadata resolution failed doi=%s: %s", doi_candidates[0], exc)
 
+    metadata.setdefault("year", _upload_filename_year(filename))
     if metadata.get("doi"):
         metadata["doi"] = DOIService()._normalize_doi(metadata["doi"]) or metadata["doi"]
     return metadata
@@ -748,6 +831,73 @@ async def _find_existing_by_file_hash(
             [item.id for item in matches],
         )
     return max(matches, key=_literature_cache_priority)
+
+
+async def _find_existing_by_doi(
+    db: AsyncSession,
+    *,
+    group_id: int,
+    scope_key: str,
+    doi: str,
+) -> Optional[Literature]:
+    normalized = DOIService()._normalize_doi(doi)
+    if not normalized or normalized.startswith("temp-"):
+        return None
+
+    matches = (
+        await db.execute(
+            select(Literature).where(
+                Literature.group_id == group_id,
+                Literature.scope_key == scope_key,
+                Literature.doi == normalized,
+            )
+        )
+    ).scalars().all()
+
+    if not matches:
+        return None
+
+    if len(matches) > 1:
+        logger.warning(
+            "Upload DOI matched multiple literature rows doi=%s group_id=%s scope=%s ids=%s",
+            normalized,
+            group_id,
+            scope_key,
+            [item.id for item in matches],
+        )
+    return max(matches, key=_literature_cache_priority)
+
+
+async def _reuse_existing_upload_literature(
+    db: AsyncSession,
+    literature: Literature,
+    *,
+    principal: AuthPrincipal,
+    content_bytes: bytes,
+    text_content: str,
+    file_hash: Optional[str],
+    is_pdf_upload: bool,
+) -> Literature:
+    await _normalize_legacy_no_data_state(db, literature)
+    if not can_manage_literature(principal, literature):
+        return literature
+
+    literature.content = text_content or literature.content
+    if file_hash and not literature.file_hash:
+        literature.file_hash = file_hash
+    if is_pdf_upload and (not literature.file_path or not os.path.exists(literature.file_path)):
+        pdf_dir = os.path.join(TEMP_UPLOAD_DIR, "pdfs")
+        os.makedirs(pdf_dir, exist_ok=True)
+        pdf_path = os.path.join(pdf_dir, f"{literature.id}.pdf")
+        with open(pdf_path, 'wb') as f:
+            f.write(content_bytes)
+        literature.file_path = pdf_path
+        logger.info("Backfilled PDF for literature_id=%s path=%s", literature.id, pdf_path)
+    if literature.status == "failed":
+        literature.status = "pending"
+        literature.error_message = None
+    await db.commit()
+    return literature
 
 
 def _resolve_existing_path(raw_path: Optional[str]) -> Optional[str]:
@@ -1208,6 +1358,7 @@ _TREND_PATTERNS = [
 _SAMPLE_ID_PATTERN = re.compile(r"\b[A-Z]{1,5}\d+(?:-\d+)+(?:-[A-Z0-9]+)*\b")
 _TRIBOLOGY_PERSISTABLE_METRIC_KEYS = (
     "cof",
+    "cof_delta",
     "friction_force",
     "wear_rate",
     "film_thickness",
@@ -1254,13 +1405,28 @@ def _parse_json_bbox(value: Any) -> Optional[list[float]]:
     return None
 
 
+def _looks_like_graphical_abstract_label(source_label: Any) -> bool:
+    source_text = _filled_text(source_label).lower()
+    return bool(
+        re.search(r"\bgraphical\s+abstract\b", source_text)
+        or re.search(r"\babstract\s+(?:figure|graphic|image|plot|visual)\b", source_text)
+        or re.search(r"\b(?:summary|toc)\s+(?:figure|graphic|image|visual)\b", source_text)
+    )
+
+
 def _infer_source_type(source_label: Optional[str]) -> str:
     text = str(source_label or "").strip().lower()
     if not text:
         return "text"
     if text.startswith("table"):
         return "table"
-    if text.startswith("fig") or text.startswith("image") or text.startswith("plot") or re.fullmatch(r"\d+[a-z]?", text):
+    if (
+        text.startswith("fig")
+        or text.startswith("image")
+        or text.startswith("plot")
+        or _looks_like_graphical_abstract_label(text)
+        or re.fullmatch(r"\d+[a-z]?", text)
+    ):
         return "figure"
     return "text"
 
@@ -1613,6 +1779,7 @@ def _is_visual_source_type(source_type: Any, source_label: Any = None) -> bool:
     return (
         source_type_text in {"figure", "visual", "image"}
         or bool(re.search(r"\bfig(?:ure)?\.?\s*\d+", source_label_text, flags=re.IGNORECASE))
+        or _looks_like_graphical_abstract_label(source_label_text)
     )
 
 
@@ -2636,6 +2803,97 @@ def _source_label_has_precise_region(source_type: Optional[str], source_label: O
     return bool(re.search(r"\b(?:fig(?:ure)?\.?|table|tab\.?)\s*[a-z]?\d+", source_text, flags=re.IGNORECASE))
 
 
+def _looks_like_graphical_abstract_source(source_type: Optional[str], source_label: Optional[str]) -> bool:
+    normalized_type = str(source_type or "").strip().lower()
+    if normalized_type not in {"figure", "visual", "image"}:
+        return False
+    return _looks_like_graphical_abstract_label(source_label)
+
+
+def _find_graphical_abstract_image_bbox(
+    pdf_path: str,
+    *,
+    page_hint: Optional[int],
+) -> Optional[tuple[int, list[float]]]:
+    if not pdf_path or not os.path.exists(pdf_path):
+        return None
+    try:
+        with fitz.open(pdf_path) as doc:
+            if len(doc) == 0:
+                return None
+            page_num = int(page_hint or 1)
+            if page_num < 1 or page_num > len(doc):
+                page_num = 1
+            page = doc[page_num - 1]
+            page_width = float(page.rect.width)
+            page_height = float(page.rect.height)
+            candidates: list[tuple[float, list[float]]] = []
+            for block in (page.get_text("dict") or {}).get("blocks", []):
+                if block.get("type") != 1:
+                    continue
+                bbox = block.get("bbox") or []
+                if len(bbox) != 4:
+                    continue
+                x0, y0, x1, y1 = [float(value) for value in bbox]
+                width = max(0.0, x1 - x0)
+                height = max(0.0, y1 - y0)
+                area = width * height
+                if area < max(2500.0, page_width * page_height * 0.012):
+                    continue
+                in_front_matter = y0 <= page_height * 0.58 and y1 >= page_height * 0.22
+                on_right = x0 >= page_width * 0.48 or x1 >= page_width * 0.72
+                not_header_logo = y0 >= page_height * 0.12
+                if not (in_front_matter and on_right and not_header_logo):
+                    continue
+                score = area
+                score += max(0.0, x0 - page_width * 0.45) * 10.0
+                score -= abs((y0 + y1) / 2.0 - page_height * 0.38)
+                candidates.append((score, [round(x0, 2), round(y0, 2), round(x1, 2), round(y1, 2)]))
+            if not candidates:
+                return None
+            _, best_bbox = max(candidates, key=lambda item: item[0])
+            return page_num, best_bbox
+    except Exception:
+        return None
+
+
+def _implicit_graphical_abstract_source_allowed(source_label: Optional[str]) -> bool:
+    normalized = _filled_text(source_label).lower()
+    return normalized in {"", "text", "reading report", "report", "llm report"}
+
+
+def _implicit_graphical_abstract_load_anchor(
+    *,
+    pdf_path: str,
+    field_key: str,
+    page: int,
+    hit_bbox: list[float],
+    source_label: Optional[str],
+) -> Optional[dict[str, Any]]:
+    if field_key != "load" or page != 1 or not _implicit_graphical_abstract_source_allowed(source_label):
+        return None
+    graphical_anchor = _find_graphical_abstract_image_bbox(pdf_path, page_hint=1)
+    if not graphical_anchor:
+        return None
+    anchor_page, anchor_bbox = graphical_anchor
+    if int(anchor_page) != int(page) or len(anchor_bbox) != 4 or len(hit_bbox) != 4:
+        return None
+    ax0, ay0, ax1, ay1 = [float(value) for value in anchor_bbox]
+    hx0, hy0, hx1, hy1 = [float(value) for value in hit_bbox]
+    vertically_near = hy1 >= ay0 - 70.0 and hy0 <= ay1 + 90.0
+    left_of_graphic = hx1 <= ax0 + 10.0
+    if not (vertically_near and left_of_graphic):
+        return None
+    return {
+        "source_type": "figure",
+        "page": int(anchor_page),
+        "source_label": "Graphical abstract",
+        "quote": "Graphical abstract image.",
+        "bbox": [float(value) for value in anchor_bbox],
+        "matched_text": None,
+    }
+
+
 def _looks_like_table_source(source_type: Optional[str], source_label: Optional[str]) -> bool:
     normalized_type = str(source_type or "").strip().lower()
     source_text = _filled_text(source_label).lower()
@@ -2810,6 +3068,19 @@ def _locate_field_evidence_for_value(
     if resolved_anchor_bbox and not _source_label_has_precise_region(effective_source_type, normalized_source):
         resolved_anchor_bbox = None
 
+    if _looks_like_graphical_abstract_source(effective_source_type, normalized_source):
+        graphical_anchor = _find_graphical_abstract_image_bbox(pdf_path, page_hint=resolved_page_hint)
+        if graphical_anchor:
+            anchor_page, anchor_bbox = graphical_anchor
+            return {
+                "source_type": effective_source_type or "image",
+                "page": int(anchor_page),
+                "source_label": normalized_source,
+                "quote": "Graphical abstract image.",
+                "bbox": [float(value) for value in anchor_bbox],
+                "matched_text": None,
+            }
+
     if normalized_source and not resolved_anchor_bbox and _source_label_has_precise_region(effective_source_type, normalized_source):
         try:
             fig_page, fig_bbox = find_figure_bbox(
@@ -2927,6 +3198,15 @@ def _locate_field_evidence_for_value(
     if used_global_fallback:
         resolved_source_type = "text"
         resolved_source_label = "Text"
+    implicit_graphical_anchor = _implicit_graphical_abstract_load_anchor(
+        pdf_path=pdf_path,
+        field_key=field_key,
+        page=page,
+        hit_bbox=bbox,
+        source_label=resolved_source_label,
+    )
+    if implicit_graphical_anchor:
+        return implicit_graphical_anchor
     if not used_global_fallback and resolved_page_hint and page != resolved_page_hint:
         return None
     if not used_global_fallback and enforced_anchor_bbox and resolved_anchor_bbox and not _bbox_intersects(resolved_anchor_bbox, bbox):
@@ -3499,6 +3779,11 @@ def _build_field_evidence_map(item: dict, db_record: TribologyData, *, confidenc
                 )
 
     raw_flexible_fields = extract_raw_flexible_fields(item)
+    provided_flexible_fields = provided_field_evidence.get(RESERVED_FLEXIBLE_FIELDS_KEY)
+    if isinstance(provided_flexible_fields, dict):
+        for raw_key, payload in provided_flexible_fields.items():
+            if raw_key not in raw_flexible_fields:
+                raw_flexible_fields[str(raw_key)] = payload if isinstance(payload, dict) else {"value": payload}
     if raw_flexible_fields:
         flexible_payload, flexible_review_queue = normalize_flexible_fields(raw_flexible_fields, KeyNormalizer())
         entries = merge_into_field_evidence_json(entries, flexible_payload)
@@ -4295,6 +4580,7 @@ def _build_db_record_from_item(
     model_cls: type[TribologyData] | type[RecordCandidate] = TribologyData,
 ) -> tuple[Any, dict[str, Any]]:
     _annotate_record_identity(item)
+    _sanitize_item_load_fields(item)
     confidence = _resolve_confidence(item.get("confidence"), item)
     lubricant = item.get("ionic_liquid", item.get("lubricant", ""))
     lubricant_components = normalize_lubricant_components(
@@ -4326,7 +4612,10 @@ def _build_db_record_from_item(
             load=item.get("load") or item.get("normal_load"),
             speed=item.get("speed"),
         )
-    load_text = item.get("load") or item.get("normal_load")
+    load_text = sanitized_mechanical_load(item.get("load") or item.get("normal_load"))
+    if not load_text:
+        item["load"] = None
+        item["normal_load"] = None
     load_conditions = normalize_load_conditions(item.get("load_conditions") or item.get("loadConditions")) or derive_load_conditions(load_text)
     resolved_record_origin = _filled_text(item.get("record_origin")) or record_origin
     is_fast_table_record = _is_fast_table_record_origin(resolved_record_origin)
@@ -5324,42 +5613,29 @@ async def save_upload_entry(
             doi_candidates = _extract_doi_candidates(text_content, file.filename)
             for normalized_doi in doi_candidates:
                 logger.info("Upload extracted DOI candidate=%s", normalized_doi)
-                existing_doi_match = (
-                    await db.execute(
-                        select(Literature).where(
-                            Literature.group_id == principal.group.id,
-                            Literature.scope_key == scope_key,
-                            Literature.doi == normalized_doi,
-                        )
-                    )
-                ).scalar_one_or_none()
+                existing_doi_match = await _find_existing_by_doi(
+                    db,
+                    group_id=principal.group.id,
+                    scope_key=scope_key,
+                    doi=normalized_doi,
+                )
                 if not existing_doi_match:
                     continue
-                await _normalize_legacy_no_data_state(db, existing_doi_match)
                 logger.info(
                     "Upload DOI cache hit doi=%s literature_id=%s status=%s",
                     normalized_doi,
                     existing_doi_match.id,
                     existing_doi_match.status,
                 )
-                if not can_manage_literature(principal, existing_doi_match):
-                    return existing_doi_match
-                existing_doi_match.content = text_content or existing_doi_match.content
-                if file_hash and not existing_doi_match.file_hash:
-                    existing_doi_match.file_hash = file_hash
-                if is_pdf_upload and (not existing_doi_match.file_path or not os.path.exists(existing_doi_match.file_path)):
-                    pdf_dir = os.path.join(TEMP_UPLOAD_DIR, "pdfs")
-                    os.makedirs(pdf_dir, exist_ok=True)
-                    pdf_path = os.path.join(pdf_dir, f"{existing_doi_match.id}.pdf")
-                    with open(pdf_path, 'wb') as f:
-                        f.write(content_bytes)
-                    existing_doi_match.file_path = pdf_path
-                    logger.info("Backfilled PDF for literature_id=%s path=%s", existing_doi_match.id, pdf_path)
-                if existing_doi_match.status == "failed":
-                    existing_doi_match.status = "pending"
-                    existing_doi_match.error_message = None
-                await db.commit()
-                return existing_doi_match
+                return await _reuse_existing_upload_literature(
+                    db,
+                    existing_doi_match,
+                    principal=principal,
+                    content_bytes=content_bytes,
+                    text_content=text_content,
+                    file_hash=file_hash,
+                    is_pdf_upload=is_pdf_upload,
+                )
             fallback_match = await _find_existing_by_title_fallback(
                 db,
                 file.filename,
@@ -5393,6 +5669,32 @@ async def save_upload_entry(
 
         # 3. Create new Literature entry
         upload_metadata = await _resolve_upload_metadata(text_content, file.filename, doi_candidates)
+        metadata_doi = upload_metadata.get("doi")
+        if metadata_doi:
+            normalized_metadata_doi = DOIService()._normalize_doi(metadata_doi) or metadata_doi
+            upload_metadata["doi"] = normalized_metadata_doi
+            existing_metadata_doi_match = await _find_existing_by_doi(
+                db,
+                group_id=principal.group.id,
+                scope_key=scope_key,
+                doi=normalized_metadata_doi,
+            )
+            if existing_metadata_doi_match:
+                logger.info(
+                    "Upload metadata DOI cache hit doi=%s literature_id=%s status=%s",
+                    normalized_metadata_doi,
+                    existing_metadata_doi_match.id,
+                    existing_metadata_doi_match.status,
+                )
+                return await _reuse_existing_upload_literature(
+                    db,
+                    existing_metadata_doi_match,
+                    principal=principal,
+                    content_bytes=content_bytes,
+                    text_content=text_content,
+                    file_hash=file_hash,
+                    is_pdf_upload=is_pdf_upload,
+                )
         # Generate a temporary DOI for files without DOI
         temp_doi = f"temp-{int(__import__('time').time() * 1000)}"
         

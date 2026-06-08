@@ -39,38 +39,69 @@ def test_parse_gemini_markdown_table_to_review_candidates():
     assert rows[1]["cof"] == "0.046"
 
 
+def test_build_db_record_does_not_store_afm_setpoint_voltage_as_load():
+    record, payload = _build_db_record_from_item(
+        literature_id=12,
+        item={
+            "material_name": "AFM setpoint paper",
+            "ionic_liquid": "[N88812][A12BMB]",
+            "cation": "N88812",
+            "anion": "A12BMB",
+            "substrate_material": "HOPG",
+            "temperature": "298 K",
+            "load": "0-3.5 V AFM setpoint (tested range)",
+            "cof": "0.023",
+            "evidence": "Normal load was controlled from 0 to 3.5 V in AFM setpoint units.",
+            "source": "Methods",
+        },
+        file_path=None,
+        record_origin="reading_report_draft",
+        model_cls=RecordCandidate,
+    )
+
+    assert record.load_raw is None
+    assert record.load_value is None
+    assert payload["load_conditions"] == {}
+    assert payload["load"] is None
+    assert payload["normal_load"] is None
+
+
 @pytest.mark.asyncio
-async def test_extract_with_metadata_uses_fast_table_without_legacy_page_pipeline(monkeypatch):
+async def test_extract_with_metadata_no_longer_routes_through_fast_table(monkeypatch):
+    # Fast-table routing was removed during the Claude full-PDF refactor:
+    # extract_with_metadata now always flows through the unified
+    # extract_tribology_data entry (Claude full-PDF when available, else legacy),
+    # regardless of LLM_FAST_TABLE_ENABLED.
     monkeypatch.setenv("LLM_FAST_TABLE_ENABLED", "1")
     service = LLMService()
-    captured = {}
+    called = {"fast_table": False, "tribology": False}
 
-    async def fake_call_fast_table_model(document_text: str):
-        captured["document_text"] = document_text
-        return SAMPLE_GEMINI_TABLE
+    async def fail_fast_table(_document_text: str):
+        called["fast_table"] = True
+        raise AssertionError("fast table path must not run")
 
-    async def fail_metadata(*_args, **_kwargs):
-        raise AssertionError("fast table extraction should skip metadata-only LLM call")
+    async def fake_tribology(**_kwargs):
+        called["tribology"] = True
+        return []
 
-    async def fail_legacy_pipeline(*_args, **_kwargs):
-        raise AssertionError("fast table extraction should skip legacy page pipeline")
+    async def fake_metadata(*_args, **_kwargs):
+        return {
+            "title": "T", "authors": "", "doi": "", "journal": "", "issn": None,
+            "year": None, "volume": None, "issue": None, "pages": None,
+        }
 
-    monkeypatch.setattr(service, "_call_fast_table_model", fake_call_fast_table_model, raising=False)
-    monkeypatch.setattr(service, "_extract_metadata_only", fail_metadata)
-    monkeypatch.setattr(service, "extract_tribology_data", fail_legacy_pipeline)
+    monkeypatch.setattr(service, "_call_fast_table_model", fail_fast_table, raising=False)
+    monkeypatch.setattr(service, "extract_tribology_data", fake_tribology)
+    monkeypatch.setattr(service, "_extract_metadata_only", fake_metadata)
 
     result = await service.extract_with_metadata(
         content="Paper text with [BMIM][BF4] friction coefficient table.",
         extraction_profile="standard",
     )
 
-    assert "Paper text" in captured["document_text"]
-    assert result["metadata"] == {}
-    assert len(result["data"]) == 2
-    assert result["data"][0]["record_origin"] == "fast_table_extraction"
-    assert result["data"][0]["review_status"] == "needs_review"
-    assert result["extraction_summary"]["pipeline"] == "fast_table"
-    assert result["extraction_summary"]["candidate_count"] == 2
+    assert called["tribology"] is True
+    assert called["fast_table"] is False
+    assert result["extraction_summary"]["pipeline"] == "legacy"
 
 
 @pytest.mark.asyncio

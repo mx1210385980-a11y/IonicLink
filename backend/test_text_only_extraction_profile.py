@@ -136,6 +136,87 @@ async def test_review_figure_estimate_caps_visual_estimate_confidence(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_review_figure_estimate_preserves_cof_delta_as_flexible_metric(monkeypatch, tmp_path):
+    pdf_path = tmp_path / "figure-delta.pdf"
+    doc = fitz.open()
+    doc.new_page().insert_text(
+        (72, 72),
+        "Fig. 9. The increase range of friction coefficient at a current intensity of 20 A.",
+    )
+    doc.save(pdf_path)
+    doc.close()
+
+    monkeypatch.setattr(
+        runtime_service,
+        "classify_pdf_pages",
+        lambda _path: {
+            "visual_pages": [0],
+            "text_pages": [],
+            "page_texts": {
+                0: "Fig. 9. The increase range of friction coefficient at a current intensity of 20 A.",
+            },
+        },
+    )
+
+    service = LLMService()
+
+    async def fake_abbrev_map(_page_texts):
+        return {}
+
+    async def fake_process_text(_text_chunk, _prompt):
+        return []
+
+    async def fake_process_vision(_images, _prompt, content="", **_kwargs):
+        return [
+            {
+                "source_page": 1,
+                "source": "Fig. 9",
+                "source_figure": "Fig. 9",
+                "material_name": "5 %Fe3O4 + IL on 304 stainless steel / Q345 steel",
+                "ionic_liquid": "[EMIM][BF4]",
+                "cof": "increase by 0.0837",
+                "evidence": "The increase range of friction coefficient was 0.0837 at a current intensity of 20 A.",
+                "confidence": 0.95,
+            }
+        ]
+
+    monkeypatch.setattr(service, "_extract_abbrev_map", fake_abbrev_map)
+    monkeypatch.setattr(service, "_process_vision_timeout", fake_process_vision)
+    monkeypatch.setattr(service, "_process_text", fake_process_text)
+    monkeypatch.setattr(runtime_service, "resolve_and_enrich_records", lambda rows: rows)
+    monkeypatch.setattr(
+        runtime_service,
+        "filter_to_supported_ionic_liquid_records",
+        lambda rows, allow_likely=False: (rows, []),
+    )
+
+    result = await service.extract_with_metadata(
+        content="",
+        pdf_path=str(pdf_path),
+        extraction_profile="review_figure_estimate",
+    )
+
+    delta_rows = [
+        row
+        for row in result["data"]
+        if (row.get("field_evidence_json") or {}).get("_flexible_fields", {}).get("cof_delta")
+    ]
+    assert delta_rows
+    row = delta_rows[0]
+    assert row["cof"] in (None, "")
+    assert row["cof_extracted"] == {}
+    assert row["value_origin"] == "figure_estimate"
+    assert 0 < row["confidence"] <= runtime_service.FIGURE_ESTIMATE_CONFIDENCE_CAP
+    flexible = row["field_evidence_json"]["_flexible_fields"]
+    assert flexible["cof_delta"]["value"] == "0.0837"
+    assert flexible["cof_delta"]["raw_value"] == "increase by 0.0837"
+    assert flexible["current"]["value"] == "20 A"
+    assert flexible["baseline_current"]["value"] == "0 A"
+    assert flexible["iron_oxide_additive_ratio"]["value"] == "5 wt%"
+    assert result["extraction_summary"]["figure_estimate_count"] >= 1
+
+
+@pytest.mark.asyncio
 async def test_text_page_extraction_uses_bounded_concurrency_without_reordering_candidates(
     monkeypatch,
     tmp_path,

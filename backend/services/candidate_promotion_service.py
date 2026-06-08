@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 
@@ -17,11 +18,77 @@ from models.db_models import (
     TribologyData,
 )
 from services.normalization import normalize_extraction_row
+from services.record_correction_service import refresh_tribology_schema_layers
+from utils.cof_extraction import normalize_cof_extracted
 from utils.document_context import apply_experimental_document_context, extract_experimental_document_context
+from utils.structured_conditions import normalize_load_conditions
 
 
 def _filled_text(value: object) -> bool:
     return bool(str(value or "").strip())
+
+
+def _core_value_present(value: object) -> bool:
+    text = str(value or "").strip().lower()
+    return bool(text and text not in {
+        "-",
+        "--",
+        "n/a",
+        "na",
+        "none",
+        "null",
+        "unknown",
+        "unspecified",
+        "not specified",
+        "not stated",
+        "not reported",
+        "not provided",
+        "not given",
+        "review required",
+    })
+
+
+def _structured_number_present(value: object) -> bool:
+    return value is not None and str(value).strip().lower() not in {"", "none", "null", "nan"}
+
+
+def _structured_load_present(value: object) -> bool:
+    load = normalize_load_conditions(value)
+    if not load:
+        return False
+    return _core_value_present(load.get("raw_text")) or any(
+        _structured_number_present(load.get(key))
+        for key in ("system_total_load_N", "contact_load_per_unit_N", "load_min_N", "load_max_N")
+    )
+
+
+def _structured_cof_present(value: object) -> bool:
+    cof = normalize_cof_extracted(value)
+    if not cof:
+        return False
+    if _core_value_present(cof.get("raw_text")) or any(
+        _structured_number_present(cof.get(key)) for key in ("cof_min", "cof_max", "cof_average")
+    ):
+        return True
+    return any(_structured_cof_present(segment) for segment in cof.get("segments") or [])
+
+
+def _missing_tribology_core_fields(candidate: RecordCandidate) -> list[str]:
+    checks = {
+        "cation": candidate.cation,
+        "anion": candidate.anion,
+        "substrate_material": candidate.substrate_material,
+        "temperature": candidate.temperature,
+        "load": candidate.load_raw or candidate.load_value or (_structured_load_present(candidate.load_conditions_json) and "structured"),
+        "cof": (
+            candidate.cof_raw
+            if candidate.cof_raw is not None
+            else candidate.cof_value
+            if candidate.cof_value is not None
+            else (_structured_cof_present(candidate.cof_extracted_json) and "structured")
+        ),
+    }
+    return [key for key, value in checks.items() if not _core_value_present(value)]
 
 
 def _probe_value_is_missing(value: object) -> bool:
@@ -38,6 +105,22 @@ def _probe_value_is_missing(value: object) -> bool:
         "probe n/a",
         "not specified",
     }
+
+
+def _parse_field_evidence_json(existing_json: object) -> dict[str, object]:
+    if isinstance(existing_json, dict):
+        return dict(existing_json)
+    try:
+        parsed = json.loads(existing_json or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _persist_refreshed_tribology_schema_layers(record: TribologyData) -> None:
+    field_map = _parse_field_evidence_json(record.field_evidence_json)
+    refreshed = refresh_tribology_schema_layers(field_map, record)
+    record.field_evidence_json = json.dumps(refreshed, ensure_ascii=False, separators=(",", ":"))
 
 
 def _tribology_record_context_item(record: TribologyData) -> dict[str, object]:
@@ -233,6 +316,10 @@ async def promote_tribology_candidate(
     db: AsyncSession,
     candidate: RecordCandidate,
 ) -> TribologyData:
+    missing_core = _missing_tribology_core_fields(candidate)
+    if missing_core:
+        raise ValueError(f"Missing core field values for: {', '.join(missing_core)}")
+
     promoted_record = None
     if candidate.promoted_record_id:
         promoted_record = await db.get(TribologyData, candidate.promoted_record_id)
@@ -246,6 +333,7 @@ async def promote_tribology_candidate(
         copy_tribology_candidate_to_final_record(candidate, promoted_record)
 
     await _apply_literature_context_to_tribology_record(db, promoted_record)
+    _persist_refreshed_tribology_schema_layers(promoted_record)
     candidate.promoted_at = datetime.utcnow()
     return promoted_record
 

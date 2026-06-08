@@ -37,13 +37,15 @@ const props = defineProps<{
 const emit = defineEmits<{
   close: []
   'next-candidate': []
-  'saved-and-approved': []
+  'saved-to-database': []
   rejected: []
 }>()
 
 type ReviewDraft = {
   materialName: string
   lubricant: string
+  cation: string
+  anion: string
   probeMaterial: string
   probeGeometry: string
   probeRadius: string
@@ -51,10 +53,12 @@ type ReviewDraft = {
   substrateMaterial: string
   substrateCoating: string
   substrateRoughness: string
+  surfaceRoughness: string
   cofRaw: string
   cofValue: string
   loadRaw: string
   loadValue: string
+  temperature: string
   potential: string
   speedRaw: string
   speedValue: string
@@ -73,6 +77,74 @@ type EvidenceField = {
   keys: string[]
   readonly?: boolean
 }
+
+type SchemaLayerField = {
+  key: string
+  label: string
+  layer: 'core' | 'extended' | 'raw'
+  status: 'ready' | 'review'
+  value: string
+  note?: string
+}
+
+const CORE_REVIEW_FIELDS = [
+  { key: 'cation', label: 'Cation' },
+  { key: 'anion', label: 'Anion' },
+  { key: 'substrate_material', label: 'Substrate' },
+  { key: 'temperature', label: 'Temperature' },
+  { key: 'load', label: 'Load' },
+  { key: 'cof', label: 'COF' },
+] as const
+
+const CORE_REVIEW_FIELD_KEYS = new Set<string>([
+  ...CORE_REVIEW_FIELDS.map((field) => field.key),
+  'ionic_liquid',
+  'ionic_liquid_display',
+  'lubricant',
+  'lubricant_alias',
+  'material',
+  'material_name',
+  'load_raw',
+  'load_value',
+  'normal_load',
+  'cof_extracted',
+])
+
+const EXTENDED_REVIEW_FIELDS = [
+  { key: 'speed', label: 'Speed' },
+  { key: 'additive', label: 'Additive' },
+  { key: 'surface_roughness', label: 'Roughness' },
+  { key: 'test_duration', label: 'Test duration' },
+  { key: 'tribological_system', label: 'Method' },
+  { key: 'potential', label: 'Potential' },
+] as const
+
+const RAW_FLEXIBLE_META_KEYS = new Set([
+  'source',
+  'schema',
+  'literature_id',
+  'extractor_type',
+  'report_id',
+  'prompt_version',
+])
+
+const EMPTY_SCHEMA_VALUE_LABELS = new Set([
+  '',
+  '-',
+  '--',
+  'n/a',
+  'na',
+  'none',
+  'null',
+  'unknown',
+  'unspecified',
+  'not specified',
+  'not stated',
+  'not reported',
+  'not provided',
+  'not given',
+  'review required',
+])
 
 // Maps each evidence group to the raw field-evidence keys (and aliases) the
 // backend may emit. Verify cards reference these groups to pull the best proof.
@@ -128,6 +200,32 @@ const candidateId = computed(() => {
 })
 
 const fieldMap = computed<Record<string, FieldEvidenceEntry | undefined>>(() => evidence.value?.fields || {})
+const rawFieldMap = computed<Record<string, any>>(() => evidence.value?.fields || {})
+
+const schemaLayerSummary = computed(() => {
+  const coreFields = schemaLayerFieldsFromEvidence('core')
+  const extendedFields = schemaLayerFieldsFromEvidence('extended')
+  const rawEntries = rawFlexibleEntries()
+  const missingCoreFields = coreFields.filter((field) => field.status !== 'ready')
+  return {
+    coreFields,
+    extendedFields,
+    missingCoreFields,
+    rawEntries,
+    coreReady: coreFields.filter((field) => field.status === 'ready').length,
+    extendedReady: extendedFields.filter((field) => field.status === 'ready').length,
+  }
+})
+
+const coreLayerMissing = computed(() =>
+  schemaLayerSummary.value.missingCoreFields.map((field) => field.label),
+)
+
+function flaggedCoreEvidenceKeys() {
+  return Object.entries(fieldMap.value)
+    .filter(([key, entry]) => CORE_REVIEW_FIELD_KEYS.has(key) && clean(entry?.review_state).toLowerCase() === 'flagged')
+    .map(([key]) => key)
+}
 
 type ReviewCardModel = {
   key: ReviewCardKey
@@ -189,13 +287,9 @@ const localBlockers = computed(() => {
   const record = props.record
   if (!record) return ['No candidate selected']
   const blockers: string[] = []
-  if (!clean(draft.value.lubricant) && !clean(record.ionicLiquidDisplay)) blockers.push('Missing ionic liquid')
-  if (!clean(draft.value.cofRaw) && !clean(draft.value.cofValue)) blockers.push('Missing COF')
-  if (!clean(draft.value.probeMaterial) && !clean(draft.value.substrateMaterial)) blockers.push('Missing tribopair material')
-  const flagged = Object.entries(fieldMap.value)
-    .filter(([, entry]) => clean(entry?.review_state).toLowerCase() === 'flagged')
-    .map(([key]) => key)
-  if (flagged.length) blockers.push(`Flagged evidence: ${flagged.slice(0, 3).join(', ')}`)
+  if (coreLayerMissing.value.length) blockers.push(`Missing core: ${coreLayerMissing.value.slice(0, 4).join(', ')}`)
+  const flaggedCore = flaggedCoreEvidenceKeys()
+  if (flaggedCore.length) blockers.push(`Flagged core evidence: ${flaggedCore.slice(0, 3).join(', ')}`)
   return blockers
 })
 
@@ -205,11 +299,19 @@ const readinessTone = computed(() =>
     ? 'border-amber-200 bg-amber-50 text-amber-700'
     : 'border-emerald-200 bg-emerald-50 text-emerald-700',
 )
+const canApproveCandidate = computed(() => !localBlockers.value.length)
+const approvalButtonLabel = computed(() => {
+  if (canApproveCandidate.value) return 'Save to Database'
+  if (coreLayerMissing.value.length) return 'Complete core fields'
+  return 'Resolve flags'
+})
 
 const dirtyGroups = computed(() => ({
   scalar:
     draft.value.materialName !== originalDraft.value.materialName
     || draft.value.lubricant !== originalDraft.value.lubricant
+    || draft.value.cation !== originalDraft.value.cation
+    || draft.value.anion !== originalDraft.value.anion
     || draft.value.probeMaterial !== originalDraft.value.probeMaterial
     || draft.value.probeGeometry !== originalDraft.value.probeGeometry
     || draft.value.probeRadius !== originalDraft.value.probeRadius
@@ -217,6 +319,8 @@ const dirtyGroups = computed(() => ({
     || draft.value.substrateMaterial !== originalDraft.value.substrateMaterial
     || draft.value.substrateCoating !== originalDraft.value.substrateCoating
     || draft.value.substrateRoughness !== originalDraft.value.substrateRoughness
+    || draft.value.surfaceRoughness !== originalDraft.value.surfaceRoughness
+    || draft.value.temperature !== originalDraft.value.temperature
     || draft.value.potential !== originalDraft.value.potential,
   cof: draft.value.cofRaw !== originalDraft.value.cofRaw || draft.value.cofValue !== originalDraft.value.cofValue,
   load: draft.value.loadRaw !== originalDraft.value.loadRaw || draft.value.loadValue !== originalDraft.value.loadValue,
@@ -254,6 +358,7 @@ function emptyDraft(): ReviewDraft {
     cofValue: '',
     loadRaw: '',
     loadValue: '',
+    temperature: '',
     potential: '',
     speedRaw: '',
     speedValue: '',
@@ -265,6 +370,8 @@ function emptyDraft(): ReviewDraft {
     measurementType: '',
     frictionRegime: '',
     lubricant: '',
+    cation: '',
+    anion: '',
     materialName: '',
     probeGeometry: '',
     probeMaterial: '',
@@ -273,6 +380,7 @@ function emptyDraft(): ReviewDraft {
     substrateCoating: '',
     substrateMaterial: '',
     substrateRoughness: '',
+    surfaceRoughness: '',
   }
 }
 
@@ -284,6 +392,8 @@ function resetDraft(record: RecordResponse) {
   const nextDraft: ReviewDraft = {
     materialName: clean(record.materialName),
     lubricant: clean(record.lubricant || record.ionicLiquidDisplay),
+    cation: clean(record.cation),
+    anion: clean(record.anion),
     probeMaterial: clean(record.probeMaterial),
     probeGeometry: clean(record.probeGeometry),
     probeRadius: clean(record.probeRadius),
@@ -291,10 +401,23 @@ function resetDraft(record: RecordResponse) {
     substrateMaterial: clean(record.substrateMaterial),
     substrateCoating: clean(record.substrateCoating),
     substrateRoughness: clean(record.substrateRoughness),
-    cofRaw: clean(cof.rawText ?? cof.raw_text ?? record.cofRaw),
-    cofValue: clean(cof.cofAverage ?? cof.cof_average ?? record.cofValue),
-    loadRaw: clean(load.rawText ?? load.raw_text ?? record.loadRaw),
-    loadValue: clean(load.systemTotalLoadN ?? load.system_total_load_N ?? record.loadValue),
+    surfaceRoughness: clean(record.surfaceRoughness),
+    cofRaw: firstSchemaValue(cof.rawText ?? cof.raw_text, record.cofRaw),
+    cofValue: firstSchemaValue(
+      cof.cofAverage ?? cof.cof_average,
+      cof.cofMin ?? cof.cof_min,
+      cof.cofMax ?? cof.cof_max,
+      record.cofValue,
+    ),
+    loadRaw: firstSchemaValue(load.rawText ?? load.raw_text, record.loadRaw),
+    loadValue: firstSchemaValue(
+      load.systemTotalLoadN ?? load.system_total_load_N,
+      load.contactLoadPerUnitN ?? load.contact_load_per_unit_N,
+      load.loadMinN ?? load.load_min_N,
+      load.loadMaxN ?? load.load_max_N,
+      record.loadValue,
+    ),
+    temperature: clean(record.temperature),
     potential: clean(record.potential),
     speedRaw: clean(speed.rawText ?? speed.raw_text ?? record.speedValue),
     speedValue: clean(speed.slidingVelocityUmS ?? speed.sliding_velocity_um_s ?? record.speedValue),
@@ -433,6 +556,11 @@ function toggleCardEditing(key: ReviewCardKey) {
 
 async function saveAndApprove() {
   if (!candidateId.value || saving.value) return
+  if (localBlockers.value.length) {
+    approvalError.value = `Complete required review items first: ${localBlockers.value.join(' · ')}`
+    openMissingCoreCards()
+    return
+  }
   const currentCandidateId = candidateId.value
   saving.value = true
   saveError.value = ''
@@ -463,9 +591,9 @@ async function saveAndApprove() {
   try {
     await approveReviewCandidate(candidateId.value)
     originalDraft.value = { ...draft.value }
-    emit('saved-and-approved')
+    emit('saved-to-database')
   } catch (err: any) {
-    approvalError.value = String(err?.response?.data?.detail || err?.message || 'Candidate could not be approved.')
+    approvalError.value = String(err?.response?.data?.detail || err?.message || 'Candidate could not be saved to Database.')
   } finally {
     if (candidateId.value === currentCandidateId) saving.value = false
   }
@@ -527,6 +655,11 @@ function handleReviewKeydown(event: KeyboardEvent) {
   }
   if ((event.key === 'Enter' && (event.metaKey || event.ctrlKey)) || (event.altKey && event.key.toLowerCase() === 's')) {
     event.preventDefault()
+    if (!canApproveCandidate.value) {
+      approvalError.value = `Complete required review items first: ${localBlockers.value.join(' · ')}`
+      openMissingCoreCards()
+      return
+    }
     void saveAndApprove()
     return
   }
@@ -555,6 +688,8 @@ function buildScalarCorrections(): Record<string, string | number | null> {
   return {
     material_name: draft.value.materialName || null,
     lubricant: draft.value.lubricant || null,
+    cation: draft.value.cation || null,
+    anion: draft.value.anion || null,
     probe_material: draft.value.probeMaterial || null,
     probe_geometry: draft.value.probeGeometry || null,
     probe_radius: draft.value.probeRadius || null,
@@ -562,6 +697,8 @@ function buildScalarCorrections(): Record<string, string | number | null> {
     substrate_material: draft.value.substrateMaterial || null,
     substrate_coating: draft.value.substrateCoating || null,
     substrate_roughness: draft.value.substrateRoughness || null,
+    surface_roughness: draft.value.surfaceRoughness || null,
+    temperature: draft.value.temperature || null,
     potential: draft.value.potential || null,
   }
 }
@@ -617,6 +754,152 @@ function clean(value: unknown) {
   return String(value ?? '').trim()
 }
 
+function schemaValuePresent(value: unknown): boolean {
+  if (value === null || value === undefined) return false
+  if (Array.isArray(value)) return value.some((item) => schemaValuePresent(item))
+  if (typeof value === 'object') return Object.values(value).some((item) => schemaValuePresent(item))
+  const text = clean(value).toLowerCase()
+  return Boolean(!EMPTY_SCHEMA_VALUE_LABELS.has(text))
+}
+
+function firstSchemaValue(...values: unknown[]): string {
+  for (const value of values) {
+    if (schemaValuePresent(value)) return clean(value)
+  }
+  return ''
+}
+
+function schemaLayerFieldsFromEvidence(layer: 'core' | 'extended'): SchemaLayerField[] {
+  const schemaLayers = rawFieldMap.value._schema_layers || {}
+  const backendFields = Array.isArray(schemaLayers[`${layer}_fields`]) ? schemaLayers[`${layer}_fields`] : []
+  if (backendFields.length) {
+    return backendFields.map((field: any) => {
+      const key = clean(field.key)
+      const currentValue = schemaFieldValue(key)
+      const backendValue = clean(field.value)
+      return {
+        key,
+        label: clean(field.label || field.key),
+        layer,
+        status: schemaValuePresent(currentValue) ? 'ready' : clean(field.status).toLowerCase() === 'ready' ? 'ready' : 'review',
+        value: currentValue || backendValue,
+        note: clean(field.note),
+      }
+    })
+  }
+
+  const definitions = layer === 'core' ? CORE_REVIEW_FIELDS : EXTENDED_REVIEW_FIELDS
+  return definitions.map((field) => {
+    const value = schemaFieldValue(field.key)
+    return {
+      key: field.key,
+      label: field.label,
+      layer,
+      status: schemaValuePresent(value) ? 'ready' : 'review',
+      value,
+      note: '',
+    }
+  })
+}
+
+function openMissingCoreCards() {
+  const missingKeys = new Set(
+    schemaLayerSummary.value.coreFields
+      .filter((field) => field.status !== 'ready')
+      .map((field) => field.key),
+  )
+  if (!missingKeys.size) return
+  const next = new Set(editingCards.value)
+  if (missingKeys.has('cation') || missingKeys.has('anion')) next.add('ionic_liquid')
+  if (missingKeys.has('substrate_material')) next.add('tribopair')
+  if (missingKeys.has('temperature') || missingKeys.has('load')) next.add('conditions')
+  if (missingKeys.has('cof')) next.add('cof')
+  editingCards.value = next
+}
+
+function rawFlexibleEntries(): Array<{ key: string, label: string, value: string }> {
+  const merged = rawFlexibleMap()
+  const entries: Array<{ key: string, label: string, value: string }> = []
+  for (const [key, value] of Object.entries(merged)) {
+    if (key === 'extended_context') {
+      if (!value || typeof value !== 'object') continue
+      for (const [nestedKey, nestedValue] of Object.entries(value as Record<string, unknown>)) {
+        const nestedText = schemaRawValue(nestedValue)
+        if (nestedText) entries.push({ key: nestedKey, label: readableRawFlexibleLabel(nestedKey), value: nestedText })
+      }
+      continue
+    }
+    const visibleRawKey = !key.startsWith('_') && !RAW_FLEXIBLE_META_KEYS.has(key)
+    if (!visibleRawKey) continue
+    const text = schemaRawValue(value)
+    if (text) entries.push({ key, label: readableRawFlexibleLabel(key), value: text })
+  }
+  return entries
+    .slice(0, 3)
+}
+
+function readableRawFlexibleLabel(key: string) {
+  return key.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+function rawFlexibleMap(): Record<string, unknown> {
+  const schemaLayers = rawFieldMap.value._schema_layers || {}
+  const rawJson = schemaLayers.raw_flexible_json && typeof schemaLayers.raw_flexible_json === 'object'
+    ? schemaLayers.raw_flexible_json
+    : {}
+  const flexibleFields = rawFieldMap.value._flexible_fields && typeof rawFieldMap.value._flexible_fields === 'object'
+    ? rawFieldMap.value._flexible_fields
+    : {}
+  return { ...rawJson, ...flexibleFields }
+}
+
+function schemaRawValue(value: unknown) {
+  if (value && typeof value === 'object') {
+    const payload = value as Record<string, unknown>
+    return clean(payload.value ?? payload.evidence_excerpt ?? payload.label ?? JSON.stringify(payload))
+  }
+  return clean(value)
+}
+
+function schemaFieldValue(key: string) {
+  if (key === 'cation') return clean(draft.value.cation)
+  if (key === 'anion') return clean(draft.value.anion)
+  if (key === 'substrate_material') return clean(draft.value.substrateMaterial)
+  if (key === 'temperature') return clean(draft.value.temperature)
+  if (key === 'load') {
+    return firstSchemaValue(
+      draft.value.loadValue,
+      draft.value.loadRaw,
+    )
+  }
+  if (key === 'cof') {
+    return firstSchemaValue(
+      draft.value.cofValue,
+      draft.value.cofRaw,
+    )
+  }
+  if (key === 'speed') return firstSchemaValue(draft.value.speedValue, draft.value.speedRaw)
+  if (key === 'additive') return schemaFlexibleValue('additive', 'additive_loading', 'additive_concentration')
+  if (key === 'surface_roughness') return clean(draft.value.surfaceRoughness)
+  if (key === 'test_duration') return schemaFlexibleValue('test_duration', 'duration', 'test_time')
+  if (key === 'tribological_system') return firstSchemaValue(draft.value.tribologyRaw, draft.value.method)
+  if (key === 'potential') return clean(draft.value.potential)
+  const entry = rawFieldMap.value[key]
+  return clean(entry?.value)
+}
+
+function schemaFlexibleValue(...keys: string[]) {
+  const rawMap = rawFlexibleMap()
+  for (const key of keys) {
+    const rawValue = schemaRawValue(rawMap[key])
+    if (rawValue) return rawValue
+    const entry = rawFieldMap.value[key]
+    const evidenceValue = schemaRawValue(entry?.value ?? entry?.raw_text ?? entry?.rawText ?? entry?.reported_value)
+    if (evidenceValue) return evidenceValue
+  }
+  return ''
+}
+
 function escapeHtml(value: string) {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
@@ -638,8 +921,8 @@ function highlightQuote(quote: string, matchedText: string) {
 
 // Card value/derivation helpers ──────────────────────────────────────────────
 function cardValueDisplay(card: ReviewCardDef) {
-  if (card.key === 'ionic_liquid') return clean(draft.value.lubricant) || clean(lubricantDisplay(props.record as RecordResponse)) || '—'
-  if (card.key === 'cof') return clean(draft.value.cofValue) || clean(draft.value.cofRaw) || '—'
+  if (card.key === 'ionic_liquid') return firstSchemaValue(draft.value.lubricant, lubricantDisplay(props.record as RecordResponse)) || '—'
+  if (card.key === 'cof') return firstSchemaValue(draft.value.cofValue, draft.value.cofRaw) || '—'
   if (card.key === 'tribopair') {
     const probe = clean(draft.value.probeMaterial) || '—'
     const substrate = clean(draft.value.substrateMaterial) || '—'
@@ -651,20 +934,20 @@ function cardValueDisplay(card: ReviewCardDef) {
 function cardSubValues(card: ReviewCardDef) {
   if (card.key !== 'conditions') return []
   return [
-    { label: 'Load', value: clean(draft.value.loadValue) || clean(draft.value.loadRaw) || '—' },
-    { label: 'Speed', value: clean(draft.value.speedValue) || clean(draft.value.speedRaw) || '—' },
-    { label: 'Potential', value: clean(draft.value.potential) || '—' },
+    { label: 'Load', value: firstSchemaValue(draft.value.loadValue, draft.value.loadRaw) || '—' },
+    { label: 'Speed', value: firstSchemaValue(draft.value.speedValue, draft.value.speedRaw) || '—' },
+    { label: 'Potential', value: firstSchemaValue(draft.value.potential) || '—' },
   ]
 }
 
 function cardHasValue(card: ReviewCardDef) {
-  if (card.key === 'ionic_liquid') return Boolean(clean(draft.value.lubricant) || clean(lubricantDisplay(props.record as RecordResponse)))
-  if (card.key === 'cof') return Boolean(clean(draft.value.cofValue) || clean(draft.value.cofRaw))
-  if (card.key === 'tribopair') return Boolean(clean(draft.value.probeMaterial) || clean(draft.value.substrateMaterial))
+  if (card.key === 'ionic_liquid') return schemaValuePresent(firstSchemaValue(draft.value.lubricant, lubricantDisplay(props.record as RecordResponse)))
+  if (card.key === 'cof') return schemaValuePresent(firstSchemaValue(draft.value.cofValue, draft.value.cofRaw))
+  if (card.key === 'tribopair') return schemaValuePresent(firstSchemaValue(draft.value.probeMaterial, draft.value.substrateMaterial))
   return Boolean(
-    clean(draft.value.loadValue) || clean(draft.value.loadRaw)
-    || clean(draft.value.speedValue) || clean(draft.value.speedRaw)
-    || clean(draft.value.potential),
+    schemaValuePresent(firstSchemaValue(draft.value.loadValue, draft.value.loadRaw))
+    || schemaValuePresent(firstSchemaValue(draft.value.speedValue, draft.value.speedRaw))
+    || schemaValuePresent(draft.value.potential),
   )
 }
 
@@ -900,6 +1183,83 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
           </div>
 
           <template v-else>
+            <section class="mb-3 rounded-[9px] border border-slate-200 bg-white px-3 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.035)]">
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <p class="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#0f7c82]">Schema layers</p>
+                  <p class="mt-0.5 text-xs font-semibold text-slate-500">Required core, optional context, and flexible evidence.</p>
+                </div>
+                <div class="flex shrink-0 items-center gap-1.5 text-[11px] font-black text-slate-600">
+                  <span class="rounded-full bg-slate-50 px-2 py-1">
+                    Core {{ schemaLayerSummary.coreReady }}/{{ schemaLayerSummary.coreFields.length }}
+                  </span>
+                  <span class="rounded-full bg-slate-50 px-2 py-1">
+                    Optional {{ schemaLayerSummary.extendedReady }} captured
+                  </span>
+                </div>
+              </div>
+              <div
+                v-if="schemaLayerSummary.missingCoreFields.length"
+                class="mt-3 flex flex-wrap items-center gap-1.5 rounded-[8px] border border-amber-100 bg-amber-50/70 px-2.5 py-2 text-[11px] font-semibold text-amber-800"
+              >
+                <span class="mr-0.5 font-black uppercase tracking-[0.12em] text-amber-700">Missing core</span>
+                <button
+                  v-for="field in schemaLayerSummary.missingCoreFields"
+                  :key="`missing-core:${field.key}`"
+                  type="button"
+                  class="rounded-full border border-amber-200 bg-white px-2 py-0.5 font-bold text-amber-800 transition hover:border-amber-300 hover:bg-amber-100"
+                  :title="`Fix ${field.label}`"
+                  @click="openMissingCoreCards"
+                >
+                  {{ field.label }}
+                </button>
+              </div>
+              <div class="mt-3 grid gap-2 md:grid-cols-3">
+                <div class="rounded-[8px] bg-[#f6fbfc] p-2">
+                  <h3 class="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">Core fields</h3>
+                  <p class="mt-1 text-[11px] font-semibold text-slate-500">Required before approval</p>
+                  <div class="mt-2 flex flex-wrap gap-1.5">
+                    <span
+                      v-for="field in schemaLayerSummary.coreFields"
+                      :key="`core:${field.key}`"
+                      class="rounded-full px-2 py-1 text-[11px] font-bold"
+                      :class="field.status === 'ready' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'"
+                    >
+                      {{ field.label }}
+                    </span>
+                  </div>
+                </div>
+                <div class="rounded-[8px] bg-[#f8fafc] p-2">
+                  <h3 class="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">Extended fields</h3>
+                  <p class="mt-1 text-[11px] font-semibold text-slate-500">Optional context</p>
+                  <div class="mt-2 flex flex-wrap gap-1.5">
+                    <span
+                      v-for="field in schemaLayerSummary.extendedFields"
+                      :key="`extended:${field.key}`"
+                      class="rounded-full px-2 py-1 text-[11px] font-bold"
+                      :class="field.status === 'ready' ? 'bg-teal-50 text-[#0f7c82]' : 'bg-slate-100 text-slate-500'"
+                    >
+                      {{ field.label }}
+                    </span>
+                  </div>
+                </div>
+                <div class="rounded-[8px] bg-[#fbfcf8] p-2">
+                  <h3 class="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">Saved raw evidence</h3>
+                  <p class="mt-1 text-[11px] font-semibold text-slate-500">Flexible evidence kept for later schema decisions.</p>
+                  <div v-if="schemaLayerSummary.rawEntries.length" class="mt-2 space-y-1">
+                    <p
+                      v-for="entry in schemaLayerSummary.rawEntries"
+                      :key="`raw:${entry.key}`"
+                      class="truncate text-[11px] font-semibold text-slate-600"
+                    >
+                      <span class="text-slate-400">{{ entry.label }}:</span> {{ entry.value }}
+                    </p>
+                  </div>
+                  <p v-else class="mt-2 text-[11px] font-semibold text-slate-400">No flexible fields yet.</p>
+                </div>
+              </div>
+            </section>
+
             <div class="grid gap-2">
               <section
                 v-for="card in cardModels"
@@ -963,6 +1323,16 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
                       Ionic liquid
                       <input v-model="draft.lubricant" class="h-10 rounded-lg border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-[#7ddfe3] focus:ring-4 focus:ring-[#e0fbfb]" placeholder="[BMIM][BF4]">
                     </label>
+                    <div class="grid gap-2 md:grid-cols-2">
+                      <label class="grid gap-1.5 text-sm font-bold text-slate-700">
+                        Cation
+                        <input v-model="draft.cation" class="h-10 rounded-lg border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-[#7ddfe3] focus:ring-4 focus:ring-[#e0fbfb]" placeholder="BMIM">
+                      </label>
+                      <label class="grid gap-1.5 text-sm font-bold text-slate-700">
+                        Anion
+                        <input v-model="draft.anion" class="h-10 rounded-lg border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-[#7ddfe3] focus:ring-4 focus:ring-[#e0fbfb]" placeholder="BF4">
+                      </label>
+                    </div>
                   </template>
                   <template v-else-if="card.key === 'cof'">
                     <label class="grid gap-1.5 text-sm font-bold text-slate-700">
@@ -1000,6 +1370,10 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
                     <label class="grid gap-1.5 text-sm font-bold text-slate-700">
                       Speed raw
                       <input v-model="draft.speedRaw" class="h-10 rounded-lg border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-[#7ddfe3] focus:ring-4 focus:ring-[#e0fbfb]" placeholder="e.g. 10 um/s">
+                    </label>
+                    <label class="grid gap-1.5 text-sm font-bold text-slate-700">
+                      Temperature
+                      <input v-model="draft.temperature" class="h-10 rounded-lg border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-[#7ddfe3] focus:ring-4 focus:ring-[#e0fbfb]" placeholder="298 K">
                     </label>
                     <label class="grid gap-1.5 text-sm font-bold text-slate-700 md:col-span-2">
                       Potential
@@ -1130,6 +1504,18 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
                   Substrate coating
                   <input v-model="draft.substrateCoating" class="h-10 rounded-lg border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-[#7ddfe3] focus:ring-4 focus:ring-[#e0fbfb]" placeholder="oxide, coating, none">
                 </label>
+                <label class="grid gap-1.5 text-sm font-bold text-slate-700">
+                  Surface roughness
+                  <input v-model="draft.surfaceRoughness" class="h-10 rounded-lg border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-[#7ddfe3] focus:ring-4 focus:ring-[#e0fbfb]" placeholder="RMS 0.3 nm">
+                </label>
+                <label class="grid gap-1.5 text-sm font-bold text-slate-700">
+                  Probe roughness
+                  <input v-model="draft.probeRoughness" class="h-10 rounded-lg border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-[#7ddfe3] focus:ring-4 focus:ring-[#e0fbfb]" placeholder="probe roughness">
+                </label>
+                <label class="grid gap-1.5 text-sm font-bold text-slate-700">
+                  Substrate roughness
+                  <input v-model="draft.substrateRoughness" class="h-10 rounded-lg border border-slate-200 px-3 text-sm font-semibold outline-none focus:border-[#7ddfe3] focus:ring-4 focus:ring-[#e0fbfb]" placeholder="substrate roughness">
+                </label>
               </div>
             </section>
           </template>
@@ -1147,7 +1533,7 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
           </p>
           <div class="flex items-center justify-between gap-3">
             <p class="text-xs font-semibold text-slate-500">
-              Shortcuts: <kbd class="rounded bg-slate-100 px-1 font-bold">Alt+S</kbd> approve ·
+              Shortcuts: <kbd class="rounded bg-slate-100 px-1 font-bold">Alt+S</kbd> save ·
               <kbd class="rounded bg-slate-100 px-1 font-bold">→</kbd> next ·
               <kbd class="rounded bg-slate-100 px-1 font-bold">Esc</kbd> close
             </p>
@@ -1165,12 +1551,12 @@ function figurePreviewMatchesEvidence(preview: PdfFigurePreview, entry: FieldEvi
               <button
                 type="button"
                 class="inline-flex h-9 items-center justify-center gap-1.5 rounded-[8px] bg-[#0f7c82] px-3 text-sm font-semibold text-white transition hover:bg-[#0b6870] disabled:cursor-not-allowed disabled:opacity-55"
-                :disabled="saving || rejecting"
+                :disabled="!canApproveCandidate || saving || rejecting"
                 @click="saveAndApprove"
               >
                 <Loader2 v-if="saving" class="h-4 w-4 animate-spin" />
                 <Check v-else class="h-4 w-4 stroke-[3]" />
-                Approve
+                {{ saving ? 'Saving...' : approvalButtonLabel }}
               </button>
             </div>
           </div>

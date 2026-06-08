@@ -1,9 +1,16 @@
 import json
+import inspect
+import io
 from types import SimpleNamespace
 
+import fitz
+import pytest
+from PIL import Image, ImageDraw
+from models.db_models import Literature, RecordCandidate, ResearchGroup, TribologyData as TribologyDataDB, User
 from models.tribology import TribologyData
 from routers import extraction as extraction_router
-from routers.extraction import _build_record_field_evidence_payload
+from routers.extraction import _build_record_field_evidence_payload, _strict_core_field_missing
+from security import AuthPrincipal
 from services.file_service import _build_field_evidence_map
 from services.file_service import _derive_grounding_metadata
 from services.file_service import _field_evidence_map_looks_generic
@@ -30,6 +37,79 @@ def test_has_core_quantitative_signal_accepts_afm_layering_record():
     }
 
     assert has_core_quantitative_signal(record) is True
+
+
+@pytest.mark.anyio
+async def test_extracted_data_uses_final_records_when_candidates_are_promoted(db_session):
+    group = ResearchGroup(name="Promoted Detail Group", slug="promoted-detail-group")
+    user = User(
+        username="promoted-detail-user",
+        display_name="Promoted Detail User",
+        password_hash="hash",
+        role="researcher",
+        group=group,
+    )
+    db_session.add_all([group, user])
+    await db_session.flush()
+    literature = Literature(
+        doi="10.0000/promoted-detail",
+        title="Promoted detail paper",
+        authors="A",
+        journal="J",
+        year=2026,
+        group_id=group.id,
+        created_by_user_id=user.id,
+        scope_type="group_library",
+        scope_key="group_library",
+    )
+    db_session.add(literature)
+    await db_session.flush()
+    final_record = TribologyDataDB(
+        literature_id=literature.id,
+        material_name="Official record",
+        lubricant="[BMIM][BF4]",
+        cation="BMIM",
+        anion="BF4",
+        substrate_material="HOPG",
+        temperature="298 K",
+        load_raw="30 nN",
+        load_value="30 nN",
+        cof_raw="0.08",
+        cof_value=0.08,
+        evidence="The official database row reports COF 0.08.",
+        source_page=1,
+        review_status="approved",
+        confidence=0.9,
+    )
+    db_session.add(final_record)
+    await db_session.flush()
+    db_session.add(
+        RecordCandidate(
+            literature_id=literature.id,
+            promoted_record_id=final_record.id,
+            material_name="Promoted duplicate candidate",
+            lubricant="[BMIM][BF4]",
+            cation="BMIM",
+            anion="BF4",
+            substrate_material="HOPG",
+            temperature="298 K",
+            load_raw="30 nN",
+            load_value="30 nN",
+            cof_raw="0.08",
+            cof_value=0.08,
+            field_evidence_json="{}",
+            review_status="approved",
+            record_origin="reading_report_draft",
+            confidence=0.9,
+        )
+    )
+    await db_session.flush()
+    principal = AuthPrincipal(user=user, group=group, personal_workspace=None)
+
+    records = await extraction_router.get_extracted_data(str(literature.id), db_session, principal)
+
+    assert len(records) == 1
+    assert records[0]["material_name"] == "Official record"
 
 
 def test_has_core_quantitative_signal_rejects_purely_qualitative_record():
@@ -152,6 +232,96 @@ def test_review_payload_requires_primary_metric_for_non_cof_record():
     payload = _build_record_field_evidence_payload(record)
 
     assert payload["required_fields"] == ["material", "ionic_liquid", "layer_spacing_delta"]
+
+
+def test_strict_core_field_gate_requires_target_schema_values():
+    record = SimpleNamespace(
+        cation="BMIM",
+        anion="BF4",
+        substrate_material="mica",
+        temperature=None,
+        load_raw="2 nN",
+        load_value=None,
+        cof_raw="0.08",
+        cof_value=0.08,
+    )
+
+    assert _strict_core_field_missing(record) == ["temperature"]
+
+    record.temperature = "298 K"
+    assert _strict_core_field_missing(record) == []
+
+
+def test_strict_core_field_gate_accepts_structured_load_and_cof_values():
+    record = SimpleNamespace(
+        cation="BMIM",
+        anion="BF4",
+        substrate_material="mica",
+        temperature="298 K",
+        load_raw=None,
+        load_value=None,
+        load_conditions_json=json.dumps({
+            "raw_text": "2 nN",
+            "value_type": "single",
+            "load_min_N": 2e-9,
+            "load_max_N": 2e-9,
+        }),
+        cof_raw=None,
+        cof_value=None,
+        cof_extracted_json=json.dumps({
+            "raw_text": "0.08",
+            "value_type": "single",
+            "cof_min": 0.08,
+            "cof_max": 0.08,
+            "cof_average": 0.08,
+        }),
+    )
+
+    assert _strict_core_field_missing(record) == []
+
+
+def test_strict_core_field_gate_accepts_zero_structured_values():
+    record = SimpleNamespace(
+        cation="BMIM",
+        anion="BF4",
+        substrate_material="mica",
+        temperature="298 K",
+        load_raw=None,
+        load_value=None,
+        load_conditions_json=json.dumps({
+            "raw_text": "",
+            "value_type": "single",
+            "load_min_N": 0,
+            "load_max_N": 0,
+        }),
+        cof_raw=None,
+        cof_value=None,
+        cof_extracted_json=json.dumps({
+            "raw_text": "",
+            "value_type": "single",
+            "cof_min": 0,
+            "cof_max": 0,
+            "cof_average": 0,
+        }),
+    )
+
+    assert _strict_core_field_missing(record) == []
+
+
+def test_record_approval_uses_strict_core_field_gate():
+    source = inspect.getsource(extraction_router.approve_record_review)
+
+    assert "_strict_core_field_missing(record)" in source
+    assert "Missing core field values" in source
+
+
+def test_candidate_approval_does_not_block_on_legacy_required_evidence_gate():
+    source = inspect.getsource(extraction_router.approve_candidate_review)
+
+    assert "_strict_core_field_missing(candidate)" in source
+    assert "Missing core field values" in source
+    assert "_required_field_missing(field_map)" not in source
+    assert "Missing field evidence" not in source
 
 
 def test_review_payload_includes_potential_field_and_conditions_summary():
@@ -591,6 +761,96 @@ def test_locate_field_evidence_marks_text_hits_outside_figure_anchor(monkeypatch
     assert evidence is not None
     assert evidence["source_type"] == "text"
     assert evidence["source_label"] == "Text"
+
+
+def test_locate_field_evidence_anchors_graphical_abstract_image(tmp_path, monkeypatch):
+    monkeypatch.setattr("services.file_service._resolve_existing_path", lambda path: path)
+    pdf_path = tmp_path / "acs_graphical_abstract.pdf"
+    image = Image.new("RGB", (360, 230), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((12, 12, 348, 218), outline="black", width=3)
+    draw.text((64, 160), "Normal Load, nN", fill="black")
+    image_buffer = io.BytesIO()
+    image.save(image_buffer, format="PNG")
+
+    doc = fitz.open()
+    page = doc.new_page(width=620, height=800)
+    page.insert_text(
+        (50, 280),
+        "ABSTRACT: The normal load exceeds 30 nN in the transition regime.",
+        fontsize=11,
+    )
+    image_rect = fitz.Rect(390, 250, 560, 365)
+    page.insert_image(image_rect, stream=image_buffer.getvalue())
+    doc.save(pdf_path)
+    doc.close()
+
+    evidence = _locate_field_evidence_for_value(
+        file_path=str(pdf_path),
+        field_key="load",
+        field_value="30 nN",
+        source_label="Graphical abstract",
+        page_hint=1,
+        anchor_bbox=None,
+        source_type="image",
+    )
+
+    assert evidence is not None
+    assert evidence["source_type"] == "image"
+    assert evidence["source_label"] == "Graphical abstract"
+    assert evidence["matched_text"] is None
+    assert evidence["bbox"][0] >= 380
+    assert evidence["bbox"][2] <= 570
+
+    inferred = _locate_field_evidence_for_value(
+        file_path=str(pdf_path),
+        field_key="load",
+        field_value="30 nN",
+        source_label="Graphical abstract",
+        page_hint=1,
+        anchor_bbox=None,
+        source_type=None,
+    )
+    assert inferred is not None
+    assert inferred["source_type"] == "figure"
+    assert inferred["bbox"][0] >= 380
+
+
+def test_locate_load_evidence_prefers_graphical_abstract_when_source_is_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr("services.file_service._resolve_existing_path", lambda path: path)
+    pdf_path = tmp_path / "acs_missing_source_graphical_abstract.pdf"
+    image = Image.new("RGB", (360, 230), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((12, 12, 348, 218), outline="black", width=3)
+    draw.text((64, 160), "Normal Load, nN", fill="black")
+    image_buffer = io.BytesIO()
+    image.save(image_buffer, format="PNG")
+
+    doc = fitz.open()
+    page = doc.new_page(width=620, height=800)
+    page.insert_text(
+        (50, 280),
+        "ABSTRACT: The friction drops once the normal load exceeds 30 nN.",
+        fontsize=11,
+    )
+    page.insert_image(fitz.Rect(390, 250, 560, 365), stream=image_buffer.getvalue())
+    doc.save(pdf_path)
+    doc.close()
+
+    evidence = _locate_field_evidence_for_value(
+        file_path=str(pdf_path),
+        field_key="load",
+        field_value="30 nN",
+        source_label=None,
+        page_hint=1,
+        anchor_bbox=None,
+        source_type=None,
+    )
+
+    assert evidence is not None
+    assert evidence["source_label"] == "Graphical abstract"
+    assert evidence["matched_text"] is None
+    assert evidence["bbox"][0] >= 380
 
 
 def test_field_query_variants_expand_ocp_and_ionic_liquid_aliases():

@@ -158,7 +158,30 @@ function renderQuote(lines: string[]) {
   return `<blockquote>${lines.map((line) => `<p>${formatInlineMarkdown(line.trim())}</p>`).join('')}</blockquote>`
 }
 
-function renderMarkdown(markdown: string) {
+function splitMarkdownTableRow(line: string) {
+  const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '')
+  return trimmed.split('|').map((cell) => cell.trim())
+}
+
+function isMarkdownTableSeparator(line: string) {
+  const cells = splitMarkdownTableRow(line)
+  return cells.length >= 2 && cells.every((cell) => /^:?-{3,}:?$/.test(cell))
+}
+
+function isMarkdownTableRow(line: string) {
+  return line.includes('|') && splitMarkdownTableRow(line).length >= 2
+}
+
+function renderMarkdownTable(rows: string[][]) {
+  if (rows.length < 2) return ''
+  const header = rows[0] ?? []
+  const bodyRows = rows.slice(1)
+  const thead = `<thead><tr>${header.map((cell) => `<th>${formatInlineMarkdown(cell)}</th>`).join('')}</tr></thead>`
+  const tbody = `<tbody>${bodyRows.map((row) => `<tr>${row.map((cell) => `<td>${formatInlineMarkdown(cell)}</td>`).join('')}</tr>`).join('')}</tbody>`
+  return `<table>${thead}${tbody}</table>`
+}
+
+export function renderMarkdown(markdown: string) {
   const lines = markdown.replace(/\r\n/g, '\n').split('\n')
   const html: string[] = []
   const headings: BlogHeading[] = []
@@ -241,6 +264,27 @@ function renderMarkdown(markdown: string) {
       flushList()
       html.push('<hr />')
       index += 1
+      continue
+    }
+
+    if (
+      isMarkdownTableRow(trimmed)
+      && index + 1 < lines.length
+      && isMarkdownTableSeparator(lines[index + 1] ?? '')
+    ) {
+      flushParagraph()
+      flushList()
+      const tableRows = [splitMarkdownTableRow(trimmed)]
+      index += 2
+      while (index < lines.length) {
+        const rowLine = lines[index]?.trim() ?? ''
+        if (!rowLine || !isMarkdownTableRow(rowLine)) {
+          break
+        }
+        tableRows.push(splitMarkdownTableRow(rowLine))
+        index += 1
+      }
+      html.push(renderMarkdownTable(tableRows))
       continue
     }
 
