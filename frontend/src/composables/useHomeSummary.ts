@@ -3,6 +3,7 @@ import {
   onBeforeUnmount,
   onMounted,
   ref,
+  watch,
   type ComputedRef,
   type Ref,
 } from 'vue'
@@ -20,6 +21,7 @@ import {
   type ExtractionRunDetail,
   type MentorProgressResponse,
 } from '@/lib/api'
+import { sessionState } from '@/lib/session'
 
 type DashboardStatsSnapshot = Awaited<ReturnType<typeof getDashboardStats>>
 type DatasetListSnapshot = Awaited<ReturnType<typeof listCleanedDatasets>>
@@ -89,6 +91,7 @@ type UseHomeSummaryOptions = {
   activeRun: Ref<ExtractionRunDetail | null> | ComputedRef<ExtractionRunDetail | null>
   latestWorkflow: Ref<AgentWorkflow | null> | ComputedRef<AgentWorkflow | null>
   preferredTrainingDatasetId: Ref<number | null> | ComputedRef<number | null>
+  canAccessAdmin: Ref<boolean> | ComputedRef<boolean>
 }
 
 const EMPTY_REMOTE_SNAPSHOT: HomeRemoteSnapshot = {
@@ -118,7 +121,8 @@ export function useHomeSummary(options: UseHomeSummaryOptions) {
     loading.value = true
     error.value = ''
 
-    const homeScope = homeRecordScope()
+    const adminVisible = Boolean(options.canAccessAdmin.value)
+    const homeScope = homeRecordScope(adminVisible)
     const [statsResult, literatureResult, mentorResult, datasetsResult, officialRecordsResult, reviewCandidatesResult] = await Promise.allSettled([
       getDashboardStats(),
       listLiterature(0, RECENT_RUN_LOOKUP_LIMIT),
@@ -232,9 +236,12 @@ export function useHomeSummary(options: UseHomeSummaryOptions) {
         )
     const reviewedToday = Math.max(countRemoteReviewedToday(mentor), localReviewedToday)
 
-    const remoteDatasetReadyRecords =
-      Number(mentor?.latest_ready_dataset?.usable_records || 0)
-      || Math.max(0, ...remoteSnapshot.value.datasets.map((item) => Number(item.row_count || 0)))
+    const remoteDatasetReadyRecords = options.canAccessAdmin.value
+      ? (
+          Number(mentor?.latest_ready_dataset?.usable_records || 0)
+          || Math.max(0, ...remoteSnapshot.value.datasets.map((item) => Number(item.row_count || 0)))
+        )
+      : 0
     const localModelReadyRecords = Math.max(0, files.reduce((sum, file) => sum + (file.records?.length || 0), 0) - localReviewPending)
     const datasetReadyRecords = Math.max(
       remoteDatasetReadyRecords,
@@ -247,6 +254,7 @@ export function useHomeSummary(options: UseHomeSummaryOptions) {
           totalRecords,
           remoteSnapshot.value.literatureRecordRows,
         )
+    const scopedTotalRecords = options.canAccessAdmin.value ? totalRecords : officialDatabaseRecords
 
     const remoteTerminalRuns = remoteSnapshot.value.successRuns + remoteSnapshot.value.failedRuns
     const extractionSuccessRate =
@@ -257,13 +265,13 @@ export function useHomeSummary(options: UseHomeSummaryOptions) {
           : null
 
     const evidenceCoverageRate =
-      totalRecords > 0
-        ? groundedCount / totalRecords
+      scopedTotalRecords > 0
+        ? groundedCount / scopedTotalRecords
         : getLocalEvidenceCoverageRate(files, latestWorkflow)
 
     const reviewCompletionRate =
-      totalRecords > 0
-        ? clampRate(1 - reviewPending / totalRecords)
+      scopedTotalRecords > 0
+        ? clampRate(1 - reviewPending / scopedTotalRecords)
         : getLocalReviewCompletionRate(files, latestWorkflow)
 
     const runningRuns = Math.max(remoteSnapshot.value.runningRuns, localRunningRuns, isRunningStatus(activeRun?.status) ? 1 : 0)
@@ -316,6 +324,13 @@ export function useHomeSummary(options: UseHomeSummaryOptions) {
       refreshTimer = null
     }
   })
+
+  watch(
+    () => [sessionState.user?.id || 0, sessionState.activeScopeKey, options.canAccessAdmin.value],
+    () => {
+      void refresh()
+    },
+  )
 
   return {
     summary,
@@ -429,8 +444,8 @@ function literatureCandidateCount(item: any): number {
   return Number(item?.candidateCount ?? 0)
 }
 
-function homeRecordScope(): 'active' | 'all_visible' {
-  return 'all_visible'
+function homeRecordScope(canAccessAdmin: boolean): 'active' | 'all_visible' {
+  return canAccessAdmin ? 'all_visible' : 'active'
 }
 
 function literatureOfficialRecordCount(item: any): number {

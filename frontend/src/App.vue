@@ -2674,6 +2674,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
           :selected-file-id="selectedFileId"
           :selected-file-name="selectedFileName"
           :explorer-doi="explorerDoi"
+          :can-access-admin="canAccessAdmin"
           :focus-file-id="databaseToolFocus?.fileId || null"
           :focus-doi="databaseToolFocus?.doi || ''"
           :focus-dataset="databaseToolFocus?.dataset || null"

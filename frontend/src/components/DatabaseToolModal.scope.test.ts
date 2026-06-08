@@ -5,8 +5,10 @@ import { resolve } from 'node:path'
 const source = readFileSync(resolve(__dirname, 'DatabaseToolModal.vue'), 'utf-8')
 
 describe('DatabaseToolModal scope', () => {
-  it('uses the admin-visible scope so admin sees library records and workspace candidates together', () => {
+  it('uses admin-visible scope only for admin accounts and active scope for regular accounts', () => {
     expect(source).toContain("const databaseRecordScope = computed<'active' | 'all_visible'")
+    expect(source).toContain('canAccessAdmin?: boolean')
+    expect(source).toContain("return props.canAccessAdmin ? 'all_visible' : 'active'")
     expect(source).toContain(':record-scope="databaseRecordScope"')
     expect(source).not.toContain('record-scope="group_library"')
     expect(source).toContain("searchRecords({ entityType: 'record' }, 0, 1, { scope: databaseRecordScope.value })")

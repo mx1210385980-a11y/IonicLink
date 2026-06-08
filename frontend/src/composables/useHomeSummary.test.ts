@@ -2,7 +2,7 @@ import { createApp, defineComponent, h, nextTick, ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useHomeSummary } from './useHomeSummary'
-import { searchRecords } from '@/lib/api'
+import { listLiterature, searchRecords } from '@/lib/api'
 
 vi.mock('@/lib/api', () => ({
   getDashboardStats: vi.fn(async () => ({
@@ -68,6 +68,7 @@ describe('useHomeSummary', () => {
           activeRun: ref(null),
           latestWorkflow: ref(null),
           preferredTrainingDatasetId: ref(null),
+          canAccessAdmin: ref(true),
         })
 
         result = homeSummary
@@ -101,6 +102,7 @@ describe('useHomeSummary', () => {
           activeRun: ref(null),
           latestWorkflow: ref(null),
           preferredTrainingDatasetId: ref(null),
+          canAccessAdmin: ref(true),
         })
 
         result = homeSummary
@@ -141,6 +143,7 @@ describe('useHomeSummary', () => {
           activeRun: ref(null),
           latestWorkflow: ref(null),
           preferredTrainingDatasetId: ref(null),
+          canAccessAdmin: ref(true),
         })
 
         result = homeSummary
@@ -154,6 +157,48 @@ describe('useHomeSummary', () => {
 
     expect(result.summary.value.today.reviewPending).toBe(44)
     expect(result.summary.value.health.officialDatabaseRecords).toBe(1)
+
+    app.unmount()
+    root.remove()
+  })
+
+  it('uses the active account scope for non-admin home counts', async () => {
+    vi.mocked(searchRecords).mockImplementation(async () => ({
+      total: 0,
+      skip: 0,
+      limit: 1,
+      items: [],
+    }))
+    vi.mocked(listLiterature).mockResolvedValueOnce([])
+
+    let result!: ReturnType<typeof useHomeSummary>
+
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+
+    const app = createApp(defineComponent({
+      setup() {
+        const homeSummary = useHomeSummary({
+          files: ref([]),
+          activeRun: ref(null),
+          latestWorkflow: ref(null),
+          preferredTrainingDatasetId: ref(null),
+          canAccessAdmin: ref(false),
+        })
+
+        result = homeSummary
+        return () => h('div')
+      },
+    }))
+
+    app.mount(root)
+    await flushPromises()
+    await nextTick()
+
+    expect(result.summary.value.today.reviewPending).toBe(0)
+    expect(result.summary.value.health.officialDatabaseRecords).toBe(0)
+    expect(searchRecords).toHaveBeenCalledWith({ entityType: 'candidate' }, 0, 1, { scope: 'active' })
+    expect(searchRecords).toHaveBeenCalledWith({ entityType: 'record' }, 0, 1, { scope: 'active' })
 
     app.unmount()
     root.remove()

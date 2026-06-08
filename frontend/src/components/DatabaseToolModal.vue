@@ -22,6 +22,7 @@ const props = defineProps<{
   focusRecordId?: number | null
   focusEntityType?: 'record' | 'candidate' | null
   entityTypeFilter?: 'record' | 'candidate' | null
+  canAccessAdmin?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -105,7 +106,7 @@ const globalTribologyExplorerKey = computed(() => [
   activeEntityTypeFilter.value,
 ].join('-'))
 const databaseRecordScope = computed<'active' | 'all_visible'>(() => {
-  return 'all_visible'
+  return props.canAccessAdmin ? 'all_visible' : 'active'
 })
 
 function selectDataset(key: DatasetKey) {
@@ -160,7 +161,7 @@ async function refreshDatasetCounts() {
   }
 }
 
-watch(() => [props.show, props.focusDataset, props.entityTypeFilter, props.focusEntityType],
+watch(() => [props.show, props.focusDataset, props.entityTypeFilter, props.focusEntityType, props.canAccessAdmin],
   ([show]) => {
     if (!show) return
     activeDataset.value = props.focusDataset === 'diffusion' ? 'diffusion' : 'tribology'

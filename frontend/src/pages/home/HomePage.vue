@@ -25,6 +25,7 @@ const { summary, loading } = useHomeSummary({
   activeRun: toRef(props, 'activeRun'),
   latestWorkflow: toRef(props, 'latestWorkflow'),
   preferredTrainingDatasetId: toRef(props, 'preferredTrainingDatasetId'),
+  canAccessAdmin: toRef(props, 'canAccessAdmin'),
 })
 
 const extractionStatusItems = computed(() => [
