@@ -566,7 +566,7 @@ async function fetchPapers() {
   error.value = ''
   try {
     const role = String(sessionState.user?.role || '').trim().toLowerCase()
-    const scope = role === 'principal_investigator' || role === 'group_admin' ? 'all_visible' : 'group_library'
+    const scope = role === 'principal_investigator' || role === 'group_admin' ? 'all_visible' : 'active'
     items.value = await listLiterature(0, 1000, { scope })
   } catch (err: any) {
     error.value = err?.message || 'Failed to fetch literature.'

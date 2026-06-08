@@ -386,8 +386,8 @@ describe('LibraryPage Elicit-style extract workflow', () => {
     expect(source).toContain("watch(() => props.selectedFileId")
   })
 
-  it('loads every admin-visible literature item instead of only the shared group library', () => {
-    expect(source).toContain("'all_visible' : 'group_library'")
+  it('loads admin-visible literature for admins and the active account library for regular users', () => {
+    expect(source).toContain("'all_visible' : 'active'")
     expect(source).toContain('items.value = await listLiterature(0, 1000, { scope })')
     expect(source).not.toContain("items.value = await listLiterature(0, 1000, { scope: 'group_library' })")
   })
