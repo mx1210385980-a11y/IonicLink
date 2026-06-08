@@ -242,8 +242,8 @@ function formatTitleLabel(value: string | null | undefined) {
 
 function formatScopeMode(value: string | null | undefined) {
   const normalized = String(value || '').trim()
-  if (!normalized) return 'Unknown scope'
-  if (normalized === 'group_library_fallback') return 'Group Library Fallback'
+  if (!normalized) return 'Unknown account'
+  if (normalized === 'group_library_fallback') return 'Group Account Fallback'
   return formatTitleLabel(normalized)
 }
 
@@ -457,7 +457,7 @@ watch(
                 <span class="font-semibold text-slate-900">{{ targetLabel }}</span>
               </div>
               <div class="flex items-center justify-between gap-3">
-                <span class="text-slate-500">Source Scope</span>
+                <span class="text-slate-500">Source Account</span>
                   <p class="mt-2 font-semibold text-slate-950">{{ formatScopeMode(sourceScope?.resolved_scope_type || sourceScope?.requested_mode) }}</p>
               </div>
               <div class="flex items-center justify-between gap-3">
@@ -707,7 +707,7 @@ watch(
                   <p class="mt-2 font-semibold text-slate-950">{{ targetLabel }}</p>
                 </div>
                 <div class="rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Scope</p>
+                  <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Account</p>
                   <p class="mt-2 font-semibold text-slate-950">{{ formatScopeMode(sourceScope?.resolved_scope_type || sourceScope?.requested_mode) }}</p>
                 </div>
                 <div class="rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-3">

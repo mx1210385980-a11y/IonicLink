@@ -54,6 +54,15 @@ describe('App home shell', () => {
     expect(source).not.toContain('openAccountSettings')
   })
 
+  it('shows account language in the shell instead of exposing scope terminology', () => {
+    expect(source).toContain('const activeAccountLabel = computed')
+    expect(source).toContain('{{ activeAccountLabel }}')
+    expect(source).toContain("isChinese.value ? '公共账户' : 'Public account'")
+    expect(source).toContain("isChinese.value ? '团队账户' : 'Group account'")
+    expect(source).toContain(".replace(/\\bWorkspace\\b/gi, 'Account')")
+    expect(source).not.toContain('<span class="truncate">{{ activeScopeLabel }}</span>')
+  })
+
   it('opens the database tool as a table modal from the top navigation', () => {
     expect(source).toContain('DatabaseToolModal')
     expect(source).toContain("modal: 'database'")

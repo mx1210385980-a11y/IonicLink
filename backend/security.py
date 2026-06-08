@@ -514,7 +514,7 @@ def group_library_scope_summary(principal: AuthPrincipal) -> dict[str, Any]:
     return {
         "type": "group_library",
         "key": build_scope_key("group_library"),
-        "label": "课题组文献库",
+        "label": "团队账户",
         "workspaceId": None,
         "ownerUserId": None,
         "isPersonal": False,

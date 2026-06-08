@@ -27,7 +27,7 @@ const tabs = computed(() => [
 ])
 
 const signals = computed(() => [
-  { key: 'scope', label: isChinese.value ? '当前范围' : 'Active Scope', value: props.activeScopeLabel },
+  { key: 'scope', label: isChinese.value ? '当前账户' : 'Active Account', value: props.activeScopeLabel },
   {
     key: 'dataset',
     label: isChinese.value ? '接收数据集' : 'Dataset Handoff',

@@ -73,7 +73,7 @@ const visibleSecondaryNav = computed(() =>
 const activeScopeName = computed(() => {
   return props.availableScopes.find((scope) => scope.key === props.selectedScopeKey)?.label
     || props.availableScopes[0]?.label
-    || (props.isChinese ? '课题组文献库' : 'Group Library')
+    || (props.isChinese ? '团队账户' : 'Group Account')
 })
 const isCollapsed = ref(false)
 const hasStoredCollapsePreference = ref(false)
@@ -286,12 +286,12 @@ onBeforeUnmount(() => {
           class="sidebar-paper-row group mb-1 flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition"
           :class="selectedFileId === null ? 'is-active' : 'text-slate-400'"
           :aria-current="selectedFileId === null ? 'page' : undefined"
-          :aria-label="isChinese ? '打开课题组文献库' : 'Open group library'"
+          :aria-label="isChinese ? '打开团队账户' : 'Open group account'"
           @click="openScopeLibrary"
         >
           <Database class="h-3.5 w-3.5 shrink-0 text-slate-600 group-hover:text-slate-400" />
           <span class="flex-1 min-w-0 text-[12.5px] font-medium leading-tight">
-            {{ isChinese ? '课题组文献库' : 'Group Library' }}
+            {{ isChinese ? '团队账户' : 'Group Account' }}
           </span>
         </button>
 
@@ -335,9 +335,9 @@ onBeforeUnmount(() => {
           type="button"
           class="sidebar-paper-row group flex h-10 w-10 items-center justify-center rounded-md transition"
           :class="selectedFileId === null ? 'is-active' : 'text-slate-400'"
-          :title="isChinese ? '课题组文献库' : 'Group Library'"
+          :title="isChinese ? '团队账户' : 'Group Account'"
           :aria-current="selectedFileId === null ? 'page' : undefined"
-          :aria-label="isChinese ? '打开课题组文献库' : 'Open group library'"
+          :aria-label="isChinese ? '打开团队账户' : 'Open group account'"
           @click="openScopeLibrary"
         >
           <Database class="h-4 w-4 shrink-0 text-slate-500 group-hover:text-slate-300" />

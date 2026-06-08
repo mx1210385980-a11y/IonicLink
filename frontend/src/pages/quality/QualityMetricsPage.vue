@@ -817,7 +817,7 @@ onMounted(() => {
 
           <div class="flex flex-col items-stretch gap-2 sm:min-w-[17rem]">
             <div class="rounded-md bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-500">
-              当前范围：<span class="font-semibold text-slate-800">{{ activeScopeLabel }}</span><br />
+              当前账户：<span class="font-semibold text-slate-800">{{ activeScopeLabel }}</span><br />
               操作员：<span class="font-semibold text-slate-800">{{ operatorName }}</span>
             </div>
             <button
@@ -1021,7 +1021,7 @@ onMounted(() => {
             <p class="text-sm font-semibold text-slate-950">文献总数</p>
           </div>
           <p class="mt-3 text-3xl font-semibold tracking-tight text-slate-950">{{ overviewDocumentTotal }}</p>
-          <p class="mt-1 text-xs text-slate-500">当前 scope 中的文献资产</p>
+          <p class="mt-1 text-xs text-slate-500">当前账户中的文献资产</p>
         </div>
         <div class="rounded-[1.35rem] border border-slate-200 bg-white px-5 py-4">
           <div class="flex items-center gap-3">

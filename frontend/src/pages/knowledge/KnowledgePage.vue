@@ -75,7 +75,7 @@ const sidebarModes = computed(() => [
   { key: 'datasets', label: 'Dataset Builder' },
 ])
 
-const sourceLabel = computed(() => props.selectedFileName || 'Scope Library')
+const sourceLabel = computed(() => props.selectedFileName || 'Account Library')
 const modeMeta = computed<{ label: string }>(() => {
   const modes: Record<string, { label: string }> = {
     explorer: { label: 'Data Grid' },

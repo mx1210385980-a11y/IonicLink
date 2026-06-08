@@ -36,7 +36,7 @@ export const DEFAULT_KEEP_FEATURES = [
 ]
 
 export const SOURCE_MODE_OPTIONS = [
-  { value: 'group_library', label: '使用课题组文献库', detail: '默认数据源，适合学生直接构建统一训练集。' },
+  { value: 'group_library', label: '使用团队账户数据', detail: '默认数据源，适合学生直接构建统一训练集。' },
   { value: 'current_scope', label: '使用当前文献库', detail: '适合做严格、可追踪的小范围分析。' },
   { value: 'group_library_fallback', label: '当前文献库 + 课题组补全', detail: '适合快速构建覆盖更广的训练集。' },
 ] as const

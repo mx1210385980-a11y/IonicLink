@@ -76,7 +76,7 @@ function iconFor(section: string) {
         <article class="rounded-[1.15rem] border border-white/70 bg-white/88 px-4 py-4 shadow-[0_14px_32px_-28px_rgba(15,23,42,0.35)]">
           <p class="text-[0.98rem] font-semibold tracking-[-0.03em] text-slate-900">{{ props.activeScopeLabel }}</p>
           <div class="mt-2 flex items-center gap-3 text-sm text-slate-500">
-            <span>Scope-linked library</span>
+            <span>Account-linked library</span>
             <span class="font-semibold text-[#5a6f8d]">WORKSPACE</span>
           </div>
         </article>

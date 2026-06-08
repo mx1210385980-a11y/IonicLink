@@ -15,6 +15,8 @@ async def test_public_session_returns_researcher_workspace_scope(async_client):
     assert payload["user"]["role"] == "researcher"
     assert payload["user"]["personalWorkspaceId"]
     assert any(scope["type"] == "workspace" and scope["writable"] for scope in payload["user"]["availableScopes"])
+    assert any(scope["label"] == "Public Account" for scope in payload["user"]["availableScopes"])
+    assert all("Workspace" not in scope["label"] for scope in payload["user"]["availableScopes"])
 
 
 @pytest.mark.anyio

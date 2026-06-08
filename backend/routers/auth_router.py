@@ -172,9 +172,12 @@ async def public_session(db: AsyncSession = Depends(get_db_session)):
     workspace = await ensure_personal_workspace(
         db,
         user,
-        name="Public Extraction Workspace",
-        description="Shared workspace for no-login extraction sessions",
+        name="Public Account",
+        description="Shared account for no-login extraction sessions",
     )
+    if workspace.name == "Public Extraction Workspace":
+        workspace.name = "Public Account"
+        workspace.description = "Shared account for no-login extraction sessions"
     await db.commit()
 
     await db.refresh(user, attribute_names=["group", "workspaces"])

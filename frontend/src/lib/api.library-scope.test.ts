@@ -19,7 +19,7 @@ function createUser(): AuthUser {
       {
         type: 'group_library',
         key: 'group_library',
-        label: '课题组文献库',
+        label: '团队账户',
         workspaceId: null,
         ownerUserId: null,
         isPersonal: false,

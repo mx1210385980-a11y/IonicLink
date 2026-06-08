@@ -786,7 +786,7 @@ watch(filters, () => {
             </p>
             <div class="mt-5 flex flex-wrap gap-3">
               <div class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-700 dark:bg-slate-800/80">
-                <div class="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400 dark:text-slate-500">Library Scope</div>
+                <div class="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400 dark:text-slate-500">Library Account</div>
                 <div class="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">{{ stats?.literature_count || 0 }} papers</div>
                 <div class="mt-1 text-xs text-slate-500 dark:text-slate-400">curated literature records</div>
               </div>

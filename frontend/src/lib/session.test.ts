@@ -27,7 +27,7 @@ function createUser(): AuthUser {
       {
         type: 'group_library',
         key: 'group:1',
-        label: 'Group Library',
+        label: 'Group Account',
         workspaceId: null,
         ownerUserId: null,
         isPersonal: false,

@@ -713,7 +713,7 @@ function logToneClass(tone: InspectorLog['tone']) {
               {{ inspectorStatus }} / {{ inspectorSummary.state }}
             </div>
             <div class="rounded-[0.95rem] border border-black/8 bg-white/70 px-3.5 py-3 text-sm text-slate-600">
-              <span class="mr-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#8ea2c0]">Scope</span>
+              <span class="mr-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#8ea2c0]">Account</span>
               {{ inspectorSummary.scope }}
             </div>
           </div>

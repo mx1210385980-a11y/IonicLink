@@ -680,6 +680,25 @@ function metadataFromUploadFallback(file: File, response: Awaited<ReturnType<typ
 const activeScopeLabel = computed(() => {
   return availableScopes.value.find((scope) => scope.key === selectedScopeKey.value)?.label || t('common.no_active_scope')
 })
+const activeAccountLabel = computed(() => {
+  const scope = availableScopes.value.find((item) => item.key === selectedScopeKey.value)
+  const user = sessionState.user
+  const fallback = isChinese.value ? '公共账户' : 'Public account'
+  if (!scope) {
+    return user?.displayName || user?.username || fallback
+  }
+  if (scope.type === 'group_library') {
+    return isChinese.value ? '团队账户' : 'Group account'
+  }
+  if (scope.isPersonal || scope.ownerUserId === user?.id) {
+    return user?.displayName || user?.username || (isChinese.value ? '个人账户' : 'Personal account')
+  }
+  return String(scope.label || '')
+    .replace(/Public Extraction Workspace/i, isChinese.value ? '公共账户' : 'Public account')
+    .replace(/\bWorkspace\b/gi, 'Account')
+    .replace(/工作区/g, '账户')
+    .trim() || fallback
+})
 const selectedFile = computed(() => batchFiles.value.find((file) => file.id === selectedFileId.value) || null)
 const selectedFileName = computed(() => selectedFile.value?.name || t('common.no_file_selected'))
 const runStateLabel = computed(() => {
@@ -2470,7 +2489,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
             <div class="ml-auto flex items-center gap-3">
               <span class="hidden max-w-[14rem] items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-600 lg:inline-flex">
                 <Database class="h-4 w-4 text-slate-400" />
-                <span class="truncate">{{ activeScopeLabel }}</span>
+                <span class="truncate">{{ activeAccountLabel }}</span>
               </span>
             </div>
           </header>
@@ -3294,7 +3313,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
         <div class="ml-auto flex min-w-0 items-center gap-2">
           <span class="topbar-chip hidden max-w-[16rem] lg:inline-flex">
             <Database class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span class="truncate">{{ activeScopeLabel }}</span>
+            <span class="truncate">{{ activeAccountLabel }}</span>
           </span>
           <span v-if="selectedFile" class="topbar-chip hidden max-w-[20rem] xl:inline-flex">
             <FileText class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
