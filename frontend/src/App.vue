@@ -3045,37 +3045,24 @@ function handleHomeAction(action: HomeSuggestedAction) {
                   </div>
                 </div>
 
-                <ReadingReportPanel
-                  v-if="livePdfUploadExtractionItem"
-                  class="mt-5"
-                  :reader="true"
-                  :editable="true"
-                  :report="livePdfUploadReadingReport"
-                  :loading="false"
-                  :saving="pdfUploadReadingReportSaving"
-                  :save-error="pdfUploadReadingReportSaveError"
-                  save-label="Save to Library"
-                  @save="savePdfUploadReadingReport"
-                  @editing-change="pdfUploadReadingReportEditing = $event"
-                />
-
                 <div
                   v-if="livePdfUploadCandidatePreview"
-                  class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-teal-100 bg-teal-50/50 px-4 py-3"
+                  data-testid="pdf-upload-candidate-preview"
+                  class="mt-4 grid gap-3 rounded-lg border border-teal-100 bg-teal-50/60 px-4 py-3 shadow-sm shadow-teal-950/5 lg:grid-cols-[minmax(0,1fr)_auto]"
                 >
                   <div class="min-w-0">
-                    <p class="text-xs font-black uppercase tracking-[0.14em] text-[#0f7c82]">Cleaning preview</p>
+                    <p class="text-xs font-black uppercase tracking-[0.14em] text-[#0f7c82]">Candidate preview</p>
                     <p class="mt-1 truncate text-sm font-semibold text-slate-600">
                       {{ candidatePreviewCanPromote(livePdfUploadCandidatePreview) ? 'Ready for Database review.' : 'Review missing core fields before approval.' }}
                     </p>
                   </div>
                   <div class="flex flex-wrap items-center gap-2 text-xs font-black text-slate-700">
-                    <span class="rounded-full bg-white px-3 py-1.5 shadow-sm">
+                    <span class="rounded-md bg-white px-2.5 py-1.5 shadow-sm">
                       Core {{ candidatePreviewCoreReady(livePdfUploadCandidatePreview) }}/{{ candidatePreviewCoreTotal(livePdfUploadCandidatePreview) }} required
                     </span>
                     <span
                       v-if="candidatePreviewMissingCoreLabels(livePdfUploadCandidatePreview).length"
-                      class="inline-flex flex-wrap items-center gap-1 rounded-full bg-white px-3 py-1.5 text-amber-700 shadow-sm"
+                      class="inline-flex flex-wrap items-center gap-1 rounded-md bg-white px-2.5 py-1.5 text-amber-700 shadow-sm"
                     >
                       <span class="uppercase tracking-[0.12em]">Missing core</span>
                       <span
@@ -3086,27 +3073,74 @@ function handleHomeAction(action: HomeSuggestedAction) {
                         {{ label }}
                       </span>
                     </span>
-                    <span class="rounded-full bg-white px-3 py-1.5 shadow-sm">
+                    <span class="rounded-md bg-white px-2.5 py-1.5 shadow-sm">
                       Optional {{ candidatePreviewReadyCount(livePdfUploadCandidatePreview.extended_fields) }} captured
                     </span>
-                    <span class="rounded-full bg-white px-3 py-1.5 text-[#0f7c82] shadow-sm">
+                    <span class="rounded-md bg-white px-2.5 py-1.5 text-[#0f7c82] shadow-sm">
                       Flexible {{ candidatePreviewRawEntryCount(livePdfUploadCandidatePreview) }} saved
                     </span>
                   </div>
-                </div>
-
-                <div class="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-4">
                   <button
-                    v-if="livePdfUploadCandidatePreview"
                     type="button"
-                    class="inline-flex h-10 items-center gap-2 rounded-md px-4 text-sm font-extrabold text-white transition"
+                    class="inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-extrabold text-white transition"
                     :class="candidatePreviewCanPromote(livePdfUploadCandidatePreview) ? 'bg-[#0f7c82] hover:bg-[#0b6870]' : 'bg-amber-600 hover:bg-amber-700'"
                     @click="openPdfUploadResultsInDatabase()"
                   >
                     <Database class="h-4 w-4" />
                     {{ candidatePreviewReviewButtonLabel(livePdfUploadCandidatePreview) }}
                   </button>
+                </div>
+
+                <div
+                  v-else
+                  class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/80 px-4 py-3"
+                >
+                  <div class="min-w-0">
+                    <p class="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Candidate preview</p>
+                    <p class="mt-1 truncate text-sm font-semibold text-slate-600">
+                      Generate candidates when the report looks usable.
+                    </p>
+                  </div>
+                  <div class="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      class="inline-flex h-10 items-center gap-2 rounded-md border border-[#d1e2dc] bg-white px-4 text-sm font-extrabold text-[#12312f] transition hover:bg-[#edf7f3] disabled:cursor-not-allowed disabled:opacity-60"
+                      :disabled="pdfUploadCandidateDrafting || pdfUploadReadingReportEditing"
+                      @click="generatePdfUploadCandidateDraft"
+                    >
+                      <Rows3 class="h-4 w-4" />
+                      {{ pdfUploadReadingReportEditing ? 'Save report first' : pdfUploadCandidateDrafting ? 'Generating...' : 'Generate candidates' }}
+                    </button>
+                    <button
+                      type="button"
+                      class="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-extrabold text-slate-700 transition hover:border-[#12312f] hover:text-[#12312f]"
+                      :disabled="pdfUploadReadingReportEditing"
+                      @click="startPdfUploadExtraction"
+                    >
+                      <FileText class="h-4 w-4" />
+                      {{ pdfUploadReadingReportEditing ? 'Save report first' : 'Deep extraction' }}
+                    </button>
+                  </div>
+                </div>
+
+                <div data-testid="pdf-upload-report-body" class="mt-4 max-h-[min(38vh,24rem)] overflow-y-auto pr-1">
+                  <ReadingReportPanel
+                    v-if="livePdfUploadExtractionItem"
+                    :reader="true"
+                    :editable="true"
+                    :report="livePdfUploadReadingReport"
+                    :loading="false"
+                    :saving="pdfUploadReadingReportSaving"
+                    :save-error="pdfUploadReadingReportSaveError"
+                    save-label="Save to Library"
+                    @save="savePdfUploadReadingReport"
+                    @editing-change="pdfUploadReadingReportEditing = $event"
+                  />
+                </div>
+
+                <div class="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-4">
                   <button
+                    v-if="livePdfUploadCandidatePreview"
                     type="button"
                     class="inline-flex h-10 items-center gap-2 rounded-md border border-[#d1e2dc] bg-white px-4 text-sm font-extrabold text-[#12312f] transition hover:bg-[#edf7f3] disabled:cursor-not-allowed disabled:opacity-60"
                     :disabled="pdfUploadCandidateDrafting || pdfUploadReadingReportEditing"
@@ -3116,6 +3150,7 @@ function handleHomeAction(action: HomeSuggestedAction) {
                     {{ pdfUploadReadingReportEditing ? 'Save report first' : pdfUploadCandidateDrafting ? 'Generating...' : 'Generate candidates' }}
                   </button>
                   <button
+                    v-if="livePdfUploadCandidatePreview"
                     type="button"
                     class="inline-flex h-10 items-center gap-2 rounded-md border border-slate-200 bg-white px-4 text-sm font-extrabold text-slate-700 transition hover:border-[#12312f] hover:text-[#12312f]"
                     :disabled="pdfUploadReadingReportEditing"

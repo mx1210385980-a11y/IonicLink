@@ -259,7 +259,7 @@ function renderReportCell(value: string) {
       {{ saveError }}
     </div>
     <article
-      class="reading-report reading-report--reader max-h-[31rem] overflow-y-auto rounded-lg border border-slate-200 bg-white px-5 py-4"
+      class="reading-report reading-report--reader max-h-[min(34vh,20rem)] overflow-y-auto rounded-lg border border-slate-200 bg-white px-5 py-4"
       :class="editing ? 'bg-[#fbfcf8]' : ''"
     >
       <div v-if="editing" data-testid="reading-report-edit-mode">
