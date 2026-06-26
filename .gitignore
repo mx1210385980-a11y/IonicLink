@@ -24,6 +24,12 @@ node_modules/
 frontend/dist/
 frontend/.vite/
 .eslintcache
+/.next/
+/.next-dev/
+/.next-build-verified-*/
+/out/
+next-env.d.ts
+*.tsbuildinfo
 
 # Logs
 *.log
@@ -54,6 +60,17 @@ backend/data/backups/*.db
 backend/data/llm_runtime_config.json
 backend/temp_uploads/
 
+# Current app runtime data
+/data/*.db
+/data/*.db-*
+/data/*.sqlite
+/data/*.sqlite3
+/data/sources/
+/data/*/sources/
+/Lubrication_sources/
+/reports/
+/reports/tribology-curation/*.json
+
 # Frontend local outputs
 frontend/pnpm-lock.yaml
 frontend/coverage/
@@ -69,6 +86,7 @@ standalone/
 ionic-intro.html
 ionic-intro.mp4
 docs/superpowers/plans/
+docs/superpowers/specs/
 
 # OS files
 .DS_Store
