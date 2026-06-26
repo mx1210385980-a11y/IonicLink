@@ -3,6 +3,7 @@
 .env.*
 .env.local
 .env.*.local
+!.env.local.example
 backend/.env
 frontend/.env
 
@@ -43,8 +44,7 @@ backend/data/literature_monitor_proxy_queue.json
 backend/data/literature_monitor_pdfs/
 
 # Local tool worktrees
-.claude/worktrees/
-.claude/launch.json
+.claude/
 .superpowers/
 .worktrees/
 skills/
@@ -69,7 +69,6 @@ backend/temp_uploads/
 /data/*/sources/
 /Lubrication_sources/
 /reports/
-/reports/tribology-curation/*.json
 
 # Frontend local outputs
 frontend/pnpm-lock.yaml
@@ -81,10 +80,21 @@ frontend/tsc-errors.txt
 frontend/tsc-errors-utf8.txt
 
 # Local reference/intake and presentation outputs
+PaperData/
+Reference/
+Designdocuments/
+export/
+personal-space/
 reference/
 standalone/
+temp_debug/
+thesis/
 ionic-intro.html
 ionic-intro.mp4
+*.docx
+agentplan.md
+debug_resp.json
+planforpredict.md
 docs/superpowers/plans/
 docs/superpowers/specs/
 

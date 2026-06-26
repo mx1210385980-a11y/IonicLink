@@ -69,11 +69,29 @@ filtering — schema can evolve without migrations.
 
 | Path | What |
 |------|------|
+| `app/` | Next.js App Router pages and API routes |
 | `app/page.tsx` | Global landing — chooser between the modules |
 | `app/[domain]/` | Per-domain `page` (hero) + `extract` / `database` / `library` / `design` |
 | `app/api/[domain]/` | `extract`, `batch`, `records` (CRUD + bulk delete), `export`, `source` |
+| `components/` | React UI components for extraction, records, navigation, and Design Studio |
 | `lib/domain.ts` | `Domain`, the generic `DomainRecord`, the per-domain DB-file boundary |
 | `lib/modules/` | The `Module` contract + `tribology` / `conductivity` / `diffusion` implementations + registry |
 | `lib/conductivity/`, `lib/diffusion/` | Per-domain schema, ingest, and extractor |
 | `lib/predict/` | The Design Studio engine — ion descriptors, kernel regression, Arrhenius fits, LOO calibration, candidate atlas |
 | `lib/` | shared `db`, `extract`, `units`, `pdf`, `csv`, `ionStructures` |
+| `scripts/` | seed, migration, WFF reproduction, cache prewarm, and evaluation utilities |
+| `data/wff/` | small WFF model/evaluation fixture CSV files used by tests and local reproduction |
+| `data/tribology/gold-standard/` | small extraction-evaluation fixture JSON |
+
+## Repository hygiene
+
+The repository intentionally keeps only source code, configuration, tests, and small
+reproducible fixtures. Runtime and research-library artifacts stay outside Git:
+
+- local SQLite databases: `data/*.db`, `data/*.db-*`, `data/*.sqlite*`
+- uploaded source PDFs and rendered page images: `data/*/sources/`
+- generated reports and local cache folders: `reports/`, `.next*`, `.superpowers/`
+- large literature/reference dumps, thesis drafts, debug exports, and personal notes
+
+This keeps GitHub cloneable and deployable without mixing application code with the live
+server database or one-off research backups.

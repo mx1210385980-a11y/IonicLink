@@ -29,6 +29,7 @@ pytest-cache-files-*
 data
 Lubrication_sources
 reports/tribology-curation/*.json
+reports
 .next
 .next-*
 out
@@ -37,13 +38,19 @@ Reference
 temp_uploads
 PaperData
 export
+personal-space
 thesis
 temp_debug
 Designdocuments
+docs/superpowers
 .claude
 debug_resp.json
 agentplan.md
+planforpredict.md
+Table.docx
 CLAUDE.md
+AGENTS.md
+DOCKER.md
 conductivity_legacy/data/*.db
 conductivity_legacy/data/*.db-*
 conductivity_legacy/data/*.sqlite
