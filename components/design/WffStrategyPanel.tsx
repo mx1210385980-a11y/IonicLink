@@ -2,11 +2,14 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  WFF_BASE_MODEL_KEYS,
   WFF_STRATEGY_DEFAULTS,
   WFF_STRATEGY_LABELS,
   WFF_REGION_PARAMETER_DEFAULTS,
   WFF_REGION_PARAMETER_PRESETS,
   WFF_REGION_PARAMETER_VALUES,
+  WFF_MODEL_KNOB_DEFAULTS,
+  WFF_MODEL_KNOB_VALUES,
   WFF_STRATEGY_OPTIONS,
   normalizeStrategyRequest,
   type WffMetricBlock,
@@ -39,8 +42,8 @@ function dualWeightLabel(value: string | number) {
 
 function configSummary(strategy: WffStrategy, options: Record<string, string>) {
   if (strategy === "single") return `${label(options.model)}`;
-  if (strategy === "dual") return `${label(options.pair)} · ${dualWeightLabel(options.weight)}`;
-  return `${label(options.base)} · Meta ${label(options.meta)} · ${label(options.region_profile)}`;
+  if (strategy === "dual") return `${optionModels(options.pair)} · ${dualWeightLabel(options.weight)}`;
+  return `${optionModels(options.base)} · Meta ${label(options.meta)} · ${label(options.region_profile)}`;
 }
 
 function project(value: number, min: number, max: number, size: number, invert = false) {
@@ -161,10 +164,28 @@ function makeTrendCloud(split: string, rowStart: number, count: number, maxMeasu
   });
 }
 
+const FIXED_LITERATURE_MEASURED = [0.21, 0.24, 0.26, 1.16, 0.93, 0.28] as const;
+
+function makeFixedLiteraturePoints(): WffPlotPoint[] {
+  return FIXED_LITERATURE_MEASURED.map((measured, offset) => {
+    const residual = Math.sin(offset * 1.17 + 3.1) * (0.018 + measured * 0.026) + Math.cos(offset * 0.29 + 3.1) * 0.018;
+    const predicted = roundTrendValue(Math.max(0.01, measured + residual));
+    return {
+      split: "external_literature",
+      index: offset + 1,
+      row_index: 501 + offset,
+      measured,
+      predicted,
+      absolute_error: Math.abs(predicted - measured),
+      source_literature_key: `lit-${offset + 1}`,
+    };
+  });
+}
+
 const TREND_BASE_POINTS: WffStrategyResult["points"] = {
   train: makeTrendCloud("train", 11, 160, 2.9, 0.15),
   test: makeTrendCloud("test", 301, 48, 2.85, 1.7),
-  external_literature: makeTrendCloud("external_literature", 501, 28, 2.35, 3.1, "lit"),
+  external_literature: makeFixedLiteraturePoints(),
 };
 
 const TREND_BASE_RESULT: WffStrategyResult = {
@@ -183,6 +204,8 @@ const TREND_BASE_RESULT: WffStrategyResult = {
   },
   points: TREND_BASE_POINTS,
 };
+
+const FIT_CHART_DOMAIN = { lo: 0, hi: 3.2 } as const;
 
 const SIM_CONTROL_DEFAULTS = {
   bias: 50,
@@ -225,7 +248,8 @@ function normalizedContinuousRegionOptions(options: Record<string, string> | und
     const max = Math.max(...numericValues, Number(fallback));
     const raw = Number(options?.[name] ?? fallback);
     const value = Number.isFinite(raw) ? clamp(raw, min, max) : Number(fallback);
-    const formatted = name.endsWith("_max_depth") ? String(Math.round(value)) : value.toFixed(2);
+    const integerParameter = name.endsWith("_max_depth") || name.endsWith("_svr_c") || name.endsWith("_mlp_hidden_units");
+    const formatted = integerParameter ? String(Math.round(value)) : value.toFixed(2);
     return [name, formatted];
   }));
 }
@@ -259,17 +283,127 @@ function relativeRegionParameter(options: Record<string, string>, key: string) {
 }
 
 function regionParameterEffect(options: Record<string, string>, region: "low" | "middle" | "high") {
-  const catboostRate = relativeRegionParameter(options, `${region}_catboost_learning_rate`);
-  const xgboostRate = relativeRegionParameter(options, `${region}_xgboost_learning_rate`);
-  const forestDepth = relativeRegionParameter(options, `${region}_forest_max_depth`);
+  const activeModels = new Set(activeTrendModels(options));
+  const catboostRate = activeModels.has("catboost") ? relativeRegionParameter(options, `${region}_catboost_learning_rate`) : 0;
+  const xgboostRate = activeModels.has("xgboost") ? relativeRegionParameter(options, `${region}_xgboost_learning_rate`) : 0;
+  const forestDepth = activeModels.has("forest") ? relativeRegionParameter(options, `${region}_forest_max_depth`) : 0;
+  const svrPenalty = activeModels.has("svr") ? relativeRegionParameter(options, `${region}_svr_c`) : 0;
+  const mlpWidth = activeModels.has("mlp") ? relativeRegionParameter(options, `${region}_mlp_hidden_units`) : 0;
   return {
-    slope: catboostRate * 1.1 + xgboostRate * 0.92 + forestDepth * 0.3,
-    residual: Math.abs(catboostRate) * 0.7 + Math.abs(xgboostRate) * 0.78 + Math.abs(forestDepth) * 0.52,
-    direction: catboostRate * 0.82 + xgboostRate * 0.72 + forestDepth * 0.32,
+    slope: catboostRate * 1.1 + xgboostRate * 0.92 + forestDepth * 0.3 + svrPenalty * 0.42 + mlpWidth * 0.58,
+    residual: Math.abs(catboostRate) * 0.7 + Math.abs(xgboostRate) * 0.78 + Math.abs(forestDepth) * 0.52 + Math.abs(svrPenalty) * 0.92 + Math.abs(mlpWidth) * 1.18,
+    direction: catboostRate * 0.82 + xgboostRate * 0.72 + forestDepth * 0.32 + svrPenalty * 0.38 + mlpWidth * 0.5,
   };
 }
 
-function simulateTrendPoints(points: WffPlotPoint[], options: Record<string, string>): WffPlotPoint[] {
+type TrendModelName = (typeof WFF_BASE_MODEL_KEYS)[number];
+
+function activeTrendModels(options: Record<string, string>): TrendModelName[] {
+  const raw = options.model ?? options.pair ?? options.base ?? "catboost+forest+xgboost";
+  const models = raw.split("+").filter((name): name is TrendModelName => WFF_BASE_MODEL_KEYS.includes(name as TrendModelName));
+  return models.length ? models : ["catboost", "forest", "xgboost"];
+}
+
+function modelKnobLevel(options: Record<string, string>, name: string) {
+  const choices = WFF_MODEL_KNOB_VALUES[name] ?? ["auto"];
+  const value = options[name] ?? WFF_MODEL_KNOB_DEFAULTS[name] ?? "auto";
+  const index = Math.max(0, choices.indexOf(value));
+  return index / Math.max(1, choices.length - 1);
+}
+
+function modelKnobTrendEffect(options: Record<string, string>) {
+  const models = activeTrendModels(options);
+  const effect = models.reduce(
+    (sum, model) => {
+      if (model === "catboost") {
+        const rate = modelKnobLevel(options, "catboost_learning_rate");
+        const depth = modelKnobLevel(options, "catboost_depth");
+        const l2 = modelKnobLevel(options, "catboost_l2_leaf_reg");
+        return {
+          slope: sum.slope + rate * 0.2 + depth * 0.1 - l2 * 0.06,
+          residual: sum.residual + rate * 0.18 + depth * 0.1 - l2 * 0.05,
+          bias: sum.bias + rate * 0.08 - l2 * 0.05,
+        };
+      }
+      if (model === "xgboost") {
+        const rate = modelKnobLevel(options, "xgboost_learning_rate");
+        const depth = modelKnobLevel(options, "xgboost_max_depth");
+        const lambda = modelKnobLevel(options, "xgboost_reg_lambda");
+        return {
+          slope: sum.slope + rate * 0.24 + depth * 0.12 - lambda * 0.07,
+          residual: sum.residual + rate * 0.22 + depth * 0.12 - lambda * 0.05,
+          bias: sum.bias - rate * 0.05 + depth * 0.04,
+        };
+      }
+      if (model === "svr") {
+        const c = modelKnobLevel(options, "svr_c");
+        const gamma = modelKnobLevel(options, "svr_gamma");
+        return {
+          slope: sum.slope + c * 0.1 + gamma * 0.16,
+          residual: sum.residual + 0.2 + c * 0.12 + gamma * 0.18,
+          bias: sum.bias + 0.03 + gamma * 0.06,
+        };
+      }
+      if (model === "mlp") {
+        const width = modelKnobLevel(options, "mlp_hidden_units");
+        const alpha = modelKnobLevel(options, "mlp_alpha");
+        return {
+          slope: sum.slope + width * 0.18 - alpha * 0.05,
+          residual: sum.residual + 0.48 + width * 0.22 - alpha * 0.08,
+          bias: sum.bias + 0.08 + width * 0.06,
+        };
+      }
+      const trees = modelKnobLevel(options, "forest_n_estimators");
+      const depth = modelKnobLevel(options, "forest_max_depth");
+      const features = modelKnobLevel(options, "forest_max_features");
+      return {
+        slope: sum.slope + trees * 0.08 + depth * 0.14 + features * 0.08,
+        residual: sum.residual + depth * 0.16 - trees * 0.05 + features * 0.05,
+        bias: sum.bias + features * 0.05 - trees * 0.03,
+      };
+    },
+    { slope: 0, residual: 0, bias: 0 }
+  );
+  const weight = Number(options.weight ?? 50);
+  const pairTilt = Number.isFinite(weight) && options.pair ? clamp((weight - 50) / 50, -1, 1) * 0.12 : 0;
+  const divisor = Math.max(1, models.length);
+  const weakLearnerPenalty = (models.includes("svr") ? 0.08 : 0) + (models.includes("mlp") ? 0.2 : 0);
+  return {
+    slope: effect.slope / divisor + pairTilt,
+    residual: effect.residual / divisor + weakLearnerPenalty,
+    bias: effect.bias / divisor + pairTilt * 0.35 + weakLearnerPenalty * 0.2,
+  };
+}
+
+function strategyDeviationEffect(strategy: WffStrategy, options: Record<string, string>) {
+  if (strategy === "triple") {
+    const models = activeTrendModels(options);
+    const weakPenalty = (models.includes("svr") ? 0.18 : 0) + (models.includes("mlp") ? 0.42 : 0);
+    return {
+      bias: 0.036 + weakPenalty * 0.18,
+      curve: 0.11 + weakPenalty * 0.42,
+      residual: 0.46 + weakPenalty,
+    };
+  }
+  const weight = Number(options.weight ?? 50);
+  const weightTilt = Number.isFinite(weight) ? clamp((weight - 50) / 50, -1, 1) : 0;
+  if (strategy === "dual") {
+    return {
+      bias: 0.075 + Math.abs(weightTilt) * 0.042,
+      curve: 0.18 + Math.abs(weightTilt) * 0.11,
+      residual: 0.9 + Math.abs(weightTilt) * 0.42,
+    };
+  }
+  const model = options.model ?? "catboost";
+  const modelBias = model === "forest" ? -0.052 : model === "xgboost" ? 0.052 : model === "svr" ? 0.14 : model === "mlp" ? 0.24 : 0.036;
+  return {
+    bias: 0.14 + modelBias,
+    curve: model === "mlp" ? 0.72 : model === "svr" ? 0.55 : 0.34,
+    residual: model === "mlp" ? 3.2 : model === "svr" ? 2.45 : 1.55,
+  };
+}
+
+function simulateTrendPoints(points: WffPlotPoint[], options: Record<string, string>, strategy: WffStrategy): WffPlotPoint[] {
   const bias = centeredControl(options, "bias");
   const spread = simControlValue(options, "spread") / 50;
   const lowResponse = centeredControl(options, "low_response");
@@ -285,6 +419,9 @@ function simulateTrendPoints(points: WffPlotPoint[], options: Record<string, str
   const lowParameterEffect = regionParameterEffect(options, "low");
   const middleParameterEffect = regionParameterEffect(options, "middle");
   const highParameterEffect = regionParameterEffect(options, "high");
+  const modelEffect = modelKnobTrendEffect(options);
+  const strategyEffect = strategyDeviationEffect(strategy, options);
+  const splitEffect = { train: 0.68, test: 1.6, external_literature: 1.75 } as const;
 
   return points.map((point) => {
     const measured = point.measured;
@@ -321,13 +458,42 @@ function simulateTrendPoints(points: WffPlotPoint[], options: Record<string, str
         localCurveResponse);
     const curveShift = nonlinearity * Math.tanh((measured - 1.08) * 1.25) * (0.018 + measured * 0.052);
     const biasShift = bias * (0.025 + measured * 0.055);
-    const heteroscedasticResidual = baseResidual * (0.55 + spread * 0.62 + measured * 0.06 + activeRegionEffect.residual * (1.15 + measured * 0.24));
+    const splitMultiplier = splitEffect[point.split as keyof typeof splitEffect] ?? 1;
+    const testGeneralizationShift =
+      point.split === "test"
+        ? (Math.sin(point.row_index * 0.19) * 0.024 + Math.cos(point.row_index * 0.43) * 0.018 + 0.022) * (0.45 + measured * 0.32)
+        : 0;
+    const heteroscedasticResidual = baseResidual * (0.55 + spread * 0.62 + measured * 0.06 + activeRegionEffect.residual * (1.15 + measured * 0.24)) * splitMultiplier;
     const outlierSignal = deterministicOutlierSignal(point.row_index);
     const outlierDirection = deterministicOutlierSignal(point.row_index + 97) > 0.5 ? 1 : -1;
     const outlierMagnitude = outlierSignal > 0.86 ? outlierPressure * outlierDirection * (0.06 + measured * 0.11) : 0;
     const domainShift = point.split === "external_literature" ? literatureDrift * (0.035 + measured * 0.07) + Math.sin(point.row_index * 0.37) * 0.012 : 0;
+    const modelShift =
+      modelEffect.slope * Math.tanh((measured - 0.82) * 1.18) * (0.018 + measured * 0.048) +
+      modelEffect.bias * (0.012 + measured * 0.03) +
+      baseResidual * modelEffect.residual * 0.42;
+    const strategyShift =
+      (strategyEffect.bias * (0.02 + measured * 0.055) +
+        strategyEffect.curve * Math.tanh((measured - 0.8) * 1.05) * (0.025 + measured * 0.06) +
+        baseResidual * strategyEffect.residual) *
+      splitMultiplier;
     const predicted = roundTrendValue(
-      Math.max(0.005, measured + heteroscedasticResidual + zoneShift + regionParameterShift + curveShift + biasShift + metaTilt + profileTilt + outlierMagnitude + domainShift)
+      Math.max(
+        0.005,
+        measured +
+          heteroscedasticResidual +
+          zoneShift +
+          regionParameterShift +
+          curveShift +
+          biasShift +
+          metaTilt +
+          profileTilt +
+          outlierMagnitude +
+          domainShift +
+          modelShift +
+          strategyShift +
+          testGeneralizationShift
+      )
     );
     return {
       ...point,
@@ -341,9 +507,9 @@ export function buildWffTrendResult(request: WffStrategyRequest): WffStrategyRes
   const baseRequest = normalizeStrategyRequest(request);
   const normalized = { ...baseRequest, options: { ...baseRequest.options, ...normalizedContinuousRegionOptions(request.options), ...normalizedSimOptions(request.options) } };
   const points = {
-    train: simulateTrendPoints(TREND_BASE_RESULT.points.train, normalized.options),
-    test: simulateTrendPoints(TREND_BASE_RESULT.points.test, normalized.options),
-    external_literature: simulateTrendPoints(TREND_BASE_RESULT.points.external_literature, normalized.options),
+    train: simulateTrendPoints(TREND_BASE_RESULT.points.train, normalized.options, normalized.strategy),
+    test: simulateTrendPoints(TREND_BASE_RESULT.points.test, normalized.options, normalized.strategy),
+    external_literature: simulateTrendPoints(TREND_BASE_RESULT.points.external_literature, normalized.options, normalized.strategy),
   };
   return {
     ...TREND_BASE_RESULT,
@@ -374,7 +540,7 @@ function WeightSlider({ value, onChange }: { value: string; onChange: (value: st
   return (
     <div className="min-w-[16rem] flex-[1.4]">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-eyebrow text-ink-500">{optionNameLabel("weight")}</span>
+        <span className="text-[10px] font-semibold uppercase tracking-eyebrow text-ink-950">{optionNameLabel("weight")}</span>
         <span className="font-mono text-xs font-semibold text-ink-950">{dualWeightLabel(safeValue)}</span>
       </div>
       <input
@@ -391,7 +557,7 @@ function WeightSlider({ value, onChange }: { value: string; onChange: (value: st
         <button
           type="button"
           onClick={() => onChange("50")}
-          className={`min-w-24 rounded-[6px] px-2 py-1 transition ${safeValue === 50 ? "bg-brand-50 text-brand-700" : "text-ink-500 hover:bg-ink-50 hover:text-ink-700"}`}
+          className={`min-w-24 rounded-[6px] px-2 py-1 transition ${safeValue === 50 ? "bg-brand-50 text-brand-700" : "text-ink-950 hover:bg-ink-50 hover:text-ink-700"}`}
         >
           50/50
         </button>
@@ -414,7 +580,7 @@ function OptionSelect({
   return (
     <div className="min-w-[12rem] flex-1">
       <div className="flex items-baseline justify-between gap-2">
-        <label htmlFor={`wff-${name}`} className="text-[10px] font-semibold uppercase tracking-eyebrow text-ink-500">
+        <label htmlFor={`wff-${name}`} className="text-[10px] font-semibold uppercase tracking-eyebrow text-ink-950">
           {optionNameLabel(name)}
         </label>
       </div>
@@ -512,6 +678,8 @@ function shortModelName(value: string) {
   if (value === "forest") return "RF";
   if (value === "catboost") return "CatBoost";
   if (value === "xgboost") return "XGBoost";
+  if (value === "svr") return "SVR";
+  if (value === "mlp") return "MLP";
   return label(value);
 }
 
@@ -525,19 +693,20 @@ function optionModels(value: string | undefined) {
 
 function chartModelSummary(result: WffStrategyResult | null, strategy: WffStrategy, options: Record<string, string>) {
   const config = result?.config ?? {};
-  const baseFromConfig = Array.isArray(config.base_learners)
+  const baseFromConfig = strategy === "triple" && Array.isArray(config.base_learners)
     ? (config.base_learners as string[]).map(shortModelName).join(" + ")
-    : typeof config.model === "string"
+    : strategy === "single" && typeof config.model === "string"
       ? shortModelName(config.model)
-      : typeof config.pair === "string"
+      : strategy === "dual" && typeof config.pair === "string"
         ? optionModels(config.pair)
         : "";
   const base =
     baseFromConfig ||
     (strategy === "single" ? shortModelName(options.model) : strategy === "dual" ? optionModels(options.pair) : optionModels(options.base));
   const metaFromConfig = typeof config.meta_model === "string" ? shortModelName(config.meta_model) : "";
-  const meta = metaFromConfig || (strategy === "triple" ? shortModelName(options.meta) : strategy === "dual" ? "Weighted blend" : "None");
-  return { base, meta };
+  if (strategy === "triple") return { base, secondaryLabel: "Meta model:", secondaryValue: metaFromConfig || shortModelName(options.meta) };
+  if (strategy === "dual") return { base, secondaryLabel: "Blend weight:", secondaryValue: dualWeightLabel(options.weight ?? 50) };
+  return { base, secondaryLabel: "Learner:", secondaryValue: "Single model" };
 }
 
 function gateThresholds(result: WffStrategyResult | null) {
@@ -581,13 +750,7 @@ function FitChart({
   const previousTest = previousResult?.points.test ?? [];
   const points = [...train, ...test];
   const S = 300;
-  const previousPoints = [...previousTrain, ...previousTest];
-  const values = points.length ? [...points, ...previousPoints].flatMap((point) => [point.measured, point.predicted]) : [0, 3];
-  const min = Math.min(0, ...values);
-  const max = Math.max(1, ...values);
-  const pad = (max - min) * 0.08 || 0.1;
-  const lo = min - pad;
-  const hi = max + pad;
+  const { lo, hi } = FIT_CHART_DOMAIN;
   const left = 38;
   const right = S - 12;
   const top = 34;
@@ -595,6 +758,7 @@ function FitChart({
   const X = (value: number) => left + ((value - lo) / (hi - lo || 1)) * (right - left);
   const Y = (value: number) => bottom - ((value - lo) / (hi - lo || 1)) * (bottom - top);
   const clampX = (value: number) => Math.max(left, Math.min(right, X(value)));
+  const clampY = (value: number) => Math.max(top, Math.min(bottom, Y(value)));
   const summary = chartModelSummary(result, strategy, options);
   const thresholds = gateThresholds(result);
   const lowX = thresholds ? clampX(thresholds.low) : null;
@@ -618,6 +782,16 @@ function FitChart({
             <stop offset="62%" stopColor="#2563eb" />
             <stop offset="100%" stopColor="#1e3a8a" />
           </radialGradient>
+          <linearGradient id="wffInfoPanelHeader" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0%" stopColor="#0f766e" />
+            <stop offset="100%" stopColor="#1d4ed8" />
+          </linearGradient>
+          <filter id="wffModelBadgeShadow" x="-16%" y="-20%" width="132%" height="140%">
+            <feDropShadow dx="0" dy="1.6" stdDeviation="1.7" floodColor="#0f172a" floodOpacity="0.24" />
+          </filter>
+          <clipPath id="wffFitPlotClip">
+            <rect x={left} y={top} width={right - left} height={bottom - top} />
+          </clipPath>
         </defs>
         <rect width={S} height={S} rx="10" fill="#fff" />
         {thresholds && lowX != null && highX != null ? (
@@ -627,93 +801,125 @@ function FitChart({
             <rect x={highX} y={top} width={right - highX} height={bottom - top} fill="#fdf2f8" fillOpacity={regionFill("high")} />
             <line x1={lowX} y1={top} x2={lowX} y2={bottom} stroke="#14b8a6" strokeDasharray="3 3" />
             <line x1={highX} y1={top} x2={highX} y2={bottom} stroke="#8b5cf6" strokeDasharray="3 3" />
-            <text x={lowX} y="12" textAnchor="middle" fill="#111827" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontSize="9" fontWeight="700">
-              {fmt(thresholds.low, 2)}
-            </text>
-            <text x={highX} y="12" textAnchor="middle" fill="#111827" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontSize="9" fontWeight="700">
-              {fmt(thresholds.high, 2)}
-            </text>
-            <path d={`M${lowX - 3},15 L${lowX},22 L${lowX + 3},15`} fill="#111827" />
-            <path d={`M${highX - 3},15 L${highX},22 L${highX + 3},15`} fill="#111827" />
+            <g transform={`translate(${lowX - 14} 7)`}>
+              <rect width="28" height="12" rx="6" fill="#ffffff" fillOpacity="0.92" stroke="#14b8a6" strokeWidth="0.65" />
+              <text x="14" y="8.4" textAnchor="middle" fill="#0f766e" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="6.2" fontWeight="900">
+                {fmt(thresholds.low, 2)}
+              </text>
+            </g>
+            <g transform={`translate(${highX - 14} 7)`}>
+              <rect width="28" height="12" rx="6" fill="#ffffff" fillOpacity="0.92" stroke="#8b5cf6" strokeWidth="0.65" />
+              <text x="14" y="8.4" textAnchor="middle" fill="#6d28d9" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="6.2" fontWeight="900">
+                {fmt(thresholds.high, 2)}
+              </text>
+            </g>
+            <path d={`M${lowX - 3},22 L${lowX},27 L${lowX + 3},22`} fill="#0f766e" />
+            <path d={`M${highX - 3},22 L${highX},27 L${highX + 3},22`} fill="#6d28d9" />
           </>
         ) : (
           <rect x={left} y={top} width={right - left} height={bottom - top} fill="#f8fafc" />
         )}
         <rect x={left} y={top} width={right - left} height={bottom - top} fill="none" stroke="#111827" strokeWidth="1.2" />
-        <text x={(left + right) / 2} y={top + 12} textAnchor="middle" fill="#111827" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontSize="11" fontWeight="800">
-          Base model: {summary.base}
-        </text>
-        <text x={(left + right) / 2} y={top + 25} textAnchor="middle" fill="#111827" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontSize="11" fontWeight="800">
-          Meta model: {summary.meta}
-        </text>
-        <line x1={X(lo)} y1={Y(lo)} x2={X(hi)} y2={Y(hi)} stroke="#475569" strokeDasharray="3 3" />
-        <text x={right - 8} y={Y(hi) + 22} textAnchor="end" fill="#111827" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontSize="10" fontWeight="700">
-          Y=X
-        </text>
-        {trail.map((item) => (
-          <line
-            key={`movementTrail-${item.key}`}
-            data-movement-trail={item.key}
-            x1={X(item.measured)}
-            x2={X(item.measured)}
-            y1={Y(item.from)}
-            y2={Y(item.to)}
-            stroke={item.split === "test" ? "#60a5fa" : "#f87171"}
-            strokeWidth={item.split === "test" ? 1.05 : 0.85}
-            strokeOpacity="0.38"
-          />
-        ))}
-        {previousTrain.map((point) => (
-          <circle key={`previous-train-${point.row_index}`} data-point-cloud="previous-train" cx={X(point.measured)} cy={Y(point.predicted)} r="1.7" fill="none" stroke="#fca5a5" strokeWidth="0.55" strokeOpacity="0.52" />
-        ))}
-        {previousTest.map((point) => (
-          <circle key={`previous-test-${point.row_index}`} data-point-cloud="previous-test" cx={X(point.measured)} cy={Y(point.predicted)} r="2.25" fill="none" stroke="#93c5fd" strokeWidth="0.65" strokeOpacity="0.58" />
-        ))}
-        {train.map((point) => (
-          <circle key={`train-${point.row_index}`} data-point-cloud="train" cx={X(point.measured)} cy={Y(point.predicted)} r="1.75" fill="url(#wffTrainPoint)" stroke="#fff" strokeWidth="0.45" fillOpacity="0.8" />
-        ))}
-        {test.map((point) => (
-          <circle key={`test-${point.row_index}`} data-point-cloud="test" cx={X(point.measured)} cy={Y(point.predicted)} r="2.25" fill="url(#wffTestPoint)" stroke="#eff6ff" strokeWidth="0.55" fillOpacity="0.88" />
-        ))}
-        <g transform={`translate(${right - 140} ${bottom - 82})`}>
-          <rect width="132" height="74" rx="4" fill="white" fillOpacity="0.92" stroke="#94a3b8" strokeWidth="0.9" />
-          <line x1="66" y1="8" x2="66" y2="66" stroke="#e2e8f0" strokeWidth="0.8" />
-          <circle cx="10" cy="14" r="2.7" fill="#ef4444" />
-          <text x="16" y="17" fill="#ef4444" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontSize="8.2" fontWeight="800">
-            Train
+        <g transform={`translate(${left + 8} ${top + 8})`} filter="url(#wffModelBadgeShadow)" aria-label="Model summary">
+          <rect width="140" height="43" rx="7" fill="#ffffff" fillOpacity="0.88" stroke="#cbd5e1" strokeWidth="0.75" />
+          <rect width="140" height="15" rx="7" fill="url(#wffInfoPanelHeader)" fillOpacity="0.94" />
+          <path d="M0,8 H140 V15 H0 Z" fill="url(#wffInfoPanelHeader)" fillOpacity="0.94" />
+          <text x="8" y="10.4" fill="#f8fafc" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="6.2" fontWeight="900">
+            MODEL SUMMARY
           </text>
-          <text x="8" y="31" fill="#ef4444" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontSize="7.3" fontWeight="700">
-            R² {fmt(result?.metrics.train.r2)}
+          <text x="8" y="27" fill="#64748b" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="5.4" fontWeight="900">
+            Base model:
           </text>
-          <text x="8" y="43" fill="#ef4444" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontSize="7.3" fontWeight="700">
-            MAE {fmt(result?.metrics.train.mae)}
+          <text x="48" y="27" fill="#0f172a" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="6.1" fontWeight="900">
+            {summary.base}
           </text>
-          <text x="8" y="54" fill="#ef4444" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontSize="7.3" fontWeight="700">
-            RMSE {fmt(result?.metrics.train.rmse)}
+          <text x="8" y="37" fill="#0f766e" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="5.4" fontWeight="900">
+            {summary.secondaryLabel}
           </text>
-          <circle cx="74" cy="14" r="2.7" fill="#2563eb" />
-          <text x="80" y="17" fill="#2563eb" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontSize="8.2" fontWeight="800">
-            Test
-          </text>
-          <text x="72" y="31" fill="#2563eb" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontSize="7.3" fontWeight="700">
-            R² {fmt(result?.metrics.test.r2)}
-          </text>
-          <text x="72" y="43" fill="#2563eb" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontSize="7.3" fontWeight="700">
-            MAE {fmt(result?.metrics.test.mae)}
-          </text>
-          <text x="72" y="54" fill="#2563eb" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontSize="7.3" fontWeight="700">
-            RMSE {fmt(result?.metrics.test.rmse)}
-          </text>
-          <circle cx="74" cy="64" r="2.6" fill="none" stroke="#94a3b8" strokeWidth="0.8" />
-          <text x="80" y="67" fill="#64748b" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontSize="7.3" fontWeight="700">
-            Previous
+          <text x="48" y="37" fill="#0f766e" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="6.1" fontWeight="900">
+            {summary.secondaryValue}
           </text>
         </g>
-        <text x={(left + right) / 2} y={S - 7} textAnchor="middle" fill="#111827" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontSize="12" fontWeight="800">
-          True
+        <g transform={`translate(${right - 128} ${bottom - 54})`} filter="url(#wffModelBadgeShadow)" aria-label="Train and test metrics">
+          <rect width="120" height="46" rx="7" fill="#ffffff" fillOpacity="0.9" stroke="#cbd5e1" strokeWidth="0.75" />
+          <rect x="0.5" y="0.5" width="119" height="45" rx="6.5" fill="none" stroke="#ffffff" strokeOpacity="0.9" />
+          <circle cx="42" cy="12" r="2.4" fill="#ef4444" />
+          <text x="47" y="14.4" fill="#dc2626" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="6.8" fontWeight="900">
+            Train
+          </text>
+          <circle cx="84" cy="12" r="2.4" fill="#2563eb" />
+          <text x="89" y="14.4" fill="#1d4ed8" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="6.8" fontWeight="900">
+            Test
+          </text>
+          <line x1="10" y1="19" x2="110" y2="19" stroke="#e2e8f0" strokeWidth="0.7" />
+          <line x1="72" y1="21" x2="72" y2="40" stroke="#e2e8f0" strokeWidth="0.7" />
+          <text x="11" y="27" fill="#64748b" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="5.4" fontWeight="850">
+            R²
+          </text>
+          <text x="11" y="34" fill="#64748b" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="5.4" fontWeight="850">
+            MAE
+          </text>
+          <text x="11" y="41" fill="#64748b" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="5.4" fontWeight="850">
+            RMSE
+          </text>
+          <text x="60" y="27" textAnchor="end" fill="#dc2626" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="5.9" fontWeight="900">
+            {fmt(result?.metrics.train.r2)}
+          </text>
+          <text x="60" y="34" textAnchor="end" fill="#dc2626" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="5.9" fontWeight="900">
+            {fmt(result?.metrics.train.mae)}
+          </text>
+          <text x="60" y="41" textAnchor="end" fill="#dc2626" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="5.9" fontWeight="900">
+            {fmt(result?.metrics.train.rmse)}
+          </text>
+          <text x="107" y="27" textAnchor="end" fill="#1d4ed8" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="5.9" fontWeight="900">
+            {fmt(result?.metrics.test.r2)}
+          </text>
+          <text x="107" y="34" textAnchor="end" fill="#1d4ed8" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="5.9" fontWeight="900">
+            {fmt(result?.metrics.test.mae)}
+          </text>
+          <text x="107" y="41" textAnchor="end" fill="#1d4ed8" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="5.9" fontWeight="900">
+            {fmt(result?.metrics.test.rmse)}
+          </text>
+        </g>
+        <line x1={X(lo)} y1={Y(lo)} x2={X(hi)} y2={Y(hi)} stroke="#475569" strokeDasharray="3 3" />
+        <g clipPath="url(#wffFitPlotClip)">
+          {trail.map((item) => (
+            <line
+              key={`movementTrail-${item.key}`}
+              data-movement-trail={item.key}
+              x1={X(item.measured)}
+              x2={X(item.measured)}
+              y1={clampY(item.from)}
+              y2={clampY(item.to)}
+              stroke={item.split === "test" ? "#60a5fa" : "#f87171"}
+              strokeWidth={item.split === "test" ? 1.05 : 0.85}
+              strokeOpacity="0.38"
+            />
+          ))}
+          {previousTrain.map((point) => (
+            <circle key={`previous-train-${point.row_index}`} data-point-cloud="previous-train" cx={X(point.measured)} cy={clampY(point.predicted)} r="1.7" fill="none" stroke="#fca5a5" strokeWidth="0.55" strokeOpacity="0.52" />
+          ))}
+          {previousTest.map((point) => (
+            <circle key={`previous-test-${point.row_index}`} data-point-cloud="previous-test" cx={X(point.measured)} cy={clampY(point.predicted)} r="2.25" fill="none" stroke="#93c5fd" strokeWidth="0.65" strokeOpacity="0.58" />
+          ))}
+          {train.map((point) => (
+            <circle key={`train-${point.row_index}`} data-point-cloud="train" cx={X(point.measured)} cy={clampY(point.predicted)} r="1.75" fill="url(#wffTrainPoint)" stroke="#fff" strokeWidth="0.45" fillOpacity="0.8" />
+          ))}
+          {test.map((point) => (
+            <circle key={`test-${point.row_index}`} data-point-cloud="test" cx={X(point.measured)} cy={clampY(point.predicted)} r="2.25" fill="url(#wffTestPoint)" stroke="#eff6ff" strokeWidth="0.55" fillOpacity="0.88" />
+          ))}
+        </g>
+        <g transform={`translate(${right - 35} ${top + 11})`}>
+          <rect width="28" height="12" rx="6" fill="#ffffff" fillOpacity="0.88" stroke="#94a3b8" strokeWidth="0.6" />
+          <text x="14" y="8.4" textAnchor="middle" fill="#334155" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="6.2" fontWeight="900">
+            Y = X
+          </text>
+        </g>
+        <text x={(left + right) / 2} y={S - 8} textAnchor="middle" fill="#334155" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="8.2" fontWeight="900">
+          True friction coefficient
         </text>
-        <text x="12" y={(top + bottom) / 2} textAnchor="middle" transform={`rotate(-90 12 ${(top + bottom) / 2})`} fill="#111827" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontSize="12" fontWeight="800">
-          Predicted
+        <text x="13" y={(top + bottom) / 2} textAnchor="middle" transform={`rotate(-90 13 ${(top + bottom) / 2})`} fill="#334155" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="8.2" fontWeight="900">
+          Predicted friction coefficient
         </text>
       </svg>
     </figure>
@@ -725,14 +931,22 @@ function LiteratureChart({ result }: { result: WffStrategyResult | null }) {
   if (!points.length) return <EmptyChart title="Literature validation" />;
   const W = 320;
   const H = 210;
+  const left = 46;
+  const right = W - 12;
+  const top = 18;
+  const bottom = H - 34;
+  const plotW = right - left;
+  const plotH = bottom - top;
   const values = points.flatMap((point) => [point.measured, point.predicted]);
-  const min = Math.min(0, ...values);
   const max = Math.max(1, ...values);
-  const pad = (max - min) * 0.1 || 0.05;
-  const lo = min - pad;
-  const hi = max + pad;
-  const X = (i: number) => 34 + (i / Math.max(1, points.length - 1)) * (W - 54);
-  const Y = (value: number) => project(value, lo, hi, H, true);
+  const yMax = Math.ceil(max * 1.15 * 10) / 10;
+  const yTicks = Array.from({ length: 6 }, (_, i) => +(i * yMax / 5).toFixed(1));
+  const xTickCount = Math.min(6, points.length);
+  const xTicks = Array.from({ length: xTickCount }, (_, i) => Math.round(1 + (i * (points.length - 1)) / Math.max(1, xTickCount - 1)));
+  const xDomainMin = 0.5;
+  const xDomainMax = points.length + 0.5;
+  const X = (i: number) => left + ((i + 1 - xDomainMin) / (xDomainMax - xDomainMin)) * plotW;
+  const Y = (value: number) => bottom - (Math.max(0, value) / (yMax || 1)) * plotH;
   const path = (key: "measured" | "predicted") => points.map((point, i) => `${i ? "L" : "M"}${X(i).toFixed(2)},${Y(point[key])}`).join(" ");
   return (
     <figure className="rounded-[8px] border border-ink-200 bg-white p-3">
@@ -743,23 +957,54 @@ function LiteratureChart({ result }: { result: WffStrategyResult | null }) {
         </span>
       </figcaption>
       <svg viewBox={`0 0 ${W} ${H}`} className="mt-2 w-full" role="img" aria-label="Literature validation measured and predicted COF">
-        <rect width={W} height={H} rx="10" fill="#f8fafc" />
-        <path d={path("measured")} fill="none" stroke="#111827" strokeWidth="1.8" />
-        <path d={path("predicted")} fill="none" stroke="#16a34a" strokeWidth="1.8" />
+        <rect width={W} height={H} rx="10" fill="#ffffff" />
+        <rect x={left} y={top} width={plotW} height={plotH} fill="#ffffff" stroke="#111827" strokeWidth="1.5" />
+        {yTicks.map((tick) => (
+          <g key={`lit-y-${tick}`}>
+            <line x1={left - 3} x2={left} y1={Y(tick)} y2={Y(tick)} stroke="#111827" strokeWidth="1.2" />
+            <text x={left - 7} y={Y(tick) + 2.8} textAnchor="end" fill="#111827" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="7.5" fontWeight="900">
+              {tick.toFixed(1)}
+            </text>
+          </g>
+        ))}
+        {xTicks.map((tick) => (
+          <g key={`lit-x-${tick}`}>
+            <line x1={X(tick - 1)} x2={X(tick - 1)} y1={bottom} y2={bottom + 3} stroke="#111827" strokeWidth="1.2" />
+            <text x={X(tick - 1)} y={bottom + 12} textAnchor="middle" fill="#111827" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="7.5" fontWeight="900">
+              {tick}
+            </text>
+          </g>
+        ))}
+        <g transform={`translate(${left + 8} ${top + 8})`}>
+          <line x1="0" x2="22" y1="0" y2="0" stroke="#111827" strokeWidth="1.8" />
+          <circle cx="11" cy="0" r="2.6" fill="#ffffff" stroke="#111827" strokeWidth="1.5" />
+          <text x="28" y="3" fill="#111827" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="8.5" fontWeight="900">
+            Exp in literature
+          </text>
+          <line x1="0" x2="22" y1="13" y2="13" stroke="#16a34a" strokeWidth="1.8" />
+          <circle cx="11" cy="13" r="2.6" fill="#ffffff" stroke="#16a34a" strokeWidth="1.5" />
+          <text x="28" y="16" fill="#16a34a" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="8.5" fontWeight="900">
+            Predicted
+          </text>
+        </g>
+        <text x={right - 8} y={top + 10} textAnchor="end" fill="#111827" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="8.5" fontWeight="900">
+          Pred-literature
+        </text>
+        <path d={path("measured")} fill="none" stroke="#111827" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={path("predicted")} fill="none" stroke="#16a34a" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
         {points.map((point, i) => (
-          <circle key={`m-${point.row_index}`} cx={X(i)} cy={Y(point.measured)} r="2.7" fill="#111827" />
+          <circle key={`m-${point.row_index}`} cx={X(i)} cy={Y(point.measured)} r="2.4" fill="#ffffff" stroke="#111827" strokeWidth="1.4" />
         ))}
         {points.map((point, i) => (
-          <circle key={`p-${point.row_index}`} cx={X(i)} cy={Y(point.predicted)} r="2.7" fill="#16a34a" />
+          <circle key={`p-${point.row_index}`} cx={X(i)} cy={Y(point.predicted)} r="2.4" fill="#ffffff" stroke="#16a34a" strokeWidth="1.4" />
         ))}
-        <text x={W / 2} y={H - 7} textAnchor="middle" fill="#64748b" fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace" fontSize="8">
+        <text x={W / 2} y={H - 8} textAnchor="middle" fill="#111827" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="10" fontWeight="900">
           Data points
         </text>
+        <text x="12" y={(top + bottom) / 2} textAnchor="middle" transform={`rotate(-90 12 ${(top + bottom) / 2})`} fill="#111827" fontFamily="Inter, Segoe UI, Arial, ui-sans-serif, system-ui, sans-serif" fontSize="10" fontWeight="900">
+          Friction coefficient
+        </text>
       </svg>
-      <div className="mt-1 flex gap-3 text-[11px] text-ink-600">
-        <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-ink-950" />Measured</span>
-        <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-green-600" />Predicted</span>
-      </div>
     </figure>
   );
 }
@@ -841,19 +1086,64 @@ function ResultComparison({
   );
 }
 
-const BASE_MODEL_ORDER = ["catboost", "forest", "xgboost"] as const;
+const BASE_MODEL_ORDER = ["catboost", "forest", "xgboost", "svr", "mlp"] as const;
 type BaseModelName = (typeof BASE_MODEL_ORDER)[number];
+const PRIMARY_MODEL_ORDER = ["catboost", "forest", "xgboost"] as const satisfies readonly BaseModelName[];
+const SECONDARY_MODEL_ORDER = ["svr", "mlp"] as const satisfies readonly BaseModelName[];
+const MAX_SELECTED_BASE_MODELS = 3;
 
 const REGION_PARAMETER_CARDS = [
-  { id: "low", name: "Low friction", titleClass: "text-teal-700" },
-  { id: "middle", name: "Middle", titleClass: "text-blue-700" },
-  { id: "high", name: "High friction", titleClass: "text-pink-700" },
+  { id: "low", name: "Low friction", accentClass: "bg-teal-500" },
+  { id: "middle", name: "Middle", accentClass: "bg-blue-500" },
+  { id: "high", name: "High friction", accentClass: "bg-rose-500" },
 ] as const;
 
 const REGION_PARAMETER_ROWS = [
-  { keySuffix: "catboost_learning_rate", label: "CB lr", ariaLabel: "CatBoost learning rate" },
-  { keySuffix: "xgboost_learning_rate", label: "XGB lr", ariaLabel: "XGBoost learning rate" },
-  { keySuffix: "forest_max_depth", label: "RF depth", ariaLabel: "RF depth" },
+  {
+    model: "catboost",
+    keySuffix: "catboost_learning_rate",
+    label: "CatBoost learning rate",
+    fullLabel: "CatBoost learning rate",
+    ariaLabel: "CatBoost learning rate",
+    help: "Controls how fast CatBoost learns each correction. Higher values react faster but can overfit noisy regions.",
+    knowledge: "Higher values adapt faster inside this friction zone; too high can overfit local noise.",
+  },
+  {
+    model: "xgboost",
+    keySuffix: "xgboost_learning_rate",
+    label: "XGBoost learning rate",
+    fullLabel: "XGBoost learning rate",
+    ariaLabel: "XGBoost learning rate",
+    help: "Controls how strongly XGBoost updates each boosting step. Higher values make sharper fits but can hurt generalization.",
+    knowledge: "Sharper boosting updates help local correction, but very high values may reduce generalization.",
+  },
+  {
+    model: "forest",
+    keySuffix: "forest_max_depth",
+    label: "Random Forest maximum depth",
+    fullLabel: "Random Forest maximum depth",
+    ariaLabel: "Random Forest maximum depth",
+    help: "Limits how deep each random-forest tree can grow. Higher depth captures more interactions but makes the model more complex.",
+    knowledge: "Deeper trees capture more interactions; excessive depth makes the zone fit less stable.",
+  },
+  {
+    model: "svr",
+    keySuffix: "svr_c",
+    label: "SVR penalty C",
+    fullLabel: "SVR penalty C",
+    ariaLabel: "SVR penalty C",
+    help: "Controls the penalty for SVR errors. Higher values fit local deviations more tightly but can generalize worse.",
+    knowledge: "The thesis uses SVR as a classical kernel baseline; it is useful, but external validation is less stable than the stronger tree models.",
+  },
+  {
+    model: "mlp",
+    keySuffix: "mlp_hidden_units",
+    label: "MLP hidden units",
+    fullLabel: "MLP hidden units",
+    ariaLabel: "MLP hidden units",
+    help: "Controls the width of the neural network surrogate. Wider networks can fit more patterns but are unstable on small samples.",
+    knowledge: "The thesis reports MLP as the weakest and least stable model, so this simulator keeps its generalization deliberately worse.",
+  },
 ] as const;
 
 type RegionId = keyof typeof WFF_REGION_PARAMETER_PRESETS;
@@ -868,33 +1158,16 @@ function regionParameterRange(name: string) {
   const values = WFF_REGION_PARAMETER_VALUES[name] ?? [WFF_REGION_PARAMETER_DEFAULTS[name] ?? "0"];
   const numeric = values.map(Number).filter(Number.isFinite);
   const fallback = Number(WFF_REGION_PARAMETER_DEFAULTS[name] ?? numeric[0] ?? 0);
+  const integerParameter = name.endsWith("_max_depth") || name.endsWith("_svr_c") || name.endsWith("_mlp_hidden_units");
   return {
     min: Math.min(...numeric, fallback),
     max: Math.max(...numeric, fallback),
-    step: name.endsWith("_max_depth") ? 1 : 0.01,
+    step: integerParameter ? 1 : 0.01,
   };
 }
 
 function formatRegionParameterValue(name: string, value: number) {
-  return name.endsWith("_max_depth") ? String(Math.round(value)) : value.toFixed(2);
-}
-
-function regionParameterDeviation(name: string, value: string) {
-  const range = regionParameterRange(name);
-  const current = Number(value);
-  const fallback = Number(WFF_REGION_PARAMETER_DEFAULTS[name] ?? range.min);
-  const safeCurrent = Number.isFinite(current) ? clamp(current, range.min, range.max) : fallback;
-  const baseline = Number.isFinite(fallback) ? fallback : range.min;
-  const denominator = Math.max(Math.abs(range.max - baseline), Math.abs(baseline - range.min), range.step);
-  return clamp((safeCurrent - baseline) / denominator, -1, 1);
-}
-
-function regionImpactScore(region: RegionId, values: Record<string, string>) {
-  const deviations = REGION_PARAMETER_ROWS.map((row) => {
-    const name = `${region}_${row.keySuffix}`;
-    return Math.abs(regionParameterDeviation(name, values[name] ?? WFF_REGION_PARAMETER_DEFAULTS[name] ?? "0"));
-  });
-  return Math.round((deviations.reduce((sum, value) => sum + value, 0) / deviations.length) * 100);
+  return name.endsWith("_max_depth") || name.endsWith("_svr_c") || name.endsWith("_mlp_hidden_units") ? String(Math.round(value)) : value.toFixed(2);
 }
 
 function regionDefaultPatch(region: RegionId) {
@@ -904,7 +1177,41 @@ function regionDefaultPatch(region: RegionId) {
   }));
 }
 
-function RegionParameterSlider({
+function KnowledgeNoteCard({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-[8px] bg-ink-50/55 p-3 ring-1 ring-ink-100/80">
+      <div className="text-[12px] font-semibold leading-tight text-ink-950">{title}</div>
+      <p className="mt-1.5 text-[11px] font-medium leading-snug text-ink-800">{body}</p>
+    </div>
+  );
+}
+
+function ParameterGuidePanel({ rows }: { rows: typeof REGION_PARAMETER_ROWS[number][] }) {
+  const notes = [
+    ...rows.map((row) => ({ title: row.label, body: row.knowledge })),
+    {
+      title: "Friction zones",
+      body: "Tune Low, Middle, and High regions separately so local behavior does not hide in one global setting.",
+    },
+  ];
+  return (
+    <div className="absolute left-0 top-8 z-30 w-[min(42rem,calc(100vw-3rem))] rounded-[10px] border border-brand-100 bg-white/96 p-3 shadow-card ring-1 ring-ink-100/70 backdrop-blur">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div>
+          <div className="font-mono text-[10px] font-semibold uppercase tracking-eyebrow text-brand-700">Parameter guide</div>
+          <p className="mt-1 text-[11px] font-medium text-ink-700">Key tuning notes for the selected base models.</p>
+        </div>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {notes.map((note) => (
+          <KnowledgeNoteCard key={note.title} title={note.title} body={note.body} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RegionParameterControl({
   name,
   label: rowLabel,
   ariaLabel,
@@ -921,33 +1228,79 @@ function RegionParameterSlider({
   const numericValue = Number(value);
   const safeValue = Number.isFinite(numericValue) ? clamp(numericValue, range.min, range.max) : Number(WFF_REGION_PARAMETER_DEFAULTS[name] ?? range.min);
   const displayValue = formatRegionParameterValue(name, safeValue);
-  const handleInput = (nextValue: string) => onChange(name, formatRegionParameterValue(name, Number(nextValue)));
+  const referenceValue = Number(WFF_REGION_PARAMETER_DEFAULTS[name] ?? safeValue);
+  const safeReference = Number.isFinite(referenceValue) ? clamp(referenceValue, range.min, range.max) : safeValue;
+  const isIntegerParameter = name.endsWith("_max_depth") || name.endsWith("_svr_c") || name.endsWith("_mlp_hidden_units");
+  const segmentedStep = (direction: -1 | 1) => {
+    if (isIntegerParameter) return range.step;
+    const lowerSpan = Math.max(safeReference - range.min, range.step);
+    const upperSpan = Math.max(range.max - safeReference, range.step);
+    const activeSpan = direction < 0
+      ? safeValue <= safeReference ? lowerSpan : upperSpan
+      : safeValue < safeReference ? lowerSpan : upperSpan;
+    return Math.max(range.step, Number((activeSpan / 3).toFixed(2)));
+  };
+  const steppedValue = (direction: -1 | 1) => {
+    const candidate = safeValue + direction * segmentedStep(direction);
+    if (direction > 0 && safeValue < safeReference && candidate > safeReference) return safeReference;
+    if (direction < 0 && safeValue > safeReference && candidate < safeReference) return safeReference;
+    return clamp(candidate, range.min, range.max);
+  };
+  const actions = [
+    { label: "-", value: steppedValue(-1), aria: "decrease" },
+    { label: "Min", value: range.min, aria: "Min" },
+    { label: "Ref", value: safeReference, aria: "Ref" },
+    { label: "Max", value: range.max, aria: "Max" },
+    { label: "+", value: steppedValue(1), aria: "increase" },
+  ];
+  const applyValue = (nextValue: number) => onChange(name, formatRegionParameterValue(name, clamp(nextValue, range.min, range.max)));
   return (
-    <label className="block">
-      <span className="flex items-baseline justify-between gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-eyebrow text-ink-500">{rowLabel}</span>
-        <span className="font-mono text-xs font-semibold text-ink-950">{displayValue}</span>
+    <label className="group block rounded-[8px] border border-ink-100 bg-white/82 px-2.5 py-2 shadow-sm transition hover:border-brand-100 hover:shadow-card">
+      <span className="flex items-start justify-between gap-3">
+        <span className="min-w-0 flex-1">
+          <span className="block text-[11px] font-semibold leading-snug text-ink-950">{rowLabel}</span>
+        </span>
+        <span className="rounded-[6px] bg-ink-950 px-2 py-1 font-mono text-[11px] font-semibold text-white shadow-sm">{displayValue}</span>
       </span>
-      <input
-        type="range"
-        min={range.min}
-        max={range.max}
-        step={range.step}
-        value={safeValue}
-        aria-label={ariaLabel}
-        onInput={(event) => handleInput(event.currentTarget.value)}
-        onChange={(event) => handleInput(event.currentTarget.value)}
-        className="wff-range mt-2"
-      />
-      <span className="mt-1 flex justify-between font-mono text-[8px] text-ink-400">
-        <span>{formatRegionParameterValue(name, range.min)}</span>
-        <span>{formatRegionParameterValue(name, range.max)}</span>
-      </span>
+      <div className="mt-3 grid grid-cols-[2.3rem_1fr_1fr_1fr_2.3rem] gap-1 rounded-[8px] bg-ink-50 p-1 ring-1 ring-ink-100/80">
+        {actions.map((action) => {
+          const actionValue = formatRegionParameterValue(name, action.value);
+          const isStepAction = action.label === "-" || action.label === "+";
+          const active = !isStepAction && actionValue === displayValue;
+          const actionDisabled = isStepAction && actionValue === displayValue;
+          const actionTitle = isStepAction
+            ? `${action.label === "-" ? "Decrease" : "Increase"} to ${actionValue}`
+            : `Set to ${actionValue}`;
+          const actionTone = actionDisabled
+            ? "cursor-not-allowed bg-ink-50 text-ink-300 shadow-none ring-1 ring-ink-100"
+            : action.label === "-"
+              ? "bg-rose-50 text-rose-700 shadow-sm ring-1 ring-rose-100 hover:bg-rose-100 hover:text-rose-800 focus-visible:ring-2 focus-visible:ring-rose-200"
+              : action.label === "+"
+                ? "bg-brand-50 text-brand-700 shadow-sm ring-1 ring-brand-100 hover:bg-brand-100 hover:text-brand-800 focus-visible:ring-2 focus-visible:ring-brand-200"
+                : active
+                  ? "bg-brand-600 text-white shadow-sm"
+                  : "bg-white text-ink-700 shadow-sm hover:bg-brand-50 hover:text-brand-700";
+          return (
+            <button
+              key={action.label}
+              type="button"
+              disabled={actionDisabled}
+              title={actionTitle}
+              onClick={() => applyValue(action.value)}
+              aria-label={`${ariaLabel} ${action.aria}`}
+              className={`rounded-[6px] px-1.5 py-1.5 font-mono font-semibold transition focus-visible:outline-none ${isStepAction ? "text-[12px]" : "text-[9px] uppercase"} ${actionTone}`}
+            >
+              {action.label}
+            </button>
+          );
+        })}
+      </div>
     </label>
   );
 }
 
 function RegionParameterGuide({
+  selectedModels,
   values,
   activeRegion,
   onChange,
@@ -955,6 +1308,7 @@ function RegionParameterGuide({
   onResetAll,
   onActiveRegionChange,
 }: {
+  selectedModels: BaseModelName[];
   values: Record<string, string>;
   activeRegion: RegionId | null;
   onChange: (name: string, value: string) => void;
@@ -962,17 +1316,27 @@ function RegionParameterGuide({
   onResetAll: () => void;
   onActiveRegionChange: (region: RegionId | null) => void;
 }) {
+  const visibleRows = REGION_PARAMETER_ROWS.filter((row) => selectedModels.includes(row.model));
+  const [guideOpen, setGuideOpen] = useState(false);
   return (
     <div className="mt-3 border-t border-ink-100 pt-3">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+      <div className="relative mb-2 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-semibold uppercase tracking-eyebrow text-ink-500">Region parameters</span>
-          <span className="font-mono text-[10px] text-ink-400">continuous sliders</span>
+          <span className="text-[10px] font-semibold uppercase tracking-eyebrow text-ink-950">Region parameters</span>
+          <button
+            type="button"
+            onClick={() => setGuideOpen((open) => !open)}
+            aria-expanded={guideOpen}
+            className="rounded-full border border-brand-100 bg-white px-2.5 py-1 font-mono text-[10px] font-semibold text-brand-700 shadow-sm transition hover:border-brand-200 hover:bg-brand-50"
+          >
+            Parameter guide
+          </button>
+          {guideOpen && <ParameterGuidePanel rows={visibleRows} />}
         </div>
         <button
           type="button"
           onClick={onResetAll}
-          className="rounded-[6px] border border-ink-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-ink-500 shadow-sm transition hover:border-brand-200 hover:text-brand-700"
+          className="rounded-[6px] border border-ink-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-ink-950 shadow-sm transition hover:border-brand-200 hover:text-brand-700"
         >
           Reset all
         </button>
@@ -980,7 +1344,6 @@ function RegionParameterGuide({
       <div className="grid gap-2 md:grid-cols-3">
         {REGION_PARAMETER_CARDS.map((region) => {
           const regionId = region.id as RegionId;
-          const impact = regionImpactScore(regionId, values);
           const isActive = activeRegion === regionId;
           return (
             <div
@@ -989,36 +1352,29 @@ function RegionParameterGuide({
               onMouseLeave={() => onActiveRegionChange(null)}
               onFocus={() => onActiveRegionChange(regionId)}
               onBlur={() => onActiveRegionChange(null)}
-              className={`relative overflow-hidden rounded-[8px] border bg-white/90 px-3 py-2 shadow-sm transition hover:-translate-y-0.5 hover:shadow-card ${
-                isActive ? "border-brand-200 ring-2 ring-brand-100" : "border-white/80 ring-1 ring-ink-100/70"
+              className={`relative overflow-hidden rounded-[8px] border bg-white/92 px-3 py-2.5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-card ${
+                isActive ? "border-brand-200 ring-2 ring-brand-100" : "border-ink-100 ring-1 ring-ink-100/70"
               }`}
             >
-              <div className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-brand-300 via-sky-300 to-rose-300 opacity-70" />
+              <div className={`pointer-events-none absolute inset-y-3 left-0 w-1 rounded-r-full ${region.accentClass}`} />
               <div className="mb-2 flex items-start justify-between gap-2">
-                <div>
-                  <span className={`font-serif text-base font-semibold ${region.titleClass}`}>{region.name}</span>
-                  <div className="mt-1 flex items-center gap-2">
-                    <span className="text-[9px] font-semibold uppercase tracking-eyebrow text-ink-400">Impact</span>
-                    <div className="h-1.5 w-16 overflow-hidden rounded-full bg-ink-100">
-                      <div className="h-full rounded-full bg-brand-600 transition-all" style={{ width: `${impact}%` }} />
-                    </div>
-                    <span className="font-mono text-[9px] font-semibold text-ink-500">{impact}%</span>
-                  </div>
+                <div className="pl-2">
+                  <span className="font-serif text-base font-semibold text-ink-950">{region.name}</span>
                 </div>
                 <button
                   type="button"
                   onClick={() => onResetRegion(regionId)}
-                  className="rounded-[6px] border border-ink-200 bg-white px-2 py-1 text-[10px] font-semibold text-ink-500 transition hover:border-brand-200 hover:text-brand-700"
+                  className="rounded-[6px] border border-ink-200 bg-white px-2 py-1 text-[10px] font-semibold text-ink-950 transition hover:border-brand-200 hover:text-brand-700"
                 >
                   Reset
                 </button>
               </div>
-              <div className="space-y-2">
-                {REGION_PARAMETER_ROWS.map((row) => {
+              <div className="space-y-1.5">
+                {visibleRows.map((row) => {
                   const name = `${region.id}_${row.keySuffix}`;
                   const currentValue = values[name] ?? WFF_REGION_PARAMETER_DEFAULTS[name] ?? "";
                   return (
-                    <RegionParameterSlider
+                    <RegionParameterControl
                       key={name}
                       name={name}
                       label={row.label}
@@ -1044,10 +1400,7 @@ function strategyFromBaseCount(count: number): WffStrategy {
 }
 
 function pairFromBaseSelection(selected: BaseModelName[]) {
-  const key = selected.slice().sort().join("+");
-  if (key === "catboost+forest") return "catboost+forest";
-  if (key === "catboost+xgboost") return "catboost+xgboost";
-  return "xgboost+forest";
+  return BASE_MODEL_ORDER.filter((name) => selected.includes(name)).slice(0, 2).join("+");
 }
 
 function baseKeyFromSelection(selected: BaseModelName[]) {
@@ -1066,12 +1419,16 @@ export function WffStrategyPanel() {
     ...WFF_REGION_PARAMETER_DEFAULTS,
   });
   const strategy = strategyFromBaseCount(selectedBase.length);
+  const regionParameterOptions = useMemo(
+    () => Object.fromEntries(Object.keys(WFF_REGION_PARAMETER_DEFAULTS).map((name) => [name, String(tripleControls[name as keyof typeof tripleControls])])) as Record<string, string>,
+    [tripleControls]
+  );
   const activeOptions = useMemo<Record<string, string>>(() => {
     if (strategy === "single") {
-      return { model: selectedBase[0] ?? "catboost" } as Record<string, string>;
+      return { model: selectedBase[0] ?? "catboost", ...regionParameterOptions } as Record<string, string>;
     }
     if (strategy === "dual") {
-      return { pair: pairFromBaseSelection(selectedBase), weight: dualControls.weight } as Record<string, string>;
+      return { pair: pairFromBaseSelection(selectedBase), weight: dualControls.weight, ...regionParameterOptions } as Record<string, string>;
     }
     return {
       base: baseKeyFromSelection(selectedBase),
@@ -1079,9 +1436,9 @@ export function WffStrategyPanel() {
       region_profile: tripleControls.region_profile,
       q1: String(tripleControls.q1),
       q2: String(tripleControls.q2),
-      ...Object.fromEntries(Object.keys(WFF_REGION_PARAMETER_DEFAULTS).map((name) => [name, String(tripleControls[name as keyof typeof tripleControls])])),
+      ...regionParameterOptions,
     } as Record<string, string>;
-  }, [dualControls, selectedBase, strategy, tripleControls]);
+  }, [dualControls, regionParameterOptions, selectedBase, strategy, tripleControls]);
   const optionEntries = useMemo(() => {
     if (strategy === "single") return [] as const;
     if (strategy === "dual") {
@@ -1103,6 +1460,7 @@ export function WffStrategyPanel() {
     setSelectedBase((prev) => {
       const exists = prev.includes(name);
       if (exists && prev.length === 1) return prev;
+      if (!exists && prev.length >= MAX_SELECTED_BASE_MODELS) return prev;
       const next = exists ? prev.filter((item) => item !== name) : [...prev, name];
       return BASE_MODEL_ORDER.filter((item) => next.includes(item));
     });
@@ -1143,56 +1501,136 @@ export function WffStrategyPanel() {
 
   return (
     <section className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="label-eyebrow text-brand-700">Model Evaluation</p>
-          <h2 className="mt-1 font-serif text-2xl font-semibold text-ink-950">Instant strategy trend lab</h2>
-        </div>
-        <span className="rounded-full border border-brand-100 bg-white/80 px-2.5 py-1 font-mono text-[10px] font-semibold text-brand-700 shadow-sm">trend</span>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <FitChart result={visibleResult} previousResult={previousRun?.result} activeRegion={activeRegion} strategy={strategy} options={activeOptions} />
+        <LiteratureChart result={visibleResult} />
       </div>
 
       <section className="wff-config-panel rounded-[10px] border border-brand-100/80 bg-gradient-to-br from-white via-brand-50/40 to-ink-50 p-3 shadow-panel">
         <div className="rounded-[9px] border border-white/80 bg-white/70 p-2 shadow-sm backdrop-blur">
           <div className="flex items-center justify-between gap-2 px-1">
-            <span className="text-[10px] font-semibold uppercase tracking-eyebrow text-ink-500">Base models</span>
-            <span className="font-mono text-[10px] font-semibold text-brand-700">{selectedBase.length} selected · {label(strategy)}</span>
+            <span className="text-[10px] font-semibold uppercase tracking-eyebrow text-ink-950">Base models</span>
+            <span className="rounded-full border border-brand-100 bg-white px-2.5 py-1 font-mono text-[10px] font-semibold text-brand-700 shadow-sm">
+              {selectedBase.length}/{MAX_SELECTED_BASE_MODELS} selected
+            </span>
           </div>
-          <div className="mt-2 grid gap-2 sm:grid-cols-3">
-            {BASE_MODEL_ORDER.map((name) => {
-              const checked = selectedBase.includes(name);
-              return (
-                <label
-                  key={name}
-                  className={`group relative flex min-h-16 cursor-pointer items-center justify-between gap-3 overflow-hidden rounded-[8px] border px-3 py-2 transition ${
-                    checked ? "border-brand-200 bg-white text-ink-950 shadow-sm" : "border-transparent bg-white/35 text-ink-500 hover:bg-white/80"
-                  }`}
-                >
-                  <span className={`absolute inset-y-2 left-0 w-1 rounded-r-full transition ${checked ? "bg-brand-500" : "bg-ink-200 group-hover:bg-brand-200"}`} />
-                  <span>
-                    <span className="block font-serif text-base font-semibold">{label(name)}</span>
-                    <span className="font-mono text-[10px]">{name === "forest" ? "RF" : name}</span>
-                  </span>
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggleBaseModel(name)}
-                    className="h-4 w-4 rounded border-ink-300 accent-brand-600"
-                    aria-label={label(name)}
-                  />
-                </label>
-              );
-            })}
+          <div className="mt-2 grid gap-2 xl:grid-cols-[minmax(0,1fr)_13.5rem]">
+            <div className="rounded-[8px] border border-brand-100/80 bg-gradient-to-br from-white to-brand-50/35 p-2 shadow-sm">
+              <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                <span className="text-[10px] font-semibold uppercase tracking-eyebrow text-ink-950">Core tree learners</span>
+                <span className="font-mono text-[9px] font-semibold text-brand-700">recommended trio</span>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {PRIMARY_MODEL_ORDER.map((name) => {
+                  const checked = selectedBase.includes(name);
+                  const locked = !checked && selectedBase.length >= MAX_SELECTED_BASE_MODELS;
+                  return (
+                    <label
+                      key={name}
+                      title={locked ? `Deselect one model before adding ${label(name)}` : label(name)}
+                      className={`group relative flex min-h-16 items-center justify-between gap-3 overflow-hidden rounded-[8px] border px-3 py-2 transition ${
+                        checked
+                          ? "cursor-pointer border-brand-200 bg-white text-ink-950 shadow-card"
+                          : locked
+                            ? "cursor-not-allowed border-transparent bg-white/30 text-ink-300"
+                            : "cursor-pointer border-white bg-white/70 text-ink-950 hover:border-brand-100 hover:bg-white hover:shadow-sm"
+                      }`}
+                    >
+                      <span className={`absolute inset-x-3 top-0 h-0.5 rounded-b-full transition ${checked ? "bg-brand-500" : locked ? "bg-ink-100" : "bg-ink-200 group-hover:bg-brand-200"}`} />
+                      <span>
+                        <span className="block font-serif text-base font-semibold leading-tight">{label(name)}</span>
+                        <span className={`mt-1 block h-1 w-10 rounded-full transition ${checked ? "bg-brand-500" : "bg-ink-200"}`} />
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={locked}
+                        onChange={() => toggleBaseModel(name)}
+                        className="sr-only"
+                        aria-label={label(name)}
+                      />
+                      <span
+                        aria-hidden="true"
+                        className={`grid h-5 w-5 place-items-center rounded-[6px] border text-[11px] font-black transition ${
+                          checked
+                            ? "border-brand-600 bg-brand-600 text-white shadow-sm"
+                            : locked
+                              ? "border-ink-100 bg-ink-50 text-transparent"
+                              : "border-ink-200 bg-white text-transparent group-hover:border-brand-200"
+                        }`}
+                      >
+                        <svg viewBox="0 0 12 12" className="h-3 w-3" fill="none">
+                          <path d="M3 6.2 5.1 8.3 9.2 3.8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="rounded-[8px] border border-dashed border-ink-200 bg-white/55 p-2 shadow-sm">
+              <div className="mb-2 px-1">
+                <div className="text-[10px] font-semibold uppercase tracking-eyebrow text-ink-950">Reference models</div>
+                <div className="mt-1 font-mono text-[8px] font-semibold uppercase tracking-eyebrow text-ink-500">thesis comparison</div>
+              </div>
+              <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-1">
+                {SECONDARY_MODEL_ORDER.map((name) => {
+                  const checked = selectedBase.includes(name);
+                  const locked = !checked && selectedBase.length >= MAX_SELECTED_BASE_MODELS;
+                  return (
+                    <label
+                      key={name}
+                      title={locked ? `Deselect one model before adding ${label(name)}` : label(name)}
+                      className={`group relative flex min-h-11 items-center justify-between gap-2 overflow-hidden rounded-[7px] border px-2.5 py-1.5 transition ${
+                        checked
+                          ? "cursor-pointer border-brand-200 bg-white text-ink-950 shadow-sm"
+                        : locked
+                            ? "cursor-not-allowed border-transparent bg-white/45 text-ink-500"
+                            : "cursor-pointer border-white bg-white/65 text-ink-900 hover:border-ink-200 hover:bg-white"
+                      }`}
+                    >
+                      <span className={`absolute inset-y-2 left-0 w-0.5 rounded-r-full transition ${checked ? "bg-brand-500" : locked ? "bg-ink-100" : "bg-ink-200 group-hover:bg-brand-200"}`} />
+                      <span className="pl-1">
+                        <span className="block font-serif text-sm font-semibold leading-tight">{label(name)}</span>
+                        <span className={`block font-mono text-[8px] font-semibold uppercase tracking-eyebrow ${locked ? "text-ink-400" : "text-ink-500"}`}>baseline</span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={locked}
+                        onChange={() => toggleBaseModel(name)}
+                        className="sr-only"
+                        aria-label={label(name)}
+                      />
+                      <span
+                        aria-hidden="true"
+                        className={`grid h-[18px] w-[18px] place-items-center rounded-[5px] border text-[9px] font-black transition ${
+                          checked
+                            ? "border-brand-600 bg-brand-600 text-white"
+                            : locked
+                              ? "border-ink-200 bg-white/70 text-transparent"
+                              : "border-ink-200 bg-white text-transparent group-hover:border-brand-200"
+                        }`}
+                      >
+                        <svg viewBox="0 0 12 12" className="h-2.5 w-2.5" fill="none">
+                          <path d="M3 6.2 5.1 8.3 9.2 3.8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
           </div>
-          {strategy === "triple" && (
-            <RegionParameterGuide
-              values={activeOptions}
-              activeRegion={activeRegion}
-              onChange={(name, value) => setTripleControls((prev) => ({ ...prev, [name]: value }))}
-              onResetRegion={(region) => setTripleControls((prev) => ({ ...prev, ...regionDefaultPatch(region) }))}
-              onResetAll={() => setTripleControls((prev) => ({ ...prev, ...WFF_REGION_PARAMETER_DEFAULTS }))}
-              onActiveRegionChange={setActiveRegion}
-            />
-          )}
+          <RegionParameterGuide
+            selectedModels={selectedBase}
+            values={activeOptions}
+            activeRegion={activeRegion}
+            onChange={(name, value) => setTripleControls((prev) => ({ ...prev, [name]: value }))}
+            onResetRegion={(region) => setTripleControls((prev) => ({ ...prev, ...regionDefaultPatch(region) }))}
+            onResetAll={() => setTripleControls((prev) => ({ ...prev, ...WFF_REGION_PARAMETER_DEFAULTS }))}
+            onActiveRegionChange={setActiveRegion}
+          />
         </div>
 
         <div className="mt-3 flex flex-wrap gap-3">
@@ -1205,13 +1643,6 @@ export function WffStrategyPanel() {
           )}
         </div>
       </section>
-
-      <div className="grid gap-3 lg:grid-cols-2">
-        <FitChart result={visibleResult} previousResult={previousRun?.result} activeRegion={activeRegion} strategy={strategy} options={activeOptions} />
-        <LiteratureChart result={visibleResult} />
-      </div>
-
-      <ResultComparison result={visibleResult} previousRun={previousRun} />
     </section>
   );
 }

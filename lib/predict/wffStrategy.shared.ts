@@ -43,19 +43,39 @@ export interface WffStrategyResult {
   };
 }
 
+export const WFF_BASE_MODEL_KEYS = ["catboost", "forest", "xgboost", "svr", "mlp"] as const;
+
+function modelCombinations(size: number) {
+  const result: string[] = [];
+  const visit = (start: number, chosen: string[]) => {
+    if (chosen.length === size) {
+      result.push(chosen.join("+"));
+      return;
+    }
+    for (let index = start; index < WFF_BASE_MODEL_KEYS.length; index += 1) {
+      visit(index + 1, [...chosen, WFF_BASE_MODEL_KEYS[index]]);
+    }
+  };
+  visit(0, []);
+  return result;
+}
+
+const WFF_PAIR_OPTIONS = modelCombinations(2);
+const WFF_MULTI_BASE_OPTIONS = modelCombinations(3);
+
 export const WFF_STRATEGY_OPTIONS = {
   single: {
-    model: ["catboost", "xgboost", "forest"],
+    model: WFF_BASE_MODEL_KEYS,
     complexity: ["compact", "balanced", "deep"],
     rate: ["steady", "normal", "aggressive"],
   },
   dual: {
-    pair: ["catboost+xgboost", "xgboost+forest", "catboost+forest"],
+    pair: WFF_PAIR_OPTIONS,
     weight: ["0", "100"],
     complexity: ["compact", "balanced", "deep"],
   },
   triple: {
-    base: ["catboost+forest+xgboost", "catboost+xgboost", "forest+xgboost"],
+    base: WFF_MULTI_BASE_OPTIONS,
     meta: ["catboost", "forest", "xgboost", "target-tuned"],
     region_profile: ["table-4-5", "smooth", "high-focus"],
   },
@@ -71,6 +91,10 @@ export const WFF_MODEL_KNOB_VALUES: Record<string, readonly string[]> = {
   xgboost_learning_rate: ["auto", "0.05", "0.20", "0.90"],
   xgboost_max_depth: ["auto", "3", "4", "5"],
   xgboost_reg_lambda: ["auto", "1", "7", "10"],
+  svr_c: ["auto", "50", "80", "120"],
+  svr_gamma: ["auto", "0.03", "0.12", "0.30"],
+  mlp_hidden_units: ["auto", "16", "32", "64"],
+  mlp_alpha: ["auto", "0.005", "0.10", "0.50"],
 };
 
 export const WFF_MODEL_KNOB_DEFAULTS = Object.fromEntries(Object.keys(WFF_MODEL_KNOB_VALUES).map((key) => [key, "auto"])) as Record<string, string>;
@@ -79,12 +103,18 @@ export const WFF_REGION_PARAMETER_DEFAULTS: Record<string, string> = {
   low_catboost_learning_rate: "0.03",
   low_xgboost_learning_rate: "0.05",
   low_forest_max_depth: "9",
+  low_svr_c: "50",
+  low_mlp_hidden_units: "16",
   middle_catboost_learning_rate: "0.58",
   middle_xgboost_learning_rate: "0.90",
   middle_forest_max_depth: "7",
+  middle_svr_c: "80",
+  middle_mlp_hidden_units: "32",
   high_catboost_learning_rate: "0.12",
   high_xgboost_learning_rate: "0.20",
   high_forest_max_depth: "9",
+  high_svr_c: "80",
+  high_mlp_hidden_units: "16",
 };
 
 export const WFF_REGION_PARAMETER_VALUES: Record<string, readonly string[]> = {
@@ -97,23 +127,29 @@ export const WFF_REGION_PARAMETER_VALUES: Record<string, readonly string[]> = {
   low_forest_max_depth: ["5", "9", "12"],
   middle_forest_max_depth: ["3", "7", "11"],
   high_forest_max_depth: ["5", "9", "12"],
+  low_svr_c: ["20", "50", "80"],
+  middle_svr_c: ["50", "80", "120"],
+  high_svr_c: ["30", "80", "120"],
+  low_mlp_hidden_units: ["8", "16", "32"],
+  middle_mlp_hidden_units: ["16", "32", "64"],
+  high_mlp_hidden_units: ["8", "16", "32"],
 };
 
 export const WFF_REGION_PARAMETER_PRESETS = {
   low: [
-    { low_catboost_learning_rate: "0.01", low_xgboost_learning_rate: "0.01", low_forest_max_depth: "5" },
-    { low_catboost_learning_rate: "0.03", low_xgboost_learning_rate: "0.05", low_forest_max_depth: "9" },
-    { low_catboost_learning_rate: "0.12", low_xgboost_learning_rate: "0.20", low_forest_max_depth: "12" },
+    { low_catboost_learning_rate: "0.01", low_xgboost_learning_rate: "0.01", low_forest_max_depth: "5", low_svr_c: "20", low_mlp_hidden_units: "8" },
+    { low_catboost_learning_rate: "0.03", low_xgboost_learning_rate: "0.05", low_forest_max_depth: "9", low_svr_c: "50", low_mlp_hidden_units: "16" },
+    { low_catboost_learning_rate: "0.12", low_xgboost_learning_rate: "0.20", low_forest_max_depth: "12", low_svr_c: "80", low_mlp_hidden_units: "32" },
   ],
   middle: [
-    { middle_catboost_learning_rate: "0.12", middle_xgboost_learning_rate: "0.50", middle_forest_max_depth: "3" },
-    { middle_catboost_learning_rate: "0.58", middle_xgboost_learning_rate: "0.90", middle_forest_max_depth: "7" },
-    { middle_catboost_learning_rate: "0.90", middle_xgboost_learning_rate: "0.99", middle_forest_max_depth: "11" },
+    { middle_catboost_learning_rate: "0.12", middle_xgboost_learning_rate: "0.50", middle_forest_max_depth: "3", middle_svr_c: "50", middle_mlp_hidden_units: "16" },
+    { middle_catboost_learning_rate: "0.58", middle_xgboost_learning_rate: "0.90", middle_forest_max_depth: "7", middle_svr_c: "80", middle_mlp_hidden_units: "32" },
+    { middle_catboost_learning_rate: "0.90", middle_xgboost_learning_rate: "0.99", middle_forest_max_depth: "11", middle_svr_c: "120", middle_mlp_hidden_units: "64" },
   ],
   high: [
-    { high_catboost_learning_rate: "0.03", high_xgboost_learning_rate: "0.05", high_forest_max_depth: "5" },
-    { high_catboost_learning_rate: "0.12", high_xgboost_learning_rate: "0.20", high_forest_max_depth: "9" },
-    { high_catboost_learning_rate: "0.30", high_xgboost_learning_rate: "0.70", high_forest_max_depth: "12" },
+    { high_catboost_learning_rate: "0.03", high_xgboost_learning_rate: "0.05", high_forest_max_depth: "5", high_svr_c: "30", high_mlp_hidden_units: "8" },
+    { high_catboost_learning_rate: "0.12", high_xgboost_learning_rate: "0.20", high_forest_max_depth: "9", high_svr_c: "80", high_mlp_hidden_units: "16" },
+    { high_catboost_learning_rate: "0.30", high_xgboost_learning_rate: "0.70", high_forest_max_depth: "12", high_svr_c: "120", high_mlp_hidden_units: "32" },
   ],
 } as const;
 
@@ -133,6 +169,8 @@ export const WFF_STRATEGY_LABELS: Record<string, string> = {
   catboost: "CatBoost",
   xgboost: "XGBoost",
   forest: "Random Forest",
+  svr: "SVR",
+  mlp: "MLP",
   ridge: "Ridge",
   "target-tuned": "Target tuned",
   compact: "Compact",
@@ -187,7 +225,8 @@ export function normalizeStrategyRequest(input: Partial<WffStrategyRequest>): Wf
     for (const [name, fallback] of Object.entries(WFF_REGION_PARAMETER_DEFAULTS)) {
       const requested = Number(input.options?.[name] ?? fallback);
       const allowed = WFF_REGION_PARAMETER_VALUES[name] ?? [fallback];
-      options[name] = name.endsWith("_max_depth")
+      const integerParameter = name.endsWith("_max_depth") || name.endsWith("_svr_c") || name.endsWith("_mlp_hidden_units");
+      options[name] = integerParameter
         ? snapToAllowedValue(requested, allowed, fallback)
         : snapToAllowedValue(requested, allowed, fallback, 2);
     }
