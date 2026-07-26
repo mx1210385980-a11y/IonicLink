@@ -1,0 +1,245 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --grid-line: rgba(15, 23, 42, 0.024);
+}
+
+body {
+  @apply text-ink-900 antialiased;
+  min-height: 100vh;
+  background-color: #f6f8f8;
+  background-image:
+    radial-gradient(95% 62% at 50% -12%, rgba(13, 148, 136, 0.075), transparent 62%),
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 100% 100%, 32px 32px, 32px 32px;
+  background-attachment: fixed;
+}
+
+/* Calm, slim scrollbar that matches the scientific console aesthetic. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+@keyframes home-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes molecule-space-turn {
+  0% {
+    transform: perspective(520px) rotateX(7deg) rotateY(-16deg) rotateZ(-1deg) scale(1.06);
+  }
+  34% {
+    transform: perspective(520px) rotateX(-5deg) rotateY(15deg) rotateZ(1.2deg) scale(1.12);
+  }
+  68% {
+    transform: perspective(520px) rotateX(5deg) rotateY(4deg) rotateZ(-1.5deg) scale(1.08);
+  }
+  100% {
+    transform: perspective(520px) rotateX(7deg) rotateY(-16deg) rotateZ(-1deg) scale(1.06);
+  }
+}
+
+@keyframes molecule-space-turn-anion {
+  0% {
+    transform: perspective(520px) rotateX(7deg) rotateY(-13deg) rotateZ(-0.7deg) scale(1.06);
+  }
+  34% {
+    transform: perspective(520px) rotateX(-4deg) rotateY(12deg) rotateZ(0.9deg) scale(1.12);
+  }
+  68% {
+    transform: perspective(520px) rotateX(4deg) rotateY(3deg) rotateZ(-1deg) scale(1.08);
+  }
+  100% {
+    transform: perspective(520px) rotateX(7deg) rotateY(-13deg) rotateZ(-0.7deg) scale(1.06);
+  }
+}
+
+@keyframes molecule-breath {
+  0%,
+  100% {
+    opacity: 0.32;
+    transform: translate(-50%, -50%) scale(0.92);
+  }
+  50% {
+    opacity: 0.52;
+    transform: translate(-50%, -50%) scale(1.08);
+  }
+}
+
+@layer base {
+  body {
+    font-feature-settings: "cv02", "cv03", "cv04", "ss01";
+  }
+}
+
+@layer components {
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-[7px] border border-ink-200 bg-white px-2.5 py-1 text-xs font-medium text-ink-800;
+  }
+  .chip-accent {
+    @apply inline-flex items-center gap-1.5 rounded-[7px] border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700;
+  }
+  .label-eyebrow {
+    @apply font-sans text-[10px] font-semibold uppercase tracking-eyebrow text-ink-500;
+  }
+  .panel {
+    @apply rounded-[10px] border border-ink-200/80 bg-white/90 shadow-card backdrop-blur;
+  }
+  .btn {
+    @apply inline-flex min-h-10 items-center gap-2 rounded-[8px] border border-ink-200 bg-white px-3.5 py-2 text-sm font-medium text-ink-800 transition hover:border-brand-300 hover:text-brand-700 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply inline-flex min-h-10 items-center gap-2 rounded-[8px] bg-brand-700 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-800 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .filter-select {
+    @apply min-h-9 rounded-[7px] border border-ink-200 bg-white px-2.5 text-xs font-semibold text-ink-700 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100;
+  }
+  .status-mini {
+    @apply inline-flex w-fit items-center rounded-md border px-1.5 py-0.5 font-sans text-[9px] font-bold uppercase tracking-eyebrow;
+  }
+  .status-mini-review {
+    @apply border-amber-200 bg-amber-50 text-amber-700;
+  }
+  .status-mini-official {
+    @apply border-brand-200 bg-brand-50 text-brand-700;
+  }
+  .status-mini-warn {
+    @apply border-amber-200 bg-white text-amber-700;
+  }
+  .status-mini-muted {
+    @apply border-ink-200 bg-white text-ink-500;
+  }
+  .molecule-field {
+    @apply relative grid flex-1 place-items-center overflow-hidden rounded-md bg-white/70;
+    isolation: isolate;
+    min-height: var(--molecule-view-height);
+    perspective: 560px;
+  }
+  .molecule-field::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 52%;
+    z-index: 0;
+    width: 78%;
+    height: 70%;
+    border-radius: 9999px;
+    background: var(--molecule-glow);
+    filter: blur(18px);
+    animation: molecule-breath 5.2s ease-in-out infinite;
+  }
+  .molecule-field::after {
+    content: "";
+    position: absolute;
+    inset: 10% 12%;
+    z-index: 0;
+    border-radius: 9999px;
+    background:
+      linear-gradient(90deg, transparent, var(--molecule-sheen), transparent),
+      radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.85), transparent 58%);
+    opacity: 0.44;
+  }
+  .molecule-field-cation {
+    --molecule-glow: radial-gradient(circle, rgba(103, 232, 249, 0.42), rgba(103, 232, 249, 0.1) 48%, transparent 72%);
+    --molecule-sheen: rgba(8, 145, 178, 0.14);
+    --molecule-shadow: rgba(8, 145, 178, 0.34);
+  }
+  .molecule-field-anion {
+    --molecule-glow: radial-gradient(circle, rgba(110, 231, 183, 0.38), rgba(110, 231, 183, 0.1) 48%, transparent 72%);
+    --molecule-sheen: rgba(5, 150, 105, 0.14);
+    --molecule-shadow: rgba(5, 150, 105, 0.3);
+    min-height: var(--molecule-view-height);
+  }
+  .molecule-spin-stage {
+    @apply relative z-10 grid h-full w-full place-items-center overflow-visible;
+    min-height: var(--molecule-view-height);
+    transform-style: preserve-3d;
+  }
+  .molecule-spin {
+    @apply grid place-items-center overflow-visible;
+    transform-origin: center;
+    transform-style: preserve-3d;
+    animation: molecule-space-turn 7.5s ease-in-out infinite;
+    filter: drop-shadow(0 12px 14px var(--molecule-shadow));
+    will-change: transform;
+  }
+  .molecule-spin-anion {
+    animation: molecule-space-turn-anion 7.5s ease-in-out infinite;
+    animation-delay: -1.9s;
+  }
+  .molecule-canvas {
+    overflow: visible;
+    filter: contrast(1.38) saturate(1.18) drop-shadow(0 1px 0 rgba(15, 23, 42, 0.18));
+    mix-blend-mode: multiply;
+    shape-rendering: geometricPrecision;
+    text-rendering: geometricPrecision;
+  }
+  .molecule-canvas .element {
+    font-weight: 700;
+    paint-order: stroke;
+    stroke: rgba(255, 255, 255, 0.9);
+    stroke-linejoin: round;
+    stroke-width: 0.7px;
+  }
+  .molecule-field-anion .molecule-canvas .element {
+    stroke-width: 0.9px;
+  }
+  .molecule-placeholder {
+    filter: contrast(1.18) saturate(1.12) drop-shadow(0 8px 10px var(--molecule-shadow));
+  }
+  /* The numeric tabular figure treatment for measured values. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+  .wff-range {
+    @apply h-2 w-full cursor-grab appearance-none rounded-full border border-white/70 bg-ink-200/80 shadow-inner accent-brand-600 active:cursor-grabbing;
+  }
+  .wff-range::-webkit-slider-thumb {
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 9999px;
+    border: 3px solid #ffffff;
+    background: linear-gradient(135deg, #14b8a6, #0f766e);
+    box-shadow: 0 8px 18px -8px rgba(15, 118, 110, 0.9), 0 0 0 1px rgba(15, 118, 110, 0.18);
+  }
+  .wff-range::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 9999px;
+    border: 3px solid #ffffff;
+    background: linear-gradient(135deg, #14b8a6, #0f766e);
+    box-shadow: 0 8px 18px -8px rgba(15, 118, 110, 0.9), 0 0 0 1px rgba(15, 118, 110, 0.18);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [class*="home-rise"],
+  .molecule-spin,
+  .molecule-field::before {
+    animation: none;
+  }
+}

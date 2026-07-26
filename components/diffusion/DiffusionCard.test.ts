@@ -1,0 +1,56 @@
+import assert from "node:assert/strict";
+import * as React from "react";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { DiffusionCard } from "./DiffusionCard";
+import { ingest } from "@/lib/diffusion/ingest";
+
+(globalThis as typeof globalThis & { React: typeof React }).React = React;
+
+const draft = ingest({
+  paper: { title: "Test diffusion paper" },
+  cation: "[EMIM]",
+  anion: "[TFSI]",
+  species: "cation",
+  temperature: "303 K",
+  diffusion: "6.2 × 10⁻¹¹ m² s⁻¹",
+  method: "PFG-NMR",
+  nucleus: "¹H",
+  viscosity: "28 cP",
+});
+const record = { ...draft, id: "#001", status: "official" as const, createdAt: "" };
+record.flexible = [{ key: "sequence note", value: "kept as flexible diffusion context" }];
+
+const html = renderToStaticMarkup(createElement(DiffusionCard, { record }));
+const actionsHtml = renderToStaticMarkup(
+  createElement(DiffusionCard, {
+    record,
+    actions: createElement("button", null, "Edit"),
+  }),
+);
+
+// D readout renders the reported value + label
+assert.match(html, /6\.2 × 10⁻¹¹ m² s⁻¹/);
+assert.match(html, /Self-diffusion/);
+// standardized line uses the µm²/s ladder
+assert.match(html, /62 µm²\/s/);
+// the ionic-identity section is reused from the shared parts
+assert.match(html, /data-testid="ionic-liquid-panel"/);
+assert.match(html, /\[EMIM\]/);
+// the species zone shows the diffusing ion + nucleus + method
+assert.match(html, /data-testid="species-panel"/);
+assert.match(html, /cation/);
+assert.match(html, /¹H/);
+assert.match(html, /PFG-NMR/);
+// other domains' visuals must NOT leak into the diffusion card
+assert.doesNotMatch(html, /afm-probe-illustration/);
+assert.doesNotMatch(html, /Coefficient of friction/);
+assert.doesNotMatch(html, /Ionic conductivity/);
+// flexible/raw context stays in the record model but is omitted from the reading card
+assert.doesNotMatch(html, /data-testid="raw-flexible-panel"/);
+assert.doesNotMatch(html, /kept as flexible diffusion context/);
+assert.match(html, /Reported Conditions/);
+assert.doesNotMatch(actionsHtml, /core complete/);
+assert.match(actionsHtml, />Edit<\/button>/);
+
+console.log("DiffusionCard tests passed");

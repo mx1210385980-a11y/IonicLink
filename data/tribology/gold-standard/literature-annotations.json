@@ -1,0 +1,137 @@
+{
+  "version": 1,
+  "domain": "tribology",
+  "description": "Small source-backed gold annotation fixture for field-level tribology extraction evaluation. Each document text is a compact page-tagged excerpt rather than a full paper.",
+  "documents": [
+    {
+      "id": "gold-bmim-bf4-mica",
+      "title": "AFM nanotribology of [BMIM][BF4] on mica",
+      "doi": "10.0000/tribology.gold.001",
+      "notes": "Single-condition AFM fixture covering base fields plus potential, velocity, roughness, probe, and concentration.",
+      "text": "[PAGE 1]\nAFM nanotribology of [BMIM][BF4] on mica\nThe ionic liquid [BMIM] [BF4] was studied between a silicon nitride AFM tip and freshly cleaved mica. Measurements were made at 25 C under a normal load of 5 nN. The applied potential was +0.5 V and the lateral velocity was 2 um/s. The mica roughness was 1 nm. The coefficient of friction was 0.12 for neat [BMIM][BF4].",
+      "goldRecords": [
+        {
+          "paper": {
+            "title": "AFM nanotribology of [BMIM][BF4] on mica",
+            "doi": "10.0000/tribology.gold.001"
+          },
+          "cation": "[BMIM]",
+          "anion": "[BF4]",
+          "substrate": "mica",
+          "temperature": "25 C",
+          "load": "5 nN",
+          "cof": 0.12,
+          "scale": "nano",
+          "method": "AFM",
+          "probe": "silicon nitride",
+          "probeType": "Tip",
+          "velocity": "2 um/s",
+          "potential": "+0.5 V",
+          "roughness": "1 nm",
+          "concentration": "neat",
+          "provenance": [
+            {
+              "field": "cof",
+              "page": 1,
+              "quote": "The coefficient of friction was 0.12 for neat [BMIM][BF4].",
+              "basis": "direct"
+            },
+            {
+              "field": "load",
+              "page": 1,
+              "quote": "Measurements were made at 25 C under a normal load of 5 nN.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 1
+        }
+      ]
+    },
+    {
+      "id": "gold-emim-tfsi-hopg",
+      "title": "Potential-controlled friction of [EMIM][TFSI] on HOPG",
+      "doi": "10.0000/tribology.gold.002",
+      "notes": "Single-condition electroresponsive AFM fixture on graphite/HOPG.",
+      "text": "[PAGE 1]\nPotential-controlled friction of [EMIM][TFSI] on HOPG\n[EMIM] [TFSI] was confined between a silica colloid probe and HOPG at 298 K. The experiment used a 10 nN load and 4 um/s sliding velocity. At -0.2 V the coefficient of friction was 0.08. The water content was below 100 ppm.",
+      "goldRecords": [
+        {
+          "paper": {
+            "title": "Potential-controlled friction of [EMIM][TFSI] on HOPG",
+            "doi": "10.0000/tribology.gold.002"
+          },
+          "cation": "[EMIM]",
+          "anion": "[TFSI]",
+          "substrate": "HOPG",
+          "temperature": "298 K",
+          "load": "10 nN",
+          "cof": 0.08,
+          "scale": "nano",
+          "method": "AFM",
+          "probe": "silica",
+          "probeType": "Colloid",
+          "velocity": "4 um/s",
+          "potential": "-0.2 V",
+          "waterContent": "below 100 ppm",
+          "provenance": [
+            {
+              "field": "cof",
+              "page": 1,
+              "quote": "At -0.2 V the coefficient of friction was 0.08.",
+              "basis": "direct"
+            },
+            {
+              "field": "load",
+              "page": 1,
+              "quote": "The experiment used a 10 nN load and 4 um/s sliding velocity.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 1
+        }
+      ]
+    },
+    {
+      "id": "gold-pyr14-fap-au",
+      "title": "Boundary-layer friction of [PYR14][FAP] on Au(111)",
+      "doi": "10.0000/tribology.gold.003",
+      "notes": "Fixture covering film-layer extraction and additives.",
+      "text": "[PAGE 1]\nBoundary-layer friction of [PYR14][FAP] on Au(111)\nA [PYR14] [FAP] ionic liquid film was measured on Au(111) with a diamond AFM probe. The test temperature was 293 K, the normal force was 2 nN, and the sliding speed was 6 um/s. Force-distance curves showed 3 layers in the boundary film. The coefficient of friction was 0.04 with 1 wt% water additive.",
+      "goldRecords": [
+        {
+          "paper": {
+            "title": "Boundary-layer friction of [PYR14][FAP] on Au(111)",
+            "doi": "10.0000/tribology.gold.003"
+          },
+          "cation": "[PYR14]",
+          "anion": "[FAP]",
+          "substrate": "Au(111)",
+          "temperature": "293 K",
+          "load": "2 nN",
+          "cof": 0.04,
+          "scale": "nano",
+          "method": "AFM",
+          "probe": "diamond",
+          "probeType": "Tip",
+          "velocity": "6 um/s",
+          "filmThickness": "3 layers",
+          "additives": "1 wt% water",
+          "provenance": [
+            {
+              "field": "cof",
+              "page": 1,
+              "quote": "The coefficient of friction was 0.04 with 1 wt% water additive.",
+              "basis": "direct"
+            },
+            {
+              "field": "filmThickness",
+              "page": 1,
+              "quote": "Force-distance curves showed 3 layers in the boundary film.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 1
+        }
+      ]
+    }
+  ]
+}
