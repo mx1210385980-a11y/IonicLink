@@ -50,19 +50,21 @@ git -C "$SOURCE_DIR" merge-base --is-ancestor "$TARGET_SHA" origin/main || {
   exit 65
 }
 
-readonly BACKUP_DIR="/opt/ioniclink-backups/actions/$(date -u +%Y%m%d-%H%M%S)-${TARGET_SHA:0:12}"
-install -d -m 0700 "$BACKUP_DIR"
-install -m 0600 "$RUNTIME_DIR/.env.production" "$BACKUP_DIR/.env.production"
-python3 "$SOURCE_DIR/ops/backup-production-databases.py" \
-  "$RUNTIME_DIR/data" \
-  "$BACKUP_DIR/databases"
-
 previous_sha=""
 if [[ -s "$STATE_DIR/current-sha" ]]; then
   previous_sha="$(tr -d '\r\n' < "$STATE_DIR/current-sha")"
 elif git -C "$SOURCE_DIR" rev-parse --verify HEAD >/dev/null 2>&1; then
   previous_sha="$(git -C "$SOURCE_DIR" rev-parse HEAD)"
 fi
+
+git -C "$SOURCE_DIR" checkout --detach "$TARGET_SHA"
+
+readonly BACKUP_DIR="/opt/ioniclink-backups/actions/$(date -u +%Y%m%d-%H%M%S)-${TARGET_SHA:0:12}"
+install -d -m 0700 "$BACKUP_DIR"
+install -m 0600 "$RUNTIME_DIR/.env.production" "$BACKUP_DIR/.env.production"
+python3 "$SOURCE_DIR/ops/backup-production-databases.py" \
+  "$RUNTIME_DIR/data" \
+  "$BACKUP_DIR/databases"
 
 export IONICLINK_ENV_FILE="$RUNTIME_DIR/.env.production"
 export IONICLINK_DATA_DIR="$RUNTIME_DIR/data"
@@ -99,7 +101,6 @@ rollback() {
 }
 
 echo "Deploying IonicLink commit $TARGET_SHA"
-git -C "$SOURCE_DIR" checkout --detach "$TARGET_SHA"
 compose config --quiet
 
 if ! compose build app; then
