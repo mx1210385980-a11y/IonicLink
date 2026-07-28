@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+umask 027
+
+readonly REPOSITORY_URL="${IONICLINK_REPOSITORY_URL:-https://github.com/mx1210385980-a11y/IonicLink.git}"
+readonly SOURCE_DIR="${IONICLINK_SOURCE_DIR:-/opt/ioniclink-source}"
+readonly RUNTIME_DIR="${IONICLINK_RUNTIME_DIR:-/opt/ioniclink-v2}"
+readonly STATE_DIR="${IONICLINK_STATE_DIR:-/var/lib/ioniclink-deploy}"
+readonly LOCK_FILE="${IONICLINK_LOCK_FILE:-/run/lock/ioniclink-deploy.lock}"
+readonly TARGET_SHA="${1:-}"
+
+if [[ ! "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+  echo "Expected a full 40-character Git commit SHA." >&2
+  exit 64
+fi
+
+for command_name in curl docker flock git python3; do
+  command -v "$command_name" >/dev/null 2>&1 || {
+    echo "Missing required command: $command_name" >&2
+    exit 69
+  }
+done
+
+exec 9>"$LOCK_FILE"
+flock -n 9 || {
+  echo "Another IonicLink deployment is already running." >&2
+  exit 75
+}
+
+test -s "$RUNTIME_DIR/.env.production" || {
+  echo "Missing production environment file: $RUNTIME_DIR/.env.production" >&2
+  exit 66
+}
+test -d "$RUNTIME_DIR/data" || {
+  echo "Missing production data directory: $RUNTIME_DIR/data" >&2
+  exit 66
+}
+
+install -d -m 0755 "$STATE_DIR"
+
+if [[ ! -d "$SOURCE_DIR/.git" ]]; then
+  git clone --no-checkout "$REPOSITORY_URL" "$SOURCE_DIR"
+fi
+
+git -C "$SOURCE_DIR" fetch --prune origin main
+git -C "$SOURCE_DIR" cat-file -e "${TARGET_SHA}^{commit}"
+git -C "$SOURCE_DIR" merge-base --is-ancestor "$TARGET_SHA" origin/main || {
+  echo "Refusing to deploy a commit that is not contained in origin/main." >&2
+  exit 65
+}
+
+readonly BACKUP_DIR="/opt/ioniclink-backups/actions/$(date -u +%Y%m%d-%H%M%S)-${TARGET_SHA:0:12}"
+install -d -m 0700 "$BACKUP_DIR"
+install -m 0600 "$RUNTIME_DIR/.env.production" "$BACKUP_DIR/.env.production"
+python3 "$SOURCE_DIR/ops/backup-production-databases.py" \
+  "$RUNTIME_DIR/data" \
+  "$BACKUP_DIR/databases"
+
+previous_sha=""
+if [[ -s "$STATE_DIR/current-sha" ]]; then
+  previous_sha="$(tr -d '\r\n' < "$STATE_DIR/current-sha")"
+elif git -C "$SOURCE_DIR" rev-parse --verify HEAD >/dev/null 2>&1; then
+  previous_sha="$(git -C "$SOURCE_DIR" rev-parse HEAD)"
+fi
+
+export IONICLINK_ENV_FILE="$RUNTIME_DIR/.env.production"
+export IONICLINK_DATA_DIR="$RUNTIME_DIR/data"
+
+compose() {
+  docker compose \
+    --project-name ioniclink-v2 \
+    --file "$SOURCE_DIR/docker-compose.prod.yml" \
+    "$@"
+}
+
+health_check() {
+  local attempt
+  for attempt in {1..30}; do
+    if curl --fail --silent --show-error --max-time 5 \
+      http://127.0.0.1/ >/dev/null; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+rollback() {
+  if [[ "$previous_sha" =~ ^[0-9a-f]{40}$ ]] &&
+    git -C "$SOURCE_DIR" cat-file -e "${previous_sha}^{commit}" 2>/dev/null; then
+    echo "Rolling back to $previous_sha" >&2
+    git -C "$SOURCE_DIR" checkout --detach "$previous_sha"
+    compose config --quiet
+    compose build app
+    compose up -d --no-build --remove-orphans app
+    printf '%s\n' "$previous_sha" > "$STATE_DIR/current-sha"
+  fi
+}
+
+echo "Deploying IonicLink commit $TARGET_SHA"
+git -C "$SOURCE_DIR" checkout --detach "$TARGET_SHA"
+compose config --quiet
+
+if ! compose build app; then
+  rollback
+  exit 1
+fi
+
+if ! compose up -d --no-build --remove-orphans app; then
+  rollback
+  exit 1
+fi
+
+if ! health_check; then
+  echo "Production health check failed." >&2
+  rollback
+  exit 1
+fi
+
+printf '%s\n' "$TARGET_SHA" > "$STATE_DIR/current-sha"
+printf '%s %s\n' "$(date -u +%FT%TZ)" "$TARGET_SHA" >> "$STATE_DIR/history.log"
+echo "IonicLink deployment succeeded: $TARGET_SHA"
