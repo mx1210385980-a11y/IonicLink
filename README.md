@@ -112,3 +112,9 @@ reproducible fixtures. Runtime and research-library artifacts stay outside Git:
 
 This keeps GitHub cloneable and deployable without mixing application code with the live
 server database or one-off research backups.
+
+## Deployment
+
+Pull requests run the full verification suite. A verified commit merged into `main`
+deploys automatically to production while preserving the server-only environment file
+and persistent databases. See [`docs/deployment.md`](docs/deployment.md).
