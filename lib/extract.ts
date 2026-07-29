@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { Domain, DomainDraft } from "./domain";
+import type { Domain, DomainDraft, ExtractionMetadata, ExtractionSource } from "./domain";
 import type { Module } from "./modules/types";
 import { getModule } from "./modules/registry.server";
 
@@ -14,7 +14,7 @@ import { getModule } from "./modules/registry.server";
 
 export interface ExtractResult {
   records: DomainDraft<any, any>[];
-  source: "openai-compatible" | "anthropic" | "mock";
+  source: ExtractionSource;
   model?: string;
 }
 
@@ -31,21 +31,35 @@ export async function extractRecords(
   if (!trimmed) return { records: [], source: "mock" };
 
   const mod = getModule(domain);
-  const stamp = (r: DomainDraft<any, any>): DomainDraft<any, any> =>
-    sourceId ? { ...r, sourceId } : r;
   // The module's hard gate: drafts the domain refuses (e.g. diffusion records
   // without any D value) never reach the review queue, whatever the model did.
   const accept = (r: DomainDraft<any, any>): boolean => mod.acceptDraft?.(r) ?? true;
+  const finish = (
+    records: DomainDraft<any, any>[],
+    source: ExtractionSource,
+    model?: string
+  ): ExtractResult => {
+    const extraction: ExtractionMetadata = { source, ...(model ? { model } : {}) };
+    return {
+      records: records.filter(accept).map((record) => ({
+        ...record,
+        ...(sourceId ? { sourceId } : {}),
+        extraction,
+      })),
+      source,
+      ...(model ? { model } : {}),
+    };
+  };
 
   if (!isLiveExtractionEnabled()) {
-    return { records: mod.mockExtract(trimmed).map(mod.ingest).filter(accept).map(stamp), source: "mock" };
+    return finish(mod.mockExtract(trimmed).map(mod.ingest), "mock");
   }
 
   const model = process.env.EXTRACT_MODEL || "claude-sonnet-4-6";
   const openAIConfig = getOpenAIConfig();
   if (openAIConfig) {
     const fields = await extractWithOpenAICompatible(trimmed, model, openAIConfig, mod);
-    return { records: fields.map(mod.ingest).filter(accept).map(stamp), source: "openai-compatible", model };
+    return finish(fields.map(mod.ingest), "openai-compatible", model);
   }
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
@@ -70,7 +84,7 @@ export async function extractRecords(
     (c): c is Anthropic.ToolUseBlock => c.type === "tool_use"
   );
   const fields = (toolUse?.input as { records?: any[] })?.records ?? [];
-  return { records: fields.map(mod.ingest).filter(accept).map(stamp), source: "anthropic", model };
+  return finish(fields.map(mod.ingest), "anthropic", model);
 }
 
 interface OpenAIConfig {

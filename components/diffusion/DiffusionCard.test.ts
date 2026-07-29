@@ -22,10 +22,19 @@ const record = { ...draft, id: "#001", status: "official" as const, createdAt: "
 record.flexible = [{ key: "sequence note", value: "kept as flexible diffusion context" }];
 
 const html = renderToStaticMarkup(createElement(DiffusionCard, { record }));
+const actionsHtml = renderToStaticMarkup(
+  createElement(DiffusionCard, {
+    record,
+    actions: createElement("button", null, "Edit"),
+  }),
+);
 
 // D readout renders the reported value + label
 assert.match(html, /6\.2 × 10⁻¹¹ m² s⁻¹/);
 assert.match(html, /Self-diffusion/);
+assert.match(html, />checked</);
+assert.doesNotMatch(html, />official</);
+assert.match(html, /record-card-unified-text/);
 // standardized line uses the µm²/s ladder
 assert.match(html, /62 µm²\/s/);
 // the ionic-identity section is reused from the shared parts
@@ -40,9 +49,11 @@ assert.match(html, /PFG-NMR/);
 assert.doesNotMatch(html, /afm-probe-illustration/);
 assert.doesNotMatch(html, /Coefficient of friction/);
 assert.doesNotMatch(html, /Ionic conductivity/);
-// official records keep flexible/raw context collapsed by default
-assert.match(html, /data-testid="raw-flexible-panel"/);
-assert.match(html, /aria-expanded="false"/);
+// flexible/raw context stays in the record model but is omitted from the reading card
+assert.doesNotMatch(html, /data-testid="raw-flexible-panel"/);
 assert.doesNotMatch(html, /kept as flexible diffusion context/);
+assert.match(html, /Reported Conditions/);
+assert.doesNotMatch(actionsHtml, /core complete/);
+assert.match(actionsHtml, />Edit<\/button>/);
 
 console.log("DiffusionCard tests passed");

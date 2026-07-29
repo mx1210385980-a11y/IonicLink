@@ -14,7 +14,6 @@ import {
   IonPill,
   MissingChip,
   ProvBadge,
-  RawFlexiblePanel,
   ionDisplayLabel,
   quantityLabel,
   quantityTitle,
@@ -124,7 +123,7 @@ export function DiffusionCard({
   const il = core.ionicLiquid;
   const cationLabel = ionDisplayLabel(il.cation || "—", "cation", units);
   const anionLabel = ionDisplayLabel(il.anion || "—", "anion", units);
-  const { complete, missing } = diffusionCoreCompleteness(record);
+  const { missing } = diffusionCoreCompleteness(record);
   const svgId = useId().replace(/:/g, "");
   const conditions = buildDiffusionConditions(record, units);
   const showConfidence = record.status === "review" && typeof record.confidence === "number";
@@ -136,7 +135,7 @@ export function DiffusionCard({
 
   return (
     <article
-      className={`group relative grid overflow-hidden rounded-xl border bg-white transition duration-300 xl:grid-cols-[auto_minmax(0,0.78fr)_minmax(0,0.72fr)_minmax(0,1.45fr)] ${
+      className={`record-card-unified-text group relative grid overflow-hidden rounded-xl border bg-white transition duration-300 xl:grid-cols-[auto_minmax(0,0.78fr)_minmax(0,0.72fr)_minmax(0,1.45fr)] ${
         selected
           ? "border-brand-300 shadow-card ring-1 ring-brand-200"
           : "border-ink-200/80 shadow-sm hover:-translate-y-px hover:border-brand-200 hover:shadow-card"
@@ -157,7 +156,7 @@ export function DiffusionCard({
         )}
         <span className="font-mono text-xs font-semibold tracking-tight text-ink-400">{record.id}</span>
         <span className={`status-mini whitespace-nowrap ${record.status === "review" ? "status-mini-review" : "status-mini-official"}`}>
-          {record.status}
+          {record.status === "official" ? "checked" : record.status}
         </span>
       </div>
 
@@ -280,11 +279,8 @@ export function DiffusionCard({
         </div>
 
         <div>
-          <div className="mb-1.5 flex items-center justify-between gap-2">
-            <span className="label-eyebrow">Conditions</span>
-            <span className="font-mono text-[10px] font-medium uppercase tracking-wide text-ink-400">
-              {units === "std" ? "standardized" : "as reported"}
-            </span>
+          <div className="mb-1.5">
+            <span className="label-eyebrow">{units === "std" ? "Standardized Conditions" : "Reported Conditions"}</span>
           </div>
           <div className="grid grid-cols-2 gap-1.5 lg:grid-cols-3">
             {conditions.map((item) => (
@@ -295,20 +291,13 @@ export function DiffusionCard({
         </div>
       </section>
 
-      {/* ── flexible / raw ── */}
-      <RawFlexiblePanel fields={record.flexible} defaultCollapsed={record.status === "official"} />
-
       {/* ── actions footer ── */}
       {actions && (
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-ink-100 bg-ink-50/30 px-3 py-2 xl:col-span-4">
-          <span className="text-[11px] font-medium">
-            {complete ? (
-              <span className="text-brand-600">core complete</span>
-            ) : (
-              <span className="text-amber-600">missing: {missing.join(", ")}</span>
-            )}
-          </span>
-          <div className="flex flex-wrap items-center justify-end gap-2">{actions}</div>
+          {missing.length > 0 && (
+            <span className="text-[11px] font-medium text-amber-600">missing: {missing.join(", ")}</span>
+          )}
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">{actions}</div>
         </div>
       )}
     </article>

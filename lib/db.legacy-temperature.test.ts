@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import Database from "better-sqlite3";
 import path from "node:path";
 import { coreCompleteness, type IonicRecord } from "./schema";
-import { deleteRecords, getRecord, listRecords } from "./db";
+import { deleteRecords, getDataDir, getRecord, listRecords } from "./db";
 
 const MARK = "__LEGACY_TEMP_MARKER__";
 const id = "#LEGACY-TEMP";
@@ -33,7 +33,8 @@ const legacyRecord: IonicRecord = {
   flexible: [{ key: "conditions", value: "ambient conditions" }],
 };
 
-const db = new Database(path.join(process.cwd(), "data", "tribology.db"));
+listRecords("tribology", { search: "__ensure_schema__" });
+const db = new Database(path.join(getDataDir(), "tribology.db"));
 db.prepare(
   `INSERT OR REPLACE INTO records
     (id, status, paper_title, cation, anion, substrate, scale, cof, temp_k, load_n, created_at, payload)

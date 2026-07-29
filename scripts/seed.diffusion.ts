@@ -2,11 +2,13 @@
  * Seed the DIFFUSION database with standardized, three-layer records — the same
  * ingest path live extraction uses. Writes to data/diffusion.db only.
  *
- * Run: npm run seed:diffusion
+ * Run: npm run seed:diffusion (empty database) or
+ * npm run seed:diffusion -- --reset (replace existing records)
  */
-import { createRecords, resetAll } from "../lib/db";
+import { createRecords } from "../lib/db";
 import { ingest } from "../lib/diffusion/ingest";
 import type { DiffusionExtractedFields } from "../lib/diffusion/schema";
+import { prepareSeed } from "./seed-guard";
 
 const REF = {
   title: "Self-diffusion of imidazolium ionic liquids confined in mesoporous silica by PFG-NMR",
@@ -98,7 +100,7 @@ const REVIEW: DiffusionExtractedFields[] = [
   },
 ];
 
-resetAll("diffusion");
+prepareSeed("diffusion");
 const official = createRecords("diffusion", OFFICIAL.map(ingest), "official");
 const review = createRecords("diffusion", REVIEW.map(ingest), "review");
 console.log(`Seeded ${official.length} official + ${review.length} review diffusion records.`);

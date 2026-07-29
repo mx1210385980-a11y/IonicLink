@@ -35,6 +35,14 @@ export async function POST(req: NextRequest, { params }: { params: { domain: str
   if (!Array.isArray(body.records)) {
     return NextResponse.json({ error: "records[] required" }, { status: 400 });
   }
-  const created = createRecords(params.domain, body.records, body.status ?? "review");
-  return NextResponse.json({ created });
+  try {
+    const created = createRecords(params.domain, body.records, body.status ?? "review");
+    return NextResponse.json({ created });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not create records";
+    if (message.startsWith("Cannot create checked records")) {
+      return NextResponse.json({ error: message }, { status: 422 });
+    }
+    throw error;
+  }
 }

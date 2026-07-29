@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { parseQuantity, stdLabel } from "@/lib/units";
 import { DEFAULT_DOMAIN, type Domain } from "@/lib/domain";
 import type { FlexibleField } from "@/lib/schema";
+import { RequestError, requestErrorMessage, requestJson } from "@/components/request";
 import {
   CONDUCTIVITY_PROVENANCE_FIELDS,
   type ConductivityExtractedFields,
@@ -66,8 +67,6 @@ export function ConductivityEditor({
   const setFlex = (i: number, key: keyof FlexibleField, value: string) =>
     setFlexible((prev) => prev.map((f, idx) => (idx === i ? { ...f, [key]: value } : f)));
   const save = async () => {
-    setBusy(true);
-    setError(null);
     const fields: ConductivityExtractedFields = {
       paper: { ...record.paper, title },
       cation,
@@ -93,18 +92,24 @@ export function ConductivityEditor({
       provenance: provRowsToFields(provRows),
       confidence: record.confidence,
     };
-    const res = await fetch(`/api/${domain}/records/${encodeURIComponent(record.id)}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fields }),
-    });
-    setBusy(false);
-    if (!res.ok) {
-      const d = await res.json().catch(() => ({}));
-      setError(d.error || "Save failed");
-      return;
+    setBusy(true);
+    setError(null);
+    try {
+      await requestJson(
+        `/api/${domain}/records/${encodeURIComponent(record.id)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fields }),
+        },
+        "Could not save this conductivity record"
+      );
+      onSaved();
+    } catch (requestError) {
+      setError(requestErrorMessage(requestError, "Could not save this conductivity record. Please try again."));
+    } finally {
+      setBusy(false);
     }
-    onSaved();
   };
 
   return (
@@ -113,12 +118,10 @@ export function ConductivityEditor({
         <div className="flex items-center gap-2">
           <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-xs text-ink-500">{record.id}</span>
           <span className="text-sm font-semibold">Editing record</span>
-          {missing.length > 0 ? (
+          {missing.length > 0 && (
             <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-700">
               missing core: {missing.join(", ")}
             </span>
-          ) : (
-            <span className="rounded-md border border-brand-200 bg-brand-50 px-2 py-0.5 text-xs text-brand-700">core complete ✓</span>
           )}
         </div>
         <div className="flex gap-2">
@@ -127,7 +130,7 @@ export function ConductivityEditor({
         </div>
       </div>
 
-      {error && <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{error}</div>}
+      {error && <div className="mb-3"><RequestError>{error}</RequestError></div>}
 
       <Group label="Source">
         <Field className="sm:col-span-3" label="Paper title" value={title} onChange={setTitle} placeholder="Paper title" />

@@ -1,5 +1,5 @@
 import type { Quantity } from "./units";
-import type { DomainDraft, DomainRecord } from "./domain";
+import type { DomainDraft, DomainRecord, ExtractionSource } from "./domain";
 import type { SurfaceDescriptors } from "./surfaceDescriptors";
 
 /**
@@ -286,14 +286,49 @@ export interface BatchJob {
   filename: string;
   status: JobStatus;
   createdAt: string;
+  /** First time this job entered extraction (new jobs only; legacy jobs stay unknown). */
+  startedAt?: string;
+  /** First time extraction reached done/error (new jobs only; legacy jobs stay unknown). */
+  completedAt?: string;
+  /** First time extracted candidates were committed (new jobs only; legacy jobs stay unknown). */
+  committedAt?: string;
   sourceId?: string;
-  source?: string; // "anthropic" | "openai-compatible" | "mock"
+  source?: ExtractionSource;
   model?: string;
   chars?: number;
   recordCount: number;
   error?: string | null;
   /** Extracted candidates (present once status is done/committed). */
   candidates: RecordDraft[];
+}
+
+/** One immutable job-status transition used for historical progress metrics. */
+export interface JobEvent {
+  eventId: number;
+  jobId: string;
+  status: JobStatus;
+  occurredAt: string;
+  recordCount: number;
+}
+
+export interface JobHistoryDuration {
+  medianMs: number | null;
+  sampleSize: number;
+}
+
+/** Historical job funnel and elapsed-time summary for one domain. */
+export interface JobHistorySummary {
+  trackedSince: string | null;
+  receivedJobs: number;
+  startedJobs: number;
+  candidateJobs: number;
+  failedJobs: number;
+  committedJobs: number;
+  candidateRecords: number;
+  committedRecords: number;
+  queue: JobHistoryDuration;
+  extraction: JobHistoryDuration;
+  reviewWait: JobHistoryDuration;
 }
 
 /**

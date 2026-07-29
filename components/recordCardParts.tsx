@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { formatProvenance, provenanceBadge, type FieldProvenance, type FlexibleField } from "@/lib/schema";
+import { formatProvenance, provenanceBadge, type FieldProvenance } from "@/lib/schema";
 import { standardizeIonFormula, standardizeIonLabel, type IonKind } from "@/lib/ionStructures";
 import { rawLabel, stdLabel, stdRangeParts, type Quantity } from "@/lib/units";
 import { DEFAULT_DOMAIN, type Domain } from "@/lib/domain";
@@ -288,54 +287,5 @@ export function MissingChip({ label }: { label: string }) {
     <span className="rounded-lg border border-dashed border-amber-300 bg-amber-50/60 px-2 py-1 text-xs font-semibold text-amber-600">
       {label}?
     </span>
-  );
-}
-
-export function RawFlexiblePanel({
-  fields,
-  defaultCollapsed = false,
-}: {
-  fields: FlexibleField[];
-  defaultCollapsed?: boolean;
-}) {
-  const [collapsed, setCollapsed] = useState(defaultCollapsed);
-  if (fields.length === 0) return null;
-
-  return (
-    <div data-testid="raw-flexible-panel" className="border-t border-ink-100 bg-violet-50/30 px-3 py-2.5 xl:col-span-4">
-      <div className={`flex items-center justify-between gap-2 ${collapsed ? "" : "mb-2"}`}>
-        <button
-          type="button"
-          onClick={() => setCollapsed((v) => !v)}
-          aria-expanded={!collapsed}
-          className="inline-flex items-center gap-2 rounded-md text-left transition hover:text-violet-700"
-        >
-          <span className="grid h-4 w-4 place-items-center rounded border border-violet-200 bg-white font-mono text-[10px] font-black leading-none text-violet-500">
-            {collapsed ? "+" : "-"}
-          </span>
-          <span className="label-eyebrow text-violet-500">raw / flexible</span>
-        </button>
-        <span className="font-mono text-[10px] font-medium uppercase tracking-wide text-violet-400">
-          {fields.length} field{fields.length === 1 ? "" : "s"}
-        </span>
-      </div>
-      {!collapsed && (
-        <div data-testid="raw-flexible-fields" className="flex flex-wrap gap-2">
-          {fields.map((f, i) => (
-            <span
-              key={i}
-              className="min-w-[8rem] max-w-full flex-none rounded-lg border border-violet-200/70 bg-white/80 px-3 py-2 text-violet-700"
-              title={f.note ? `${f.note}` : "flexible field"}
-            >
-              <span className="block text-[10px] font-semibold uppercase tracking-eyebrow text-violet-400 [overflow-wrap:anywhere]">{f.key}</span>
-              <span className="mt-0.5 block break-words font-mono text-xs font-medium leading-relaxed">
-                {f.value}
-                {f.unit ? ` ${f.unit}` : ""}
-              </span>
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
   );
 }

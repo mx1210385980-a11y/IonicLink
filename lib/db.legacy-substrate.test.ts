@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import Database from "better-sqlite3";
 import path from "node:path";
-import { deleteRecords, getRecord, listRecords } from "./db";
+import { deleteRecords, getDataDir, getRecord, listRecords } from "./db";
 import type { IonicRecord } from "./schema";
 
 const MARK = "__LEGACY_SUBSTRATE_MARKER__";
@@ -32,7 +32,7 @@ const legacyRecord: IonicRecord = {
   },
 };
 
-const db = new Database(path.join(process.cwd(), "data", "tribology.db"));
+const db = new Database(path.join(getDataDir(), "tribology.db"));
 db.prepare(
   `INSERT OR REPLACE INTO records
     (id, status, paper_title, cation, anion, substrate, scale, cof, temp_k, load_n, created_at, payload)

@@ -8,24 +8,28 @@ import HomePage from "./page";
 
 const html = renderToStaticMarkup(createElement(HomePage));
 
-assert.match(html, /IONICLINK/);
 assert.match(html, /IONICLINK EXTRACT/);
 assert.match(html, /Add papers\. Get data\./);
-assert.match(html, /Upload PDF papers/);
-assert.match(html, /Start a clean extraction run/);
-assert.match(html, /href="\/tribology\/extract"/);
-assert.match(html, /href="\/tribology\/database\?status=review"/);
-assert.match(html, /href="\/tribology\/database\?status=official"/);
-assert.match(html, /href="\/tribology\/library"/);
-assert.match(html, /Needs review/);
-assert.match(html, /Official database/);
-assert.match(html, /Papers indexed/);
-// the global landing still exposes the isolated property workspaces
-assert.match(html, /Tribology/);
-assert.match(html, /Conductivity/);
-assert.match(html, /Diffusion/);
-assert.match(html, /href="\/tribology"/);
-assert.match(html, /href="\/conductivity"/);
-assert.match(html, /href="\/diffusion"/);
+assert.match(html, /Choose the property you are extracting/);
 
-console.log("Global landing focused extract tests passed");
+for (const [domain, label] of [
+  ["tribology", "Tribology"],
+  ["conductivity", "Conductivity"],
+  ["diffusion", "Diffusion"],
+] as const) {
+  assert.match(html, new RegExp(`${label} workspace`));
+  assert.match(html, new RegExp(`Upload ${label} papers`));
+  assert.match(html, new RegExp(`href="/${domain}/extract"`));
+  assert.match(html, new RegExp(`href="/${domain}/database"`));
+  assert.match(html, new RegExp(`href="/${domain}/database\\?status=review"`));
+  assert.match(html, new RegExp(`href="/${domain}/library"`));
+}
+
+assert.doesNotMatch(html, />Upload PDF papers</);
+assert.doesNotMatch(html, /Start a clean extraction run/);
+assert.match(html, /Review/);
+assert.match(html, /Checked/);
+assert.doesNotMatch(html, />Official</);
+assert.match(html, /Papers/);
+
+console.log("Global landing requires an explicit property workspace");

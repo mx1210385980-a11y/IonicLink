@@ -3,11 +3,12 @@
  * ExtractedFields object run through `ingest` — the same path live extraction
  * uses — so units are standardized and fields stratified into core/extended/flexible.
  *
- * Run: npm run seed
+ * Run: npm run seed (empty database) or npm run seed -- --reset (replace existing records)
  */
-import { createRecords, resetAll } from "../lib/db";
+import { createRecords } from "../lib/db";
 import { ingest } from "../lib/ingest";
 import type { ExtractedFields } from "../lib/schema";
+import { prepareSeed } from "./seed-guard";
 
 const REF_PAPER = {
   title: "Ionic liquid lubrication: influence of ion structure, surface potential and sliding velocity",
@@ -121,7 +122,7 @@ const REVIEW: ExtractedFields[] = [
   },
 ];
 
-resetAll("tribology");
+prepareSeed("tribology");
 const official = createRecords("tribology", OFFICIAL.map(ingest), "official");
 const review = createRecords("tribology", REVIEW.map(ingest), "review");
 console.log(`Seeded ${official.length} official + ${review.length} review records.`);

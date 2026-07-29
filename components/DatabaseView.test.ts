@@ -4,12 +4,25 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   analyzeGroupConditions,
+  buildDatabaseQuery,
+  databaseStatusUrl,
   DatabaseView,
+  filterRecordsByReadiness,
   filterSources,
+  isMockExtractionRecord,
+  isLoadedQueryReady,
   parseDatabaseResponse,
+  pruneSelectionToDisplayed,
   recordListUnitsForStatus,
+  requireOk,
+  ReviewReadinessStrip,
+  SEARCH_DEBOUNCE_MS,
+  selectedDisplayedRecords,
   shouldShowUnitModeControl,
   splitBySystem,
+  summarizeReviewReadiness,
+  takeVisibleRecords,
+  VISIBLE_BATCH_SIZE,
 } from "./DatabaseView";
 import { buildGroupConditionItems } from "./RecordCard";
 import { parseQuantity } from "../lib/units";
@@ -24,13 +37,123 @@ assert.equal(recordListUnitsForStatus("review", "raw"), "raw");
 assert.equal(recordListUnitsForStatus("review", "std"), "std");
 assert.equal(shouldShowUnitModeControl("official"), false);
 assert.equal(shouldShowUnitModeControl("review"), true);
+assert.equal(isMockExtractionRecord({ extraction: { source: "mock" } }), true);
+assert.equal(isMockExtractionRecord({ extraction: { source: "openai-compatible" } }), false);
+assert.equal(isMockExtractionRecord({}), false, "legacy records without extractor metadata remain publishable");
+
+type ReadinessFixture = { id: string; complete: boolean; extraction?: { source?: string } };
+const readinessFixtures: ReadinessFixture[] = [
+  { id: "ready", complete: true, extraction: { source: "openai-compatible" } },
+  { id: "incomplete", complete: false, extraction: { source: "anthropic" } },
+  { id: "mock-complete", complete: true, extraction: { source: "mock" } },
+  { id: "mock-incomplete", complete: false, extraction: { source: "mock" } },
+];
+const checkCompleteness = (record: ReadinessFixture) => ({ complete: record.complete });
+assert.deepEqual(summarizeReviewReadiness(readinessFixtures, checkCompleteness), {
+  all: 4,
+  ready: 1,
+  incomplete: 1,
+  mock: 2,
+});
+assert.deepEqual(
+  filterRecordsByReadiness(readinessFixtures, "ready", checkCompleteness).map((record) => record.id),
+  ["ready"]
+);
+assert.deepEqual(
+  filterRecordsByReadiness(readinessFixtures, "incomplete", checkCompleteness).map((record) => record.id),
+  ["incomplete"],
+  "Mock records never leak into the incomplete bucket"
+);
+assert.deepEqual(
+  filterRecordsByReadiness(readinessFixtures, "mock", checkCompleteness).map((record) => record.id),
+  ["mock-complete", "mock-incomplete"],
+  "Mock wins regardless of core completeness"
+);
+assert.equal(filterRecordsByReadiness(readinessFixtures, "all", checkCompleteness), readinessFixtures);
+
+const readinessStripHtml = renderToStaticMarkup(
+  createElement(ReviewReadinessStrip, {
+    summary: { all: 4, ready: 1, incomplete: 1, mock: 2 },
+    active: "ready",
+    onChange: () => {},
+  })
+);
+assert.match(readinessStripHtml, /data-testid="review-readiness-strip"/);
+assert.match(readinessStripHtml, /aria-label="Review readiness"/);
+assert.match(readinessStripHtml, /aria-label="Ready to approve: 1"[^>]*aria-pressed="true"|aria-pressed="true"[^>]*aria-label="Ready to approve: 1"/);
+assert.match(readinessStripHtml, /Needs core fields/);
+assert.match(readinessStripHtml, /Mock locked/);
+assert.match(readinessStripHtml, /Ready → approve/);
+assert.match(readinessStripHtml, /edit missing fields/);
+assert.match(readinessStripHtml, /re-extract with a live model or enter manually/);
+
+const zeroReadinessHtml = renderToStaticMarkup(
+  createElement(ReviewReadinessStrip, {
+    summary: { all: 2, ready: 2, incomplete: 0, mock: 0 },
+    active: "all",
+    onChange: () => {},
+  })
+);
+assert.match(zeroReadinessHtml, /aria-label="Needs core fields: 0"/);
+assert.match(zeroReadinessHtml, /aria-label="Mock locked: 0"/);
+assert.equal(zeroReadinessHtml.match(/disabled=""/g)?.length, 2, "zero-count readiness shortcuts stay visible but disabled");
+
+assert.equal(SEARCH_DEBOUNCE_MS, 300);
+assert.equal(VISIBLE_BATCH_SIZE, 50);
+assert.equal(
+  buildDatabaseQuery({ status: "review", facet: "nano", paper: "A paper", search: "  bmim pf6  " }),
+  "status=review&facet=nano&paper=A+paper&search=bmim+pf6"
+);
+assert.equal(
+  buildDatabaseQuery({ status: "official", facet: "all", paper: "all", search: "   " }),
+  "status=official",
+  "only committed, non-empty filters enter the server query"
+);
+const manyRecords = Array.from({ length: 120 }, (_, index) => ({ id: index + 1 }));
+assert.deepEqual(takeVisibleRecords(manyRecords, VISIBLE_BATCH_SIZE), manyRecords.slice(0, 50));
+assert.deepEqual(takeVisibleRecords(manyRecords, 100), manyRecords.slice(0, 100));
+assert.equal(isLoadedQueryReady(null, "tribology?status=official", "", ""), false);
+assert.equal(
+  isLoadedQueryReady("tribology?status=official", "tribology?status=official", "", ""),
+  true
+);
+assert.equal(
+  isLoadedQueryReady("tribology?status=official", "tribology?status=review", "", ""),
+  false,
+  "old records are not interactive under a new status query"
+);
+assert.equal(
+  isLoadedQueryReady("tribology?status=official", "tribology?status=official", "bmim", ""),
+  false,
+  "an uncommitted search input invalidates the loaded query"
+);
+const displayedSelectionFixtures = [{ id: "a" }, { id: "b" }];
+const selectionWithPaginatedRecord = new Set(["a", "c"]);
+assert.deepEqual(
+  selectedDisplayedRecords(displayedSelectionFixtures, selectionWithPaginatedRecord).map((record) => record.id),
+  ["a"],
+  "bulk records come only from the current pagination slice"
+);
+assert.deepEqual(
+  [...pruneSelectionToDisplayed(selectionWithPaginatedRecord, displayedSelectionFixtures)],
+  ["a"],
+  "pagination-hidden selections are removed"
+);
+assert.equal(
+  databaseStatusUrl("http://localhost/tribology/database?source=paper#records", "review"),
+  "/tribology/database?source=paper&status=review#records"
+);
 
 const officialHtml = renderToStaticMarkup(createElement(DatabaseView, { domain: "tribology" }));
 
-assert.match(officialHtml, /Official Database/);
+assert.match(officialHtml, /Checked Database/);
+assert.doesNotMatch(officialHtml, />Official</);
 assert.match(officialHtml, /data-testid="database-workbench-shell"/);
 assert.match(officialHtml, /data-testid="database-command-bar"/);
 assert.match(officialHtml, /rounded-\[8px\]/);
+assert.match(officialHtml, /Export visible \(0\)/);
+assert.match(officialHtml, /disabled=""/, "empty visible sets cannot be exported");
+assert.doesNotMatch(officialHtml, /data-testid="review-readiness-strip"/, "readiness is Review-only");
 assert.doesNotMatch(officialHtml, /As reported/);
 assert.doesNotMatch(officialHtml, /Standardized/);
 
@@ -77,6 +200,15 @@ async function testDatabaseResponseParsing() {
   await assert.rejects(
     () => parseDatabaseResponse(new Response("<!doctype html><h1>404</h1>", { status: 404 })),
     /Database API returned 404/
+  );
+  await requireOk(new Response(null, { status: 204 }), "unused fallback");
+  await assert.rejects(
+    () => requireOk(new Response(JSON.stringify({ error: "Mutation rejected" }), { status: 422 }), "fallback"),
+    /Mutation rejected/
+  );
+  await assert.rejects(
+    () => requireOk(new Response("not json", { status: 500 }), "Readable fallback"),
+    /Readable fallback/
   );
 }
 

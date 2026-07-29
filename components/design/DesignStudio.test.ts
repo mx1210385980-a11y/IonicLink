@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import React, { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { DesignStudio } from "./DesignStudio";
+import { DesignStudio, summarizeDesignReadiness } from "./DesignStudio";
 import { conditionEvidence, formatForceText, formatPotentialText, formatVelocityText } from "./PredictBench";
 import { buildDataset, operatingConditions } from "../../lib/predict/dataset";
 import { parseQuantity } from "../../lib/units";
@@ -13,7 +13,14 @@ function quantity(value: number, stdUnit: string) {
 }
 
 let nextId = 0;
-function tribologyRecord(cation: string, anion: string, cof: number, substrate = "mica", scale = "nano") {
+function tribologyRecord(
+  cation: string,
+  anion: string,
+  cof: number,
+  substrate = "mica",
+  scale = "nano",
+  basis?: "direct" | "inferred" | "assumed"
+) {
   nextId += 1;
   return {
     id: `#t${String(nextId).padStart(3, "0")}`,
@@ -29,8 +36,12 @@ function tribologyRecord(cation: string, anion: string, cof: number, substrate =
     },
     extended: { scale },
     flexible: [],
-    provenance: { cof: { page: 2, quote: `mu = ${cof}` } },
+    provenance: { cof: { page: 2, quote: `mu = ${cof}`, ...(basis ? { basis } : {}) } },
   };
+}
+
+function visibleText(html: string) {
+  return html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function conductivityRecord(cation: string, anion: string, sigma: number, tempK: number) {
@@ -74,10 +85,18 @@ function conductivityRecord(cation: string, anion: string, sigma: number, tempK:
   assert.match(html, /grid-cols-\[auto_minmax\(0,1fr\)_auto\]/);
   assert.match(
     html,
-    /<input[^>]*type="checkbox"[^>]*checked=""[^>]*\/>official records only/,
+    /<input[^>]*type="checkbox"[^>]*checked=""[^>]*\/>checked records only/,
     "the studio opens on approved evidence; review records are opt-in for model training"
   );
   assert.match(html, /usable points/);
+  assert.match(html, /data-testid="data-readiness"/);
+  assert.match(visibleText(html), /8 \/ 8 usable points Calibration gate reached\./);
+  assert.match(visibleText(html), /Statistical estimates and candidate ranking are available\./);
+  assert.match(visibleText(html), /scope excluded 1/);
+  assert.match(visibleText(html), /property evidence direct 0 inferred 0 assumed 0 unlabeled 9/);
+  assert.doesNotMatch(visibleText(html), /review hidden|model unusable/, "zero-count exclusions stay out of the compact card");
+  assert.match(html, /href="#candidate-atlas"[^>]*>Open candidate atlas</);
+  assert.match(html, /id="candidate-atlas"/);
   assert.match(html, /Model ribbon/, "the live model facts are grouped in the refined ribbon");
   assert.match(html, /Query/, "the prediction bench has a named query column");
   assert.match(html, /Result/, "the prediction bench has a named result column");
@@ -86,7 +105,7 @@ function conductivityRecord(cation: string, anion: string, sigma: number, tempK:
   assert.match(html, /LOO/, "9 usable records unlock leave-one-out calibration");
   assert.match(html, /Design explorer/);
   assert.match(html, /Calibration certificate/);
-  assert.match(html, /official records only/);
+  assert.match(html, /checked records only/);
   assert.doesNotMatch(html, /Knowledge Consolidation/, "the old knowledge page is gone");
   // the condition-resolved lubrication model surfaces
   assert.match(html, /Operating conditions/, "tribology bench exposes load/speed/potential/film inputs");
@@ -109,6 +128,57 @@ function conductivityRecord(cation: string, anion: string, sigma: number, tempK:
   assert.match(html, /RMSE/);
   assert.match(html, /MAE/);
   assert.match(html, /Kernel bandwidth/);
+}
+
+/* ---- readiness summary: every included property member lands in exactly one evidence bucket ---- */
+{
+  const included = [
+    tribologyRecord("[EMIM]", "[TFSI]", 0.02, "mica", "nano", "direct"),
+    tribologyRecord("[C4C1Im]", "[TFSI]", 0.03, "mica", "nano", "inferred"),
+    tribologyRecord("[PYR14]", "[TFSI]", 0.06, "mica", "nano", "assumed"),
+    tribologyRecord("[BMIm]", "[EtSO4]", 0.004),
+  ];
+  for (const record of included) record.status = "official";
+
+  const hiddenReview = tribologyRecord("[C6C1Im]", "[TFSI]", 0.05);
+  hiddenReview.status = "review";
+  const outOfScope = tribologyRecord("[C8MIM]", "[TFSI]", 0.08, "steel", "macro");
+  outOfScope.status = "official";
+  const unusable = tribologyRecord("[C2MIM]", "[EtSO4]", 0.005);
+  unusable.status = "official";
+  (unusable.core as { cof?: number }).cof = undefined;
+
+  const dataset = buildDataset("tribology", [...included, hiddenReview, outOfScope, unusable], {
+    includeReview: false,
+    nanoOnly: true,
+  });
+  const summary = summarizeDesignReadiness(dataset);
+  assert.deepEqual(summary, {
+    usable: 4,
+    gate: 8,
+    gap: 4,
+    ready: false,
+    recordCount: 4,
+    reviewExcludedCount: 1,
+    scaleExcludedCount: 1,
+    modelExclusions: 1,
+    evidenceBasis: { direct: 1, inferred: 1, assumed: 1, unlabeled: 1 },
+  });
+  assert.equal(
+    Object.values(summary.evidenceBasis).reduce((total, count) => total + count, 0),
+    summary.recordCount,
+    "evidence buckets are mutually exclusive and exhaustive over included members"
+  );
+
+  const html = renderToStaticMarkup(
+    createElement(DesignStudio, { domain: "tribology", records: [...included, hiddenReview, outOfScope, unusable] })
+  );
+  const text = visibleText(html);
+  assert.match(text, /included records 4/);
+  assert.match(text, /scope excluded 1/);
+  assert.match(text, /review hidden 1/);
+  assert.match(text, /model unusable 1/);
+  assert.match(text, /property evidence direct 1 inferred 1 assumed 1 unlabeled 1/);
 }
 
 /* ---- evaluation lab is a small link-out, not a heavy panel on the Design page ---- */
@@ -142,10 +212,20 @@ function conductivityRecord(cation: string, anion: string, sigma: number, tempK:
   ];
   const html = renderToStaticMarkup(createElement(DesignStudio, { domain: "conductivity", records }));
   assert.match(html, /Design Studio/);
+  assert.match(visibleText(html), /3 \/ 8 usable points 5 more usable points needed\./);
+  assert.match(visibleText(html), /Cited analog \/ coverage mode\. Statistical estimates and ranking unlock at 8 usable points\./);
+  assert.match(html, /href="\/conductivity\/database\?status=review"[^>]*>Review evidence</);
   assert.match(html, /calibration unavailable — outputs are cited analog lookups/);
   assert.match(html, /Coverage mode/, "the atlas degrades to coverage-only below the gate");
   assert.match(html, /Measured record/, "exact matches still show the measurement when gated");
   assert.match(html, /Insufficient data for validation/);
+}
+
+/* ---- a locked workspace with no Review work routes to extraction, not an empty queue ---- */
+{
+  const html = renderToStaticMarkup(createElement(DesignStudio, { domain: "conductivity", records: [] }));
+  assert.match(html, /href="\/conductivity\/extract"[^>]*>Add evidence</);
+  assert.doesNotMatch(html, /href="\/conductivity\/database\?status=review"[^>]*>Review evidence</);
 }
 
 /* ---- pick-first bench inputs: evidence chips must round-trip the platform's own parser ---- */

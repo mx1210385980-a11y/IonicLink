@@ -5,9 +5,9 @@ import { useDeferredValue, useMemo, useState, type ReactNode } from "react";
 import type { Domain } from "@/lib/domain";
 import { parseQuantity } from "@/lib/units";
 import { buildAtlas, buildVocabulary, rankCandidates, type AtlasCell, type DesignConstraints } from "@/lib/predict/candidates";
-import { buildDataset } from "@/lib/predict/dataset";
+import { buildDataset, type DomainDataset } from "@/lib/predict/dataset";
 import { describeIon, featureNorm } from "@/lib/predict/descriptors";
-import { predict } from "@/lib/predict/engine";
+import { CALIBRATION_GATE, predict } from "@/lib/predict/engine";
 import { runLoo } from "@/lib/predict/loo";
 import { DESIGN_SPECS } from "@/lib/predict/specs";
 import { fmtK, modelHash } from "./studioParts";
@@ -49,6 +49,59 @@ function ModelRibbonStat({
   );
 }
 
+export interface DesignReadinessSummary {
+  usable: number;
+  gate: number;
+  gap: number;
+  ready: boolean;
+  recordCount: number;
+  reviewExcludedCount: number;
+  scaleExcludedCount: number;
+  modelExclusions: number;
+  evidenceBasis: {
+    direct: number;
+    inferred: number;
+    assumed: number;
+    unlabeled: number;
+  };
+}
+
+/** Summarize only the records and members that feed the current model view. */
+export function summarizeDesignReadiness(dataset: DomainDataset): DesignReadinessSummary {
+  const evidenceBasis = { direct: 0, inferred: 0, assumed: 0, unlabeled: 0 };
+
+  for (const point of dataset.points) {
+    for (const member of point.members) {
+      switch (member.basis) {
+        case "direct":
+          evidenceBasis.direct += 1;
+          break;
+        case "inferred":
+          evidenceBasis.inferred += 1;
+          break;
+        case "assumed":
+          evidenceBasis.assumed += 1;
+          break;
+        default:
+          evidenceBasis.unlabeled += 1;
+      }
+    }
+  }
+
+  const usable = dataset.points.length;
+  return {
+    usable,
+    gate: CALIBRATION_GATE,
+    gap: Math.max(0, CALIBRATION_GATE - usable),
+    ready: usable >= CALIBRATION_GATE,
+    recordCount: dataset.recordCount,
+    reviewExcludedCount: dataset.reviewExcludedCount,
+    scaleExcludedCount: dataset.scaleExcludedCount,
+    modelExclusions: dataset.exclusions.length,
+    evidenceBasis,
+  };
+}
+
 export function DesignStudio({
   domain,
   records,
@@ -83,6 +136,11 @@ export function DesignStudio({
   const dataset = useMemo(
     () => buildDataset(domain, records, { includeReview, nanoOnly: domain === "tribology" }),
     [domain, records, includeReview]
+  );
+  const readiness = useMemo(() => summarizeDesignReadiness(dataset), [dataset]);
+  const reviewWorkCount = useMemo(
+    () => records.reduce((count, record) => count + (record.status === "review" ? 1 : 0), 0),
+    [records]
   );
   const cationOptions = useMemo(() => buildVocabulary("cation", dataset), [dataset]);
   const anionOptions = useMemo(() => buildVocabulary("anion", dataset), [dataset]);
@@ -222,7 +280,7 @@ export function DesignStudio({
                 onChange={(e) => setIncludeReview(!e.target.checked)}
                 className="h-3.5 w-3.5 accent-brand-600"
               />
-              official records only
+              checked records only
             </label>
           </div>
         </section>
@@ -235,7 +293,7 @@ export function DesignStudio({
           <ModelRibbonStat label="usable points" value={dataset.points.length} />
           <ModelRibbonStat label="ion pairs" value={dataset.pairCount} />
           <ModelRibbonStat
-            label="official / review"
+            label="checked / review"
             value={
               <>
                 <span className="text-brand-700">{dataset.officialCount}</span>
@@ -243,7 +301,7 @@ export function DesignStudio({
                 <span className="text-amber-700">{dataset.reviewCount}</span>
               </>
             }
-            title="official / review"
+            title="checked / review"
           />
           <ModelRibbonStat label="papers" value={dataset.paperCount} />
           {dataset.tempRange && (
@@ -284,6 +342,110 @@ export function DesignStudio({
               model {hash}
             </span>
           </span>
+        </section>
+
+        <section
+          aria-labelledby="data-readiness-title"
+          data-testid="data-readiness"
+          className="rounded-[8px] border border-ink-200/80 bg-white px-4 py-3 shadow-card"
+        >
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <div>
+                  <p className="label-eyebrow text-violet-700">Data readiness</p>
+                  <h2 id="data-readiness-title" className="mt-0.5 text-sm font-semibold text-ink-950">
+                    Calibration gate
+                  </h2>
+                </div>
+                <span
+                  className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-eyebrow ${
+                    readiness.ready
+                      ? "border-brand-200 bg-brand-50 text-brand-700"
+                      : "border-amber-200 bg-amber-50 text-amber-700"
+                  }`}
+                >
+                  {readiness.ready ? "Ready" : "Locked"}
+                </span>
+              </div>
+              <p className="mt-1.5 text-sm font-semibold text-ink-900">
+                <span className="font-mono tnum">{readiness.usable} / {readiness.gate}</span> usable points
+                {" "}
+                <span className="ml-2 text-xs font-medium text-ink-600">
+                  {readiness.ready
+                    ? "Calibration gate reached."
+                    : `${readiness.gap} more usable point${readiness.gap === 1 ? "" : "s"} needed.`}
+                </span>
+              </p>
+              <p className="mt-1 text-xs leading-5 text-ink-700">
+                {readiness.ready
+                  ? "Statistical estimates and candidate ranking are available."
+                  : `Cited analog / coverage mode. Statistical estimates and ranking unlock at ${readiness.gate} usable points.`}
+              </p>
+            </div>
+
+            <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="rounded-[7px] border border-ink-200/80 bg-ink-50/50 px-3 py-2">
+                <dl className="flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-ink-600" aria-label="Data inclusion and exclusions">
+                  <div className="inline-flex items-baseline gap-1">
+                    <dt>included records</dt>
+                    <dd className="font-mono font-semibold text-ink-900 tnum">{readiness.recordCount}</dd>
+                  </div>
+                  {readiness.scaleExcludedCount > 0 ? (
+                    <div className="inline-flex items-baseline gap-1">
+                      <dt>scope excluded</dt>
+                      <dd className="font-mono font-semibold text-ink-900 tnum">{readiness.scaleExcludedCount}</dd>
+                    </div>
+                  ) : null}
+                  {readiness.reviewExcludedCount > 0 ? (
+                    <div className="inline-flex items-baseline gap-1">
+                      <dt>review hidden</dt>
+                      <dd className="font-mono font-semibold text-ink-900 tnum">{readiness.reviewExcludedCount}</dd>
+                    </div>
+                  ) : null}
+                  {readiness.modelExclusions > 0 ? (
+                    <div className="inline-flex items-baseline gap-1">
+                      <dt>model unusable</dt>
+                      <dd className="font-mono font-semibold text-ink-900 tnum">{readiness.modelExclusions}</dd>
+                    </div>
+                  ) : null}
+                </dl>
+                <div className="mt-1.5 border-t border-ink-200/70 pt-1.5">
+                  <p className="text-[9px] font-semibold uppercase tracking-eyebrow text-ink-500">property evidence</p>
+                  <dl className="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-ink-600" aria-label="Property evidence basis">
+                    <div className="inline-flex items-baseline gap-1">
+                      <dt>direct</dt>
+                      <dd className="font-mono font-semibold text-brand-700 tnum">{readiness.evidenceBasis.direct}</dd>
+                    </div>
+                    <div className="inline-flex items-baseline gap-1">
+                      <dt>inferred</dt>
+                      <dd className="font-mono font-semibold text-violet-700 tnum">{readiness.evidenceBasis.inferred}</dd>
+                    </div>
+                    <div className="inline-flex items-baseline gap-1">
+                      <dt>assumed</dt>
+                      <dd className="font-mono font-semibold text-amber-700 tnum">{readiness.evidenceBasis.assumed}</dd>
+                    </div>
+                    <div className="inline-flex items-baseline gap-1">
+                      <dt>unlabeled</dt>
+                      <dd className="font-mono font-semibold text-ink-900 tnum">{readiness.evidenceBasis.unlabeled}</dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
+              <Link
+                href={
+                  readiness.ready
+                    ? "#candidate-atlas"
+                    : reviewWorkCount > 0
+                      ? `/${domain}/database?status=review`
+                      : `/${domain}/extract`
+                }
+                className="inline-flex min-h-[34px] shrink-0 items-center justify-center rounded-[7px] border border-brand-200 bg-brand-50 px-3 text-xs font-semibold text-brand-700 transition hover:border-brand-300 hover:bg-brand-100"
+              >
+                {readiness.ready ? "Open candidate atlas" : reviewWorkCount > 0 ? "Review evidence" : "Add evidence"}
+              </Link>
+            </div>
+          </div>
         </section>
       </header>
 
@@ -333,20 +495,22 @@ export function DesignStudio({
 
       <EvidenceLedger domain={domain} spec={spec} dataset={dataset} prediction={prediction} tempK={queryTempK} />
 
-      <DesignExplorer
-        spec={spec}
-        atlas={atlas}
-        ranked={ranked}
-        objective={objective}
-        includeExtrapolated={includeExtrapolated}
-        constraints={constraints}
-        modelHashValue={hash}
-        labSummary={domain === "tribology" ? labSummary(lab) : null}
-        onObjective={setObjective}
-        onIncludeExtrapolated={setIncludeExtrapolated}
-        onConstraints={setConstraints}
-        onPickPair={pickPair}
-      />
+      <div id="candidate-atlas" className="scroll-mt-4">
+        <DesignExplorer
+          spec={spec}
+          atlas={atlas}
+          ranked={ranked}
+          objective={objective}
+          includeExtrapolated={includeExtrapolated}
+          constraints={constraints}
+          modelHashValue={hash}
+          labSummary={domain === "tribology" ? labSummary(lab) : null}
+          onObjective={setObjective}
+          onIncludeExtrapolated={setIncludeExtrapolated}
+          onConstraints={setConstraints}
+          onPickPair={pickPair}
+        />
+      </div>
 
       {domain === "tribology" && (
         <ModelLab

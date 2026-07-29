@@ -3,8 +3,335 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getClientModule } from "@/components/registry.client";
+import { RequestError, requestErrorMessage, requestJson } from "@/components/request";
 import { DEFAULT_DOMAIN, type Domain } from "@/lib/domain";
-import type { BatchJob, JobStatus, RecordDraft } from "@/lib/schema";
+import type { BatchJob, JobHistorySummary, JobStatus, RecordDraft } from "@/lib/schema";
+
+type QueuePayload = {
+  jobs: BatchJob[];
+  draining: boolean;
+  concurrency: number;
+  history?: JobHistorySummary | null;
+};
+
+const EMPTY_JOB_HISTORY: JobHistorySummary = {
+  trackedSince: null,
+  receivedJobs: 0,
+  startedJobs: 0,
+  candidateJobs: 0,
+  failedJobs: 0,
+  committedJobs: 0,
+  candidateRecords: 0,
+  committedRecords: 0,
+  queue: { medianMs: null, sampleSize: 0 },
+  extraction: { medianMs: null, sampleSize: 0 },
+  reviewWait: { medianMs: null, sampleSize: 0 },
+};
+
+export function jobHistoryFromPayload(history?: JobHistorySummary | null): JobHistorySummary {
+  return history ?? EMPTY_JOB_HISTORY;
+}
+
+export function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "\u2014";
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+
+  const seconds = ms / 1000;
+  if (seconds < 60) {
+    const rounded = seconds < 10 ? Math.round(seconds * 10) / 10 : Math.round(seconds);
+    return `${rounded} s`;
+  }
+
+  const totalSeconds = Math.round(seconds);
+  if (totalSeconds < 3600) {
+    const minutes = Math.floor(totalSeconds / 60);
+    const remainingSeconds = totalSeconds % 60;
+    return remainingSeconds ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+  }
+
+  const hours = Math.floor(totalSeconds / 3600);
+  const remainingMinutes = Math.floor((totalSeconds % 3600) / 60);
+  return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+}
+
+const HISTORY_STAGES: readonly {
+  key: "receivedJobs" | "startedJobs" | "candidateJobs" | "committedJobs";
+  label: string;
+  tone: string;
+}[] = [
+  { key: "receivedJobs", label: "Received", tone: "border-slate-200 bg-white text-ink-700" },
+  { key: "startedJobs", label: "Started", tone: "border-amber-200 bg-amber-50 text-amber-800" },
+  { key: "candidateJobs", label: "Candidates", tone: "border-brand-200 bg-brand-50 text-brand-800" },
+  { key: "committedJobs", label: "Sent to review", tone: "border-violet-200 bg-violet-50 text-violet-800" },
+];
+
+const HISTORY_DURATIONS: readonly {
+  key: "queue" | "extraction" | "reviewWait";
+  label: string;
+}[] = [
+  { key: "queue", label: "Queue wait" },
+  { key: "extraction", label: "Extraction" },
+  { key: "reviewWait", label: "Review wait" },
+];
+
+export function HistoryProgress({ history }: { history: JobHistorySummary }) {
+  const trackedDate = history.trackedSince?.slice(0, 10) ?? null;
+
+  return (
+    <section
+      aria-label="Extraction history"
+      data-testid="history-progress"
+      className="border-b border-slate-100 bg-white px-5 py-3"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+        <div className="flex items-baseline gap-2">
+          <h3 className="text-xs font-semibold text-ink-900">History</h3>
+          <span className="font-mono text-[9px] uppercase tracking-wide text-ink-400">exact events</span>
+        </div>
+        {trackedDate && (
+          <p className="text-[10px] text-ink-500">
+            Tracked since {trackedDate} · persists when finished jobs are cleared
+          </p>
+        )}
+      </div>
+
+      {!trackedDate ? (
+        <p role="status" className="mt-2 text-xs text-ink-700">
+          History starts with the next queued job. Legacy completion times are not backfilled.
+        </p>
+      ) : (
+        <>
+          <div className="mt-2 overflow-x-auto pb-1">
+            <div className="flex min-w-[42rem] gap-2">
+              <ol aria-label="Historical job stage counts" className="grid flex-1 grid-cols-4 gap-2">
+                {HISTORY_STAGES.map((stage) => {
+                  const jobs = history[stage.key];
+                  const records =
+                    stage.key === "candidateJobs"
+                      ? `${history.candidateRecords} candidate records`
+                      : stage.key === "committedJobs"
+                        ? `${history.committedRecords} committed records`
+                        : null;
+                  return (
+                    <li
+                      key={stage.key}
+                      aria-label={`${stage.label}: ${jobs} jobs${records ? `, ${records}` : ""}`}
+                      data-history-stage={stage.key}
+                      className={`min-w-0 rounded-lg border px-3 py-2 ${stage.tone}`}
+                    >
+                      <span className="block truncate text-[10px] font-semibold uppercase tracking-wide">{stage.label}</span>
+                      <span className="mt-0.5 block font-mono text-lg font-semibold tnum">{jobs}</span>
+                      <span className="block text-[9px] opacity-80">{records ?? "jobs"}</span>
+                    </li>
+                  );
+                })}
+              </ol>
+              <aside
+                aria-label={`Errors branch: ${history.failedJobs} jobs`}
+                data-history-branch="errors"
+                className="w-28 shrink-0 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-rose-800"
+              >
+                <span className="block text-[10px] font-semibold uppercase tracking-wide">Errors</span>
+                <span className="mt-0.5 block font-mono text-lg font-semibold tnum">{history.failedJobs}</span>
+                <span className="block text-[9px] opacity-80">jobs · branch</span>
+              </aside>
+            </div>
+          </div>
+
+          <dl aria-label="Historical median durations" className="mt-2 flex flex-wrap gap-x-5 gap-y-1">
+            {HISTORY_DURATIONS.map((metric) => {
+              const duration = history[metric.key];
+              if (duration.sampleSize <= 0) return null;
+              const formatted = duration.medianMs === null ? "\u2014" : formatDuration(duration.medianMs);
+              return (
+                <div
+                  key={metric.key}
+                  role="group"
+                  aria-label={`Median ${metric.label}: ${formatted}, sample size ${duration.sampleSize}`}
+                  className="flex items-baseline gap-1.5 text-[10px]"
+                >
+                  <dt className="text-ink-500">Median {metric.label}</dt>
+                  <dd className="font-mono font-semibold text-ink-800 tnum">
+                    {formatted} (n={duration.sampleSize})
+                  </dd>
+                </div>
+              );
+            })}
+          </dl>
+        </>
+      )}
+    </section>
+  );
+}
+
+export type QueueSummary = Record<JobStatus, number>;
+
+export function summarizeQueue(jobs: readonly Pick<BatchJob, "status">[]): QueueSummary {
+  const summary: QueueSummary = { queued: 0, extracting: 0, done: 0, error: 0, committed: 0 };
+  for (const job of jobs) summary[job.status] += 1;
+  return summary;
+}
+
+const QUEUE_PROGRESS_STAGES: readonly {
+  status: JobStatus;
+  label: string;
+  tone: string;
+}[] = [
+  { status: "queued", label: "Queued", tone: "border-slate-200 bg-slate-50 text-ink-700" },
+  { status: "extracting", label: "Extracting", tone: "border-amber-200 bg-amber-50 text-amber-800" },
+  { status: "done", label: "Ready to review", tone: "border-brand-200 bg-brand-50 text-brand-800" },
+  { status: "error", label: "Errors", tone: "border-rose-200 bg-rose-50 text-rose-800" },
+  { status: "committed", label: "Committed", tone: "border-violet-200 bg-violet-50 text-violet-800" },
+];
+
+export function QueueProgress({
+  jobs,
+  draining,
+  concurrency,
+}: {
+  jobs: readonly Pick<BatchJob, "status">[];
+  draining: boolean;
+  concurrency: number;
+}) {
+  const summary = summarizeQueue(jobs);
+  const total = jobs.length;
+
+  return (
+    <section
+      aria-label="Extraction queue progress"
+      data-testid="queue-progress"
+      className="border-b border-slate-100 bg-slate-50/35 px-5 py-3"
+    >
+      <div className="overflow-x-auto pb-1">
+        <ol aria-label="Queue status counts" className="grid min-w-[38rem] grid-cols-5 gap-2">
+          {QUEUE_PROGRESS_STAGES.map((stage) => (
+            <li
+              key={stage.status}
+              aria-label={`${stage.label}: ${summary[stage.status]}`}
+              data-queue-status={stage.status}
+              className={`min-w-0 rounded-lg border px-3 py-2 ${stage.tone}`}
+            >
+              <span className="block truncate text-[10px] font-semibold uppercase tracking-wide">{stage.label}</span>
+              <span className="mt-1 block font-mono text-xl font-semibold tnum">{summary[stage.status]}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+      {total === 0 && (
+        <p role="status" className="mt-2 text-xs text-ink-700">
+          Queue is clear. Add PDFs or paste text to begin.
+        </p>
+      )}
+      {draining && (
+        <p role="status" className="mt-2 text-xs text-amber-800">
+          Extracting with up to {Math.max(1, concurrency)} job{Math.max(1, concurrency) === 1 ? "" : "s"} at once. Time varies by paper and model.
+        </p>
+      )}
+    </section>
+  );
+}
+
+export type JobStageState = "done" | "current" | "pending" | "error";
+
+const JOB_STAGE_LABELS = ["Received", "Extracting", "Candidates", "Review"] as const;
+const JOB_STAGE_BY_STATUS: Record<JobStatus, readonly JobStageState[]> = {
+  queued: ["current", "pending", "pending", "pending"],
+  extracting: ["done", "current", "pending", "pending"],
+  done: ["done", "done", "current", "pending"],
+  committed: ["done", "done", "done", "current"],
+  error: ["done", "error", "pending", "pending"],
+};
+
+export function jobStageStates(status: JobStatus): readonly JobStageState[] {
+  return JOB_STAGE_BY_STATUS[status];
+}
+
+const JOB_STAGE_TONE: Record<JobStageState, string> = {
+  done: "border-brand-300 bg-brand-100 text-brand-800",
+  current: "border-amber-300 bg-amber-100 text-amber-900",
+  pending: "border-slate-200 bg-white text-ink-400",
+  error: "border-rose-300 bg-rose-100 text-rose-800",
+};
+
+const JOB_STAGE_A11Y: Record<JobStageState, string> = {
+  done: "complete",
+  current: "current",
+  pending: "pending",
+  error: "failed",
+};
+
+export function JobStageTrack({ status, filename }: { status: JobStatus; filename: string }) {
+  const states = jobStageStates(status);
+  return (
+    <div
+      role="group"
+      aria-label={`${filename} progress`}
+      data-testid="job-stage-track"
+      className="px-5 pb-3"
+    >
+      <ol className="grid grid-cols-4 gap-1.5">
+        {JOB_STAGE_LABELS.map((label, index) => {
+          const state = states[index];
+          return (
+            <li
+              key={label}
+              aria-current={state === "current" ? "step" : undefined}
+              aria-label={`${label}: ${JOB_STAGE_A11Y[state]}`}
+              data-stage={label.toLowerCase()}
+              data-state={state}
+              className={`min-w-0 rounded-md border px-2 py-1 text-[10px] font-semibold ${JOB_STAGE_TONE[state]}`}
+            >
+              <span className="block truncate">{label}</span>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
+export function queueRefreshIsCurrent(
+  generation: number,
+  currentGeneration: number,
+  aborted: boolean,
+  requestDomain: Domain,
+  currentDomain: Domain
+): boolean {
+  return generation === currentGeneration && !aborted && requestDomain === currentDomain;
+}
+
+export function mutationRefreshFailureMessage(successDescription: string, error: unknown): string {
+  const detail = requestErrorMessage(error, "Could not refresh the extraction queue.");
+  return `${successDescription}, but the queue could not be refreshed. The write already succeeded; do not repeat it. ${detail}`;
+}
+
+export function commitAllIssueMessage({
+  committed,
+  failed,
+  failureDetail,
+  refreshError,
+}: {
+  committed: number;
+  failed: number;
+  failureDetail?: string;
+  refreshError?: unknown;
+}): string | null {
+  const parts: string[] = [];
+  if (failed > 0) {
+    parts.push(
+      `${committed} committed; ${failed} failed.${failureDetail ? ` ${failureDetail}` : ""}`
+    );
+  }
+  if (refreshError) {
+    const detail = requestErrorMessage(refreshError, "Could not refresh the extraction queue.");
+    parts.push(
+      committed > 0
+        ? `${committed} successful commit${committed === 1 ? " is" : "s are"} already complete, but the queue could not be refreshed. Do not repeat successful commits. ${detail}`
+        : `The queue also could not be refreshed. ${detail}`
+    );
+  }
+  return parts.length ? parts.join(" ") : null;
+}
 
 /**
  * Unified extraction surface. Drop one or many PDFs (or paste text) — every
@@ -15,24 +342,81 @@ import type { BatchJob, JobStatus, RecordDraft } from "@/lib/schema";
 export function Extractor({ domain = DEFAULT_DOMAIN }: { domain?: Domain }) {
   const Card = getClientModule(domain).Card;
   const [jobs, setJobs] = useState<BatchJob[]>([]);
+  const [history, setHistory] = useState<JobHistorySummary>(EMPTY_JOB_HISTORY);
   const [draining, setDraining] = useState(false);
   const [concurrency, setConcurrency] = useState(1);
   const [busy, setBusy] = useState(false);
+  const [processing, setProcessing] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [over, setOver] = useState(false);
   const [text, setText] = useState("");
   const [skipped, setSkipped] = useState<SkippedFile[] | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<Record<string, Set<number>>>({});
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const refreshGenerationRef = useRef(0);
+  const refreshRequestRef = useRef<AbortController | null>(null);
+  const currentDomainRef = useRef(domain);
+  currentDomainRef.current = domain;
   const dismissSkipped = useCallback(() => setSkipped(null), []);
 
   const refresh = useCallback(async () => {
-    const res = await fetch(`/api/${domain}/batch`);
-    const data = (await res.json()) as { jobs: BatchJob[]; draining: boolean; concurrency: number };
-    setJobs(data.jobs);
-    setDraining(data.draining);
-    if (data.concurrency) setConcurrency(data.concurrency);
-    return data;
+    if (currentDomainRef.current !== domain) return null;
+    const generation = refreshGenerationRef.current + 1;
+    refreshGenerationRef.current = generation;
+    refreshRequestRef.current?.abort();
+    const controller = new AbortController();
+    refreshRequestRef.current = controller;
+    try {
+      const data = await requestJson<QueuePayload>(
+        `/api/${domain}/batch`,
+        { signal: controller.signal },
+        "Could not refresh the extraction queue"
+      );
+      if (
+        !queueRefreshIsCurrent(
+          generation,
+          refreshGenerationRef.current,
+          controller.signal.aborted,
+          domain,
+          currentDomainRef.current
+        )
+      ) return null;
+      setJobs(data.jobs);
+      setHistory(jobHistoryFromPayload(data.history));
+      setDraining(data.draining);
+      if (data.concurrency) setConcurrency(data.concurrency);
+      return data;
+    } catch (requestError) {
+      if (
+        !queueRefreshIsCurrent(
+          generation,
+          refreshGenerationRef.current,
+          controller.signal.aborted,
+          domain,
+          currentDomainRef.current
+        )
+      ) return null;
+      throw requestError;
+    } finally {
+      if (refreshRequestRef.current === controller) refreshRequestRef.current = null;
+    }
+  }, [domain]);
+
+  useEffect(() => {
+    refreshGenerationRef.current += 1;
+    refreshRequestRef.current?.abort();
+    refreshRequestRef.current = null;
+    setJobs([]);
+    setHistory(EMPTY_JOB_HISTORY);
+    setDraining(false);
+    setExpanded(new Set());
+    setSelection({});
+    return () => {
+      refreshGenerationRef.current += 1;
+      refreshRequestRef.current?.abort();
+      refreshRequestRef.current = null;
+    };
   }, [domain]);
 
   useEffect(() => {
@@ -53,28 +437,55 @@ export function Extractor({ domain = DEFAULT_DOMAIN }: { domain?: Domain }) {
 
   const uploadFiles = async (files: FileList | File[]) => {
     const list = Array.from(files);
-    if (list.length === 0) return;
+    if (list.length === 0 || busy || processing) return;
     setBusy(true);
+    setError(null);
     setSkipped(null);
-    const form = new FormData();
-    list.forEach((f) => form.append("files", f));
-    const res = await fetch(`/api/${domain}/batch`, { method: "POST", body: form });
-    const data = await res.json();
-    setBusy(false);
-    setSkipped(data.skipped?.length ? data.skipped : null);
-    refresh();
+    try {
+      const form = new FormData();
+      list.forEach((f) => form.append("files", f));
+      const data = await requestJson<{ skipped?: SkippedFile[] }>(
+        `/api/${domain}/batch`,
+        { method: "POST", body: form },
+        "Could not upload files"
+      );
+      setSkipped(data.skipped?.length ? data.skipped : null);
+      try {
+        await refresh();
+      } catch (refreshError) {
+        setError(mutationRefreshFailureMessage("The files were uploaded", refreshError));
+      }
+    } catch (requestError) {
+      setError(requestErrorMessage(requestError, "Could not upload files. Please try again."));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const submitText = async () => {
-    if (!text.trim()) return;
+    if (!text.trim() || busy || processing) return;
     setBusy(true);
+    setError(null);
     setSkipped(null);
-    const form = new FormData();
-    form.append("text", text);
-    await fetch(`/api/${domain}/batch`, { method: "POST", body: form });
-    setText("");
-    setBusy(false);
-    refresh();
+    try {
+      const form = new FormData();
+      form.append("text", text);
+      await requestJson(
+        `/api/${domain}/batch`,
+        { method: "POST", body: form },
+        "Could not add the text to the queue"
+      );
+      setText("");
+      try {
+        await refresh();
+      } catch (refreshError) {
+        setError(mutationRefreshFailureMessage("The text was added to the queue", refreshError));
+      }
+    } catch (requestError) {
+      setError(requestErrorMessage(requestError, "Could not add the text to the queue. Please try again."));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const toggleExpand = (job: BatchJob) =>
@@ -101,50 +512,129 @@ export function Extractor({ domain = DEFAULT_DOMAIN }: { domain?: Domain }) {
   const setAll = (jobId: string, total: number, all: boolean) =>
     setSelection((prev) => ({ ...prev, [jobId]: new Set(all ? Array.from({ length: total }, (_, i) => i) : []) }));
 
+  const runQueueAction = async (
+    key: string,
+    fallback: string,
+    successDescription: string,
+    action: () => Promise<void>,
+    onSuccess?: () => void
+  ) => {
+    if (processing || busy) return;
+    setProcessing(key);
+    setError(null);
+    try {
+      try {
+        await action();
+      } catch (requestError) {
+        setError(requestErrorMessage(requestError, fallback));
+        return;
+      }
+      onSuccess?.();
+      try {
+        await refresh();
+      } catch (refreshError) {
+        setError(mutationRefreshFailureMessage(successDescription, refreshError));
+      }
+    } finally {
+      setProcessing(null);
+    }
+  };
+
   const commit = async (job: BatchJob) => {
     const sel = selection[job.id] ?? new Set(job.candidates.map((_, i) => i));
     if (sel.size === 0) return;
-    await fetch(`/api/${domain}/batch/${encodeURIComponent(job.id)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "commit", indices: [...sel] }),
-    });
-    setExpanded((prev) => {
-      const n = new Set(prev);
-      n.delete(job.id);
-      return n;
-    });
-    refresh();
+    await runQueueAction(
+      `commit:${job.id}`,
+      "Could not commit this job. Please try again.",
+      "The selected candidates were committed",
+      async () => {
+        await requestJson(
+          `/api/${domain}/batch/${encodeURIComponent(job.id)}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "commit", indices: [...sel] }),
+          },
+          "Could not commit this job"
+        );
+      },
+      () => setExpanded((prev) => {
+        const next = new Set(prev);
+        next.delete(job.id);
+        return next;
+      })
+    );
   };
 
   const commitAll = async () => {
     const done = jobs.filter((j) => j.status === "done");
-    await Promise.all(
-      done.map((j) =>
-        fetch(`/api/${domain}/batch/${encodeURIComponent(j.id)}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "commit" }),
+    if (done.length === 0 || processing || busy) return;
+    setProcessing("commit-all");
+    setError(null);
+    try {
+      const results = await Promise.allSettled(
+        done.map((job) =>
+          requestJson(
+            `/api/${domain}/batch/${encodeURIComponent(job.id)}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "commit" }),
+            },
+            `Could not commit ${job.filename}`
+          )
+        )
+      );
+      const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+      const committed = results.length - failures.length;
+      let refreshError: unknown;
+      try {
+        await refresh();
+      } catch (error) {
+        refreshError = error;
+      }
+      setError(
+        commitAllIssueMessage({
+          committed,
+          failed: failures.length,
+          failureDetail: failures.length
+            ? requestErrorMessage(failures[0].reason, "One or more jobs failed.")
+            : undefined,
+          refreshError,
         })
-      )
-    );
-    refresh();
+      );
+    } finally {
+      setProcessing(null);
+    }
   };
 
   const remove = async (id: string) => {
-    await fetch(`/api/${domain}/batch/${encodeURIComponent(id)}`, { method: "DELETE" });
-    refresh();
+    await runQueueAction(
+      `remove:${id}`,
+      "Could not remove this job. Please try again.",
+      "The job was removed",
+      async () => {
+        await requestJson(
+          `/api/${domain}/batch/${encodeURIComponent(id)}`,
+          { method: "DELETE" },
+          "Could not remove this job"
+        );
+      }
+    );
   };
   const clearFinished = async () => {
-    await fetch(`/api/${domain}/batch`, { method: "DELETE" });
-    refresh();
+    await runQueueAction(
+      "clear",
+      "Could not clear finished jobs. Please try again.",
+      "Finished jobs were cleared",
+      async () => {
+        await requestJson(`/api/${domain}/batch`, { method: "DELETE" }, "Could not clear finished jobs");
+      }
+    );
   };
 
-  const counts = {
-    active: jobs.filter((j) => j.status === "queued" || j.status === "extracting").length,
-    done: jobs.filter((j) => j.status === "done").length,
-    committed: jobs.filter((j) => j.status === "committed").length,
-  };
+  const counts = summarizeQueue(jobs);
+  const clearableCount = counts.done + counts.error + counts.committed;
 
   return (
     <div className="space-y-6">
@@ -175,7 +665,7 @@ export function Extractor({ domain = DEFAULT_DOMAIN }: { domain?: Domain }) {
             <p className="font-medium text-ink-900">{busy ? "Uploading…" : "Drop one or many PDFs"}</p>
             <p className="text-xs text-ink-700">or click to browse · each is queued and processed in the background</p>
           </div>
-          <input type="file" accept=".pdf,.txt" multiple className="hidden" disabled={busy} onChange={(e) => e.target.files && uploadFiles(e.target.files)} />
+          <input type="file" accept=".pdf,.txt" multiple className="hidden" disabled={busy || !!processing} onChange={(e) => e.target.files && uploadFiles(e.target.files)} />
         </label>
 
         <div className="panel flex flex-col p-4">
@@ -186,38 +676,37 @@ export function Extractor({ domain = DEFAULT_DOMAIN }: { domain?: Domain }) {
             placeholder="Paste an abstract, results section, or full text…"
             className="h-40 w-full resize-none rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-brand-300 focus:ring-2 focus:ring-brand-100"
           />
-          <button onClick={submitText} disabled={busy || !text.trim()} className="btn-primary mt-3 self-start">
+          <button onClick={submitText} disabled={busy || !!processing || !text.trim()} className="btn-primary mt-3 self-start">
             Add to queue
           </button>
         </div>
       </div>
 
+      {error && <RequestError>{error}</RequestError>}
       {skipped && <SkipNotice skipped={skipped} onDismiss={dismissSkipped} />}
 
-      {jobs.length > 0 && (
-        <div className="panel overflow-hidden">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3">
-            <div className="flex items-center gap-2 text-sm">
-              <span className="font-semibold">Queue</span>
-              <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                <span className="text-amber-700">{counts.active} processing</span>
-                <span className="text-ink-400">·</span>
-                <span className="text-brand-700">{counts.done} to review</span>
-                <span className="text-ink-400">·</span>
-                <span className="text-violet-700">{counts.committed} committed</span>
-                {draining && <span className="ml-1 text-amber-700">● working (up to {concurrency} at once)</span>}
-              </span>
-            </div>
+      <div className="panel overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="font-semibold">Queue</span>
+            <span className="font-mono text-[10px] text-ink-500">{jobs.length} current job{jobs.length === 1 ? "" : "s"}</span>
+          </div>
+          {jobs.length > 0 && (
             <div className="flex items-center gap-2">
-              <button onClick={commitAll} disabled={counts.done === 0} className="btn-primary px-3 py-1.5 text-xs">
+              <button onClick={commitAll} disabled={counts.done === 0 || busy || !!processing} className="btn-primary px-3 py-1.5 text-xs">
                 Commit all ready
               </button>
-              <button onClick={clearFinished} className="btn px-3 py-1.5 text-xs">
+              <button onClick={clearFinished} disabled={clearableCount === 0 || busy || !!processing} className="btn px-3 py-1.5 text-xs">
                 Clear finished
               </button>
             </div>
-          </div>
+          )}
+        </div>
 
+        <QueueProgress jobs={jobs} draining={draining} concurrency={concurrency} />
+        <HistoryProgress history={history} />
+
+        {jobs.length > 0 && (
           <ul className="divide-y divide-slate-100">
             {jobs.map((job) => {
               const isOpen = expanded.has(job.id);
@@ -247,6 +736,7 @@ export function Extractor({ domain = DEFAULT_DOMAIN }: { domain?: Domain }) {
                     )}
                     <button
                       onClick={() => remove(job.id)}
+                      disabled={busy || !!processing}
                       className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-ink-400 hover:border-rose-200 hover:text-rose-600"
                       aria-label="Remove job"
                     >
@@ -254,13 +744,23 @@ export function Extractor({ domain = DEFAULT_DOMAIN }: { domain?: Domain }) {
                     </button>
                   </div>
 
+                  <JobStageTrack status={job.status} filename={job.filename} />
+
                   {isOpen && job.status === "done" && (
                     <div className="border-t border-slate-100 bg-slate-50/40 px-5 py-4">
                       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                         <span className="text-xs text-ink-700">
                           {selCount} of {job.candidates.length} selected
-                          {job.source === "mock" ? " · mock" : job.model ? ` · ${job.model}` : ""}
+                          {job.model ? ` · ${job.model}` : ""}
                         </span>
+                        {job.source === "mock" && (
+                          <span
+                            role="status"
+                            className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800"
+                          >
+                            Mock demo · review only
+                          </span>
+                        )}
                         <div className="flex items-center gap-2">
                           <button onClick={() => setAll(job.id, job.candidates.length, true)} className="text-xs font-medium text-ink-700 hover:text-brand-700">
                             Select all
@@ -268,7 +768,12 @@ export function Extractor({ domain = DEFAULT_DOMAIN }: { domain?: Domain }) {
                           <button onClick={() => setAll(job.id, job.candidates.length, false)} className="text-xs font-medium text-ink-700 hover:text-brand-700">
                             None
                           </button>
-                          <button onClick={() => commit(job)} disabled={selCount === 0} className="btn-primary px-3 py-1.5 text-xs">
+                          <button
+                            onClick={() => commit(job)}
+                            disabled={selCount === 0 || busy || !!processing}
+                            title={job.source === "mock" ? "Mock candidates can be reviewed, but cannot be published as Checked records." : undefined}
+                            className="btn-primary px-3 py-1.5 text-xs"
+                          >
                             Commit {selCount} to Review →
                           </button>
                         </div>
@@ -290,18 +795,24 @@ export function Extractor({ domain = DEFAULT_DOMAIN }: { domain?: Domain }) {
               );
             })}
           </ul>
+        )}
 
-          {counts.committed > 0 && (
-            <div className="border-t border-slate-100 px-5 py-3 text-xs text-ink-700">
-              Committed candidates are in the{" "}
-              <Link href={`/${domain}/database`} className="font-semibold text-brand-600 underline">
-                Review Queue
-              </Link>
-              .
-            </div>
-          )}
-        </div>
-      )}
+        {counts.committed > 0 && (
+          <CommittedJobsNotice domain={domain} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function CommittedJobsNotice({ domain }: { domain: Domain }) {
+  return (
+    <div className="border-t border-slate-100 px-5 py-3 text-xs text-ink-700">
+      Committed candidates are in the{" "}
+      <Link href={`/${domain}/database?status=review`} className="font-semibold text-brand-600 underline">
+        Review Queue
+      </Link>
+      .
     </div>
   );
 }

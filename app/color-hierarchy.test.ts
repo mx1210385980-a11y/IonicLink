@@ -17,15 +17,12 @@ assert.match(globals, /\.btn[\s\S]*text-ink-800/, "secondary buttons should be r
 
 const homeSource = file("app/page.tsx");
 assert.match(homeSource, /leading-8 text-ink-700/, "global landing supporting copy should be stronger than gray");
-assert.match(homeSource, /text-lg font-semibold text-ink-700/, "global secondary links should be readable before hover");
-assert.match(homeSource, /text-brand-700[^]*Official|Official[^]*text-brand-700/, "official counts should carry brand color");
-assert.match(homeSource, /text-amber-700[^]*Review|Review[^]*text-amber-700/, "review counts should carry amber color");
-assert.match(homeSource, /label="Needs review"[^]*tone="amber"/, "landing review metric should be amber");
-assert.match(homeSource, /label="Official database"[^]*tone="brand"/, "landing official metric should be brand teal");
+assert.match(homeSource, /text-sm font-semibold text-ink-700/, "workspace secondary links should be readable before hover");
+assert.match(homeSource, /label="Review" tone="amber"/, "landing review metric should be amber");
+assert.match(homeSource, /label="Checked" tone="brand"/, "landing checked metric should use the established metric tone");
 assert.match(homeSource, /tone\?: "brand" \| "amber" \| "ink"/, "landing metrics should expose semantic tones");
-assert.match(homeSource, /tone === "amber"[\s\S]*"group-hover:text-amber-700"/, "landing review metric should keep amber on hover");
-assert.match(homeSource, /tone === "amber"[\s\S]*"hover:text-amber-700"/, "landing review metric label should keep amber on hover");
-assert.doesNotMatch(homeSource, /className="group inline-flex items-baseline gap-2 transition hover:text-brand-700/, "landing metric link hover should be tone-aware");
+assert.match(homeSource, /tone === "amber" \? "text-amber-700"/, "landing review count should use amber");
+assert.match(homeSource, /Review queue[\s\S]*hover:text-amber-700|hover:text-amber-700[\s\S]*Review queue/, "review links should keep amber semantics");
 
 const domainSource = file("app/[domain]/page.tsx");
 assert.match(domainSource, /leading-7 text-ink-700/, "domain tagline should be readable");

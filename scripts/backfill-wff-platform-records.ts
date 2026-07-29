@@ -5,7 +5,7 @@ import { createRecords, findSourceByDoi, listRecords } from "../lib/db";
 import { toFields } from "../lib/ingest";
 import { getModule } from "../lib/modules/registry.server";
 import { createSourceFromPdf } from "../lib/sources";
-import type { DomainDraft } from "../lib/domain";
+import type { DomainDraft, ExtractionMetadata, ExtractionSource } from "../lib/domain";
 import type { IonicRecord } from "../lib/schema";
 
 type CachedExtraction = {
@@ -14,6 +14,8 @@ type CachedExtraction = {
   doi?: string;
   filename: string;
   filePath: string;
+  extractionSource?: ExtractionSource | "error";
+  model?: string;
   records: IonicRecord[];
 };
 
@@ -141,12 +143,29 @@ function isCoreComplete(record: IonicRecord): boolean {
   );
 }
 
-function draftFromCacheRecord(record: IonicRecord, sourceId?: string): DomainDraft<any, any> {
+function cacheExtractionMetadata(
+  extraction: CachedExtraction,
+  record: IonicRecord
+): ExtractionMetadata | undefined {
+  if (record.extraction) return record.extraction;
+  if (!extraction.extractionSource || extraction.extractionSource === "error") return undefined;
+  return {
+    source: extraction.extractionSource,
+    ...(extraction.model ? { model: extraction.model } : {}),
+  };
+}
+
+function draftFromCacheRecord(
+  record: IonicRecord,
+  sourceId: string | undefined,
+  extraction: CachedExtraction
+): DomainDraft<any, any> {
   const mod = getModule("tribology");
   const draft = mod.ingest(toFields(record));
   return {
     ...draft,
     sourceId: sourceId ?? record.sourceId,
+    extraction: cacheExtractionMetadata(extraction, record),
   };
 }
 
@@ -196,7 +215,12 @@ async function main() {
         incomplete++;
         continue;
       }
-      const draft = draftFromCacheRecord(cached, sourceId);
+      const draft = draftFromCacheRecord(cached, sourceId, extraction);
+      if (write && !draft.extraction) {
+        throw new Error(
+          `${key}: cached record ${cached.id} has no extraction provenance; re-extract it before writing Official records.`
+        );
+      }
       const recForFingerprint = { ...draft, id: cached.id, status: "official" as const, createdAt: cached.createdAt } as IonicRecord;
       const fp = fingerprint(recForFingerprint);
       if (existing.has(fp)) {

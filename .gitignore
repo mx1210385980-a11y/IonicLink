@@ -67,8 +67,12 @@ backend/temp_uploads/
 /data/*.sqlite3
 /data/sources/
 /data/*/sources/
+/data/backups/
 /Lubrication_sources/
 /reports/
+/outputs/
+/data/wff-strategy-cache/
+/wff-strategy-cache-shard-*.tar.gz
 
 # Frontend local outputs
 frontend/pnpm-lock.yaml

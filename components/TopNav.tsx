@@ -23,6 +23,7 @@ export function TopNav() {
   const parts = pathname.split("/");
   const first = parts[1];
   const onDomainPage = isDomain(first);
+  const onTeachingPage = first === "teaching";
   const domain: Domain = onDomainPage ? (first as Domain) : DEFAULT_DOMAIN;
   const sub = parts[2] ?? "";
 
@@ -37,22 +38,34 @@ export function TopNav() {
             </span>
           </Link>
 
-          <div aria-label="Property workspace" className="flex shrink-0 rounded-[9px] border border-ink-200/90 bg-white/90 p-0.5 text-xs shadow-sm">
-            {DOMAINS.map((d) => {
-              const active = onDomainPage && d === domain;
-              return (
-                <Link
-                  key={d}
-                  href={`/${d}${sub ? "/" + sub : ""}`}
-                  className={`min-h-8 rounded-[7px] px-2.5 py-1.5 font-semibold transition focus:outline-none focus:ring-2 focus:ring-brand-200 ${
-                    active ? "bg-ink-950 text-white shadow-sm" : "text-ink-700 hover:bg-ink-50 hover:text-brand-700"
-                  }`}
-                >
-                  {DOMAIN_LABELS[d]}
-                </Link>
-              );
-            })}
-          </div>
+          {!onTeachingPage ? (
+            <div aria-label="Property workspace" className="flex shrink-0 rounded-[9px] border border-ink-200/90 bg-white/90 p-0.5 text-xs shadow-sm">
+              {DOMAINS.map((d) => {
+                const active = onDomainPage && d === domain;
+                return (
+                  <Link
+                    key={d}
+                    href={`/${d}${sub ? "/" + sub : ""}`}
+                    className={`min-h-8 rounded-[7px] px-2.5 py-1.5 font-semibold transition focus:outline-none focus:ring-2 focus:ring-brand-200 ${
+                      active ? "bg-ink-950 text-white shadow-sm" : "text-ink-700 hover:bg-ink-50 hover:text-brand-700"
+                    }`}
+                  >
+                    {DOMAIN_LABELS[d]}
+                  </Link>
+                );
+              })}
+            </div>
+          ) : null}
+          <Link
+            href="/teaching"
+            className={`min-h-8 shrink-0 rounded-[8px] px-2.5 py-1.5 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-brand-200 ${
+              onTeachingPage
+                ? "bg-brand-50 text-brand-800 ring-1 ring-brand-100"
+                : "text-ink-700 hover:bg-white/80 hover:text-brand-700"
+            }`}
+          >
+            教学实验
+          </Link>
         </div>
 
         {onDomainPage && (

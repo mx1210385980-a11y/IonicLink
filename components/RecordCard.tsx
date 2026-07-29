@@ -8,7 +8,6 @@ import {
   ConditionChip,
   IonPill,
   MissingChip,
-  RawFlexiblePanel,
   ionDisplayLabel,
   openRecordEvidence,
   quantityLabel,
@@ -126,15 +125,6 @@ export function buildSystemFacets(record: IonicRecord, units: UnitMode): Conditi
   if (il.anion) items.push({ label: "Anion", value: ionDisplayLabel(il.anion, "anion", units), prov: prov.anion, field: "anion" });
   if (core.substrate) items.push({ label: "Substrate", value: core.substrate, prov: prov.substrate, field: "substrate" });
   return items;
-}
-
-/** Friction band from the coefficient — gives an at-a-glance read on lubrication quality. */
-function frictionBand(cof: number | null) {
-  if (cof == null) return { label: "—", pct: 0 };
-  const pct = Math.max(2, Math.min(100, (cof / 0.5) * 100));
-  if (cof < 0.1) return { label: "low friction", pct };
-  if (cof < 0.25) return { label: "moderate", pct };
-  return { label: "high friction", pct };
 }
 
 type TribopairDisplay = {
@@ -340,14 +330,13 @@ export function RecordCard({
   const il = core.ionicLiquid;
   const cationLabel = ionDisplayLabel(il.cation || "—", "cation", units);
   const anionLabel = ionDisplayLabel(il.anion || "—", "anion", units);
-  const { complete, missing } = coreCompleteness(record);
+  const { missing } = coreCompleteness(record);
   const svgId = useId().replace(/:/g, "");
   const conditions = buildConditionItems(record, units);
   const tribopair = tribopairDisplay(record);
   const probeLabel = tribopair.mode === "macro" ? tribopair.primaryLabel : tribopair.primaryLabel;
   const showConfidence = record.status === "review" && typeof record.confidence === "number";
   const confidencePct = showConfidence ? Math.round((record.confidence as number) * 100) : null;
-  const band = frictionBand(core.cof);
   const instrumentLabel = tribopair.mode === "macro" ? "TRIBO" : "AFM";
   const tribopairSpecs = [
     {
@@ -392,42 +381,27 @@ export function RecordCard({
   const cofValue = formatCof(core.cof);
   const cofReadoutContent = (
     <>
-      <div className="pointer-events-none absolute -right-6 -top-8 h-20 w-20 rounded-full bg-brand-400/25 blur-2xl" />
-      <div className="relative flex items-end justify-between gap-3">
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="label-eyebrow text-white/65">Coefficient of friction</div>
+          <div className="label-eyebrow text-ink-500">Coefficient of friction</div>
           <div
-            className={`mt-0.5 font-mono text-[2rem] font-semibold leading-none tnum ${
-              core.cof == null ? "text-amber-200" : "text-white"
+            className={`mt-1 font-mono text-[1.8rem] font-semibold leading-none tnum ${
+              core.cof == null ? "text-amber-600" : "text-ink-900"
             }`}
           >
             {cofValue}
           </div>
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1 pb-1 text-right">
-          {core.cof != null && (
-            <span className="whitespace-nowrap rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-semibold text-white/90">{band.label}</span>
-          )}
-          {showConfidence && <span className="whitespace-nowrap text-[10px] font-medium text-white/70">conf {confidencePct}%</span>}
-        </div>
+        {showConfidence && (
+          <span className="shrink-0 whitespace-nowrap text-right text-[10px] font-medium text-ink-400">conf {confidencePct}%</span>
+        )}
       </div>
-      <div className="relative mt-3 h-1 overflow-hidden rounded-full bg-white/10">
-        <span
-          className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-brand-400 to-brand-300 transition-[width] duration-500"
-          style={{ width: `${band.pct}%` }}
-        />
-      </div>
-      {e.cofMethod && (
-        <div className="mt-2 truncate text-[10px] font-medium text-white/70" title={e.cofMethod}>
-          method · {e.cofMethod}
-        </div>
-      )}
     </>
   );
 
   return (
     <article
-      className={`group relative grid items-start overflow-hidden rounded-[10px] border bg-white transition duration-300 xl:grid-cols-[auto_minmax(0,0.84fr)_minmax(0,1.05fr)_minmax(0,1.28fr)] ${
+      className={`record-card-unified-text group relative grid items-start overflow-hidden rounded-[10px] border bg-white transition duration-300 xl:grid-cols-[auto_minmax(0,0.84fr)_minmax(0,1.05fr)_minmax(0,1.28fr)] ${
         selected
           ? "border-brand-300 shadow-card ring-1 ring-brand-200"
           : "border-ink-200/80 shadow-sm hover:-translate-y-px hover:border-brand-200 hover:shadow-card"
@@ -451,7 +425,7 @@ export function RecordCard({
         <span
           className={`status-mini whitespace-nowrap ${record.status === "review" ? "status-mini-review" : "status-mini-official"}`}
         >
-          {record.status}
+          {record.status === "official" ? "checked" : record.status}
         </span>
       </div>
 
@@ -490,14 +464,8 @@ export function RecordCard({
           </div>
         </div>
         <div data-testid="tribopair-contact-strip" className="min-w-0 overflow-hidden rounded-[8px] border border-ink-100 bg-white">
-          <div className="flex items-center justify-between gap-2 border-b border-ink-100 bg-gradient-to-r from-cyan-50/70 to-white px-2.5 py-1.5">
+          <div className="border-b border-ink-100 bg-gradient-to-r from-cyan-50/70 to-white px-2.5 py-1.5">
             <span className="font-sans text-[8.5px] font-bold uppercase tracking-eyebrow text-ink-400">Tribopair</span>
-            <span
-              data-testid="tribopair-contact-state"
-              className="shrink-0 rounded-full border border-cyan-100 bg-cyan-50 px-2 py-0.5 font-mono text-[8.5px] font-black uppercase tracking-[0.14em] text-cyan-700"
-            >
-              contact
-            </span>
           </div>
           <div data-testid="tribopair-contact-stack" className="grid min-w-0 grid-cols-1 divide-y divide-ink-100 bg-white">
             <TribopairContactValue
@@ -549,24 +517,22 @@ export function RecordCard({
             onClick={() =>
               openRecordEvidence({ sourceId: record.sourceId, recordId: record.id, field: "cof", value: cofValue, prov: record.provenance!.cof!, domain })
             }
-            className="relative overflow-hidden rounded-xl bg-gradient-to-br from-ink-900 to-ink-800 px-3.5 py-2.5 text-left text-white shadow-readout transition hover:ring-2 hover:ring-brand-200 focus:outline-none focus:ring-2 focus:ring-brand-200"
+            data-ui="cof-summary"
+            className="rounded-[10px] border border-cyan-100 bg-gradient-to-br from-white to-cyan-50/45 px-3 py-2.5 text-left shadow-sm transition hover:border-brand-300 hover:bg-cyan-50/55 focus:outline-none focus:ring-2 focus:ring-brand-200"
             title={`${cofValue} · evidence available`}
             aria-label="Open evidence for cof"
           >
             {cofReadoutContent}
           </button>
         ) : (
-          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-ink-900 to-ink-800 px-3.5 py-2.5 text-white shadow-readout">
+          <div data-ui="cof-summary" className="rounded-[10px] border border-cyan-100 bg-gradient-to-br from-white to-cyan-50/45 px-3 py-2.5 shadow-sm">
             {cofReadoutContent}
           </div>
         )}
 
         <div>
-          <div className="mb-1.5 flex items-center justify-between gap-2">
-            <span className="label-eyebrow">Conditions</span>
-            <span className="font-mono text-[10px] font-medium uppercase tracking-wide text-ink-400">
-              {units === "std" ? "standardized" : "as reported"}
-            </span>
+          <div className="mb-1.5">
+            <span className="label-eyebrow">{units === "std" ? "Standardized Conditions" : "Reported Conditions"}</span>
           </div>
           <div className="grid grid-cols-2 gap-1.5 lg:grid-cols-3">
             {/* half-width chips first, then missing-field placeholders in their
@@ -583,20 +549,13 @@ export function RecordCard({
         </div>
       </section>
 
-      {/* ── flexible / raw ── */}
-      <RawFlexiblePanel fields={record.flexible} defaultCollapsed={record.status === "official"} />
-
       {/* ── actions footer ── */}
       {actions && (
         <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t border-ink-100 bg-ink-50/30 px-3 py-2 xl:col-span-4">
-          <span className="text-[11px] font-medium">
-            {complete ? (
-              <span className="text-brand-600">core complete</span>
-            ) : (
-              <span className="text-amber-600">missing: {missing.join(", ")}</span>
-            )}
-          </span>
-          <div className="flex flex-wrap items-center justify-end gap-2">{actions}</div>
+          {missing.length > 0 && (
+            <span className="text-[11px] font-medium text-amber-600">missing: {missing.join(", ")}</span>
+          )}
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">{actions}</div>
         </div>
       )}
     </article>

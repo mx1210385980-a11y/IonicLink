@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { clearFinishedJobs, createJobs, findSourceByDoi, listJobs } from "@/lib/db";
+import {
+  clearFinishedJobs,
+  createJobs,
+  findSourceByDoi,
+  getJobHistorySummary,
+  listJobs,
+} from "@/lib/db";
 import { isDomain } from "@/lib/domain";
 import { extractDoiFromPages } from "@/lib/doi";
 import { extractionConcurrency, isDraining, kickDrain } from "@/lib/jobs";
@@ -84,6 +90,7 @@ export async function GET(_req: NextRequest, { params }: { params: { domain: str
     jobs: listJobs(params.domain),
     draining: isDraining(params.domain),
     concurrency: extractionConcurrency(),
+    history: getJobHistorySummary(params.domain),
   });
 }
 

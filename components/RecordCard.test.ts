@@ -28,6 +28,7 @@ function makeRecord(): IonicRecord {
     extended: {
       scale: "nano",
       method: "AFM",
+      cofMethod: "slope of friction force vs normal load fitting line (Amontons’ law)",
       probe: "silicon nitride",
       probeType: "Tip · 2 nm",
       velocity: parseQuantity("2 µm/s", "velocity") ?? undefined,
@@ -108,16 +109,15 @@ flexibleRecord.flexible = [
 ];
 
 const html = renderToStaticMarkup(createElement(RecordCard, { record: flexibleRecord }));
-assert.match(html, /data-testid="raw-flexible-panel"/);
-assert.match(html, /IL film preparation/);
-assert.match(html, /ambient conditions/);
+assert.doesNotMatch(html, /data-testid="raw-flexible-panel"/);
+assert.doesNotMatch(html, /IL film preparation/);
+assert.doesNotMatch(html, /ambient conditions/);
 
 const officialFlexibleRecord = makeRecord();
 officialFlexibleRecord.status = "official";
 officialFlexibleRecord.flexible = flexibleRecord.flexible;
 const officialFlexibleHtml = renderToStaticMarkup(createElement(RecordCard, { record: officialFlexibleRecord }));
-assert.match(officialFlexibleHtml, /data-testid="raw-flexible-panel"/);
-assert.match(officialFlexibleHtml, /aria-expanded="false"/);
+assert.doesNotMatch(officialFlexibleHtml, /data-testid="raw-flexible-panel"/);
 assert.doesNotMatch(officialFlexibleHtml, /IL film preparation/);
 assert.doesNotMatch(officialFlexibleHtml, /ambient conditions/);
 
@@ -126,10 +126,22 @@ console.log("RecordCard flexible layout tests passed");
 const reviewHtml = renderToStaticMarkup(createElement(RecordCard, { record: makeRecord() }));
 assert.match(reviewHtml, /conf 82%/);
 
+const reviewActionsHtml = renderToStaticMarkup(
+  createElement(RecordCard, {
+    record: makeRecord(),
+    actions: createElement("button", null, "Edit"),
+  }),
+);
+assert.doesNotMatch(reviewActionsHtml, /core complete/);
+assert.match(reviewActionsHtml, />Edit<\/button>/);
+
 const officialRecord = makeRecord();
 officialRecord.status = "official";
 const officialHtml = renderToStaticMarkup(createElement(RecordCard, { record: officialRecord }));
 assert.doesNotMatch(officialHtml, /conf 82%/);
+assert.match(officialHtml, />checked</);
+assert.doesNotMatch(officialHtml, />official</);
+assert.match(officialHtml, /record-card-unified-text/);
 
 console.log("RecordCard confidence visibility tests passed");
 
@@ -171,7 +183,14 @@ assert.match(compactHtml, /data-testid="tribopair-panel"/);
 assert.doesNotMatch(compactHtml, /data-testid="tribopair-fact-row"/);
 assert.match(compactHtml, /data-testid="tribopair-contact-strip"/);
 assert.match(compactHtml, /data-testid="tribopair-contact-stack"/);
-assert.match(compactHtml, /data-testid="tribopair-contact-state"/);
+assert.doesNotMatch(compactHtml, /data-testid="tribopair-contact-state"/);
+assert.match(compactHtml, /data-ui="cof-summary"/);
+assert.match(compactHtml, /border-cyan-100 bg-gradient-to-br from-white to-cyan-50\/45/);
+assert.doesNotMatch(compactHtml, /low friction|moderate|high friction/);
+assert.doesNotMatch(compactHtml, /slope of friction force vs normal load fitting line/);
+assert.doesNotMatch(compactHtml, /from-ink-900 to-ink-800/);
+assert.doesNotMatch(compactHtml, /transition-\[width\]/);
+assert.match(compactHtml, /Reported Conditions/);
 assert.doesNotMatch(compactHtml, /sm:grid-cols-\[minmax\(0,1fr\)_auto_minmax\(0,1fr\)\]/);
 assert.doesNotMatch(compactHtml, /sm:grid-cols-3/);
 assert.doesNotMatch(compactHtml, /data-testid="contact-fingerprint"/);
@@ -269,6 +288,7 @@ const rawIonHtml = renderToStaticMarkup(createElement(RecordCard, { record: stan
 assert.match(rawIonHtml, />\[BMIM\]</);
 assert.match(rawIonHtml, />\[PF6\]</);
 const standardizedIonHtml = renderToStaticMarkup(createElement(RecordCard, { record: standardizedIonRecord, units: "std" }));
+assert.match(standardizedIonHtml, /Standardized Conditions/);
 assert.match(standardizedIonHtml, />\[C<sub[^>]*>4<\/sub>MIM\]</);
 assert.match(standardizedIonHtml, />\[PF<sub[^>]*>6<\/sub>\]</);
 assert.doesNotMatch(standardizedIonHtml, />\[BMIM\]</);

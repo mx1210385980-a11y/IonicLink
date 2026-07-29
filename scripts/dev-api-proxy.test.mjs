@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import http from "node:http";
+import path from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import { createProxyServer, isCliEntrypoint } from "./dev-api-proxy.mjs";
 
@@ -62,8 +64,6 @@ test("forwards requests to the target dev server", async () => {
 });
 
 test("detects CLI entrypoint when the script path contains non-ASCII characters", () => {
-  assert.equal(
-    isCliEntrypoint("file:///Users/example/%E9%A1%B9%E7%9B%AE/scripts/dev-api-proxy.mjs", "/Users/example/项目/scripts/dev-api-proxy.mjs"),
-    true,
-  );
+  const scriptPath = path.join(process.cwd(), "\u9879\u76ee", "scripts", "dev-api-proxy.mjs");
+  assert.equal(isCliEntrypoint(pathToFileURL(scriptPath).href, scriptPath), true);
 });

@@ -3,7 +3,7 @@ import path from "node:path";
 import { createRecords, listRecords } from "../lib/db";
 import { toFields } from "../lib/ingest";
 import { getModule } from "../lib/modules/registry.server";
-import type { DomainDraft } from "../lib/domain";
+import type { DomainDraft, ExtractionMetadata, ExtractionSource } from "../lib/domain";
 import type { IonicRecord } from "../lib/schema";
 
 const TITLE = "Surface-active ionic liquids as lubricant additives to hexadecane and diethyl succinate";
@@ -19,6 +19,8 @@ const DEFAULT_CACHE = path.resolve(
 );
 
 type CachedExtraction = {
+  extractionSource?: ExtractionSource | "error";
+  model?: string;
   records: IonicRecord[];
 };
 
@@ -55,12 +57,29 @@ function sourceIdForPaper(existing: IonicRecord[]): string | undefined {
   return existing.find((record) => record.paper.title === TITLE && record.sourceId)?.sourceId;
 }
 
-function draftFromCacheRecord(record: IonicRecord, sourceId?: string): DomainDraft<any, any> {
+function cacheExtractionMetadata(
+  cache: CachedExtraction,
+  record: IonicRecord
+): ExtractionMetadata | undefined {
+  if (record.extraction) return record.extraction;
+  if (!cache.extractionSource || cache.extractionSource === "error") return undefined;
+  return {
+    source: cache.extractionSource,
+    ...(cache.model ? { model: cache.model } : {}),
+  };
+}
+
+function draftFromCacheRecord(
+  record: IonicRecord,
+  sourceId: string | undefined,
+  cache: CachedExtraction
+): DomainDraft<any, any> {
   const mod = getModule("tribology");
   const draft = mod.ingest(toFields(record));
   return {
     ...draft,
     sourceId: sourceId ?? record.sourceId,
+    extraction: cacheExtractionMetadata(cache, record),
   };
 }
 
@@ -77,7 +96,12 @@ function main() {
 
   for (const cached of cache.records) {
     if (cached.paper.title !== TITLE) continue;
-    const draft = draftFromCacheRecord(cached, sourceId);
+    const draft = draftFromCacheRecord(cached, sourceId, cache);
+    if (write && !draft.extraction) {
+      throw new Error(
+        `Cached record ${cached.id} has no extraction provenance; re-extract it before writing Official records.`
+      );
+    }
     const recordForFingerprint = { ...draft, id: cached.id, status: "official" as const, createdAt: cached.createdAt } as IonicRecord;
     const fp = fingerprint(recordForFingerprint);
     if (existing.has(fp)) {

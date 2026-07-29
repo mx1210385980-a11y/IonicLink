@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { deleteRecords, updateRecord } from "@/lib/db";
+import { deleteRecords, updateRecord, type FieldProvenancePatch } from "@/lib/db";
 import { isDomain } from "@/lib/domain";
-import type { ExtractedFields, FieldProvenance, RecordStatus } from "@/lib/schema";
+import type { ExtractedFields, RecordStatus } from "@/lib/schema";
 
 export const runtime = "nodejs";
 
@@ -10,7 +10,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { domain: st
   const body = (await req.json()) as {
     fields?: ExtractedFields;
     status?: RecordStatus;
-    setProvenance?: { field: string; prov: FieldProvenance };
+    setProvenance?: { field: string; prov: FieldProvenancePatch };
   };
   const result = updateRecord(params.domain, decodeURIComponent(params.id), body);
   if (result.error) {

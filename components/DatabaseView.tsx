@@ -17,12 +17,172 @@ type DatabasePayload = {
   papers?: { title: string; n: number }[];
 };
 
+export const SEARCH_DEBOUNCE_MS = 300;
+export const VISIBLE_BATCH_SIZE = 50;
+
+export function buildDatabaseQuery({
+  status,
+  facet,
+  paper,
+  search,
+}: {
+  status: RecordStatus;
+  facet: string;
+  paper: string;
+  search: string;
+}): string {
+  const params = new URLSearchParams({ status });
+  if (facet !== "all") params.set("facet", facet);
+  if (paper !== "all") params.set("paper", paper);
+  if (search.trim()) params.set("search", search.trim());
+  return params.toString();
+}
+
+export function takeVisibleRecords<T>(records: T[], limit: number): T[] {
+  return records.slice(0, Math.max(0, limit));
+}
+
+export function isLoadedQueryReady(
+  loadedQuery: string | null,
+  currentQuery: string,
+  searchInput: string,
+  committedSearch: string
+): boolean {
+  return loadedQuery === currentQuery && searchInput.trim() === committedSearch;
+}
+
+export function selectedDisplayedRecords<T extends { id: string }>(
+  displayedRecords: T[],
+  selected: ReadonlySet<string>
+): T[] {
+  return displayedRecords.filter((record) => selected.has(record.id));
+}
+
+export function pruneSelectionToDisplayed<T extends { id: string }>(
+  selected: ReadonlySet<string>,
+  displayedRecords: T[]
+): Set<string> {
+  const displayedIds = new Set(displayedRecords.map((record) => record.id));
+  return new Set([...selected].filter((id) => displayedIds.has(id)));
+}
+
+export function databaseStatusUrl(href: string, status: RecordStatus): string {
+  const url = new URL(href);
+  url.searchParams.set("status", status);
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+export async function requireOk(response: Response, fallback: string): Promise<void> {
+  if (response.ok) return;
+  const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
+  const message = typeof payload?.error === "string" && payload.error.trim() ? payload.error : fallback;
+  throw new Error(message);
+}
+
 export function recordListUnitsForStatus(status: RecordStatus, selectedUnits: UnitMode): UnitMode {
   return status === "official" ? "std" : selectedUnits;
 }
 
 export function shouldShowUnitModeControl(status: RecordStatus): boolean {
   return status === "review";
+}
+
+export function isMockExtractionRecord(record: { extraction?: { source?: string } }): boolean {
+  return record.extraction?.source === "mock";
+}
+
+export type ReviewReadinessFilter = "all" | "ready" | "incomplete" | "mock";
+export type ReviewReadinessSummary = Record<ReviewReadinessFilter, number>;
+
+type CoreCompletenessCheck<T> = (record: T) => { complete: boolean };
+
+function reviewReadinessBucket<T extends { extraction?: { source?: string } }>(
+  record: T,
+  coreCompleteness: CoreCompletenessCheck<T>
+): Exclude<ReviewReadinessFilter, "all"> {
+  if (isMockExtractionRecord(record)) return "mock";
+  return coreCompleteness(record).complete ? "ready" : "incomplete";
+}
+
+/** Snapshot counts over the loaded Review response, before variable filters. */
+export function summarizeReviewReadiness<T extends { extraction?: { source?: string } }>(
+  records: T[],
+  coreCompleteness: CoreCompletenessCheck<T>
+): ReviewReadinessSummary {
+  const summary: ReviewReadinessSummary = { all: records.length, ready: 0, incomplete: 0, mock: 0 };
+  for (const record of records) summary[reviewReadinessBucket(record, coreCompleteness)] += 1;
+  return summary;
+}
+
+/** Apply one mutually exclusive readiness bucket; Mock always wins over completeness. */
+export function filterRecordsByReadiness<T extends { extraction?: { source?: string } }>(
+  records: T[],
+  filter: ReviewReadinessFilter,
+  coreCompleteness: CoreCompletenessCheck<T>
+): T[] {
+  if (filter === "all") return records;
+  return records.filter((record) => reviewReadinessBucket(record, coreCompleteness) === filter);
+}
+
+const READINESS_OPTIONS: {
+  value: ReviewReadinessFilter;
+  label: string;
+  activeClass: string;
+}[] = [
+  { value: "all", label: "All", activeClass: "border-ink-700 bg-ink-800 text-white" },
+  { value: "ready", label: "Ready to approve", activeClass: "border-brand-600 bg-brand-600 text-white" },
+  { value: "incomplete", label: "Needs core fields", activeClass: "border-amber-500 bg-amber-500 text-white" },
+  { value: "mock", label: "Mock locked", activeClass: "border-rose-500 bg-rose-500 text-white" },
+];
+
+export function ReviewReadinessStrip({
+  summary,
+  active,
+  onChange,
+}: {
+  summary: ReviewReadinessSummary;
+  active: ReviewReadinessFilter;
+  onChange: (filter: ReviewReadinessFilter) => void;
+}) {
+  return (
+    <section
+      data-testid="review-readiness-strip"
+      aria-label="Review readiness"
+      className="border-b border-brand-200 bg-gradient-to-r from-brand-50/90 via-white to-amber-50/70 px-4 py-3"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="label-eyebrow mr-1 text-ink-700">Review readiness</span>
+        {READINESS_OPTIONS.map((option) => {
+          const count = summary[option.value];
+          const pressed = active === option.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              aria-pressed={pressed}
+              aria-label={`${option.label}: ${count}`}
+              disabled={count === 0}
+              title={count === 0 ? `No records are ${option.label.toLowerCase()}` : undefined}
+              onClick={() => onChange(option.value)}
+              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-45 ${
+                pressed
+                  ? option.activeClass
+                  : "border-ink-200 bg-white text-ink-700 hover:border-brand-300 hover:text-brand-700"
+              }`}
+            >
+              <span>{option.label}</span>
+              <span className={`rounded-full px-1.5 py-0.5 font-mono text-[10px] tnum ${pressed ? "bg-white/20" : "bg-ink-100"}`}>
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-[11px] leading-relaxed text-ink-700">
+        <strong>Next:</strong> Ready → approve; Needs core fields → edit missing fields; Mock locked → re-extract with a live model or enter manually.
+      </p>
+    </section>
+  );
 }
 
 /** Token AND-match over source titles: every word of the query must appear. */
@@ -65,54 +225,73 @@ export function DatabaseView({ domain }: { domain: Domain }) {
   const [paper, setPaper] = useState<string>("all");
   const [papers, setPapers] = useState<{ title: string; n: number }[]>([]);
   const [search, setSearch] = useState("");
+  const [committedSearch, setCommittedSearch] = useState("");
   const [groupByPaper, setGroupByPaper] = useState(true);
   const [units, setUnits] = useState<UnitMode>("raw");
   const [records, setRecords] = useState<AnyRecord[]>([]);
   const [filters, setFilters] = useState<RecordFilters>(EMPTY_FILTERS);
+  const [readinessFilter, setReadinessFilter] = useState<ReviewReadinessFilter>("all");
   const [counts, setCounts] = useState({ official: 0, review: 0 });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [mutationBusy, setMutationBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [visibleLimit, setVisibleLimit] = useState(VISIBLE_BATCH_SIZE);
   const [statusReady, setStatusReady] = useState(false);
+  const [loadedQuery, setLoadedQuery] = useState<string | null>(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const requestRef = useRef<AbortController | null>(null);
+  const hasLoadedRef = useRef(false);
+  const searchTimeoutRef = useRef<number | null>(null);
 
-  const queryParams = useCallback(() => {
-    const params = new URLSearchParams({ status });
-    if (facet !== "all") params.set("facet", facet);
-    if (paper !== "all") params.set("paper", paper);
-    if (search.trim()) params.set("search", search.trim());
-    return params;
-  }, [status, facet, paper, search]);
+  const query = useMemo(
+    () => buildDatabaseQuery({ status, facet, paper, search: committedSearch }),
+    [status, facet, paper, committedSearch]
+  );
+  const queryKey = `${domain}?${query}`;
+  const queryReady = statusReady && isLoadedQueryReady(loadedQuery, queryKey, search, committedSearch);
 
   const load = useCallback(async () => {
-    setLoading(true);
-    setNotice(null);
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
+    setLoadedQuery(null);
+    if (!hasLoadedRef.current) setLoading(true);
+    setRefreshing(true);
     try {
-      const res = await fetch(`/api/${domain}/records?${queryParams()}`);
+      const res = await fetch(`/api/${domain}/records?${query}`, { signal: controller.signal });
       const data = await parseDatabaseResponse(res);
+      if (controller.signal.aborted) return;
       const sources: { title: string; n: number }[] = data.papers ?? [];
       setRecords(data.records);
+      setVisibleLimit(VISIBLE_BATCH_SIZE);
       setCounts(data.counts);
       setPapers(sources);
+      hasLoadedRef.current = true;
+      setLoadedQuery(queryKey);
       // The focused source vanished from this queue (tab switch, or its last
       // record was approved/rejected) — fall back to the full list.
       if (paper !== "all" && !sources.some((p) => p.title === paper)) setPaper("all");
       setSelected(new Set());
     } catch (error) {
+      if (controller.signal.aborted) return;
       console.error(error);
-      setRecords([]);
-      setPapers([]);
-      setSelected(new Set());
       setNotice("Could not load database records. Refresh once; in local dev, keep the frontend on port 3000 and restart it if the API keeps returning 404.");
     } finally {
-      setLoading(false);
+      if (requestRef.current === controller) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [domain, queryParams, paper]);
+  }, [domain, query, queryKey, paper]);
 
   useEffect(() => {
     if (!statusReady) return;
     load();
-  }, [load, statusReady]);
+  }, [load, refreshVersion, statusReady]);
 
   useEffect(() => {
     const statusParam = new URLSearchParams(window.location.search).get("status");
@@ -120,103 +299,267 @@ export function DatabaseView({ domain }: { domain: Domain }) {
     setStatusReady(true);
   }, []);
 
-  const toggle = (id: string) =>
+  useEffect(() => {
+    if (searchTimeoutRef.current != null) window.clearTimeout(searchTimeoutRef.current);
+    searchTimeoutRef.current = window.setTimeout(() => {
+      searchTimeoutRef.current = null;
+      setCommittedSearch(search.trim());
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      if (searchTimeoutRef.current != null) window.clearTimeout(searchTimeoutRef.current);
+      searchTimeoutRef.current = null;
+    };
+  }, [search]);
+
+  useEffect(() => () => requestRef.current?.abort(), []);
+
+  const commitPendingSearch = useCallback(() => {
+    if (searchTimeoutRef.current != null) window.clearTimeout(searchTimeoutRef.current);
+    searchTimeoutRef.current = null;
+    setCommittedSearch(search.trim());
+  }, [search]);
+
+  const invalidateQueryInteractions = useCallback(() => {
+    setSelected((previous) => previous.size === 0 ? previous : new Set());
+    setEditingId(null);
+  }, []);
+
+  const changeStatus = useCallback((next: RecordStatus) => {
+    invalidateQueryInteractions();
+    commitPendingSearch();
+    setReadinessFilter("all");
+    window.history.replaceState(window.history.state, "", databaseStatusUrl(window.location.href, next));
+    setStatus(next);
+  }, [commitPendingSearch, invalidateQueryInteractions]);
+
+  const changeFacet = useCallback((next: string) => {
+    invalidateQueryInteractions();
+    commitPendingSearch();
+    setFacet(next);
+  }, [commitPendingSearch, invalidateQueryInteractions]);
+
+  const changePaper = useCallback((next: string) => {
+    invalidateQueryInteractions();
+    commitPendingSearch();
+    setPaper(next);
+  }, [commitPendingSearch, invalidateQueryInteractions]);
+
+  const changeSearch = useCallback((next: string) => {
+    invalidateQueryInteractions();
+    setSearch(next);
+  }, [invalidateQueryInteractions]);
+
+  const changeReadinessFilter = useCallback((next: ReviewReadinessFilter) => {
+    setReadinessFilter(next);
+    setVisibleLimit(VISIBLE_BATCH_SIZE);
+    setSelected((previous) => previous.size === 0 ? previous : new Set());
+    setEditingId(null);
+  }, []);
+
+  const toggle = (id: string) => {
+    if (!queryReady) return;
     setSelected((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+  };
 
-  /** Select/deselect a whole source's records at once (group-header checkbox). */
-  const toggleGroup = (recs: AnyRecord[]) =>
+  /** Select/deselect the currently displayed records in one group. */
+  const toggleGroup = (recs: AnyRecord[]) => {
+    if (!queryReady) return;
     setSelected((prev) => {
       const next = new Set(prev);
       const allIn = recs.every((r) => next.has(r.id));
       for (const r of recs) allIn ? next.delete(r.id) : next.add(r.id);
       return next;
     });
+  };
+
+  const refreshCurrentQuery = useCallback(() => {
+    setLoadedQuery(null);
+    setRefreshVersion((version) => version + 1);
+  }, []);
 
   const deleteSelected = async () => {
-    if (selected.size === 0) return;
-    await fetch(`/api/${domain}/records/delete`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids: [...selected] }),
-    });
-    load();
+    if (!queryReady || selectedRecords.length === 0 || mutationBusy) return;
+    const ids = selectedRecords.map((record) => record.id);
+    setMutationBusy(true);
+    setNotice(null);
+    try {
+      const response = await fetch(`/api/${domain}/records/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      await requireOk(response, "Could not delete the selected records.");
+      setNotice(`${status === "review" ? "Rejected" : "Deleted"} ${ids.length} record${ids.length === 1 ? "" : "s"}.`);
+      refreshCurrentQuery();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not delete the selected records.");
+    } finally {
+      setMutationBusy(false);
+    }
   };
 
   const approve = async (id: string) => {
+    if (!queryReady || mutationBusy) return;
+    setMutationBusy(true);
     setNotice(null);
-    const res = await fetch(`/api/${domain}/records/${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: "official" }),
-    });
-    if (!res.ok) {
-      const d = await res.json().catch(() => ({}));
-      setNotice(d.error || "Could not approve this record.");
-      return;
-    }
-    load();
-  };
-
-  const reject = async (id: string) => {
-    await fetch(`/api/${domain}/records/${encodeURIComponent(id)}`, { method: "DELETE" });
-    load();
-  };
-
-  /** Selected review records that pass the domain's core-completeness gate. */
-  const readySelected = useMemo(
-    () => records.filter((r) => selected.has(r.id) && mod.coreCompleteness(r).complete),
-    [records, selected, mod]
-  );
-
-  const approveSelected = async () => {
-    if (readySelected.length === 0) return;
-    setNotice(null);
-    let ok = 0;
-    let failed = 0;
-    for (const r of readySelected) {
-      const res = await fetch(`/api/${domain}/records/${encodeURIComponent(r.id)}`, {
+    try {
+      const response = await fetch(`/api/${domain}/records/${encodeURIComponent(id)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "official" }),
       });
-      if (res.ok) ok++;
-      else failed++;
+      await requireOk(response, "Could not approve this record.");
+      setNotice("Record approved.");
+      refreshCurrentQuery();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not approve this record.");
+    } finally {
+      setMutationBusy(false);
     }
-    const skipped = selected.size - readySelected.length;
-    const parts = [`Approved ${ok} record${ok === 1 ? "" : "s"}`];
-    if (skipped > 0) parts.push(`${skipped} skipped (incomplete core fields)`);
-    if (failed > 0) parts.push(`${failed} failed`);
-    setNotice(parts.join(" · "));
-    load();
   };
 
-  const exportHref = useMemo(() => `/api/${domain}/export?${queryParams()}`, [domain, queryParams]);
-  // Variable filters apply instantly client-side over the loaded record list.
-  const visible = useMemo(() => applyRecordFilters(domain, records, filters), [domain, records, filters]);
-  const filtered = hasActiveFilters(filters);
-  const groups = useMemo(() => groupRecords(visible, groupByPaper), [visible, groupByPaper]);
+  const reject = async (id: string) => {
+    if (!queryReady || mutationBusy) return;
+    setMutationBusy(true);
+    setNotice(null);
+    try {
+      const response = await fetch(`/api/${domain}/records/${encodeURIComponent(id)}`, { method: "DELETE" });
+      await requireOk(response, "Could not reject this record.");
+      setNotice("Record rejected.");
+      refreshCurrentQuery();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not reject this record.");
+    } finally {
+      setMutationBusy(false);
+    }
+  };
+
+  const approveSelected = async () => {
+    if (!queryReady || readySelected.length === 0 || mutationBusy) return;
+    setMutationBusy(true);
+    setNotice(null);
+    try {
+      const results = await Promise.allSettled(
+        readySelected.map((record) =>
+          fetch(`/api/${domain}/records/${encodeURIComponent(record.id)}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "official" }),
+          })
+        )
+      );
+      const ok = results.filter((result) => result.status === "fulfilled" && result.value.ok).length;
+      const failed = results.length - ok;
+      const parts = [`Approved ${ok} record${ok === 1 ? "" : "s"}`];
+      if (mockSelectedCount > 0) parts.push(`${mockSelectedCount} skipped (mock demo)`);
+      if (incompleteSelectedCount > 0) parts.push(`${incompleteSelectedCount} skipped (incomplete core fields)`);
+      if (failed > 0) parts.push(`${failed} failed`);
+      setNotice(parts.join(" · "));
+      refreshCurrentQuery();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not approve the selected records.");
+    } finally {
+      setMutationBusy(false);
+    }
+  };
+
+  const readinessSummary = useMemo(
+    () => summarizeReviewReadiness(records, mod.coreCompleteness),
+    [records, mod]
+  );
+  const readinessRecords = useMemo(
+    () => status === "review"
+      ? filterRecordsByReadiness(records, readinessFilter, mod.coreCompleteness)
+      : records,
+    [records, readinessFilter, status, mod]
+  );
+  const readinessFiltered = status === "review" && readinessFilter !== "all";
+  const variableFiltered = hasActiveFilters(filters);
+  // Readiness filters first; variable filters then apply instantly over that loaded subset.
+  const visible = useMemo(
+    () => applyRecordFilters(domain, readinessRecords, filters),
+    [domain, readinessRecords, filters]
+  );
+  const filtered = readinessFiltered || variableFiltered;
+  const displayedRecords = useMemo(() => takeVisibleRecords(visible, visibleLimit), [visible, visibleLimit]);
+  const groups = useMemo(() => groupRecords(displayedRecords, groupByPaper), [displayedRecords, groupByPaper]);
   const stats = useMemo(() => mod.listStats(visible), [mod, visible]);
   const sourceCount = useMemo(() => new Set(visible.map((r) => r.paper?.title)).size, [visible]);
+  const selectedRecords = useMemo(
+    () => selectedDisplayedRecords(displayedRecords, selected),
+    [displayedRecords, selected]
+  );
+  const mockSelectedCount = useMemo(
+    () => selectedRecords.filter(isMockExtractionRecord).length,
+    [selectedRecords]
+  );
+  const incompleteSelectedCount = useMemo(
+    () => selectedRecords.filter((r) => !isMockExtractionRecord(r) && !mod.coreCompleteness(r).complete).length,
+    [selectedRecords, mod]
+  );
+  const readySelected = useMemo(
+    () => selectedRecords.filter((r) => !isMockExtractionRecord(r) && mod.coreCompleteness(r).complete),
+    [selectedRecords, mod]
+  );
 
-  // Hidden records must never ride along in bulk actions — prune the selection
-  // whenever a filter removes them from view.
+  const changeFilters = useCallback((next: RecordFilters) => {
+    setFilters(next);
+    setVisibleLimit(VISIBLE_BATCH_SIZE);
+  }, []);
+
+  const exportVisible = async () => {
+    if (!queryReady || visible.length === 0 || exporting) return;
+    setExporting(true);
+    setNotice(null);
+    try {
+      const response = await fetch(`/api/${domain}/export`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: visible.map((record) => record.id) }),
+      });
+      await requireOk(response, "Could not export the visible records.");
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") ?? "";
+      const filename = disposition.match(/filename="?([^";]+)"?/i)?.[1] ?? `ioniclink-${domain}-${status}.csv`;
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+      setNotice(`Exported ${visible.length} visible record${visible.length === 1 ? "" : "s"}.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not export the visible records.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // Bulk actions apply only to cards currently rendered by this pagination slice.
   useEffect(() => {
     setSelected((prev) => {
-      const visibleIds = new Set(visible.map((r) => r.id));
-      const next = new Set([...prev].filter((id) => visibleIds.has(id)));
+      if (!queryReady) return prev.size === 0 ? prev : new Set();
+      const next = pruneSelectionToDisplayed(prev, displayedRecords);
       return next.size === prev.size ? prev : next;
     });
-  }, [visible]);
+    if (!queryReady) setEditingId(null);
+  }, [displayedRecords, queryReady]);
   const recordUnits = recordListUnitsForStatus(status, units);
   const conditionItemsOf = useCallback((r: AnyRecord) => mod.conditionItems(r, recordUnits), [mod, recordUnits]);
   const systemFacetsOf = useCallback((r: AnyRecord) => mod.systemFacets(r, recordUnits), [mod, recordUnits]);
 
   return (
-    <div data-testid="database-workbench-shell" className="panel overflow-hidden rounded-[8px] shadow-sm">
+    <div
+      data-testid="database-workbench-shell"
+      aria-busy={refreshing}
+      className="panel overflow-hidden rounded-[8px] shadow-sm"
+    >
       {/* ── header ── */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink-200/70 px-4 py-3">
         <div className="flex items-center gap-3">
@@ -227,9 +570,15 @@ export function DatabaseView({ domain }: { domain: Domain }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <a href={exportHref} className="btn">
-            <DownloadIcon /> Export CSV
-          </a>
+          <button
+            type="button"
+            onClick={exportVisible}
+            disabled={!queryReady || visible.length === 0 || exporting}
+            title={!queryReady ? "Wait for the current database query to finish loading" : undefined}
+            className="btn disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <DownloadIcon /> {exporting ? "Exporting…" : `Export visible (${visible.length})`}
+          </button>
           <Link
             href={`/${domain}`}
             aria-label="Close database"
@@ -243,10 +592,10 @@ export function DatabaseView({ domain }: { domain: Domain }) {
       {/* ── tabs + at-a-glance stats ── */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink-200/70 bg-ink-50/40 px-4 py-2.5">
         <div className="flex rounded-[8px] border border-ink-200 bg-white p-0.5 text-sm">
-          <Tab active={status === "official"} onClick={() => setStatus("official")}>
-            Official Database <Badge active={status === "official"}>{counts.official}</Badge>
+          <Tab active={status === "official"} onClick={() => changeStatus("official")}>
+            Checked Database <Badge active={status === "official"}>{counts.official}</Badge>
           </Tab>
-          <Tab active={status === "review"} onClick={() => setStatus("review")}>
+          <Tab active={status === "review"} onClick={() => changeStatus("review")}>
             Review Queue <Badge active={status === "review"} tone="amber">{counts.review}</Badge>
           </Tab>
         </div>
@@ -257,19 +606,32 @@ export function DatabaseView({ domain }: { domain: Domain }) {
         </div>
       </div>
 
+      {status === "review" && queryReady && (
+        <ReviewReadinessStrip
+          summary={readinessSummary}
+          active={readinessFilter}
+          onChange={changeReadinessFilter}
+        />
+      )}
+
       {/* ── toolbar ── */}
       <div data-testid="database-command-bar" className="flex flex-wrap items-center gap-2 border-b border-ink-200/70 px-4 py-2.5">
         <div className="relative w-full sm:w-auto">
           <SearchIcon />
           <input
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => changeSearch(e.target.value)}
             placeholder="Search paper, cation, anion…"
             className="w-full min-w-0 rounded-[8px] border border-ink-200 bg-white py-1.5 pl-9 pr-3 text-xs outline-none transition focus:border-brand-300 focus:ring-2 focus:ring-brand-100 sm:w-64"
           />
         </div>
-        <SourceFilter paper={paper} papers={papers} onChange={setPaper} />
-        <Segmented value={facet} onChange={setFacet} options={mod.facet.options} />
+        {refreshing && !loading && (
+          <span aria-live="polite" className="font-mono text-[10px] text-ink-400">
+            Refreshing…
+          </span>
+        )}
+        <SourceFilter paper={paper} papers={papers} onChange={changePaper} />
+        <Segmented value={facet} onChange={changeFacet} options={mod.facet.options} />
         <button
           onClick={() => setGroupByPaper((g) => !g)}
           className={`inline-flex items-center gap-1.5 rounded-[8px] border px-2.5 py-1.5 text-xs font-semibold tracking-wide transition-all ${
@@ -290,17 +652,19 @@ export function DatabaseView({ domain }: { domain: Domain }) {
             ]}
           />
         )}
-        {selected.size > 0 && (
+        {queryReady && selectedRecords.length > 0 && (
           <div className="ml-auto flex items-center gap-2 text-sm">
-            <span className="font-mono text-ink-700">{selected.size} selected</span>
+            <span className="font-mono text-ink-700">{selectedRecords.length} selected</span>
             {status === "review" && (
               <button
                 onClick={approveSelected}
-                disabled={readySelected.length === 0}
+                disabled={readySelected.length === 0 || mutationBusy}
                 title={
                   readySelected.length === 0
-                    ? "None of the selected records have complete core fields"
-                    : "Approve every selected record whose core fields are complete"
+                    ? mockSelectedCount > 0
+                      ? "Mock demo records stay in Review and cannot be published"
+                      : "None of the selected records have complete core fields"
+                    : "Approve every selected non-mock record whose core fields are complete"
                 }
                 className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -309,7 +673,8 @@ export function DatabaseView({ domain }: { domain: Domain }) {
             )}
             <button
               onClick={deleteSelected}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-2 font-medium text-rose-600 transition hover:bg-rose-50"
+              disabled={mutationBusy}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-2 font-medium text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <TrashIcon /> {status === "review" ? "Reject" : "Delete"}
             </button>
@@ -318,8 +683,8 @@ export function DatabaseView({ domain }: { domain: Domain }) {
       </div>
 
       {/* ── variable filters ── */}
-      {!loading && records.length > 0 && (
-        <FilterBar domain={domain} records={records} filters={filters} shown={visible.length} onChange={setFilters} />
+      {!loading && readinessRecords.length > 0 && (
+        <FilterBar domain={domain} records={readinessRecords} filters={filters} shown={visible.length} onChange={changeFilters} />
       )}
 
       {/* ── context caption ── */}
@@ -336,7 +701,11 @@ export function DatabaseView({ domain }: { domain: Domain }) {
       </p>
 
       {notice && (
-        <div className="mx-4 mt-3 flex items-center justify-between rounded-[8px] border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <div
+          role="status"
+          aria-live="polite"
+          className="mx-4 mt-3 flex items-center justify-between rounded-[8px] border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+        >
           <span>{notice}</span>
           <button onClick={() => setNotice(null)} className="text-amber-500 hover:text-amber-700">✕</button>
         </div>
@@ -352,11 +721,21 @@ export function DatabaseView({ domain }: { domain: Domain }) {
           </div>
         ) : visible.length === 0 ? (
           <Empty>
-            {records.length > 0 && filtered ? (
+            {readinessFiltered && readinessRecords.length === 0 ? (
+              <span className="inline-flex flex-col items-center gap-2">
+                <span>No records are in this readiness bucket.</span>
+                <button
+                  onClick={() => changeReadinessFilter("all")}
+                  className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-medium text-ink-700 transition hover:border-brand-300 hover:text-brand-700"
+                >
+                  Show all review records
+                </button>
+              </span>
+            ) : readinessRecords.length > 0 && variableFiltered ? (
               <span className="inline-flex flex-col items-center gap-2">
                 <span>No records match the variable filters.</span>
                 <button
-                  onClick={() => setFilters(EMPTY_FILTERS)}
+                  onClick={() => changeFilters(EMPTY_FILTERS)}
                   className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-medium text-ink-700 transition hover:border-brand-300 hover:text-brand-700"
                 >
                   Reset filters
@@ -367,11 +746,12 @@ export function DatabaseView({ domain }: { domain: Domain }) {
             ) : status === "review" ? (
               "Review queue is empty. Head to Extract to pull candidates from a paper."
             ) : (
-              "No official records yet. Approve candidates from the Review Queue."
+              "No checked records yet. Approve candidates from the Review Queue."
             )}
           </Empty>
         ) : (
-          groups.map((group, gi) => (
+          <>
+            {groups.map((group, gi) => (
             <section
               key={group.key}
               className="animate-[row-rise_460ms_cubic-bezier(0.22,1,0.36,1)_both]"
@@ -380,14 +760,16 @@ export function DatabaseView({ domain }: { domain: Domain }) {
               {groupByPaper && (
                 <div className="mb-3 flex items-end justify-between gap-3 border-b border-ink-100 pb-2">
                   <div className="flex min-w-0 items-baseline gap-2.5">
-                    <input
-                      type="checkbox"
-                      checked={group.records.every((r) => selected.has(r.id))}
-                      onChange={() => toggleGroup(group.records)}
-                      className="h-4 w-4 translate-y-0.5 cursor-pointer rounded border-ink-300 text-brand-600 focus:ring-brand-500"
-                      aria-label={`Select all records from ${group.title}`}
-                      title="Select every record from this source"
-                    />
+                    {queryReady && (
+                      <input
+                        type="checkbox"
+                        checked={group.records.every((r) => selected.has(r.id))}
+                        onChange={() => toggleGroup(group.records)}
+                        className="h-4 w-4 translate-y-0.5 cursor-pointer rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+                        aria-label={`Select displayed records from ${group.title}`}
+                        title="Select the currently displayed records from this source"
+                      />
+                    )}
                     <BookIcon className="shrink-0 translate-y-0.5 text-brand-600" />
                     <h2 className="min-w-0 truncate font-serif text-[16px] font-semibold leading-snug text-ink-900" title={group.title}>{group.title}</h2>
                     {group.meta && (
@@ -402,7 +784,7 @@ export function DatabaseView({ domain }: { domain: Domain }) {
                   <div className="flex shrink-0 items-center gap-2">
                     {paper === "all" && (
                       <button
-                        onClick={() => setPaper(group.key)}
+                        onClick={() => changePaper(group.key)}
                         title="Show only this source's records"
                         className="inline-flex items-center gap-1 rounded-md border border-ink-200 bg-white px-2 py-1 text-[10px] font-semibold tracking-wide text-ink-700 transition hover:border-brand-300 hover:text-brand-700"
                       >
@@ -410,7 +792,7 @@ export function DatabaseView({ domain }: { domain: Domain }) {
                       </button>
                     )}
                     <span className="font-mono text-[11px] text-ink-400">
-                      {group.records.length} record{group.records.length > 1 ? "s" : ""}
+                      {group.records.length} displayed
                     </span>
                   </div>
                 </div>
@@ -421,7 +803,13 @@ export function DatabaseView({ domain }: { domain: Domain }) {
               ).map((subgroup) => (
                 <div key={subgroup.key} className="mb-5 last:mb-0">
                   {subgroup.facets.length > 0 && (
-                    <SystemSubgroupHeader subgroup={subgroup} selected={selected} onToggle={toggleGroup} domain={domain} />
+                    <SystemSubgroupHeader
+                      subgroup={subgroup}
+                      selected={selected}
+                      onToggle={toggleGroup}
+                      domain={domain}
+                      selectable={queryReady}
+                    />
                   )}
                   {groupByPaper && subgroup.records.length > 1 && (
                     <GroupConditionsStrip
@@ -433,14 +821,14 @@ export function DatabaseView({ domain }: { domain: Domain }) {
                   )}
                   <div className="space-y-3">
                     {subgroup.records.map((rec) =>
-                  editingId === rec.id ? (
+                  queryReady && editingId === rec.id ? (
                     <Editor
                       key={rec.id}
                       record={rec}
                       domain={domain}
                       onSaved={() => {
                         setEditingId(null);
-                        load();
+                        refreshCurrentQuery();
                       }}
                       onCancel={() => setEditingId(null)}
                     />
@@ -450,25 +838,36 @@ export function DatabaseView({ domain }: { domain: Domain }) {
                       record={rec}
                       domain={domain}
                       units={recordUnits}
-                      selected={selected.has(rec.id)}
-                      onToggle={toggle}
+                      selected={queryReady && selected.has(rec.id)}
+                      onToggle={queryReady ? toggle : undefined}
                       actions={
-                        <>
+                        queryReady ? <>
                           <button
                             onClick={() => setEditingId(rec.id)}
-                            className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-medium text-ink-700 transition hover:border-brand-300 hover:text-brand-700"
+                            disabled={mutationBusy}
+                            className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-medium text-ink-700 transition hover:border-brand-300 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
                           >
                             Edit
                           </button>
                           {status === "review" && (
                             <>
+                              {isMockExtractionRecord(rec) && (
+                                <span
+                                  className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800"
+                                  title="This candidate came from the offline mock extractor and is kept for review only."
+                                >
+                                  Mock · review only
+                                </span>
+                              )}
                               <button
                                 onClick={() => approve(rec.id)}
-                                disabled={!mod.coreCompleteness(rec).complete}
+                                disabled={mutationBusy || isMockExtractionRecord(rec) || !mod.coreCompleteness(rec).complete}
                                 title={
-                                  mod.coreCompleteness(rec).complete
-                                    ? "Approve into the official database"
-                                    : `Complete core fields first: ${mod.coreCompleteness(rec).missing.join(", ")}`
+                                  isMockExtractionRecord(rec)
+                                    ? "Mock demo records cannot be published as Checked records"
+                                    : mod.coreCompleteness(rec).complete
+                                      ? "Approve into the checked database"
+                                      : `Complete core fields first: ${mod.coreCompleteness(rec).missing.join(", ")}`
                                 }
                                 className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
                               >
@@ -476,13 +875,14 @@ export function DatabaseView({ domain }: { domain: Domain }) {
                               </button>
                               <button
                                 onClick={() => reject(rec.id)}
-                                className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-medium text-ink-700 transition hover:border-rose-200 hover:text-rose-600"
+                                disabled={mutationBusy}
+                                className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-medium text-ink-700 transition hover:border-rose-200 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
                               >
                                 Reject
                               </button>
                             </>
                           )}
-                        </>
+                        </> : undefined
                       }
                     />
                   )
@@ -491,14 +891,26 @@ export function DatabaseView({ domain }: { domain: Domain }) {
                 </div>
               ))}
             </section>
-          ))
+            ))}
+            {displayedRecords.length < visible.length && (
+              <div className="flex justify-center pt-1">
+                <button
+                  type="button"
+                  onClick={() => setVisibleLimit((limit) => limit + VISIBLE_BATCH_SIZE)}
+                  className="rounded-lg border border-ink-200 bg-white px-4 py-2 text-xs font-semibold text-ink-700 transition hover:border-brand-300 hover:text-brand-700"
+                >
+                  Load more ({visible.length - displayedRecords.length} remaining)
+                </button>
+              </div>
+            )}
+          </>
         )}
       </div>
 
       {/* ── footer ── */}
       <div className="flex items-center justify-between border-t border-ink-200/70 bg-ink-50/30 px-5 py-3 font-mono text-[11px] text-ink-400">
         <span>
-          {visible.length === 0 ? "0" : `1–${visible.length}`} of {visible.length} record
+          {displayedRecords.length === 0 ? "0" : `1–${displayedRecords.length}`} of {visible.length} record
           {visible.length === 1 ? "" : "s"}
           {filtered && ` · filtered from ${records.length}`}
         </span>
@@ -713,11 +1125,13 @@ function SystemSubgroupHeader({
   selected,
   onToggle,
   domain,
+  selectable,
 }: {
   subgroup: SystemSubgroup;
   selected: Set<string>;
   onToggle: (records: AnyRecord[]) => void;
   domain: Domain;
+  selectable: boolean;
 }) {
   const facetSummary = subgroup.facets.map((f) => f.item.value).join(" · ");
   return (
@@ -725,14 +1139,17 @@ function SystemSubgroupHeader({
       data-testid="system-subgroup"
       className="mb-2.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 rounded-lg border-l-2 border-brand-400 bg-brand-50/50 px-3 py-1.5"
     >
-      <input
-        type="checkbox"
-        checked={subgroup.records.every((r) => selected.has(r.id))}
-        onChange={() => onToggle(subgroup.records)}
-        className="h-3.5 w-3.5 cursor-pointer rounded border-ink-300 text-brand-600 focus:ring-brand-500"
-        aria-label={`Select all ${facetSummary} records`}
-        title="Select every record of this system"
-      />
+      {selectable && (
+        <input
+          type="checkbox"
+          checked={subgroup.records.every((r) => selected.has(r.id))}
+          onChange={() => onToggle(subgroup.records)}
+          className="h-3.5 w-3.5 cursor-pointer rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+          aria-label={`Select displayed ${facetSummary} records`}
+          title="Select the currently displayed records of this system"
+        />
+      )}
+      <span className="label-eyebrow shrink-0 text-[9px] leading-5 text-brand-700">Variable</span>
       {subgroup.facets.map((f) => (
         <EvidenceInline
           key={f.item.label}
@@ -749,7 +1166,7 @@ function SystemSubgroupHeader({
         />
       ))}
       <span className="ml-auto font-mono text-[10px] text-ink-400">
-        {subgroup.records.length} record{subgroup.records.length > 1 ? "s" : ""}
+        {subgroup.records.length} displayed
       </span>
     </div>
   );
@@ -810,7 +1227,7 @@ function GroupConditionsStrip({
             shared.length > 0 ? "mt-1.5 border-t border-ink-100 pt-1.5" : ""
           }`}
         >
-          <span className="label-eyebrow shrink-0 text-[9px] leading-5 text-violet-700">Varies</span>
+          <span className="label-eyebrow shrink-0 text-[9px] leading-5 text-violet-700">Variable</span>
           {varying.map((v) => (
             <span key={v.label} className="inline-flex items-baseline gap-1.5">
               <span className="text-[9px] font-semibold uppercase tracking-eyebrow text-violet-700">{v.label}</span>

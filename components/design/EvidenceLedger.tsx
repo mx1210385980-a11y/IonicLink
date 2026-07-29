@@ -255,7 +255,7 @@ export function EvidenceLedger({
           </div>
           <p className="mt-2 text-[10px] leading-relaxed text-ink-400">
             {spec.hasTemperatureModel && usedFit
-              ? "Teal points = official evidence, amber = review; dashed lines = per-pair Arrhenius fits; violet ring = this query."
+              ? "Teal points = checked evidence, amber = review; dashed lines = per-pair Arrhenius fits; violet ring = this query."
               : "Bars are evidence weights at their descriptor distance from the query (violet dot). The dashed line is the kernel bandwidth."}
           </p>
         </div>

@@ -1,14 +1,28 @@
 import Database from "better-sqlite3";
-import { existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Domain, DomainDraft, DomainRecord } from "./domain";
-import type { BatchJob, FieldProvenance, JobStatus, RecordStatus, SourceDoc } from "./schema";
+import type {
+  BatchJob,
+  FieldProvenance,
+  JobEvent,
+  JobHistorySummary,
+  JobStatus,
+  RecordStatus,
+  SourceDoc,
+} from "./schema";
 import { extractDoiFromPages, normalizeDoi } from "./doi";
+import { summarizeJobEvents } from "./jobHistory";
 import { getModule } from "./modules/registry.server";
 import { parseQuantity, ROOM_TEMPERATURE_RAW, type Dimension, type Quantity } from "./units";
 import { standardizeSubstrate } from "./substrates";
 import { applySurfaceDescriptorsToRecord } from "./surfaceDescriptors";
+
+/** JSON-safe provenance patch; `null` explicitly removes a persisted crop. */
+export type FieldProvenancePatch = Omit<FieldProvenance, "figureBox"> & {
+  figureBox?: FieldProvenance["figureBox"] | null;
+};
 
 /**
  * SQLite-backed store, ONE database file per domain (`data/<domain>.db`). The
@@ -25,7 +39,8 @@ import { applySurfaceDescriptorsToRecord } from "./surfaceDescriptors";
 type AnyRecord = DomainRecord<any, any>;
 type AnyDraft = DomainDraft<any, any>;
 
-const DATA_DIR = path.join(process.cwd(), "data");
+const DATA_DIR = path.resolve(process.env.IONICLINK_DATA_DIR || path.join(process.cwd(), "data"));
+export const getDataDir = () => DATA_DIR;
 const dbPath = (domain: Domain) => path.join(DATA_DIR, `${domain}.db`);
 
 const _dbs = new Map<Domain, Database.Database>();
@@ -44,6 +59,14 @@ const JOBS_DDL = `
       payload     TEXT NOT NULL  -- BatchJob JSON (no text)
     );
     CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+    CREATE TABLE IF NOT EXISTS job_events (
+      event_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_id       TEXT NOT NULL,
+      status       TEXT NOT NULL,
+      occurred_at  TEXT NOT NULL,
+      record_count INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_job_events_job_id ON job_events(job_id, event_id);
 `;
 
 const SOURCES_DDL = `
@@ -53,6 +76,17 @@ const SOURCES_DDL = `
       page_count  INTEGER NOT NULL,
       created_at  TEXT NOT NULL,
       payload     TEXT NOT NULL  -- SourceDoc JSON (per-page text)
+    );
+`;
+
+const DATASET_IMPORTS_DDL = `
+    CREATE TABLE IF NOT EXISTS dataset_imports (
+      fingerprint  TEXT PRIMARY KEY,
+      filename     TEXT NOT NULL,
+      adapter      TEXT NOT NULL,
+      created_at   TEXT NOT NULL,
+      record_count INTEGER NOT NULL,
+      payload      TEXT NOT NULL
     );
 `;
 
@@ -78,6 +112,7 @@ function getDb(domain: Domain): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_records_status ON records(status);
     ${JOBS_DDL}
     ${SOURCES_DDL}
+    ${DATASET_IMPORTS_DDL}
   `);
   // Promoted columns evolve with the module (diffusion gained system_name /
   // pore_size_m) — add any that an existing DB is missing. Values backfill
@@ -385,12 +420,22 @@ export function createRecords(
   const db = getDb(domain);
   const mod = getModule(domain);
   if (status === "official") {
+    const mockIndices = drafts
+      .map((draft, i) => (draft.extraction?.source === "mock" ? i : -1))
+      .filter((i) => i >= 0);
+    if (mockIndices.length) {
+      throw new Error(
+        `Cannot create checked records from mock extraction: ${mockIndices
+          .map((i) => `#${i + 1}`)
+          .join(", ")}. Re-extract with a live model or enter the records manually.`
+      );
+    }
     const bad = drafts
       .map((draft, i) => ({ i, missing: mod.coreCompleteness(draft).missing }))
       .filter((row) => row.missing.length);
     if (bad.length) {
       const details = bad.map((row) => `#${row.i + 1}: ${row.missing.join(", ")}`).join("; ");
-      throw new Error(`Cannot create official records — missing core fields: ${details}`);
+      throw new Error(`Cannot create checked records — missing core fields: ${details}`);
     }
   }
   const made: AnyRecord[] = [];
@@ -403,6 +448,70 @@ export function createRecords(
   });
   tx();
   return made;
+}
+
+export interface DatasetImportCommitResult {
+  alreadyCommitted: boolean;
+  recordIds: string[];
+  recordCount: number;
+}
+
+/**
+ * Atomically commit one adapted dataset and its idempotency receipt. A retry
+ * with the same file fingerprint returns the first result without new rows.
+ */
+export function commitDatasetImport(
+  domain: Domain,
+  input: {
+    fingerprint: string;
+    filename: string;
+    adapter: string;
+    drafts: AnyDraft[];
+    metadata?: Record<string, unknown>;
+  }
+): DatasetImportCommitResult {
+  const db = getDb(domain);
+  const tx = db.transaction(() => {
+    const existing = db
+      .prepare("SELECT record_count, payload FROM dataset_imports WHERE fingerprint = ?")
+      .get(input.fingerprint) as { record_count: number; payload: string } | undefined;
+    if (existing) {
+      const payload = JSON.parse(existing.payload) as { recordIds?: string[] };
+      return {
+        alreadyCommitted: true,
+        recordIds: payload.recordIds ?? [],
+        recordCount: existing.record_count,
+      };
+    }
+
+    const createdAt = new Date().toISOString();
+    const records: AnyRecord[] = [];
+    for (const draft of input.drafts) {
+      const record: AnyRecord = {
+        ...draft,
+        id: nextId(domain, db),
+        status: "review",
+        createdAt,
+      };
+      write(db, domain, record);
+      records.push(record);
+    }
+    const recordIds = records.map((record) => record.id);
+    db.prepare(
+      `INSERT INTO dataset_imports
+       (fingerprint, filename, adapter, created_at, record_count, payload)
+       VALUES (@fingerprint, @filename, @adapter, @created_at, @record_count, @payload)`
+    ).run({
+      fingerprint: input.fingerprint,
+      filename: input.filename,
+      adapter: input.adapter,
+      created_at: createdAt,
+      record_count: records.length,
+      payload: JSON.stringify({ recordIds, metadata: input.metadata ?? {} }),
+    });
+    return { alreadyCommitted: false, recordIds, recordCount: records.length };
+  });
+  return tx();
 }
 
 export interface UpdateResult {
@@ -422,7 +531,7 @@ export function updateRecord(
   patch: {
     fields?: any;
     status?: RecordStatus;
-    setProvenance?: { field: string; prov: FieldProvenance };
+    setProvenance?: { field: string; prov: FieldProvenancePatch };
   }
 ): UpdateResult {
   const db = getDb(domain);
@@ -439,14 +548,25 @@ export function updateRecord(
       status: current.status,
       createdAt: current.createdAt,
       sourceId: current.sourceId, // preserve link to the source document
+      extraction: current.extraction, // preserve extractor provenance across curator edits
     };
   }
   if (patch.setProvenance) {
     const { field, prov } = patch.setProvenance;
-    next = { ...next, provenance: { ...next.provenance, [field]: { ...next.provenance?.[field], ...prov } } };
+    const { figureBox, ...rest } = prov;
+    const nextFieldProvenance: FieldProvenance = { ...next.provenance?.[field], ...rest };
+    if (figureBox === null) delete nextFieldProvenance.figureBox;
+    else if (figureBox !== undefined) nextFieldProvenance.figureBox = figureBox;
+    next = { ...next, provenance: { ...next.provenance, [field]: nextFieldProvenance } };
   }
   if (patch.status && patch.status !== next.status) {
     if (patch.status === "official") {
+      if (next.extraction?.source === "mock") {
+        return {
+          error: "Cannot approve a mock-extracted record; re-extract it with a live model or enter it manually.",
+          status: 422,
+        };
+      }
       const { complete, missing } = mod.coreCompleteness(next);
       if (!complete) {
         return { error: `Cannot approve — missing core fields: ${missing.join(", ")}`, status: 422 };
@@ -473,8 +593,23 @@ export function deleteRecords(domain: Domain, ids: string[]): number {
 /** Test/seed helper — wipe one domain's records and reset its id counter. */
 export function resetAll(domain: Domain): void {
   const db = getDb(domain);
-  db.exec("DELETE FROM records");
+  db.exec("DELETE FROM records; DELETE FROM dataset_imports;");
   _counters.delete(domain);
+}
+
+/** Create a consistent SQLite snapshot before an intentional destructive reset. */
+export function backupDomainDatabase(domain: Domain): string | null {
+  const source = dbPath(domain);
+  if (!existsSync(source)) return null;
+
+  const db = getDb(domain);
+  db.pragma("wal_checkpoint(TRUNCATE)");
+  const backupDir = path.join(DATA_DIR, "backups");
+  mkdirSync(backupDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const target = path.join(backupDir, `${domain}-${stamp}-${randomUUID().slice(0, 8)}.db`);
+  copyFileSync(source, target);
+  return target;
 }
 
 /* ------------------------------------------------------------------ */
@@ -493,6 +628,18 @@ function writeJob(db: Database.Database, job: BatchJob, text?: string): void {
     created_at: job.createdAt,
     text: text ?? null,
     payload: JSON.stringify(job),
+  });
+}
+
+function appendJobEvent(db: Database.Database, job: BatchJob, occurredAt: string): void {
+  db.prepare(
+    `INSERT INTO job_events (job_id, status, occurred_at, record_count)
+     VALUES (@job_id, @status, @occurred_at, @record_count)`
+  ).run({
+    job_id: job.id,
+    status: job.status,
+    occurred_at: occurredAt,
+    record_count: job.recordCount,
   });
 }
 
@@ -517,6 +664,7 @@ export function createJobs(
         chars: it.text.length,
       };
       writeJob(db, job, it.text);
+      appendJobEvent(db, job, now);
       made.push(job);
     }
   });
@@ -551,11 +699,34 @@ export function getJobText(domain: Domain, id: string): string | null {
 
 export function updateJob(domain: Domain, id: string, patch: Partial<BatchJob>): BatchJob | null {
   const db = getDb(domain);
-  const current = getJob(domain, id);
-  if (!current) return null;
-  const next = { ...current, ...patch };
-  writeJob(db, next);
-  return next;
+  const tx = db.transaction(() => {
+    const row = db.prepare("SELECT payload FROM jobs WHERE id = ?").get(id) as
+      | { payload: string }
+      | undefined;
+    if (!row) return null;
+
+    const current = JSON.parse(row.payload) as BatchJob;
+    const statusChanged = patch.status != null && patch.status !== current.status;
+    const occurredAt = new Date().toISOString();
+    let next: BatchJob = { ...current, ...patch };
+
+    if (statusChanged) {
+      if (next.status === "extracting") {
+        next = { ...next, startedAt: current.startedAt ?? occurredAt };
+      }
+      if (next.status === "done" || next.status === "error") {
+        next = { ...next, completedAt: current.completedAt ?? occurredAt };
+      }
+      if (next.status === "committed") {
+        next = { ...next, committedAt: current.committedAt ?? occurredAt };
+      }
+    }
+
+    writeJob(db, next);
+    if (statusChanged) appendJobEvent(db, next, occurredAt);
+    return next;
+  });
+  return tx();
 }
 
 /** Atomically claim the oldest queued job (queued → extracting). */
@@ -568,11 +739,47 @@ export function claimNextJob(domain: Domain): { job: BatchJob; text: string } | 
     if (!row) return null;
     const job = getJob(domain, row.id)!;
     const text = getJobText(domain, row.id) ?? "";
-    const claimed = { ...job, status: "extracting" as JobStatus };
+    const hasQueuedEvent = db
+      .prepare("SELECT 1 FROM job_events WHERE job_id = ? AND status = 'queued' LIMIT 1")
+      .get(job.id);
+    if (!hasQueuedEvent) appendJobEvent(db, { ...job, status: "queued" }, job.createdAt);
+
+    const occurredAt = new Date().toISOString();
+    const claimed = {
+      ...job,
+      status: "extracting" as JobStatus,
+      startedAt: job.startedAt ?? occurredAt,
+    };
     writeJob(db, claimed);
+    appendJobEvent(db, claimed, occurredAt);
     return { job: claimed, text };
   });
   return tx();
+}
+
+/** Historical funnel and elapsed-time metrics derived only from recorded events. */
+export function getJobHistorySummary(domain: Domain): JobHistorySummary {
+  const db = getDb(domain);
+  const rows = db
+    .prepare(
+      `SELECT event_id, job_id, status, occurred_at, record_count
+       FROM job_events ORDER BY event_id ASC`
+    )
+    .all() as {
+    event_id: number;
+    job_id: string;
+    status: JobStatus;
+    occurred_at: string;
+    record_count: number;
+  }[];
+  const events: JobEvent[] = rows.map((row) => ({
+    eventId: row.event_id,
+    jobId: row.job_id,
+    status: row.status,
+    occurredAt: row.occurred_at,
+    recordCount: row.record_count,
+  }));
+  return summarizeJobEvents(events);
 }
 
 export function deleteJob(domain: Domain, id: string): number {
@@ -598,8 +805,14 @@ export function commitJob(
   const job = getJob(domain, id);
   if (!job) return { error: "Job not found" };
   if (job.status !== "done") return { error: `Job is "${job.status}", not ready to commit` };
-  const chosen =
+  const selected =
     indices && indices.length ? job.candidates.filter((_, i) => indices.includes(i)) : job.candidates;
+  const extraction = job.source
+    ? { source: job.source, ...(job.model ? { model: job.model } : {}) }
+    : undefined;
+  const chosen = extraction
+    ? selected.map((candidate) => ({ ...candidate, extraction }))
+    : selected;
   const created = createRecords(domain, chosen, "review");
   const updated = updateJob(domain, id, { status: "committed", recordCount: created.length })!;
   return { created: created.length, job: updated };

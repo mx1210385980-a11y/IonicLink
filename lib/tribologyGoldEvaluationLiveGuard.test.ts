@@ -12,9 +12,9 @@ delete env.ANTHROPIC_API_KEY;
 let failed = false;
 try {
   execFileSync(
-    "npx",
+    process.execPath,
     [
-      "tsx",
+      path.join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs"),
       "scripts/evaluate-tribology-gold.ts",
       "--live",
       `--report-dir=${path.join("reports", "tribology-gold-evaluation", "test-live-guard")}`,

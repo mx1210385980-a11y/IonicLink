@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { DomainDraft } from "../lib/domain";
+import type { DomainDraft, ExtractionMetadata } from "../lib/domain";
 import { createRecords, createSource, findSourceByDoi, listRecords } from "../lib/db";
 import { extractRecords, isLiveExtractionEnabled, type ExtractResult } from "../lib/extract";
 import { getModule } from "../lib/modules/registry.server";
@@ -681,8 +681,24 @@ export function selectOfficialRecordDrafts(opts: {
         skipped.push({ ...skipBase, reason: "duplicate_current_import" });
         continue;
       }
+      const extractionMetadata: ExtractionMetadata | undefined =
+        record.extraction ??
+        (!extraction.extractionSource || extraction.extractionSource === "error"
+          ? undefined
+          : {
+              source: extraction.extractionSource,
+              ...(extraction.model ? { model: extraction.model } : {}),
+            });
+      if (!extractionMetadata) {
+        skipped.push({ ...skipBase, reason: "missing_extraction_provenance" });
+        continue;
+      }
       seen.add(fingerprint);
-      const draft = recordToDraft(record, opts.sourceIdsByKey.get(extraction.key) ?? record.sourceId ?? extraction.key);
+      const draft = recordToDraft(
+        record,
+        opts.sourceIdsByKey.get(extraction.key) ?? record.sourceId ?? extraction.key,
+        extractionMetadata
+      );
       selected.push({
         sourceKey: extraction.key,
         platformRecordId: record.id,
@@ -700,9 +716,13 @@ export function selectOfficialRecordDrafts(opts: {
   };
 }
 
-function recordToDraft(record: IonicRecord, sourceId: string): DomainDraft<any, any> {
+function recordToDraft(
+  record: IonicRecord,
+  sourceId: string,
+  extraction: ExtractionMetadata
+): DomainDraft<any, any> {
   const { id: _id, status: _status, createdAt: _createdAt, ...draft } = record;
-  return { ...draft, sourceId };
+  return { ...draft, sourceId, extraction: record.extraction ?? extraction };
 }
 
 function officialFingerprint(record: IonicRecord): string {

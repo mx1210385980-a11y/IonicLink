@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useMemo, useRef, useState } from "react";
 import type { Atlas, AtlasCell, DesignConstraints, RankedCandidate } from "@/lib/predict/candidates";
 import { CALIBRATION_GATE } from "@/lib/predict/engine";
 import type { DesignSpec } from "@/lib/predict/specs";
@@ -82,8 +83,64 @@ function ConstraintChip({ active, label, onClick }: { active: boolean; label: st
   );
 }
 
+export interface AtlasFocusPosition {
+  row: number;
+  column: number;
+}
+
+export type AtlasArrowKey = "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown";
+
+function isAtlasArrowKey(key: string): key is AtlasArrowKey {
+  return key === "ArrowLeft" || key === "ArrowRight" || key === "ArrowUp" || key === "ArrowDown";
+}
+
+/** Move between actionable atlas cells while skipping gated/unavailable cells. */
+export function moveAtlasFocus(
+  interactive: boolean[][],
+  current: AtlasFocusPosition,
+  key: AtlasArrowKey
+): AtlasFocusPosition {
+  if (key === "ArrowRight") {
+    for (let row = current.row; row < interactive.length; row++) {
+      const start = row === current.row ? current.column + 1 : 0;
+      for (let column = start; column < (interactive[row]?.length ?? 0); column++) {
+        if (interactive[row][column]) return { row, column };
+      }
+    }
+    return current;
+  }
+
+  if (key === "ArrowLeft") {
+    for (let row = current.row; row >= 0; row--) {
+      const start = row === current.row ? current.column - 1 : (interactive[row]?.length ?? 0) - 1;
+      for (let column = start; column >= 0; column--) {
+        if (interactive[row][column]) return { row, column };
+      }
+    }
+    return current;
+  }
+
+  const step = key === "ArrowDown" ? 1 : -1;
+  for (let row = current.row + step; row >= 0 && row < interactive.length; row += step) {
+    let nearestColumn = -1;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    for (let column = 0; column < (interactive[row]?.length ?? 0); column++) {
+      if (!interactive[row][column]) continue;
+      const distance = Math.abs(column - current.column);
+      if (distance < nearestDistance) {
+        nearestColumn = column;
+        nearestDistance = distance;
+      }
+    }
+    if (nearestColumn >= 0) return { row, column: nearestColumn };
+  }
+  return current;
+}
+
 function PairAtlas({ spec, atlas, onPickPair }: { spec: DesignSpec; atlas: Atlas; onPickPair: (c: AtlasCell) => void }) {
   const [hover, setHover] = useState<AtlasCell | null>(null);
+  const [activePairKey, setActivePairKey] = useState<string | null>(null);
+  const cellRefs = useRef<Map<string, SVGGElement>>(new Map());
   const CELL = 17;
   const LEFT = 86;
   const TOP = 74;
@@ -100,6 +157,25 @@ function PairAtlas({ spec, atlas, onPickPair }: { spec: DesignSpec; atlas: Atlas
     return logs.length ? { lo: Math.min(...logs), hi: Math.max(...logs) } : { lo: 0, hi: 1 };
   }, [atlas]);
   const scale = (v: number) => (hi > lo ? (Math.log10(v) - lo) / (hi - lo) : 0.5);
+
+  const navigation = useMemo(() => {
+    let firstPairKey: string | null = null;
+    const pairKeys = new Set<string>();
+    const interactive = atlas.cells.map((row) =>
+      row.map((cell) => {
+        const enabled = !atlas.gated || cell.kind === "measured";
+        if (enabled) {
+          pairKeys.add(cell.pairKey);
+          firstPairKey ??= cell.pairKey;
+        }
+        return enabled;
+      })
+    );
+    return { interactive, pairKeys, firstPairKey };
+  }, [atlas]);
+  const rovingPairKey = activePairKey && navigation.pairKeys.has(activePairKey)
+    ? activePairKey
+    : navigation.firstPairKey;
 
   const cellAria = (cell: AtlasCell) => {
     const detail = cell.value != null ? `, ${spec.formatValue(cell.value)} ${cell.kind}` : ", no estimate";
@@ -137,23 +213,43 @@ function PairAtlas({ spec, atlas, onPickPair }: { spec: DesignSpec; atlas: Atlas
             row.map((cell, j) => {
               const x = LEFT + j * CELL;
               const y = TOP + i * CELL;
-              const common = {
-                onMouseEnter: () => setHover(cell),
-                onMouseLeave: () => setHover(null),
-                onFocus: () => setHover(cell),
-                onBlur: () => setHover(null),
-                onClick: () => onPickPair(cell),
-                onKeyDown: (e: React.KeyboardEvent) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    onPickPair(cell);
+              const interactive = !atlas.gated || cell.kind === "measured";
+              const common = interactive
+                ? {
+                    ref: (node: SVGGElement | null) => {
+                      if (node) cellRefs.current.set(cell.pairKey, node);
+                      else cellRefs.current.delete(cell.pairKey);
+                    },
+                    onMouseEnter: () => setHover(cell),
+                    onMouseLeave: () => setHover(null),
+                    onFocus: () => {
+                      setHover(cell);
+                      setActivePairKey(cell.pairKey);
+                    },
+                    onBlur: () => setHover(null),
+                    onClick: () => onPickPair(cell),
+                    onKeyDown: (e: React.KeyboardEvent<SVGGElement>) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onPickPair(cell);
+                        return;
+                      }
+                      if (isAtlasArrowKey(e.key)) {
+                        e.preventDefault();
+                        const next = moveAtlasFocus(navigation.interactive, { row: i, column: j }, e.key);
+                        const nextCell = atlas.cells[next.row]?.[next.column];
+                        if (nextCell && nextCell.pairKey !== cell.pairKey) {
+                          setActivePairKey(nextCell.pairKey);
+                          cellRefs.current.get(nextCell.pairKey)?.focus();
+                        }
+                      }
+                    },
+                    role: "button" as const,
+                    tabIndex: cell.pairKey === rovingPairKey ? 0 : -1,
+                    "aria-label": cellAria(cell),
+                    className: "cursor-pointer focus:outline-none [&:focus-visible>rect]:stroke-ink-900 [&:focus-visible>rect]:stroke-2",
                   }
-                },
-                role: "button" as const,
-                tabIndex: 0,
-                "aria-label": cellAria(cell),
-                className: "cursor-pointer focus:outline-none [&:focus-visible>rect]:stroke-ink-900 [&:focus-visible>rect]:stroke-2",
-              };
+                : {};
               if (cell.kind === "measured") {
                 return (
                   <g key={cell.pairKey} {...common}>
@@ -196,7 +292,7 @@ function PairAtlas({ spec, atlas, onPickPair }: { spec: DesignSpec; atlas: Atlas
         </svg>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-ink-500">
-        <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full bg-brand-600" /> measured (click → bench)</span>
+        <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full bg-brand-600" /> measured (click / Enter → bench; arrows navigate)</span>
         <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-full bg-brand-500 ring-2 ring-amber-300" /> review-only evidence</span>
         {!atlas.gated && (
           <>
@@ -219,13 +315,14 @@ function PairAtlas({ spec, atlas, onPickPair }: { spec: DesignSpec; atlas: Atlas
 export function DesignExplorer(props: ExplorerProps) {
   const { spec, atlas, ranked, constraints } = props;
   const measuredCount = useMemo(() => atlas.cells.flat().filter((c) => c.kind === "measured").length, [atlas]);
+  const emptyCoverage = atlas.gated && measuredCount === 0;
 
   return (
     <section className="panel overflow-hidden">
       <SectionHeader
         title="Design explorer"
         hint="Every cation × anion combination over the ion library, at the bench conditions."
-        right={
+        right={emptyCoverage ? null : (
           <div className="flex flex-wrap items-center gap-2">
             <select
               value={props.objective}
@@ -247,7 +344,7 @@ export function DesignExplorer(props: ExplorerProps) {
               Export CSV
             </button>
           </div>
-        }
+        )}
       />
 
       {props.labSummary && (
@@ -257,79 +354,97 @@ export function DesignExplorer(props: ExplorerProps) {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-ink-100 px-5 py-2.5">
-        <span className="label-eyebrow mr-1">Constraints</span>
-        <ConstraintChip active={!!constraints.halideFree} label="halide-free" onClick={() => props.onConstraints({ ...constraints, halideFree: !constraints.halideFree })} />
-        <ConstraintChip active={!!constraints.fluorineFree} label="fluorine-free" onClick={() => props.onConstraints({ ...constraints, fluorineFree: !constraints.fluorineFree })} />
-        <ConstraintChip
-          active={constraints.maxChainLength === 8}
-          label="chain ≤ C8"
-          onClick={() => props.onConstraints({ ...constraints, maxChainLength: constraints.maxChainLength === 8 ? null : 8 })}
-        />
-        <ConstraintChip active={!!props.includeExtrapolated} label="include extrapolated" onClick={() => props.onIncludeExtrapolated(!props.includeExtrapolated)} />
-      </div>
-
-      {atlas.gated && (
-        <div className="border-b border-amber-100 bg-amber-50/60 px-5 py-2.5 text-xs leading-relaxed text-amber-800">
-          <strong>Coverage mode.</strong> Candidate ranking and predictive coloring unlock at {CALIBRATION_GATE} usable records — this
-          pool has {atlas.usableN}. The grid shows the {measuredCount} measured pair{measuredCount === 1 ? "" : "s"}; approving records
-          in the review queue grows it.
+      {emptyCoverage ? (
+        <div data-testid="design-explorer-empty" className="px-5 py-10 text-center">
+          <p className="font-mono text-xs font-semibold text-amber-700 tnum">
+            0 / {CALIBRATION_GATE} usable records
+          </p>
+          <h3 className="mt-2 text-base font-semibold tracking-tight text-ink-900">No measured pairs yet</h3>
+          <p className="mx-auto mt-2 max-w-lg text-xs leading-relaxed text-ink-600">
+            Extract and review the first measured result for this domain. The pair atlas and candidate ranking will grow from cited,
+            approved evidence.
+          </p>
+          <Link href={`/${spec.domain}/extract`} className="btn mt-4 inline-flex items-center justify-center">
+            Extract a paper
+          </Link>
         </div>
-      )}
-
-      <div className="grid gap-0 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
-        <div className="border-b border-ink-100 px-5 py-4 lg:border-b-0 lg:border-r">
-          <PairAtlas spec={spec} atlas={atlas} onPickPair={props.onPickPair} />
-        </div>
-        <div>
-          <div className="px-5 pt-3.5">
-            <span className="label-eyebrow">{atlas.gated ? "Shortlist (locked)" : `Top candidates — ${spec.objectiveLabel[props.objective]}`}</span>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-ink-100 px-5 py-2.5">
+            <span className="label-eyebrow mr-1">Constraints</span>
+            <ConstraintChip active={!!constraints.halideFree} label="halide-free" onClick={() => props.onConstraints({ ...constraints, halideFree: !constraints.halideFree })} />
+            <ConstraintChip active={!!constraints.fluorineFree} label="fluorine-free" onClick={() => props.onConstraints({ ...constraints, fluorineFree: !constraints.fluorineFree })} />
+            <ConstraintChip
+              active={constraints.maxChainLength === 8}
+              label="chain ≤ C8"
+              onClick={() => props.onConstraints({ ...constraints, maxChainLength: constraints.maxChainLength === 8 ? null : 8 })}
+            />
+            <ConstraintChip active={!!props.includeExtrapolated} label="include extrapolated" onClick={() => props.onIncludeExtrapolated(!props.includeExtrapolated)} />
           </div>
-          {ranked.length === 0 ? (
-            <p className="px-5 py-4 text-xs leading-relaxed text-ink-700">
-              {atlas.gated
-                ? "No ranking below the calibration gate — a top-10 computed from this little data would be noise dressed as advice."
-                : "No candidates clear the current tier filter. Try including extrapolated estimates."}
-            </p>
-          ) : (
-            <ol className="pb-2">
-              {ranked.map((r) => {
-                const c = r.cell;
-                const p = c.prediction;
-                const topMember = p?.neighbors[0]?.point.members[0] ?? c.measured[0]?.members[0];
-                const regime = spec.domain === "tribology" ? frictionRegimeInsight(c.value) : null;
-                return (
-                  <li key={c.pairKey} className="border-b border-ink-100 px-5 py-2.5 last:border-0">
-                    <button type="button" onClick={() => props.onPickPair(c)} className="block w-full text-left">
-                      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-                        <span className="w-6 font-mono text-xs font-bold text-ink-400 tnum">{r.rank}.</span>
-                        <PairLabel cation={c.cation} anion={c.anion} />
-                        <span className={`font-mono text-sm font-semibold tnum ${c.kind === "measured" ? "text-brand-700" : "text-violet-700"}`}>
-                          {c.value != null ? spec.formatValue(c.value) : "—"}
-                        </span>
-                        {p?.fold != null && <span className="font-mono text-[10px] text-ink-500 tnum">×/÷ {p.fold.toFixed(2)}</span>}
-                        {c.kind === "measured" ? <TierBadge tier="measured" /> : p ? <TierBadge tier={p.tier} /> : null}
-                        {r.novel && <span className="status-mini border-violet-200 bg-violet-50 text-violet-700">novel</span>}
-                      </div>
-                      {topMember && (
-                        <p className="mt-0.5 pl-8 text-[10px] text-ink-400">
-                          {c.kind === "measured" ? "measured in" : "nearest evidence"} · {topMember.id} — {topMember.paperTitle}
-                        </p>
-                      )}
-                      {regime && (
-                        <p className="mt-1 pl-8 text-[10px] leading-relaxed text-ink-700">
-                          <span className="font-semibold text-ink-700">Gate regime</span> · {regime.label} ({regime.range}).{" "}
-                          <span className="font-semibold text-violet-700">Paper-derived rationale:</span> {regime.rationale}
-                        </p>
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
+
+          {atlas.gated && (
+            <div className="border-b border-amber-100 bg-amber-50/60 px-5 py-2.5 text-xs leading-relaxed text-amber-800">
+              <strong>Coverage mode.</strong> Candidate ranking and predictive coloring unlock at {CALIBRATION_GATE} usable records — this
+              pool has {atlas.usableN}. The grid shows the {measuredCount} measured pair{measuredCount === 1 ? "" : "s"}; only those
+              measured pairs are interactive until the gate unlocks. Approving records in the review queue grows it.
+            </div>
           )}
-        </div>
-      </div>
+
+          <div className="grid gap-0 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+            <div className="border-b border-ink-100 px-5 py-4 lg:border-b-0 lg:border-r">
+              <PairAtlas spec={spec} atlas={atlas} onPickPair={props.onPickPair} />
+            </div>
+            <div>
+              <div className="px-5 pt-3.5">
+                <span className="label-eyebrow">{atlas.gated ? "Shortlist (locked)" : `Top candidates — ${spec.objectiveLabel[props.objective]}`}</span>
+              </div>
+              {ranked.length === 0 ? (
+                <p className="px-5 py-4 text-xs leading-relaxed text-ink-700">
+                  {atlas.gated
+                    ? "No ranking below the calibration gate — a top-10 computed from this little data would be noise dressed as advice."
+                    : "No candidates clear the current tier filter. Try including extrapolated estimates."}
+                </p>
+              ) : (
+                <ol className="pb-2">
+                  {ranked.map((r) => {
+                    const c = r.cell;
+                    const p = c.prediction;
+                    const topMember = p?.neighbors[0]?.point.members[0] ?? c.measured[0]?.members[0];
+                    const regime = spec.domain === "tribology" ? frictionRegimeInsight(c.value) : null;
+                    return (
+                      <li key={c.pairKey} className="border-b border-ink-100 px-5 py-2.5 last:border-0">
+                        <button type="button" onClick={() => props.onPickPair(c)} className="block w-full text-left">
+                          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                            <span className="w-6 font-mono text-xs font-bold text-ink-400 tnum">{r.rank}.</span>
+                            <PairLabel cation={c.cation} anion={c.anion} />
+                            <span className={`font-mono text-sm font-semibold tnum ${c.kind === "measured" ? "text-brand-700" : "text-violet-700"}`}>
+                              {c.value != null ? spec.formatValue(c.value) : "—"}
+                            </span>
+                            {p?.fold != null && <span className="font-mono text-[10px] text-ink-500 tnum">×/÷ {p.fold.toFixed(2)}</span>}
+                            {c.kind === "measured" ? <TierBadge tier="measured" /> : p ? <TierBadge tier={p.tier} /> : null}
+                            {r.novel && <span className="status-mini border-violet-200 bg-violet-50 text-violet-700">novel</span>}
+                          </div>
+                          {topMember && (
+                            <p className="mt-0.5 pl-8 text-[10px] text-ink-400">
+                              {c.kind === "measured" ? "measured in" : "nearest evidence"} · {topMember.id} — {topMember.paperTitle}
+                            </p>
+                          )}
+                          {regime && (
+                            <p className="mt-1 pl-8 text-[10px] leading-relaxed text-ink-700">
+                              <span className="font-semibold text-ink-700">Gate regime</span> · {regime.label} ({regime.range}).{" "}
+                              <span className="font-semibold text-violet-700">Paper-derived rationale:</span> {regime.rationale}
+                            </p>
+                          )}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </section>
   );
 }

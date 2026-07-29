@@ -61,7 +61,8 @@ export async function pdfPageTextSpans(data: Uint8Array, page: number): Promise<
     const ty = item.transform[5];
     // Baseline-origin rect in PDF user space; the viewport handles page rotation
     // and the flipped y-axis.
-    const [vx1, vy1, vx2, vy2] = viewport.convertToViewportRectangle([tx, ty, tx + item.width, ty + item.height]);
+    const [vx1, vy1] = viewport.convertToViewportPoint(tx, ty);
+    const [vx2, vy2] = viewport.convertToViewportPoint(tx + item.width, ty + item.height);
     const w = Math.abs(vx2 - vx1) / viewport.width;
     const h = Math.abs(vy2 - vy1) / viewport.height;
     if (!(w > 0) || !(h > 0)) continue;

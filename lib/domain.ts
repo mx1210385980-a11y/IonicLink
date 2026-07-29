@@ -17,6 +17,15 @@ export const DOMAINS: Domain[] = ["tribology", "conductivity", "diffusion"];
 /** The original module — also the implicit domain for legacy/un-namespaced calls. */
 export const DEFAULT_DOMAIN: Domain = "tribology";
 
+/** Provider that produced an extracted record candidate. */
+export type ExtractionSource = "openai-compatible" | "anthropic" | "mock";
+
+/** Extraction provenance retained after a batch candidate becomes a record. */
+export interface ExtractionMetadata {
+  source: ExtractionSource;
+  model?: string;
+}
+
 const DOMAIN_ALIASES: Record<string, Domain> = {
   摩擦: "tribology",
   tribology: "tribology",
@@ -60,6 +69,8 @@ export interface DomainRecord<Core, Extended> {
   provenance?: ProvenanceMap;
   /** Id of the stored source document (uploaded PDF) this record came from. */
   sourceId?: string;
+  /** Extractor provenance; absent on legacy, seed, and manually created records. */
+  extraction?: ExtractionMetadata;
 }
 
 /** A record before the store assigns id/status/createdAt. */

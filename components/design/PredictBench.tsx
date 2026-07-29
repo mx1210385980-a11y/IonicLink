@@ -483,7 +483,7 @@ function Readout({ domain, spec, prediction, dataset }: { domain: Domain; spec: 
             ))}
             <li>
               n_eff {p.facts.nEff.toFixed(1)} · d₁ {p.facts.d1?.toFixed(2)} · bandwidth {p.facts.bandwidth.toFixed(2)} ·
-              official fraction {(p.facts.officialFraction * 100).toFixed(0)}%
+              checked fraction {(p.facts.officialFraction * 100).toFixed(0)}%
             </li>
           </ul>
         </details>

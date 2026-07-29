@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { listRecords, listSourceSummaries } from "@/lib/db";
 import { isDomain, type Domain } from "@/lib/domain";
 import { getModule } from "@/lib/modules/registry.server";
+import { LibraryProgress, SourceProgressTrack } from "@/components/library/LibraryProgress";
 import { SourceThumb } from "@/components/SourceThumb";
 
 export const dynamic = "force-dynamic";
@@ -22,8 +23,9 @@ export default function LibraryPage({ params }: { params: { domain: string } }) 
 
   const bySource = new Map<string, AnyRecord[]>();
   const noSource: AnyRecord[] = [];
+  const sourceIds = new Set(sources.map((source) => source.id));
   for (const r of records) {
-    if (r.sourceId) {
+    if (r.sourceId && sourceIds.has(r.sourceId)) {
       if (!bySource.has(r.sourceId)) bySource.set(r.sourceId, []);
       bySource.get(r.sourceId)!.push(r);
     } else {
@@ -46,9 +48,12 @@ export default function LibraryPage({ params }: { params: { domain: string } }) 
         <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
         <p className="mt-1 text-sm text-ink-700">
           {sources.length} source document{sources.length === 1 ? "" : "s"} ·{" "}
-          {records.length} {mod.label.toLowerCase()} record{records.length === 1 ? "" : "s"} drawn from them.
+          {records.length} {mod.label.toLowerCase()} record{records.length === 1 ? "" : "s"} total ·{" "}
+          {records.length - noSource.length} linked to indexed PDFs.
         </p>
       </header>
+
+      <LibraryProgress domain={domain} sources={sources} records={records} />
 
       {sources.length > 0 ? (
         <section className="space-y-4">
@@ -71,7 +76,7 @@ export default function LibraryPage({ params }: { params: { domain: string } }) 
 
       {noSource.length > 0 && (
         <section className="space-y-3">
-          <h2 className="label-eyebrow">Without a source PDF · pasted or seeded</h2>
+          <h2 className="label-eyebrow">Without an indexed source PDF · pasted, seeded, or orphaned</h2>
           <div className="grid gap-3">
             {[...noSourcePapers.entries()].map(([title, recs]) => (
               <div key={title} className="panel flex items-center justify-between gap-4 p-4">
@@ -102,8 +107,6 @@ function SourceRow({
   records: AnyRecord[];
   headline: (r: AnyRecord) => string;
 }) {
-  const review = records.filter((r) => r.status === "review").length;
-  const official = records.filter((r) => r.status === "official").length;
   const date = source.createdAt.slice(0, 10);
 
   return (
@@ -117,11 +120,7 @@ function SourceRow({
           <span className="text-xs text-ink-400">added {date}</span>
         </div>
 
-        <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs">
-          {official > 0 && <span className="status-mini status-mini-official">{official} official</span>}
-          {review > 0 && <span className="status-mini status-mini-review">{review} in review</span>}
-          {records.length === 0 && <span className="text-ink-400">no records kept</span>}
-        </div>
+        <SourceProgressTrack records={records} />
 
         {records.length > 0 && (
           <ul className="mt-3 grid gap-1.5 sm:grid-cols-2">
@@ -140,7 +139,7 @@ function SourceRow({
                 <span className="flex shrink-0 flex-wrap items-center gap-2">
                   <span className="font-mono font-bold text-brand-600">{headline(r)}</span>
                   <span className={`status-mini ${r.status === "review" ? "status-mini-review" : "status-mini-official"}`}>
-                    {r.status}
+                    {r.status === "official" ? "checked" : r.status}
                   </span>
                 </span>
               </li>

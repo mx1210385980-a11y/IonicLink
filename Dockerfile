@@ -36,7 +36,7 @@ COPY --from=build /app/next.config.mjs ./next.config.mjs
 COPY --from=build /app/requirements-wff-reproduction.txt ./requirements-wff-reproduction.txt
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/.next ./.next
-COPY --from=build /app/data ./data
+RUN mkdir -p ./data
 COPY --from=build /app/scripts ./scripts
 
 RUN /opt/wff-venv/bin/pip install --no-cache-dir -r requirements-wff-reproduction.txt

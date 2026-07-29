@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { boxesInCrop, type EvidenceMatch } from "@/lib/evidence";
 import { formatProvenance, type BBox, type FieldProvenance } from "@/lib/schema";
 import { DEFAULT_DOMAIN, type Domain } from "@/lib/domain";
+import { RequestError, requestErrorMessage, requestJson } from "@/components/request";
 
 /**
  * Slide-over that lets you refer back to the original paper for any value:
@@ -31,6 +32,15 @@ export interface SourceEventDetail {
   domain?: Domain;
 }
 
+export function sourceOperationIsCurrent(
+  operationVersion: number,
+  currentVersion: number,
+  operationDetail: SourceEventDetail | null,
+  currentDetail: SourceEventDetail | null
+): boolean {
+  return operationVersion === currentVersion && operationDetail !== null && operationDetail === currentDetail;
+}
+
 export function SourceViewer() {
   const [detail, setDetail] = useState<SourceEventDetail | null>(null);
   const [prov, setProv] = useState<FieldProvenance>({});
@@ -42,32 +52,87 @@ export function SourceViewer() {
   const [drawing, setDrawing] = useState(false);
   const [rect, setRect] = useState<BBox | null>(null);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loadErrors, setLoadErrors] = useState<{ pageText?: string; evidence?: string }>({});
   const wrapRef = useRef<HTMLDivElement>(null);
   const startRef = useRef<{ x: number; y: number } | null>(null);
   const rectRef = useRef<BBox | null>(null);
+  const openVersionRef = useRef(0);
+  const currentDetailRef = useRef<SourceEventDetail | null>(null);
+
+  const closeViewer = useCallback(() => {
+    openVersionRef.current += 1;
+    currentDetailRef.current = null;
+    startRef.current = null;
+    rectRef.current = null;
+    setSaving(false);
+    setDrawing(false);
+    setRect(null);
+    setDetail(null);
+  }, []);
 
   useEffect(() => {
     const onOpen = (e: Event) => {
       const d = (e as CustomEvent<SourceEventDetail>).detail;
+      openVersionRef.current += 1;
+      currentDetailRef.current = d;
+      startRef.current = null;
+      rectRef.current = null;
       setDetail(d);
       setProv(d.prov || {});
       setPageText(null);
       setImgError(false);
       setDrawing(false);
       setRect(null);
+      setSaving(false);
+      setError(null);
+      setLoadErrors({});
       setView(d.prov?.figureBox ? "figure" : "page");
     };
     window.addEventListener("ioniclink:source", onOpen);
-    return () => window.removeEventListener("ioniclink:source", onOpen);
+    return () => {
+      window.removeEventListener("ioniclink:source", onOpen);
+      openVersionRef.current += 1;
+      currentDetailRef.current = null;
+    };
   }, []);
 
   useEffect(() => {
     if (!detail?.sourceId || prov.page == null) return;
     let alive = true;
-    fetch(`/api/${detail.domain ?? DEFAULT_DOMAIN}/source/${encodeURIComponent(detail.sourceId)}/page/${prov.page}?format=text`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => alive && setPageText(d?.text ?? ""))
-      .catch(() => alive && setPageText(""));
+    const openVersion = openVersionRef.current;
+    const openDetail = detail;
+    setLoadErrors((previous) => {
+      if (!previous.pageText) return previous;
+      const next = { ...previous };
+      delete next.pageText;
+      return next;
+    });
+    void (async () => {
+      try {
+        const data = await requestJson<{ text?: string }>(
+          `/api/${detail.domain ?? DEFAULT_DOMAIN}/source/${encodeURIComponent(detail.sourceId!)}/page/${prov.page}?format=text`,
+          undefined,
+          "Could not load the source page text"
+        );
+        if (
+          alive &&
+          sourceOperationIsCurrent(openVersion, openVersionRef.current, openDetail, currentDetailRef.current)
+        ) {
+          setPageText(data.text ?? "");
+        }
+      } catch (requestError) {
+        if (
+          !alive ||
+          !sourceOperationIsCurrent(openVersion, openVersionRef.current, openDetail, currentDetailRef.current)
+        ) return;
+        setPageText("");
+        setLoadErrors((previous) => ({
+          ...previous,
+          pageText: requestErrorMessage(requestError, "Could not load the source page text."),
+        }));
+      }
+    })();
     return () => {
       alive = false;
     };
@@ -77,28 +142,53 @@ export function SourceViewer() {
   useEffect(() => {
     setMarks(null);
     setMarkTier(null);
+    setLoadErrors((previous) => {
+      if (!previous.evidence) return previous;
+      const next = { ...previous };
+      delete next.evidence;
+      return next;
+    });
     const quote = prov.quote?.trim();
     if (!detail?.sourceId || prov.page == null || !quote) return;
     let alive = true;
+    const openVersion = openVersionRef.current;
+    const openDetail = detail;
     const base = `/api/${detail.domain ?? DEFAULT_DOMAIN}/source/${encodeURIComponent(detail.sourceId)}/page/${prov.page}`;
-    fetch(`${base}?format=evidence&q=${encodeURIComponent(quote)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!alive) return;
-        setMarks(Array.isArray(d?.boxes) ? d.boxes : []);
-        setMarkTier(d?.match ?? null);
-      })
-      .catch(() => alive && setMarks([]));
+    void (async () => {
+      try {
+        const data = await requestJson<{ boxes?: BBox[]; match?: EvidenceMatch }>(
+          `${base}?format=evidence&q=${encodeURIComponent(quote)}`,
+          undefined,
+          "Could not locate the quote on the source page"
+        );
+        if (
+          !alive ||
+          !sourceOperationIsCurrent(openVersion, openVersionRef.current, openDetail, currentDetailRef.current)
+        ) return;
+        setMarks(Array.isArray(data.boxes) ? data.boxes : []);
+        setMarkTier(data.match ?? null);
+      } catch (requestError) {
+        if (
+          !alive ||
+          !sourceOperationIsCurrent(openVersion, openVersionRef.current, openDetail, currentDetailRef.current)
+        ) return;
+        setMarks([]);
+        setLoadErrors((previous) => ({
+          ...previous,
+          evidence: requestErrorMessage(requestError, "Could not locate the quote on the source page."),
+        }));
+      }
+    })();
     return () => {
       alive = false;
     };
   }, [detail, prov.page, prov.quote]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setDetail(null);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && closeViewer();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [closeViewer]);
 
   if (!detail) return null;
   const { sourceId, recordId, field, value } = detail;
@@ -134,47 +224,114 @@ export function SourceViewer() {
   const onUp = async () => {
     const box = rectRef.current;
     if (!startRef.current || !box) return;
+    const operationVersion = openVersionRef.current;
+    const operationDetail = detail;
     startRef.current = null;
     rectRef.current = null;
     if (box.w < 0.02 || box.h < 0.02) {
       setRect(null);
       return;
     }
-    await saveCrop(box);
+    const saved = await saveCrop(box);
+    if (
+      !sourceOperationIsCurrent(
+        operationVersion,
+        openVersionRef.current,
+        operationDetail,
+        currentDetailRef.current
+      )
+    ) return;
     setDrawing(false);
     setRect(null);
-    setView("figure");
+    if (saved) setView("figure");
   };
 
   const saveCrop = async (box: BBox) => {
+    const operationVersion = openVersionRef.current;
+    const operationDetail = detail;
+    const isCurrent = () =>
+      sourceOperationIsCurrent(
+        operationVersion,
+        openVersionRef.current,
+        operationDetail,
+        currentDetailRef.current
+      );
+    if (!isCurrent()) return false;
     const next = { ...prov, figureBox: box };
-    setProv(next);
-    if (!recordId) return;
+    if (!recordId) {
+      if (isCurrent()) setProv(next);
+      return isCurrent();
+    }
     setSaving(true);
-    await fetch(`/api/${domain}/records/${encodeURIComponent(recordId)}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ setProvenance: { field, prov: { figureBox: box } } }),
-    }).catch(() => {});
-    setSaving(false);
+    setError(null);
+    try {
+      await requestJson(
+        `/api/${domain}/records/${encodeURIComponent(recordId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ setProvenance: { field, prov: { figureBox: box } } }),
+        },
+        "Could not save the figure crop"
+      );
+      if (!isCurrent()) return false;
+      setProv(next);
+      return true;
+    } catch (requestError) {
+      if (!isCurrent()) return false;
+      setError(requestErrorMessage(requestError, "Could not save the figure crop. Please try again."));
+      return false;
+    } finally {
+      if (isCurrent()) setSaving(false);
+    }
   };
 
   const clearCrop = async () => {
+    const operationVersion = openVersionRef.current;
+    const operationDetail = detail;
+    const isCurrent = () =>
+      sourceOperationIsCurrent(
+        operationVersion,
+        openVersionRef.current,
+        operationDetail,
+        currentDetailRef.current
+      );
+    if (!isCurrent()) return;
     const next = { ...prov };
     delete next.figureBox;
-    setProv(next);
-    setView("page");
-    if (!recordId) return;
-    await fetch(`/api/${domain}/records/${encodeURIComponent(recordId)}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ setProvenance: { field, prov: { figureBox: undefined } } }),
-    }).catch(() => {});
+    if (!recordId) {
+      if (isCurrent()) {
+        setProv(next);
+        setView("page");
+      }
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      await requestJson(
+        `/api/${domain}/records/${encodeURIComponent(recordId)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ setProvenance: { field, prov: { figureBox: null } } }),
+        },
+        "Could not clear the figure crop"
+      );
+      if (!isCurrent()) return;
+      setProv(next);
+      setView("page");
+    } catch (requestError) {
+      if (!isCurrent()) return;
+      setError(requestErrorMessage(requestError, "Could not clear the figure crop. Please try again."));
+    } finally {
+      if (isCurrent()) setSaving(false);
+    }
   };
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-ink-900/30 backdrop-blur-sm" onClick={() => setDetail(null)} />
+      <div className="absolute inset-0 bg-ink-900/30 backdrop-blur-sm" onClick={closeViewer} />
       <aside className="relative flex h-full w-full max-w-xl flex-col overflow-hidden bg-white shadow-2xl">
         <header className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">
           <div>
@@ -185,10 +342,18 @@ export function SourceViewer() {
             </div>
             {summary && <p className="mt-1 text-xs text-ink-500">{summary}</p>}
           </div>
-          <button onClick={() => setDetail(null)} className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 text-ink-400 hover:text-ink-700">
+          <button onClick={closeViewer} className="grid h-8 w-8 place-items-center rounded-lg border border-slate-200 text-ink-400 hover:text-ink-700">
             ✕
           </button>
         </header>
+
+        {(error || loadErrors.pageText || loadErrors.evidence) && (
+          <div className="space-y-2 px-5 pt-4">
+            {error && <RequestError>{error}</RequestError>}
+            {loadErrors.pageText && <RequestError>{loadErrors.pageText}</RequestError>}
+            {loadErrors.evidence && <RequestError>{loadErrors.evidence}</RequestError>}
+          </div>
+        )}
 
         <div className="flex-1 space-y-5 overflow-y-auto p-5">
           {imgSrc && !imgError ? (
@@ -298,7 +463,7 @@ function CropControls({
   const btn = "rounded-md border border-slate-200 px-2 py-0.5 text-[10px] font-semibold text-ink-600 hover:border-cyan-300 hover:text-cyan-700";
   if (drawing) {
     return (
-      <button onClick={onCancelDraw} className={btn}>
+      <button onClick={onCancelDraw} disabled={saving} className={btn}>
         Cancel
       </button>
     );
@@ -307,15 +472,15 @@ function CropControls({
     <span className="flex items-center gap-1.5">
       {saving && <span className="text-[10px] text-ink-400">saving…</span>}
       {hasBox && (
-        <button onClick={onToggleView} className={btn}>
+        <button onClick={onToggleView} disabled={saving} className={btn}>
           {view === "figure" ? "View page" : "View figure"}
         </button>
       )}
-      <button onClick={onStartDraw} className={btn}>
+      <button onClick={onStartDraw} disabled={saving} className={btn}>
         {hasBox ? "Re-crop" : "Crop to figure"}
       </button>
       {hasBox && (
-        <button onClick={onClear} className={`${btn} hover:border-rose-200 hover:text-rose-600`}>
+        <button onClick={onClear} disabled={saving} className={`${btn} hover:border-rose-200 hover:text-rose-600`}>
           Clear
         </button>
       )}

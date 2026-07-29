@@ -44,11 +44,28 @@ PDF / text   ─▶    Review Queue   ─▶   Official Database  ─▶  CSV
 ```bash
 npm install
 npm run migrate            # one-time: data/ioniclink.db → data/tribology.db (no-op on fresh installs)
-npm run seed               # seed the tribology database
-npm run seed:conductivity  # seed the conductivity database
-npm run seed:diffusion     # seed the diffusion database
 npm run dev                # http://localhost:3000
 npm test                   # run the standalone node:assert test suite
+npm run check:fast         # lint + TypeScript check
+npm run check              # full verification: lint, types, tests, production build
+```
+
+Sample data is optional. Each seed command is safe by default: it only seeds an empty
+domain database and refuses to overwrite existing records.
+
+```bash
+npm run seed               # tribology
+npm run seed:conductivity  # conductivity
+npm run seed:diffusion     # diffusion
+```
+
+To intentionally delete and rebuild a domain's records, pass `--reset` explicitly.
+Before deleting anything, IonicLink writes a SQLite snapshot to `data/backups/`:
+
+```bash
+npm run seed -- --reset
+npm run seed:conductivity -- --reset
+npm run seed:diffusion -- --reset
 ```
 
 For live AI extraction, copy `.env.local.example` → `.env.local` and set `OPENAI_BASE_URL` plus `OPENAI_API_KEY`.

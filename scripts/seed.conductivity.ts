@@ -2,11 +2,13 @@
  * Seed the CONDUCTIVITY database with standardized, three-layer records — the
  * same ingest path live extraction uses. Writes to data/conductivity.db only.
  *
- * Run: npm run seed:conductivity
+ * Run: npm run seed:conductivity (empty database) or
+ * npm run seed:conductivity -- --reset (replace existing records)
  */
-import { createRecords, resetAll } from "../lib/db";
+import { createRecords } from "../lib/db";
 import { ingest } from "../lib/conductivity/ingest";
 import type { ConductivityExtractedFields } from "../lib/conductivity/schema";
+import { prepareSeed } from "./seed-guard";
 
 const REF = {
   title: "Temperature dependence of ionic conductivity in imidazolium ionic liquids",
@@ -82,7 +84,7 @@ const REVIEW: ConductivityExtractedFields[] = [
   },
 ];
 
-resetAll("conductivity");
+prepareSeed("conductivity");
 const official = createRecords("conductivity", OFFICIAL.map(ingest), "official");
 const review = createRecords("conductivity", REVIEW.map(ingest), "review");
 console.log(`Seeded ${official.length} official + ${review.length} review conductivity records.`);

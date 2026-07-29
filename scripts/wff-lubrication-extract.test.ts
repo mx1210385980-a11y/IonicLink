@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import path from "node:path";
+import { createRecords } from "../lib/db";
 import {
   buildSourceJobs,
   normalizeIonLabel,
@@ -132,7 +133,69 @@ const selectedOfficial = selectOfficialRecordDrafts({
 });
 assert.equal(selectedOfficial.drafts.length, 1);
 assert.equal(selectedOfficial.drafts[0].sourceId, "source-uuid");
+assert.deepEqual(
+  selectedOfficial.drafts[0].extraction,
+  { source: "openai-compatible" },
+  "old caches inherit extraction provenance from their wrapper before Official import"
+);
 assert.equal(selectedOfficial.skipped.length, 0);
+
+const selectedMock = selectOfficialRecordDrafts({
+  extractions: [
+    {
+      key: "paper_a",
+      title: "Paper A",
+      doi: "",
+      filename: "paper-a.pdf",
+      filePath: "/tmp/paper-a.pdf",
+      extractedAt: "2026-06-11T00:00:00.000Z",
+      extractionSource: "mock",
+      pageCount: 1,
+      charCount: 100,
+      sha256: "abc",
+      quoteAudit: { totalQuotes: 1, verifiedQuotes: 1, missingQuotes: 0 },
+      records: [platformRecord as any],
+    },
+  ],
+  reviewRows: reviewed,
+  existingOfficialRecords: [],
+  sourceIdsByKey: new Map([[
+    "paper_a",
+    "source-uuid",
+  ]]),
+});
+assert.equal(selectedMock.drafts[0].extraction?.source, "mock", "old mock caches cannot masquerade as legacy records");
+assert.throws(
+  () => createRecords("tribology", selectedMock.drafts, "official"),
+  /Cannot create official records from mock extraction/,
+  "the WFF --write-official path rejects a reused mock cache"
+);
+
+for (const extractionSource of [undefined, "error"] as const) {
+  const missingProvenance = selectOfficialRecordDrafts({
+    extractions: [
+      {
+        key: "paper_a",
+        title: "Paper A",
+        doi: "",
+        filename: "paper-a.pdf",
+        filePath: "/tmp/paper-a.pdf",
+        extractedAt: "2026-06-11T00:00:00.000Z",
+        ...(extractionSource ? { extractionSource } : {}),
+        pageCount: 1,
+        charCount: 100,
+        sha256: "abc",
+        quoteAudit: { totalQuotes: 1, verifiedQuotes: 1, missingQuotes: 0 },
+        records: [platformRecord as any],
+      } as any,
+    ],
+    reviewRows: reviewed,
+    existingOfficialRecords: [],
+    sourceIdsByKey: new Map([["paper_a", "source-uuid"]]),
+  });
+  assert.equal(missingProvenance.drafts.length, 0);
+  assert.equal(missingProvenance.skipped[0].reason, "missing_extraction_provenance");
+}
 
 const skippedDuplicate = selectOfficialRecordDrafts({
   extractions: [
