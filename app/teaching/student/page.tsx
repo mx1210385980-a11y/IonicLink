@@ -13,4 +13,3 @@ export default function TeachingStudentPage() {
   if (!workspace) redirect("/teaching");
   return <StudentWorkspace initial={workspace} />;
 }
-

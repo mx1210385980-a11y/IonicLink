@@ -46,4 +46,3 @@ export type TeachingDashboardRow = {
   metrics: TeachingMetrics;
   status: "draft" | "pending" | "reviewed";
 };
-

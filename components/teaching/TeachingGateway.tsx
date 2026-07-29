@@ -109,7 +109,6 @@ export function TeachingGateway() {
     </main>
   );
 }
-
 function Field({
   label,
   name,
@@ -137,4 +136,3 @@ function Field({
     </label>
   );
 }
-
