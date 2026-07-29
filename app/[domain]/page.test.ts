@@ -125,7 +125,7 @@ const mockAction = chooseNextAction(progressFor([reviewRecord("mock")]));
 assert.equal(mockAction.key, "mock-locked");
 assert.equal(mockAction.href, "/tribology/extract");
 
-// The calibration gate uses collapsed, model-usable points rather than raw Official count.
+// The calibration gate uses collapsed, model-usable points rather than raw Checked count.
 const calibrationGap = progressFor(Array.from({ length: 3 }, (_, index) => tribologyRecord(index)));
 assert.equal(calibrationGap.design.usable, 3);
 assert.equal(calibrationGap.design.gap, 5);

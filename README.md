@@ -20,7 +20,7 @@ instrument honestly gates itself while a domain's dataset is still small.
 ```
 Extract            Review              Publish
 ─────────          ────────            ─────────
-PDF / text   ─▶    Review Queue   ─▶   Official Database  ─▶  CSV
+PDF / text   ─▶    Review Queue   ─▶   Checked Database   ─▶  CSV
 (AI extract)       (approve/edit)      (clean records)        (export)
 ```
 
@@ -28,7 +28,7 @@ PDF / text   ─▶    Review Queue   ─▶   Official Database  ─▶  CSV
    standardizes every friction result into candidate records. No key? A deterministic
    mock extractor keeps the whole flow working offline.
 2. **Review** — candidates land in the Review Queue. Approve the accurate ones into the
-   Official Database; reject the rest. Nothing is published blindly.
+   Checked Database; reject the rest. Nothing is published blindly.
 3. **Export** — filter by scale (nano/AFM vs macro/tribometer) or search, then download CSV.
 
 ## Stack
