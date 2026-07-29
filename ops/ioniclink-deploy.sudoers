@@ -1,0 +1,1 @@
+ionicdeploy ALL=(root) NOPASSWD: /usr/local/sbin/ioniclink-deploy *
