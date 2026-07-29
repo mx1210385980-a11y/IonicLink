@@ -29,7 +29,7 @@ const zeroLoad = ingest({ ...base, load: "0 nN" });
 assert.deepEqual(coreCompleteness(zeroLoad).missing, ["Load"], "zero normal load is not a complete core load");
 assert.throws(
   () => createRecords("tribology", [zeroLoad], "official"),
-  /Cannot create official records — missing core fields: #1: Load/,
+  /Cannot create checked records — missing core fields: #1: Load/,
   "bulk official creation is gated by core completeness"
 );
 
@@ -44,7 +44,7 @@ assert.throws(
       [{ ...valid, extraction: { source: "mock" } }],
       "official"
     ),
-  /Cannot create official records from mock extraction: #1/,
+  /Cannot create checked records from mock extraction: #1/,
   "direct official creation cannot bypass the mock extraction gate"
 );
 
