@@ -19,7 +19,7 @@ const homeSource = file("app/page.tsx");
 assert.match(homeSource, /leading-8 text-ink-700/, "global landing supporting copy should be stronger than gray");
 assert.match(homeSource, /text-sm font-semibold text-ink-700/, "workspace secondary links should be readable before hover");
 assert.match(homeSource, /label="Review" tone="amber"/, "landing review metric should be amber");
-assert.match(homeSource, /label="Official" tone="brand"/, "landing official metric should be brand teal");
+assert.match(homeSource, /label="Checked" tone="brand"/, "landing checked metric should use the established metric tone");
 assert.match(homeSource, /tone\?: "brand" \| "amber" \| "ink"/, "landing metrics should expose semantic tones");
 assert.match(homeSource, /tone === "amber" \? "text-amber-700"/, "landing review count should use amber");
 assert.match(homeSource, /Review queue[\s\S]*hover:text-amber-700|hover:text-amber-700[\s\S]*Review queue/, "review links should keep amber semantics");

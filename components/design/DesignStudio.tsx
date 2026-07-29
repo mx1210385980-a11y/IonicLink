@@ -280,7 +280,7 @@ export function DesignStudio({
                 onChange={(e) => setIncludeReview(!e.target.checked)}
                 className="h-3.5 w-3.5 accent-brand-600"
               />
-              official records only
+              checked records only
             </label>
           </div>
         </section>
@@ -293,7 +293,7 @@ export function DesignStudio({
           <ModelRibbonStat label="usable points" value={dataset.points.length} />
           <ModelRibbonStat label="ion pairs" value={dataset.pairCount} />
           <ModelRibbonStat
-            label="official / review"
+            label="checked / review"
             value={
               <>
                 <span className="text-brand-700">{dataset.officialCount}</span>
@@ -301,7 +301,7 @@ export function DesignStudio({
                 <span className="text-amber-700">{dataset.reviewCount}</span>
               </>
             }
-            title="official / review"
+            title="checked / review"
           />
           <ModelRibbonStat label="papers" value={dataset.paperCount} />
           {dataset.tempRange && (

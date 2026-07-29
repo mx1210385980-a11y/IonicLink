@@ -148,7 +148,7 @@ function WorkflowRail({ progress }: { progress: WorkspaceProgress }) {
         />
         <WorkflowNode
           href={`/${progress.domain}/database?status=official`}
-          label="Official"
+          label="Checked"
           value={progress.counts.official}
           detail="approved records"
           tone="brand"

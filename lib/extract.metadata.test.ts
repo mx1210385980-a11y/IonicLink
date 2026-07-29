@@ -28,7 +28,7 @@ async function main() {
     }
     assert.throws(
       () => createRecords("tribology", result.records, "official"),
-      /Cannot create official records from mock extraction/,
+      /Cannot create checked records from mock extraction/,
       "direct extract-to-official workflows cannot discard the mock gate"
     );
   } finally {

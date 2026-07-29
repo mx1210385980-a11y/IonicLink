@@ -12,4 +12,3 @@ export default function TeachingPage() {
   if (session?.role === "student") redirect("/teaching/student");
   return <TeachingGateway />;
 }
-

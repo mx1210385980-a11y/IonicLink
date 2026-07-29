@@ -167,7 +167,7 @@ const selectedMock = selectOfficialRecordDrafts({
 assert.equal(selectedMock.drafts[0].extraction?.source, "mock", "old mock caches cannot masquerade as legacy records");
 assert.throws(
   () => createRecords("tribology", selectedMock.drafts, "official"),
-  /Cannot create official records from mock extraction/,
+  /Cannot create checked records from mock extraction/,
   "the WFF --write-official path rejects a reused mock cache"
 );
 

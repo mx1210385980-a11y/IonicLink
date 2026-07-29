@@ -29,7 +29,7 @@ async function main() {
 
   assert.equal(response.status, 422);
   const payload = (await response.json()) as { error?: string };
-  assert.match(payload.error ?? "", /Cannot create official records from mock extraction/);
+  assert.match(payload.error ?? "", /Cannot create checked records from mock extraction/);
 
   console.log("Records API official mock gate tests passed");
 }

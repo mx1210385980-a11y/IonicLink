@@ -32,6 +32,9 @@ const actionsHtml = renderToStaticMarkup(
 // D readout renders the reported value + label
 assert.match(html, /6\.2 × 10⁻¹¹ m² s⁻¹/);
 assert.match(html, /Self-diffusion/);
+assert.match(html, />checked</);
+assert.doesNotMatch(html, />official</);
+assert.match(html, /record-card-unified-text/);
 // standardized line uses the µm²/s ladder
 assert.match(html, /62 µm²\/s/);
 // the ionic-identity section is reused from the shared parts

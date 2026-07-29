@@ -28,7 +28,8 @@ for (const [domain, label] of [
 assert.doesNotMatch(html, />Upload PDF papers</);
 assert.doesNotMatch(html, /Start a clean extraction run/);
 assert.match(html, /Review/);
-assert.match(html, /Official/);
+assert.match(html, /Checked/);
+assert.doesNotMatch(html, />Official</);
 assert.match(html, /Papers/);
 
 console.log("Global landing requires an explicit property workspace");

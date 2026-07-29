@@ -49,10 +49,7 @@ export function MoleculeView({
     setOk(false);
     (async () => {
       try {
-        // The prebuilt bundle attaches the API to window.SmilesDrawer as a side
-        // effect; the package main points at raw TS source, so we load the dist.
-        await import("smiles-drawer/dist/smiles-drawer.min.js");
-        const SmilesDrawer = (window as unknown as { SmilesDrawer?: any }).SmilesDrawer;
+        const { default: SmilesDrawer } = await import("smiles-drawer");
         if (!SmilesDrawer?.SvgDrawer) {
           setOk(false);
           return;

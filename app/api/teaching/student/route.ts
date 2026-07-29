@@ -18,7 +18,6 @@ export async function GET(request: NextRequest) {
   if (!workspace) return NextResponse.json({ error: "未找到分配的教学任务。" }, { status: 404 });
   return NextResponse.json(workspace);
 }
-
 export async function PATCH(request: NextRequest) {
   const rejected = rejectCrossOriginMutation(request);
   if (rejected) return rejected;
@@ -60,4 +59,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

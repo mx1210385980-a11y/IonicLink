@@ -85,7 +85,7 @@ function conductivityRecord(cation: string, anion: string, sigma: number, tempK:
   assert.match(html, /grid-cols-\[auto_minmax\(0,1fr\)_auto\]/);
   assert.match(
     html,
-    /<input[^>]*type="checkbox"[^>]*checked=""[^>]*\/>official records only/,
+    /<input[^>]*type="checkbox"[^>]*checked=""[^>]*\/>checked records only/,
     "the studio opens on approved evidence; review records are opt-in for model training"
   );
   assert.match(html, /usable points/);
@@ -105,7 +105,7 @@ function conductivityRecord(cation: string, anion: string, sigma: number, tempK:
   assert.match(html, /LOO/, "9 usable records unlock leave-one-out calibration");
   assert.match(html, /Design explorer/);
   assert.match(html, /Calibration certificate/);
-  assert.match(html, /official records only/);
+  assert.match(html, /checked records only/);
   assert.doesNotMatch(html, /Knowledge Consolidation/, "the old knowledge page is gone");
   // the condition-resolved lubrication model surfaces
   assert.match(html, /Operating conditions/, "tribology bench exposes load/speed/potential/film inputs");

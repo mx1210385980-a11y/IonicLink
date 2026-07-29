@@ -11,4 +11,3 @@ export default function TeachingAdminPage() {
   if (session?.role !== "teacher") redirect("/teaching");
   return <TeacherDashboard initial={getTeachingAdminDashboard()} />;
 }
-

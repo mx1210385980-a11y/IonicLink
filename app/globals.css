@@ -132,6 +132,10 @@ body {
   .status-mini-muted {
     @apply border-ink-200 bg-white text-ink-500;
   }
+  .record-card-unified-text,
+  .record-card-unified-text :where(*) {
+    color: #0f172a !important;
+  }
   .molecule-field {
     @apply relative grid flex-1 place-items-center overflow-hidden rounded-md bg-white/70;
     isolation: isolate;

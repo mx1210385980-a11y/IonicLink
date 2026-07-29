@@ -125,7 +125,7 @@ const mockAction = chooseNextAction(progressFor([reviewRecord("mock")]));
 assert.equal(mockAction.key, "mock-locked");
 assert.equal(mockAction.href, "/tribology/extract");
 
-// The calibration gate uses collapsed, model-usable points rather than raw Official count.
+// The calibration gate uses collapsed, model-usable points rather than raw Checked count.
 const calibrationGap = progressFor(Array.from({ length: 3 }, (_, index) => tribologyRecord(index)));
 assert.equal(calibrationGap.design.usable, 3);
 assert.equal(calibrationGap.design.gap, 5);
@@ -134,7 +134,7 @@ const calibrationAction = chooseNextAction(calibrationGap);
 assert.equal(calibrationAction.key, "calibration");
 assert.equal(calibrationAction.href, "/tribology/extract");
 assert.match(calibrationAction.title, /Add 5 model-usable points/);
-assert.match(calibrationAction.body, /differ from the raw Official count/);
+assert.match(calibrationAction.body, /differ from the raw Checked count/);
 
 const calibrationReady = progressFor(Array.from({ length: 8 }, (_, index) => tribologyRecord(index)));
 assert.equal(calibrationReady.design.usable, 8);
@@ -160,7 +160,8 @@ assert.match(html, /Design Studio/);
 assert.match(html, /Workflow/);
 assert.match(html, /Papers/);
 assert.match(html, /Extraction/);
-assert.match(html, /Official/);
+assert.match(html, /Checked/);
+assert.doesNotMatch(html, />Official</);
 assert.match(html, /0 queued · 0 extracting · 0 done · 0 error · 0 committed/);
 assert.match(html, /0 ready · 0 incomplete · 0 mock locked/);
 assert.match(html, /0 \/ 8/);

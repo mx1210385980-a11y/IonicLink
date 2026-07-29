@@ -593,7 +593,7 @@ export function DatabaseView({ domain }: { domain: Domain }) {
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink-200/70 bg-ink-50/40 px-4 py-2.5">
         <div className="flex rounded-[8px] border border-ink-200 bg-white p-0.5 text-sm">
           <Tab active={status === "official"} onClick={() => changeStatus("official")}>
-            Official Database <Badge active={status === "official"}>{counts.official}</Badge>
+            Checked Database <Badge active={status === "official"}>{counts.official}</Badge>
           </Tab>
           <Tab active={status === "review"} onClick={() => changeStatus("review")}>
             Review Queue <Badge active={status === "review"} tone="amber">{counts.review}</Badge>
@@ -746,7 +746,7 @@ export function DatabaseView({ domain }: { domain: Domain }) {
             ) : status === "review" ? (
               "Review queue is empty. Head to Extract to pull candidates from a paper."
             ) : (
-              "No official records yet. Approve candidates from the Review Queue."
+              "No checked records yet. Approve candidates from the Review Queue."
             )}
           </Empty>
         ) : (
@@ -864,9 +864,9 @@ export function DatabaseView({ domain }: { domain: Domain }) {
                                 disabled={mutationBusy || isMockExtractionRecord(rec) || !mod.coreCompleteness(rec).complete}
                                 title={
                                   isMockExtractionRecord(rec)
-                                    ? "Mock demo records cannot be published as Official records"
+                                    ? "Mock demo records cannot be published as Checked records"
                                     : mod.coreCompleteness(rec).complete
-                                      ? "Approve into the official database"
+                                      ? "Approve into the checked database"
                                       : `Complete core fields first: ${mod.coreCompleteness(rec).missing.join(", ")}`
                                 }
                                 className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40"

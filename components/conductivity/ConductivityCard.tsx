@@ -123,7 +123,7 @@ export function ConductivityCard({
 
   return (
     <article
-      className={`group relative grid overflow-hidden rounded-xl border bg-white transition duration-300 xl:grid-cols-[auto_minmax(0,0.78fr)_minmax(0,0.72fr)_minmax(0,1.45fr)] ${
+      className={`record-card-unified-text group relative grid overflow-hidden rounded-xl border bg-white transition duration-300 xl:grid-cols-[auto_minmax(0,0.78fr)_minmax(0,0.72fr)_minmax(0,1.45fr)] ${
         selected
           ? "border-brand-300 shadow-card ring-1 ring-brand-200"
           : "border-ink-200/80 shadow-sm hover:-translate-y-px hover:border-brand-200 hover:shadow-card"
@@ -144,7 +144,7 @@ export function ConductivityCard({
         )}
         <span className="font-mono text-xs font-semibold tracking-tight text-ink-400">{record.id}</span>
         <span className={`status-mini whitespace-nowrap ${record.status === "review" ? "status-mini-review" : "status-mini-official"}`}>
-          {record.status}
+          {record.status === "official" ? "checked" : record.status}
         </span>
       </div>
 

@@ -425,7 +425,7 @@ export function createRecords(
       .filter((i) => i >= 0);
     if (mockIndices.length) {
       throw new Error(
-        `Cannot create official records from mock extraction: ${mockIndices
+        `Cannot create checked records from mock extraction: ${mockIndices
           .map((i) => `#${i + 1}`)
           .join(", ")}. Re-extract with a live model or enter the records manually.`
       );
@@ -435,7 +435,7 @@ export function createRecords(
       .filter((row) => row.missing.length);
     if (bad.length) {
       const details = bad.map((row) => `#${row.i + 1}: ${row.missing.join(", ")}`).join("; ");
-      throw new Error(`Cannot create official records — missing core fields: ${details}`);
+      throw new Error(`Cannot create checked records — missing core fields: ${details}`);
     }
   }
   const made: AnyRecord[] = [];

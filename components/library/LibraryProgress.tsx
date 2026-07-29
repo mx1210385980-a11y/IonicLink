@@ -133,7 +133,7 @@ export function LibraryProgress({
             }
           : {
               href: `/${domain}/database?status=official`,
-              label: "Open official database",
+              label: "Open checked database",
               detail: "All indexed sources with records are published and no review work remains.",
             };
 
@@ -223,7 +223,7 @@ export function SourceProgressTrack({ records }: { records: readonly SourceProgr
             {review} pending review
           </span>
         ) : null}
-        {official > 0 ? <span className="font-semibold text-emerald-700">{official} official</span> : null}
+        {official > 0 ? <span className="font-semibold text-emerald-700">{official} checked</span> : null}
         {state === "empty" ? <span className="text-ink-400">no records</span> : null}
       </div>
 

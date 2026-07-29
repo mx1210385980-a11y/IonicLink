@@ -31,6 +31,9 @@ const actionsHtml = renderToStaticMarkup(
 // σ readout renders the reported value + label
 assert.match(html, /3\.5 mS\/cm/);
 assert.match(html, /Ionic conductivity/);
+assert.match(html, />checked</);
+assert.doesNotMatch(html, />official</);
+assert.match(html, /record-card-unified-text/);
 // the ionic-identity section is reused from the shared parts
 assert.match(html, /data-testid="ionic-liquid-panel"/);
 assert.match(html, /\[BMIM\]/);

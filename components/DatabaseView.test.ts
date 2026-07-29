@@ -146,7 +146,8 @@ assert.equal(
 
 const officialHtml = renderToStaticMarkup(createElement(DatabaseView, { domain: "tribology" }));
 
-assert.match(officialHtml, /Official Database/);
+assert.match(officialHtml, /Checked Database/);
+assert.doesNotMatch(officialHtml, />Official</);
 assert.match(officialHtml, /data-testid="database-workbench-shell"/);
 assert.match(officialHtml, /data-testid="database-command-bar"/);
 assert.match(officialHtml, /rounded-\[8px\]/);

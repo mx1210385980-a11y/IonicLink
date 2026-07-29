@@ -89,7 +89,7 @@ const officialNextHtml = renderToStaticMarkup(
   })
 );
 assert.match(officialNextHtml, /href="\/tribology\/database\?status=official"/);
-assert.match(officialNextHtml, /Open official database/);
+assert.match(officialNextHtml, /Open checked database/);
 
 const firstSourceHtml = renderToStaticMarkup(
   createElement(LibraryProgress, { domain: "diffusion", sources: [], records: [] })

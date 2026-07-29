@@ -138,7 +138,7 @@ export function chooseNextAction(progress: WorkspaceProgress): NextAction {
       key: "ready-review",
       eyebrow: "Human review",
       title: `Approve ${review.ready} ready record${review.ready === 1 ? "" : "s"}`,
-      body: "These non-mock records have complete core fields and can move into Official now.",
+      body: "These non-mock records have complete core fields and can move into Checked now.",
       href: `/${domain}/database?status=review`,
       tone: "brand",
     };
@@ -171,7 +171,7 @@ export function chooseNextAction(progress: WorkspaceProgress): NextAction {
       title: noData ? "Start extraction" : `Add ${design.gap} model-usable point${design.gap === 1 ? "" : "s"}`,
       body: noData
         ? `Design has ${design.usable} / ${design.gate} usable points. Add a paper and curate the first evidence point.`
-        : `Design has ${design.usable} / ${design.gate} usable points. Model scope and exclusions can make this differ from the raw Official count.`,
+        : `Design has ${design.usable} / ${design.gate} usable points. Model scope and exclusions can make this differ from the raw Checked count.`,
       href: `/${domain}/extract`,
       tone: "violet",
     };

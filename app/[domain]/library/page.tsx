@@ -139,7 +139,7 @@ function SourceRow({
                 <span className="flex shrink-0 flex-wrap items-center gap-2">
                   <span className="font-mono font-bold text-brand-600">{headline(r)}</span>
                   <span className={`status-mini ${r.status === "review" ? "status-mini-review" : "status-mini-official"}`}>
-                    {r.status}
+                    {r.status === "official" ? "checked" : r.status}
                   </span>
                 </span>
               </li>

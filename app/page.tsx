@@ -89,7 +89,7 @@ function WorkspaceCard({
 
       <div className="mt-auto grid grid-cols-3 gap-2 border-t border-ink-100 pt-5">
         <Metric value={review} label="Review" tone="amber" />
-        <Metric value={official} label="Official" tone="brand" />
+        <Metric value={official} label="Checked" tone="brand" />
         <Metric value={papers} label="Papers" />
       </div>
     </article>

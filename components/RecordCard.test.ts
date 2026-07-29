@@ -28,6 +28,7 @@ function makeRecord(): IonicRecord {
     extended: {
       scale: "nano",
       method: "AFM",
+      cofMethod: "slope of friction force vs normal load fitting line (Amontons’ law)",
       probe: "silicon nitride",
       probeType: "Tip · 2 nm",
       velocity: parseQuantity("2 µm/s", "velocity") ?? undefined,
@@ -138,6 +139,9 @@ const officialRecord = makeRecord();
 officialRecord.status = "official";
 const officialHtml = renderToStaticMarkup(createElement(RecordCard, { record: officialRecord }));
 assert.doesNotMatch(officialHtml, /conf 82%/);
+assert.match(officialHtml, />checked</);
+assert.doesNotMatch(officialHtml, />official</);
+assert.match(officialHtml, /record-card-unified-text/);
 
 console.log("RecordCard confidence visibility tests passed");
 
@@ -182,6 +186,8 @@ assert.match(compactHtml, /data-testid="tribopair-contact-stack"/);
 assert.doesNotMatch(compactHtml, /data-testid="tribopair-contact-state"/);
 assert.match(compactHtml, /data-ui="cof-summary"/);
 assert.match(compactHtml, /border-cyan-100 bg-gradient-to-br from-white to-cyan-50\/45/);
+assert.doesNotMatch(compactHtml, /low friction|moderate|high friction/);
+assert.doesNotMatch(compactHtml, /slope of friction force vs normal load fitting line/);
 assert.doesNotMatch(compactHtml, /from-ink-900 to-ink-800/);
 assert.doesNotMatch(compactHtml, /transition-\[width\]/);
 assert.match(compactHtml, /Reported Conditions/);

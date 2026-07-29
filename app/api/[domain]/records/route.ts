@@ -40,7 +40,7 @@ export async function POST(req: NextRequest, { params }: { params: { domain: str
     return NextResponse.json({ created });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not create records";
-    if (message.startsWith("Cannot create official records")) {
+    if (message.startsWith("Cannot create checked records")) {
       return NextResponse.json({ error: message }, { status: 422 });
     }
     throw error;

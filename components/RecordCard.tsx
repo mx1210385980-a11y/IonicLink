@@ -127,14 +127,6 @@ export function buildSystemFacets(record: IonicRecord, units: UnitMode): Conditi
   return items;
 }
 
-/** Friction band from the coefficient — gives an at-a-glance read on lubrication quality. */
-function frictionBand(cof: number | null) {
-  if (cof == null) return { label: "—", tone: "border-ink-200 bg-ink-50 text-ink-500" };
-  if (cof < 0.1) return { label: "low friction", tone: "border-emerald-200 bg-emerald-50 text-emerald-700" };
-  if (cof < 0.25) return { label: "moderate", tone: "border-amber-200 bg-amber-50 text-amber-700" };
-  return { label: "high friction", tone: "border-rose-200 bg-rose-50 text-rose-700" };
-}
-
 type TribopairDisplay = {
   mode: "nano" | "macro" | "unknown";
   pattern: "afm" | "ball-disk" | "pin-disk" | "three-ball-plate" | "ball-pins" | "block-ring" | "counterface-specimen";
@@ -345,7 +337,6 @@ export function RecordCard({
   const probeLabel = tribopair.mode === "macro" ? tribopair.primaryLabel : tribopair.primaryLabel;
   const showConfidence = record.status === "review" && typeof record.confidence === "number";
   const confidencePct = showConfidence ? Math.round((record.confidence as number) * 100) : null;
-  const band = frictionBand(core.cof);
   const instrumentLabel = tribopair.mode === "macro" ? "TRIBO" : "AFM";
   const tribopairSpecs = [
     {
@@ -401,24 +392,16 @@ export function RecordCard({
             {cofValue}
           </div>
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1 text-right">
-          {core.cof != null && (
-            <span className={`whitespace-nowrap rounded-md border px-2 py-1 text-[10px] font-semibold ${band.tone}`}>{band.label}</span>
-          )}
-          {showConfidence && <span className="whitespace-nowrap text-[10px] font-medium text-ink-400">conf {confidencePct}%</span>}
-        </div>
+        {showConfidence && (
+          <span className="shrink-0 whitespace-nowrap text-right text-[10px] font-medium text-ink-400">conf {confidencePct}%</span>
+        )}
       </div>
-      {e.cofMethod && (
-        <div className="mt-2 truncate border-t border-ink-100 pt-1.5 text-[10px] font-medium text-ink-500" title={e.cofMethod}>
-          method · {e.cofMethod}
-        </div>
-      )}
     </>
   );
 
   return (
     <article
-      className={`group relative grid items-start overflow-hidden rounded-[10px] border bg-white transition duration-300 xl:grid-cols-[auto_minmax(0,0.84fr)_minmax(0,1.05fr)_minmax(0,1.28fr)] ${
+      className={`record-card-unified-text group relative grid items-start overflow-hidden rounded-[10px] border bg-white transition duration-300 xl:grid-cols-[auto_minmax(0,0.84fr)_minmax(0,1.05fr)_minmax(0,1.28fr)] ${
         selected
           ? "border-brand-300 shadow-card ring-1 ring-brand-200"
           : "border-ink-200/80 shadow-sm hover:-translate-y-px hover:border-brand-200 hover:shadow-card"
@@ -442,7 +425,7 @@ export function RecordCard({
         <span
           className={`status-mini whitespace-nowrap ${record.status === "review" ? "status-mini-review" : "status-mini-official"}`}
         >
-          {record.status}
+          {record.status === "official" ? "checked" : record.status}
         </span>
       </div>
 

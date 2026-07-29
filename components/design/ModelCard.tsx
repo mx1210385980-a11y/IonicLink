@@ -294,7 +294,7 @@ export function ModelCard({
                     </li>
                   ))}
                   {dataset.reviewExcludedCount > 0 && (
-                    <li>{dataset.reviewExcludedCount} review-status records hidden by the official-only toggle</li>
+                    <li>{dataset.reviewExcludedCount} review-status records hidden by the checked-only toggle</li>
                   )}
                 </ul>
               )}

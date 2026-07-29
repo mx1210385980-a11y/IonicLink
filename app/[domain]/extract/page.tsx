@@ -31,7 +31,7 @@ export default function ExtractPage({ params }: { params: { domain: string } }) 
             className={`chip shrink-0 ${
               live ? "border-brand-200 text-brand-700" : "border-amber-200 bg-amber-50 text-amber-800"
             }`}
-            title={live ? "Records can be reviewed and published after extraction." : "Offline mock candidates can be reviewed, but cannot be published as Official records."}
+            title={live ? "Records can be reviewed and published after extraction." : "Offline mock candidates can be reviewed, but cannot be published as Checked records."}
           >
             <span className={`h-2 w-2 rounded-full ${live ? "bg-brand-500" : "bg-amber-400"}`} />
             {live ? "Live AI extraction" : "Demo mode · cannot publish"}
