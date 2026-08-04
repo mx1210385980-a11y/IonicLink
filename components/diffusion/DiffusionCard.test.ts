@@ -40,11 +40,9 @@ assert.match(html, /62 µm²\/s/);
 // the ionic-identity section is reused from the shared parts
 assert.match(html, /data-testid="ionic-liquid-panel"/);
 assert.match(html, /\[EMIM\]/);
-// the species zone shows the diffusing ion + nucleus + method
-assert.match(html, /data-testid="species-panel"/);
+// the confined-system zone shows the diffusion system context
+assert.match(html, /data-testid="confined-system-panel"/);
 assert.match(html, /cation/);
-assert.match(html, /¹H/);
-assert.match(html, /PFG-NMR/);
 // other domains' visuals must NOT leak into the diffusion card
 assert.doesNotMatch(html, /afm-probe-illustration/);
 assert.doesNotMatch(html, /Coefficient of friction/);
