@@ -114,6 +114,7 @@ async function extractWithOpenAICompatible(
   mod: Module<any, any>
 ): Promise<any[]> {
   const body = text.slice(0, 120_000);
+
   let response: Response;
   try {
     response = await fetch(`${config.baseURL}/chat/completions`, {
@@ -144,8 +145,6 @@ async function extractWithOpenAICompatible(
       }),
     });
   } catch (err) {
-    // Surface WHERE it failed — a bare "fetch failed" reads like an app bug
-    // when the actual problem is the relay endpoint being unreachable.
     const cause = (err as { cause?: { code?: string } })?.cause?.code;
     throw new Error(
       `LLM endpoint unreachable: ${config.baseURL}${cause ? ` (${cause})` : ""}. ` +

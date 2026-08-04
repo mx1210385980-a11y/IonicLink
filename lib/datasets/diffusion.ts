@@ -18,6 +18,10 @@ const ALIASES = {
   year: ["year", "publication_year"],
   doi: ["doi"],
   systemName: ["system_name", "confinement_system", "system"],
+  material: ["material", "confinement_material", "host_material"],
+  geometry: ["geometry", "confinement_geometry", "structure"],
+  functionalGroups: ["functional_groups", "surface_functional_groups", "functionalization"],
+  polarizable: ["polarizable", "polarizable_walls", "wall_polarizability"],
   cation: ["cation"],
   anion: ["anion"],
   ionicLiquid: ["ionic_liquid", "ionic_liquid_name", "il"],
@@ -192,7 +196,7 @@ function recordMappings(
 ) {
   const targets: Partial<Record<AliasKey, string>> = {
     paperTitle: "paper.title", journal: "paper.journal", year: "paper.year", doi: "paper.doi",
-    systemName: "extended.systemName", cation: "core.ionicLiquid.cation", anion: "core.ionicLiquid.anion",
+    systemName: "extended.systemName", material: "extended.material", geometry: "extended.geometry", functionalGroups: "extended.functionalGroups", polarizable: "extended.polarizable", cation: "core.ionicLiquid.cation", anion: "core.ionicLiquid.anion",
     ionicLiquid: "core.ionicLiquid.{cation,anion}", dCation: "core.diffusion (species=cation)",
     dAnion: "core.diffusion (species=anion)", dTotal: "core.diffusion (species=overall)",
     dUnit: "core.diffusion.unit", temperature: "core.temperature", temperatureUnit: "core.temperature.unit",

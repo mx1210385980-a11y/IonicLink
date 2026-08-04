@@ -28,6 +28,10 @@ export interface DiffusionExtended {
   poreSize?: Quantity; // confinement scale (pore size / interlayer spacing) → m
   method?: string; // PFG-NMR / electrochemical / MD simulation
   nucleus?: string; // probed nucleus, e.g. ¹H, ¹⁹F
+  material?: string; // material of the confined medium, e.g. silica, carbon, MOF, polymer
+  geometry?: string; // pore/channel geometry, e.g. pore, channel, slit, membrane, layered
+  functionalGroups?: string; // surface functionalization or groups, e.g. sulfonate, hydroxyl
+  polarizable?: string; // whether the confining surface or environment is described as polarizable
   surface?: string; // electrode surface, for electrochemical D only
   viscosity?: Quantity; // dynamic viscosity η → Pa·s (Stokes–Einstein context)
   waterContent?: string; // ppm or wt% (kept raw)
@@ -46,6 +50,10 @@ export interface DiffusionExtractedFields extends ExtractedFieldsBase {
   poreSize?: string; // e.g. "2.5 nm", "38 Å"
   method?: string;
   nucleus?: string;
+  material?: string;
+  geometry?: string;
+  functionalGroups?: string;
+  polarizable?: string;
   surface?: string;
   viscosity?: string;
   waterContent?: string;
@@ -69,6 +77,10 @@ export const DIFFUSION_PROVENANCE_FIELDS = [
   "diffusion",
   "systemName",
   "poreSize",
+  "material",
+  "geometry",
+  "functionalGroups",
+  "polarizable",
   "method",
   "nucleus",
   "surface",
@@ -147,6 +159,22 @@ export const DIFFUSION_EXTRACTION_TOOL_SCHEMA = {
             description:
               "Confinement scale (pore diameter / slit width / interlayer spacing) WITH unit, exactly as reported, e.g. '2.5 nm', '38 Å', '1.0 to 5.0 nm'.",
           },
+          material: {
+            type: "string",
+            description: "Material of the confined medium, e.g. silica, carbon, MOF, polymer, membrane, alumina.",
+          },
+          geometry: {
+            type: "string",
+            description: "Confined system geometry, e.g. pore, channel, slit, membrane, layered structure.",
+          },
+          functionalGroups: {
+            type: "string",
+            description: "Surface functional groups or structural motifs, e.g. sulfonate, hydroxyl, amine, fluorinated.",
+          },
+          polarizable: {
+            type: "string",
+            description: "Whether the confining surface/environment is described as polarizable or having polarizable walls.",
+          },
           method: {
             type: "string",
             description: "How D was measured: 'PFG-NMR' (pulsed-field-gradient NMR), 'electrochemical', or 'MD simulation'.",
@@ -187,7 +215,7 @@ export const DIFFUSION_EXTRACTION_TOOL_SCHEMA = {
                 field: {
                   type: "string",
                   description:
-                    "Field name: cation, anion, species, temperature, diffusion, systemName, poreSize, method, nucleus, surface, viscosity, waterContent, or concentration.",
+                    "Field name: cation, anion, species, temperature, diffusion, systemName, poreSize, material, geometry, functionalGroups, polarizable, method, nucleus, surface, viscosity, waterContent, or concentration.",
                 },
                 page: { type: "integer", description: "Page number from the [PAGE n] markers." },
                 figure: { type: "string", description: "e.g. 'Fig. 4a'." },

@@ -39,6 +39,10 @@ export function DiffusionEditor({
 
   const [systemName, setSystemName] = useState(e.systemName ?? "");
   const [poreSize, setPoreSize] = useState(e.poreSize?.raw ?? "");
+  const [material, setMaterial] = useState(e.material ?? "");
+  const [geometry, setGeometry] = useState(e.geometry ?? "");
+  const [functionalGroups, setFunctionalGroups] = useState(e.functionalGroups ?? "");
+  const [polarizable, setPolarizable] = useState(e.polarizable ?? "");
   const [method, setMethod] = useState(e.method ?? "");
   const [nucleus, setNucleus] = useState(e.nucleus ?? "");
   const [surface, setSurface] = useState(e.surface ?? "");
@@ -87,6 +91,10 @@ export function DiffusionEditor({
       diffusion,
       systemName,
       poreSize,
+      material,
+      geometry,
+      functionalGroups,
+      polarizable,
       method,
       nucleus,
       surface,
@@ -156,6 +164,10 @@ export function DiffusionEditor({
       <Layer tone="slate" name="Middle layer · extended (optional)">
         <Field label="Confined system" value={systemName} onChange={setSystemName} placeholder="MCM-41 pores / silica nanochannel" />
         <Field label="Pore size" value={poreSize} onChange={setPoreSize} placeholder="2.5 nm / 38 Å" std={stdLabel(poreQ)} mono />
+        <Field label="Material" value={material} onChange={setMaterial} placeholder="silica / carbon / MOF / polymer" />
+        <Field label="Geometry" value={geometry} onChange={setGeometry} placeholder="pore / channel / slit / membrane" />
+        <Field label="Functional groups" value={functionalGroups} onChange={setFunctionalGroups} placeholder="sulfonate / hydroxyl / amine" />
+        <Field label="Polarizable" value={polarizable} onChange={setPolarizable} placeholder="yes / no / polarizable surface" />
         <SelectField label="Method" value={method} onChange={setMethod} options={["", "PFG-NMR", "electrochemical", "MD simulation"]} />
         <Field label="Nucleus" value={nucleus} onChange={setNucleus} placeholder="¹H / ¹⁹F / ⁷Li" mono />
         <Field label="Surface (electrochemical only)" value={surface} onChange={setSurface} placeholder="Pt microelectrode" />
