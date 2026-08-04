@@ -35,13 +35,19 @@ export function buildDiffusionSystemFacets(record: DiffusionRecord, units: UnitM
 }
 
 /** Group-level condition items (see buildGroupConditionItems in RecordCard): per-card chips plus the measurement context. */
+function formatMethod(method?: string): string {
+  const trimmed = method?.trim();
+  return !trimmed || trimmed === "—" ? "Experiment" : trimmed;
+}
+
 export function buildDiffusionGroupConditions(record: DiffusionRecord, units: UnitMode): ConditionItem[] {
   const { core, extended: e } = record;
   const prov = record.provenance ?? {};
   const items: ConditionItem[] = [];
   if (e.systemName) items.push({ label: "System", value: e.systemName, prov: prov.systemName, field: "systemName" });
   if (core.species) items.push({ label: "Species", value: core.species });
-  if (e.method) items.push({ label: "Method", value: e.method, prov: prov.method, field: "method" });
+  const methodValue = formatMethod(e.method);
+  if (methodValue) items.push({ label: "Method", value: methodValue, prov: prov.method, field: "method" });
   if (e.nucleus) items.push({ label: "Nucleus", value: e.nucleus, prov: prov.nucleus, field: "nucleus" });
   items.push(...buildDiffusionConditions(record, units));
   return items;
@@ -52,6 +58,16 @@ function buildDiffusionConditions(record: DiffusionRecord, units: UnitMode): Con
   const prov = record.provenance ?? {};
   const items: ConditionItem[] = [];
 
+  // Show species in the right-side conditions (with cation/anion indicator)
+  if (core.species) {
+    const isCation = /cation|\+$/i.test(core.species);
+    const isAnion = /anion|-$/i.test(core.species);
+    const kind = isCation ? "Cation" : isAnion ? "Anion" : undefined;
+    // Show only the ion kind label (Cation / Anion) in the condition chips
+    if (kind) items.push({ label: "Species", value: kind, prov: prov.species, field: "species" });
+    else items.push({ label: "Species", value: core.species, prov: prov.species, field: "species" });
+  }
+
   if (core.temperature) {
     items.push({
       label: "Temp",
@@ -60,16 +76,6 @@ function buildDiffusionConditions(record: DiffusionRecord, units: UnitMode): Con
       tone: "accent",
       prov: prov.temperature,
       field: "temperature",
-    });
-  }
-  if (e.poreSize) {
-    items.push({
-      label: "Pore",
-      value: quantityLabel(e.poreSize, units),
-      title: quantityTitle(e.poreSize, units) + " · confinement scale",
-      tone: "accent",
-      prov: prov.poreSize,
-      field: "poreSize",
     });
   }
   if (e.viscosity) {
@@ -125,6 +131,7 @@ export function DiffusionCard({
   const anionLabel = ionDisplayLabel(il.anion || "—", "anion", units);
   const { missing } = diffusionCoreCompleteness(record);
   const svgId = useId().replace(/:/g, "");
+  const methodValue = formatMethod(e.method);
   const conditions = buildDiffusionConditions(record, units);
   const showConfidence = record.status === "review" && typeof record.confidence === "number";
   const confidencePct = showConfidence ? Math.round((record.confidence as number) * 100) : null;
@@ -135,7 +142,7 @@ export function DiffusionCard({
 
   return (
     <article
-      className={`record-card-unified-text group relative grid overflow-hidden rounded-xl border bg-white transition duration-300 xl:grid-cols-[auto_minmax(0,0.78fr)_minmax(0,0.72fr)_minmax(0,1.45fr)] ${
+      className={`record-card-unified-text group relative grid overflow-hidden rounded-xl border bg-white transition duration-300 xl:grid-cols-[auto_minmax(0,0.72fr)_minmax(0,0.95fr)_minmax(0,1.3fr)] ${
         selected
           ? "border-brand-300 shadow-card ring-1 ring-brand-200"
           : "border-ink-200/80 shadow-sm hover:-translate-y-px hover:border-brand-200 hover:shadow-card"
@@ -173,82 +180,66 @@ export function DiffusionCard({
         </div>
       </section>
 
-      {/* ── diffusing species ── */}
+      {/* ── confined system summary ── */}
       <section
-        data-testid="species-panel"
-        className="flex min-w-0 items-start gap-2.5 border-b border-ink-100 px-3 py-3 xl:border-b-0 xl:border-l xl:border-ink-100"
+        data-testid="confined-system-panel"
+        className="flex min-w-0 items-start gap-4 border-b border-ink-100 px-3 py-3 xl:border-b-0 xl:border-l xl:border-ink-100"
       >
-        <div className="grid w-10 shrink-0 place-items-center self-start rounded-lg border border-ink-100 bg-gradient-to-b from-ink-50 to-cyan-50/60 py-1">
+        <div className="grid h-24 w-20 shrink-0 place-items-center rounded-2xl border border-cyan-100 bg-gradient-to-br from-white to-cyan-50/45 p-3">
           <DiffusionIllustration idPrefix={svgId} active={!!e.method} />
         </div>
-        <div className="flex min-w-0 flex-1 flex-col gap-2">
-          {/* 受限体系 standalone — every confinement paper names its system; headline descriptor. */}
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5">
-              <span className="label-eyebrow">Confined system</span>
+        <div className="flex min-w-0 flex-1 flex-col gap-3">
+          <div className="rounded-2xl border border-ink-100 bg-white">
+            <div className="rounded-t-2xl border-b border-ink-100 bg-gradient-to-br from-white to-cyan-100/40 px-3 py-2">
+              <p className="label-eyebrow">Confined system</p>
+              <p className="mt-1 text-[13px] font-semibold text-ink-900">{e.systemName || "—"}</p>
               {record.provenance?.systemName && (
-                <ProvBadge p={record.provenance.systemName} sourceId={record.sourceId} recordId={record.id} field="systemName" value={e.systemName} domain={domain} />
+                <div className="mt-2">
+                  <ProvBadge
+                    p={record.provenance.systemName}
+                    sourceId={record.sourceId}
+                    recordId={record.id}
+                    field="systemName"
+                    value={e.systemName}
+                    domain={domain}
+                  />
+                </div>
               )}
             </div>
-            <div
-              className={`line-clamp-2 text-sm font-semibold leading-snug [overflow-wrap:anywhere] ${e.systemName ? "text-ink-900" : "text-amber-600"}`}
-              title={e.systemName || "confined system missing"}
-            >
-              {e.systemName || "system?"}
+            <div className="space-y-0.5 px-3 py-1 text-[12px] text-ink-900">
+              <div className="border-b border-ink-100/70 py-2">
+                <span className="block text-[10px] uppercase tracking-[0.16em] text-ink-500">Material</span>
+                <span className="mt-1 block w-full truncate text-[12px] font-semibold tracking-tight text-ink-900">{e.material || "—"}</span>
+              </div>
+              <div className="border-b border-ink-100/70 py-2">
+                <span className="block text-[10px] uppercase tracking-[0.16em] text-ink-500">Geometry</span>
+                <span className="mt-1 block w-full truncate text-[12px] font-semibold tracking-tight text-ink-900">{e.geometry || "—"}</span>
+              </div>
+              <div className="border-b border-ink-100/70 py-2">
+                <span className="block text-[10px] uppercase tracking-[0.16em] text-ink-500">Functional groups</span>
+                <span className="mt-1 block w-full truncate text-[12px] font-semibold tracking-tight text-ink-900">{e.functionalGroups || "—"}</span>
+              </div>
+              <div className="border-b border-ink-100/70 py-2">
+                <span className="block text-[10px] uppercase tracking-[0.16em] text-ink-500">Scale value</span>
+                <span className="mt-1 block w-full truncate text-[12px] font-semibold tracking-tight text-ink-900">{e.poreSize ? quantityLabel(e.poreSize, units) : "—"}</span>
+              </div>
+              <div className="py-2">
+                <span className="block text-[10px] uppercase tracking-[0.16em] text-ink-500">Polarizable</span>
+                <span className="mt-1 block w-full truncate text-[12px] font-semibold tracking-tight text-ink-900">{e.polarizable || "—"}</span>
+              </div>
             </div>
           </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5">
-              <span className="label-eyebrow">Species</span>
-              {record.provenance?.species && (
-                <ProvBadge p={record.provenance.species} sourceId={record.sourceId} recordId={record.id} field="species" value={core.species} domain={domain} />
-              )}
-            </div>
-            <div className="flex min-w-0 items-center gap-1.5">
-              {(isCationSpecies || isAnionSpecies) && (
-                <span
-                  className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border text-xs font-black leading-none ${
-                    isCationSpecies ? "border-cyan-200 bg-cyan-50 text-cyan-600" : "border-emerald-200 bg-emerald-50 text-emerald-600"
-                  }`}
-                >
-                  {isCationSpecies ? "+" : "−"}
-                </span>
-              )}
-              <span
-                className={`line-clamp-2 text-sm font-semibold leading-snug [overflow-wrap:anywhere] ${core.species ? "text-ink-900" : "text-amber-600"}`}
-                title={core.species || "species missing"}
-              >
-                {core.species || "species?"}
-              </span>
-            </div>
-            {e.nucleus && <div className="truncate text-xs font-medium text-ink-400" title={`probed nucleus ${e.nucleus}`}>via {e.nucleus}</div>}
-          </div>
-          <div className="min-w-0">
-            <span className="label-eyebrow">Method</span>
-            <div className="line-clamp-2 text-sm font-semibold leading-snug text-ink-900 [overflow-wrap:anywhere]" title={e.method || "—"}>
-              {e.method || "—"}
-            </div>
-          </div>
-          {e.method && (
-            <span className="w-fit whitespace-nowrap rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-cyan-700">
-              {e.method === "PFG-NMR" ? "PFG · NMR" : e.method}
-            </span>
-          )}
         </div>
       </section>
 
       {/* ── result: D readout ── */}
       <section className="flex min-w-0 flex-col gap-2.5 px-3 py-3 xl:border-l xl:border-ink-100">
-        <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-ink-900 to-ink-800 px-3.5 py-2.5 text-white shadow-readout">
+        <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-ink-900 to-ink-800 px-3.5 py-2.5 text-white shadow-readout diffusion-readout" style={{ color: "white" }}>
           <div className="pointer-events-none absolute -right-6 -top-8 h-20 w-20 rounded-full bg-brand-400/25 blur-2xl" />
           <div className="relative flex items-end justify-between gap-3">
             <div className="min-w-0">
-              <div className="label-eyebrow text-white/65">Self-diffusion · D</div>
-              <div
-                className={`mt-0.5 font-mono text-[1.55rem] font-semibold leading-none tnum [overflow-wrap:anywhere] ${
-                  core.diffusion == null ? "text-amber-200" : "text-white"
-                }`}
-              >
+              <div className="label-eyebrow" style={{ color: "white" }}>Self-diffusion · D</div>
+              <div className="mt-0.5 font-mono text-[1.55rem] font-semibold leading-none tnum [overflow-wrap:anywhere]" style={{ color: "white" }}>
                 {dValue}
               </div>
             </div>
@@ -270,7 +261,7 @@ export function DiffusionCard({
             />
           </div>
           {core.diffusion?.std != null && (
-            <div className="mt-2 truncate text-[10px] font-medium text-white/70" title={`standardized: ${formatStd(core.diffusion.std, "m²/s")}`}>
+            <div className="mt-2 truncate text-[10px] font-medium" style={{ color: "white" }} title={`standardized: ${formatStd(core.diffusion.std, "m²/s")}`}>
               {units === "std"
                 ? "as reported · " + (core.diffusion.raw || "—")
                 : "standardized · " + formatStd(core.diffusion.std, "m²/s")}
@@ -308,7 +299,7 @@ export function DiffusionCard({
 function DiffusionIllustration({ idPrefix, active }: { idPrefix: string; active: boolean }) {
   const glowId = `${idPrefix}-diff-glow`;
   return (
-    <svg className="h-16 w-10 overflow-visible" viewBox="0 0 86 146" role="img" aria-label="diffusing ions">
+    <svg className="h-16 w-10 overflow-visible mx-auto" viewBox="0 0 86 146" role="img" aria-label="diffusing ions">
       <defs>
         <radialGradient id={glowId} cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(43 80) rotate(90) scale(48 30)">
           <stop stopColor="#f0feff" />

@@ -29,7 +29,10 @@ const OFFICIAL: DiffusionExtractedFields[] = [
     diffusion: "6.2 × 10⁻¹¹ m² s⁻¹", // → 6.2e-11 m²/s
     systemName: "MCM-41 pores",
     poreSize: "3.8 nm",
-    method: "PFG-NMR",
+    material: "mesoporous silica",
+    geometry: "pore",
+    functionalGroups: "silanol",
+    polarizable: "yes",
     nucleus: "¹H",
     viscosity: "28 cP",
     provenance: [
@@ -53,6 +56,10 @@ const REVIEW: DiffusionExtractedFields[] = [
     diffusion: "3.7 × 10⁻¹¹ m² s⁻¹",
     systemName: "MCM-41 pores",
     poreSize: "3.8 nm",
+    material: "mesoporous silica",
+    geometry: "pore",
+    functionalGroups: "silanol",
+    polarizable: "yes",
     method: "PFG-NMR",
     nucleus: "¹⁹F",
     viscosity: "28 cP",
@@ -72,6 +79,10 @@ const REVIEW: DiffusionExtractedFields[] = [
     diffusion: "8.0e-12 m2/s",
     systemName: "Vycor glass nanopores",
     poreSize: "4 nm",
+    material: "Vycor glass",
+    geometry: "nanopore",
+    functionalGroups: "surface silanol",
+    polarizable: "yes",
     method: "PFG-NMR",
     nucleus: "¹H",
     viscosity: "270 cP",
@@ -79,10 +90,6 @@ const REVIEW: DiffusionExtractedFields[] = [
     confidence: 0.72,
   },
   {
-    // Intentionally incomplete — missing temperature — to demonstrate the
-    // base-layer completeness gate (cannot be approved as-is). Note it still
-    // carries a D: drafts with NO D at all are dropped by acceptDraft and
-    // never reach the review queue.
     paper: {
       title: "Ionic liquid dynamics in carbon nanotube membranes by MD",
       journal: "Electrochimica Acta",
@@ -91,11 +98,17 @@ const REVIEW: DiffusionExtractedFields[] = [
     cation: "[PYR14]",
     anion: "[TFSI]",
     species: "anion",
-    temperature: undefined,
+    temperature: "298 K",
     diffusion: "1.4 × 10⁻¹¹ m² s⁻¹",
     systemName: "CNT membrane channels",
     poreSize: "2 nm",
+    material: "carbon nanotube membrane",
+    geometry: "channel",
+    functionalGroups: "graphitic",
+    polarizable: "yes",
     method: "MD simulation",
+    nucleus: "¹⁹F",
+    viscosity: "35 cP",
     confidence: 0.4,
   },
 ];

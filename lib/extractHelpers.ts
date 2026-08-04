@@ -6,7 +6,7 @@ export function matchAll(text: string, re: RegExp): RegExpMatchArray[] {
 
 export function first(text: string, re: RegExp): string | null {
   const m = text.match(re);
-  return m ? m[1].replace(/\s+/g, " ").trim() : null;
+  return m && typeof m[1] === "string" ? m[1].replace(/\s+/g, " ").trim() : null;
 }
 
 /** Page number from the nearest preceding [PAGE n] marker. */

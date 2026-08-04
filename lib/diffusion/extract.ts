@@ -22,6 +22,10 @@ Required (base layer) for every record: cation, anion, species, temperature, dif
 Confinement (extended layer) — every confinement paper has these; capture them per record:
   - systemName = the author's OWN name for the confined system (e.g. "MCM-41 pores", "silica nanochannel", "PEM with bicontinuous morphology"). REQUIRED — it is the headline descriptor of the system.
   - poreSize = pore diameter / slit width / interlayer spacing WITH unit, exactly as reported (e.g. "2.5 nm", "38 Å").
+  - material = the host material of the confined medium, e.g. silica, carbon, MOF, polymer, membrane, alumina.
+  - geometry = the confinement geometry such as pore, channel, slit, membrane, layered structure.
+  - functionalGroups = surface functionalization or relevant groups, e.g. sulfonate, hydroxyl, amine, fluorinated.
+  - polarizable = whether the confining walls or environment are described as polarizable.
 
 Common (extended layer), include when present: method ("PFG-NMR" for pulsed-field-gradient NMR, "electrochemical", or "MD simulation"), nucleus (¹H, ¹⁹F), surface (electrode — ONLY for electrochemical D), viscosity, waterContent, concentration.
   - viscosity = dynamic viscosity WITH unit (cP, mPa·s) — often co-reported for Stokes–Einstein analysis; capture it whenever stated.
@@ -66,6 +70,10 @@ export function diffusionMockExtract(text: string): DiffusionExtractedFields[] {
       /([A-Za-z0-9][A-Za-z0-9\][(/),.+-]*(?:\s+[A-Za-z0-9\][(/),.+-]+){0,3}\s+(?:nanochannels?|nanopores?|nanotubes?|membranes?|pores?|slits?|channels?))/i
     );
   const poreSize = first(text, /(\d+(?:\.\d+)?\s?(?:nm|Å))(?=[^a-z]|$)/i);
+  const material = first(text, /(?:silica|carbon|MOF|metal-organic framework|polymer|membrane|alumina|zeolite|graphene)/i);
+  const geometry = first(text, /(?:pore|channel|slit|membrane|layered structure|interlayer spacing)/i);
+  const functionalGroups = first(text, /(?:sulfonate|hydroxyl|amine|fluorinated|carboxylate|methyl|ethyl)/i);
+  const polarizable = /polarizable|polarizability|polarizable walls|polarizable surface/i.test(text) ? "yes" : undefined;
   const method = /PFG|pulsed[- ]field|NMR/i.test(text)
     ? "PFG-NMR"
     : /chronoamperometr|voltammetr|electrochemical|microelectrode/i.test(text)

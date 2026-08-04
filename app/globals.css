@@ -136,6 +136,10 @@ body {
   .record-card-unified-text :where(*) {
     color: #0f172a !important;
   }
+  .diffusion-readout,
+  .diffusion-readout :where(*) {
+    color: white !important;
+  }
   .molecule-field {
     @apply relative grid flex-1 place-items-center overflow-hidden rounded-md bg-white/70;
     isolation: isolate;
