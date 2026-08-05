@@ -105,3 +105,4 @@ docs/superpowers/specs/
 # OS files
 .DS_Store
 Thumbs.db
+temp‑*.txt
