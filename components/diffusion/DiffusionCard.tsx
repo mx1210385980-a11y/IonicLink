@@ -1,6 +1,6 @@
 "use client";
 
-import { useId } from "react";
+import { useId, useMemo } from "react";
 import {
   diffusionCoreCompleteness,
   formatD,
@@ -8,6 +8,7 @@ import {
 } from "@/lib/diffusion/schema";
 import { getDiffusionMode, type DiffusionMode } from "@/lib/diffusion/mode";
 import { DEFAULT_DOMAIN, type Domain } from "@/lib/domain";
+import type { FieldProvenance } from "@/lib/schema";
 import { formatStd } from "@/lib/units";
 import { MoleculeView } from "../MoleculeView";
 import {
@@ -16,6 +17,7 @@ import {
   MissingChip,
   ProvBadge,
   ionDisplayLabel,
+  openRecordEvidence,
   quantityLabel,
   quantityTitle,
   type ConditionItem,
@@ -68,9 +70,6 @@ function buildDiffusionConditions(record: DiffusionRecord, units: UnitMode): Con
     if (kind) items.push({ label: "Species", value: kind, prov: prov.species, field: "species" });
     else items.push({ label: "Species", value: core.species, prov: prov.species, field: "species" });
   }
-  if (e.method) {
-    items.push({ label: "Method", value: formatMethod(e.method), prov: prov.method, field: "method" });
-  }
   if (e.nucleus) {
     items.push({ label: "Nucleus", value: e.nucleus, prov: prov.nucleus, field: "nucleus" });
   }
@@ -105,15 +104,52 @@ function buildDiffusionConditions(record: DiffusionRecord, units: UnitMode): Con
   return items;
 }
 
-/** Diffusion band on a log scale (10⁻¹³ – 10⁻⁹ m²/s) — at-a-glance ion mobility. */
-function diffusionBand(dSI: number | null | undefined) {
-  if (dSI == null) return { label: "—", pct: 0 };
-  const lo = -13;
-  const hi = -9;
-  const pct = Math.max(2, Math.min(100, ((Math.log10(Math.max(dSI, 1e-15)) - lo) / (hi - lo)) * 100));
-  if (dSI >= 1e-10) return { label: "fast diffusion", pct };
-  if (dSI >= 1e-12) return { label: "moderate", pct };
-  return { label: "slow diffusion", pct };
+function ConfinedSystemValue({
+  label,
+  hideLabel = false,
+  value,
+  field,
+  prov,
+  sourceId,
+  recordId,
+  domain,
+}: {
+  label: string;
+  hideLabel?: boolean;
+  value: string;
+  field: string;
+  prov?: FieldProvenance;
+  sourceId?: string;
+  recordId?: string;
+  domain: Domain;
+}) {
+  const className = `min-w-0 px-3 py-2 text-left ${
+    prov ? "cursor-pointer transition hover:bg-brand-50/45 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-200" : ""
+  }`;
+  const content = (
+    <>
+      {!hideLabel && <span className="block text-[10px] uppercase tracking-[0.16em] text-ink-500">{label}</span>}
+      <span className={`${hideLabel ? "" : "mt-1 "}block w-full truncate text-[12px] font-semibold tracking-tight text-ink-900`}>{value}</span>
+    </>
+  );
+
+  if (prov) {
+    return (
+      <button
+        type="button"
+        data-testid="evidence-click-target"
+        data-ui={`confined-system-${field}`}
+        className={className}
+        title={`${value} · evidence available`}
+        aria-label={`Open evidence for ${field}`}
+        onClick={() => openRecordEvidence({ sourceId, recordId, field, value, prov, domain })}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return <div className={className} title={value}>{content}</div>;
 }
 
 export function DiffusionCard({
@@ -141,11 +177,21 @@ export function DiffusionCard({
   const conditions = buildDiffusionConditions(record, units);
   const showConfidence = record.status === "review" && typeof record.confidence === "number";
   const confidencePct = showConfidence ? Math.round((record.confidence as number) * 100) : null;
-  const band = diffusionBand(core.diffusion?.std);
   const dValue = core.diffusion ? quantityLabel(core.diffusion, units) : formatD(core.diffusion);
+  const standardizedDValue = record.status === "review" && core.diffusion?.std != null ? formatStd(core.diffusion.std, "m²/s") : null;
   const isCationSpecies = /cation|\+$/i.test(core.species);
   const isAnionSpecies = /anion|-$/i.test(core.species);
   const mode = getDiffusionMode(e.geometry);
+  const diffusionReadoutContent = (
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <div className="label-eyebrow text-black">Diffusion coefficient</div>
+        <div className="mt-1 font-mono text-[1.8rem] font-semibold leading-none tnum text-black [overflow-wrap:anywhere]">{dValue}</div>
+        {standardizedDValue && <div className="mt-2 text-[10px] font-medium text-black">standardized · {standardizedDValue}</div>}
+      </div>
+      {showConfidence && <span className="shrink-0 whitespace-nowrap text-right text-[10px] font-medium text-black">conf {confidencePct}%</span>}
+    </div>
+  );
 
   return (
     <article
@@ -192,48 +238,31 @@ export function DiffusionCard({
         data-testid="confined-system-panel"
         className="flex min-w-0 items-start gap-4 border-b border-ink-100 px-3 py-3 xl:border-b-0 xl:border-l xl:border-ink-100"
       >
-        <div className="flex h-32 w-36 shrink-0 items-center justify-center rounded-2xl border border-cyan-100 bg-gradient-to-br from-white to-cyan-50/45 p-3">
+        <div className="flex h-32 w-36 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-cyan-100 bg-gradient-to-br from-white to-cyan-50/45">
           <DiffusionIllustration idPrefix={svgId} active={!!e.method} mode={mode} />
         </div>
         <div className="flex min-w-0 flex-1 flex-col gap-3">
           <div className="rounded-2xl border border-ink-100 bg-white">
-            <div className="rounded-t-2xl border-b border-ink-100 bg-gradient-to-br from-white to-cyan-100/40 px-3 py-2">
-              <p className="label-eyebrow">Confined system</p>
-              <p className="mt-1 text-[13px] font-semibold text-ink-900">{e.systemName || "—"}</p>
-              {record.provenance?.systemName && (
-                <div className="mt-2">
-                  <ProvBadge
-                    p={record.provenance.systemName}
-                    sourceId={record.sourceId}
-                    recordId={record.id}
-                    field="systemName"
-                    value={e.systemName}
-                    domain={domain}
-                  />
-                </div>
-              )}
+            <div className="rounded-t-2xl border-b border-ink-100 bg-gradient-to-br from-white to-cyan-100/40">
+              <p className="label-eyebrow px-3 pt-2">Confined system</p>
+              <ConfinedSystemValue
+                label="System"
+                hideLabel
+                value={e.systemName || "—"}
+                field="systemName"
+                prov={record.provenance?.systemName}
+                sourceId={record.sourceId}
+                recordId={record.id}
+                domain={domain}
+              />
             </div>
-            <div className="space-y-0.5 px-3 py-1 text-[12px] text-ink-900">
-              <div className="border-b border-ink-100/70 py-2">
-                <span className="block text-[10px] uppercase tracking-[0.16em] text-ink-500">Material</span>
-                <span className="mt-1 block w-full truncate text-[12px] font-semibold tracking-tight text-ink-900">{e.material || "—"}</span>
-              </div>
-              <div className="border-b border-ink-100/70 py-2">
-                <span className="block text-[10px] uppercase tracking-[0.16em] text-ink-500">Geometry</span>
-                <span className="mt-1 block w-full truncate text-[12px] font-semibold tracking-tight text-ink-900">{e.geometry || "—"}</span>
-              </div>
-              <div className="border-b border-ink-100/70 py-2">
-                <span className="block text-[10px] uppercase tracking-[0.16em] text-ink-500">Functional groups</span>
-                <span className="mt-1 block w-full truncate text-[12px] font-semibold tracking-tight text-ink-900">{e.functionalGroups || "—"}</span>
-              </div>
-              <div className="border-b border-ink-100/70 py-2">
-                <span className="block text-[10px] uppercase tracking-[0.16em] text-ink-500">Scale value</span>
-                <span className="mt-1 block w-full truncate text-[12px] font-semibold tracking-tight text-ink-900">{e.poreSize ? quantityLabel(e.poreSize, units) : "—"}</span>
-              </div>
-              <div className="py-2">
-                <span className="block text-[10px] uppercase tracking-[0.16em] text-ink-500">Polarizable</span>
-                <span className="mt-1 block w-full truncate text-[12px] font-semibold tracking-tight text-ink-900">{e.polarizable || "—"}</span>
-              </div>
+            <div className="divide-y divide-ink-100/70">
+              <ConfinedSystemValue label="Method" value={methodValue} field="method" prov={record.provenance?.method} sourceId={record.sourceId} recordId={record.id} domain={domain} />
+              <ConfinedSystemValue label="Material" value={e.material || "—"} field="material" prov={record.provenance?.material} sourceId={record.sourceId} recordId={record.id} domain={domain} />
+              <ConfinedSystemValue label="Geometry" value={e.geometry || "—"} field="geometry" prov={record.provenance?.geometry} sourceId={record.sourceId} recordId={record.id} domain={domain} />
+              <ConfinedSystemValue label="Functional groups" value={e.functionalGroups || "—"} field="functionalGroups" prov={record.provenance?.functionalGroups} sourceId={record.sourceId} recordId={record.id} domain={domain} />
+              <ConfinedSystemValue label="Scale value" value={e.poreSize ? quantityLabel(e.poreSize, units) : "—"} field="poreSize" prov={record.provenance?.poreSize} sourceId={record.sourceId} recordId={record.id} domain={domain} />
+              <ConfinedSystemValue label="Polarizable" value={e.polarizable || "—"} field="polarizable" prov={record.provenance?.polarizable} sourceId={record.sourceId} recordId={record.id} domain={domain} />
             </div>
           </div>
         </div>
@@ -241,40 +270,32 @@ export function DiffusionCard({
 
       {/* ── result: D readout ── */}
       <section className="flex min-w-0 flex-col gap-2.5 px-3 py-3 xl:border-l xl:border-ink-100">
-        <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-ink-900 to-ink-800 px-3.5 py-2.5 text-white shadow-readout diffusion-readout" style={{ color: "white" }}>
-          <div className="pointer-events-none absolute -right-6 -top-8 h-20 w-20 rounded-full bg-brand-400/25 blur-2xl" />
-          <div className="relative flex items-end justify-between gap-3">
-            <div className="min-w-0">
-              <div className="label-eyebrow" style={{ color: "white" }}>Self-diffusion · D</div>
-              <div className="mt-0.5 font-mono text-[1.55rem] font-semibold leading-none tnum [overflow-wrap:anywhere]" style={{ color: "white" }}>
-                {dValue}
-              </div>
-            </div>
-            <div className="flex shrink-0 flex-col items-end gap-1 pb-1 text-right">
-              {core.diffusion != null && (
-                <span className="whitespace-nowrap rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-semibold text-white/90">{band.label}</span>
-              )}
-              {showConfidence && <span className="whitespace-nowrap text-[10px] font-medium text-white/70">conf {confidencePct}%</span>}
-              {record.provenance?.diffusion && (
-                <ProvBadge p={record.provenance.diffusion} sourceId={record.sourceId} recordId={record.id} field="diffusion" value={dValue} domain={domain} />
-              )}
-            </div>
+        {record.provenance?.diffusion ? (
+          <button
+            type="button"
+            data-testid="evidence-click-target"
+            onClick={() =>
+              openRecordEvidence({
+                sourceId: record.sourceId,
+                recordId: record.id,
+                field: "diffusion",
+                value: dValue,
+                prov: record.provenance!.diffusion!,
+                domain,
+              })
+            }
+            data-ui="diffusion-summary"
+            className="rounded-[10px] border border-cyan-100 bg-gradient-to-br from-white to-cyan-50/45 px-3 py-2.5 text-left shadow-sm transition hover:border-brand-300 hover:bg-cyan-50/55 focus:outline-none focus:ring-2 focus:ring-brand-200"
+            title={`${dValue} · evidence available`}
+            aria-label="Open evidence for diffusion coefficient"
+          >
+            {diffusionReadoutContent}
+          </button>
+        ) : (
+          <div data-ui="diffusion-summary" className="rounded-[10px] border border-cyan-100 bg-gradient-to-br from-white to-cyan-50/45 px-3 py-2.5 shadow-sm">
+            {diffusionReadoutContent}
           </div>
-          {/* diffusion magnitude meter (log 10⁻¹³ – 10⁻⁹ m²/s) */}
-          <div className="relative mt-3 h-1 overflow-hidden rounded-full bg-white/10">
-            <span
-              className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-brand-400 to-brand-300 transition-[width] duration-500"
-              style={{ width: `${band.pct}%` }}
-            />
-          </div>
-          {core.diffusion?.std != null && (
-            <div className="mt-2 truncate text-[10px] font-medium" style={{ color: "white" }} title={`standardized: ${formatStd(core.diffusion.std, "m²/s")}`}>
-              {units === "std"
-                ? "as reported · " + (core.diffusion.raw || "—")
-                : "standardized · " + formatStd(core.diffusion.std, "m²/s")}
-            </div>
-          )}
-        </div>
+        )}
 
         <div>
           <div className="mb-1.5">
@@ -303,93 +324,78 @@ export function DiffusionCard({
 }
 
 function DiffusionIllustration({ idPrefix, active, mode }: { idPrefix?: string; active: boolean; mode: DiffusionMode }) {
-  // restore original ion palette (blue / green) used previously
-  const cationColor = "#22b8cf"; // cyan-ish blue for cation
-  const anionColor = "#2f9e6f"; // green for anion
-  // softer, less-black blob color to feel like nanoporous material
-  const bgSkeleton = "#203B47"; // deep teal/graphite for porous scaffold
+  const cationColor = "#0ea5e9";
+  const anionColor = "#10b981";
+  const bgSkeleton = "#334155";
   const softBg = "#f8fafc";
 
   const pfx = idPrefix ? idPrefix.replace(/[^a-z0-9\-_]/gi, "") : `diff-${mode}`.replace(/[^a-z0-9\-_]/gi, "");
   const pathCenter1D = `${pfx}-path-1d`;
-  const centerWave = `${pfx}-center-wave`;
-  const blobPath = `${pfx}-blob-path`;
-  const mazePath = `${pfx}-maze-path`;
+  const slitPath = `${pfx}-slit-path`;
+  const membranePath = `${pfx}-membrane-path`;
+  const gyroidPath = `${pfx}-gyroid-path`;
+  const membraneMask = `${pfx}-vector-membrane-mask`;
+  const denseMembrane = useMemo(() => {
+    const lines = [];
+    const pores = [];
+
+    for (let index = 0; index < 40; index++) {
+      const isHorizontal = index % 2 === 0;
+      const startPos = (index / 40) * 350 - 20;
+      const waveOffset1 = Math.sin(index) * 50;
+      const waveOffset2 = Math.cos(index) * 50;
+
+      if (isHorizontal) {
+        lines.push(<path key={`h-${index}`} d={`M -20,${startPos} Q 80,${startPos + waveOffset1} 160,${startPos} T 340,${startPos + waveOffset2}`} strokeWidth={4 + (index % 4)} fill="none" stroke="black" strokeLinecap="round" />);
+      } else {
+        lines.push(<path key={`v-${index}`} d={`M ${startPos},-20 Q ${startPos + waveOffset1},80 ${startPos},160 T ${startPos + waveOffset2},340`} strokeWidth={3 + (index % 3)} fill="none" stroke="black" strokeLinecap="round" />);
+      }
+    }
+
+    for (let index = 0; index < 80; index++) {
+      const cx = (Math.sin(index * 13) * 0.5 + 0.5) * 300;
+      const cy = (Math.cos(index * 17) * 0.5 + 0.5) * 200;
+      const radius = 2 + (index % 6);
+      pores.push(<circle key={`p-${index}`} cx={cx} cy={cy} r={radius} fill="black" />);
+    }
+
+    return { lines, pores };
+  }, []);
 
   const defaultViewBox = "0 0 300 200";
-  const viewBox = mode === "3D" ? "-120 -120 240 240" : defaultViewBox;
-  const ariaLabel = mode === "1D" ? "one-dimensional confined channel" : mode === "2D" ? "two-dimensional slit channel" : "three-dimensional porous network";
+  const viewBox = mode === "3D-Cage" ? "-200 -190 400 356" : defaultViewBox;
+  const ariaLabel = {
+    "1D": "one-dimensional cylindrical channel",
+    "2D": "two-dimensional slit pore",
+    "3D-Cage": "three-dimensional framework cage",
+    Membrane: "tortuous porous membrane",
+    "0D-Pools": "isolated liquid pools",
+    Gyroid: "bicontinuous gyroid channel",
+  }[mode];
 
-  const phi = (1 + Math.sqrt(5)) / 2;
-  const rotateX = 0.4;
-  const rotateY = 0.6;
-  const scale = 40;
-  const cosX = Math.cos(rotateX);
-  const sinX = Math.sin(rotateX);
-  const cosY = Math.cos(rotateY);
-  const sinY = Math.sin(rotateY);
-
-  const points3D = [
-    [-1, phi, 0],
-    [1, phi, 0],
-    [-1, -phi, 0],
-    [1, -phi, 0],
-    [0, -1, phi],
-    [0, 1, phi],
-    [0, -1, -phi],
-    [0, 1, -phi],
-    [phi, 0, -1],
-    [phi, 0, 1],
-    [-phi, 0, -1],
-    [-phi, 0, 1],
+  const frameworkNodes = [
+    { id: "n02", x: -22, y: -74 }, { id: "n03", x: -74, y: -48 }, { id: "n04", x: -33, y: -35 }, { id: "n05", x: 53, y: -45 },
+    { id: "n06", x: -78, y: 28 }, { id: "n07", x: -46, y: 43 }, { id: "n08", x: 1, y: 43 }, { id: "n09", x: 50, y: 27 }, { id: "n10", x: -136, y: 51 },
+    { id: "n11", x: -94, y: 72 }, { id: "n12", x: 29, y: 73 }, { id: "n13", x: 123, y: 63 }, { id: "n14", x: -134, y: 125 }, { id: "n15", x: -50, y: 141 },
+    { id: "n16", x: -3, y: 127 }, { id: "n17", x: 117, y: 126 }, { id: "n18", x: -184, y: 150 }, { id: "n19", x: -151, y: 174 }, { id: "n20", x: -104, y: 156 },
+    { id: "n21", x: -63, y: 181 }, { id: "n22", x: -25, y: 174 }, { id: "n23", x: 28, y: 163 }, { id: "n24", x: 62, y: 153 }, { id: "n25", x: 110, y: 184 },
+    { id: "n26", x: 185, y: 159 }, { id: "n27", x: -121, y: 198 }, { id: "n28", x: -80, y: 189 }, { id: "n29", x: 16, y: 169 },
   ];
-
-  const projectedIcos = points3D.map(([x0, y0, z0]) => {
-    const y1 = y0 * cosX - z0 * sinX;
-    const z1 = y0 * sinX + z0 * cosX;
-    const x2 = x0 * cosY + z1 * sinY;
-    const z2 = -x0 * sinY + z1 * cosY;
-    const x = x2 * scale;
-    const y = y1 * scale;
-    const z = z2 * scale;
-    const f = 200 / (200 + z);
-    return { x: x * f, y: y * f, z, original: [x0, y0, z0] as [number, number, number] };
+  const frameworkNodeById = new Map(frameworkNodes.map((node) => [node.id, node]));
+  const frameworkEdges = [
+    ["n02", "n03"], ["n02", "n04"], ["n02", "n05"], ["n03", "n06"], ["n04", "n07"], ["n05", "n09"],
+    ["n06", "n07"], ["n06", "n10"], ["n06", "n11"], ["n07", "n08"], ["n07", "n11"], ["n08", "n09"], ["n08", "n12"], ["n09", "n12"], ["n09", "n13"],
+    ["n10", "n14"], ["n11", "n14"], ["n11", "n15"], ["n11", "n16"], ["n12", "n16"], ["n12", "n23"], ["n13", "n17"], ["n13", "n24"],
+    ["n14", "n18"], ["n14", "n19"], ["n15", "n20"], ["n15", "n21"], ["n16", "n22"], ["n16", "n23"], ["n17", "n24"], ["n17", "n25"], ["n17", "n26"],
+    ["n18", "n19"], ["n19", "n20"], ["n20", "n22"], ["n20", "n27"], ["n21", "n22"], ["n21", "n28"], ["n22", "n29"], ["n23", "n24"], ["n23", "n29"], ["n24", "n25"], ["n25", "n26"],
+  ] as const;
+  const frameworkLinks = frameworkEdges.map(([startId, endId]) => {
+    const start = frameworkNodeById.get(startId)!;
+    const end = frameworkNodeById.get(endId)!;
+    return { x1: start.x, y1: start.y, x2: end.x, y2: end.y };
   });
-
-  const icosahedronEdges = points3D.flatMap((_, i) =>
-    points3D.slice(i + 1).map((_, j) => ({ i, j: j + i + 1 }))
-  ).filter(({ i, j }) => {
-    const [x1, y1, z1] = points3D[i];
-    const [x2, y2, z2] = points3D[j];
-    const d = Math.hypot(x2 - x1, y2 - y1, z2 - z1);
-    return d >= 1.9 && d <= 2.1;
-  });
-
-  function getPentagonPoints(radius: number, offsetAngle: number) {
-    return Array.from({ length: 5 }, (_, index) => {
-      const angle = offsetAngle + (index * 2 * Math.PI) / 5;
-      return {
-        x: radius * Math.cos(angle),
-        y: radius * Math.sin(angle),
-      };
-    });
-  }
-
-  const innerPoints = getPentagonPoints(25, -Math.PI / 2);
-  const middlePoints = getPentagonPoints(60, -Math.PI / 2 + Math.PI / 5);
-  const outerPoints = getPentagonPoints(95, -Math.PI / 2 + Math.PI / 5);
-
-  const allPoints = [...innerPoints, ...middlePoints, ...outerPoints];
-
-  function pointPairs(points: { x: number; y: number }[]) {
-    return points.map((point, i) => ({ start: point, end: points[(i + 1) % points.length] }));
-  }
-
-  const innerEdges = pointPairs(innerPoints);
-  const middleEdges = pointPairs(middlePoints);
-  const outerEdges = pointPairs(outerPoints);
   return (
-    <svg viewBox={viewBox} preserveAspectRatio="xMidYMid slice" className="h-full w-full" role="img" aria-label={ariaLabel}>
+    <svg viewBox={viewBox} preserveAspectRatio="xMidYMid slice" className="block h-full w-full" role="img" aria-label={ariaLabel}>
       <defs>
         <linearGradient id={`${pfx}-grad-cap`} x1="0" x2="1" y1="0" y2="0">
           <stop offset="0" stopColor="#e6f2ff" />
@@ -401,9 +407,19 @@ function DiffusionIllustration({ idPrefix, active, mode }: { idPrefix?: string; 
           <stop offset="1" stopColor="#9fcfff" />
         </linearGradient>
 
-        <linearGradient id={`${pfx}-grad-membrane`} x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0" stopColor="#f0fbff" />
-          <stop offset="1" stopColor="#def6ff" />
+        <linearGradient id={`${pfx}-grad-slit-wall`} x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0" stopColor="#475569" />
+          <stop offset="1" stopColor="#334155" />
+        </linearGradient>
+
+        <linearGradient id={`${pfx}-gyroid-rear`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#52717c" />
+          <stop offset="1" stopColor="#284752" />
+        </linearGradient>
+        <linearGradient id={`${pfx}-gyroid-front`} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#b8dce0" />
+          <stop offset="0.48" stopColor="#7caeb4" />
+          <stop offset="1" stopColor="#416b75" />
         </linearGradient>
 
         <radialGradient id={`${pfx}-ion-glow`} cx="50%" cy="50%" r="50%">
@@ -426,37 +442,23 @@ function DiffusionIllustration({ idPrefix, active, mode }: { idPrefix?: string; 
           <stop offset="1" stopColor="#f0f7f8" stopOpacity="0.0" />
         </radialGradient>
 
+        <mask id={membraneMask}>
+          <rect width="100%" height="100%" fill="white" />
+          <g opacity="0.9">
+            {denseMembrane.lines}
+            {denseMembrane.pores}
+          </g>
+        </mask>
+
         <path id={pathCenter1D} d="M30 100 H270" fill="none" stroke="none" />
 
-        <path id={centerWave} d="M40 90 C 80 70, 120 110, 160 90 S 240 70, 260 90" fill="none" stroke="none" />
+        <path id={slitPath} d="M28 100 C 80 92, 125 108, 176 99 S 240 91, 272 100" fill="none" stroke="none" />
+        <path id={membranePath} d="M 10,100 L 65,100 Q 95,140 125,90 T 175,120 T 225,100 L 290,100" fill="none" stroke="none" />
+        <path id={gyroidPath} d="M12 132 C 44 178, 76 178, 108 132 S 172 86, 204 132 S 260 178, 292 132" fill="none" stroke="none" />
 
-        <path
-          id={blobPath}
-          d={`M150 30
-             C 210 30, 270 70, 260 130
-             C 250 170, 200 190, 150 170
-             C 100 190, 50 170, 40 130
-             C 30 80, 80 30, 150 30 Z`}
-          fill={bgSkeleton}
-        />
-
-        <path
-          id={mazePath}
-          d={`M120 60 C 140 80, 110 100, 130 120 S 180 140, 200 120 C 220 100, 190 90, 170 80 S 140 60, 120 60`}
-          fill="none"
-          stroke="none"
-        />
-
-        <mask id={`${pfx}-pore-mask`}>
-          <rect x="0" y="0" width="300" height="200" fill="black" />
-          <use href={`#${blobPath}`} fill="white" />
-          <circle cx="175" cy="70" r="14" fill="black" />
-          <circle cx="135" cy="95" r="10" fill="black" />
-          <circle cx="190" cy="125" r="12" fill="black" />
-          <circle cx="110" cy="135" r="9" fill="black" />
-          <ellipse cx="155" cy="150" rx="20" ry="12" fill="black" />
-        </mask>
       </defs>
+
+      <rect x={mode === "3D-Cage" ? -200 : 0} y={mode === "3D-Cage" ? -190 : 0} width="100%" height="100%" rx="16" fill={softBg} />
 
       {/* 1D: 极简并规整的二维剖面，平行原子墙与居中水平单排扩散 */}
       {mode === "1D" && (
@@ -492,87 +494,107 @@ function DiffusionIllustration({ idPrefix, active, mode }: { idPrefix?: string; 
         </g>
       )}
 
-      {/* 2D: 波浪状膜（保留简洁膜示意） */}
+      {/* 2D: two rigid slabs contain a broad, laterally open slit. */}
       {mode === "2D" && (
         <g>
-          <rect x="0" y="0" width="300" height="200" fill="none" />
-          <path d="M10 70 Q 60 40, 110 70 T 210 70 T 290 70 L 290 90 Q 220 120, 150 90 T 10 90 Z" fill={`url(#${pfx}-grad-membrane)`} opacity={0.95} />
-          <path d="M10 110 Q 60 140, 110 110 T 210 110 T 290 110 L 290 90 Q 220 60, 150 90 T 10 90 Z" fill={`url(#${pfx}-grad-membrane)`} opacity={0.95} />
-
-          <path d="M40 90 C 80 70, 120 110, 160 90 S 240 70, 260 90" stroke="#9fd7f7" strokeWidth={1} strokeDasharray="4 4" opacity={0.22} fill="none" />
-
-          <g>
-            <circle r={9} fill={cationColor}>
-              {active && (
-                <animateMotion dur="3s" repeatCount="indefinite">
-                  <mpath href={`#${centerWave}`} />
-                </animateMotion>
-              )}
-            </circle>
-
-            <circle r={9} fill={anionColor}>
-              {active && (
-                <animateMotion dur="3.6s" begin="0.4s" repeatCount="indefinite">
-                  <mpath href={`#${centerWave}`} />
-                </animateMotion>
-              )}
-            </circle>
-
-            <g transform="translate(90,86)">
-              <circle r={7} fill={cationColor} opacity={0.95} />
-              {active && <animateTransform attributeName="transform" type="translate" values="0 0; 6 -6; 12 2; 0 0" dur="2.8s" repeatCount="indefinite" />}
-            </g>
-
-            <g transform="translate(200,100)">
-              <circle r={7} fill={anionColor} opacity={0.95} />
-              {active && <animateTransform attributeName="transform" type="translate" values="0 0; -8 6; -16 -2; 0 0" dur="3.2s" repeatCount="indefinite" />}
-            </g>
+          <rect x="15" width="270" height="62" rx="10" fill={`url(#${pfx}-grad-slit-wall)`} />
+          <rect x="15" y="138" width="270" height="62" rx="10" fill={`url(#${pfx}-grad-slit-wall)`} />
+          <path d="M15 62 H285 M15 138 H285" stroke="#94a3b8" strokeWidth="2" opacity="0.55" />
+          <rect x="15" y="64" width="270" height="72" fill={softBg} />
+          <g fill="#78909d" opacity="0.95" aria-hidden="true">
+            {Array.from({ length: 27 }).map((_, index) => <circle key={`top-atom-${index}`} cx={20 + index * 10} cy="63" r="3.2" />)}
+            {Array.from({ length: 27 }).map((_, index) => <circle key={`bottom-atom-${index}`} cx={20 + index * 10} cy="137" r="3.2" />)}
           </g>
+          <circle cx="66" cy="77" r="7" fill={cationColor}>
+            {active && <animateTransform attributeName="transform" type="translate" values="0 0; 18 2; -12 -1; 0 0" dur="4.8s" repeatCount="indefinite" />}
+          </circle>
+          <circle cx="220" cy="123" r="5.5" fill={anionColor}>
+            {active && <animateTransform attributeName="transform" type="translate" values="0 0; -16 -2; 10 1; 0 0" dur="5.2s" repeatCount="indefinite" />}
+          </circle>
+          <circle cx="72" cy="101" r="8" fill={cationColor}>
+            {active && <animateTransform attributeName="transform" type="translate" values="0 0; 142 -3; 92 4; 0 0" dur="2.4s" repeatCount="indefinite" />}
+          </circle>
+          <circle cx="208" cy="99" r="5.5" fill={anionColor}>
+            {active && <animateTransform attributeName="transform" type="translate" values="0 0; -138 4; -82 -3; 0 0" dur="2.9s" repeatCount="indefinite" />}
+          </circle>
+          <circle cx="150" cy="82" r="5" fill={anionColor} opacity="0.9">
+            {active && <animateTransform attributeName="transform" type="translate" values="0 0; 28 3; -20 -2; 0 0" dur="3.7s" repeatCount="indefinite" />}
+          </circle>
         </g>
       )}
 
-      {/* 3D: Icosahedron cage projection using strict 3D coordinates and perspective */}
-      {mode === "3D" && (
+      {/* Membrane: a central porous barrier separates two free-fluid regions. */}
+      {mode === "Membrane" && (
         <g>
-          <rect x="-120" y="-120" width="240" height="240" fill="none" />
+          <rect width="100%" height="100%" fill="#ffffff" />
+          <rect x="75" y="0" width="150" height="100%" fill="#334155" mask={`url(#${membraneMask})`} />
+          <line x1="75" y1="0" x2="75" y2="100%" stroke="#94a3b8" strokeWidth="2" strokeDasharray="4 4" opacity="0.5" />
+          <line x1="225" y1="0" x2="225" y2="100%" stroke="#94a3b8" strokeWidth="2" strokeDasharray="4 4" opacity="0.5" />
+          <circle r="8" fill={cationColor}>
+            {active && <animateMotion dur="5.6s" repeatCount="indefinite"><mpath href={`#${membranePath}`} /></animateMotion>}
+          </circle>
+          <circle r="5.5" fill={anionColor}>
+            {active && <animateMotion dur="6.4s" begin="-2.1s" repeatCount="indefinite"><mpath href={`#${membranePath}`} /></animateMotion>}
+          </circle>
+        </g>
+      )}
 
-          <g fill="none" stroke="#555" strokeWidth={2}>
-            {icosahedronEdges.map(({ i, j }, idx) => {
-              const p1 = projectedIcos[i];
-              const p2 = projectedIcos[j];
-              const avgZ = (p1.z + p2.z) / 2;
-              return (
-                <line
-                  key={`edge-${i}-${j}`}
-                  x1={p1.x}
-                  y1={p1.y}
-                  x2={p2.x}
-                  y2={p2.y}
-                  strokeOpacity={avgZ < 0 ? 0.3 : 0.95}
-                />
-              );
-            })}
-          </g>
+      {/* 0D-Pools: isolated cavities retain ions in local oscillations. */}
+      {mode === "0D-Pools" && (
+        <g>
+          <rect x="15" width="270" height="200" rx="12" fill={bgSkeleton} />
+          <circle cx="74" cy="88" r="30" fill={softBg} stroke="#94a3b8" strokeWidth="2" />
+          <circle cx="172" cy="59" r="22" fill={softBg} stroke="#94a3b8" strokeWidth="2" />
+          <circle cx="211" cy="139" r="34" fill={softBg} stroke="#94a3b8" strokeWidth="2" />
+          <circle cx="110" cy="155" r="15" fill={softBg} stroke="#94a3b8" strokeWidth="2" />
+          <circle cx="74" cy="88" r="8" fill={cationColor}>
+            {active && <animateTransform attributeName="transform" type="translate" values="0,0; 2,-3; -2,2; 3,-1; -1,3; 0,0" dur="0.6s" repeatCount="indefinite" />}
+          </circle>
+          <circle cx="74" cy="88" r="5.5" fill={anionColor}>
+            {active && <animateTransform attributeName="transform" type="translate" values="0,0; -2,2; 2,3; -3,-1; 1,-3; 0,0" dur="0.72s" repeatCount="indefinite" />}
+          </circle>
+        </g>
+      )}
 
-          <g fill="#333" aria-hidden>
-            {projectedIcos.map((pt, idx) => (
-              <circle key={`vertex-${idx}`} cx={pt.x} cy={pt.y} r={4} />
-            ))}
-          </g>
+      {/* Gyroid: interwoven tubular phases form a pseudo-3D bicontinuous network. */}
+      {mode === "Gyroid" && (
+        <g>
+          <path d="M-18 61 C 18 12, 54 12, 90 61 S 162 110, 198 61 S 270 12, 318 61" fill="none" stroke="#475569" strokeWidth="20" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M-18 139 C 18 188, 54 188, 90 139 S 162 90, 198 139 S 270 188, 318 139" fill="none" stroke="#475569" strokeWidth="20" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M12 132 C 44 178, 76 178, 108 132 S 172 86, 204 132 S 260 178, 292 132" fill="none" stroke="#334155" strokeWidth="18" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M12 68 C 44 22, 76 22, 108 68 S 172 114, 204 68 S 260 22, 292 68" fill="none" stroke="#334155" strokeWidth="18" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M12 132 C 44 178, 76 178, 108 132 S 172 86, 204 132 S 260 178, 292 132" fill="none" stroke="#94a3b8" strokeWidth="3" strokeLinecap="round" opacity="0.68" />
+          <path d="M12 68 C 44 22, 76 22, 108 68 S 172 114, 204 68 S 260 22, 292 68" fill="none" stroke="#94a3b8" strokeWidth="3" strokeLinecap="round" opacity="0.68" />
+          <circle r="8" fill={cationColor}>
+            {active && <animateMotion dur="4.2s" repeatCount="indefinite" rotate="auto"><mpath href={`#${gyroidPath}`} /></animateMotion>}
+          </circle>
+          <circle r="5.5" fill={anionColor}>
+            {active && <animateMotion dur="5s" begin="-1.8s" repeatCount="indefinite" rotate="auto"><mpath href={`#${gyroidPath}`} /></animateMotion>}
+          </circle>
+        </g>
+      )}
 
-          <g>
-            <circle cx={0} cy={0} r={6} fill={cationColor} />
-            <circle cx={0} cy={0} r={12} fill={`url(#${pfx}-ion-glow)`} opacity={0.18} />
-            {active && (
-              <animateTransform
-                attributeName="transform"
-                type="translate"
-                values="0,0; 15,-10; -10,-15; 10,15; 0,0"
-                dur="4s"
-                repeatCount="indefinite"
-              />
-            )}
+      {/* 3D-Cage: hard-coded F-framework projection with an irregular, open central cavity. */}
+      {mode === "3D-Cage" && (
+        <g>
+          <g transform="translate(0 -64)">
+            <g fill="none" stroke="#64748b" strokeWidth="1.1" strokeLinecap="round" opacity="0.82">
+              {frameworkLinks.map((link, index) => <line key={`f-bond-${index}`} {...link} />)}
+            </g>
+            <g fill="#334155">
+              {frameworkNodes.map((node) => <circle key={`f-node-${node.id}`} cx={node.x} cy={node.y} r="8.8" />)}
+            </g>
+            <g opacity="0.22" fill="none" stroke="#94a3b8" strokeWidth="0.9">
+              <path d="M-78 28 L-46 43 L1 43 L50 27 L29 73 L-3 127 L-50 141 L-94 72 Z" />
+              <path d="M-33 -35 L1 43 L-3 127" />
+            </g>
           </g>
+          <circle cx="0" cy="-44" r="11.5" fill={cationColor}>
+            {active && <animateTransform attributeName="transform" type="translate" values="0 0; -23 -17; -36 8; -20 37; 16 31; 37 4; 18 -21; 0 0" dur="5.8s" repeatCount="indefinite" />}
+          </circle>
+          <circle cx="0" cy="-44" r="8.5" fill={anionColor}>
+            {active && <animateTransform attributeName="transform" type="translate" values="0 0; 28 18; 38 -4; 21 -28; -9 -24; -32 -1; -21 25; 0 0" dur="6.6s" begin="-1.7s" repeatCount="indefinite" />}
+          </circle>
         </g>
       )}
     </svg>
