@@ -17,6 +17,36 @@ export type TeachingRole = "teacher" | "student";
 export type TeachingMode = "manual" | "ai_assisted";
 export type TeachingSequence = "manual_then_ai" | "ai_then_manual";
 
+type TeachingStudentActiveBase = {
+  status: "active";
+  project: { id: string; name: string; fields: typeof TEACHING_FIELDS };
+  participant: { studentAlias: string };
+  paper: {
+    id: string;
+    code: "A" | "B";
+    title: string;
+    doi: string;
+    journal: string;
+    sourceUrl: string;
+    taskPrompt: string;
+  };
+  roundNo: 1 | 2;
+  totalRounds: 2;
+  startedAt: string;
+  answers: TeachingAnswers;
+  activeSeconds: number;
+  version: number;
+};
+
+export type TeachingStudentState =
+  | (TeachingStudentActiveBase & { mode: "manual" })
+  | (TeachingStudentActiveBase & { mode: "ai_assisted"; aiInitial: TeachingAnswers })
+  | { status: "complete"; participant: { studentAlias: string }; completedAt: string };
+
+export type TeachingRoundTransition =
+  | { status: "next_round"; roundNo: 2 }
+  | { status: "complete"; completedAt: string };
+
 export type TeachingEvidenceRule = {
   pages: number[];
   anyKeywordSets: string[][];

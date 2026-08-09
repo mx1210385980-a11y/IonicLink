@@ -13,6 +13,15 @@ import {
   type TeachingScores,
 } from "./teachingShared";
 export {
+  getCurrentTeachingRound,
+  joinDefaultTeachingExperiment,
+  normalizeStudentAlias,
+  rescoreErroredTeachingSubmissions,
+  rescoreTeachingSubmission,
+  saveCurrentTeachingDraft,
+  submitCurrentTeachingRound,
+} from "./teaching/assignment";
+export {
   TEACHING_FIELDS,
   type TeachingAnswer,
   type TeachingAnswers,
@@ -20,8 +29,10 @@ export {
   type TeachingFieldKey,
   type TeachingMetrics,
   type TeachingRole,
+  type TeachingRoundTransition,
   type TeachingScore,
   type TeachingScores,
+  type TeachingStudentState,
 } from "./teachingShared";
 
 export interface TeachingSession {
