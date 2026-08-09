@@ -1,4 +1,8 @@
 import type { TeachingAnswer, TeachingFieldKey } from "@/lib/teachingShared";
+import {
+  normalizeTeachingText,
+  teachingAnswersEquivalent,
+} from "@/lib/teaching/answerComparison";
 
 const IDLE_AFTER_MS = 120_000;
 const MAX_HEARTBEAT_SECONDS = 15;
@@ -20,16 +24,14 @@ export type TeachingSubmitPayload = {
 };
 
 export function normalizeTeachingDraftText(value: string | undefined): string {
-  return (value ?? "").normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
+  return normalizeTeachingText(value ?? "");
 }
 
 export function hasTeachingAnswerChanged(
   answer: TeachingAnswer | undefined,
   initial: TeachingAnswer | undefined
 ): boolean {
-  return (["value", "page", "evidence"] as const).some(
-    (key) => normalizeTeachingDraftText(answer?.[key]) !== normalizeTeachingDraftText(initial?.[key])
-  );
+  return !teachingAnswersEquivalent(answer, initial);
 }
 
 export function buildTeachingHeartbeat(input: {

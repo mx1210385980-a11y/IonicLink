@@ -74,6 +74,16 @@ const assisted: TeachingStudentState & { gold: string; scoringVersion: string } 
   gold: "CONFIDENTIAL_AI_GOLD_VALUE",
   scoringVersion: "CONFIDENTIAL_SCORING_VERSION",
 };
+const equivalentAssisted: TeachingStudentState = {
+  ...activeBase,
+  roundNo: 2,
+  mode: "ai_assisted",
+  aiInitial,
+  answers: {
+    ...aiInitial,
+    load: { value: "15-75 nN", page: "page 5", evidence: "15 to 75 nN" },
+  },
+};
 const complete: TeachingStudentState = {
   status: "complete",
   participant: { studentAlias: "S001" },
@@ -82,6 +92,9 @@ const complete: TeachingStudentState = {
 
 const manualHtml = renderToStaticMarkup(createElement(StudentWorkspace, { initial: manual }));
 const aiHtml = renderToStaticMarkup(createElement(StudentWorkspace, { initial: assisted }));
+const equivalentAiHtml = renderToStaticMarkup(
+  createElement(StudentWorkspace, { initial: equivalentAssisted })
+);
 const completeHtml = renderToStaticMarkup(createElement(StudentWorkspace, { initial: complete }));
 
 assert.match(manualHtml, /第 1 \/ 2 轮/);
@@ -123,6 +136,8 @@ assert.match(aiHtml, /<button[^>]+disabled=""[^>]*>提交第 2 轮<\/button>/);
 assert.doesNotMatch(aiHtml, /gold|标准答案|评分规则|scoring/i);
 assert.doesNotMatch(aiHtml, /CONFIDENTIAL_/);
 assert.match(aiHtml, /实验轮次进度[^>]+aria-valuenow="2"/);
+assert.doesNotMatch(equivalentAiHtml, /已编辑/);
+assert.equal((equivalentAiHtml.match(/未修改/g) ?? []).length, 6);
 
 assert.match(completeHtml, /两轮实验已完成/);
 assert.match(completeHtml, /S001/);
@@ -145,6 +160,35 @@ assert.equal(
     { value: "EMIM", page: "2", evidence: "ionic liquid" }
   ),
   true
+);
+const formattingInitial = {
+  value: "15–75 nN",
+  page: "5",
+  evidence: "normal load: 15–75 nN",
+};
+assert.equal(
+  hasTeachingAnswerChanged(
+    { value: "15-75 nN", page: "page 5", evidence: "normal load 15 - 75 nN" },
+    formattingInitial
+  ),
+  false,
+  "dash, structured punctuation, and equivalent page formatting must stay unmodified"
+);
+assert.equal(
+  hasTeachingAnswerChanged(
+    { value: "5-75 nN", page: "page 5", evidence: "normal load 5-75 nN" },
+    formattingInitial
+  ),
+  true,
+  "a genuine value edit must remain visible"
+);
+assert.equal(
+  hasTeachingAnswerChanged(
+    { value: "15 - 75 nN", page: "第 5 页", evidence: "normal load：15-75 nN" },
+    formattingInitial
+  ),
+  false,
+  "editing and then reverting to an equivalent initial form must restore the unmodified marker"
 );
 
 const heartbeat = buildTeachingHeartbeat({

@@ -217,6 +217,42 @@ const pageOnlyBehavior = scoreAiBehavior(
 );
 assert.equal(pageOnlyBehavior.modified, 1);
 
+const formattingAi: TeachingAnswers = {
+  load: { value: "15–75 nN", page: "5", evidence: "normal load: 15–75 nN" },
+};
+const formattingFinal: TeachingAnswers = {
+  load: { value: "15-75 nN", page: "page 5", evidence: "normal load 15 - 75 nN" },
+};
+const formattingBehavior = scoreAiBehavior(
+  formattingAi,
+  formattingFinal,
+  scoreSubmission(formattingAi, paperA),
+  scoreSubmission(formattingFinal, paperA)
+);
+assert.equal(formattingBehavior.adopted, 1);
+assert.equal(formattingBehavior.modified, 0);
+
+const conversionPaper = structuredClone(paperA);
+conversionPaper.gold.temperature = roomTemperatureRule;
+const conversionAi: TeachingAnswers = {
+  temperature: { value: "25 C", page: "1", evidence: "temperature" },
+};
+const conversionFinal: TeachingAnswers = {
+  temperature: { value: "298.15 K", page: "1", evidence: "temperature" },
+};
+const conversionBehavior = scoreAiBehavior(
+  conversionAi,
+  conversionFinal,
+  scoreSubmission(conversionAi, conversionPaper),
+  scoreSubmission(conversionFinal, conversionPaper)
+);
+assert.equal(conversionBehavior.adopted, 0);
+assert.equal(
+  conversionBehavior.modified,
+  1,
+  "AI behavior comparison must use the same non-sensitive textual equivalence as the client"
+);
+
 const evidenceOnlyFinal = structuredClone(singleAi);
 evidenceOnlyFinal.cation = { ...evidenceOnlyFinal.cation!, evidence: "EMIM cation" };
 const evidenceOnlyBehavior = scoreAiBehavior(

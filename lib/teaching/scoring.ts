@@ -8,8 +8,13 @@ import {
   type TeachingFieldScore,
   type TeachingGoldRule,
 } from "../teachingShared";
+import {
+  normalizeTeachingStructuredText as normalizeStructuredText,
+  normalizeTeachingText,
+  parseTeachingPage as parsePage,
+  teachingAnswersEquivalent,
+} from "./answerComparison";
 
-const DASHES = /[\u2010-\u2015\u2212\u2e3a-\u2e3b\ufe58\ufe63\uff0d]/gu;
 const NUMBER_SOURCE = "[+-]?(?:\\d+(?:\\.\\d+)?|\\.\\d+)";
 const NUMBER_ONLY = new RegExp(`^(${NUMBER_SOURCE})$`, "u");
 const TEMPERATURE = new RegExp(
@@ -21,52 +26,13 @@ const FORCE_RANGE = new RegExp(
   "u"
 );
 
-export function normalizeTeachingText(value: string): string {
-  return value
-    .normalize("NFKC")
-    .replace(DASHES, "-")
-    .toLowerCase()
-    .replace(/[\u03bc\u00b5]/gu, "u")
-    .replace(/\s+/gu, " ")
-    .trim();
-}
+export { normalizeTeachingText } from "./answerComparison";
 
 function normalizeTextAlias(value: string): string {
   return normalizeTeachingText(value)
     .replace(/[\p{P}\p{S}]+/gu, " ")
     .replace(/\s+/gu, " ")
     .trim();
-}
-
-function normalizeStructuredText(value: string): string {
-  const characters = Array.from(
-    normalizeTeachingText(value)
-      .replace(/(\d)\s*([.:\/-])\s*(?=\d)/gu, "$1$2")
-      .replace(
-        /(^|[\s([{=,:;])([+-])(?:\s*[\(\[\{<])*\s*(?=(?:\d|\.\d))/gu,
-        "$1$2"
-      )
-  );
-  const normalized = characters.map((character, index) => {
-    if (!/[\p{P}\p{S}]/u.test(character)) return character;
-
-    const previous = characters[index - 1] ?? "";
-    const next = characters[index + 1] ?? "";
-    const previousPrevious = characters[index - 2] ?? "";
-    const nextNext = characters[index + 2] ?? "";
-    const betweenDigits = /[.:\/-]/u.test(character) && /\d/u.test(previous) && /\d/u.test(next);
-    const hasLeadingBoundary = !previous || /[\s([{=,:;]/u.test(previous);
-    const unarySign =
-      /[+-]/u.test(character) &&
-      hasLeadingBoundary &&
-      (/\d/u.test(next) || (next === "." && /\d/u.test(nextNext)));
-    const leadingDecimalPoint =
-      character === "." &&
-      /\d/u.test(next) &&
-      (hasLeadingBoundary || (/[+-]/u.test(previous) && (!previousPrevious || /[\s([{=,:;]/u.test(previousPrevious))));
-    return betweenDigits || unarySign || leadingDecimalPoint ? character : " ";
-  });
-  return normalized.join("").replace(/\s+/gu, " ").trim();
 }
 
 function result(correct: boolean, normalized: string, reason: string): TeachingFieldScore {
@@ -162,14 +128,6 @@ export function scoreValue(value: string, rule: TeachingGoldRule): TeachingField
       );
     }
   }
-}
-
-function parsePage(value: string): number | null {
-  const normalized = normalizeTeachingText(value);
-  const match = normalized.match(/^(?:(?:p|page)\.?\s*)?(\d+)$/u);
-  if (match) return Number(match[1]);
-  const chineseMatch = normalized.match(/^(?:第\s*)?(\d+)\s*页$/u);
-  return chineseMatch ? Number(chineseMatch[1]) : null;
 }
 
 function isIntegerKeywordBoundary(adjacent: string, beyond: string): boolean {
@@ -279,11 +237,6 @@ export function scoreSubmission(
   };
 }
 
-function normalizedPage(value: string | undefined): string {
-  const parsed = parsePage(value ?? "");
-  return parsed === null ? normalizeStructuredText(value ?? "") : String(parsed);
-}
-
 function rate(numerator: number, denominator: number): number | null {
   return denominator === 0 ? null : numerator / denominator;
 }
@@ -308,11 +261,7 @@ export function scoreAiBehavior(
 
     suggested += 1;
     const finalAnswer = final[key];
-    const unchanged =
-      aiScore.values[key].normalized === finalScore.values[key].normalized &&
-      normalizedPage(aiAnswer?.page) === normalizedPage(finalAnswer?.page) &&
-      normalizeStructuredText(aiAnswer?.evidence ?? "") ===
-        normalizeStructuredText(finalAnswer?.evidence ?? "");
+    const unchanged = teachingAnswersEquivalent(aiAnswer, finalAnswer);
 
     if (unchanged) adopted += 1;
     else modified += 1;
