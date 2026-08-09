@@ -35,6 +35,36 @@ export type TeachingGoldRule = {
   evidence: TeachingEvidenceRule;
 };
 
+export type TeachingFieldScore = {
+  correct: boolean;
+  normalized: string;
+  reason: string;
+};
+
+export type TeachingAutoScore = {
+  values: Record<TeachingFieldKey, TeachingFieldScore>;
+  evidence: Record<TeachingFieldKey, TeachingFieldScore>;
+  valueCorrect: number;
+  valueAccuracy: number;
+  valueCoverage: number;
+  evidenceCorrect: number;
+  evidenceAccuracy: number;
+  evidenceCoverage: number;
+};
+
+export type TeachingAiBehavior = {
+  suggested: number;
+  adopted: number;
+  modified: number;
+  initiallyIncorrect: number;
+  corrected: number;
+  incorrectlyAdopted: number;
+  adoptionRate: number | null;
+  modificationRate: number | null;
+  correctionRate: number | null;
+  incorrectAdoptionRate: number | null;
+};
+
 export type TeachingExperimentPaper = {
   id: string;
   code: "A" | "B";
