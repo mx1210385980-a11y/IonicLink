@@ -22,6 +22,10 @@ export {
   submitCurrentTeachingRound,
 } from "./teaching/assignment";
 export {
+  recordTeachingHeartbeat,
+  teachingTimingQuality,
+} from "./teaching/activity";
+export {
   TEACHING_FIELDS,
   type TeachingAnswer,
   type TeachingAnswers,
