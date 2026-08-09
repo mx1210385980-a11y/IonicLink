@@ -1,9 +1,14 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
-import { migrateTeachingSchema, TEACHING_SCHEMA_VERSION } from "./migrations";
+import {
+  hasCompleteTeachingSchema,
+  migrateTeachingSchema,
+  TEACHING_SCHEMA_VERSION,
+} from "./migrations";
 
 const TEACHING_DATABASE_NAME = "teaching.db";
+const TEACHING_DATABASE_TIMEOUT_MS = 30_000;
 
 const BASE_SCHEMA = `
   CREATE TABLE IF NOT EXISTS teaching_projects (
@@ -83,7 +88,9 @@ export function getTeachingDb(): Database.Database {
 
   const dataDir = teachingDataDir();
   mkdirSync(dataDir, { recursive: true });
-  const next = new Database(path.join(dataDir, TEACHING_DATABASE_NAME));
+  const next = new Database(path.join(dataDir, TEACHING_DATABASE_NAME), {
+    timeout: TEACHING_DATABASE_TIMEOUT_MS,
+  });
   try {
     const currentVersion = Number(next.pragma("user_version", { simple: true }));
     if (currentVersion > TEACHING_SCHEMA_VERSION) {
@@ -91,9 +98,12 @@ export function getTeachingDb(): Database.Database {
         `Unsupported teaching database schema version ${currentVersion}; this build supports version ${TEACHING_SCHEMA_VERSION}.`
       );
     }
-    next.pragma("journal_mode = WAL");
     next.pragma("foreign_keys = ON");
-    next.exec(BASE_SCHEMA);
+    const journalMode = String(next.pragma("journal_mode", { simple: true })).toLowerCase();
+    if (journalMode !== "wal") next.pragma("journal_mode = WAL");
+    const schemaIsComplete =
+      currentVersion === TEACHING_SCHEMA_VERSION && hasCompleteTeachingSchema(next);
+    if (!schemaIsComplete) next.exec(BASE_SCHEMA);
     migrateTeachingSchema(next);
     teachingDb = next;
     return next;

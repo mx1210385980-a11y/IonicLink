@@ -270,31 +270,43 @@ assert.deepEqual(
 );
 assert.equal(db.pragma("quick_check", { simple: true }), "ok");
 
+const readonlyCompleteDb = new Database(databasePath, { readonly: true, fileMustExist: true });
+assert.doesNotThrow(
+  () => migrateTeachingSchema(readonlyCompleteDb),
+  "opening a complete v2 schema must not attempt DDL or a write transaction"
+);
+readonlyCompleteDb.close();
+
 db.exec(`
+  DROP INDEX idx_teaching_submissions_project;
   DROP INDEX idx_teaching_default_identity;
   DROP INDEX idx_teaching_participant_round;
+  DROP TABLE teaching_sessions;
   DROP TABLE teaching_activity_events;
   ALTER TABLE teaching_projects DROP COLUMN config_checksum;
 `);
 assert.equal(db.pragma("user_version", { simple: true }), 2);
-migrateTeachingSchema(db);
-assert.equal(columnNames(db, "teaching_projects").has("config_checksum"), true);
-assert.equal(tableNames(db).has("teaching_activity_events"), true);
+closeTeachingStoreForTests();
+const repairedDb = getTeachingDb();
+assert.equal(columnNames(repairedDb, "teaching_projects").has("config_checksum"), true);
+assert.equal(tableNames(repairedDb).has("teaching_sessions"), true);
+assert.equal(tableNames(repairedDb).has("teaching_activity_events"), true);
 const repairedIndexes = new Set(
-  db
+  repairedDb
     .prepare("SELECT name FROM sqlite_master WHERE type = 'index'")
     .pluck()
     .all() as string[]
 );
 for (const index of [
+  "idx_teaching_submissions_project",
   "idx_teaching_default_identity",
   "idx_teaching_participant_round",
   "idx_teaching_activity_submission",
 ]) {
   assert.equal(repairedIndexes.has(index), true, `${index} should be repaired at version 2`);
 }
-assert.equal(db.pragma("user_version", { simple: true }), 2);
-assert.equal(db.pragma("quick_check", { simple: true }), "ok");
+assert.equal(repairedDb.pragma("user_version", { simple: true }), 2);
+assert.equal(repairedDb.pragma("quick_check", { simple: true }), "ok");
 
 const rollbackDb = new Database(":memory:");
 rollbackDb.pragma("foreign_keys = ON");

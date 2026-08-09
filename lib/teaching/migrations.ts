@@ -50,15 +50,54 @@ const COLUMN_MIGRATIONS: ReadonlyArray<{
   },
 ];
 
+const REQUIRED_SCHEMA_OBJECTS = [
+  { type: "table", name: "teaching_projects" },
+  { type: "table", name: "teaching_papers" },
+  { type: "table", name: "teaching_participants" },
+  { type: "table", name: "teaching_submissions" },
+  { type: "table", name: "teaching_reviews" },
+  { type: "table", name: "teaching_sessions" },
+  { type: "table", name: "teaching_activity_events" },
+  { type: "index", name: "idx_teaching_submissions_project" },
+  { type: "index", name: "idx_teaching_sessions_expiry" },
+  { type: "index", name: "idx_teaching_default_identity" },
+  { type: "index", name: "idx_teaching_participant_round" },
+  { type: "index", name: "idx_teaching_activity_submission" },
+] as const;
+
 function existingColumns(db: Database.Database, table: string): Set<string> {
   return new Set(
     (db.pragma(`table_info(${table})`) as Array<{ name: string }>).map((column) => column.name)
   );
 }
 
+export function hasCompleteTeachingSchema(db: Database.Database): boolean {
+  for (const migration of COLUMN_MIGRATIONS) {
+    const columns = existingColumns(db, migration.table);
+    for (const definition of migration.columns) {
+      const [name] = definition.split(/\s+/, 1);
+      if (!columns.has(name)) return false;
+    }
+  }
+
+  const schemaObjects = new Set(
+    (db
+      .prepare(
+        `SELECT type, name FROM sqlite_master
+         WHERE name IN (${REQUIRED_SCHEMA_OBJECTS.map(() => "?").join(", ")})`
+      )
+      .all(...REQUIRED_SCHEMA_OBJECTS.map(({ name }) => name)) as Array<{
+        type: string;
+        name: string;
+      }>).map(({ type, name }) => `${type}:${name}`)
+  );
+  return REQUIRED_SCHEMA_OBJECTS.every(({ type, name }) => schemaObjects.has(`${type}:${name}`));
+}
+
 export function migrateTeachingSchema(db: Database.Database): void {
   const currentVersion = Number(db.pragma("user_version", { simple: true }));
   if (currentVersion > TEACHING_SCHEMA_VERSION) return;
+  if (currentVersion === TEACHING_SCHEMA_VERSION && hasCompleteTeachingSchema(db)) return;
 
   db.transaction(() => {
     for (const migration of COLUMN_MIGRATIONS) {
@@ -92,5 +131,5 @@ export function migrateTeachingSchema(db: Database.Database): void {
     `);
 
     db.pragma(`user_version = ${TEACHING_SCHEMA_VERSION}`);
-  })();
+  }).immediate();
 }

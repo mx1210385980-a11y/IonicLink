@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import {
@@ -57,16 +57,6 @@ function assertActive(
 ): asserts state is Exclude<NonNullable<typeof state>, { status: "complete" }> {
   assert.ok(state);
   assert.equal(state.status, "active");
-}
-
-const waitArray = new Int32Array(new SharedArrayBuffer(4));
-
-function waitForFiles(paths: string[], timeoutMs: number, label: string): void {
-  const deadline = Date.now() + timeoutMs;
-  while (!paths.every((file) => existsSync(file))) {
-    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${label}.`);
-    Atomics.wait(waitArray, 0, 0, 10);
-  }
 }
 
 assert.equal(normalizeStudentAlias("  Ｓ００１\tStudent  "), "Ｓ００１\tStudent");
@@ -491,31 +481,40 @@ assert.equal(
   initializer.stderr || initializer.error?.message || "concurrency database initialization failed"
 );
 
-const startPath = path.join(concurrentDataDir, "start");
 const workerSource = `
-  import { existsSync, writeFileSync } from "node:fs";
+  import { existsSync } from "node:fs";
   import { joinDefaultTeachingExperiment } from "./lib/teaching/assignment.ts";
   import { closeTeachingStoreForTests, getTeachingDb } from "./lib/teaching/store.ts";
 
-  const readyPath = process.env.IONICLINK_CONCURRENT_READY;
-  const resultPath = process.env.IONICLINK_CONCURRENT_RESULT;
-  const startPath = process.env.IONICLINK_CONCURRENT_START;
+  const bootStartPath = process.env.IONICLINK_CONCURRENT_BOOT_START;
+  const joinStartPath = process.env.IONICLINK_CONCURRENT_JOIN_START;
   const aliasesJson = process.env.IONICLINK_CONCURRENT_ALIASES;
+  const workerName = process.env.IONICLINK_CONCURRENT_WORKER;
   const waitArray = new Int32Array(new SharedArrayBuffer(4));
+  const emit = (event, details = {}) => {
+    process.stdout.write(JSON.stringify({ event, workerName, ...details }) + "\\n");
+  };
+  const waitForBarrier = (file, label) => {
+    const deadline = Date.now() + 10_000;
+    while (!existsSync(file)) {
+      if (Date.now() >= deadline) throw new Error(label + " barrier timed out");
+      Atomics.wait(waitArray, 0, 0, 10);
+    }
+  };
   let result;
   try {
-    if (!readyPath || !resultPath || !startPath || !aliasesJson) throw new Error("worker environment is incomplete");
+    if (!bootStartPath || !joinStartPath || !aliasesJson || !workerName) {
+      throw new Error("worker environment is incomplete");
+    }
     const aliases = JSON.parse(aliasesJson);
     if (!Array.isArray(aliases) || aliases.some((alias) => typeof alias !== "string")) {
       throw new Error("worker aliases are invalid");
     }
+    emit("boot_ready");
+    waitForBarrier(bootStartPath, "store-open");
     getTeachingDb();
-    writeFileSync(readyPath, "ready");
-    const deadline = Date.now() + 30_000;
-    while (!existsSync(startPath)) {
-      if (Date.now() >= deadline) throw new Error("worker start barrier timed out");
-      Atomics.wait(waitArray, 0, 0, 10);
-    }
+    emit("join_ready");
+    waitForBarrier(joinStartPath, "join");
     result = {
       ok: true,
       aliases,
@@ -530,57 +529,189 @@ const workerSource = `
     };
   } finally {
     closeTeachingStoreForTests();
-    if (resultPath) writeFileSync(resultPath, JSON.stringify(result));
+    emit("result", { result });
   }
 `;
-const readyPaths: string[] = [];
-const resultPaths: string[] = [];
-const workers = Array.from({ length: 10 }, (_, workerIndex) => {
-  const aliases = Array.from({ length: 3 }, (_, aliasIndex) => {
-    const sequence = workerIndex * 3 + aliasIndex + 1;
-    return `C${String(sequence).padStart(3, "0")}`;
-  });
-  const workerName = `worker-${String(workerIndex + 1).padStart(2, "0")}`;
-  const readyPath = path.join(concurrentDataDir, `${workerName}.ready`);
-  const resultPath = path.join(concurrentDataDir, `${workerName}.json`);
-  readyPaths.push(readyPath);
-  resultPaths.push(resultPath);
-  return spawn(process.execPath, [tsxCli, "--eval", workerSource], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      IONICLINK_DATA_DIR: concurrentDataDir,
-      IONICLINK_CONCURRENT_READY: readyPath,
-      IONICLINK_CONCURRENT_RESULT: resultPath,
-      IONICLINK_CONCURRENT_START: startPath,
-      IONICLINK_CONCURRENT_ALIASES: JSON.stringify(aliases),
-    },
-    stdio: ["ignore", "ignore", "inherit"],
-  });
-});
-try {
-  waitForFiles(readyPaths, 30_000, "concurrent workers to become ready");
-  writeFileSync(startPath, "start");
-  waitForFiles(resultPaths, 30_000, "concurrent teaching joins to finish");
-} finally {
-  for (const worker of workers) {
-    if (worker.exitCode === null && !existsSync(resultPaths[workers.indexOf(worker)])) worker.kill();
-  }
-}
+const coordinatorSource = `
+  import { spawn } from "node:child_process";
+  import { writeFileSync } from "node:fs";
+  import path from "node:path";
 
-const workerResults = resultPaths.map((file) => JSON.parse(readFileSync(file, "utf8")) as {
-  ok: boolean;
-  aliases?: string[];
-  joined?: Array<{ projectId: string; participantId: string }>;
-  message?: string;
-  code?: string | null;
+  (async () => {
+  const dataDir = process.env.IONICLINK_DATA_DIR;
+  const tsxCli = process.env.IONICLINK_CONCURRENT_TSX;
+  const workerSource = process.env.IONICLINK_CONCURRENT_SOURCE;
+  if (!dataDir || !tsxCli || !workerSource) throw new Error("coordinator environment is incomplete");
+
+  const bootStartPath = path.join(dataDir, "boot-start");
+  const joinStartPath = path.join(dataDir, "join-start");
+  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const states = Array.from({ length: 6 }, (_, workerIndex) => {
+    const workerName = "worker-" + String(workerIndex + 1).padStart(2, "0");
+    const aliases = Array.from({ length: 5 }, (_, aliasIndex) => {
+      const sequence = workerIndex * 5 + aliasIndex + 1;
+      return "C" + String(sequence).padStart(3, "0");
+    });
+    const child = spawn(process.execPath, [tsxCli, "--eval", workerSource], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        IONICLINK_DATA_DIR: dataDir,
+        IONICLINK_CONCURRENT_BOOT_START: bootStartPath,
+        IONICLINK_CONCURRENT_JOIN_START: joinStartPath,
+        IONICLINK_CONCURRENT_ALIASES: JSON.stringify(aliases),
+        IONICLINK_CONCURRENT_WORKER: workerName,
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const state = {
+      workerName,
+      aliases,
+      child,
+      events: [],
+      stderr: "",
+      stdoutRemainder: "",
+      spawnError: null,
+      closed: false,
+      exitCode: null,
+      signal: null,
+      closePromise: null,
+    };
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      state.stdoutRemainder += chunk;
+      let newline = state.stdoutRemainder.indexOf("\\n");
+      while (newline !== -1) {
+        const line = state.stdoutRemainder.slice(0, newline).trim();
+        state.stdoutRemainder = state.stdoutRemainder.slice(newline + 1);
+        if (line) {
+          try {
+            state.events.push(JSON.parse(line));
+          } catch (error) {
+            state.events.push({ event: "protocol_error", line, message: String(error) });
+          }
+        }
+        newline = state.stdoutRemainder.indexOf("\\n");
+      }
+    });
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => { state.stderr += chunk; });
+    state.closePromise = new Promise((resolve) => {
+      child.on("error", (error) => { state.spawnError = error.message; });
+      child.on("close", (code, signal) => {
+        state.closed = true;
+        state.exitCode = code;
+        state.signal = signal;
+        resolve();
+      });
+    });
+    return state;
+  });
+
+  const resultEvent = (state) => state.events.find((event) => event.event === "result");
+  const hasEvent = (state, name) => state.events.some((event) => event.event === name);
+  const snapshot = () => states.map((state) => ({
+    workerName: state.workerName,
+    aliases: state.aliases,
+    events: state.events,
+    stderr: state.stderr,
+    stdoutRemainder: state.stdoutRemainder,
+    spawnError: state.spawnError,
+    closed: state.closed,
+    exitCode: state.exitCode,
+    signal: state.signal,
+  }));
+  const waitForPhase = async (eventName, timeoutMs) => {
+    const deadline = Date.now() + timeoutMs;
+    while (!states.every((state) => hasEvent(state, eventName))) {
+      const early = states.find((state) => {
+        const result = resultEvent(state);
+        return state.spawnError || (result && !result.result?.ok) || (state.closed && !hasEvent(state, eventName));
+      });
+      if (early) throw new Error(early.workerName + " failed before " + eventName);
+      if (Date.now() >= deadline) throw new Error("timed out waiting for " + eventName);
+      await delay(10);
+    }
+  };
+  const waitForClose = async (timeoutMs) => {
+    const deadline = Date.now() + timeoutMs;
+    while (!states.every((state) => state.closed)) {
+      const early = states.find((state) => {
+        const result = resultEvent(state);
+        return state.spawnError || (result && !result.result?.ok) ||
+          (state.closed && (!result || state.exitCode !== 0));
+      });
+      if (early) throw new Error(early.workerName + " failed while joining");
+      if (Date.now() >= deadline) throw new Error("timed out waiting for workers to close");
+      await delay(10);
+    }
+  };
+
+  let failure = null;
+  try {
+    await waitForPhase("boot_ready", 10_000);
+    writeFileSync(bootStartPath, "start");
+    await waitForPhase("join_ready", 10_000);
+    writeFileSync(joinStartPath, "start");
+    await waitForClose(10_000);
+    const failed = states.find((state) => {
+      const result = resultEvent(state);
+      return !result || !result.result?.ok || state.exitCode !== 0;
+    });
+    if (failed) throw new Error(failed.workerName + " did not complete its joins");
+  } catch (error) {
+    failure = error instanceof Error ? error.message : String(error);
+  } finally {
+    for (const state of states) {
+      if (!state.closed) state.child.kill("SIGTERM");
+    }
+    await delay(100);
+    for (const state of states) {
+      if (!state.closed) state.child.kill("SIGKILL");
+    }
+    await Promise.all(states.map((state) => state.closePromise));
+  }
+
+  if (failure) {
+    process.stderr.write(JSON.stringify({ failure, workers: snapshot() }, null, 2) + "\\n");
+    process.exitCode = 1;
+  } else {
+    const joined = states.flatMap((state) => resultEvent(state).result.joined);
+    process.stdout.write(JSON.stringify({ ok: true, joined, workers: snapshot() }) + "\\n");
+  }
+  })().catch((error) => {
+    process.stderr.write(
+      JSON.stringify(
+        { failure: error instanceof Error ? error.message : String(error) },
+        null,
+        2
+      ) + "\\n"
+    );
+    process.exitCode = 1;
+  });
+`;
+const coordinator = spawnSync(process.execPath, [tsxCli, "--eval", coordinatorSource], {
+  cwd: process.cwd(),
+  env: {
+    ...process.env,
+    IONICLINK_DATA_DIR: concurrentDataDir,
+    IONICLINK_CONCURRENT_TSX: tsxCli,
+    IONICLINK_CONCURRENT_SOURCE: workerSource,
+  },
+  encoding: "utf8",
+  timeout: 35_000,
 });
-assert.deepEqual(
-  workerResults.filter((result) => !result.ok),
-  [],
-  "all concurrent joins must finish without SQLITE_BUSY or another bootstrap error"
+assert.equal(
+  coordinator.status,
+  0,
+  coordinator.stderr || coordinator.stdout || coordinator.error?.message || "concurrency coordinator failed"
 );
-const concurrentJoins = workerResults.flatMap((result) => result.joined ?? []);
+const coordinatorResult = JSON.parse(coordinator.stdout.trim()) as {
+  ok: boolean;
+  joined: Array<{ projectId: string; participantId: string }>;
+};
+assert.equal(coordinatorResult.ok, true);
+const concurrentJoins = coordinatorResult.joined;
 assert.equal(concurrentJoins.length, 30);
 assert.equal(new Set(concurrentJoins.map((result) => result.participantId)).size, 30);
 
