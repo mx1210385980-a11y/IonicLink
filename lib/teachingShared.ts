@@ -14,6 +14,49 @@ export type TeachingScore = "correct" | "incorrect" | "pending";
 export type TeachingScores = Partial<Record<TeachingFieldKey, TeachingScore>>;
 export type TeachingRole = "teacher" | "student";
 
+export type TeachingMode = "manual" | "ai_assisted";
+export type TeachingSequence = "manual_then_ai" | "ai_then_manual";
+
+export type TeachingEvidenceRule = {
+  pages: number[];
+  anyKeywordSets: string[][];
+  notReported?: boolean;
+};
+
+export type TeachingValueRule =
+  | { kind: "text"; expected: string; aliases: string[] }
+  | { kind: "number"; expected: number; tolerance: number; aliases: string[] }
+  | { kind: "temperature"; kelvin: number; toleranceKelvin: number; aliases: string[] }
+  | { kind: "force-range"; min: number; max: number; unit: "nN"; tolerance: number; aliases: string[] }
+  | { kind: "not_reported"; aliases: string[] };
+
+export type TeachingGoldRule = {
+  value: TeachingValueRule;
+  evidence: TeachingEvidenceRule;
+};
+
+export type TeachingExperimentPaper = {
+  id: string;
+  code: "A" | "B";
+  title: string;
+  doi: string;
+  journal: string;
+  sourceUrl: string;
+  taskPrompt: string;
+  aiModel: string;
+  aiInitial: TeachingAnswers;
+  gold: Record<TeachingFieldKey, TeachingGoldRule>;
+};
+
+export type TeachingExperimentConfig = {
+  id: string;
+  name: string;
+  version: string;
+  scoringVersion: string;
+  fields: typeof TEACHING_FIELDS;
+  papers: [TeachingExperimentPaper, TeachingExperimentPaper];
+};
+
 export interface TeachingMetrics {
   expected: number;
   humanFilled: number;
