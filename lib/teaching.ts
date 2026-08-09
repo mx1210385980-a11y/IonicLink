@@ -42,6 +42,8 @@ export {
   rescoreTeachingSubmission,
   saveCurrentTeachingDraft,
   submitCurrentTeachingRound,
+  TeachingRoundConflictError,
+  type TeachingRoundExpectation,
 } from "./teaching/assignment";
 export {
   recordTeachingHeartbeat,

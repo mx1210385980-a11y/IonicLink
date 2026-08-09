@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   createTeachingSession,
   deleteTeachingSession,
-  joinTeachingProject,
+  joinDefaultTeachingExperiment,
+  normalizeStudentAlias,
   teacherLoginConfigured,
   verifyTeacherPassword,
 } from "@/lib/teaching";
@@ -21,17 +22,17 @@ export async function POST(request: NextRequest) {
   if (rejected) return rejected;
   const body = (await request.json().catch(() => null)) as
     | {
-        role?: "student" | "teacher";
-        inviteCode?: string;
-        groupCode?: string;
+        role?: unknown;
         studentAlias?: string;
         password?: string;
       }
     | null;
-  if (!body?.role) return NextResponse.json({ error: "请选择学生或教师入口。" }, { status: 400 });
+  if (body?.role !== "student" && body?.role !== "teacher") {
+    return NextResponse.json({ error: "请选择学生或教师入口。" }, { status: 400 });
+  }
 
-  try {
-    if (body.role === "teacher") {
+  if (body.role === "teacher") {
+    try {
       if (!teacherLoginConfigured()) {
         return NextResponse.json(
           { error: "服务器尚未配置 TEACHING_TEACHER_PASSWORD。" },
@@ -43,13 +44,26 @@ export async function POST(request: NextRequest) {
       }
       const token = createTeachingSession({ role: "teacher", projectId: null, participantId: null });
       return withTeachingCookie(NextResponse.json({ redirect: "/teaching/admin" }), token, request);
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "教师登录失败。" },
+        { status: 500 }
+      );
     }
+  }
 
-    const joined = joinTeachingProject({
-      inviteCode: body.inviteCode ?? "",
-      groupCode: body.groupCode ?? "",
-      studentAlias: body.studentAlias ?? "",
-    });
+  let studentAlias: string;
+  try {
+    studentAlias = normalizeStudentAlias(body.studentAlias ?? "");
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "学生标识无效。" },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const joined = joinDefaultTeachingExperiment(studentAlias);
     const token = createTeachingSession({
       role: "student",
       projectId: joined.projectId,
@@ -59,7 +73,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "进入教学实验失败。" },
-      { status: 400 }
+      { status: 503 }
     );
   }
 }

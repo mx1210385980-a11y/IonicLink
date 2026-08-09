@@ -36,6 +36,21 @@ type ScoringRow = {
   scoringRulesJson: string;
 };
 
+export type TeachingRoundExpectation = {
+  roundNo: 1 | 2;
+  version: number;
+};
+
+export class TeachingRoundConflictError extends Error {
+  constructor(
+    message: string,
+    public readonly kind: "version" | "locked" | "stale_round"
+  ) {
+    super(message);
+    this.name = "TeachingRoundConflictError";
+  }
+}
+
 function now(): string {
   return new Date().toISOString();
 }
@@ -404,7 +419,10 @@ export function saveCurrentTeachingDraft(
   }).immediate();
 }
 
-export function submitCurrentTeachingRound(participantId: string): TeachingRoundTransition {
+export function submitCurrentTeachingRound(
+  participantId: string,
+  expected?: TeachingRoundExpectation
+): TeachingRoundTransition {
   const store = getTeachingDb();
   let failure: unknown;
   const transition = store.transaction((): TeachingRoundTransition => {
@@ -419,7 +437,32 @@ export function submitCurrentTeachingRound(participantId: string): TeachingRound
       )
       .get(participantId) as { completedAt: string | null } | undefined;
     if (!participant) throw new Error("Teaching participant was not found.");
-    if (participant.completedAt) return { status: "complete", completedAt: participant.completedAt };
+    if (participant.completedAt) {
+      if (expected) {
+        const completedRound = store
+          .prepare(
+            `SELECT round_no AS roundNo, version
+             FROM teaching_submissions
+             WHERE participant_id = ? AND submitted_at IS NOT NULL
+               AND round_no IN (1, 2)
+             ORDER BY round_no DESC LIMIT 1`
+          )
+          .get(participantId) as { roundNo: 1 | 2; version: number } | undefined;
+        if (!completedRound || completedRound.roundNo !== expected.roundNo) {
+          throw new TeachingRoundConflictError(
+            "The submitted teaching round is stale.",
+            "stale_round"
+          );
+        }
+        if (completedRound.version !== expected.version + 1) {
+          throw new TeachingRoundConflictError(
+            "The submitted teaching draft version is stale.",
+            "version"
+          );
+        }
+      }
+      return { status: "complete", completedAt: participant.completedAt };
+    }
 
     const current = store
       .prepare(
@@ -432,6 +475,18 @@ export function submitCurrentTeachingRound(participantId: string): TeachingRound
       | { id: string; roundNo: 1 | 2; answersJson: string; version: number }
       | undefined;
     if (!current) throw new Error("No active teaching round is available.");
+    if (expected?.roundNo !== undefined && current.roundNo !== expected.roundNo) {
+      throw new TeachingRoundConflictError(
+        "The submitted teaching round is stale.",
+        "stale_round"
+      );
+    }
+    if (expected?.version !== undefined && current.version !== expected.version) {
+      throw new TeachingRoundConflictError(
+        "The submitted teaching draft version is stale.",
+        "version"
+      );
+    }
 
     const answers = JSON.parse(current.answersJson) as TeachingAnswers;
     const missing = TEACHING_FIELDS.filter(
