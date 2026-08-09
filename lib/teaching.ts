@@ -1,7 +1,8 @@
 import Database from "better-sqlite3";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
+import { closeTeachingStoreForTests, getTeachingDb, teachingDataDir } from "./teaching/store";
 import {
   TEACHING_FIELDS,
   type TeachingAnswers,
@@ -29,86 +30,9 @@ export interface TeachingSession {
   participantId: string | null;
 }
 
-const DATA_DIR = path.resolve(process.env.IONICLINK_DATA_DIR || path.join(process.cwd(), "data"));
-const TEACHING_DB_PATH = path.join(DATA_DIR, "teaching.db");
+const db = getTeachingDb;
+const DATA_DIR = teachingDataDir();
 const SESSION_DAYS = 14;
-let teachingDb: Database.Database | null = null;
-
-function db(): Database.Database {
-  if (teachingDb) return teachingDb;
-  mkdirSync(DATA_DIR, { recursive: true });
-  const next = new Database(TEACHING_DB_PATH);
-  next.pragma("journal_mode = WAL");
-  next.pragma("foreign_keys = ON");
-  next.exec(`
-    CREATE TABLE IF NOT EXISTS teaching_projects (
-      id          TEXT PRIMARY KEY,
-      name        TEXT NOT NULL,
-      domain      TEXT NOT NULL DEFAULT 'tribology',
-      invite_code TEXT NOT NULL UNIQUE,
-      status      TEXT NOT NULL DEFAULT 'open',
-      fields_json TEXT NOT NULL,
-      created_at  TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS teaching_papers (
-      id               TEXT PRIMARY KEY,
-      project_id       TEXT NOT NULL REFERENCES teaching_projects(id) ON DELETE CASCADE,
-      paper_no         TEXT NOT NULL,
-      title            TEXT NOT NULL,
-      doi              TEXT,
-      journal          TEXT,
-      source_url       TEXT,
-      source_record_id TEXT,
-      ai_snapshot_json TEXT NOT NULL,
-      ai_model         TEXT,
-      ai_extracted_at  TEXT,
-      created_at       TEXT NOT NULL,
-      UNIQUE(project_id, paper_no)
-    );
-    CREATE TABLE IF NOT EXISTS teaching_participants (
-      id                TEXT PRIMARY KEY,
-      project_id        TEXT NOT NULL REFERENCES teaching_projects(id) ON DELETE CASCADE,
-      group_code        TEXT NOT NULL,
-      student_alias     TEXT NOT NULL,
-      assigned_paper_id TEXT REFERENCES teaching_papers(id) ON DELETE SET NULL,
-      created_at        TEXT NOT NULL,
-      UNIQUE(project_id, group_code, student_alias)
-    );
-    CREATE TABLE IF NOT EXISTS teaching_submissions (
-      id             TEXT PRIMARY KEY,
-      project_id     TEXT NOT NULL REFERENCES teaching_projects(id) ON DELETE CASCADE,
-      paper_id       TEXT NOT NULL REFERENCES teaching_papers(id) ON DELETE CASCADE,
-      participant_id TEXT NOT NULL REFERENCES teaching_participants(id) ON DELETE CASCADE,
-      started_at     TEXT NOT NULL,
-      submitted_at   TEXT,
-      answers_json   TEXT NOT NULL DEFAULT '{}',
-      version        INTEGER NOT NULL DEFAULT 0,
-      updated_at     TEXT NOT NULL,
-      UNIQUE(project_id, paper_id, participant_id)
-    );
-    CREATE TABLE IF NOT EXISTS teaching_reviews (
-      submission_id     TEXT PRIMARY KEY REFERENCES teaching_submissions(id) ON DELETE CASCADE,
-      human_scores_json TEXT NOT NULL DEFAULT '{}',
-      ai_scores_json    TEXT NOT NULL DEFAULT '{}',
-      reviewed_at       TEXT NOT NULL,
-      reviewer_id       TEXT NOT NULL DEFAULT 'teacher'
-    );
-    CREATE TABLE IF NOT EXISTS teaching_sessions (
-      token_hash     TEXT PRIMARY KEY,
-      role           TEXT NOT NULL,
-      project_id     TEXT,
-      participant_id TEXT,
-      created_at     TEXT NOT NULL,
-      expires_at     TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_teaching_submissions_project
-      ON teaching_submissions(project_id, submitted_at);
-    CREATE INDEX IF NOT EXISTS idx_teaching_sessions_expiry
-      ON teaching_sessions(expires_at);
-  `);
-  teachingDb = next;
-  return next;
-}
 
 function now(): string {
   return new Date().toISOString();
@@ -715,6 +639,5 @@ export function reviewTeachingSubmission(
 }
 
 export function closeTeachingDatabaseForTests(): void {
-  teachingDb?.close();
-  teachingDb = null;
+  closeTeachingStoreForTests();
 }
