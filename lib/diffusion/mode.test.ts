@@ -4,13 +4,14 @@ import { getDiffusionMode, type DiffusionMode } from "./mode";
 const cases: Array<{ geometry: string; expected: DiffusionMode }> = [
   { geometry: "slit pore", expected: "2D" },
   { geometry: "carbon nanotube", expected: "1D" },
-  { geometry: "cellulose ionogel matrix", expected: "3D" },
+  { geometry: "MOF framework", expected: "3D-Cage" },
   { geometry: "parallel plate", expected: "2D" },
-  { geometry: "cylindrical channel", expected: "1D" },
-  { geometry: "graphene oxide film", expected: "2D" },
-  { geometry: "mesoporous carbon network", expected: "3D" },
-  { geometry: "unknown geometry", expected: "3D" },
-  { geometry: "", expected: "3D" },
+  { geometry: "cylindrical pore", expected: "1D" },
+  { geometry: "isolated liquid droplets", expected: "0D-Pools" },
+  { geometry: "bicontinuous gyroid", expected: "Gyroid" },
+  { geometry: "mesoporous carbon network", expected: "Membrane" },
+  { geometry: "unknown geometry", expected: "Membrane" },
+  { geometry: "", expected: "Membrane" },
 ];
 
 for (const { geometry, expected } of cases) {
