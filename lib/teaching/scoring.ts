@@ -196,7 +196,13 @@ export function scoreSubmission(
     if (valueScore.correct) valueCorrect += 1;
     if (normalizeTeachingText(answer?.value ?? "")) valueCovered += 1;
     if (evidenceScore.correct) evidenceCorrect += 1;
-    if (normalizeTeachingText(answer?.evidence ?? "")) evidenceCovered += 1;
+    const evidenceText = answer?.evidence ?? "";
+    const hasEvidence = Boolean(normalizeTeachingText(evidenceText));
+    const hasPage = Boolean(normalizeTeachingText(answer?.page ?? ""));
+    const isExplicitNotReported =
+      paper.gold[field.key].evidence.notReported === true &&
+      keywordSetMatches(evidenceText, paper.gold[field.key].evidence.anyKeywordSets);
+    if (hasEvidence && (hasPage || isExplicitNotReported)) evidenceCovered += 1;
   }
 
   const denominator = TEACHING_FIELDS.length;

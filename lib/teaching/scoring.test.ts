@@ -69,6 +69,47 @@ assert.equal(
   "blank answers count against all six fields"
 );
 assert.equal(scoreSubmission({}, paperA).valueCoverage, 0);
+assert.equal(
+  scoreSubmission({ cation: { value: "EMIM", evidence: "EMIM" } }, paperA).evidenceCoverage,
+  0,
+  "ordinary evidence needs both a page and evidence text to count as covered"
+);
+assert.equal(
+  scoreSubmission(
+    {
+      temperature: {
+        value: "not reported",
+        page: "",
+        evidence: "temperature not reported",
+      },
+    },
+    paperA
+  ).evidenceCoverage,
+  1 / 6,
+  "explicit not-reported evidence may be covered without a page"
+);
+assert.equal(
+  scoreSubmission(
+    { temperature: { value: "not reported", page: "", evidence: "arbitrary text" } },
+    paperA
+  ).evidenceCoverage,
+  0,
+  "an empty page is not covered when not-reported evidence is not explicit"
+);
+assert.equal(
+  scoreSubmission(
+    { cation: { value: "EMIM", page: "999", evidence: "EMIM" } },
+    paperA
+  ).evidenceCoverage,
+  1 / 6,
+  "coverage records a page-and-evidence attempt even when the page is wrong"
+);
+assert.equal(
+  scoreSubmission({ cation: { value: "EMIM", page: "2", evidence: "" } }, paperA)
+    .evidenceCoverage,
+  0,
+  "a page without evidence text is not covered"
+);
 
 const correctedFinalAnswers = structuredClone(paperA.aiInitial);
 correctedFinalAnswers.temperature = {
