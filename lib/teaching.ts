@@ -11,6 +11,7 @@ import {
 import {
   DEFAULT_EXPERIMENT,
   ensureDefaultTeachingExperiment,
+  hasCurrentDefaultTeachingExperiment,
 } from "./teaching/config";
 import { scoreAiBehavior, scoreSubmission } from "./teaching/scoring";
 import { teachingTimingQuality as classifyTeachingTiming } from "./teaching/activity";
@@ -291,6 +292,19 @@ export function addTeachingPaper(input: {
   if (!recordId) throw new Error("请选择一篇文献。");
 
   const store = db();
+  const projectKind = store
+    .prepare(
+      `SELECT experiment_kind AS experimentKind, is_default AS isDefault
+       FROM teaching_projects WHERE id = ?`
+    )
+    .get(projectId) as { experimentKind: string; isDefault: number } | undefined;
+  if (
+    projectId === DEFAULT_EXPERIMENT.id ||
+    projectKind?.experimentKind === "crossover" ||
+    projectKind?.isDefault === 1
+  ) {
+    throw new Error("默认交叉实验的冻结文献不能通过普通教学项目修改。");
+  }
   const existing = store
     .prepare(
       `SELECT id, source_record_id AS sourceRecordId
@@ -359,7 +373,11 @@ export function joinTeachingProject(input: {
 }): { projectId: string; participantId: string } {
   const store = db();
   const project = store
-    .prepare("SELECT id FROM teaching_projects WHERE invite_code = ? AND status = 'open'")
+    .prepare(
+      `SELECT id FROM teaching_projects
+       WHERE invite_code = ? AND status = 'open'
+         AND experiment_kind = 'legacy' AND is_default = 0`
+    )
     .get(clean(input.inviteCode, 40).toUpperCase().replace(/\s+/g, "")) as { id: string } | undefined;
   if (!project) throw new Error("邀请码不存在或项目尚未开放。");
   const groupCode = clean(input.groupCode, 80);
@@ -558,6 +576,8 @@ type DefaultTeachingSubmissionRow = {
   valueScoresJson: string;
   evidenceScoresJson: string;
   scoringStatus: string;
+  scoringVersion: string | null;
+  autoScoredAt: string | null;
   paperId: string;
   paperCode: string;
   title: string;
@@ -655,6 +675,9 @@ function defaultTeachingRoundAnalysis(
     row.paperCode !== expected.paperCode ||
     row.submittedAt === null ||
     row.scoringStatus !== "scored" ||
+    row.scoringVersion !== DEFAULT_EXPERIMENT.scoringVersion ||
+    row.autoScoredAt === null ||
+    !Number.isFinite(Date.parse(row.autoScoredAt)) ||
     !Number.isFinite(row.activeSeconds) ||
     row.activeSeconds < 0
   ) {
@@ -662,7 +685,13 @@ function defaultTeachingRoundAnalysis(
   }
   const startedAt = Date.parse(row.startedAt);
   const submittedAt = Date.parse(row.submittedAt);
-  if (!Number.isFinite(startedAt) || !Number.isFinite(submittedAt)) return null;
+  if (
+    !Number.isFinite(startedAt) ||
+    !Number.isFinite(submittedAt) ||
+    submittedAt < startedAt
+  ) {
+    return null;
+  }
 
   const answers = parsedObject<TeachingAnswers>(row.answersJson);
   const aiInitial = parsedObject<TeachingAnswers>(row.aiInitialJson);
@@ -692,7 +721,7 @@ function defaultTeachingRoundAnalysis(
       return null;
     }
   }
-  const wallSeconds = Math.max(0, (submittedAt - startedAt) / 1_000);
+  const wallSeconds = (submittedAt - startedAt) / 1_000;
   return {
     submissionId: row.submissionId,
     paperCode: expected.paperCode,
@@ -724,7 +753,9 @@ function defaultTeachingAssignments(sequence: TeachingSequence): Array<{
 
 export function getDefaultTeachingDashboard(): TeachingExperimentDashboard {
   const store = db();
-  ensureDefaultTeachingExperiment(store);
+  if (!hasCurrentDefaultTeachingExperiment(store)) {
+    ensureDefaultTeachingExperiment(store);
+  }
 
   const participants = store
     .prepare(
@@ -733,6 +764,7 @@ export function getDefaultTeachingDashboard(): TeachingExperimentDashboard {
               pt.exclusion_reason AS exclusionReason
        FROM teaching_participants pt
        WHERE pt.project_id = ?
+         AND pt.sequence_code IN ('manual_then_ai', 'ai_then_manual')
        ORDER BY pt.created_at ASC, pt.id ASC`
     )
     .all(DEFAULT_EXPERIMENT.id) as DefaultTeachingParticipantRow[];
@@ -744,7 +776,8 @@ export function getDefaultTeachingDashboard(): TeachingExperimentDashboard {
               s.answers_json AS answersJson, s.ai_initial_json AS aiInitialJson,
               s.auto_value_scores_json AS valueScoresJson,
               s.auto_evidence_scores_json AS evidenceScoresJson,
-              s.scoring_status AS scoringStatus,
+              s.scoring_status AS scoringStatus, s.scoring_version AS scoringVersion,
+              s.auto_scored_at AS autoScoredAt,
               p.id AS paperId, p.paper_no AS paperCode, p.title, p.doi, p.journal,
               p.source_url AS sourceUrl, p.task_prompt AS taskPrompt,
               p.ai_model AS aiModel, p.scoring_rules_json AS scoringRulesJson

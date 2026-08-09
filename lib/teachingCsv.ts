@@ -24,9 +24,34 @@ const HEADERS = [
   "状态",
 ] as const;
 
+interface TrustedCsvCell {
+  readonly kind: "trusted_csv_cell";
+  readonly value: string | number;
+}
+
+function trustedCell(value: string | number): TrustedCsvCell {
+  return { kind: "trusted_csv_cell", value };
+}
+
+function trustedNumber(value: number): TrustedCsvCell | "" {
+  return Number.isFinite(value) ? trustedCell(value) : "";
+}
+
+function trustedPercentage(value: number | null): TrustedCsvCell | "" {
+  return value !== null && Number.isFinite(value)
+    ? trustedCell(`${(value * 100).toFixed(1)}%`)
+    : "";
+}
+
 function safeCell(value: unknown): string {
-  let text = value == null ? "" : String(value);
-  if (/^[\s\p{Cc}]*[=+\-@]/u.test(text)) text = `'${text}`;
+  const trusted =
+    typeof value === "object" &&
+    value !== null &&
+    "kind" in value &&
+    value.kind === "trusted_csv_cell";
+  const raw = trusted ? (value as TrustedCsvCell).value : value;
+  let text = raw == null ? "" : String(raw);
+  if (!trusted && /^[\s\p{Cc}]*[=+\-@]/u.test(text)) text = `'${text}`;
   return `"${text.replace(/"/g, '""')}"`;
 }
 
@@ -116,22 +141,21 @@ function roundCells(round: TeachingRoundAnalysis | null): unknown[] {
   if (!round) return Array.from({ length: 9 }, () => "");
   return [
     round.paperCode,
-    round.activeSeconds,
-    round.wallSeconds,
+    trustedNumber(round.activeSeconds),
+    trustedNumber(round.wallSeconds),
     round.timingQuality,
     `${round.score.valueCorrect}/${TEACHING_FIELDS.length}`,
-    percentage(round.score.valueAccuracy),
-    percentage(round.score.valueCoverage),
-    percentage(round.score.evidenceAccuracy),
-    percentage(round.score.evidenceCoverage),
+    trustedPercentage(round.score.valueAccuracy),
+    trustedPercentage(round.score.valueCoverage),
+    trustedPercentage(round.score.evidenceAccuracy),
+    trustedPercentage(round.score.evidenceCoverage),
   ];
 }
 
-function replaceAliases(
-  value: unknown,
+function createAliasReplacer(
   replacements: ReadonlyArray<{ raw: string; anonymized: string }>
-): unknown {
-  if (typeof value !== "string" || replacements.length === 0) return value;
+): (value: unknown) => unknown {
+  if (replacements.length === 0) return (value) => value;
   const anonymizedByRaw = new Map<string, string>();
   for (const replacement of replacements) {
     if (!anonymizedByRaw.has(replacement.raw)) {
@@ -144,7 +168,10 @@ function replaceAliases(
       .join("|"),
     "gu"
   );
-  return value.replace(pattern, (raw) => anonymizedByRaw.get(raw)!);
+  return (value) =>
+    typeof value === "string"
+      ? value.replace(pattern, (raw) => anonymizedByRaw.get(raw)!)
+      : value;
 }
 
 export function teachingExperimentToCsv(
@@ -163,6 +190,7 @@ export function teachingExperimentToCsv(
         .filter(({ raw }) => raw.length > 0)
         .sort((left, right) => right.raw.length - left.raw.length)
     : [];
+  const replaceAliases = createAliasReplacer(replacements);
   const lines = [EXPERIMENT_HEADERS.map(safeCell).join(",")];
 
   for (const [index, participant] of dashboard.participants.entries()) {
@@ -178,30 +206,34 @@ export function teachingExperimentToCsv(
       participant.sequence,
       participant.completed ? "completed" : "incomplete",
       paired ? "paired" : "not_paired",
-      participant.exclusionReason ?? "",
+      options.anonymize
+        ? participant.exclusionReason === null
+          ? ""
+          : "excluded"
+        : participant.exclusionReason ?? "",
       ...roundCells(participant.manual),
       ...roundCells(participant.aiAssisted),
-      behavior?.suggested ?? "",
-      behavior?.adopted ?? "",
-      behavior?.modified ?? "",
-      behavior?.initiallyIncorrect ?? "",
-      behavior?.corrected ?? "",
-      behavior?.incorrectlyAdopted ?? "",
-      behavior ? percentage(behavior.adoptionRate) : "",
-      behavior ? percentage(behavior.modificationRate) : "",
-      behavior ? percentage(behavior.correctionRate) : "",
-      behavior ? percentage(behavior.incorrectAdoptionRate) : "",
-      participant.activeTimeDifference ?? "",
-      participant.accuracyDifference === null
+      behavior ? trustedNumber(behavior.suggested) : "",
+      behavior ? trustedNumber(behavior.adopted) : "",
+      behavior ? trustedNumber(behavior.modified) : "",
+      behavior ? trustedNumber(behavior.initiallyIncorrect) : "",
+      behavior ? trustedNumber(behavior.corrected) : "",
+      behavior ? trustedNumber(behavior.incorrectlyAdopted) : "",
+      behavior ? trustedPercentage(behavior.adoptionRate) : "",
+      behavior ? trustedPercentage(behavior.modificationRate) : "",
+      behavior ? trustedPercentage(behavior.correctionRate) : "",
+      behavior ? trustedPercentage(behavior.incorrectAdoptionRate) : "",
+      participant.activeTimeDifference === null
         ? ""
-        : percentage(participant.accuracyDifference),
+        : trustedNumber(participant.activeTimeDifference),
+      trustedPercentage(participant.accuracyDifference),
     ];
     lines.push(
       values
         .map((value, columnIndex) =>
           options.anonymize && columnIndex === 4
             ? value
-            : replaceAliases(value, replacements)
+            : replaceAliases(value)
         )
         .map(safeCell)
         .join(",")

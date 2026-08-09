@@ -159,7 +159,7 @@ const incompleteParticipant: TeachingPairedResult = {
   sequence: "ai_then_manual",
   completed: false,
   exclusionReason:
-    "\u000b@external-review participant-dangerous-alias participant-incomplete Raw Alias",
+    "\u000b@external-review participant-dangerous-alias participant-incomplete Raw Alias Alice ALICE Ａｌｉｃｅ alice@example.com",
   manual: null,
   aiAssisted: null,
   activeTimeDifference: null,
@@ -209,6 +209,62 @@ assert.match(anonymized, /"S002"/);
 assert.doesNotMatch(anonymized, new RegExp(dangerousAlias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 assert.doesNotMatch(anonymized, /Raw Alias/);
 assert.doesNotMatch(anonymized, /participant-dangerous-alias|participant-incomplete/);
+assert.doesNotMatch(anonymized, /Alice|ALICE|Ａｌｉｃｅ|alice@example\.com/);
+assert.match(anonymized, /"incomplete","not_paired","excluded"/);
+
+const aliasVariants = ["Alice", "ALICE", "Ａｌｉｃｅ", "alice@example.com"];
+const aliasVariantParticipants = aliasVariants.map((studentAlias, index) => ({
+  ...incompleteParticipant,
+  participantId: `alias-variant-${index + 1}`,
+  studentAlias,
+  exclusionReason: null,
+}));
+const aliasVariantCsv = teachingExperimentToCsv(
+  {
+    experiment: {
+      id: "alias-variant-experiment",
+      name: "Alias variant export",
+      version: "v-alias",
+      scoringVersion: "score-alias",
+    },
+    summary: summarizeTeachingExperiment(aliasVariantParticipants),
+    participants: aliasVariantParticipants,
+  },
+  { anonymize: true }
+);
+for (const alias of aliasVariants) {
+  assert.equal(
+    aliasVariantCsv.includes(alias),
+    false,
+    `anonymized exports must remove the real participant alias ${alias}`
+  );
+}
+assert.match(aliasVariantCsv, /"S001"/);
+assert.match(aliasVariantCsv, /"S004"/);
+
+const negativeComputedParticipant: TeachingPairedResult = {
+  ...pairedParticipant,
+  participantId: "negative-computed-id",
+  studentAlias: "-600 user alias",
+  activeTimeDifference: -600,
+  accuracyDifference: -1 / 6,
+};
+const negativeComputedCsv = teachingExperimentToCsv({
+  ...experimentDashboard,
+  summary: summarizeTeachingExperiment([negativeComputedParticipant]),
+  participants: [negativeComputedParticipant],
+});
+assert.match(
+  negativeComputedCsv,
+  /,"-600","-16\.7%"\r\n$/,
+  "trusted computed negatives must remain numeric CSV cells"
+);
+assert.match(
+  negativeComputedCsv,
+  /"'-600 user alias"/,
+  "untrusted user strings that begin with a minus must remain formula-safe"
+);
+assert.doesNotMatch(negativeComputedCsv, /"'-600"|"'-16\.7%"/);
 
 const collisionParticipants: TeachingPairedResult[] = [
   {
@@ -227,7 +283,7 @@ const collisionParticipants: TeachingPairedResult[] = [
 const collisionDashboard: TeachingExperimentDashboard = {
   experiment: {
     id: "collision-experiment",
-    name: "Collision experiment",
+    name: "Alice",
     version: "v-collision",
     scoringVersion: "score-collision",
   },
@@ -245,6 +301,11 @@ const collisionExclusions = collisionCsv
   .filter(Boolean)
   .slice(1)
   .map((line) => line.split(",")[8]);
+const collisionNames = collisionCsv
+  .split("\r\n")
+  .filter(Boolean)
+  .slice(1)
+  .map((line) => line.split(",")[1]);
 assert.deepEqual(
   collisionLabels,
   ['"S001"', '"S002"'],
@@ -252,7 +313,12 @@ assert.deepEqual(
 );
 assert.deepEqual(
   collisionExclusions,
-  ['"S001"', '""'],
+  ['"excluded"', '""'],
+  "anonymized exports must replace free-text exclusion reasons with a safe marker"
+);
+assert.deepEqual(
+  collisionNames,
+  ['"S001"', '"S001"'],
   "raw values must be replaced once without rescanning generated labels"
 );
 

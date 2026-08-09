@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import type Database from "better-sqlite3";
 import {
+  addTeachingPaper,
   getDefaultTeachingDashboard,
   joinDefaultTeachingExperiment,
+  joinTeachingProject,
 } from "../teaching";
 import { DEFAULT_EXPERIMENT, defaultExperimentChecksum } from "./config";
 import { scoreSubmission } from "./scoring";
@@ -476,6 +478,33 @@ assert.equal(
   1,
   "the empty dashboard must bootstrap the default experiment"
 );
+assert.throws(
+  () =>
+    addTeachingPaper({
+      projectId: DEFAULT_EXPERIMENT.id,
+      recordId: "frozen-default-record",
+      paperNo: "C",
+    }),
+  /frozen|default|cross|experiment|冻结|默认|交叉|实验/i,
+  "the legacy paper-management path must not add papers to the frozen default experiment"
+);
+const participantCountBeforeLegacyJoin = Number(
+  database.prepare("SELECT COUNT(*) FROM teaching_participants").pluck().get()
+);
+assert.throws(
+  () =>
+    joinTeachingProject({
+      inviteCode: "AUTO-CROSSOVER-2026-V1",
+      groupCode: "legacy-path",
+      studentAlias: "Legacy Crossover Join",
+    }),
+  /invite|project|crossover|default|邀请码|项目/i,
+  "the legacy one-paper join must not enter the default crossover experiment"
+);
+assert.equal(
+  database.prepare("SELECT COUNT(*) FROM teaching_participants").pluck().get(),
+  participantCountBeforeLegacyJoin
+);
 database
   .prepare(
     `UPDATE teaching_projects
@@ -535,11 +564,34 @@ function assertStoredPaperBIsDefault(): void {
   });
 }
 
+function insertUnexpectedDefaultPaper(id: string, paperNo: string): void {
+  database
+    .prepare(
+      `INSERT INTO teaching_papers
+       (id, project_id, paper_no, title, doi, journal, source_url, source_record_id,
+        ai_snapshot_json, ai_model, ai_extracted_at, created_at, task_prompt,
+        gold_snapshot_json, scoring_rules_json, config_version)
+       VALUES (?, ?, ?, 'Unexpected paper', NULL, NULL, NULL, NULL,
+               '{}', NULL, NULL, '2026-08-01T00:00:00.000Z', '', '{}', '{}', NULL)`
+    )
+    .run(id, DEFAULT_EXPERIMENT.id, paperNo);
+}
+
 database
   .prepare("DELETE FROM teaching_papers WHERE id = ?")
   .run(DEFAULT_EXPERIMENT.papers[1].id);
 getDefaultTeachingDashboard();
 assertStoredPaperBIsDefault();
+
+const changesBeforeHealthyDashboardRead = Number(
+  database.prepare("SELECT total_changes()").pluck().get()
+);
+getDefaultTeachingDashboard();
+assert.equal(
+  Number(database.prepare("SELECT total_changes()").pluck().get()),
+  changesBeforeHealthyDashboardRead,
+  "a healthy dashboard read must not rewrite the frozen experiment rows"
+);
 
 database
   .prepare(
@@ -551,6 +603,94 @@ database
   .run(DEFAULT_EXPERIMENT.papers[1].id);
 getDefaultTeachingDashboard();
 assertStoredPaperBIsDefault();
+
+insertUnexpectedDefaultPaper("unexpected-default-paper", "C");
+getDefaultTeachingDashboard();
+assertStoredPaperBIsDefault();
+const changesAfterUnexpectedPaperRepair = Number(
+  database.prepare("SELECT total_changes()").pluck().get()
+);
+getDefaultTeachingDashboard();
+assert.equal(
+  Number(database.prepare("SELECT total_changes()").pluck().get()),
+  changesAfterUnexpectedPaperRepair,
+  "repairing an unexpected unreferenced paper must restore the healthy read fast path"
+);
+
+insertUnexpectedDefaultPaper("linked-unexpected-paper", "D");
+database
+  .prepare(
+    `INSERT INTO teaching_participants
+     (id, project_id, group_code, student_alias, assigned_paper_id, created_at)
+     VALUES ('linked-extra-participant', ?, 'linked-extra',
+             'Linked Extra', 'linked-unexpected-paper', '2026-08-01T00:00:00.000Z')`
+  )
+  .run(DEFAULT_EXPERIMENT.id);
+database
+  .prepare(
+    `INSERT INTO teaching_submissions
+     (id, project_id, paper_id, participant_id, started_at, answers_json, version, updated_at)
+     VALUES ('linked-extra-submission', ?, 'linked-unexpected-paper',
+             'linked-extra-participant', '2026-08-01T00:00:00.000Z', '{}', 0,
+             '2026-08-01T00:00:00.000Z')`
+  )
+  .run(DEFAULT_EXPERIMENT.id);
+assert.throws(
+  () => getDefaultTeachingDashboard(),
+  /unexpected|linked|dependent|额外|关联|依赖/i,
+  "repair must fail instead of deleting an unexpected paper with dependent data"
+);
+assert.equal(
+  database.prepare("SELECT COUNT(*) FROM teaching_papers WHERE id = 'linked-unexpected-paper'").pluck().get(),
+  1
+);
+assert.equal(
+  database
+    .prepare("SELECT COUNT(*) FROM teaching_participants WHERE id = 'linked-extra-participant'")
+    .pluck()
+    .get(),
+  1
+);
+assert.equal(
+  database
+    .prepare("SELECT COUNT(*) FROM teaching_submissions WHERE id = 'linked-extra-submission'")
+    .pluck()
+    .get(),
+  1
+);
+database.prepare("DELETE FROM teaching_participants WHERE id = 'linked-extra-participant'").run();
+getDefaultTeachingDashboard();
+assertStoredPaperBIsDefault();
+
+database
+  .prepare(
+    `INSERT INTO teaching_participants
+     (id, project_id, group_code, student_alias, assigned_paper_id, created_at)
+     VALUES ('invalid-sequence-participant', ?, 'legacy-null-sequence',
+             'Invalid Sequence', ?, '2026-08-01T00:00:00.000Z'),
+            ('illegal-sequence-participant', ?, 'legacy-illegal-sequence',
+             'Illegal Sequence', ?, '2026-08-01T00:00:01.000Z')`
+  )
+  .run(
+    DEFAULT_EXPERIMENT.id,
+    DEFAULT_EXPERIMENT.papers[0].id,
+    DEFAULT_EXPERIMENT.id,
+    DEFAULT_EXPERIMENT.papers[0].id
+  );
+database
+  .prepare(
+    "UPDATE teaching_participants SET sequence_code = 'manual_twice' WHERE id = 'illegal-sequence-participant'"
+  )
+  .run();
+const dashboardWithInvalidSequence = getDefaultTeachingDashboard();
+assert.deepEqual(dashboardWithInvalidSequence.participants, []);
+assert.deepEqual(dashboardWithInvalidSequence.summary.completion, {
+  total: 0,
+  completed: 0,
+  paired: 0,
+  incomplete: 0,
+  excluded: 0,
+});
 
 const completedDb = joinDefaultTeachingExperiment("Dashboard completed");
 const completedSubmissionIds = completeDashboardParticipant(database, completedDb.participantId);
@@ -571,9 +711,76 @@ database
     "2026-08-01T00:00:02.000Z"
   );
 
+const storedAiLineage = database
+  .prepare(
+    `SELECT scoring_version AS scoringVersion, auto_scored_at AS autoScoredAt,
+            auto_value_scores_json AS valueScoresJson,
+            auto_evidence_scores_json AS evidenceScoresJson
+     FROM teaching_submissions WHERE id = ?`
+  )
+  .get(completedSubmissionIds.aiSubmissionId) as {
+  scoringVersion: string;
+  autoScoredAt: string;
+  valueScoresJson: string;
+  evidenceScoresJson: string;
+};
+const distortedOldScore = autoScore(0);
+database
+  .prepare(
+    `UPDATE teaching_submissions
+     SET scoring_version = 'legacy-score-v0', auto_value_scores_json = ?,
+         auto_evidence_scores_json = ?
+     WHERE id = ?`
+  )
+  .run(
+    JSON.stringify(distortedOldScore.values),
+    JSON.stringify(distortedOldScore.evidence),
+    completedSubmissionIds.aiSubmissionId
+  );
+const oldVersionDashboard = getDefaultTeachingDashboard();
+const oldVersionParticipant = oldVersionDashboard.participants.find(
+  (participant) => participant.participantId === completedDb.participantId
+);
+assert.ok(oldVersionParticipant?.manual);
+assert.equal(oldVersionParticipant.aiAssisted, null);
+assert.equal(oldVersionParticipant.activeTimeDifference, null);
+assert.equal(oldVersionDashboard.summary.completion.paired, 0);
+
+database
+  .prepare(
+    `UPDATE teaching_submissions
+     SET scoring_version = ?, auto_scored_at = NULL,
+         auto_value_scores_json = ?, auto_evidence_scores_json = ?
+     WHERE id = ?`
+  )
+  .run(
+    storedAiLineage.scoringVersion,
+    storedAiLineage.valueScoresJson,
+    storedAiLineage.evidenceScoresJson,
+    completedSubmissionIds.aiSubmissionId
+  );
+const missingScoredAtParticipant = getDefaultTeachingDashboard().participants.find(
+  (participant) => participant.participantId === completedDb.participantId
+);
+assert.ok(missingScoredAtParticipant?.manual);
+assert.equal(missingScoredAtParticipant.aiAssisted, null);
+assert.equal(missingScoredAtParticipant.activeTimeDifference, null);
+database
+  .prepare("UPDATE teaching_submissions SET auto_scored_at = 'invalid-date' WHERE id = ?")
+  .run(completedSubmissionIds.aiSubmissionId);
+const malformedScoredAtParticipant = getDefaultTeachingDashboard().participants.find(
+  (participant) => participant.participantId === completedDb.participantId
+);
+assert.ok(malformedScoredAtParticipant?.manual);
+assert.equal(malformedScoredAtParticipant.aiAssisted, null);
+assert.equal(malformedScoredAtParticipant.activeTimeDifference, null);
+database
+  .prepare("UPDATE teaching_submissions SET auto_scored_at = ? WHERE id = ?")
+  .run(storedAiLineage.autoScoredAt, completedSubmissionIds.aiSubmissionId);
+
 const incompleteDb = joinDefaultTeachingExperiment("Dashboard incomplete");
 const excludedDb = joinDefaultTeachingExperiment("Dashboard excluded");
-completeDashboardParticipant(database, excludedDb.participantId, { manualWall: -30 });
+completeDashboardParticipant(database, excludedDb.participantId);
 database
   .prepare(
     `UPDATE teaching_participants
@@ -602,24 +809,27 @@ database
   .prepare("UPDATE teaching_submissions SET mode = NULL WHERE id = ?")
   .run(modeNullIds.manualSubmissionId);
 
+const reverseTimestampDb = joinDefaultTeachingExperiment("Dashboard reverse timestamp");
+completeDashboardParticipant(database, reverseTimestampDb.participantId, { manualWall: -30 });
+
 const dbDashboard = getDefaultTeachingDashboard();
 assert.deepEqual(dbDashboard, getDefaultTeachingDashboard(), "dashboard ordering must be deterministic");
-assert.equal(dbDashboard.participants.length, 7);
+assert.equal(dbDashboard.participants.length, 8);
 assert.equal(
   new Set(dbDashboard.participants.map((participant) => participant.participantId)).size,
-  7,
+  8,
   "submission activity joins must not multiply participant rows"
 );
 assert.deepEqual(dbDashboard.summary.completion, {
-  total: 7,
-  completed: 6,
+  total: 8,
+  completed: 7,
   paired: 1,
   incomplete: 1,
   excluded: 1,
 });
 assert.deepEqual(dbDashboard.summary.sequenceCounts, {
   manual_then_ai: 4,
-  ai_then_manual: 3,
+  ai_then_manual: 4,
 });
 assert.deepEqual(dbDashboard.summary.manual, {
   n: 1,
@@ -689,7 +899,6 @@ const excludedResult = dbDashboard.participants.find(
 );
 assert.ok(excludedResult?.manual && excludedResult.aiAssisted);
 assert.equal(excludedResult.exclusionReason, "manual exclusion");
-assert.equal(excludedResult.manual.wallSeconds, 0, "negative wall time is clamped to zero");
 assert.equal(excludedResult.activeTimeDifference, null);
 
 const zeroResult = dbDashboard.participants.find(
@@ -721,6 +930,14 @@ const modeNullResult = dbDashboard.participants.find(
 assert.ok(modeNullResult?.aiAssisted);
 assert.equal(modeNullResult.manual, null);
 assert.equal(modeNullResult.activeTimeDifference, null);
+
+const reverseTimestampResult = dbDashboard.participants.find(
+  (participant) => participant.participantId === reverseTimestampDb.participantId
+);
+assert.ok(reverseTimestampResult?.aiAssisted);
+assert.equal(reverseTimestampResult.manual, null);
+assert.equal(reverseTimestampResult.activeTimeDifference, null);
+assert.equal(reverseTimestampResult.accuracyDifference, null);
 
 assert.doesNotMatch(
   JSON.stringify(dbDashboard),

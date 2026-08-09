@@ -28,6 +28,96 @@ export function defaultExperimentChecksum(): string {
   return createHash("sha256").update(JSON.stringify(DEFAULT_EXPERIMENT)).digest("hex");
 }
 
+interface StoredDefaultProject {
+  name: string;
+  domain: string;
+  inviteCode: string;
+  status: string;
+  fieldsJson: string;
+  experimentKind: string;
+  configVersion: string | null;
+  configChecksum: string | null;
+  isDefault: number;
+}
+
+interface StoredDefaultPaper {
+  id: string;
+  paperNo: string;
+  title: string;
+  doi: string | null;
+  journal: string | null;
+  sourceUrl: string | null;
+  sourceRecordId: string | null;
+  aiSnapshotJson: string;
+  aiModel: string | null;
+  aiExtractedAt: string | null;
+  taskPrompt: string;
+  goldSnapshotJson: string;
+  scoringRulesJson: string;
+  configVersion: string | null;
+}
+
+export function hasCurrentDefaultTeachingExperiment(store?: Database.Database): boolean {
+  const target = store ?? getTeachingDb();
+  const project = target
+    .prepare(
+      `SELECT name, domain, invite_code AS inviteCode, status, fields_json AS fieldsJson,
+              experiment_kind AS experimentKind, config_version AS configVersion,
+              config_checksum AS configChecksum, is_default AS isDefault
+       FROM teaching_projects WHERE id = ?`
+    )
+    .get(DEFAULT_PROJECT_ID) as StoredDefaultProject | undefined;
+  if (
+    !project ||
+    project.name !== DEFAULT_EXPERIMENT.name ||
+    project.domain !== "tribology" ||
+    project.inviteCode !== DEFAULT_INVITE ||
+    project.status !== "open" ||
+    project.fieldsJson !== JSON.stringify(DEFAULT_EXPERIMENT.fields) ||
+    project.experimentKind !== "crossover" ||
+    project.configVersion !== DEFAULT_EXPERIMENT.version ||
+    project.configChecksum !== defaultExperimentChecksum() ||
+    project.isDefault !== 1
+  ) {
+    return false;
+  }
+
+  const papers = target
+    .prepare(
+      `SELECT id, paper_no AS paperNo, title, doi, journal, source_url AS sourceUrl,
+              source_record_id AS sourceRecordId, ai_snapshot_json AS aiSnapshotJson,
+              ai_model AS aiModel, ai_extracted_at AS aiExtractedAt,
+              task_prompt AS taskPrompt, gold_snapshot_json AS goldSnapshotJson,
+              scoring_rules_json AS scoringRulesJson, config_version AS configVersion
+       FROM teaching_papers WHERE project_id = ? ORDER BY paper_no ASC, id ASC`
+    )
+    .all(DEFAULT_PROJECT_ID) as StoredDefaultPaper[];
+  if (papers.length !== DEFAULT_EXPERIMENT.papers.length) return false;
+
+  return DEFAULT_EXPERIMENT.papers.every((expectedPaper) => {
+    const paper = papers.find((candidate) => candidate.id === expectedPaper.id);
+    const goldValues = Object.fromEntries(
+      Object.entries(expectedPaper.gold).map(([key, rule]) => [key, rule.value])
+    );
+    return (
+      paper !== undefined &&
+      paper.paperNo === expectedPaper.code &&
+      paper.title === expectedPaper.title &&
+      paper.doi === expectedPaper.doi &&
+      paper.journal === expectedPaper.journal &&
+      paper.sourceUrl === expectedPaper.sourceUrl &&
+      paper.sourceRecordId === null &&
+      paper.aiSnapshotJson === JSON.stringify(expectedPaper.aiInitial) &&
+      paper.aiModel === expectedPaper.aiModel &&
+      paper.aiExtractedAt === null &&
+      paper.taskPrompt === expectedPaper.taskPrompt &&
+      paper.goldSnapshotJson === JSON.stringify(goldValues) &&
+      paper.scoringRulesJson === JSON.stringify(expectedPaper.gold) &&
+      paper.configVersion === DEFAULT_EXPERIMENT.version
+    );
+  });
+}
+
 export function ensureDefaultTeachingExperiment(store?: Database.Database): void {
   const validationErrors = validateExperimentConfig(DEFAULT_EXPERIMENT);
   if (validationErrors.length) {
@@ -51,6 +141,40 @@ export function ensureDefaultTeachingExperiment(store?: Database.Database): void
       if (participantCount > 0) {
         throw new Error("Default teaching experiment checksum drift detected after participation began.");
       }
+    }
+
+    const expectedPaperIds = DEFAULT_EXPERIMENT.papers.map((paper) => paper.id);
+    const expectedPaperPlaceholders = expectedPaperIds.map(() => "?").join(", ");
+    const unexpectedPapers = target
+      .prepare(
+        `SELECT p.id,
+                EXISTS(
+                  SELECT 1 FROM teaching_participants pt WHERE pt.assigned_paper_id = p.id
+                ) AS hasParticipant,
+                EXISTS(
+                  SELECT 1 FROM teaching_submissions s WHERE s.paper_id = p.id
+                ) AS hasSubmission
+         FROM teaching_papers p
+         WHERE p.project_id = ? AND p.id NOT IN (${expectedPaperPlaceholders})`
+      )
+      .all(DEFAULT_PROJECT_ID, ...expectedPaperIds) as Array<{
+      id: string;
+      hasParticipant: number;
+      hasSubmission: number;
+    }>;
+    const linkedUnexpectedPaper = unexpectedPapers.find(
+      (paper) => paper.hasParticipant === 1 || paper.hasSubmission === 1
+    );
+    if (linkedUnexpectedPaper) {
+      throw new Error(
+        `Default teaching experiment has an unexpected paper linked to participant data: ${linkedUnexpectedPaper.id}`
+      );
+    }
+    const deleteUnexpectedPaper = target.prepare(
+      "DELETE FROM teaching_papers WHERE id = ? AND project_id = ?"
+    );
+    for (const paper of unexpectedPapers) {
+      deleteUnexpectedPaper.run(paper.id, DEFAULT_PROJECT_ID);
     }
 
     target
