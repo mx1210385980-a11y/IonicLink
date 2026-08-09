@@ -178,14 +178,14 @@ export function DiffusionCard({
   const showConfidence = record.status === "review" && typeof record.confidence === "number";
   const confidencePct = showConfidence ? Math.round((record.confidence as number) * 100) : null;
   const dValue = core.diffusion ? quantityLabel(core.diffusion, units) : formatD(core.diffusion);
-  const standardizedDValue = record.status === "review" && core.diffusion?.std != null ? formatStd(core.diffusion.std, "m²/s") : null;
+  const standardizedDValue = core.diffusion?.std != null ? formatStd(core.diffusion.std, "m²/s") : null;
   const isCationSpecies = /cation|\+$/i.test(core.species);
   const isAnionSpecies = /anion|-$/i.test(core.species);
   const mode = getDiffusionMode(e.geometry);
   const diffusionReadoutContent = (
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
-        <div className="label-eyebrow text-black">Diffusion coefficient</div>
+        <div className="label-eyebrow text-black">Self-diffusion · D</div>
         <div className="mt-1 font-mono text-[1.8rem] font-semibold leading-none tnum text-black [overflow-wrap:anywhere]">{dValue}</div>
         {standardizedDValue && <div className="mt-2 text-[10px] font-medium text-black">standardized · {standardizedDValue}</div>}
       </div>
@@ -365,10 +365,10 @@ function DiffusionIllustration({ idPrefix, active, mode }: { idPrefix?: string; 
   const defaultViewBox = "0 0 300 200";
   const viewBox = mode === "3D-Cage" ? "-200 -190 400 356" : defaultViewBox;
   const ariaLabel = {
-    "1D": "one-dimensional cylindrical channel",
-    "2D": "two-dimensional slit pore",
-    "3D-Cage": "three-dimensional framework cage",
-    Membrane: "tortuous porous membrane",
+    "1D": "one-dimensional confined channel",
+    "2D": "two-dimensional slit channel",
+    "3D-Cage": "three-dimensional porous network",
+    Membrane: "three-dimensional porous network",
     "0D-Pools": "isolated liquid pools",
     Gyroid: "bicontinuous gyroid channel",
   }[mode];
