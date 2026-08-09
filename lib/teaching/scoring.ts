@@ -24,18 +24,49 @@ const FORCE_RANGE = new RegExp(
 export function normalizeTeachingText(value: string): string {
   return value
     .normalize("NFKC")
-    .replace(/[\u03bc\u00b5]/gu, "u")
     .replace(DASHES, "-")
     .toLowerCase()
+    .replace(/[\u03bc\u00b5]/gu, "u")
     .replace(/\s+/gu, " ")
     .trim();
 }
 
-function normalizeAlias(value: string): string {
+function normalizeTextAlias(value: string): string {
   return normalizeTeachingText(value)
     .replace(/[\p{P}\p{S}]+/gu, " ")
     .replace(/\s+/gu, " ")
     .trim();
+}
+
+function normalizeStructuredText(value: string): string {
+  const characters = Array.from(
+    normalizeTeachingText(value)
+      .replace(/(\d)\s*([.:\/-])\s*(?=\d)/gu, "$1$2")
+      .replace(
+        /(^|[\s([{=,:;])([+-])(?:\s*[\(\[\{<])*\s*(?=(?:\d|\.\d))/gu,
+        "$1$2"
+      )
+  );
+  const normalized = characters.map((character, index) => {
+    if (!/[\p{P}\p{S}]/u.test(character)) return character;
+
+    const previous = characters[index - 1] ?? "";
+    const next = characters[index + 1] ?? "";
+    const previousPrevious = characters[index - 2] ?? "";
+    const nextNext = characters[index + 2] ?? "";
+    const betweenDigits = /[.:\/-]/u.test(character) && /\d/u.test(previous) && /\d/u.test(next);
+    const hasLeadingBoundary = !previous || /[\s([{=,:;]/u.test(previous);
+    const unarySign =
+      /[+-]/u.test(character) &&
+      hasLeadingBoundary &&
+      (/\d/u.test(next) || (next === "." && /\d/u.test(nextNext)));
+    const leadingDecimalPoint =
+      character === "." &&
+      /\d/u.test(next) &&
+      (hasLeadingBoundary || (/[+-]/u.test(previous) && (!previousPrevious || /[\s([{=,:;]/u.test(previousPrevious))));
+    return betweenDigits || unarySign || leadingDecimalPoint ? character : " ";
+  });
+  return normalized.join("").replace(/\s+/gu, " ").trim();
 }
 
 function result(correct: boolean, normalized: string, reason: string): TeachingFieldScore {
@@ -50,9 +81,13 @@ function within(actual: number, expected: number, tolerance: number): boolean {
   return Math.abs(actual - expected) <= tolerance + Number.EPSILON * 8;
 }
 
-function aliasMatch(value: string, aliases: string[]): boolean {
-  const normalized = normalizeAlias(value);
-  return aliases.some((alias) => normalizeAlias(alias) === normalized);
+function aliasMatch(
+  value: string,
+  aliases: string[],
+  normalize: (candidate: string) => string
+): boolean {
+  const normalized = normalize(value);
+  return aliases.some((alias) => normalize(alias) === normalized);
 }
 
 export function scoreValue(value: string, rule: TeachingGoldRule): TeachingFieldScore {
@@ -61,33 +96,33 @@ export function scoreValue(value: string, rule: TeachingGoldRule): TeachingField
 
   switch (rule.value.kind) {
     case "text": {
-      const normalized = normalizeAlias(value);
-      const matches = aliasMatch(value, [rule.value.expected, ...rule.value.aliases]);
+      const normalized = normalizeTextAlias(value);
+      const matches = aliasMatch(value, [rule.value.expected, ...rule.value.aliases], normalizeTextAlias);
       return result(matches, normalized, matches ? "alias_match" : "value_mismatch");
     }
     case "not_reported": {
-      const normalized = normalizeAlias(value);
-      const matches = aliasMatch(value, rule.value.aliases);
+      const normalized = normalizeTextAlias(value);
+      const matches = aliasMatch(value, rule.value.aliases, normalizeTextAlias);
       return result(matches, normalized, matches ? "alias_match" : "value_mismatch");
     }
     case "number": {
-      if (aliasMatch(value, rule.value.aliases)) {
-        return result(true, normalizeAlias(value), "alias_match");
+      if (aliasMatch(value, rule.value.aliases, normalizeStructuredText)) {
+        return result(true, normalizeStructuredText(value), "alias_match");
       }
       const scalar = normalizedText.match(NUMBER_ONLY);
-      if (!scalar) return result(false, normalizeAlias(value), "parse_error");
+      if (!scalar) return result(false, normalizeStructuredText(value), "parse_error");
       const actual = Number(scalar[1]);
       const correct = Number.isFinite(actual) && within(actual, rule.value.expected, rule.value.tolerance);
       return result(correct, numberText(actual), correct ? "within_tolerance" : "value_mismatch");
     }
     case "temperature": {
-      if (aliasMatch(value, rule.value.aliases)) {
-        return result(true, normalizeAlias(value), "alias_match");
+      if (aliasMatch(value, rule.value.aliases, normalizeStructuredText)) {
+        return result(true, normalizeStructuredText(value), "alias_match");
       }
       const parsed = normalizedText.match(TEMPERATURE);
       if (!parsed) {
         const reason = NUMBER_ONLY.test(normalizedText) ? "unit_missing" : "parse_error";
-        return result(false, normalizeAlias(value), reason);
+        return result(false, normalizeStructuredText(value), reason);
       }
       const scalar = Number(parsed[1]);
       const unit = parsed[2];
@@ -96,11 +131,11 @@ export function scoreValue(value: string, rule: TeachingGoldRule): TeachingField
       return result(correct, `${numberText(kelvin)} k`, correct ? "within_tolerance" : "value_mismatch");
     }
     case "force-range": {
-      if (aliasMatch(value, rule.value.aliases)) {
-        return result(true, normalizeAlias(value), "alias_match");
+      if (aliasMatch(value, rule.value.aliases, normalizeStructuredText)) {
+        return result(true, normalizeStructuredText(value), "alias_match");
       }
       const parsed = normalizedText.match(FORCE_RANGE);
-      if (!parsed) return result(false, normalizeAlias(value), "parse_error");
+      if (!parsed) return result(false, normalizeStructuredText(value), "parse_error");
       const min = Number(parsed[1]);
       const max = Number(parsed[3]);
       const firstUnit = parsed[2];
@@ -113,7 +148,7 @@ export function scoreValue(value: string, rule: TeachingGoldRule): TeachingField
         (secondUnit && secondUnit !== "nn") ||
         (firstUnit && secondUnit && firstUnit !== secondUnit)
       ) {
-        return result(false, normalizeAlias(value), "unit_mismatch");
+        return result(false, normalizeStructuredText(value), "unit_mismatch");
       }
       const correct =
         Number.isFinite(min) &&
@@ -137,14 +172,40 @@ function parsePage(value: string): number | null {
   return chineseMatch ? Number(chineseMatch[1]) : null;
 }
 
+function isIntegerKeywordBoundary(adjacent: string, beyond: string): boolean {
+  if (!adjacent) return true;
+  if (adjacent === "-") return /\d/u.test(beyond);
+  return !/[\p{L}\p{N}.:/+]/u.test(adjacent);
+}
+
+function integerKeywordMatches(evidence: string, keyword: string): boolean {
+  let index = evidence.indexOf(keyword);
+  while (index !== -1) {
+    const before = evidence[index - 1] ?? "";
+    const afterIndex = index + keyword.length;
+    const after = evidence[afterIndex] ?? "";
+    if (
+      isIntegerKeywordBoundary(before, evidence[index - 2] ?? "") &&
+      isIntegerKeywordBoundary(after, evidence[afterIndex + 1] ?? "")
+    ) {
+      return true;
+    }
+    index = evidence.indexOf(keyword, index + 1);
+  }
+  return false;
+}
+
 function keywordSetMatches(evidence: string, keywordSets: string[][]): boolean {
   if (keywordSets.length === 0) return false;
-  const normalizedEvidence = normalizeAlias(evidence);
+  const normalizedEvidence = normalizeStructuredText(evidence);
   const paddedEvidence = ` ${normalizedEvidence} `;
   return keywordSets.some((set) =>
     set.length > 0 && set.every((keyword) => {
-      const normalizedKeyword = normalizeAlias(keyword);
+      const normalizedKeyword = normalizeStructuredText(keyword);
       if (!normalizedKeyword) return false;
+      if (/^\d+$/u.test(normalizedKeyword)) {
+        return integerKeywordMatches(normalizedEvidence, normalizedKeyword);
+      }
       if (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(normalizedKeyword)) {
         return normalizedEvidence.includes(normalizedKeyword);
       }
@@ -220,7 +281,7 @@ export function scoreSubmission(
 
 function normalizedPage(value: string | undefined): string {
   const parsed = parsePage(value ?? "");
-  return parsed === null ? normalizeAlias(value ?? "") : String(parsed);
+  return parsed === null ? normalizeStructuredText(value ?? "") : String(parsed);
 }
 
 function rate(numerator: number, denominator: number): number | null {
@@ -250,7 +311,8 @@ export function scoreAiBehavior(
     const unchanged =
       aiScore.values[key].normalized === finalScore.values[key].normalized &&
       normalizedPage(aiAnswer?.page) === normalizedPage(finalAnswer?.page) &&
-      normalizeAlias(aiAnswer?.evidence ?? "") === normalizeAlias(finalAnswer?.evidence ?? "");
+      normalizeStructuredText(aiAnswer?.evidence ?? "") ===
+        normalizeStructuredText(finalAnswer?.evidence ?? "");
 
     if (unchanged) adopted += 1;
     else modified += 1;
