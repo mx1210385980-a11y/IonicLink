@@ -34,6 +34,11 @@ for (const paper of DEFAULT_EXPERIMENT.papers) {
   assert.deepEqual(Object.keys(paper.gold).sort(), TEACHING_FIELDS.map((field) => field.key).sort());
 }
 assert.match(defaultExperimentChecksum(), /^[a-f0-9]{64}$/);
+assert.equal(
+  defaultExperimentChecksum(),
+  "a36d0f9be5be402f2510f8919cacd6228e333ad975683e21033ea5acebf1058d",
+  "versioned config checksum must not drift",
+);
 assert.equal(defaultExperimentChecksum(), defaultExperimentChecksum(), "checksum must be stable");
 
 const invalid = structuredClone(DEFAULT_EXPERIMENT);
