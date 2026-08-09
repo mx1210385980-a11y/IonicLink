@@ -95,6 +95,75 @@ export type TeachingAiBehavior = {
   incorrectAdoptionRate: number | null;
 };
 
+export type TeachingTimingQuality = "valid" | "zero_active" | "excessive_idle";
+
+export type TeachingRoundAnalysis = {
+  submissionId: string;
+  paperCode: "A" | "B";
+  mode: TeachingMode;
+  activeSeconds: number;
+  wallSeconds: number;
+  score: TeachingAutoScore;
+  aiBehavior: TeachingAiBehavior | null;
+  timingQuality: TeachingTimingQuality;
+};
+
+export type TeachingExperimentAnalysisRow = {
+  participantId: string;
+  studentAlias: string;
+  sequence: TeachingSequence;
+  completed: boolean;
+  exclusionReason: string | null;
+  manual: TeachingRoundAnalysis | null;
+  aiAssisted: TeachingRoundAnalysis | null;
+};
+
+export type TeachingModeSummary = {
+  n: number;
+  medianActiveSeconds: number | null;
+  medianAccuracy: number | null;
+  meanAccuracy: number | null;
+  medianCoverage: number | null;
+  medianEvidenceAccuracy: number | null;
+  medianEvidenceCoverage: number | null;
+};
+
+export type TeachingDifferenceSummary = {
+  median: number | null;
+  ci95: { low: number; high: number } | null;
+  wilcoxonP: number | null;
+};
+
+export type TeachingExperimentSummary = {
+  completion: {
+    total: number;
+    completed: number;
+    paired: number;
+    incomplete: number;
+    excluded: number;
+  };
+  sequenceCounts: Record<TeachingSequence, number>;
+  manual: TeachingModeSummary;
+  aiAssisted: TeachingModeSummary;
+  timeSavedRate: number | null;
+  accuracyDelta: number | null;
+  fasterAndMoreAccurate: number;
+  timeDifference: TeachingDifferenceSummary;
+  accuracyDifference: TeachingDifferenceSummary;
+  aiBehavior: TeachingAiBehavior;
+};
+
+export type TeachingPairedResult = TeachingExperimentAnalysisRow & {
+  activeTimeDifference: number | null;
+  accuracyDifference: number | null;
+};
+
+export type TeachingExperimentDashboard = {
+  experiment: { id: string; name: string; version: string; scoringVersion: string };
+  summary: TeachingExperimentSummary;
+  participants: TeachingPairedResult[];
+};
+
 export type TeachingExperimentPaper = {
   id: string;
   code: "A" | "B";

@@ -4,13 +4,35 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { closeTeachingStoreForTests, getTeachingDb, teachingDataDir } from "./teaching/store";
 import {
+  isTeachingExperimentAnalysisEligible,
+  summarizeTeachingExperiment,
+  teachingPairedDifferences,
+} from "./teaching/analytics";
+import {
+  DEFAULT_EXPERIMENT,
+  defaultExperimentChecksum,
+  ensureDefaultTeachingExperiment,
+} from "./teaching/config";
+import { scoreAiBehavior, scoreSubmission } from "./teaching/scoring";
+import { teachingTimingQuality as classifyTeachingTiming } from "./teaching/activity";
+import {
   TEACHING_FIELDS,
+  type TeachingAutoScore,
   type TeachingAnswers,
   type TeachingDashboardRow,
+  type TeachingExperimentAnalysisRow,
+  type TeachingExperimentDashboard,
+  type TeachingExperimentPaper,
+  type TeachingFieldScore,
   type TeachingFieldKey,
+  type TeachingGoldRule,
   type TeachingMetrics,
+  type TeachingMode,
+  type TeachingPairedResult,
   type TeachingRole,
+  type TeachingRoundAnalysis,
   type TeachingScores,
+  type TeachingSequence,
 } from "./teachingShared";
 export {
   getCurrentTeachingRound,
@@ -31,13 +53,23 @@ export {
   type TeachingAnswer,
   type TeachingAnswers,
   type TeachingDashboardRow,
+  type TeachingDifferenceSummary,
+  type TeachingExperimentAnalysisRow,
+  type TeachingExperimentDashboard,
+  type TeachingExperimentSummary,
   type TeachingFieldKey,
   type TeachingMetrics,
+  type TeachingMode,
+  type TeachingModeSummary,
+  type TeachingPairedResult,
   type TeachingRole,
+  type TeachingRoundAnalysis,
   type TeachingRoundTransition,
   type TeachingScore,
   type TeachingScores,
+  type TeachingSequence,
   type TeachingStudentState,
+  type TeachingTimingQuality,
 } from "./teachingShared";
 
 export interface TeachingSession {
@@ -504,6 +536,303 @@ export class TeachingConflictError extends Error {
   ) {
     super(message);
   }
+}
+
+type DefaultTeachingParticipantRow = {
+  participantId: string;
+  studentAlias: string;
+  sequenceCode: string | null;
+  completedAt: string | null;
+  exclusionReason: string | null;
+};
+
+type DefaultTeachingSubmissionRow = {
+  submissionId: string;
+  participantId: string;
+  roundNo: number | null;
+  mode: string | null;
+  activeSeconds: number;
+  startedAt: string;
+  submittedAt: string | null;
+  answersJson: string;
+  aiInitialJson: string;
+  valueScoresJson: string;
+  evidenceScoresJson: string;
+  scoringStatus: string;
+  paperId: string;
+  paperCode: string;
+  title: string;
+  doi: string | null;
+  journal: string | null;
+  sourceUrl: string | null;
+  taskPrompt: string;
+  aiModel: string | null;
+  scoringRulesJson: string;
+};
+
+function defaultTeachingSequence(value: string | null, participantId: string): TeachingSequence {
+  if (value === "manual_then_ai" || value === "ai_then_manual") return value;
+  throw new Error(`Invalid teaching sequence for participant ${participantId}.`);
+}
+
+function parsedObject<T extends object>(value: string): T | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as T
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function parsedFieldScores(value: string): TeachingAutoScore["values"] | null {
+  const parsed = parsedObject<Record<string, unknown>>(value);
+  if (!parsed) return null;
+  const scores = {} as TeachingAutoScore["values"];
+  for (const field of TEACHING_FIELDS) {
+    const candidate = parsed[field.key];
+    if (
+      candidate === null ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate)
+    ) {
+      return null;
+    }
+    const score = candidate as Partial<TeachingFieldScore>;
+    if (
+      typeof score.correct !== "boolean" ||
+      typeof score.normalized !== "string" ||
+      typeof score.reason !== "string"
+    ) {
+      return null;
+    }
+    scores[field.key] = {
+      correct: score.correct,
+      normalized: score.normalized,
+      reason: score.reason,
+    };
+  }
+  return scores;
+}
+
+function reconstructedAutomaticScore(
+  row: DefaultTeachingSubmissionRow,
+  answers: TeachingAnswers,
+  paper: TeachingExperimentPaper
+): TeachingAutoScore | null {
+  const values = parsedFieldScores(row.valueScoresJson);
+  const evidence = parsedFieldScores(row.evidenceScoresJson);
+  if (!values || !evidence) return null;
+
+  let coverage: TeachingAutoScore;
+  try {
+    coverage = scoreSubmission(answers, paper);
+  } catch {
+    return null;
+  }
+  const valueCorrect = TEACHING_FIELDS.filter((field) => values[field.key].correct).length;
+  const evidenceCorrect = TEACHING_FIELDS.filter((field) => evidence[field.key].correct).length;
+  const denominator = TEACHING_FIELDS.length;
+  return {
+    values,
+    evidence,
+    valueCorrect,
+    valueAccuracy: valueCorrect / denominator,
+    valueCoverage: coverage.valueCoverage,
+    evidenceCorrect,
+    evidenceAccuracy: evidenceCorrect / denominator,
+    evidenceCoverage: coverage.evidenceCoverage,
+  };
+}
+
+function defaultTeachingRoundAnalysis(
+  row: DefaultTeachingSubmissionRow,
+  expected: { roundNo: 1 | 2; mode: TeachingMode; paperCode: "A" | "B" }
+): TeachingRoundAnalysis | null {
+  if (
+    row.roundNo !== expected.roundNo ||
+    row.mode !== expected.mode ||
+    row.paperCode !== expected.paperCode ||
+    row.submittedAt === null ||
+    row.scoringStatus !== "scored" ||
+    !Number.isFinite(row.activeSeconds) ||
+    row.activeSeconds < 0
+  ) {
+    return null;
+  }
+  const startedAt = Date.parse(row.startedAt);
+  const submittedAt = Date.parse(row.submittedAt);
+  if (!Number.isFinite(startedAt) || !Number.isFinite(submittedAt)) return null;
+
+  const answers = parsedObject<TeachingAnswers>(row.answersJson);
+  const aiInitial = parsedObject<TeachingAnswers>(row.aiInitialJson);
+  const gold = parsedObject<Record<TeachingFieldKey, TeachingGoldRule>>(row.scoringRulesJson);
+  if (!answers || !aiInitial || !gold) return null;
+  const paper: TeachingExperimentPaper = {
+    id: row.paperId,
+    code: expected.paperCode,
+    title: row.title,
+    doi: row.doi ?? "",
+    journal: row.journal ?? "",
+    sourceUrl: row.sourceUrl ?? "",
+    taskPrompt: row.taskPrompt,
+    aiModel: row.aiModel ?? "",
+    aiInitial,
+    gold,
+  };
+  const score = reconstructedAutomaticScore(row, answers, paper);
+  if (!score) return null;
+
+  let aiBehavior = null;
+  if (expected.mode === "ai_assisted") {
+    try {
+      const initialScore = scoreSubmission(aiInitial, paper);
+      aiBehavior = scoreAiBehavior(aiInitial, answers, initialScore, score);
+    } catch {
+      return null;
+    }
+  }
+  const wallSeconds = Math.max(0, (submittedAt - startedAt) / 1_000);
+  return {
+    submissionId: row.submissionId,
+    paperCode: expected.paperCode,
+    mode: expected.mode,
+    activeSeconds: row.activeSeconds,
+    wallSeconds,
+    score,
+    aiBehavior,
+    timingQuality: classifyTeachingTiming(row.activeSeconds, wallSeconds),
+  };
+}
+
+function defaultTeachingAssignments(sequence: TeachingSequence): Array<{
+  key: "manual" | "aiAssisted";
+  roundNo: 1 | 2;
+  mode: TeachingMode;
+  paperCode: "A" | "B";
+}> {
+  return sequence === "manual_then_ai"
+    ? [
+        { key: "manual", roundNo: 1, mode: "manual", paperCode: "A" },
+        { key: "aiAssisted", roundNo: 2, mode: "ai_assisted", paperCode: "B" },
+      ]
+    : [
+        { key: "aiAssisted", roundNo: 1, mode: "ai_assisted", paperCode: "A" },
+        { key: "manual", roundNo: 2, mode: "manual", paperCode: "B" },
+      ];
+}
+
+export function getDefaultTeachingDashboard(): TeachingExperimentDashboard {
+  const store = db();
+  const defaultProject = store
+    .prepare(
+      `SELECT experiment_kind AS experimentKind, config_version AS configVersion,
+              config_checksum AS configChecksum, is_default AS isDefault
+       FROM teaching_projects WHERE id = ?`
+    )
+    .get(DEFAULT_EXPERIMENT.id) as
+    | {
+        experimentKind: string;
+        configVersion: string | null;
+        configChecksum: string | null;
+        isDefault: number;
+      }
+    | undefined;
+  if (
+    !defaultProject ||
+    defaultProject.experimentKind !== "crossover" ||
+    defaultProject.configVersion !== DEFAULT_EXPERIMENT.version ||
+    defaultProject.configChecksum !== defaultExperimentChecksum() ||
+    defaultProject.isDefault !== 1
+  ) {
+    ensureDefaultTeachingExperiment(store);
+  }
+
+  const participants = store
+    .prepare(
+      `SELECT pt.id AS participantId, pt.student_alias AS studentAlias,
+              pt.sequence_code AS sequenceCode, pt.completed_at AS completedAt,
+              pt.exclusion_reason AS exclusionReason
+       FROM teaching_participants pt
+       WHERE pt.project_id = ?
+       ORDER BY pt.created_at ASC, pt.id ASC`
+    )
+    .all(DEFAULT_EXPERIMENT.id) as DefaultTeachingParticipantRow[];
+  const submissions = store
+    .prepare(
+      `SELECT s.id AS submissionId, s.participant_id AS participantId,
+              s.round_no AS roundNo, s.mode, s.active_seconds AS activeSeconds,
+              s.started_at AS startedAt, s.submitted_at AS submittedAt,
+              s.answers_json AS answersJson, s.ai_initial_json AS aiInitialJson,
+              s.auto_value_scores_json AS valueScoresJson,
+              s.auto_evidence_scores_json AS evidenceScoresJson,
+              s.scoring_status AS scoringStatus,
+              p.id AS paperId, p.paper_no AS paperCode, p.title, p.doi, p.journal,
+              p.source_url AS sourceUrl, p.task_prompt AS taskPrompt,
+              p.ai_model AS aiModel, p.scoring_rules_json AS scoringRulesJson
+       FROM teaching_submissions s
+       JOIN teaching_papers p ON p.id = s.paper_id
+       WHERE s.project_id = ?
+       ORDER BY s.participant_id ASC, s.round_no ASC, s.id ASC`
+    )
+    .all(DEFAULT_EXPERIMENT.id) as DefaultTeachingSubmissionRow[];
+  const submissionsByParticipant = new Map<string, DefaultTeachingSubmissionRow[]>();
+  for (const submission of submissions) {
+    const existing = submissionsByParticipant.get(submission.participantId);
+    if (existing) existing.push(submission);
+    else submissionsByParticipant.set(submission.participantId, [submission]);
+  }
+
+  const analysisRows = participants.map((participant): TeachingExperimentAnalysisRow => {
+    const sequence = defaultTeachingSequence(participant.sequenceCode, participant.participantId);
+    const participantSubmissions = submissionsByParticipant.get(participant.participantId) ?? [];
+    const rounds: Pick<TeachingExperimentAnalysisRow, "manual" | "aiAssisted"> = {
+      manual: null,
+      aiAssisted: null,
+    };
+    for (const assignment of defaultTeachingAssignments(sequence)) {
+      const candidates = participantSubmissions.filter(
+        (submission) =>
+          submission.roundNo === assignment.roundNo &&
+          submission.mode === assignment.mode &&
+          submission.paperCode === assignment.paperCode
+      );
+      rounds[assignment.key] = candidates.length === 1
+        ? defaultTeachingRoundAnalysis(candidates[0], assignment)
+        : null;
+    }
+    return {
+      participantId: participant.participantId,
+      studentAlias: participant.studentAlias,
+      sequence,
+      completed: participant.completedAt !== null,
+      exclusionReason: participant.exclusionReason,
+      ...rounds,
+    };
+  });
+  const summary = summarizeTeachingExperiment(analysisRows);
+  const results = analysisRows.map((row): TeachingPairedResult => {
+    const differences = isTeachingExperimentAnalysisEligible(row)
+      ? teachingPairedDifferences(row)
+      : null;
+    return {
+      ...row,
+      activeTimeDifference: differences?.activeTimeDifference ?? null,
+      accuracyDifference: differences?.accuracyDifference ?? null,
+    };
+  });
+
+  return {
+    experiment: {
+      id: DEFAULT_EXPERIMENT.id,
+      name: DEFAULT_EXPERIMENT.name,
+      version: DEFAULT_EXPERIMENT.version,
+      scoringVersion: DEFAULT_EXPERIMENT.scoringVersion,
+    },
+    summary,
+    participants: results,
+  };
 }
 
 export function getTeachingAdminDashboard(requestedProjectId?: string | null): {

@@ -1,4 +1,9 @@
-import type { TeachingDashboardRow } from "./teachingShared";
+import {
+  TEACHING_FIELDS,
+  type TeachingDashboardRow,
+  type TeachingExperimentDashboard,
+  type TeachingRoundAnalysis,
+} from "./teachingShared";
 
 const HEADERS = [
   "组别",
@@ -21,7 +26,7 @@ const HEADERS = [
 
 function safeCell(value: unknown): string {
   let text = value == null ? "" : String(value);
-  if (/^[=+\-@]/.test(text)) text = `'${text}`;
+  if (/^[\s\p{Cc}]*[=+\-@]/u.test(text)) text = `'${text}`;
   return `"${text.replace(/"/g, '""')}"`;
 }
 
@@ -58,6 +63,134 @@ export function teachingRowsToCsv(rows: TeachingDashboardRow[]): string {
         percentage(m.aiAccuracy),
         status(row),
       ]
+        .map(safeCell)
+        .join(",")
+    );
+  }
+  return `\uFEFF${lines.join("\r\n")}\r\n`;
+}
+
+const EXPERIMENT_HEADERS = [
+  "实验ID",
+  "实验名称",
+  "实验版本",
+  "评分版本",
+  "学生标识",
+  "序列",
+  "完成状态",
+  "主分析配对状态",
+  "排除原因",
+  "人工文献代码",
+  "人工活跃时间(s)",
+  "人工墙钟时间(s)",
+  "人工计时质量",
+  "人工正确数/6",
+  "人工值准确率",
+  "人工值覆盖率",
+  "人工证据准确率",
+  "人工证据覆盖率",
+  "AI文献代码",
+  "AI活跃时间(s)",
+  "AI墙钟时间(s)",
+  "AI计时质量",
+  "AI正确数/6",
+  "AI值准确率",
+  "AI值覆盖率",
+  "AI证据准确率",
+  "AI证据覆盖率",
+  "AI建议数",
+  "AI采纳数",
+  "AI修改数",
+  "AI初始错误数",
+  "AI纠正数",
+  "AI错误照抄数",
+  "AI采纳率",
+  "AI修改率",
+  "AI纠错率",
+  "AI错误照抄率",
+  "AI-人工活跃时间差(s)",
+  "AI-人工准确率差",
+] as const;
+
+function roundCells(round: TeachingRoundAnalysis | null): unknown[] {
+  if (!round) return Array.from({ length: 9 }, () => "");
+  return [
+    round.paperCode,
+    round.activeSeconds,
+    round.wallSeconds,
+    round.timingQuality,
+    `${round.score.valueCorrect}/${TEACHING_FIELDS.length}`,
+    percentage(round.score.valueAccuracy),
+    percentage(round.score.valueCoverage),
+    percentage(round.score.evidenceAccuracy),
+    percentage(round.score.evidenceCoverage),
+  ];
+}
+
+function replaceAliases(
+  value: unknown,
+  replacements: ReadonlyArray<{ raw: string; anonymized: string }>
+): unknown {
+  if (typeof value !== "string") return value;
+  let redacted = value;
+  for (const replacement of replacements) {
+    redacted = redacted.split(replacement.raw).join(replacement.anonymized);
+  }
+  return redacted;
+}
+
+export function teachingExperimentToCsv(
+  dashboard: TeachingExperimentDashboard,
+  options: { anonymize?: boolean } = {}
+): string {
+  const labels = dashboard.participants.map(
+    (_, index) => `S${String(index + 1).padStart(3, "0")}`
+  );
+  const replacements = options.anonymize
+    ? dashboard.participants
+        .map((participant, index) => ({
+          raw: participant.studentAlias,
+          anonymized: labels[index],
+        }))
+        .filter(({ raw }) => raw.length > 0)
+        .sort((left, right) => right.raw.length - left.raw.length)
+    : [];
+  const lines = [EXPERIMENT_HEADERS.map(safeCell).join(",")];
+
+  for (const [index, participant] of dashboard.participants.entries()) {
+    const behavior = participant.aiAssisted?.aiBehavior;
+    const paired =
+      participant.activeTimeDifference !== null && participant.accuracyDifference !== null;
+    const values: unknown[] = [
+      dashboard.experiment.id,
+      dashboard.experiment.name,
+      dashboard.experiment.version,
+      dashboard.experiment.scoringVersion,
+      options.anonymize ? labels[index] : participant.studentAlias,
+      participant.sequence,
+      participant.completed ? "completed" : "incomplete",
+      paired ? "paired" : "not_paired",
+      participant.exclusionReason ?? "",
+      ...roundCells(participant.manual),
+      ...roundCells(participant.aiAssisted),
+      behavior?.suggested ?? "",
+      behavior?.adopted ?? "",
+      behavior?.modified ?? "",
+      behavior?.initiallyIncorrect ?? "",
+      behavior?.corrected ?? "",
+      behavior?.incorrectlyAdopted ?? "",
+      behavior ? percentage(behavior.adoptionRate) : "",
+      behavior ? percentage(behavior.modificationRate) : "",
+      behavior ? percentage(behavior.correctionRate) : "",
+      behavior ? percentage(behavior.incorrectAdoptionRate) : "",
+      participant.activeTimeDifference ?? "",
+      participant.accuracyDifference === null
+        ? ""
+        : percentage(participant.accuracyDifference),
+    ];
+    lines.push(
+      values
+        .map((value) => replaceAliases(value, replacements))
         .map(safeCell)
         .join(",")
     );

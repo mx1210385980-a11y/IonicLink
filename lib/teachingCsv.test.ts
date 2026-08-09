@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
-import type { TeachingDashboardRow } from "./teachingShared";
-import { teachingRowsToCsv } from "./teachingCsv";
+import { summarizeTeachingExperiment } from "./teaching/analytics";
+import {
+  TEACHING_FIELDS,
+  type TeachingAiBehavior,
+  type TeachingAutoScore,
+  type TeachingDashboardRow,
+  type TeachingExperimentDashboard,
+  type TeachingPairedResult,
+  type TeachingRoundAnalysis,
+} from "./teachingShared";
+import { teachingExperimentToCsv, teachingRowsToCsv } from "./teachingCsv";
 
 const row: TeachingDashboardRow = {
   submissionId: "s1",
@@ -39,4 +48,165 @@ assert.match(csv, /"'=1\+1"/);
 assert.match(csv, /"'@student"/);
 assert.match(csv, /"期刊""甲"""/);
 assert.doesNotMatch(csv, /undefined|null/);
-console.log("Teaching CSV safety tests passed");
+
+const whitespaceFormulaRow: TeachingDashboardRow = {
+  ...row,
+  submissionId: "s2",
+  groupCode: "\t  =HYPERLINK(\"https://invalid.example\")",
+  studentAlias: "\u000b@legacy-control",
+};
+const whitespaceFormulaCsv = teachingRowsToCsv([whitespaceFormulaRow]);
+assert.ok(
+  whitespaceFormulaCsv.includes(
+    `"'${whitespaceFormulaRow.groupCode.replace(/"/g, '""')}"`
+  ),
+  "legacy CSV must neutralize formulas after leading whitespace"
+);
+assert.ok(
+  whitespaceFormulaCsv.includes(`"'${whitespaceFormulaRow.studentAlias}"`),
+  "legacy CSV must neutralize formulas after leading control characters"
+);
+
+function experimentScore(correctCount: number): TeachingAutoScore {
+  const scores = Object.fromEntries(
+    TEACHING_FIELDS.map((field, index) => [
+      field.key,
+      {
+        correct: index < correctCount,
+        normalized: `${field.key}-${index}`,
+        reason: index < correctCount ? "correct" : "incorrect",
+      },
+    ])
+  ) as TeachingAutoScore["values"];
+  return {
+    values: structuredClone(scores),
+    evidence: structuredClone(scores),
+    valueCorrect: correctCount,
+    valueAccuracy: correctCount / 6,
+    valueCoverage: 1,
+    evidenceCorrect: correctCount,
+    evidenceAccuracy: correctCount / 6,
+    evidenceCoverage: 5 / 6,
+  };
+}
+
+const csvAiBehavior: TeachingAiBehavior = {
+  suggested: 6,
+  adopted: 4,
+  modified: 2,
+  initiallyIncorrect: 0,
+  corrected: 0,
+  incorrectlyAdopted: 0,
+  adoptionRate: 4 / 6,
+  modificationRate: 2 / 6,
+  correctionRate: null,
+  incorrectAdoptionRate: null,
+};
+
+function experimentRound(input: {
+  submissionId: string;
+  paperCode: "A" | "B";
+  mode: "manual" | "ai_assisted";
+  activeSeconds: number;
+  wallSeconds: number;
+  correctCount: number;
+  aiBehavior?: TeachingAiBehavior | null;
+}): TeachingRoundAnalysis {
+  return {
+    submissionId: input.submissionId,
+    paperCode: input.paperCode,
+    mode: input.mode,
+    activeSeconds: input.activeSeconds,
+    wallSeconds: input.wallSeconds,
+    score: experimentScore(input.correctCount),
+    aiBehavior: input.aiBehavior ?? null,
+    timingQuality: "valid",
+  };
+}
+
+const dangerousAlias = `\t =2+2,"student"`;
+const pairedParticipant: TeachingPairedResult = {
+  participantId: "participant-dangerous-alias",
+  studentAlias: dangerousAlias,
+  sequence: "manual_then_ai",
+  completed: true,
+  exclusionReason: null,
+  manual: experimentRound({
+    submissionId: "manual-csv",
+    paperCode: "A",
+    mode: "manual",
+    activeSeconds: 1_200,
+    wallSeconds: 1_300,
+    correctCount: 4,
+  }),
+  aiAssisted: experimentRound({
+    submissionId: "ai-csv",
+    paperCode: "B",
+    mode: "ai_assisted",
+    activeSeconds: 600,
+    wallSeconds: 650,
+    correctCount: 5,
+    aiBehavior: csvAiBehavior,
+  }),
+  activeTimeDifference: -600,
+  accuracyDifference: 1 / 6,
+};
+
+const rawAlias = "Raw Alias";
+const incompleteParticipant: TeachingPairedResult = {
+  participantId: "participant-incomplete",
+  studentAlias: rawAlias,
+  sequence: "ai_then_manual",
+  completed: false,
+  exclusionReason: "\u000b@external-review",
+  manual: null,
+  aiAssisted: null,
+  activeTimeDifference: null,
+  accuracyDifference: null,
+};
+
+const experimentParticipants = [pairedParticipant, incompleteParticipant];
+const experimentDashboard: TeachingExperimentDashboard = {
+  experiment: {
+    id: "experiment-id",
+    name: "Experiment, with quote \"A\"",
+    version: "v-test",
+    scoringVersion: "score-test",
+  },
+  summary: summarizeTeachingExperiment(experimentParticipants),
+  participants: experimentParticipants,
+};
+
+const experimentCsv = teachingExperimentToCsv(experimentDashboard);
+assert.ok(experimentCsv.startsWith("\uFEFF"));
+assert.ok(experimentCsv.endsWith("\r\n"));
+assert.equal(experimentCsv.replace(/\r\n/g, "").includes("\n"), false);
+assert.match(experimentCsv, /"实验版本","评分版本","学生标识"/);
+assert.match(experimentCsv, /"人工活跃时间\(s\)"/);
+assert.match(experimentCsv, /"AI墙钟时间\(s\)"/);
+assert.ok(
+  experimentCsv.includes(`"'${dangerousAlias.replace(/"/g, '""')}"`),
+  "experiment aliases with whitespace before a formula must be neutralized"
+);
+assert.ok(experimentCsv.includes(`"'${incompleteParticipant.exclusionReason}"`));
+assert.match(experimentCsv, /"A","1200","1300","valid","4\/6"/);
+assert.match(experimentCsv, /"B","600","650","valid","5\/6"/);
+assert.match(experimentCsv, /"66\.7%"/);
+assert.match(experimentCsv, /"completed","paired"/);
+assert.match(experimentCsv, /"incomplete","not_paired"/);
+assert.doesNotMatch(experimentCsv, /undefined|null/);
+assert.equal(experimentCsv.split("\r\n").filter(Boolean).length, 3);
+
+const anonymized = teachingExperimentToCsv(experimentDashboard, { anonymize: true });
+assert.equal(
+  anonymized,
+  teachingExperimentToCsv(experimentDashboard, { anonymize: true }),
+  "anonymized labels must be deterministic for dashboard order"
+);
+assert.match(anonymized, /"S001"/);
+assert.match(anonymized, /"S002"/);
+assert.doesNotMatch(anonymized, new RegExp(dangerousAlias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+assert.doesNotMatch(anonymized, /Raw Alias/);
+assert.doesNotMatch(anonymized, /participant-dangerous-alias|participant-incomplete/);
+
+console.log("Teaching legacy and paired experiment CSV safety tests passed");
