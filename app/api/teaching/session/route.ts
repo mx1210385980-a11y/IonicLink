@@ -13,6 +13,11 @@ import {
   rejectCrossOriginMutation,
   withTeachingCookie,
 } from "../_auth";
+import {
+  internalTeachingErrorResponse,
+  readTeachingJson,
+  teachingRequestErrorResponse,
+} from "../_route";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,18 +25,31 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   const rejected = rejectCrossOriginMutation(request);
   if (rejected) return rejected;
-  const body = (await request.json().catch(() => null)) as
-    | {
-        role?: unknown;
-        studentAlias?: string;
-        password?: string;
-      }
-    | null;
+  let body: {
+    role?: unknown;
+    studentAlias?: unknown;
+    password?: unknown;
+  } | null;
+  try {
+    const parsed = await readTeachingJson(request);
+    body = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as typeof body
+      : null;
+  } catch (error) {
+    return teachingRequestErrorResponse(error) ?? internalTeachingErrorResponse(
+      "read teaching session request",
+      error,
+      { message: "读取登录请求失败，请稍后重试。" }
+    );
+  }
   if (body?.role !== "student" && body?.role !== "teacher") {
     return NextResponse.json({ error: "请选择学生或教师入口。" }, { status: 400 });
   }
 
   if (body.role === "teacher") {
+    if (typeof body.password !== "string") {
+      return NextResponse.json({ error: "请输入教师密码。" }, { status: 400 });
+    }
     try {
       if (!teacherLoginConfigured()) {
         return NextResponse.json(
@@ -39,22 +57,25 @@ export async function POST(request: NextRequest) {
           { status: 503 }
         );
       }
-      if (!verifyTeacherPassword(body.password ?? "")) {
+      if (!verifyTeacherPassword(body.password)) {
         return NextResponse.json({ error: "教师密码错误。" }, { status: 401 });
       }
       const token = createTeachingSession({ role: "teacher", projectId: null, participantId: null });
       return withTeachingCookie(NextResponse.json({ redirect: "/teaching/admin" }), token, request);
     } catch (error) {
-      return NextResponse.json(
-        { error: error instanceof Error ? error.message : "教师登录失败。" },
-        { status: 500 }
+      return internalTeachingErrorResponse(
+        "create teacher session",
+        error,
+        { message: "教师登录失败，请稍后重试。" }
       );
     }
   }
 
   let studentAlias: string;
   try {
-    studentAlias = normalizeStudentAlias(body.studentAlias ?? "");
+    studentAlias = normalizeStudentAlias(
+      typeof body.studentAlias === "string" ? body.studentAlias : ""
+    );
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "学生标识无效。" },
@@ -71,9 +92,10 @@ export async function POST(request: NextRequest) {
     });
     return withTeachingCookie(NextResponse.json({ redirect: "/teaching/student" }), token, request);
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "进入教学实验失败。" },
-      { status: 503 }
+    return internalTeachingErrorResponse(
+      "join default teaching experiment",
+      error,
+      { status: 503, message: "教学实验暂不可用，请稍后重试。" }
     );
   }
 }
@@ -81,6 +103,14 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   const rejected = rejectCrossOriginMutation(request);
   if (rejected) return rejected;
-  deleteTeachingSession(request.cookies.get(TEACHING_COOKIE)?.value);
-  return clearTeachingCookie(NextResponse.json({ ok: true }), request);
+  try {
+    deleteTeachingSession(request.cookies.get(TEACHING_COOKIE)?.value);
+    return clearTeachingCookie(NextResponse.json({ ok: true }), request);
+  } catch (error) {
+    return internalTeachingErrorResponse(
+      "delete teaching session",
+      error,
+      { message: "退出教学实验失败，请稍后重试。" }
+    );
+  }
 }

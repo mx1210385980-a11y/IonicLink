@@ -19,6 +19,13 @@ export type TeachingHeartbeatInput = {
   fieldKey?: TeachingFieldKey;
 };
 
+export class TeachingHeartbeatValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TeachingHeartbeatValidationError";
+  }
+}
+
 function isValidIsoTimestamp(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const match = ISO_TIMESTAMP.exec(value);
@@ -48,7 +55,7 @@ function isValidIsoTimestamp(value: unknown): value is string {
   );
 }
 
-function validateHeartbeatInput(input: TeachingHeartbeatInput): void {
+export function validateTeachingHeartbeatInput(input: TeachingHeartbeatInput): void {
   if (
     !input ||
     typeof input.eventId !== "string" ||
@@ -56,26 +63,28 @@ function validateHeartbeatInput(input: TeachingHeartbeatInput): void {
     input.eventId.length > MAX_EVENT_ID_LENGTH ||
     !SAFE_EVENT_ID.test(input.eventId)
   ) {
-    throw new Error("Teaching activity event ID is invalid.");
+    throw new TeachingHeartbeatValidationError("Teaching activity event ID is invalid.");
   }
   if (input.roundNo !== 1 && input.roundNo !== 2) {
-    throw new Error("Teaching activity round number must be 1 or 2.");
+    throw new TeachingHeartbeatValidationError("Teaching activity round number must be 1 or 2.");
   }
   if (!isValidIsoTimestamp(input.clientAt)) {
-    throw new Error("Teaching activity client timestamp is invalid.");
+    throw new TeachingHeartbeatValidationError("Teaching activity client timestamp is invalid.");
   }
   if (
     !Number.isFinite(input.activeDeltaSeconds) ||
     !Number.isInteger(input.activeDeltaSeconds) ||
     input.activeDeltaSeconds < 0
   ) {
-    throw new Error("Teaching activity delta seconds must be a nonnegative finite integer.");
+    throw new TeachingHeartbeatValidationError(
+      "Teaching activity delta seconds must be a nonnegative finite integer."
+    );
   }
   if (typeof input.visible !== "boolean") {
-    throw new Error("Teaching activity visible must be a boolean.");
+    throw new TeachingHeartbeatValidationError("Teaching activity visible must be a boolean.");
   }
   if (input.fieldKey !== undefined && !TEACHING_FIELD_KEYS.has(input.fieldKey)) {
-    throw new Error("Teaching activity field is invalid.");
+    throw new TeachingHeartbeatValidationError("Teaching activity field is invalid.");
   }
 }
 
@@ -83,7 +92,7 @@ export function recordTeachingHeartbeat(
   participantId: string,
   input: TeachingHeartbeatInput
 ): { activeSeconds: number } {
-  validateHeartbeatInput(input);
+  validateTeachingHeartbeatInput(input);
   const creditedSeconds = input.visible
     ? Math.min(input.activeDeltaSeconds, MAX_ACTIVE_DELTA_SECONDS)
     : 0;

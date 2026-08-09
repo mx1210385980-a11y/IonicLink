@@ -10,7 +10,11 @@ import {
   type TeachingSequence,
   type TeachingStudentState,
 } from "../teachingShared";
-import { DEFAULT_EXPERIMENT, ensureDefaultTeachingExperiment } from "./config";
+import {
+  DEFAULT_EXPERIMENT,
+  ensureDefaultTeachingExperiment,
+  hasCurrentDefaultTeachingExperiment,
+} from "./config";
 import { scoreSubmission } from "./scoring";
 import { getTeachingDb } from "./store";
 
@@ -53,6 +57,12 @@ export class TeachingRoundConflictError extends Error {
 
 function now(): string {
   return new Date().toISOString();
+}
+
+function ensureCanonicalTeachingScoring(store: Database.Database): void {
+  if (!hasCurrentDefaultTeachingExperiment(store)) {
+    ensureDefaultTeachingExperiment(store);
+  }
 }
 
 function clean(value: unknown, max: number): string {
@@ -426,6 +436,7 @@ export function submitCurrentTeachingRound(
   const store = getTeachingDb();
   let failure: unknown;
   const transition = store.transaction((): TeachingRoundTransition => {
+    ensureCanonicalTeachingScoring(store);
     const participant = store
       .prepare(
         `SELECT pt.completed_at AS completedAt
@@ -544,6 +555,7 @@ export function rescoreTeachingSubmission(submissionId: string): TeachingAutoSco
   let result: TeachingAutoScore | undefined;
   let failure: unknown;
   store.transaction(() => {
+    ensureCanonicalTeachingScoring(store);
     const row = loadScoringRow(store, submissionId);
     if (!row) throw new Error("Teaching submission was not found.");
     if (!row.submittedAt) throw new Error("Teaching submission must be submitted and locked before rescoring.");
@@ -570,20 +582,24 @@ export function rescoreTeachingSubmission(submissionId: string): TeachingAutoSco
 export function rescoreErroredTeachingSubmissions(limit = 20): number {
   const normalizedLimit = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 20;
   if (normalizedLimit === 0) return 0;
-  const ids = getTeachingDb()
-    .prepare(
-      `SELECT s.id
-       FROM teaching_submissions s
-       JOIN teaching_participants pt ON pt.id = s.participant_id
-       JOIN teaching_projects pr ON pr.id = s.project_id
-       WHERE s.scoring_status = 'scoring_error' AND s.submitted_at IS NOT NULL
-         AND s.round_no IN (1, 2)
-         AND pt.sequence_code IN ('manual_then_ai', 'ai_then_manual')
-         AND pr.is_default = 1
-       ORDER BY s.submitted_at ASC, s.id ASC LIMIT ?`
-    )
-    .pluck()
-    .all(normalizedLimit) as string[];
+  const store = getTeachingDb();
+  const ids = store.transaction(() => {
+    ensureCanonicalTeachingScoring(store);
+    return store
+      .prepare(
+        `SELECT s.id
+         FROM teaching_submissions s
+         JOIN teaching_participants pt ON pt.id = s.participant_id
+         JOIN teaching_projects pr ON pr.id = s.project_id
+         WHERE s.scoring_status = 'scoring_error' AND s.submitted_at IS NOT NULL
+           AND s.round_no IN (1, 2)
+           AND pt.sequence_code IN ('manual_then_ai', 'ai_then_manual')
+           AND pr.is_default = 1
+         ORDER BY s.submitted_at ASC, s.id ASC LIMIT ?`
+      )
+      .pluck()
+      .all(normalizedLimit) as string[];
+  }).immediate();
   let rescored = 0;
   for (const id of ids) {
     try {

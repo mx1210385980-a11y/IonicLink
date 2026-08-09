@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTeachingSession, type TeachingRole, type TeachingSession } from "@/lib/teaching";
+import { internalTeachingErrorResponse } from "./_route";
 
 export const TEACHING_COOKIE = "ioniclink_teaching_session";
 
@@ -11,7 +12,16 @@ export function requireTeachingRole(
   request: NextRequest,
   role: TeachingRole
 ): TeachingSession | NextResponse {
-  const session = sessionFromRequest(request);
+  let session: TeachingSession | null;
+  try {
+    session = sessionFromRequest(request);
+  } catch (error) {
+    return internalTeachingErrorResponse(
+      "read teaching session",
+      error,
+      { message: "教学实验认证暂不可用，请稍后重试。" }
+    );
+  }
   if (!session) return NextResponse.json({ error: "请先登录教学实验。" }, { status: 401 });
   if (session.role !== role) return NextResponse.json({ error: "当前账号没有此操作权限。" }, { status: 403 });
   return session;

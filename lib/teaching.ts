@@ -48,6 +48,8 @@ export {
 export {
   recordTeachingHeartbeat,
   teachingTimingQuality,
+  TeachingHeartbeatValidationError,
+  validateTeachingHeartbeatInput,
   type TeachingHeartbeatInput,
 } from "./teaching/activity";
 export {
@@ -967,6 +969,13 @@ export function getTeachingAdminDashboard(requestedProjectId?: string | null): {
   };
 }
 
+export class TeachingReviewValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TeachingReviewValidationError";
+  }
+}
+
 export function reviewTeachingSubmission(
   submissionId: string,
   humanScores: TeachingScores,
@@ -976,7 +985,9 @@ export function reviewTeachingSubmission(
   const submission = store
     .prepare("SELECT submitted_at FROM teaching_submissions WHERE id = ?")
     .get(submissionId) as { submitted_at: string | null } | undefined;
-  if (!submission?.submitted_at) throw new Error("学生尚未提交，暂时不能审核。");
+  if (!submission?.submitted_at) {
+    throw new TeachingReviewValidationError("学生尚未提交，暂时不能审核。");
+  }
   store
     .prepare(
       `INSERT INTO teaching_reviews

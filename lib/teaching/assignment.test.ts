@@ -278,9 +278,19 @@ const paperARules = db
   .prepare("SELECT scoring_rules_json FROM teaching_papers WHERE id = ?")
   .pluck()
   .get(DEFAULT_EXPERIMENT.papers[0].id) as string;
-db.prepare("UPDATE teaching_papers SET scoring_rules_json = '{broken json' WHERE id = ?").run(
-  DEFAULT_EXPERIMENT.papers[0].id
-);
+db.exec(`
+  CREATE TRIGGER force_assignment_scoring_error
+  AFTER UPDATE OF submitted_at ON teaching_submissions
+  WHEN NEW.participant_id IN ('${errorParticipantIds.join("', '")}')
+    AND NEW.round_no = 1
+    AND OLD.submitted_at IS NULL
+    AND NEW.submitted_at IS NOT NULL
+  BEGIN
+    UPDATE teaching_papers
+    SET scoring_rules_json = '{broken json'
+    WHERE id = NEW.paper_id;
+  END;
+`);
 
 const erroredSnapshots = new Map<string, Pick<SubmissionRow, "answers_json" | "version" | "updated_at" | "submitted_at">>();
 const scoringFailureActivations: Array<{
@@ -314,6 +324,7 @@ for (const participantId of errorParticipantIds) {
     submittedAt: row.submitted_at,
   });
 }
+db.exec("DROP TRIGGER force_assignment_scoring_error");
 
 for (const activation of [successfulActivation, ...scoringFailureActivations]) {
   assert.ok(activation.submittedAt);
@@ -329,11 +340,14 @@ for (const activation of [successfulActivation, ...scoringFailureActivations]) {
   );
 }
 
-db.prepare("UPDATE teaching_papers SET scoring_rules_json = ? WHERE id = ?").run(
-  paperARules,
-  DEFAULT_EXPERIMENT.papers[0].id
-);
 assert.equal(rescoreErroredTeachingSubmissions(1), 1);
+assert.equal(
+  db.prepare("SELECT scoring_rules_json FROM teaching_papers WHERE id = ?").pluck().get(
+    DEFAULT_EXPERIMENT.papers[0].id
+  ),
+  paperARules,
+  "batch rescoring must repair canonical rules before selecting errored submissions"
+);
 assert.equal(
   db.prepare("SELECT COUNT(*) FROM teaching_submissions WHERE scoring_status = 'scoring_error'").pluck().get(),
   1,
@@ -345,6 +359,7 @@ assert.equal(
   0
 );
 
+let testedDirectCanonicalRepair = false;
 for (const [submissionId, immutable] of erroredSnapshots) {
   const rescored = db.prepare("SELECT * FROM teaching_submissions WHERE id = ?").get(submissionId) as SubmissionRow;
   assert.equal(rescored.scoring_status, "scored");
@@ -358,8 +373,39 @@ for (const [submissionId, immutable] of erroredSnapshots) {
     immutable,
     "rescoring may overwrite automatic score columns only"
   );
+  const expectedValueCorrect = Object.values(
+    JSON.parse(rescored.auto_value_scores_json) as Record<string, { correct: boolean }>
+  ).filter((field) => field.correct).length;
+  if (!testedDirectCanonicalRepair) {
+    const answers = JSON.parse(rescored.answers_json) as TeachingAnswers;
+    const permissiveRules = Object.fromEntries(
+      TEACHING_FIELDS.map((field) => [
+        field.key,
+        {
+          value: {
+            kind: "text",
+            expected: answers[field.key]?.value ?? "",
+            aliases: [],
+          },
+          evidence: { pages: [], anyKeywordSets: [], notReported: true },
+        },
+      ])
+    );
+    db.prepare("UPDATE teaching_papers SET scoring_rules_json = ? WHERE id = ?").run(
+      JSON.stringify(permissiveRules),
+      DEFAULT_EXPERIMENT.papers[0].id
+    );
+    testedDirectCanonicalRepair = true;
+  }
   const score = rescoreTeachingSubmission(submissionId);
-  assert.equal(score.valueCorrect >= 0, true);
+  assert.equal(score.valueCorrect, expectedValueCorrect);
+  assert.equal(
+    db.prepare("SELECT scoring_rules_json FROM teaching_papers WHERE id = ?").pluck().get(
+      DEFAULT_EXPERIMENT.papers[0].id
+    ),
+    paperARules,
+    "direct rescoring must repair valid semantic rule drift before scoring"
+  );
   const repeated = db.prepare("SELECT * FROM teaching_submissions WHERE id = ?").get(submissionId) as SubmissionRow;
   assert.deepEqual(
     {

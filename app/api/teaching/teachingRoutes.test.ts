@@ -7,6 +7,7 @@ import {
   type TeachingAnswers,
 } from "@/lib/teaching";
 import { DEFAULT_EXPERIMENT } from "@/lib/teaching/config";
+import { scoreSubmission } from "@/lib/teaching/scoring";
 import { getTeachingDb } from "@/lib/teaching/store";
 import { GET as exportGet } from "./admin/export/route";
 import { GET as adminGet, POST as adminPost } from "./admin/route";
@@ -48,6 +49,35 @@ async function json(response: Response): Promise<JsonRecord> {
   return (await response.json()) as JsonRecord;
 }
 
+async function assertInternalRouteError(
+  run: () => Promise<Response>,
+  expected: { status: 500 | 503; message: string; secret: string }
+): Promise<void> {
+  const originalConsoleError = console.error;
+  const logs: string[] = [];
+  console.error = (...values: unknown[]) => {
+    logs.push(
+      values
+        .map((value) => value instanceof Error ? `${value.name}: ${value.message}` : String(value))
+        .join(" ")
+    );
+  };
+  try {
+    const response = await run();
+    assert.equal(response.status, expected.status);
+    const payload = await json(response);
+    assert.equal(payload.error, expected.message);
+    assert.equal(JSON.stringify(payload).includes(expected.secret), false);
+    assert.equal(
+      logs.some((line) => line.includes(expected.secret)),
+      true,
+      "internal error detail must be logged server-side"
+    );
+  } finally {
+    console.error = originalConsoleError;
+  }
+}
+
 async function loginStudent(
   studentAlias: string,
   extra: Record<string, unknown> = {}
@@ -79,6 +109,22 @@ function completeAnswers(prefix: string): TeachingAnswers {
     TEACHING_FIELDS.map((field) => [
       field.key,
       { value: `${prefix}-${field.key}`, page: "1", evidence: `${prefix} evidence ${field.key}` },
+    ])
+  );
+}
+
+function permissiveRulesFor(answers: TeachingAnswers): Record<string, unknown> {
+  return Object.fromEntries(
+    TEACHING_FIELDS.map((field) => [
+      field.key,
+      {
+        value: {
+          kind: "text",
+          expected: answers[field.key]?.value ?? "",
+          aliases: [],
+        },
+        evidence: { pages: [], anyKeywordSets: [], notReported: true },
+      },
     ])
   );
 }
@@ -146,6 +192,29 @@ async function main(): Promise<void> {
       { sequence: "manual_then_ai", count: 1 },
     ]
   );
+
+  store.exec(`
+    CREATE TRIGGER fail_route_join
+    BEFORE INSERT ON teaching_participants
+    WHEN NEW.student_alias = 'Route Fault Join'
+    BEGIN
+      SELECT RAISE(ABORT, 'route-internal-join-secret');
+    END;
+  `);
+  await assertInternalRouteError(
+    () => sessionPost(
+      request("/api/teaching/session", "POST", {
+        role: "student",
+        studentAlias: "Route Fault Join",
+      })
+    ),
+    {
+      status: 503,
+      message: "教学实验暂不可用，请稍后重试。",
+      secret: "route-internal-join-secret",
+    }
+  );
+  store.exec("DROP TRIGGER fail_route_join");
 
   const noAuth = await studentGet(request("/api/teaching/student", "GET"));
   assert.equal(noAuth.status, 401);
@@ -228,6 +297,53 @@ async function main(): Promise<void> {
     visible: true,
     fieldKey: "cation",
   };
+  const oversizedHeartbeatRequest = request(
+    "/api/teaching/student",
+    "POST",
+    { ...heartbeatBody, eventId: `route-${"x".repeat(70_000)}` },
+    first.cookie
+  );
+  assert.equal(
+    oversizedHeartbeatRequest.headers.get("content-length"),
+    null,
+    "the oversized-body regression must exercise streamed input without Content-Length"
+  );
+  const oversizedHeartbeat = await studentPost(oversizedHeartbeatRequest);
+  assert.equal(oversizedHeartbeat.status, 413);
+
+  for (const invalidHeartbeat of [
+    { ...heartbeatBody, eventId: "x".repeat(129) },
+    { ...heartbeatBody, eventId: "route heartbeat spaces" },
+    { ...heartbeatBody, clientAt: "2026-02-30T12:00:00.000Z" },
+  ]) {
+    const response = await studentPost(
+      request("/api/teaching/student", "POST", invalidHeartbeat, first.cookie)
+    );
+    assert.equal(response.status, 400);
+  }
+  store.exec(`
+    CREATE TRIGGER fail_route_heartbeat
+    BEFORE INSERT ON teaching_activity_events
+    BEGIN
+      SELECT RAISE(ABORT, 'route-internal-heartbeat-secret');
+    END;
+  `);
+  await assertInternalRouteError(
+    () => studentPost(
+      request(
+        "/api/teaching/student",
+        "POST",
+        { ...heartbeatBody, eventId: "route-hb-internal-failure" },
+        first.cookie
+      )
+    ),
+    {
+      status: 500,
+      message: "记录有效时间失败，请稍后重试。",
+      secret: "route-internal-heartbeat-secret",
+    }
+  );
+  store.exec("DROP TRIGGER fail_route_heartbeat");
   const heartbeat = await studentPost(
     request("/api/teaching/student", "POST", heartbeatBody, first.cookie)
   );
@@ -249,6 +365,76 @@ async function main(): Promise<void> {
     )
   );
   assert.equal(crossOriginPatch.status, 403);
+
+  const oversizedPatchRequest = request(
+    "/api/teaching/student",
+    "PATCH",
+    {
+      version: manualPayload.version,
+      answers: {
+        ...completeAnswers("oversized"),
+        cation: { value: "cation", evidence: "x".repeat(70_000) },
+      },
+    },
+    first.cookie
+  );
+  assert.equal(oversizedPatchRequest.headers.get("content-length"), null);
+  const oversizedPatch = await studentPatch(oversizedPatchRequest);
+  assert.equal(oversizedPatch.status, 413);
+
+  for (const overlongAnswer of [
+    { value: "x".repeat(501), page: "1", evidence: "evidence" },
+    { value: "value", page: "x".repeat(41), evidence: "evidence" },
+    { value: "value", page: "1", evidence: "x".repeat(2_001) },
+  ]) {
+    const response = await studentPatch(
+      request(
+        "/api/teaching/student",
+        "PATCH",
+        {
+          version: manualPayload.version,
+          answers: { ...completeAnswers("bounded"), cation: overlongAnswer },
+        },
+        first.cookie
+      )
+    );
+    assert.equal(response.status, 400, "overlong answer fields must not be truncated silently");
+  }
+  assert.equal(
+    store
+      .prepare(
+        "SELECT version FROM teaching_submissions WHERE participant_id = ? AND round_no = 1"
+      )
+      .pluck()
+      .get(first.participantId),
+    manualPayload.version,
+    "rejected request bodies must not update the draft"
+  );
+
+  store.exec(`
+    CREATE TRIGGER fail_route_patch
+    BEFORE UPDATE OF answers_json ON teaching_submissions
+    WHEN NEW.participant_id = '${first.participantId}'
+    BEGIN
+      SELECT RAISE(ABORT, 'route-internal-patch-secret');
+    END;
+  `);
+  await assertInternalRouteError(
+    () => studentPatch(
+      request(
+        "/api/teaching/student",
+        "PATCH",
+        { version: manualPayload.version, answers: completeAnswers("internal") },
+        first.cookie
+      )
+    ),
+    {
+      status: 500,
+      message: "保存草稿失败，请稍后重试。",
+      secret: "route-internal-patch-secret",
+    }
+  );
+  store.exec("DROP TRIGGER fail_route_patch");
 
   const firstSave = await studentPatch(
     request(
@@ -286,11 +472,81 @@ async function main(): Promise<void> {
     roundNo: 1,
     version: Number(firstSavePayload.version),
   };
+  const canonicalPaperARules = store
+    .prepare("SELECT scoring_rules_json FROM teaching_papers WHERE id = ?")
+    .pluck()
+    .get(DEFAULT_EXPERIMENT.papers[0].id) as string;
+  const canonicalProjectChecksum = store
+    .prepare("SELECT config_checksum FROM teaching_projects WHERE id = ?")
+    .pluck()
+    .get(DEFAULT_EXPERIMENT.id) as string;
+  store
+    .prepare("UPDATE teaching_projects SET config_checksum = ? WHERE id = ?")
+    .run("route-checksum-drift", DEFAULT_EXPERIMENT.id);
+  await assertInternalRouteError(
+    () => studentPost(
+      request("/api/teaching/student", "POST", firstSubmitBody, first.cookie)
+    ),
+    {
+      status: 500,
+      message: "提交失败，请稍后重试。",
+      secret: "checksum drift detected",
+    }
+  );
+  assert.deepEqual(
+    store
+      .prepare(
+        `SELECT submitted_at AS submittedAt, version
+         FROM teaching_submissions WHERE participant_id = ? AND round_no = 1`
+      )
+      .get(first.participantId),
+    { submittedAt: null, version: firstSavePayload.version },
+    "a canonical-config repair failure must occur before the round is locked"
+  );
+  store
+    .prepare("UPDATE teaching_projects SET config_checksum = ? WHERE id = ?")
+    .run(canonicalProjectChecksum, DEFAULT_EXPERIMENT.id);
+  const firstSubmittedAnswers = completeAnswers("manual");
+  const firstCanonicalValueCorrect = scoreSubmission(
+    firstSubmittedAnswers,
+    DEFAULT_EXPERIMENT.papers[0]
+  ).valueCorrect;
+  store
+    .prepare("UPDATE teaching_papers SET scoring_rules_json = ? WHERE id = ?")
+    .run(
+      JSON.stringify(permissiveRulesFor(firstSubmittedAnswers)),
+      DEFAULT_EXPERIMENT.papers[0].id
+    );
   const firstTransition = await studentPost(
     request("/api/teaching/student", "POST", firstSubmitBody, first.cookie)
   );
   assert.equal(firstTransition.status, 200);
   assert.deepEqual(await json(firstTransition), { status: "next_round", roundNo: 2 });
+  const firstSubmittedScore = store
+    .prepare(
+      `SELECT auto_value_scores_json AS valueScoresJson,
+              scoring_version AS scoringVersion
+       FROM teaching_submissions WHERE participant_id = ? AND round_no = 1`
+    )
+    .get(first.participantId) as { valueScoresJson: string; scoringVersion: string };
+  assert.equal(
+    Object.values(
+      JSON.parse(firstSubmittedScore.valueScoresJson) as Record<
+        string,
+        { correct: boolean }
+      >
+    ).filter((score) => score.correct).length,
+    firstCanonicalValueCorrect,
+    "initial submission must repair canonical paper rules before scoring and locking"
+  );
+  assert.equal(firstSubmittedScore.scoringVersion, DEFAULT_EXPERIMENT.scoringVersion);
+  assert.equal(
+    store
+      .prepare("SELECT scoring_rules_json FROM teaching_papers WHERE id = ?")
+      .pluck()
+      .get(DEFAULT_EXPERIMENT.papers[0].id),
+    canonicalPaperARules
+  );
 
   const delayedSubmit = await studentPost(
     request("/api/teaching/student", "POST", firstSubmitBody, first.cookie)
@@ -371,13 +627,19 @@ async function main(): Promise<void> {
   assert.equal(lockedSave.status, 409);
   assert.equal((await json(lockedSave)).kind, "locked");
 
-  const paperARules = store
-    .prepare("SELECT scoring_rules_json FROM teaching_papers WHERE id = ?")
-    .pluck()
-    .get(DEFAULT_EXPERIMENT.papers[0].id) as string;
-  store
-    .prepare("UPDATE teaching_papers SET scoring_rules_json = '{broken json' WHERE id = ?")
-    .run(DEFAULT_EXPERIMENT.papers[0].id);
+  store.exec(`
+    CREATE TRIGGER force_route_scoring_error
+    AFTER UPDATE OF submitted_at ON teaching_submissions
+    WHEN NEW.participant_id = '${second.participantId}'
+      AND NEW.round_no = 1
+      AND OLD.submitted_at IS NULL
+      AND NEW.submitted_at IS NOT NULL
+    BEGIN
+      UPDATE teaching_papers
+      SET scoring_rules_json = '{broken json'
+      WHERE id = NEW.paper_id;
+    END;
+  `);
 
   const erroredSubmit = await studentPost(
     request(
@@ -387,6 +649,7 @@ async function main(): Promise<void> {
       second.cookie
     )
   );
+  store.exec("DROP TRIGGER force_route_scoring_error");
   assert.equal(
     erroredSubmit.status,
     200,
@@ -424,9 +687,20 @@ async function main(): Promise<void> {
     null,
     "handling a scoring error must not submit the newly activated round"
   );
+  const erroredAnswers = JSON.parse(erroredRound.answers_json) as TeachingAnswers;
+  const canonicalValueCorrect = scoreSubmission(
+    erroredAnswers,
+    DEFAULT_EXPERIMENT.papers[0]
+  ).valueCorrect;
+  assert.notEqual(
+    canonicalValueCorrect,
+    TEACHING_FIELDS.length,
+    "the fixture must distinguish canonical scoring from a permissive drifted rule set"
+  );
+  const permissiveDriftedRules = permissiveRulesFor(erroredAnswers);
   store
     .prepare("UPDATE teaching_papers SET scoring_rules_json = ? WHERE id = ?")
-    .run(paperARules, DEFAULT_EXPERIMENT.papers[0].id);
+    .run(JSON.stringify(permissiveDriftedRules), DEFAULT_EXPERIMENT.papers[0].id);
 
   const adminResponse = await adminGet(
     request("/api/teaching/admin", "GET", undefined, teacherCookie)
@@ -442,6 +716,31 @@ async function main(): Promise<void> {
       .pluck()
       .get(erroredRound.id),
     "scored"
+  );
+  const canonicallyRescoredByAdmin = store
+    .prepare(
+      `SELECT auto_value_scores_json AS valueScoresJson,
+              scoring_version AS scoringVersion
+       FROM teaching_submissions WHERE id = ?`
+    )
+    .get(erroredRound.id) as { valueScoresJson: string; scoringVersion: string };
+  assert.equal(
+    Object.values(
+      JSON.parse(canonicallyRescoredByAdmin.valueScoresJson) as Record<
+        string,
+        { correct: boolean }
+      >
+    ).filter((score) => score.correct).length,
+    canonicalValueCorrect,
+    "admin recovery must repair canonical paper rules before rescoring"
+  );
+  assert.equal(canonicallyRescoredByAdmin.scoringVersion, DEFAULT_EXPERIMENT.scoringVersion);
+  assert.equal(
+    store
+      .prepare("SELECT scoring_rules_json FROM teaching_papers WHERE id = ?")
+      .pluck()
+      .get(DEFAULT_EXPERIMENT.papers[0].id),
+    canonicalPaperARules
   );
   assert.deepEqual(
     store
@@ -473,6 +772,43 @@ async function main(): Promise<void> {
     )
   );
   assert.equal(removedSetupAction.status, 400);
+  const invalidReviewScores = await adminPost(
+    request(
+      "/api/teaching/admin",
+      "POST",
+      {
+        action: "review",
+        submissionId: erroredRound.id,
+        humanScores: { cation: "yes" },
+        aiScores: {},
+      },
+      teacherCookie
+    )
+  );
+  assert.equal(invalidReviewScores.status, 400);
+  store.exec(`
+    CREATE TRIGGER fail_route_review
+    BEFORE INSERT ON teaching_reviews
+    BEGIN
+      SELECT RAISE(ABORT, 'route-internal-review-secret');
+    END;
+  `);
+  await assertInternalRouteError(
+    () => adminPost(
+      request(
+        "/api/teaching/admin",
+        "POST",
+        { action: "review", submissionId: erroredRound.id, humanScores: {}, aiScores: {} },
+        teacherCookie
+      )
+    ),
+    {
+      status: 500,
+      message: "教师操作失败，请稍后重试。",
+      secret: "route-internal-review-secret",
+    }
+  );
+  store.exec("DROP TRIGGER fail_route_review");
   const review = await adminPost(
     request(
       "/api/teaching/admin",
@@ -490,6 +826,9 @@ async function main(): Promise<void> {
        WHERE id = ?`
     )
     .run(erroredRound.id);
+  store
+    .prepare("UPDATE teaching_papers SET scoring_rules_json = ? WHERE id = ?")
+    .run(JSON.stringify(permissiveDriftedRules), DEFAULT_EXPERIMENT.papers[0].id);
   const exportResponse = await exportGet(
     request("/api/teaching/admin/export", "GET", undefined, teacherCookie)
   );
@@ -512,6 +851,34 @@ async function main(): Promise<void> {
       .get(erroredRound.id),
     "scored",
     "direct CSV export must perform the same bounded scoring recovery as the dashboard"
+  );
+  const canonicallyRescoredByExport = store
+    .prepare(
+      `SELECT auto_value_scores_json AS valueScoresJson,
+              scoring_version AS scoringVersion
+       FROM teaching_submissions WHERE id = ?`
+    )
+    .get(erroredRound.id) as { valueScoresJson: string; scoringVersion: string };
+  assert.equal(
+    Object.values(
+      JSON.parse(canonicallyRescoredByExport.valueScoresJson) as Record<
+        string,
+        { correct: boolean }
+      >
+    ).filter((score) => score.correct).length,
+    canonicalValueCorrect,
+    "direct export must repair canonical paper rules before rescoring"
+  );
+  assert.equal(canonicallyRescoredByExport.scoringVersion, DEFAULT_EXPERIMENT.scoringVersion);
+  assert.deepEqual(
+    store
+      .prepare(
+        `SELECT answers_json, version, updated_at, submitted_at
+         FROM teaching_submissions WHERE id = ?`
+      )
+      .get(erroredRound.id),
+    immutableErroredRound,
+    "export recovery may not mutate locked student answers, version, or timestamps"
   );
 
   const anonymousResponse = await exportGet(
