@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
-import { migrateTeachingSchema } from "./migrations";
+import { migrateTeachingSchema, TEACHING_SCHEMA_VERSION } from "./migrations";
 
 const TEACHING_DATABASE_NAME = "teaching.db";
 
@@ -85,6 +85,12 @@ export function getTeachingDb(): Database.Database {
   mkdirSync(dataDir, { recursive: true });
   const next = new Database(path.join(dataDir, TEACHING_DATABASE_NAME));
   try {
+    const currentVersion = Number(next.pragma("user_version", { simple: true }));
+    if (currentVersion > TEACHING_SCHEMA_VERSION) {
+      throw new Error(
+        `Unsupported teaching database schema version ${currentVersion}; this build supports version ${TEACHING_SCHEMA_VERSION}.`
+      );
+    }
     next.pragma("journal_mode = WAL");
     next.pragma("foreign_keys = ON");
     next.exec(BASE_SCHEMA);

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { mkdirSync } from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import {
@@ -327,4 +328,30 @@ assert.equal(rollbackDb.pragma("quick_check", { simple: true }), "ok");
 rollbackDb.close();
 
 closeTeachingStoreForTests();
+
+const originalDataDir = process.env.IONICLINK_DATA_DIR!;
+const futureDataDir = path.join(originalDataDir, "future-version");
+const futureDatabasePath = path.join(futureDataDir, "teaching.db");
+mkdirSync(futureDataDir, { recursive: true });
+const futureDb = new Database(futureDatabasePath);
+futureDb.exec(`
+  CREATE TABLE future_only (id TEXT PRIMARY KEY);
+  PRAGMA user_version = 3;
+`);
+futureDb.close();
+
+try {
+  process.env.IONICLINK_DATA_DIR = futureDataDir;
+  assert.throws(() => getTeachingDb(), /schema version 3.*supports version 2/i);
+} finally {
+  closeTeachingStoreForTests();
+  process.env.IONICLINK_DATA_DIR = originalDataDir;
+}
+
+const unchangedFutureDb = new Database(futureDatabasePath, { readonly: true, fileMustExist: true });
+assert.equal(unchangedFutureDb.pragma("user_version", { simple: true }), 3);
+assert.deepEqual([...tableNames(unchangedFutureDb)].sort(), ["future_only"]);
+assert.equal(unchangedFutureDb.pragma("quick_check", { simple: true }), "ok");
+unchangedFutureDb.close();
+
 console.log("Teaching migration and default bootstrap tests passed");

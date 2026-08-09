@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 
-const TEACHING_SCHEMA_VERSION = 2;
+export const TEACHING_SCHEMA_VERSION = 2;
 
 const COLUMN_MIGRATIONS: ReadonlyArray<{
   table: string;

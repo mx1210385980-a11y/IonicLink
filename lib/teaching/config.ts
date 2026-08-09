@@ -28,21 +28,22 @@ export function defaultExperimentChecksum(): string {
   return createHash("sha256").update(JSON.stringify(DEFAULT_EXPERIMENT)).digest("hex");
 }
 
-export function ensureDefaultTeachingExperiment(store: Database.Database = getTeachingDb()): void {
+export function ensureDefaultTeachingExperiment(store?: Database.Database): void {
   const validationErrors = validateExperimentConfig(DEFAULT_EXPERIMENT);
   if (validationErrors.length) {
     throw new Error(`Invalid default teaching experiment config:\n${validationErrors.join("\n")}`);
   }
   const checksum = defaultExperimentChecksum();
+  const target = store ?? getTeachingDb();
   const createdAt = new Date().toISOString();
 
-  store.transaction(() => {
-    const existing = store
+  target.transaction(() => {
+    const existing = target
       .prepare("SELECT config_checksum FROM teaching_projects WHERE id = ?")
       .get(DEFAULT_PROJECT_ID) as { config_checksum: string | null } | undefined;
     if (existing?.config_checksum !== checksum) {
       const participantCount = Number(
-        store
+        target
           .prepare("SELECT COUNT(*) FROM teaching_participants WHERE project_id = ?")
           .pluck()
           .get(DEFAULT_PROJECT_ID)
@@ -52,7 +53,7 @@ export function ensureDefaultTeachingExperiment(store: Database.Database = getTe
       }
     }
 
-    store
+    target
       .prepare(
         `INSERT INTO teaching_projects
          (id, name, domain, invite_code, status, fields_json, created_at,
@@ -79,7 +80,7 @@ export function ensureDefaultTeachingExperiment(store: Database.Database = getTe
         checksum
       );
 
-    const upsertPaper = store.prepare(
+    const upsertPaper = target.prepare(
       `INSERT INTO teaching_papers
        (id, project_id, paper_no, title, doi, journal, source_url, source_record_id,
         ai_snapshot_json, ai_model, ai_extracted_at, created_at, task_prompt,

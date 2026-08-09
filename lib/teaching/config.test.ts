@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { DEFAULT_EXPERIMENT, defaultExperimentChecksum, validateExperimentConfig } from "./config";
+import { existsSync, mkdirSync } from "node:fs";
+import path from "node:path";
+import {
+  DEFAULT_EXPERIMENT,
+  defaultExperimentChecksum,
+  ensureDefaultTeachingExperiment,
+  validateExperimentConfig,
+} from "./config";
+import { closeTeachingStoreForTests } from "./store";
 import { TEACHING_FIELDS, type TeachingExperimentConfig } from "../teachingShared";
 
 assert.deepEqual(validateExperimentConfig(DEFAULT_EXPERIMENT), []);
@@ -44,4 +52,24 @@ assert.equal(defaultExperimentChecksum(), defaultExperimentChecksum(), "checksum
 const invalid = structuredClone(DEFAULT_EXPERIMENT);
 delete (invalid.papers[0].gold as Partial<typeof invalid.papers[0]["gold"]>).cof;
 assert.match(validateExperimentConfig(invalid as TeachingExperimentConfig).join("\n"), /paper A.*cof/i);
+
+const originalDataDir = process.env.IONICLINK_DATA_DIR!;
+const invalidDataDir = path.join(originalDataDir, "invalid-default-config");
+const originalTaskPrompt = DEFAULT_EXPERIMENT.papers[0].taskPrompt;
+mkdirSync(invalidDataDir, { recursive: true });
+closeTeachingStoreForTests();
+try {
+  process.env.IONICLINK_DATA_DIR = invalidDataDir;
+  DEFAULT_EXPERIMENT.papers[0].taskPrompt = "";
+  assert.throws(
+    () => ensureDefaultTeachingExperiment(),
+    /paper A requires a task prompt/
+  );
+  assert.equal(existsSync(path.join(invalidDataDir, "teaching.db")), false);
+} finally {
+  closeTeachingStoreForTests();
+  DEFAULT_EXPERIMENT.papers[0].taskPrompt = originalTaskPrompt;
+  process.env.IONICLINK_DATA_DIR = originalDataDir;
+}
+
 console.log("Teaching default experiment config tests passed");
