@@ -3,10 +3,20 @@ import type Database from "better-sqlite3";
 import {
   recordTeachingHeartbeat,
   teachingTimingQuality,
+  type TeachingHeartbeatInput,
 } from "../teaching";
-import { joinDefaultTeachingExperiment } from "./assignment";
+import {
+  getCurrentTeachingRound,
+  joinDefaultTeachingExperiment,
+  saveCurrentTeachingDraft,
+  submitCurrentTeachingRound,
+} from "./assignment";
 import { closeTeachingStoreForTests, getTeachingDb } from "./store";
-import type { TeachingFieldKey } from "../teachingShared";
+import {
+  TEACHING_FIELDS,
+  type TeachingAnswers,
+  type TeachingFieldKey,
+} from "../teachingShared";
 
 type SubmissionRow = {
   id: string;
@@ -58,21 +68,27 @@ function activityRows(
     .all(participantId) as ActivityRow[];
 }
 
+function allValues(prefix: string): TeachingAnswers {
+  return Object.fromEntries(
+    TEACHING_FIELDS.map((field) => [field.key, { value: `${prefix} ${field.key}` }])
+  );
+}
+
 const db = getTeachingDb();
 const { participantId, projectId } = joinDefaultTeachingExperiment("Activity Student");
 const [roundOne, roundTwo] = submissions(db, participantId);
 
 assert.deepEqual(recordTeachingHeartbeat(participantId, {
-  eventId: "hb-1", clientAt: "2026-08-09T00:00:15.000Z", activeDeltaSeconds: 15, visible: true
+  eventId: "hb-1", roundNo: 1, clientAt: "2026-08-09T00:00:15.000Z", activeDeltaSeconds: 15, visible: true
 }), { activeSeconds: 15 });
 assert.deepEqual(recordTeachingHeartbeat(participantId, {
-  eventId: "hb-1", clientAt: "2026-08-09T00:00:15.000Z", activeDeltaSeconds: 15, visible: true
+  eventId: "hb-1", roundNo: 1, clientAt: "2026-08-09T00:00:15.000Z", activeDeltaSeconds: 15, visible: true
 }), { activeSeconds: 15 }, "duplicate heartbeat must not double count");
 assert.equal(recordTeachingHeartbeat(participantId, {
-  eventId: "hb-2", clientAt: "2026-08-09T00:00:30.000Z", activeDeltaSeconds: 99, visible: true
+  eventId: "hb-2", roundNo: 1, clientAt: "2026-08-09T00:00:30.000Z", activeDeltaSeconds: 99, visible: true
 }).activeSeconds, 35, "server caps each heartbeat at 20 seconds");
 assert.equal(recordTeachingHeartbeat(participantId, {
-  eventId: "hb-3", clientAt: "2026-08-09T00:00:45.000Z", activeDeltaSeconds: 15, visible: false
+  eventId: "hb-3", roundNo: 1, clientAt: "2026-08-09T00:00:45.000Z", activeDeltaSeconds: 15, visible: false
 }).activeSeconds, 35);
 
 assert.deepEqual(
@@ -87,6 +103,7 @@ assert.deepEqual(
 assert.equal(
   recordTeachingHeartbeat(participantId, {
     eventId: "edit-1",
+    roundNo: 1,
     clientAt: "2026-08-09T00:01:00.000Z",
     activeDeltaSeconds: 4,
     visible: true,
@@ -97,6 +114,7 @@ assert.equal(
 assert.equal(
   recordTeachingHeartbeat(participantId, {
     eventId: "edit-1",
+    roundNo: 1,
     clientAt: "2026-08-09T00:01:20.000Z",
     activeDeltaSeconds: 20,
     visible: true,
@@ -106,8 +124,14 @@ assert.equal(
   "duplicate edit events must not double count or replace the first event"
 );
 
-const sensitivePayload = {
+const sensitivePayload: TeachingHeartbeatInput & {
+  answerText: string;
+  clipboard: string;
+  evidence: string;
+  pdfContent: string;
+} = {
   eventId: "hb-safe-metadata",
+  roundNo: 1 as const,
   clientAt: "2026-08-09T00:01:25.000Z",
   activeDeltaSeconds: 0,
   visible: true,
@@ -196,6 +220,7 @@ for (const eventId of ["", "contains space", "unsafe/slash", "x".repeat(129)]) {
   assert.throws(
     () => recordTeachingHeartbeat(participantId, {
       eventId,
+      roundNo: 1,
       clientAt: "2026-08-09T00:02:00.000Z",
       activeDeltaSeconds: 1,
       visible: true,
@@ -207,6 +232,7 @@ for (const clientAt of ["", "not-a-date", "2026-02-30T00:00:00.000Z"]) {
   assert.throws(
     () => recordTeachingHeartbeat(participantId, {
       eventId: `bad-date-${clientAt.length}`,
+      roundNo: 1,
       clientAt,
       activeDeltaSeconds: 1,
       visible: true,
@@ -218,6 +244,7 @@ for (const activeDeltaSeconds of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]
   assert.throws(
     () => recordTeachingHeartbeat(participantId, {
       eventId: `bad-delta-${String(activeDeltaSeconds)}`,
+      roundNo: 1,
       clientAt: "2026-08-09T00:02:00.000Z",
       activeDeltaSeconds,
       visible: true,
@@ -225,9 +252,22 @@ for (const activeDeltaSeconds of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]
     /delta|seconds|integer|invalid/i
   );
 }
+for (const [index, roundNo] of [0, 3, 1.5, "1", undefined, null].entries()) {
+  assert.throws(
+    () => recordTeachingHeartbeat(participantId, {
+      eventId: `bad-round-${index}`,
+      roundNo: roundNo as TeachingHeartbeatInput["roundNo"],
+      clientAt: "2026-08-09T00:02:00.000Z",
+      activeDeltaSeconds: 1,
+      visible: true,
+    }),
+    /round number must be 1 or 2/i
+  );
+}
 assert.throws(
   () => recordTeachingHeartbeat(participantId, {
     eventId: "bad-visible",
+    roundNo: 1,
     clientAt: "2026-08-09T00:02:00.000Z",
     activeDeltaSeconds: 1,
     visible: "true" as unknown as boolean,
@@ -237,6 +277,7 @@ assert.throws(
 assert.throws(
   () => recordTeachingHeartbeat(participantId, {
     eventId: "bad-field",
+    roundNo: 1,
     clientAt: "2026-08-09T00:02:00.000Z",
     activeDeltaSeconds: 1,
     visible: true,
@@ -256,6 +297,7 @@ db.prepare(
 assert.throws(
   () => recordTeachingHeartbeat(submitted.participantId, {
     eventId: "submitted-heartbeat",
+    roundNo: 1,
     clientAt: "2026-08-09T00:03:01.000Z",
     activeDeltaSeconds: 1,
     visible: true,
@@ -272,6 +314,7 @@ db.prepare(
 assert.throws(
   () => recordTeachingHeartbeat(completed.participantId, {
     eventId: "completed-heartbeat",
+    roundNo: 1,
     clientAt: "2026-08-09T00:04:01.000Z",
     activeDeltaSeconds: 1,
     visible: true,
@@ -281,6 +324,7 @@ assert.throws(
 assert.throws(
   () => recordTeachingHeartbeat("unknown-participant", {
     eventId: "unknown-heartbeat",
+    roundNo: 1,
     clientAt: "2026-08-09T00:05:00.000Z",
     activeDeltaSeconds: 1,
     visible: true,
@@ -314,6 +358,7 @@ db.prepare(
 assert.throws(
   () => recordTeachingHeartbeat("legacy-activity-participant", {
     eventId: "legacy-heartbeat",
+    roundNo: 1,
     clientAt: "2026-08-09T00:06:01.000Z",
     activeDeltaSeconds: 20,
     visible: true,
@@ -337,6 +382,7 @@ db.prepare("UPDATE teaching_projects SET experiment_kind = 'legacy' WHERE id = ?
 assert.throws(
   () => recordTeachingHeartbeat(participantId, {
     eventId: "wrong-experiment-kind",
+    roundNo: 1,
     clientAt: "2026-08-09T00:07:00.000Z",
     activeDeltaSeconds: 7,
     visible: true,
@@ -347,6 +393,88 @@ assert.throws(
 assert.equal(activityRows(db, participantId).length, validEventCount);
 assert.equal(submissions(db, participantId)[0].activeSeconds, activeSecondsBeforeInvalidInput);
 db.prepare("UPDATE teaching_projects SET experiment_kind = 'crossover' WHERE id = ?").run(projectId);
+
+const future = joinDefaultTeachingExperiment("Future Round Activity Student");
+assert.throws(
+  () => recordTeachingHeartbeat(future.participantId, {
+    eventId: "future-round-two-heartbeat",
+    roundNo: 2,
+    clientAt: "2026-08-09T00:07:30.000Z",
+    activeDeltaSeconds: 7,
+    visible: true,
+  }),
+  /active|locked|round/i,
+  "round 2 must not receive activity while round 1 is still active"
+);
+assert.deepEqual(
+  submissions(db, future.participantId).map(({ roundNo, activeSeconds }) => ({
+    roundNo,
+    activeSeconds,
+  })),
+  [
+    { roundNo: 1, activeSeconds: 0 },
+    { roundNo: 2, activeSeconds: 0 },
+  ]
+);
+assert.equal(activityRows(db, future.participantId).length, 0);
+
+const delayed = joinDefaultTeachingExperiment("Delayed Round One Activity Student");
+const delayedRoundOneState = getCurrentTeachingRound(delayed.participantId);
+assert.ok(delayedRoundOneState && delayedRoundOneState.status === "active");
+assert.equal(delayedRoundOneState.roundNo, 1);
+const delayedRoundOneClientAt = new Date(Date.now() - 60_000).toISOString();
+saveCurrentTeachingDraft(
+  delayed.participantId,
+  delayedRoundOneState.version,
+  allValues("delayed-round-one")
+);
+assert.deepEqual(
+  submitCurrentTeachingRound(delayed.participantId),
+  { status: "next_round", roundNo: 2 }
+);
+assert.deepEqual(
+  submissions(db, delayed.participantId).map(({ roundNo, activeSeconds }) => ({
+    roundNo,
+    activeSeconds,
+  })),
+  [
+    { roundNo: 1, activeSeconds: 0 },
+    { roundNo: 2, activeSeconds: 0 },
+  ]
+);
+assert.throws(
+  () => recordTeachingHeartbeat(delayed.participantId, {
+    eventId: "late-round-one-heartbeat",
+    roundNo: 1,
+    clientAt: delayedRoundOneClientAt,
+    activeDeltaSeconds: 6,
+    visible: true,
+  }),
+  /active|locked|submitted|round/i,
+  "a delayed round 1 heartbeat must not drift into active round 2"
+);
+assert.equal(submissions(db, delayed.participantId)[1].activeSeconds, 0);
+assert.equal(activityRows(db, delayed.participantId).length, 0);
+assert.deepEqual(
+  recordTeachingHeartbeat(delayed.participantId, {
+    eventId: "round-two-heartbeat",
+    roundNo: 2,
+    clientAt: "2026-08-09T00:08:00.000Z",
+    activeDeltaSeconds: 6,
+    visible: true,
+  }),
+  { activeSeconds: 6 }
+);
+assert.deepEqual(
+  submissions(db, delayed.participantId).map(({ roundNo, activeSeconds }) => ({
+    roundNo,
+    activeSeconds,
+  })),
+  [
+    { roundNo: 1, activeSeconds: 0 },
+    { roundNo: 2, activeSeconds: 6 },
+  ]
+);
 
 assert.equal(teachingTimingQuality(0, 0), "zero_active");
 assert.equal(teachingTimingQuality(0, 3_600), "zero_active");

@@ -24,6 +24,7 @@ export {
 export {
   recordTeachingHeartbeat,
   teachingTimingQuality,
+  type TeachingHeartbeatInput,
 } from "./teaching/activity";
 export {
   TEACHING_FIELDS,

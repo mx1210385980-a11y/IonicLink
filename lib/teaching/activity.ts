@@ -10,8 +10,9 @@ const TEACHING_FIELD_KEYS = new Set<TeachingFieldKey>(
   TEACHING_FIELDS.map((field) => field.key)
 );
 
-type TeachingHeartbeatInput = {
+export type TeachingHeartbeatInput = {
   eventId: string;
+  roundNo: 1 | 2;
   clientAt: string;
   activeDeltaSeconds: number;
   visible: boolean;
@@ -56,6 +57,9 @@ function validateHeartbeatInput(input: TeachingHeartbeatInput): void {
     !SAFE_EVENT_ID.test(input.eventId)
   ) {
     throw new Error("Teaching activity event ID is invalid.");
+  }
+  if (input.roundNo !== 1 && input.roundNo !== 2) {
+    throw new Error("Teaching activity round number must be 1 or 2.");
   }
   if (!isValidIsoTimestamp(input.clientAt)) {
     throw new Error("Teaching activity client timestamp is invalid.");
@@ -104,14 +108,21 @@ export function recordTeachingHeartbeat(
 
     const current = store
       .prepare(
-        `SELECT id, active_seconds AS activeSeconds
-         FROM teaching_submissions
-         WHERE participant_id = ? AND project_id = ?
-           AND submitted_at IS NULL AND round_no IN (1, 2)
-         ORDER BY round_no ASC
+        `SELECT s.id, s.active_seconds AS activeSeconds
+         FROM teaching_submissions s
+         WHERE s.participant_id = ? AND s.project_id = ?
+           AND s.round_no = ? AND s.submitted_at IS NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM teaching_submissions earlier
+             WHERE earlier.participant_id = s.participant_id
+               AND earlier.project_id = s.project_id
+               AND earlier.submitted_at IS NULL
+               AND earlier.round_no IN (1, 2)
+               AND earlier.round_no < s.round_no
+           )
          LIMIT 1`
       )
-      .get(participantId, participant.projectId) as
+      .get(participantId, participant.projectId, input.roundNo) as
       | { id: string; activeSeconds: number }
       | undefined;
     if (!current) {
