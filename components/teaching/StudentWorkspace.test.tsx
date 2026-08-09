@@ -3,11 +3,16 @@ import { readFileSync } from "node:fs";
 import React, { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
+  buildTeachingHeartbeatEventId,
   buildTeachingHeartbeat,
   buildTeachingSubmitPayload,
+  flushTeachingHeartbeatBeforeSubmit,
   hasTeachingAnswerChanged,
   isTeachingInteractionLocked,
+  isTeachingHeartbeatEligible,
   normalizeTeachingDraftText,
+  selectTeachingHeartbeatAttempt,
+  teachingHeartbeatSkipSucceeded,
 } from "./studentWorkspaceModel";
 import { StudentWorkspace } from "./StudentWorkspace";
 import {
@@ -210,6 +215,56 @@ assert.deepEqual(heartbeat, {
   visible: true,
   fieldKey: "load",
 });
+const fastHeartbeat = buildTeachingHeartbeat({
+  enabled: true,
+  visible: true,
+  now: 100_001,
+  lastActivityAt: 100_001,
+  lastHeartbeatAt: 100_000,
+  eventId: "fast-round-final",
+  roundNo: 1,
+  minimumOneSecond: true,
+});
+assert.equal(fastHeartbeat?.activeDeltaSeconds, 1, "a fast submitted round must record active time");
+const noResidualHeartbeat = buildTeachingHeartbeat({
+  enabled: true,
+  visible: true,
+  now: 100_000,
+  lastActivityAt: 100_000,
+  lastHeartbeatAt: 100_000,
+  eventId: "same-millisecond-final",
+  roundNo: 1,
+  minimumOneSecond: true,
+});
+assert.equal(noResidualHeartbeat, null);
+assert.equal(
+  teachingHeartbeatSkipSucceeded(
+    isTeachingHeartbeatEligible({
+      enabled: true,
+      visible: true,
+      now: 100_000,
+      lastActivityAt: 100_000,
+    }),
+    true
+  ),
+  true,
+  "an eligible same-millisecond final flush has no residual work and must not block submit"
+);
+assert.equal(teachingHeartbeatSkipSucceeded(false, true), false);
+assert.equal(teachingHeartbeatSkipSucceeded(false, false), true);
+const firstPageId = buildTeachingHeartbeatEventId("page-nonce-a", 1, 7);
+const secondPageId = buildTeachingHeartbeatEventId("page-nonce-b", 1, 7);
+assert.notEqual(firstPageId, secondPageId);
+assert.match(firstPageId, /^[A-Za-z0-9][A-Za-z0-9._:-]*$/);
+const retainedPayload = fastHeartbeat!;
+let retryFactoryCalls = 0;
+const retriedPayload = selectTeachingHeartbeatAttempt(retainedPayload, () => {
+  retryFactoryCalls += 1;
+  return { ...retainedPayload, eventId: "must-not-be-minted" };
+});
+assert.strictEqual(retriedPayload, retainedPayload);
+assert.equal(retriedPayload?.eventId, "fast-round-final");
+assert.equal(retryFactoryCalls, 0, "ambiguous retry must retain its original event ID");
 assert.equal(
   buildTeachingHeartbeat({
     enabled: true,
@@ -263,3 +318,65 @@ assert.match(workspaceSource, /闲置，计时已暂停/);
 assert.match(workspaceSource, /setConfirmed\(false\)/);
 assert.match(workspaceSource, /submittingRef\.current/);
 assert.match(workspaceSource, /window\.location\.reload\(\)/);
+assert.match(
+  workspaceSource,
+  /flushTeachingHeartbeatBeforeSubmit[\s\S]+if \(!heartbeatPersisted\)[\s\S]+return;[\s\S]+flushLatestDraft/,
+  "the component must abort on heartbeat failure before saving or submitting"
+);
+
+async function verifyHeartbeatFlushCoordination(): Promise<void> {
+  const order: string[] = [];
+  let resolveInFlight!: (value: boolean) => void;
+  const inFlight = new Promise<boolean>((resolve) => {
+    resolveInFlight = resolve;
+  });
+  const waitingFlush = flushTeachingHeartbeatBeforeSubmit({
+    currentInFlight: () => inFlight,
+    hasPending: () => false,
+    send: async () => {
+      order.push("residual");
+      return true;
+    },
+  });
+  await Promise.resolve();
+  assert.deepEqual(order, [], "submit flush must await an interval heartbeat already in flight");
+  resolveInFlight(true);
+  assert.equal(await waitingFlush, true);
+  assert.deepEqual(order, ["residual"]);
+
+  let pending = true;
+  const retryThenResidual: string[] = [];
+  const failedResidual = await flushTeachingHeartbeatBeforeSubmit({
+    currentInFlight: () => Promise.resolve(false),
+    hasPending: () => pending,
+    send: async () => {
+      if (pending) {
+        retryThenResidual.push("retry-pending");
+        pending = false;
+        return true;
+      }
+      retryThenResidual.push("residual-failed");
+      return false;
+    },
+  });
+  assert.equal(failedResidual, false, "submit must abort when its residual heartbeat fails");
+  assert.deepEqual(retryThenResidual, ["retry-pending", "residual-failed"]);
+
+  pending = true;
+  let failedRetryAttempts = 0;
+  const failedRetry = await flushTeachingHeartbeatBeforeSubmit({
+    currentInFlight: () => null,
+    hasPending: () => pending,
+    send: async () => {
+      failedRetryAttempts += 1;
+      return false;
+    },
+  });
+  assert.equal(failedRetry, false);
+  assert.equal(failedRetryAttempts, 1, "a failed pending retry must stop before residual send");
+}
+
+void verifyHeartbeatFlushCoordination().catch((cause) => {
+  console.error(cause);
+  process.exitCode = 1;
+});

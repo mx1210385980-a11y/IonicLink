@@ -10,10 +10,17 @@ import type {
 } from "@/lib/teachingShared";
 import {
   buildTeachingHeartbeat,
+  buildTeachingHeartbeatEventId,
   buildTeachingSubmitPayload,
+  createTeachingPageNonce,
+  flushTeachingHeartbeatBeforeSubmit,
   hasTeachingAnswerChanged,
+  isTeachingHeartbeatEligible,
   isTeachingInteractionLocked,
   isTeachingWorkspaceIdle,
+  selectTeachingHeartbeatAttempt,
+  teachingHeartbeatSkipSucceeded,
+  type TeachingHeartbeatPayload,
 } from "./studentWorkspaceModel";
 
 type ActiveTeachingState = Extract<TeachingStudentState, { status: "active" }>;
@@ -94,10 +101,15 @@ function ActiveWorkspace({ initial }: { initial: ActiveTeachingState }) {
   const savedRevisionRef = useRef(0);
   const lockedRef = useRef(false);
   const submittingRef = useRef(false);
-  const heartbeatInFlightRef = useRef(false);
+  const heartbeatInFlightRef = useRef<Promise<boolean> | null>(null);
+  const pendingHeartbeatRef = useRef<TeachingHeartbeatPayload | null>(null);
+  const sendHeartbeatRef = useRef<(requirePayload?: boolean) => Promise<boolean>>(
+    async () => false
+  );
+  const heartbeatPageNonceRef = useRef<string>();
   const heartbeatSequenceRef = useRef(0);
   const lastActivityAtRef = useRef(Date.now());
-  const lastHeartbeatAtRef = useRef(Date.now());
+  const activeWindowStartedAtRef = useRef(Date.now());
   const lastEditedFieldRef = useRef<TeachingFieldKey>();
   answersRef.current = answers;
 
@@ -186,7 +198,7 @@ function ActiveWorkspace({ initial }: { initial: ActiveTeachingState }) {
     const markActivity = () => {
       const timestamp = Date.now();
       if (isTeachingWorkspaceIdle(timestamp, lastActivityAtRef.current)) {
-        lastHeartbeatAtRef.current = timestamp;
+        activeWindowStartedAtRef.current = timestamp;
       }
       lastActivityAtRef.current = timestamp;
       setIdle(false);
@@ -196,53 +208,101 @@ function ActiveWorkspace({ initial }: { initial: ActiveTeachingState }) {
     for (const eventName of eventNames) document.addEventListener(eventName, markActivity, passive);
 
     const resetVisibleWindow = () => {
-      lastHeartbeatAtRef.current = Date.now();
+      activeWindowStartedAtRef.current = Date.now();
     };
     document.addEventListener("visibilitychange", resetVisibleWindow);
 
-    const sendHeartbeat = async () => {
+    const sendHeartbeat = (requirePayload = false): Promise<boolean> => {
+      const existing = heartbeatInFlightRef.current;
+      if (existing) return existing;
+
       const timestamp = Date.now();
       const isIdle = isTeachingWorkspaceIdle(timestamp, lastActivityAtRef.current);
       setIdle(isIdle);
-      if (heartbeatInFlightRef.current) return;
-      heartbeatSequenceRef.current += 1;
-      const fieldKey = lastEditedFieldRef.current;
-      const payload = buildTeachingHeartbeat({
+      const heartbeatEligible = isTeachingHeartbeatEligible({
         enabled: !lockedRef.current,
         visible: document.visibilityState === "visible",
         now: timestamp,
         lastActivityAt: lastActivityAtRef.current,
-        lastHeartbeatAt: lastHeartbeatAtRef.current,
-        eventId: `teaching-${initial.roundNo}-${timestamp.toString(36)}-${heartbeatSequenceRef.current.toString(36)}`,
-        roundNo: initial.roundNo,
-        fieldKey,
       });
-      if (!payload) return;
-
-      heartbeatInFlightRef.current = true;
-      try {
-        const result = await teachingRequest<{ activeSeconds: number }>(
-          "POST",
-          payload,
-          "记录有效时间失败"
-        );
-        setActiveSeconds(result.activeSeconds);
-        lastHeartbeatAtRef.current = timestamp;
-        if (lastEditedFieldRef.current === fieldKey) lastEditedFieldRef.current = undefined;
-      } catch (cause) {
-        if (!handleConflict(cause)) {
-          setError(errorMessage(cause, "有效时间暂未同步，将在后续操作时重试。"));
-        }
-      } finally {
-        heartbeatInFlightRef.current = false;
+      if (!heartbeatEligible) {
+        return Promise.resolve(teachingHeartbeatSkipSucceeded(false, requirePayload));
       }
+      const fieldKey = lastEditedFieldRef.current;
+      let payload: TeachingHeartbeatPayload | null;
+      try {
+        payload = selectTeachingHeartbeatAttempt(pendingHeartbeatRef.current, () => {
+          const sequence = heartbeatSequenceRef.current + 1;
+          const pageNonce = heartbeatPageNonceRef.current ?? createTeachingPageNonce();
+          heartbeatPageNonceRef.current = pageNonce;
+          const created = buildTeachingHeartbeat({
+            enabled: true,
+            visible: true,
+            now: timestamp,
+            lastActivityAt: lastActivityAtRef.current,
+            lastHeartbeatAt: activeWindowStartedAtRef.current,
+            eventId: buildTeachingHeartbeatEventId(pageNonce, initial.roundNo, sequence),
+            roundNo: initial.roundNo,
+            fieldKey,
+            minimumOneSecond: requirePayload,
+          });
+          if (created) heartbeatSequenceRef.current = sequence;
+          return created;
+        });
+      } catch (cause) {
+        setError(errorMessage(cause, "无法生成安全的计时事件，请刷新页面后重试。"));
+        return Promise.resolve(false);
+      }
+      if (!payload) {
+        return Promise.resolve(teachingHeartbeatSkipSucceeded(true, requirePayload));
+      }
+      pendingHeartbeatRef.current = payload;
+
+      const operation = (async () => {
+        try {
+          const result = await teachingRequest<{ activeSeconds: number }>(
+            "POST",
+            payload,
+            "记录有效时间失败"
+          );
+          setActiveSeconds(result.activeSeconds);
+          const acknowledgedAt = Date.parse(payload.clientAt);
+          if (Number.isFinite(acknowledgedAt)) {
+            activeWindowStartedAtRef.current = Math.max(
+              activeWindowStartedAtRef.current,
+              acknowledgedAt
+            );
+          }
+          if (pendingHeartbeatRef.current?.eventId === payload.eventId) {
+            pendingHeartbeatRef.current = null;
+          }
+          if (lastEditedFieldRef.current === payload.fieldKey) {
+            lastEditedFieldRef.current = undefined;
+          }
+          return true;
+        } catch (cause) {
+          if (!handleConflict(cause)) {
+            setError(errorMessage(cause, "有效时间暂未同步，将在后续操作时重试。"));
+          }
+          return false;
+        }
+      })();
+      heartbeatInFlightRef.current = operation;
+      void operation.then(() => {
+        if (heartbeatInFlightRef.current === operation) {
+          heartbeatInFlightRef.current = null;
+        }
+      });
+      return operation;
     };
+    sendHeartbeatRef.current = sendHeartbeat;
 
     const heartbeatTimer = window.setInterval(() => void sendHeartbeat(), 15_000);
     return () => {
       window.clearInterval(heartbeatTimer);
       for (const eventName of eventNames) document.removeEventListener(eventName, markActivity);
       document.removeEventListener("visibilitychange", resetVisibleWindow);
+      sendHeartbeatRef.current = async () => false;
     };
     // The round is the only prop that identifies this activity stream; transient values live in refs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -268,6 +328,19 @@ function ActiveWorkspace({ initial }: { initial: ActiveTeachingState }) {
     setSubmitting(true);
     setError("");
     clearPendingAutosave();
+    const heartbeatPersisted = await flushTeachingHeartbeatBeforeSubmit({
+      currentInFlight: () => heartbeatInFlightRef.current,
+      hasPending: () => pendingHeartbeatRef.current !== null,
+      send: () => sendHeartbeatRef.current(true),
+    });
+    if (!heartbeatPersisted) {
+      if (!lockedRef.current) {
+        setError("有效时间尚未保存，本轮没有提交。请检查网络后重试提交。");
+      }
+      submittingRef.current = false;
+      setSubmitting(false);
+      return;
+    }
     const saved = await flushLatestDraft();
     if (!saved) {
       submittingRef.current = false;

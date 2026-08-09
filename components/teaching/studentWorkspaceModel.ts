@@ -34,6 +34,22 @@ export function hasTeachingAnswerChanged(
   return !teachingAnswersEquivalent(answer, initial);
 }
 
+export function isTeachingHeartbeatEligible(input: {
+  enabled: boolean;
+  visible: boolean;
+  now: number;
+  lastActivityAt: number;
+}): boolean {
+  return input.enabled && input.visible && input.now - input.lastActivityAt <= IDLE_AFTER_MS;
+}
+
+export function teachingHeartbeatSkipSucceeded(
+  eligible: boolean,
+  finalFlush: boolean
+): boolean {
+  return eligible || !finalFlush;
+}
+
 export function buildTeachingHeartbeat(input: {
   enabled: boolean;
   visible: boolean;
@@ -43,11 +59,13 @@ export function buildTeachingHeartbeat(input: {
   eventId: string;
   roundNo: 1 | 2;
   fieldKey?: TeachingFieldKey;
+  minimumOneSecond?: boolean;
 }): TeachingHeartbeatPayload | null {
-  if (!input.enabled || !input.visible || input.now - input.lastActivityAt > IDLE_AFTER_MS) {
-    return null;
-  }
-  const elapsedSeconds = Math.round((input.now - input.lastHeartbeatAt) / 1_000);
+  if (!isTeachingHeartbeatEligible(input)) return null;
+  const elapsedMilliseconds = input.now - input.lastHeartbeatAt;
+  const elapsedSeconds = input.minimumOneSecond && elapsedMilliseconds > 0
+    ? Math.max(1, Math.round(elapsedMilliseconds / 1_000))
+    : Math.round(elapsedMilliseconds / 1_000);
   if (elapsedSeconds <= 0) return null;
   const payload: TeachingHeartbeatPayload = {
     action: "heartbeat",
@@ -59,6 +77,42 @@ export function buildTeachingHeartbeat(input: {
   };
   if (input.fieldKey !== undefined) payload.fieldKey = input.fieldKey;
   return payload;
+}
+
+export function createTeachingPageNonce(): string {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === "function") return cryptoApi.randomUUID();
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+    return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+  }
+  throw new Error("Secure random identifiers are unavailable in this browser.");
+}
+
+export function buildTeachingHeartbeatEventId(
+  pageNonce: string,
+  roundNo: 1 | 2,
+  sequence: number
+): string {
+  return `teaching-${pageNonce}-${roundNo}-${sequence.toString(36)}`;
+}
+
+export function selectTeachingHeartbeatAttempt(
+  pending: TeachingHeartbeatPayload | null,
+  create: () => TeachingHeartbeatPayload | null
+): TeachingHeartbeatPayload | null {
+  return pending ?? create();
+}
+
+export async function flushTeachingHeartbeatBeforeSubmit(input: {
+  currentInFlight: () => Promise<boolean> | null;
+  hasPending: () => boolean;
+  send: () => Promise<boolean>;
+}): Promise<boolean> {
+  const inFlight = input.currentInFlight();
+  if (inFlight) await inFlight;
+  if (input.hasPending() && !(await input.send())) return false;
+  return input.send();
 }
 
 export function buildTeachingSubmitPayload(
