@@ -160,9 +160,9 @@ export function joinDefaultTeachingExperiment(
   const displayAlias = normalizeStudentAlias(studentAlias);
   const identityKey = studentIdentityKey(displayAlias);
   const store = getTeachingDb();
-  ensureDefaultTeachingExperiment(store);
 
   return store.transaction(() => {
+    ensureDefaultTeachingExperiment(store);
     const project = store
       .prepare("SELECT id FROM teaching_projects WHERE id = ? AND is_default = 1 AND status = 'open'")
       .get(DEFAULT_EXPERIMENT.id) as { id: string } | undefined;
@@ -423,12 +423,14 @@ export function submitCurrentTeachingRound(participantId: string): TeachingRound
 
     const current = store
       .prepare(
-        `SELECT id, round_no AS roundNo, answers_json AS answersJson
+        `SELECT id, round_no AS roundNo, answers_json AS answersJson, version
          FROM teaching_submissions
          WHERE participant_id = ? AND submitted_at IS NULL AND round_no IN (1, 2)
          ORDER BY round_no ASC LIMIT 1`
       )
-      .get(participantId) as { id: string; roundNo: 1 | 2; answersJson: string } | undefined;
+      .get(participantId) as
+      | { id: string; roundNo: 1 | 2; answersJson: string; version: number }
+      | undefined;
     if (!current) throw new Error("No active teaching round is available.");
 
     const answers = JSON.parse(current.answersJson) as TeachingAnswers;
@@ -461,7 +463,17 @@ export function submitCurrentTeachingRound(participantId: string): TeachingRound
       failure = error;
     }
 
-    if (current.roundNo === 1) return { status: "next_round", roundNo: 2 };
+    if (current.roundNo === 1) {
+      const activated = store
+        .prepare(
+          `UPDATE teaching_submissions
+           SET version = ?, started_at = ?, updated_at = ?
+           WHERE participant_id = ? AND round_no = 2 AND submitted_at IS NULL`
+        )
+        .run(current.version + 1, submittedAt, submittedAt, participantId);
+      if (activated.changes !== 1) throw new Error("Round 2 could not be activated.");
+      return { status: "next_round", roundNo: 2 };
+    }
     store
       .prepare("UPDATE teaching_participants SET completed_at = ? WHERE id = ?")
       .run(submittedAt, participantId);

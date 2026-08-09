@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import type Database from "better-sqlite3";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import Database from "better-sqlite3";
 import {
   getCurrentTeachingRound,
   joinDefaultTeachingExperiment,
@@ -18,6 +21,7 @@ type SubmissionRow = {
   id: string;
   round_no: number;
   mode: "manual" | "ai_assisted";
+  started_at: string;
   answers_json: string;
   ai_initial_json: string;
   version: number;
@@ -53,6 +57,16 @@ function assertActive(
 ): asserts state is Exclude<NonNullable<typeof state>, { status: "complete" }> {
   assert.ok(state);
   assert.equal(state.status, "active");
+}
+
+const waitArray = new Int32Array(new SharedArrayBuffer(4));
+
+function waitForFiles(paths: string[], timeoutMs: number, label: string): void {
+  const deadline = Date.now() + timeoutMs;
+  while (!paths.every((file) => existsSync(file))) {
+    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${label}.`);
+    Atomics.wait(waitArray, 0, 0, 10);
+  }
 }
 
 assert.equal(normalizeStudentAlias("  Ｓ００１\tStudent  "), "Ｓ００１\tStudent");
@@ -185,10 +199,37 @@ assert.equal(submission(db, first.participantId, 2).submitted_at, null);
 
 const completeRoundOne = allValues("round-one-complete");
 const secondSave = saveCurrentTeachingDraft(first.participantId, firstSave.version, completeRoundOne);
+const inactiveRoundStartedAt = "2000-01-01T00:00:00.000Z";
+db.prepare(
+  `UPDATE teaching_submissions SET started_at = ?, updated_at = ?
+   WHERE participant_id = ? AND round_no = 2`
+).run(inactiveRoundStartedAt, inactiveRoundStartedAt, first.participantId);
+const roundTwoAnswersBeforeTransition = submission(db, first.participantId, 2).answers_json;
 const transition = submitCurrentTeachingRound(first.participantId);
 assert.deepEqual(transition, { status: "next_round", roundNo: 2 });
+assert.throws(
+  () => saveCurrentTeachingDraft(first.participantId, initialVersion, allValues("delayed-round-one")),
+  /version|refresh|update|刷新/i,
+  "a delayed round 1 save must not match the newly active round 2"
+);
+assert.equal(
+  submission(db, first.participantId, 2).answers_json,
+  roundTwoAnswersBeforeTransition,
+  "a delayed round 1 save must leave round 2 answers unchanged"
+);
+assert.equal(
+  submission(db, first.participantId, 2).version,
+  secondSave.version + 1,
+  "round 2 must activate above every version visible in round 1"
+);
 const scoredRoundOne = submission(db, first.participantId, 1);
 assert.ok(scoredRoundOne.submitted_at);
+const activatedRoundTwo = submission(db, first.participantId, 2);
+const successfulActivation = {
+  startedAt: activatedRoundTwo.started_at,
+  updatedAt: activatedRoundTwo.updated_at,
+  submittedAt: scoredRoundOne.submitted_at,
+};
 assert.equal(scoredRoundOne.version, secondSave.version + 1);
 assert.equal(scoredRoundOne.scoring_status, "scored");
 assert.equal(scoredRoundOne.scoring_version, DEFAULT_EXPERIMENT.scoringVersion);
@@ -252,10 +293,19 @@ db.prepare("UPDATE teaching_papers SET scoring_rules_json = '{broken json' WHERE
 );
 
 const erroredSnapshots = new Map<string, Pick<SubmissionRow, "answers_json" | "version" | "updated_at" | "submitted_at">>();
+const scoringFailureActivations: Array<{
+  startedAt: string;
+  updatedAt: string;
+  submittedAt: string | null;
+}> = [];
 for (const participantId of errorParticipantIds) {
   const state = getCurrentTeachingRound(participantId);
   assertActive(state);
   const saved = saveCurrentTeachingDraft(participantId, state.version, allValues("rescore"));
+  db.prepare(
+    `UPDATE teaching_submissions SET started_at = ?, updated_at = ?
+     WHERE participant_id = ? AND round_no = 2`
+  ).run(inactiveRoundStartedAt, inactiveRoundStartedAt, participantId);
   assert.throws(() => submitCurrentTeachingRound(participantId), /score|scoring|json|评分/i);
   const row = submission(db, participantId, 1);
   assert.ok(row.submitted_at, "a scoring failure must still lock the submitted answers");
@@ -267,6 +317,26 @@ for (const participantId of errorParticipantIds) {
     updated_at: row.updated_at,
     submitted_at: row.submitted_at,
   });
+  const nextRound = submission(db, participantId, 2);
+  scoringFailureActivations.push({
+    startedAt: nextRound.started_at,
+    updatedAt: nextRound.updated_at,
+    submittedAt: row.submitted_at,
+  });
+}
+
+for (const activation of [successfulActivation, ...scoringFailureActivations]) {
+  assert.ok(activation.submittedAt);
+  assert.notEqual(
+    activation.startedAt,
+    inactiveRoundStartedAt,
+    "round 2 must stop using its join-time placeholder when it activates"
+  );
+  assert.equal(activation.startedAt, activation.updatedAt);
+  assert.ok(
+    Date.parse(activation.startedAt) >= Date.parse(activation.submittedAt),
+    "round 2 timing must begin no earlier than the round 1 transition"
+  );
 }
 
 db.prepare("UPDATE teaching_papers SET scoring_rules_json = ? WHERE id = ?").run(
@@ -392,6 +462,146 @@ assert.deepEqual(
   legacyBefore,
   "default two-round APIs must never mutate legacy teaching rows"
 );
+
+const concurrentDataDir = path.join(
+  process.env.IONICLINK_DATA_DIR!,
+  "concurrent-default-assignment"
+);
+mkdirSync(concurrentDataDir, { recursive: true });
+const tsxCli = path.join(process.cwd(), "node_modules", "tsx", "dist", "cli.mjs");
+const initializer = spawnSync(
+  process.execPath,
+  [
+    tsxCli,
+    "--eval",
+    `import { getTeachingDb, closeTeachingStoreForTests } from "./lib/teaching/store.ts";
+     getTeachingDb();
+     closeTeachingStoreForTests();`,
+  ],
+  {
+    cwd: process.cwd(),
+    env: { ...process.env, IONICLINK_DATA_DIR: concurrentDataDir },
+    encoding: "utf8",
+    timeout: 10_000,
+  }
+);
+assert.equal(
+  initializer.status,
+  0,
+  initializer.stderr || initializer.error?.message || "concurrency database initialization failed"
+);
+
+const startPath = path.join(concurrentDataDir, "start");
+const workerSource = `
+  import { existsSync, writeFileSync } from "node:fs";
+  import { joinDefaultTeachingExperiment } from "./lib/teaching/assignment.ts";
+  import { closeTeachingStoreForTests, getTeachingDb } from "./lib/teaching/store.ts";
+
+  const readyPath = process.env.IONICLINK_CONCURRENT_READY;
+  const resultPath = process.env.IONICLINK_CONCURRENT_RESULT;
+  const startPath = process.env.IONICLINK_CONCURRENT_START;
+  const aliasesJson = process.env.IONICLINK_CONCURRENT_ALIASES;
+  const waitArray = new Int32Array(new SharedArrayBuffer(4));
+  let result;
+  try {
+    if (!readyPath || !resultPath || !startPath || !aliasesJson) throw new Error("worker environment is incomplete");
+    const aliases = JSON.parse(aliasesJson);
+    if (!Array.isArray(aliases) || aliases.some((alias) => typeof alias !== "string")) {
+      throw new Error("worker aliases are invalid");
+    }
+    getTeachingDb();
+    writeFileSync(readyPath, "ready");
+    const deadline = Date.now() + 30_000;
+    while (!existsSync(startPath)) {
+      if (Date.now() >= deadline) throw new Error("worker start barrier timed out");
+      Atomics.wait(waitArray, 0, 0, 10);
+    }
+    result = {
+      ok: true,
+      aliases,
+      joined: aliases.map((alias) => joinDefaultTeachingExperiment(alias)),
+    };
+  } catch (error) {
+    result = {
+      ok: false,
+      aliasesJson,
+      message: error instanceof Error ? error.message : String(error),
+      code: error && typeof error === "object" && "code" in error ? String(error.code) : null,
+    };
+  } finally {
+    closeTeachingStoreForTests();
+    if (resultPath) writeFileSync(resultPath, JSON.stringify(result));
+  }
+`;
+const readyPaths: string[] = [];
+const resultPaths: string[] = [];
+const workers = Array.from({ length: 10 }, (_, workerIndex) => {
+  const aliases = Array.from({ length: 3 }, (_, aliasIndex) => {
+    const sequence = workerIndex * 3 + aliasIndex + 1;
+    return `C${String(sequence).padStart(3, "0")}`;
+  });
+  const workerName = `worker-${String(workerIndex + 1).padStart(2, "0")}`;
+  const readyPath = path.join(concurrentDataDir, `${workerName}.ready`);
+  const resultPath = path.join(concurrentDataDir, `${workerName}.json`);
+  readyPaths.push(readyPath);
+  resultPaths.push(resultPath);
+  return spawn(process.execPath, [tsxCli, "--eval", workerSource], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      IONICLINK_DATA_DIR: concurrentDataDir,
+      IONICLINK_CONCURRENT_READY: readyPath,
+      IONICLINK_CONCURRENT_RESULT: resultPath,
+      IONICLINK_CONCURRENT_START: startPath,
+      IONICLINK_CONCURRENT_ALIASES: JSON.stringify(aliases),
+    },
+    stdio: ["ignore", "ignore", "inherit"],
+  });
+});
+try {
+  waitForFiles(readyPaths, 30_000, "concurrent workers to become ready");
+  writeFileSync(startPath, "start");
+  waitForFiles(resultPaths, 30_000, "concurrent teaching joins to finish");
+} finally {
+  for (const worker of workers) {
+    if (worker.exitCode === null && !existsSync(resultPaths[workers.indexOf(worker)])) worker.kill();
+  }
+}
+
+const workerResults = resultPaths.map((file) => JSON.parse(readFileSync(file, "utf8")) as {
+  ok: boolean;
+  aliases?: string[];
+  joined?: Array<{ projectId: string; participantId: string }>;
+  message?: string;
+  code?: string | null;
+});
+assert.deepEqual(
+  workerResults.filter((result) => !result.ok),
+  [],
+  "all concurrent joins must finish without SQLITE_BUSY or another bootstrap error"
+);
+const concurrentJoins = workerResults.flatMap((result) => result.joined ?? []);
+assert.equal(concurrentJoins.length, 30);
+assert.equal(new Set(concurrentJoins.map((result) => result.participantId)).size, 30);
+
+const concurrentDb = new Database(path.join(concurrentDataDir, "teaching.db"), {
+  readonly: true,
+  fileMustExist: true,
+});
+try {
+  assert.equal(
+    concurrentDb.prepare("SELECT COUNT(*) FROM teaching_participants").pluck().get(),
+    30
+  );
+  assert.equal(
+    concurrentDb.prepare("SELECT COUNT(*) FROM teaching_submissions").pluck().get(),
+    60
+  );
+  assert.deepEqual(sequenceCounts(concurrentDb), { manual_then_ai: 15, ai_then_manual: 15 });
+  assert.equal(concurrentDb.pragma("quick_check", { simple: true }), "ok");
+} finally {
+  concurrentDb.close();
+}
 
 closeTeachingStoreForTests();
 console.log("Teaching balanced assignment and two-round transition tests passed");
