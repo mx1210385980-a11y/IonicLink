@@ -10,7 +10,6 @@ import {
 } from "./teaching/analytics";
 import {
   DEFAULT_EXPERIMENT,
-  defaultExperimentChecksum,
   ensureDefaultTeachingExperiment,
 } from "./teaching/config";
 import { scoreAiBehavior, scoreSubmission } from "./teaching/scoring";
@@ -725,29 +724,7 @@ function defaultTeachingAssignments(sequence: TeachingSequence): Array<{
 
 export function getDefaultTeachingDashboard(): TeachingExperimentDashboard {
   const store = db();
-  const defaultProject = store
-    .prepare(
-      `SELECT experiment_kind AS experimentKind, config_version AS configVersion,
-              config_checksum AS configChecksum, is_default AS isDefault
-       FROM teaching_projects WHERE id = ?`
-    )
-    .get(DEFAULT_EXPERIMENT.id) as
-    | {
-        experimentKind: string;
-        configVersion: string | null;
-        configChecksum: string | null;
-        isDefault: number;
-      }
-    | undefined;
-  if (
-    !defaultProject ||
-    defaultProject.experimentKind !== "crossover" ||
-    defaultProject.configVersion !== DEFAULT_EXPERIMENT.version ||
-    defaultProject.configChecksum !== defaultExperimentChecksum() ||
-    defaultProject.isDefault !== 1
-  ) {
-    ensureDefaultTeachingExperiment(store);
-  }
+  ensureDefaultTeachingExperiment(store);
 
   const participants = store
     .prepare(

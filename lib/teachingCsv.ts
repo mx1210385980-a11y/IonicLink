@@ -131,12 +131,20 @@ function replaceAliases(
   value: unknown,
   replacements: ReadonlyArray<{ raw: string; anonymized: string }>
 ): unknown {
-  if (typeof value !== "string") return value;
-  let redacted = value;
+  if (typeof value !== "string" || replacements.length === 0) return value;
+  const anonymizedByRaw = new Map<string, string>();
   for (const replacement of replacements) {
-    redacted = redacted.split(replacement.raw).join(replacement.anonymized);
+    if (!anonymizedByRaw.has(replacement.raw)) {
+      anonymizedByRaw.set(replacement.raw, replacement.anonymized);
+    }
   }
-  return redacted;
+  const pattern = new RegExp(
+    [...anonymizedByRaw.keys()]
+      .map((raw) => raw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("|"),
+    "gu"
+  );
+  return value.replace(pattern, (raw) => anonymizedByRaw.get(raw)!);
 }
 
 export function teachingExperimentToCsv(
@@ -148,10 +156,10 @@ export function teachingExperimentToCsv(
   );
   const replacements = options.anonymize
     ? dashboard.participants
-        .map((participant, index) => ({
-          raw: participant.studentAlias,
-          anonymized: labels[index],
-        }))
+        .flatMap((participant, index) => [
+          { raw: participant.studentAlias, anonymized: labels[index] },
+          { raw: participant.participantId, anonymized: labels[index] },
+        ])
         .filter(({ raw }) => raw.length > 0)
         .sort((left, right) => right.raw.length - left.raw.length)
     : [];
@@ -190,7 +198,11 @@ export function teachingExperimentToCsv(
     ];
     lines.push(
       values
-        .map((value) => replaceAliases(value, replacements))
+        .map((value, columnIndex) =>
+          options.anonymize && columnIndex === 4
+            ? value
+            : replaceAliases(value, replacements)
+        )
         .map(safeCell)
         .join(",")
     );

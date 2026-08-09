@@ -158,7 +158,8 @@ const incompleteParticipant: TeachingPairedResult = {
   studentAlias: rawAlias,
   sequence: "ai_then_manual",
   completed: false,
-  exclusionReason: "\u000b@external-review",
+  exclusionReason:
+    "\u000b@external-review participant-dangerous-alias participant-incomplete Raw Alias",
   manual: null,
   aiAssisted: null,
   activeTimeDifference: null,
@@ -208,5 +209,51 @@ assert.match(anonymized, /"S002"/);
 assert.doesNotMatch(anonymized, new RegExp(dangerousAlias.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 assert.doesNotMatch(anonymized, /Raw Alias/);
 assert.doesNotMatch(anonymized, /participant-dangerous-alias|participant-incomplete/);
+
+const collisionParticipants: TeachingPairedResult[] = [
+  {
+    ...pairedParticipant,
+    participantId: "collision-alice-id",
+    studentAlias: "Alice",
+    exclusionReason: "Alice",
+  },
+  {
+    ...incompleteParticipant,
+    participantId: "collision-s001-id",
+    studentAlias: "S001",
+    exclusionReason: null,
+  },
+];
+const collisionDashboard: TeachingExperimentDashboard = {
+  experiment: {
+    id: "collision-experiment",
+    name: "Collision experiment",
+    version: "v-collision",
+    scoringVersion: "score-collision",
+  },
+  summary: summarizeTeachingExperiment(collisionParticipants),
+  participants: collisionParticipants,
+};
+const collisionCsv = teachingExperimentToCsv(collisionDashboard, { anonymize: true });
+const collisionLabels = collisionCsv
+  .split("\r\n")
+  .filter(Boolean)
+  .slice(1)
+  .map((line) => line.split(",")[4]);
+const collisionExclusions = collisionCsv
+  .split("\r\n")
+  .filter(Boolean)
+  .slice(1)
+  .map((line) => line.split(",")[8]);
+assert.deepEqual(
+  collisionLabels,
+  ['"S001"', '"S002"'],
+  "generated label cells must not be rewritten by raw-alias redaction"
+);
+assert.deepEqual(
+  collisionExclusions,
+  ['"S001"', '""'],
+  "raw values must be replaced once without rescanning generated labels"
+);
 
 console.log("Teaching legacy and paired experiment CSV safety tests passed");

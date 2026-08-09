@@ -18,10 +18,27 @@ import {
   type TeachingAiBehavior,
   type TeachingAutoScore,
   type TeachingExperimentAnalysisRow,
+  type TeachingModeSummary,
   type TeachingRoundAnalysis,
   type TeachingSequence,
   type TeachingTimingQuality,
 } from "../teachingShared";
+
+type ApprovedModeSummaryKey =
+  | "n"
+  | "medianActiveSeconds"
+  | "medianAccuracy"
+  | "meanAccuracy"
+  | "medianCoverage"
+  | "medianEvidenceAccuracy";
+type ModeSummaryHasOnlyApprovedKeys = Exclude<
+  keyof TeachingModeSummary,
+  ApprovedModeSummaryKey
+> extends never
+  ? true
+  : false;
+const modeSummaryHasOnlyApprovedKeys: ModeSummaryHasOnlyApprovedKeys = true;
+assert.equal(modeSummaryHasOnlyApprovedKeys, true);
 
 function autoScore(correctCount: number): TeachingAutoScore {
   assert.equal(Number.isInteger(correctCount) && correctCount >= 0 && correctCount <= 6, true);
@@ -196,7 +213,6 @@ assert.deepEqual(completeSummary.manual, {
   meanAccuracy: 4 / 6,
   medianCoverage: 1,
   medianEvidenceAccuracy: 4 / 6,
-  medianEvidenceCoverage: 1,
 });
 assert.deepEqual(completeSummary.aiAssisted, {
   n: 30,
@@ -205,7 +221,6 @@ assert.deepEqual(completeSummary.aiAssisted, {
   meanAccuracy: 5 / 6,
   medianCoverage: 1,
   medianEvidenceAccuracy: 5 / 6,
-  medianEvidenceCoverage: 1,
 });
 assert.equal(completeSummary.timeSavedRate, 0.5);
 assert.equal(completeSummary.accuracyDelta, 1 / 6);
@@ -485,6 +500,58 @@ assert.deepEqual(
   "an empty dashboard must repair stale default experiment identity before querying it"
 );
 
+function storedPaperB(): {
+  paperNo: string;
+  taskPrompt: string;
+  aiSnapshotJson: string;
+  scoringRulesJson: string;
+  configVersion: string | null;
+} | undefined {
+  return database
+    .prepare(
+      `SELECT paper_no AS paperNo, task_prompt AS taskPrompt,
+              ai_snapshot_json AS aiSnapshotJson,
+              scoring_rules_json AS scoringRulesJson,
+              config_version AS configVersion
+       FROM teaching_papers WHERE id = ?`
+    )
+    .get(DEFAULT_EXPERIMENT.papers[1].id) as ReturnType<typeof storedPaperB>;
+}
+
+function assertStoredPaperBIsDefault(): void {
+  assert.equal(
+    database
+      .prepare("SELECT COUNT(*) FROM teaching_papers WHERE project_id = ?")
+      .pluck()
+      .get(DEFAULT_EXPERIMENT.id),
+    2
+  );
+  assert.deepEqual(storedPaperB(), {
+    paperNo: "B",
+    taskPrompt: DEFAULT_EXPERIMENT.papers[1].taskPrompt,
+    aiSnapshotJson: JSON.stringify(DEFAULT_EXPERIMENT.papers[1].aiInitial),
+    scoringRulesJson: JSON.stringify(DEFAULT_EXPERIMENT.papers[1].gold),
+    configVersion: DEFAULT_EXPERIMENT.version,
+  });
+}
+
+database
+  .prepare("DELETE FROM teaching_papers WHERE id = ?")
+  .run(DEFAULT_EXPERIMENT.papers[1].id);
+getDefaultTeachingDashboard();
+assertStoredPaperBIsDefault();
+
+database
+  .prepare(
+    `UPDATE teaching_papers
+     SET task_prompt = 'damaged', ai_snapshot_json = '{}',
+         scoring_rules_json = '{}', config_version = 'stale'
+     WHERE id = ?`
+  )
+  .run(DEFAULT_EXPERIMENT.papers[1].id);
+getDefaultTeachingDashboard();
+assertStoredPaperBIsDefault();
+
 const completedDb = joinDefaultTeachingExperiment("Dashboard completed");
 const completedSubmissionIds = completeDashboardParticipant(database, completedDb.participantId);
 database
@@ -561,7 +628,6 @@ assert.deepEqual(dbDashboard.summary.manual, {
   meanAccuracy: 4 / 6,
   medianCoverage: 1,
   medianEvidenceAccuracy: 4 / 6,
-  medianEvidenceCoverage: 5 / 6,
 });
 assert.deepEqual(dbDashboard.summary.aiAssisted, {
   n: 1,
@@ -570,7 +636,6 @@ assert.deepEqual(dbDashboard.summary.aiAssisted, {
   meanAccuracy: 5 / 6,
   medianCoverage: 1,
   medianEvidenceAccuracy: 4 / 6,
-  medianEvidenceCoverage: 5 / 6,
 });
 assert.equal(dbDashboard.summary.timeSavedRate, 0.5);
 assert.equal(dbDashboard.summary.accuracyDelta, 1 / 6);

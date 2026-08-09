@@ -125,7 +125,6 @@ export type TeachingModeSummary = {
   meanAccuracy: number | null;
   medianCoverage: number | null;
   medianEvidenceAccuracy: number | null;
-  medianEvidenceCoverage: number | null;
 };
 
 export type TeachingDifferenceSummary = {

@@ -144,7 +144,6 @@ function summarizeMode(rounds: TeachingRoundAnalysis[]): TeachingModeSummary {
     meanAccuracy: mean(rounds.map((round) => round.score.valueAccuracy)),
     medianCoverage: median(rounds.map((round) => round.score.valueCoverage)),
     medianEvidenceAccuracy: median(rounds.map((round) => round.score.evidenceAccuracy)),
-    medianEvidenceCoverage: median(rounds.map((round) => round.score.evidenceCoverage)),
   };
 }
 
