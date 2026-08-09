@@ -142,9 +142,7 @@ function loadScoringRow(store: Database.Database, submissionId: string): Scoring
 }
 
 export function normalizeStudentAlias(value: string): string {
-  const alias = typeof value === "string"
-    ? value.normalize("NFKC").replace(/\s+/gu, " ").trim()
-    : "";
+  const alias = typeof value === "string" ? value.trim() : "";
   const length = Array.from(alias).length;
   if (length < 2 || length > 80) {
     throw new Error("Student alias must be between 2 and 80 characters.");
@@ -152,11 +150,15 @@ export function normalizeStudentAlias(value: string): string {
   return alias;
 }
 
+function studentIdentityKey(displayAlias: string): string {
+  return displayAlias.normalize("NFKC").replace(/\s+/gu, " ").trim().toLowerCase();
+}
+
 export function joinDefaultTeachingExperiment(
   studentAlias: string
 ): { projectId: string; participantId: string } {
   const displayAlias = normalizeStudentAlias(studentAlias);
-  const identityKey = displayAlias.toLowerCase();
+  const identityKey = studentIdentityKey(displayAlias);
   const store = getTeachingDb();
   ensureDefaultTeachingExperiment(store);
 

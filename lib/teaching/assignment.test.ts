@@ -55,10 +55,15 @@ function assertActive(
   assert.equal(state.status, "active");
 }
 
-assert.equal(normalizeStudentAlias("  Ｓ００１\tStudent  "), "S001 Student");
+assert.equal(normalizeStudentAlias("  Ｓ００１\tStudent  "), "Ｓ００１\tStudent");
 assert.equal(normalizeStudentAlias(` ${"a".repeat(80)} `), "a".repeat(80));
 assert.throws(() => normalizeStudentAlias(" x "), /2.*80|alias/i);
 assert.throws(() => normalizeStudentAlias("a".repeat(81)), /2.*80|alias/i);
+assert.throws(
+  () => normalizeStudentAlias(`A${" ".repeat(80)}B`),
+  /2.*80|alias/i,
+  "display length must be checked before identity whitespace is collapsed"
+);
 
 const db = getTeachingDb();
 const joinedByAlias = new Map<string, ReturnType<typeof joinDefaultTeachingExperiment>>();
@@ -88,6 +93,17 @@ for (const participant of participants(db)) {
     }
   }
 }
+
+const enteredAliceAlias = "Ａｌｉｃｅ\t  Smith";
+const alice = joinDefaultTeachingExperiment(`  ${enteredAliceAlias}  `);
+const aliceAgain = joinDefaultTeachingExperiment("alice smith");
+assert.equal(aliceAgain.participantId, alice.participantId);
+assert.deepEqual(
+  db.prepare(
+    "SELECT student_alias AS studentAlias, identity_key AS identityKey FROM teaching_participants WHERE id = ?"
+  ).get(alice.participantId),
+  { studentAlias: enteredAliceAlias, identityKey: "alice smith" }
+);
 
 const first = joinedByAlias.get("S001")!;
 const again = joinDefaultTeachingExperiment("  ｓ００１  ");
