@@ -27,6 +27,10 @@ type ActiveTeachingState = Extract<TeachingStudentState, { status: "active" }>;
 type CompleteTeachingState = Extract<TeachingStudentState, { status: "complete" }>;
 type SaveState = "idle" | "saving" | "saved" | "error";
 type TeachingConflictKind = "version" | "locked" | "stale_round";
+type SendHeartbeatOptions = {
+  finalFlush?: boolean;
+  cutoff?: number;
+};
 
 class TeachingApiError extends Error {
   constructor(
@@ -103,7 +107,7 @@ function ActiveWorkspace({ initial }: { initial: ActiveTeachingState }) {
   const submittingRef = useRef(false);
   const heartbeatInFlightRef = useRef<Promise<boolean> | null>(null);
   const pendingHeartbeatRef = useRef<TeachingHeartbeatPayload | null>(null);
-  const sendHeartbeatRef = useRef<(requirePayload?: boolean) => Promise<boolean>>(
+  const sendHeartbeatRef = useRef<(options?: SendHeartbeatOptions) => Promise<boolean>>(
     async () => false
   );
   const heartbeatPageNonceRef = useRef<string>();
@@ -212,11 +216,13 @@ function ActiveWorkspace({ initial }: { initial: ActiveTeachingState }) {
     };
     document.addEventListener("visibilitychange", resetVisibleWindow);
 
-    const sendHeartbeat = (requirePayload = false): Promise<boolean> => {
+    const sendHeartbeat = (options: SendHeartbeatOptions = {}): Promise<boolean> => {
+      if (!options.finalFlush && submittingRef.current) return Promise.resolve(true);
+
       const existing = heartbeatInFlightRef.current;
       if (existing) return existing;
 
-      const timestamp = Date.now();
+      const timestamp = options.cutoff ?? Date.now();
       const isIdle = isTeachingWorkspaceIdle(timestamp, lastActivityAtRef.current);
       setIdle(isIdle);
       const heartbeatEligible = isTeachingHeartbeatEligible({
@@ -226,7 +232,7 @@ function ActiveWorkspace({ initial }: { initial: ActiveTeachingState }) {
         lastActivityAt: lastActivityAtRef.current,
       });
       if (!heartbeatEligible) {
-        return Promise.resolve(teachingHeartbeatSkipSucceeded(false, requirePayload));
+        return Promise.resolve(teachingHeartbeatSkipSucceeded(false, Boolean(options.finalFlush)));
       }
       const fieldKey = lastEditedFieldRef.current;
       let payload: TeachingHeartbeatPayload | null;
@@ -244,7 +250,7 @@ function ActiveWorkspace({ initial }: { initial: ActiveTeachingState }) {
             eventId: buildTeachingHeartbeatEventId(pageNonce, initial.roundNo, sequence),
             roundNo: initial.roundNo,
             fieldKey,
-            minimumOneSecond: requirePayload,
+            minimumOneSecond: options.finalFlush,
           });
           if (created) heartbeatSequenceRef.current = sequence;
           return created;
@@ -254,7 +260,7 @@ function ActiveWorkspace({ initial }: { initial: ActiveTeachingState }) {
         return Promise.resolve(false);
       }
       if (!payload) {
-        return Promise.resolve(teachingHeartbeatSkipSucceeded(true, requirePayload));
+        return Promise.resolve(teachingHeartbeatSkipSucceeded(true, Boolean(options.finalFlush)));
       }
       pendingHeartbeatRef.current = payload;
 
@@ -322,16 +328,17 @@ function ActiveWorkspace({ initial }: { initial: ActiveTeachingState }) {
 
   const submit = async () => {
     if (!canSubmit || lockedRef.current || submittingRef.current) return;
+    const submitCutoff = Date.now();
     if (!window.confirm(`确认提交第 ${initial.roundNo} 轮吗？提交后本轮答案将锁定。`)) return;
 
     submittingRef.current = true;
     setSubmitting(true);
     setError("");
-    clearPendingAutosave();
     const heartbeatPersisted = await flushTeachingHeartbeatBeforeSubmit({
+      cutoff: submitCutoff,
       currentInFlight: () => heartbeatInFlightRef.current,
       hasPending: () => pendingHeartbeatRef.current !== null,
-      send: () => sendHeartbeatRef.current(true),
+      send: (cutoff) => sendHeartbeatRef.current({ finalFlush: true, cutoff }),
     });
     if (!heartbeatPersisted) {
       if (!lockedRef.current) {

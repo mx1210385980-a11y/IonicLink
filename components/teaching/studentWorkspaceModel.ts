@@ -105,14 +105,15 @@ export function selectTeachingHeartbeatAttempt(
 }
 
 export async function flushTeachingHeartbeatBeforeSubmit(input: {
+  cutoff: number;
   currentInFlight: () => Promise<boolean> | null;
   hasPending: () => boolean;
-  send: () => Promise<boolean>;
+  send: (cutoff: number) => Promise<boolean>;
 }): Promise<boolean> {
   const inFlight = input.currentInFlight();
   if (inFlight) await inFlight;
-  if (input.hasPending() && !(await input.send())) return false;
-  return input.send();
+  if (input.hasPending() && !(await input.send(input.cutoff))) return false;
+  return input.send(input.cutoff);
 }
 
 export function buildTeachingSubmitPayload(

@@ -323,6 +323,24 @@ assert.match(
   /flushTeachingHeartbeatBeforeSubmit[\s\S]+if \(!heartbeatPersisted\)[\s\S]+return;[\s\S]+flushLatestDraft/,
   "the component must abort on heartbeat failure before saving or submitting"
 );
+assert.match(
+  workspaceSource,
+  /const submitCutoff = Date\.now\(\);[\s\S]+window\.confirm/,
+  "submit cutoff must be captured before the confirmation dialog opens"
+);
+assert.match(
+  workspaceSource,
+  /!options\.finalFlush && submittingRef\.current/,
+  "ordinary interval heartbeats must be suppressed during submit"
+);
+const submitCutoffIndex = workspaceSource.indexOf("const submitCutoff = Date.now();");
+const finalHeartbeatIndex = workspaceSource.indexOf("flushTeachingHeartbeatBeforeSubmit", submitCutoffIndex);
+assert.ok(submitCutoffIndex >= 0 && finalHeartbeatIndex > submitCutoffIndex);
+assert.doesNotMatch(
+  workspaceSource.slice(submitCutoffIndex, finalHeartbeatIndex),
+  /clearPendingAutosave/,
+  "a failed final heartbeat must leave the existing autosave scheduled"
+);
 
 async function verifyHeartbeatFlushCoordination(): Promise<void> {
   const order: string[] = [];
@@ -331,10 +349,11 @@ async function verifyHeartbeatFlushCoordination(): Promise<void> {
     resolveInFlight = resolve;
   });
   const waitingFlush = flushTeachingHeartbeatBeforeSubmit({
+    cutoff: 246_810,
     currentInFlight: () => inFlight,
     hasPending: () => false,
-    send: async () => {
-      order.push("residual");
+    send: async (cutoff) => {
+      order.push(`residual:${cutoff}`);
       return true;
     },
   });
@@ -342,32 +361,38 @@ async function verifyHeartbeatFlushCoordination(): Promise<void> {
   assert.deepEqual(order, [], "submit flush must await an interval heartbeat already in flight");
   resolveInFlight(true);
   assert.equal(await waitingFlush, true);
-  assert.deepEqual(order, ["residual"]);
+  assert.deepEqual(order, ["residual:246810"]);
 
   let pending = true;
   const retryThenResidual: string[] = [];
   const failedResidual = await flushTeachingHeartbeatBeforeSubmit({
+    cutoff: 135_790,
     currentInFlight: () => Promise.resolve(false),
     hasPending: () => pending,
-    send: async () => {
+    send: async (cutoff) => {
       if (pending) {
-        retryThenResidual.push("retry-pending");
+        retryThenResidual.push(`retry-pending:${cutoff}`);
         pending = false;
         return true;
       }
-      retryThenResidual.push("residual-failed");
+      retryThenResidual.push(`residual-failed:${cutoff}`);
       return false;
     },
   });
   assert.equal(failedResidual, false, "submit must abort when its residual heartbeat fails");
-  assert.deepEqual(retryThenResidual, ["retry-pending", "residual-failed"]);
+  assert.deepEqual(retryThenResidual, [
+    "retry-pending:135790",
+    "residual-failed:135790",
+  ]);
 
   pending = true;
   let failedRetryAttempts = 0;
   const failedRetry = await flushTeachingHeartbeatBeforeSubmit({
+    cutoff: 975_310,
     currentInFlight: () => null,
     hasPending: () => pending,
-    send: async () => {
+    send: async (cutoff) => {
+      assert.equal(cutoff, 975_310);
       failedRetryAttempts += 1;
       return false;
     },
