@@ -1,26 +1,93 @@
 import Database from "better-sqlite3";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import path from "node:path";
+import { closeTeachingStoreForTests, getTeachingDb, teachingDataDir } from "./teaching/store";
+import {
+  isTeachingExperimentAnalysisEligible,
+  summarizeTeachingExperimentDiagnostics,
+  summarizeTeachingExperiment,
+  teachingParticipantQuality,
+  teachingPairedDifferences,
+} from "./teaching/analytics";
+import {
+  DEFAULT_EXPERIMENT,
+  ensureDefaultTeachingExperiment,
+  hasCurrentDefaultTeachingExperiment,
+} from "./teaching/config";
+import { scoreAiBehavior, scoreSubmission } from "./teaching/scoring";
+import { teachingTimingQuality as classifyTeachingTiming } from "./teaching/activity";
 import {
   TEACHING_FIELDS,
+  type TeachingAutoScore,
   type TeachingAnswers,
+  type TeachingDashboardParticipant,
   type TeachingDashboardRow,
+  type TeachingExperimentDashboard,
+  type TeachingExperimentPaper,
+  type TeachingFieldScore,
   type TeachingFieldKey,
+  type TeachingGoldRule,
   type TeachingMetrics,
+  type TeachingMode,
   type TeachingRole,
   type TeachingScores,
+  type TeachingSequence,
+  type TeachingTeacherAiRound,
+  type TeachingTeacherManualRound,
+  type TeachingTeacherReview,
+  type TeachingTeacherRound,
 } from "./teachingShared";
+export {
+  getCurrentTeachingRound,
+  joinDefaultTeachingExperiment,
+  normalizeStudentAlias,
+  rescoreErroredTeachingSubmissions,
+  rescoreTeachingSubmission,
+  saveCurrentTeachingDraft,
+  submitCurrentTeachingRound,
+  TeachingRoundConflictError,
+  type TeachingRoundExpectation,
+} from "./teaching/assignment";
+export {
+  recordTeachingHeartbeat,
+  teachingTimingQuality,
+  TeachingHeartbeatValidationError,
+  validateTeachingHeartbeatInput,
+  type TeachingHeartbeatInput,
+} from "./teaching/activity";
 export {
   TEACHING_FIELDS,
   type TeachingAnswer,
   type TeachingAnswers,
+  type TeachingDashboardParticipant,
+  type TeachingDashboardParticipantQuality,
   type TeachingDashboardRow,
+  type TeachingDifferenceSummary,
+  type TeachingExperimentAnalysisRow,
+  type TeachingExperimentDashboard,
+  type TeachingExperimentDiagnostics,
+  type TeachingExperimentSummary,
   type TeachingFieldKey,
   type TeachingMetrics,
+  type TeachingMode,
+  type TeachingModeSummary,
+  type TeachingParticipantTimingStatus,
+  type TeachingPairedResult,
   type TeachingRole,
+  type TeachingRoundAnalysis,
+  type TeachingRoundTransition,
   type TeachingScore,
   type TeachingScores,
+  type TeachingSafeExperimentPaper,
+  type TeachingSequence,
+  type TeachingSequenceDiagnostics,
+  type TeachingStudentState,
+  type TeachingTeacherAiRound,
+  type TeachingTeacherManualRound,
+  type TeachingTeacherReview,
+  type TeachingTeacherRound,
+  type TeachingTimingQuality,
 } from "./teachingShared";
 
 export interface TeachingSession {
@@ -29,86 +96,9 @@ export interface TeachingSession {
   participantId: string | null;
 }
 
-const DATA_DIR = path.resolve(process.env.IONICLINK_DATA_DIR || path.join(process.cwd(), "data"));
-const TEACHING_DB_PATH = path.join(DATA_DIR, "teaching.db");
+const db = getTeachingDb;
+const DATA_DIR = teachingDataDir();
 const SESSION_DAYS = 14;
-let teachingDb: Database.Database | null = null;
-
-function db(): Database.Database {
-  if (teachingDb) return teachingDb;
-  mkdirSync(DATA_DIR, { recursive: true });
-  const next = new Database(TEACHING_DB_PATH);
-  next.pragma("journal_mode = WAL");
-  next.pragma("foreign_keys = ON");
-  next.exec(`
-    CREATE TABLE IF NOT EXISTS teaching_projects (
-      id          TEXT PRIMARY KEY,
-      name        TEXT NOT NULL,
-      domain      TEXT NOT NULL DEFAULT 'tribology',
-      invite_code TEXT NOT NULL UNIQUE,
-      status      TEXT NOT NULL DEFAULT 'open',
-      fields_json TEXT NOT NULL,
-      created_at  TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS teaching_papers (
-      id               TEXT PRIMARY KEY,
-      project_id       TEXT NOT NULL REFERENCES teaching_projects(id) ON DELETE CASCADE,
-      paper_no         TEXT NOT NULL,
-      title            TEXT NOT NULL,
-      doi              TEXT,
-      journal          TEXT,
-      source_url       TEXT,
-      source_record_id TEXT,
-      ai_snapshot_json TEXT NOT NULL,
-      ai_model         TEXT,
-      ai_extracted_at  TEXT,
-      created_at       TEXT NOT NULL,
-      UNIQUE(project_id, paper_no)
-    );
-    CREATE TABLE IF NOT EXISTS teaching_participants (
-      id                TEXT PRIMARY KEY,
-      project_id        TEXT NOT NULL REFERENCES teaching_projects(id) ON DELETE CASCADE,
-      group_code        TEXT NOT NULL,
-      student_alias     TEXT NOT NULL,
-      assigned_paper_id TEXT REFERENCES teaching_papers(id) ON DELETE SET NULL,
-      created_at        TEXT NOT NULL,
-      UNIQUE(project_id, group_code, student_alias)
-    );
-    CREATE TABLE IF NOT EXISTS teaching_submissions (
-      id             TEXT PRIMARY KEY,
-      project_id     TEXT NOT NULL REFERENCES teaching_projects(id) ON DELETE CASCADE,
-      paper_id       TEXT NOT NULL REFERENCES teaching_papers(id) ON DELETE CASCADE,
-      participant_id TEXT NOT NULL REFERENCES teaching_participants(id) ON DELETE CASCADE,
-      started_at     TEXT NOT NULL,
-      submitted_at   TEXT,
-      answers_json   TEXT NOT NULL DEFAULT '{}',
-      version        INTEGER NOT NULL DEFAULT 0,
-      updated_at     TEXT NOT NULL,
-      UNIQUE(project_id, paper_id, participant_id)
-    );
-    CREATE TABLE IF NOT EXISTS teaching_reviews (
-      submission_id     TEXT PRIMARY KEY REFERENCES teaching_submissions(id) ON DELETE CASCADE,
-      human_scores_json TEXT NOT NULL DEFAULT '{}',
-      ai_scores_json    TEXT NOT NULL DEFAULT '{}',
-      reviewed_at       TEXT NOT NULL,
-      reviewer_id       TEXT NOT NULL DEFAULT 'teacher'
-    );
-    CREATE TABLE IF NOT EXISTS teaching_sessions (
-      token_hash     TEXT PRIMARY KEY,
-      role           TEXT NOT NULL,
-      project_id     TEXT,
-      participant_id TEXT,
-      created_at     TEXT NOT NULL,
-      expires_at     TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_teaching_submissions_project
-      ON teaching_submissions(project_id, submitted_at);
-    CREATE INDEX IF NOT EXISTS idx_teaching_sessions_expiry
-      ON teaching_sessions(expires_at);
-  `);
-  teachingDb = next;
-  return next;
-}
 
 function now(): string {
   return new Date().toISOString();
@@ -320,6 +310,19 @@ export function addTeachingPaper(input: {
   if (!recordId) throw new Error("请选择一篇文献。");
 
   const store = db();
+  const projectKind = store
+    .prepare(
+      `SELECT experiment_kind AS experimentKind, is_default AS isDefault
+       FROM teaching_projects WHERE id = ?`
+    )
+    .get(projectId) as { experimentKind: string; isDefault: number } | undefined;
+  if (
+    projectId === DEFAULT_EXPERIMENT.id ||
+    projectKind?.experimentKind === "crossover" ||
+    projectKind?.isDefault === 1
+  ) {
+    throw new Error("默认交叉实验的冻结文献不能通过普通教学项目修改。");
+  }
   const existing = store
     .prepare(
       `SELECT id, source_record_id AS sourceRecordId
@@ -388,7 +391,11 @@ export function joinTeachingProject(input: {
 }): { projectId: string; participantId: string } {
   const store = db();
   const project = store
-    .prepare("SELECT id FROM teaching_projects WHERE invite_code = ? AND status = 'open'")
+    .prepare(
+      `SELECT id FROM teaching_projects
+       WHERE invite_code = ? AND status = 'open'
+         AND experiment_kind = 'legacy' AND is_default = 0`
+    )
     .get(clean(input.inviteCode, 40).toUpperCase().replace(/\s+/g, "")) as { id: string } | undefined;
   if (!project) throw new Error("邀请码不存在或项目尚未开放。");
   const groupCode = clean(input.groupCode, 80);
@@ -566,6 +573,370 @@ export class TeachingConflictError extends Error {
   }
 }
 
+type DefaultTeachingParticipantRow = {
+  participantId: string;
+  studentAlias: string;
+  sequenceCode: string | null;
+  completedAt: string | null;
+  exclusionReason: string | null;
+};
+
+type DefaultTeachingSubmissionRow = {
+  submissionId: string;
+  participantId: string;
+  roundNo: number | null;
+  mode: string | null;
+  activeSeconds: number;
+  startedAt: string;
+  submittedAt: string | null;
+  answersJson: string;
+  aiInitialJson: string;
+  valueScoresJson: string;
+  evidenceScoresJson: string;
+  scoringStatus: string;
+  scoringVersion: string | null;
+  autoScoredAt: string | null;
+  paperId: string;
+  paperCode: string;
+  title: string;
+  doi: string | null;
+  journal: string | null;
+  sourceUrl: string | null;
+  taskPrompt: string;
+  aiModel: string | null;
+  scoringRulesJson: string;
+  reviewedAt: string | null;
+  finalValueScoresJson: string | null;
+  aiInitialValueScoresJson: string | null;
+};
+
+function defaultTeachingSequence(value: string | null, participantId: string): TeachingSequence {
+  if (value === "manual_then_ai" || value === "ai_then_manual") return value;
+  throw new Error(`Invalid teaching sequence for participant ${participantId}.`);
+}
+
+function parsedObject<T extends object>(value: string): T | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as T
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function parsedTeachingAnswers(value: string): TeachingAnswers | null {
+  const parsed = parsedObject<Record<string, unknown>>(value);
+  if (!parsed) return null;
+  const answers: TeachingAnswers = {};
+  for (const field of TEACHING_FIELDS) {
+    const candidate = parsed[field.key];
+    if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) {
+      continue;
+    }
+    const answer = candidate as Record<string, unknown>;
+    if (typeof answer.value !== "string") continue;
+    answers[field.key] = {
+      value: answer.value,
+      ...(typeof answer.page === "string" ? { page: answer.page } : {}),
+      ...(typeof answer.evidence === "string" ? { evidence: answer.evidence } : {}),
+    };
+  }
+  return answers;
+}
+
+function parsedFieldScores(value: string): TeachingAutoScore["values"] | null {
+  const parsed = parsedObject<Record<string, unknown>>(value);
+  if (!parsed) return null;
+  const scores = {} as TeachingAutoScore["values"];
+  for (const field of TEACHING_FIELDS) {
+    const candidate = parsed[field.key];
+    if (
+      candidate === null ||
+      typeof candidate !== "object" ||
+      Array.isArray(candidate)
+    ) {
+      return null;
+    }
+    const score = candidate as Partial<TeachingFieldScore>;
+    if (
+      typeof score.correct !== "boolean" ||
+      typeof score.normalized !== "string" ||
+      typeof score.reason !== "string"
+    ) {
+      return null;
+    }
+    scores[field.key] = {
+      correct: score.correct,
+      normalized: score.normalized,
+      reason: score.reason,
+    };
+  }
+  return scores;
+}
+
+function parsedTeachingScores(value: string | null): TeachingScores {
+  const parsed = value ? parsedObject<Record<string, unknown>>(value) : null;
+  if (!parsed) return {};
+  const scores: TeachingScores = {};
+  for (const field of TEACHING_FIELDS) {
+    const score = parsed[field.key];
+    if (score === "correct" || score === "incorrect" || score === "pending") {
+      scores[field.key] = score;
+    }
+  }
+  return scores;
+}
+
+function defaultTeachingReview(row: DefaultTeachingSubmissionRow): TeachingTeacherReview | null {
+  if (!row.reviewedAt) return null;
+  return {
+    reviewedAt: row.reviewedAt,
+    finalValueScores: parsedTeachingScores(row.finalValueScoresJson),
+    aiInitialValueScores: parsedTeachingScores(row.aiInitialValueScoresJson),
+  };
+}
+
+function reconstructedAutomaticScore(
+  row: DefaultTeachingSubmissionRow,
+  answers: TeachingAnswers,
+  paper: TeachingExperimentPaper
+): TeachingAutoScore | null {
+  const values = parsedFieldScores(row.valueScoresJson);
+  const evidence = parsedFieldScores(row.evidenceScoresJson);
+  if (!values || !evidence) return null;
+
+  let coverage: TeachingAutoScore;
+  try {
+    coverage = scoreSubmission(answers, paper);
+  } catch {
+    return null;
+  }
+  const valueCorrect = TEACHING_FIELDS.filter((field) => values[field.key].correct).length;
+  const evidenceCorrect = TEACHING_FIELDS.filter((field) => evidence[field.key].correct).length;
+  const denominator = TEACHING_FIELDS.length;
+  return {
+    values,
+    evidence,
+    valueCorrect,
+    valueAccuracy: valueCorrect / denominator,
+    valueCoverage: coverage.valueCoverage,
+    evidenceCorrect,
+    evidenceAccuracy: evidenceCorrect / denominator,
+    evidenceCoverage: coverage.evidenceCoverage,
+  };
+}
+
+function defaultTeachingRoundAnalysis(
+  row: DefaultTeachingSubmissionRow,
+  expected: { roundNo: 1 | 2; mode: TeachingMode; paperCode: "A" | "B" }
+): TeachingTeacherRound | null {
+  if (
+    row.roundNo !== expected.roundNo ||
+    row.mode !== expected.mode ||
+    row.paperCode !== expected.paperCode ||
+    row.submittedAt === null ||
+    row.scoringStatus !== "scored" ||
+    row.scoringVersion !== DEFAULT_EXPERIMENT.scoringVersion ||
+    row.autoScoredAt === null ||
+    !Number.isFinite(Date.parse(row.autoScoredAt)) ||
+    !Number.isFinite(row.activeSeconds) ||
+    row.activeSeconds < 0
+  ) {
+    return null;
+  }
+  const startedAt = Date.parse(row.startedAt);
+  const submittedAt = Date.parse(row.submittedAt);
+  if (
+    !Number.isFinite(startedAt) ||
+    !Number.isFinite(submittedAt) ||
+    submittedAt < startedAt
+  ) {
+    return null;
+  }
+
+  const answers = parsedTeachingAnswers(row.answersJson);
+  const aiInitial = parsedTeachingAnswers(row.aiInitialJson);
+  const gold = parsedObject<Record<TeachingFieldKey, TeachingGoldRule>>(row.scoringRulesJson);
+  if (!answers || !aiInitial || !gold) return null;
+  const paper: TeachingExperimentPaper = {
+    id: row.paperId,
+    code: expected.paperCode,
+    title: row.title,
+    doi: row.doi ?? "",
+    journal: row.journal ?? "",
+    sourceUrl: row.sourceUrl ?? "",
+    taskPrompt: row.taskPrompt,
+    aiModel: row.aiModel ?? "",
+    aiInitial,
+    gold,
+  };
+  const score = reconstructedAutomaticScore(row, answers, paper);
+  if (!score) return null;
+
+  let aiBehavior = null;
+  if (expected.mode === "ai_assisted") {
+    try {
+      const initialScore = scoreSubmission(aiInitial, paper);
+      aiBehavior = scoreAiBehavior(aiInitial, answers, initialScore, score);
+    } catch {
+      return null;
+    }
+  }
+  const wallSeconds = (submittedAt - startedAt) / 1_000;
+  const common = {
+    submissionId: row.submissionId,
+    paperCode: expected.paperCode,
+    activeSeconds: row.activeSeconds,
+    wallSeconds,
+    score,
+    aiBehavior,
+    timingQuality: classifyTeachingTiming(row.activeSeconds, wallSeconds),
+    finalAnswers: answers,
+    review: defaultTeachingReview(row),
+  };
+  return expected.mode === "manual"
+    ? { ...common, mode: "manual" }
+    : { ...common, mode: "ai_assisted", aiInitial };
+}
+
+function defaultTeachingAssignments(sequence: TeachingSequence): Array<{
+  key: "manual" | "aiAssisted";
+  roundNo: 1 | 2;
+  mode: TeachingMode;
+  paperCode: "A" | "B";
+}> {
+  return sequence === "manual_then_ai"
+    ? [
+        { key: "manual", roundNo: 1, mode: "manual", paperCode: "A" },
+        { key: "aiAssisted", roundNo: 2, mode: "ai_assisted", paperCode: "B" },
+      ]
+    : [
+        { key: "aiAssisted", roundNo: 1, mode: "ai_assisted", paperCode: "A" },
+        { key: "manual", roundNo: 2, mode: "manual", paperCode: "B" },
+      ];
+}
+
+export function getDefaultTeachingDashboard(): TeachingExperimentDashboard {
+  const store = db();
+  if (!hasCurrentDefaultTeachingExperiment(store)) {
+    ensureDefaultTeachingExperiment(store);
+  }
+
+  const participants = store
+    .prepare(
+      `SELECT pt.id AS participantId, pt.student_alias AS studentAlias,
+              pt.sequence_code AS sequenceCode, pt.completed_at AS completedAt,
+              pt.exclusion_reason AS exclusionReason
+       FROM teaching_participants pt
+       WHERE pt.project_id = ?
+         AND pt.sequence_code IN ('manual_then_ai', 'ai_then_manual')
+       ORDER BY pt.created_at ASC, pt.id ASC`
+    )
+    .all(DEFAULT_EXPERIMENT.id) as DefaultTeachingParticipantRow[];
+  const submissions = store
+    .prepare(
+      `SELECT s.id AS submissionId, s.participant_id AS participantId,
+              s.round_no AS roundNo, s.mode, s.active_seconds AS activeSeconds,
+              s.started_at AS startedAt, s.submitted_at AS submittedAt,
+              s.answers_json AS answersJson, s.ai_initial_json AS aiInitialJson,
+              s.auto_value_scores_json AS valueScoresJson,
+              s.auto_evidence_scores_json AS evidenceScoresJson,
+              s.scoring_status AS scoringStatus, s.scoring_version AS scoringVersion,
+              s.auto_scored_at AS autoScoredAt,
+              p.id AS paperId, p.paper_no AS paperCode, p.title, p.doi, p.journal,
+              p.source_url AS sourceUrl, p.task_prompt AS taskPrompt,
+              p.ai_model AS aiModel, p.scoring_rules_json AS scoringRulesJson,
+              r.reviewed_at AS reviewedAt,
+              r.human_scores_json AS finalValueScoresJson,
+              r.ai_scores_json AS aiInitialValueScoresJson
+       FROM teaching_submissions s
+       JOIN teaching_papers p ON p.id = s.paper_id
+       LEFT JOIN teaching_reviews r ON r.submission_id = s.id
+       WHERE s.project_id = ?
+       ORDER BY s.participant_id ASC, s.round_no ASC, s.id ASC`
+    )
+    .all(DEFAULT_EXPERIMENT.id) as DefaultTeachingSubmissionRow[];
+  const submissionsByParticipant = new Map<string, DefaultTeachingSubmissionRow[]>();
+  for (const submission of submissions) {
+    const existing = submissionsByParticipant.get(submission.participantId);
+    if (existing) existing.push(submission);
+    else submissionsByParticipant.set(submission.participantId, [submission]);
+  }
+
+  const analysisRows = participants.map((participant) => {
+    const sequence = defaultTeachingSequence(participant.sequenceCode, participant.participantId);
+    const participantSubmissions = submissionsByParticipant.get(participant.participantId) ?? [];
+    const rounds: {
+      manual: TeachingTeacherManualRound | null;
+      aiAssisted: TeachingTeacherAiRound | null;
+    } = {
+      manual: null,
+      aiAssisted: null,
+    };
+    for (const assignment of defaultTeachingAssignments(sequence)) {
+      const candidates = participantSubmissions.filter(
+        (submission) =>
+          submission.roundNo === assignment.roundNo &&
+          submission.mode === assignment.mode &&
+          submission.paperCode === assignment.paperCode
+      );
+      const round = candidates.length === 1
+        ? defaultTeachingRoundAnalysis(candidates[0], assignment)
+        : null;
+      if (assignment.key === "manual") {
+        rounds.manual = round?.mode === "manual" ? round : null;
+      } else {
+        rounds.aiAssisted = round?.mode === "ai_assisted" ? round : null;
+      }
+    }
+    return {
+      participantId: participant.participantId,
+      studentAlias: participant.studentAlias,
+      sequence,
+      completed: participant.completedAt !== null,
+      exclusionReason: participant.exclusionReason,
+      ...rounds,
+    };
+  });
+  const summary = summarizeTeachingExperiment(analysisRows);
+  const diagnostics = summarizeTeachingExperimentDiagnostics(analysisRows);
+  const results = analysisRows.map((row): TeachingDashboardParticipant => {
+    const differences = isTeachingExperimentAnalysisEligible(row)
+      ? teachingPairedDifferences(row)
+      : null;
+    return {
+      ...row,
+      quality: teachingParticipantQuality(row),
+      activeTimeDifference: differences?.activeTimeDifference ?? null,
+      accuracyDifference: differences?.accuracyDifference ?? null,
+    };
+  });
+
+  return {
+    experiment: {
+      id: DEFAULT_EXPERIMENT.id,
+      name: DEFAULT_EXPERIMENT.name,
+      version: DEFAULT_EXPERIMENT.version,
+      scoringVersion: DEFAULT_EXPERIMENT.scoringVersion,
+      papers: DEFAULT_EXPERIMENT.papers.map(
+        ({ id, code, title, doi, journal, sourceUrl }) => ({
+          id,
+          code,
+          title,
+          doi,
+          journal,
+          sourceUrl,
+        })
+      ),
+    },
+    summary,
+    diagnostics,
+    participants: results,
+  };
+}
+
 export function getTeachingAdminDashboard(requestedProjectId?: string | null): {
   configured: boolean;
   projects: Array<{ id: string; name: string; inviteCode: string; status: string; paperCount: number }>;
@@ -686,6 +1057,13 @@ export function getTeachingAdminDashboard(requestedProjectId?: string | null): {
   };
 }
 
+export class TeachingReviewValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TeachingReviewValidationError";
+  }
+}
+
 export function reviewTeachingSubmission(
   submissionId: string,
   humanScores: TeachingScores,
@@ -695,7 +1073,9 @@ export function reviewTeachingSubmission(
   const submission = store
     .prepare("SELECT submitted_at FROM teaching_submissions WHERE id = ?")
     .get(submissionId) as { submitted_at: string | null } | undefined;
-  if (!submission?.submitted_at) throw new Error("学生尚未提交，暂时不能审核。");
+  if (!submission?.submitted_at) {
+    throw new TeachingReviewValidationError("学生尚未提交，暂时不能审核。");
+  }
   store
     .prepare(
       `INSERT INTO teaching_reviews
@@ -715,6 +1095,5 @@ export function reviewTeachingSubmission(
 }
 
 export function closeTeachingDatabaseForTests(): void {
-  teachingDb?.close();
-  teachingDb = null;
+  closeTeachingStoreForTests();
 }

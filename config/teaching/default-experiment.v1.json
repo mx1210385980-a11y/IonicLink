@@ -1,0 +1,68 @@
+{
+  "id": "tribology-crossover-2026-v1",
+  "name": "人工提取与 AI 辅助提取对比实验",
+  "version": "2026.1",
+  "scoringVersion": "teaching-score-v1",
+  "fields": [
+    { "key": "cation", "label": "Cation" },
+    { "key": "anion", "label": "Anion" },
+    { "key": "substrate", "label": "Substrate" },
+    { "key": "temperature", "label": "Temperature" },
+    { "key": "load", "label": "Load" },
+    { "key": "cof", "label": "COF" }
+  ],
+  "papers": [
+    {
+      "id": "mdpi-lubricants-2018-6-64",
+      "code": "A",
+      "title": "Molecular Mechanisms Underlying Lubrication by Ionic Liquids: Activated Slip and Flow",
+      "doi": "10.3390/lubricants6030064",
+      "journal": "Lubricants",
+      "sourceUrl": "https://www.mdpi.com/2075-4442/6/3/64/pdf",
+      "taskPrompt": "提取文中 IL-44% 体系在 Figure 3 所述载荷依赖摩擦实验中的六个目标字段；不要把 IL-0% 或 PEG-IL 的结果混入答案。",
+      "aiModel": "ioniclink-frozen-teaching-snapshot-2026.1",
+      "aiInitial": {
+        "cation": { "value": "EMIM", "page": "2", "evidence": "[EMIM][TFSI]" },
+        "anion": { "value": "TFSI", "page": "2", "evidence": "[EMIM][TFSI]" },
+        "substrate": { "value": "mica", "page": "14", "evidence": "freshly cleaved mica surface" },
+        "temperature": { "value": "298.15 K", "page": "", "evidence": "default room-temperature condition" },
+        "load": { "value": "15–75 nN", "page": "5", "evidence": "normal load ranging from 15 to 75 nN" },
+        "cof": { "value": "0.04", "page": "5", "evidence": "IL-44% (μ = 0.04)" }
+      },
+      "gold": {
+        "cation": { "value": { "kind": "text", "expected": "EMIM", "aliases": ["[EMIM]", "1-ethyl-3-methylimidazolium", "1-ethyl-3-methyl imidazolium"] }, "evidence": { "pages": [2], "anyKeywordSets": [["emim"], ["1-ethyl-3-methyl"]] } },
+        "anion": { "value": { "kind": "text", "expected": "TFSI", "aliases": ["[TFSI]", "NTf2", "bis(trifluoromethylsulfonyl)imide"] }, "evidence": { "pages": [2], "anyKeywordSets": [["tfsi"], ["trifluoromethylsulfonyl"]] } },
+        "substrate": { "value": { "kind": "text", "expected": "mica", "aliases": ["freshly cleaved mica"] }, "evidence": { "pages": [14], "anyKeywordSets": [["mica"]] } },
+        "temperature": { "value": { "kind": "not_reported", "aliases": ["not reported", "未报告", "未说明", "NR", "N/A"] }, "evidence": { "pages": [], "anyKeywordSets": [["not reported"], ["未报告"]], "notReported": true } },
+        "load": { "value": { "kind": "force-range", "min": 5, "max": 75, "unit": "nN", "tolerance": 1, "aliases": ["5-75 nN", "5 to 75 nN"] }, "evidence": { "pages": [14], "anyKeywordSets": [["load", "5", "75", "nN"]] } },
+        "cof": { "value": { "kind": "number", "expected": 0.04, "tolerance": 0.005, "aliases": ["μ = 0.04", "COF 0.04"] }, "evidence": { "pages": [5], "anyKeywordSets": [["0.04"], ["IL-44%", "coefficient"]] } }
+      }
+    },
+    {
+      "id": "mdpi-lubricants-2023-11-376",
+      "code": "B",
+      "title": "Investigation of Programmable Friction with Ionic Liquid Mixtures at the Nano- and Macroscales",
+      "doi": "10.3390/lubricants11090376",
+      "journal": "Lubricants",
+      "sourceUrl": "https://www.mdpi.com/2075-4442/11/9/376/pdf",
+      "taskPrompt": "提取 Figure 4a 中开路电位 OCP、静摩擦、宏观 ball-on-three-pins 条件对应的六个字段；不要使用 −4 V、+4 V 或滑动末期数据。",
+      "aiModel": "ioniclink-frozen-teaching-snapshot-2026.1",
+      "aiInitial": {
+        "cation": { "value": "P66614", "page": "4", "evidence": "[P66614][BTA] and [P66614][Doc]" },
+        "anion": { "value": "BTA/Doc (4:1)", "page": "4", "evidence": "BTA to Doc mass ratio 4:1" },
+        "substrate": { "value": "100Cr6 steel pins", "page": "6", "evidence": "100Cr6 steel ball on stationary pins" },
+        "temperature": { "value": "298.15 K", "page": "", "evidence": "default room-temperature condition" },
+        "load": { "value": "5 N total load", "page": "6", "evidence": "normal load was increased to 5 N" },
+        "cof": { "value": "0.17", "page": "11", "evidence": "mean value was COF = 0.17" }
+      },
+      "gold": {
+        "cation": { "value": { "kind": "text", "expected": "P66614", "aliases": ["[P66614]", "trihexyltetradecylphosphonium"] }, "evidence": { "pages": [4], "anyKeywordSets": [["p66614"], ["phosphonium"]] } },
+        "anion": { "value": { "kind": "text", "expected": "BTA/Doc (4:1)", "aliases": ["BTA/Doc", "BTA:Doc 4:1", "[BTA]/[Doc] = 4:1"] }, "evidence": { "pages": [4], "anyKeywordSets": [["bta", "doc", "4:1"]] } },
+        "substrate": { "value": { "kind": "text", "expected": "100Cr6 steel pins", "aliases": ["100Cr6 steel", "stationary steel pins"] }, "evidence": { "pages": [6], "anyKeywordSets": [["100cr6", "pins"]] } },
+        "temperature": { "value": { "kind": "text", "expected": "room temperature", "aliases": ["at room temperature", "ambient temperature", "室温"] }, "evidence": { "pages": [6, 11], "anyKeywordSets": [["room", "temperature"]] } },
+        "load": { "value": { "kind": "text", "expected": "5 N total load", "aliases": ["5 N", "5N total", "total load 5 N"] }, "evidence": { "pages": [6, 11], "anyKeywordSets": [["5", "N", "normal force"]] } },
+        "cof": { "value": { "kind": "number", "expected": 0.17, "tolerance": 0.005, "aliases": ["μ = 0.17", "COF 0.17"] }, "evidence": { "pages": [11, 12], "anyKeywordSets": [["cof", "0.17"], ["mean", "0.17"]] } }
+      }
+    }
+  ]
+}
