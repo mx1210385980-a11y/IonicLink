@@ -16,7 +16,11 @@ import {
   type TeachingTeacherAiRound,
   type TeachingTeacherManualRound,
 } from "../../lib/teachingShared";
-import { TeacherDashboard, TeacherParticipantDetail } from "./TeacherDashboard";
+import {
+  TeacherDashboard,
+  TeacherParticipantDetail,
+  teachingDialogTabTarget,
+} from "./TeacherDashboard";
 
 (globalThis as typeof globalThis & { React: typeof React }).React = React;
 
@@ -185,6 +189,32 @@ const dashboard: TeachingExperimentDashboard = {
   participants,
 };
 
+const excludedParticipant: TeachingDashboardParticipant = {
+  ...participants[0],
+  participantId: "participant-excluded",
+  studentAlias: "S999",
+  exclusionReason: "教师排除备注：重复提交 EXCLUSION_UI_SECRET",
+  manual: {
+    ...participants[0].manual!,
+    submissionId: "manual-excluded",
+    activeSeconds: 100,
+    wallSeconds: 1_200,
+    timingQuality: "excessive_idle",
+  },
+  aiAssisted: {
+    ...participants[0].aiAssisted!,
+    submissionId: "ai-excluded",
+  },
+  activeTimeDifference: null,
+  accuracyDifference: null,
+  quality: {
+    completion: "completed",
+    timing: "excessive_idle",
+    excluded: true,
+    paired: false,
+  },
+};
+
 const html = renderToStaticMarkup(createElement(TeacherDashboard, { initial: dashboard }));
 assert.match(html, /^<section\b/);
 assert.doesNotMatch(html, /<main\b/);
@@ -204,6 +234,8 @@ assert.match(html, /4\/6/);
 assert.match(html, /5\/6/);
 assert.match(html, /50\.0%/);
 assert.match(html, /证据准确率|证据覆盖率/);
+assert.match(html, /更快且更准确/);
+assert.match(html, /30 \/ 30[\s\S]*100\.0%/);
 
 assert.match(html, /role="img"/);
 assert.match(html, /aria-label="[^"]*AI[^"]*有效时间[^"]*准确率[^"]*"/);
@@ -234,6 +266,7 @@ for (const option of ["A · 人工", "A · AI", "B · 人工", "B · AI"]) {
 assert.match(html, /<caption[^>]*>参与者结果/);
 assert.match(html, /scope="col"/);
 assert.match(html, /aria-label="查看学生 S001 的结果"/);
+assert.match(html, /主分析状态/);
 assert.equal((html.match(/>AI 有效时间</g) ?? []).length, 1);
 assert.match(
   html,
@@ -243,7 +276,7 @@ assert.match(
 
 const detailHtml = renderToStaticMarkup(
   createElement(TeacherParticipantDetail, {
-    participant: participants[0],
+    participant: excludedParticipant,
     papers,
     onClose: () => undefined,
   })
@@ -266,7 +299,21 @@ assert.match(detailHtml, /历史教师判定/);
 assert.match(detailHtml, /最终值 正确/);
 assert.match(detailHtml, /AI 初始值 不正确/);
 assert.match(detailHtml, /08\/10/);
+assert.match(detailHtml, /完成状态[\s\S]*已完成/);
+assert.match(detailHtml, /计时质量[\s\S]*空闲过多/);
+assert.match(detailHtml, /排除状态[\s\S]*已排除/);
+assert.match(detailHtml, /主分析配对[\s\S]*未纳入/);
+assert.match(detailHtml, /教师排除备注：重复提交 EXCLUSION_UI_SECRET/);
+assert.match(detailHtml, /有效时间[\s\S]*100 s/);
+assert.match(detailHtml, /墙钟时间[\s\S]*1,200 s/);
 assert.doesNotMatch(detailHtml, /<input\b|<select\b|<textarea\b|保存审核|>保存</);
+
+const excludedDashboardHtml = renderToStaticMarkup(
+  createElement(TeacherDashboard, {
+    initial: { ...dashboard, participants: [excludedParticipant] },
+  })
+);
+assert.match(excludedDashboardHtml, /S999[\s\S]*已排除/);
 
 const emptyDashboard: TeachingExperimentDashboard = {
   ...dashboard,
@@ -280,6 +327,13 @@ const emptyHtml = renderToStaticMarkup(
 assert.match(emptyHtml, /样本不足/);
 assert.match(emptyHtml, />—</);
 assert.doesNotMatch(emptyHtml, />0\.0%</);
+assert.match(emptyHtml, /更快且更准确[\s\S]*>—<[\s\S]*样本不足/);
+
+assert.equal(teachingDialogTabTarget(0, 2, true), 1);
+assert.equal(teachingDialogTabTarget(1, 2, false), 0);
+assert.equal(teachingDialogTabTarget(-1, 2, false), 0);
+assert.equal(teachingDialogTabTarget(0, 2, false), null);
+assert.equal(teachingDialogTabTarget(0, 0, false), null);
 
 const source = readFileSync("components/teaching/TeacherDashboard.tsx", "utf8");
 assert.match(source, /30_000/);
@@ -293,11 +347,20 @@ assert.match(
   "a selected participant id must be cleared if the refreshed record disappears"
 );
 assert.doesNotMatch(source, /useState<TeachingDashboardParticipant\s*\|\s*null>/);
+assert.match(source, /querySelectorAll<HTMLElement>/);
+assert.match(source, /event\.key\s*!==\s*["']Tab["']/);
+assert.match(source, /event\.preventDefault\(\)/);
+assert.match(source, /detailReturnFocusRef/);
+assert.match(source, /event\.currentTarget/);
+assert.match(source, /detailReturnFocusRef\.current[\s\S]*\.focus\(\)/);
+assert.match(source, /aria-hidden=\{selectedParticipant\s*\?\s*true\s*:\s*undefined\}/);
+assert.match(source, /setAttribute\(["']inert["'],\s*["']["']\)/);
+assert.match(source, /removeAttribute\(["']inert["']\)/);
 assert.match(source, /overflow-x-auto/);
 assert.match(source, /min-h-(?:11|\[44px\])/);
 assert.doesNotMatch(source, /w-screen|min-w-screen/);
 assert.equal((source.match(/["']AI 有效时间["']/g) ?? []).length, 1);
-assert.match(source, /colSpan=\{13\}/);
+assert.match(source, /colSpan=\{14\}/);
 
 const pageSource = readFileSync("app/teaching/admin/page.tsx", "utf8");
 assert.match(pageSource, /getDefaultTeachingDashboard/);

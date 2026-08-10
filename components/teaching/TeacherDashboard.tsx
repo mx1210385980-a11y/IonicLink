@@ -36,6 +36,17 @@ const TIMING_LABELS: Record<TeachingParticipantTimingStatus, string> = {
   unavailable: "不可用",
 };
 
+export function teachingDialogTabTarget(
+  currentIndex: number,
+  focusableCount: number,
+  shiftKey: boolean
+): number | null {
+  if (focusableCount <= 0) return null;
+  if (shiftKey && currentIndex <= 0) return focusableCount - 1;
+  if (!shiftKey && (currentIndex < 0 || currentIndex >= focusableCount - 1)) return 0;
+  return null;
+}
+
 export function TeacherDashboard({ initial }: { initial: TeachingExperimentDashboard }) {
   const [data, setData] = useState(initial);
   const [refreshState, setRefreshState] = useState<RefreshState>("live");
@@ -48,6 +59,8 @@ export function TeacherDashboard({ initial }: { initial: TeachingExperimentDashb
   const [timing, setTiming] = useState("");
   const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
+  const detailReturnFocusRef = useRef<HTMLButtonElement | null>(null);
+  const dashboardBackgroundRef = useRef<HTMLElement | null>(null);
 
   const refresh = useCallback((): Promise<void> => {
     if (refreshInFlightRef.current) return refreshInFlightRef.current;
@@ -139,10 +152,35 @@ export function TeacherDashboard({ initial }: { initial: TeachingExperimentDashb
   const selectedParticipant = selectedParticipantId
     ? data.participants.find((participant) => participant.participantId === selectedParticipantId) ?? null
     : null;
-  const closeDetail = useCallback(() => setSelectedParticipantId(null), []);
+
+  useEffect(() => {
+    const background = dashboardBackgroundRef.current;
+    if (!background) return;
+    if (selectedParticipant) {
+      background.setAttribute("inert", "");
+    } else {
+      background.removeAttribute("inert");
+    }
+    return () => background.removeAttribute("inert");
+  }, [selectedParticipant]);
+
+  const closeDetail = useCallback(() => {
+    setSelectedParticipantId(null);
+    const trigger = detailReturnFocusRef.current;
+    window.requestAnimationFrame(() => {
+      if (trigger?.isConnected) trigger.focus();
+    });
+  }, []);
 
   return (
-    <section lang="zh-CN" aria-labelledby="teacher-dashboard-title" className="min-w-0 pb-10">
+    <>
+      <section
+        ref={dashboardBackgroundRef}
+        lang="zh-CN"
+        aria-labelledby="teacher-dashboard-title"
+        aria-hidden={selectedParticipant ? true : undefined}
+        className="min-w-0 pb-10"
+      >
       <header className="border-b border-ink-300 pb-5">
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div className="min-w-0">
@@ -272,7 +310,7 @@ export function TeacherDashboard({ initial }: { initial: TeachingExperimentDashb
         </div>
 
         <div className="mt-4 max-w-full overflow-x-auto border-y border-ink-200 bg-white">
-          <table className="w-full min-w-[70rem] border-collapse text-left text-xs">
+          <table className="w-full min-w-[76rem] border-collapse text-left text-xs">
             <caption className="border-b border-ink-200 px-4 py-3 text-left text-sm font-semibold text-ink-800">
               参与者结果 · 自动评分只读明细
             </caption>
@@ -283,6 +321,7 @@ export function TeacherDashboard({ initial }: { initial: TeachingExperimentDashb
                   "序列",
                   "完成",
                   "计时质量",
+                  "主分析状态",
                   "人工文献",
                   "人工有效时间",
                   "人工正确数",
@@ -304,12 +343,15 @@ export function TeacherDashboard({ initial }: { initial: TeachingExperimentDashb
                 <ParticipantRow
                   key={participant.participantId}
                   participant={participant}
-                  onOpen={() => setSelectedParticipantId(participant.participantId)}
+                  onOpen={(trigger) => {
+                    detailReturnFocusRef.current = trigger;
+                    setSelectedParticipantId(participant.participantId);
+                  }}
                 />
               ))}
               {filteredParticipants.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="px-4 py-12 text-center text-sm text-ink-500">
+                  <td colSpan={14} className="px-4 py-12 text-center text-sm text-ink-500">
                     当前筛选条件下没有参与者。
                   </td>
                 </tr>
@@ -319,6 +361,7 @@ export function TeacherDashboard({ initial }: { initial: TeachingExperimentDashb
         </div>
       </section>
 
+    </section>
       {selectedParticipant ? (
         <TeacherParticipantDetail
           participant={selectedParticipant}
@@ -326,7 +369,7 @@ export function TeacherDashboard({ initial }: { initial: TeachingExperimentDashb
           onClose={closeDetail}
         />
       ) : null}
-    </section>
+    </>
   );
 }
 
@@ -357,7 +400,7 @@ function SummaryStrip({ dashboard }: { dashboard: TeachingExperimentDashboard })
         </div>
         <p className="text-xs text-ink-500">主分析仅纳入完成双轮、评分链路有效且计时有效的配对样本。</p>
       </div>
-      <div className="mt-2 grid gap-px overflow-hidden rounded-[10px] border border-ink-200 bg-ink-200 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-2 grid gap-px overflow-hidden rounded-[10px] border border-ink-200 bg-ink-200 sm:grid-cols-2 xl:grid-cols-5">
         <SummaryCell label="完成 / 计划">
           <strong className="font-mono text-2xl text-ink-950">{completion.completed} / 30</strong>
           <span>已进入系统 {completion.total} 人 · 配对 {completion.paired} 人 · 排除 {completion.excluded} 人</span>
@@ -375,6 +418,18 @@ function SummaryStrip({ dashboard }: { dashboard: TeachingExperimentDashboard })
             <span className="text-brand-800">{formatCorrectFraction(aiAssisted.medianAccuracy, aiAssisted.n)}</span>
           </strong>
           <span>人工 {formatPercent(manual.medianAccuracy)} · AI {formatPercent(aiAssisted.medianAccuracy)} · 配对差 {formatSignedPercentagePoints(dashboard.summary.accuracyDelta)}</span>
+        </SummaryCell>
+        <SummaryCell label="更快且更准确">
+          <strong className="font-mono text-xl text-ink-950">
+            {completion.paired === 0
+              ? "—"
+              : `${dashboard.summary.fasterAndMoreAccurate} / ${completion.paired}`}
+          </strong>
+          <span>
+            {completion.paired === 0
+              ? "样本不足 · 暂无合格配对样本"
+              : `${formatPercent(dashboard.summary.fasterAndMoreAccurate / completion.paired)} · 主分析配对参与者`}
+          </span>
         </SummaryCell>
         <SummaryCell label="证据质量护栏">
           <strong className="font-mono text-lg text-ink-950">
@@ -665,7 +720,7 @@ function ParticipantRow({
   onOpen,
 }: {
   participant: TeachingDashboardParticipant;
-  onOpen: () => void;
+  onOpen: (trigger: HTMLButtonElement) => void;
 }) {
   return (
     <tr className="hover:bg-brand-50/40">
@@ -673,6 +728,7 @@ function ParticipantRow({
       <td className="whitespace-nowrap px-3 py-3">{SEQUENCE_LABELS[participant.sequence]}</td>
       <td className="whitespace-nowrap px-3 py-3">{participant.quality.completion === "completed" ? "已完成" : "未完成"}</td>
       <td className="whitespace-nowrap px-3 py-3">{TIMING_LABELS[participant.quality.timing]}</td>
+      <td className="whitespace-nowrap px-3 py-3 font-semibold">{participantAnalysisStatus(participant)}</td>
       <RoundTableCells round={participant.manual} />
       <RoundTableCells round={participant.aiAssisted} />
       <td className="whitespace-nowrap px-3 py-3 font-mono">{formatSignedSeconds(participant.activeTimeDifference)}</td>
@@ -682,13 +738,18 @@ function ParticipantRow({
           type="button"
           className="btn min-h-11 whitespace-nowrap"
           aria-label={`查看学生 ${participant.studentAlias} 的结果`}
-          onClick={onOpen}
+          onClick={(event) => onOpen(event.currentTarget)}
         >
           查看
         </button>
       </td>
     </tr>
   );
+}
+
+function participantAnalysisStatus(participant: TeachingDashboardParticipant): string {
+  if (participant.quality.excluded) return "已排除";
+  return participant.quality.paired ? "已纳入" : "未配对";
 }
 
 function RoundTableCells({ round }: { round: TeachingTeacherRound | null }) {
@@ -713,22 +774,45 @@ export function TeacherParticipantDetail({
   onClose: () => void;
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     closeRef.current?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]):not([tabindex="-1"]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      );
+      const currentIndex = focusable.indexOf(document.activeElement as HTMLElement);
+      const targetIndex = teachingDialogTabTarget(
+        currentIndex,
+        focusable.length,
+        event.shiftKey
+      );
+      if (targetIndex === null) return;
+      event.preventDefault();
+      focusable[targetIndex]?.focus();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
       aria-labelledby="teacher-participant-detail-title"
       className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-ink-950/35 p-2 sm:p-6"
     >
-      <button type="button" aria-label="关闭参与者详情" className="absolute inset-0 cursor-default" onClick={onClose} />
+      <button type="button" tabIndex={-1} aria-label="关闭参与者详情" className="absolute inset-0 cursor-default" onClick={onClose} />
       <article className="relative z-10 my-auto w-full max-w-6xl overflow-hidden rounded-[12px] border border-ink-200 bg-[#f8faf9] shadow-2xl">
         <header className="flex flex-wrap items-start justify-between gap-4 border-b border-ink-200 bg-white px-4 py-4 sm:px-6">
           <div>
@@ -736,17 +820,33 @@ export function TeacherParticipantDetail({
             <h2 id="teacher-participant-detail-title" className="mt-1 font-serif text-2xl font-semibold text-ink-950">
               {participant.studentAlias} · 双轮自动评分明细
             </h2>
-            <p className="mt-1 text-xs text-ink-500">{SEQUENCE_LABELS[participant.sequence]} · {TIMING_LABELS[participant.quality.timing]} · 不可编辑</p>
+            <p className="mt-1 text-xs text-ink-500">{SEQUENCE_LABELS[participant.sequence]} · {TIMING_LABELS[participant.quality.timing]} · {participantAnalysisStatus(participant)} · 不可编辑</p>
           </div>
           <button ref={closeRef} type="button" className="btn min-h-11" onClick={onClose}>关闭</button>
         </header>
         <div className="max-h-[calc(100vh-8rem)] overflow-y-auto px-4 py-5 sm:px-6">
+          <dl className="mb-6 grid gap-px overflow-hidden rounded-[9px] border border-ink-200 bg-ink-200 text-xs sm:grid-cols-2 lg:grid-cols-5">
+            <QualityValue label="完成状态" value={participant.quality.completion === "completed" ? "已完成" : "未完成"} />
+            <QualityValue label="计时质量" value={TIMING_LABELS[participant.quality.timing]} />
+            <QualityValue label="排除状态" value={participant.quality.excluded ? "已排除" : "未排除"} />
+            <QualityValue label="主分析配对" value={participant.quality.paired ? "已纳入" : "未纳入"} />
+            <QualityValue label="排除原因" value={participant.exclusionReason || "—"} />
+          </dl>
           <div className="grid gap-8 xl:grid-cols-2">
             <RoundDetail round={participant.manual} papers={papers} title="人工模式" />
             <RoundDetail round={participant.aiAssisted} papers={papers} title="AI 辅助" />
           </div>
         </div>
       </article>
+    </div>
+  );
+}
+
+function QualityValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 bg-white px-3 py-3">
+      <dt className="font-semibold text-ink-500">{label}</dt>
+      <dd className="mt-1 break-words font-mono text-ink-900">{value}</dd>
     </div>
   );
 }
@@ -774,8 +874,13 @@ function RoundDetail({
       <div className="border-b-2 border-ink-800 pb-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 id={`round-${round.submissionId}`} className="font-serif text-xl font-semibold text-ink-950">{title} · 文献 {round.paperCode}</h3>
-          <span className="font-mono text-xs text-ink-600">{formatDuration(round.activeSeconds)} · {round.score.valueCorrect}/{TEACHING_FIELDS.length}</span>
+          <span className="font-mono text-xs text-ink-600">{round.score.valueCorrect}/{TEACHING_FIELDS.length}</span>
         </div>
+        <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 font-mono text-xs text-ink-600">
+          <span>有效时间 {formatSecondsLabel(round.activeSeconds)} ({formatDuration(round.activeSeconds)})</span>
+          <span>墙钟时间 {formatSecondsLabel(round.wallSeconds)} ({formatDuration(round.wallSeconds)})</span>
+          <span>计时质量 {TIMING_LABELS[round.timingQuality]}</span>
+        </p>
         <p className="mt-1 truncate text-xs text-ink-500">{paper?.title ?? "文献信息不可用"}</p>
       </div>
       <div className="divide-y divide-ink-200">

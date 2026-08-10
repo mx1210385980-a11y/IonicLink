@@ -198,7 +198,7 @@ const incompleteParticipant: TeachingDashboardParticipant = {
   sequence: "ai_then_manual",
   completed: false,
   exclusionReason:
-    "\u000b@external-review participant-dangerous-alias participant-incomplete Raw Alias Alice ALICE Ａｌｉｃｅ alice@example.com",
+    "\u000b@external-review PRIVATE_EXCLUSION_SECRET participant-dangerous-alias participant-incomplete Raw Alias Alice ALICE Ａｌｉｃｅ alice@example.com",
   manual: null,
   aiAssisted: null,
   activeTimeDifference: null,
@@ -236,7 +236,13 @@ assert.ok(
   experimentCsv.includes(`"'${dangerousAlias.replace(/"/g, '""')}"`),
   "experiment aliases with whitespace before a formula must be neutralized"
 );
-assert.ok(experimentCsv.includes(`"'${incompleteParticipant.exclusionReason}"`));
+assert.doesNotMatch(
+  experimentCsv,
+  /PRIVATE_EXCLUSION_SECRET|@external-review|alice@example\.com/,
+  "ordinary exports must replace arbitrary exclusion notes with a categorical marker"
+);
+assert.match(experimentCsv, /"completed","paired",""/);
+assert.match(experimentCsv, /"incomplete","not_paired","excluded"/);
 assert.match(experimentCsv, /"A","1200","1300","valid","4\/6"/);
 assert.match(experimentCsv, /"B","600","650","valid","5\/6"/);
 assert.match(experimentCsv, /"66\.7%"/);
@@ -285,6 +291,8 @@ assert.doesNotMatch(anonymized, new RegExp(dangerousAlias.replace(/[.*+?^${}()|[
 assert.doesNotMatch(anonymized, /Raw Alias/);
 assert.doesNotMatch(anonymized, /participant-dangerous-alias|participant-incomplete/);
 assert.doesNotMatch(anonymized, /Alice|ALICE|Ａｌｉｃｅ|alice@example\.com/);
+assert.doesNotMatch(anonymized, /PRIVATE_EXCLUSION_SECRET|@external-review/);
+assert.match(anonymized, /"completed","paired",""/);
 assert.match(anonymized, /"incomplete","not_paired","excluded"/);
 
 const aliasVariants = ["Alice", "ALICE", "Ａｌｉｃｅ", "alice@example.com"];

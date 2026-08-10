@@ -204,9 +204,7 @@ export function teachingExperimentToCsv(
       participant.sequence,
       participant.quality.completion,
       participant.quality.paired ? "paired" : "not_paired",
-      options.anonymize
-        ? participant.quality.excluded ? "excluded" : ""
-        : participant.exclusionReason ?? "",
+      participant.quality.excluded ? "excluded" : "",
       ...roundCells(participant.manual),
       ...roundCells(participant.aiAssisted),
       behavior ? trustedNumber(behavior.suggested) : "",
