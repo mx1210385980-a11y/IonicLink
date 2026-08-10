@@ -5,6 +5,7 @@ import {
   getDefaultTeachingDashboard,
   joinDefaultTeachingExperiment,
   joinTeachingProject,
+  reviewTeachingSubmission,
 } from "../teaching";
 import { DEFAULT_EXPERIMENT, defaultExperimentChecksum } from "./config";
 import { scoreSubmission } from "./scoring";
@@ -12,7 +13,9 @@ import { closeTeachingStoreForTests, getTeachingDb } from "./store";
 import {
   bootstrapMedianCi,
   median,
+  summarizeTeachingExperimentDiagnostics,
   summarizeTeachingExperiment,
+  teachingParticipantQuality,
   wilcoxonSignedRank,
 } from "./analytics";
 import {
@@ -32,7 +35,8 @@ type ApprovedModeSummaryKey =
   | "medianAccuracy"
   | "meanAccuracy"
   | "medianCoverage"
-  | "medianEvidenceAccuracy";
+  | "medianEvidenceAccuracy"
+  | "medianEvidenceCoverage";
 type ModeSummaryHasOnlyApprovedKeys = Exclude<
   keyof TeachingModeSummary,
   ApprovedModeSummaryKey
@@ -196,6 +200,7 @@ assert.equal(
 const completeThirty = Array.from({ length: 30 }, (_, index) => pairedFixture(index + 1));
 const untouchedThirty = structuredClone(completeThirty);
 const completeSummary = summarizeTeachingExperiment(completeThirty);
+const completeDiagnostics = summarizeTeachingExperimentDiagnostics(completeThirty);
 assert.deepEqual(completeThirty, untouchedThirty, "summarization must not mutate analysis rows");
 assert.deepEqual(completeSummary.completion, {
   total: 30,
@@ -215,6 +220,7 @@ assert.deepEqual(completeSummary.manual, {
   meanAccuracy: 4 / 6,
   medianCoverage: 1,
   medianEvidenceAccuracy: 4 / 6,
+  medianEvidenceCoverage: 1,
 });
 assert.deepEqual(completeSummary.aiAssisted, {
   n: 30,
@@ -223,6 +229,7 @@ assert.deepEqual(completeSummary.aiAssisted, {
   meanAccuracy: 5 / 6,
   medianCoverage: 1,
   medianEvidenceAccuracy: 5 / 6,
+  medianEvidenceCoverage: 1,
 });
 assert.equal(completeSummary.timeSavedRate, 0.5);
 assert.equal(completeSummary.accuracyDelta, 1 / 6);
@@ -251,6 +258,59 @@ assert.deepEqual(completeSummary.aiBehavior, {
   correctionRate: 1,
   incorrectAdoptionRate: 0,
 });
+assert.deepEqual(completeDiagnostics.timingQuality, {
+  valid: 30,
+  zero_active: 0,
+  excessive_idle: 0,
+  unavailable: 0,
+});
+assert.equal(completeDiagnostics.byPaper.A.manual.n, 15);
+assert.equal(completeDiagnostics.byPaper.A.aiAssisted.n, 15);
+assert.equal(completeDiagnostics.byPaper.B.manual.n, 15);
+assert.equal(completeDiagnostics.byPaper.B.aiAssisted.n, 15);
+assert.deepEqual(
+  {
+    manualThenAi: {
+      total: completeDiagnostics.bySequence.manual_then_ai.total,
+      completed: completeDiagnostics.bySequence.manual_then_ai.completed,
+      paired: completeDiagnostics.bySequence.manual_then_ai.paired,
+      manualN: completeDiagnostics.bySequence.manual_then_ai.manual.n,
+      aiN: completeDiagnostics.bySequence.manual_then_ai.aiAssisted.n,
+    },
+    aiThenManual: {
+      total: completeDiagnostics.bySequence.ai_then_manual.total,
+      completed: completeDiagnostics.bySequence.ai_then_manual.completed,
+      paired: completeDiagnostics.bySequence.ai_then_manual.paired,
+      manualN: completeDiagnostics.bySequence.ai_then_manual.manual.n,
+      aiN: completeDiagnostics.bySequence.ai_then_manual.aiAssisted.n,
+    },
+  },
+  {
+    manualThenAi: { total: 15, completed: 15, paired: 15, manualN: 15, aiN: 15 },
+    aiThenManual: { total: 15, completed: 15, paired: 15, manualN: 15, aiN: 15 },
+  }
+);
+assert.equal(
+  completeDiagnostics.byPaper.A.manual.n + completeDiagnostics.byPaper.B.manual.n,
+  completeSummary.manual.n,
+  "paper-level manual n must reconcile to the headline paired sample"
+);
+assert.equal(
+  completeDiagnostics.byPaper.A.aiAssisted.n + completeDiagnostics.byPaper.B.aiAssisted.n,
+  completeSummary.aiAssisted.n,
+  "paper-level AI n must reconcile to the headline paired sample"
+);
+assert.equal(
+  completeDiagnostics.bySequence.manual_then_ai.paired +
+    completeDiagnostics.bySequence.ai_then_manual.paired,
+  completeSummary.completion.paired,
+  "sequence paired counts must reconcile to the headline paired sample"
+);
+assert.equal(
+  Object.values(completeDiagnostics.timingQuality).reduce((sum, count) => sum + count, 0),
+  completeSummary.completion.total,
+  "timing quality must classify every participant exactly once"
+);
 
 const incomplete: TeachingExperimentAnalysisRow = {
   ...pairedFixture(31, { completed: false }),
@@ -273,6 +333,43 @@ const scoringOrModeNull: TeachingExperimentAnalysisRow = {
 const noAiError = pairedFixture(36, { aiCorrect: 6, aiBehavior: noErrorAiBehavior });
 assert.equal(zeroActive.exclusionReason, null);
 assert.equal(excessiveIdle.exclusionReason, null);
+
+assert.deepEqual(teachingParticipantQuality(completeThirty[0]), {
+  completion: "completed",
+  timing: "valid",
+  excluded: false,
+  paired: true,
+});
+assert.deepEqual(teachingParticipantQuality(incomplete), {
+  completion: "incomplete",
+  timing: "unavailable",
+  excluded: false,
+  paired: false,
+});
+assert.deepEqual(teachingParticipantQuality(zeroActive), {
+  completion: "completed",
+  timing: "zero_active",
+  excluded: false,
+  paired: false,
+});
+assert.deepEqual(teachingParticipantQuality(excessiveIdle), {
+  completion: "completed",
+  timing: "excessive_idle",
+  excluded: false,
+  paired: false,
+});
+assert.deepEqual(teachingParticipantQuality(excluded), {
+  completion: "completed",
+  timing: "valid",
+  excluded: true,
+  paired: false,
+});
+assert.deepEqual(teachingParticipantQuality(scoringOrModeNull), {
+  completion: "completed",
+  timing: "unavailable",
+  excluded: false,
+  paired: false,
+});
 
 const edgeRows = [
   ...completeThirty,
@@ -459,6 +556,14 @@ assert.deepEqual(emptyDashboard.experiment, {
   name: DEFAULT_EXPERIMENT.name,
   version: DEFAULT_EXPERIMENT.version,
   scoringVersion: DEFAULT_EXPERIMENT.scoringVersion,
+  papers: DEFAULT_EXPERIMENT.papers.map(({ id, code, title, doi, journal, sourceUrl }) => ({
+    id,
+    code,
+    title,
+    doi,
+    journal,
+    sourceUrl,
+  })),
 });
 assert.deepEqual(emptyDashboard.summary.completion, {
   total: 0,
@@ -468,6 +573,12 @@ assert.deepEqual(emptyDashboard.summary.completion, {
   excluded: 0,
 });
 assert.deepEqual(emptyDashboard.participants, []);
+assert.deepEqual(emptyDashboard.diagnostics.timingQuality, {
+  valid: 0,
+  zero_active: 0,
+  excessive_idle: 0,
+  unavailable: 0,
+});
 
 const database = getTeachingDb();
 assert.equal(
@@ -694,6 +805,11 @@ assert.deepEqual(dashboardWithInvalidSequence.summary.completion, {
 
 const completedDb = joinDefaultTeachingExperiment("Dashboard completed");
 const completedSubmissionIds = completeDashboardParticipant(database, completedDb.participantId);
+reviewTeachingSubmission(
+  completedSubmissionIds.aiSubmissionId,
+  { cation: "correct", load: "incorrect" },
+  { cation: "incorrect", load: "correct" }
+);
 database
   .prepare(
     `INSERT INTO teaching_activity_events
@@ -744,6 +860,8 @@ const oldVersionParticipant = oldVersionDashboard.participants.find(
 assert.ok(oldVersionParticipant?.manual);
 assert.equal(oldVersionParticipant.aiAssisted, null);
 assert.equal(oldVersionParticipant.activeTimeDifference, null);
+assert.equal(oldVersionParticipant.quality.timing, "unavailable");
+assert.equal(oldVersionParticipant.quality.paired, false);
 assert.equal(oldVersionDashboard.summary.completion.paired, 0);
 
 database
@@ -838,6 +956,7 @@ assert.deepEqual(dbDashboard.summary.manual, {
   meanAccuracy: 4 / 6,
   medianCoverage: 1,
   medianEvidenceAccuracy: 4 / 6,
+  medianEvidenceCoverage: 5 / 6,
 });
 assert.deepEqual(dbDashboard.summary.aiAssisted, {
   n: 1,
@@ -846,6 +965,7 @@ assert.deepEqual(dbDashboard.summary.aiAssisted, {
   meanAccuracy: 5 / 6,
   medianCoverage: 1,
   medianEvidenceAccuracy: 4 / 6,
+  medianEvidenceCoverage: 5 / 6,
 });
 assert.equal(dbDashboard.summary.timeSavedRate, 0.5);
 assert.equal(dbDashboard.summary.accuracyDelta, 1 / 6);
@@ -883,6 +1003,38 @@ assert.equal(completedResult.manual.timingQuality, "valid");
 assert.equal(completedResult.aiAssisted.timingQuality, "valid");
 assert.equal(completedResult.activeTimeDifference, -600);
 assert.equal(completedResult.accuracyDifference, 1 / 6);
+assert.deepEqual(completedResult.quality, {
+  completion: "completed",
+  timing: "valid",
+  excluded: false,
+  paired: true,
+});
+const completedManualPaper = DEFAULT_EXPERIMENT.papers.find(
+  (paper) => paper.code === completedResult.manual?.paperCode
+);
+const completedAiPaper = DEFAULT_EXPERIMENT.papers.find(
+  (paper) => paper.code === completedResult.aiAssisted?.paperCode
+);
+assert.ok(completedManualPaper && completedAiPaper);
+assert.deepEqual(completedResult.manual.finalAnswers, completedManualPaper.aiInitial);
+assert.equal(
+  Object.prototype.hasOwnProperty.call(completedResult.manual, "aiInitial"),
+  false,
+  "manual round payload must not contain an aiInitial key"
+);
+assert.deepEqual(completedResult.aiAssisted.finalAnswers, completedAiPaper.aiInitial);
+assert.deepEqual(completedResult.aiAssisted.aiInitial, completedAiPaper.aiInitial);
+assert.equal(typeof completedResult.aiAssisted.score.values.cation.reason, "string");
+assert.equal(typeof completedResult.aiAssisted.score.evidence.cation.reason, "string");
+assert.deepEqual(completedResult.aiAssisted.review, {
+  reviewedAt: completedResult.aiAssisted.review?.reviewedAt,
+  finalValueScores: { cation: "correct", load: "incorrect" },
+  aiInitialValueScores: { cation: "incorrect", load: "correct" },
+});
+assert.ok(
+  Number.isFinite(Date.parse(completedResult.aiAssisted.review?.reviewedAt ?? "")),
+  "review timestamp must be returned with its display-only score metadata"
+);
 
 const incompleteResult = dbDashboard.participants.find(
   (participant) => participant.participantId === incompleteDb.participantId
@@ -893,6 +1045,12 @@ assert.equal(incompleteResult.manual, null);
 assert.equal(incompleteResult.aiAssisted, null);
 assert.equal(incompleteResult.activeTimeDifference, null);
 assert.equal(incompleteResult.accuracyDifference, null);
+assert.deepEqual(incompleteResult.quality, {
+  completion: "incomplete",
+  timing: "unavailable",
+  excluded: false,
+  paired: false,
+});
 
 const excludedResult = dbDashboard.participants.find(
   (participant) => participant.participantId === excludedDb.participantId
@@ -900,6 +1058,12 @@ const excludedResult = dbDashboard.participants.find(
 assert.ok(excludedResult?.manual && excludedResult.aiAssisted);
 assert.equal(excludedResult.exclusionReason, "manual exclusion");
 assert.equal(excludedResult.activeTimeDifference, null);
+assert.deepEqual(excludedResult.quality, {
+  completion: "completed",
+  timing: "valid",
+  excluded: true,
+  paired: false,
+});
 
 const zeroResult = dbDashboard.participants.find(
   (participant) => participant.participantId === zeroDb.participantId
@@ -908,6 +1072,7 @@ assert.ok(zeroResult?.manual && zeroResult.aiAssisted);
 assert.equal(zeroResult.exclusionReason, null);
 assert.equal(zeroResult.manual.timingQuality, "zero_active");
 assert.equal(zeroResult.activeTimeDifference, null);
+assert.equal(zeroResult.quality.timing, "zero_active");
 
 const idleResult = dbDashboard.participants.find(
   (participant) => participant.participantId === idleDb.participantId
@@ -916,6 +1081,7 @@ assert.ok(idleResult?.manual && idleResult.aiAssisted);
 assert.equal(idleResult.exclusionReason, null);
 assert.equal(idleResult.manual.timingQuality, "excessive_idle");
 assert.equal(idleResult.activeTimeDifference, null);
+assert.equal(idleResult.quality.timing, "excessive_idle");
 
 const scoringErrorResult = dbDashboard.participants.find(
   (participant) => participant.participantId === scoringErrorDb.participantId
@@ -923,6 +1089,7 @@ const scoringErrorResult = dbDashboard.participants.find(
 assert.ok(scoringErrorResult?.manual);
 assert.equal(scoringErrorResult.aiAssisted, null);
 assert.equal(scoringErrorResult.activeTimeDifference, null);
+assert.equal(scoringErrorResult.quality.timing, "unavailable");
 
 const modeNullResult = dbDashboard.participants.find(
   (participant) => participant.participantId === modeNullDb.participantId
@@ -930,6 +1097,7 @@ const modeNullResult = dbDashboard.participants.find(
 assert.ok(modeNullResult?.aiAssisted);
 assert.equal(modeNullResult.manual, null);
 assert.equal(modeNullResult.activeTimeDifference, null);
+assert.equal(modeNullResult.quality.timing, "unavailable");
 
 const reverseTimestampResult = dbDashboard.participants.find(
   (participant) => participant.participantId === reverseTimestampDb.participantId
@@ -938,11 +1106,35 @@ assert.ok(reverseTimestampResult?.aiAssisted);
 assert.equal(reverseTimestampResult.manual, null);
 assert.equal(reverseTimestampResult.activeTimeDifference, null);
 assert.equal(reverseTimestampResult.accuracyDifference, null);
+assert.equal(reverseTimestampResult.quality.timing, "unavailable");
+
+assert.equal(
+  dbDashboard.diagnostics.byPaper.A.manual.n +
+    dbDashboard.diagnostics.byPaper.B.manual.n,
+  dbDashboard.summary.manual.n
+);
+assert.equal(
+  dbDashboard.diagnostics.byPaper.A.aiAssisted.n +
+    dbDashboard.diagnostics.byPaper.B.aiAssisted.n,
+  dbDashboard.summary.aiAssisted.n
+);
+assert.equal(
+  dbDashboard.diagnostics.bySequence.manual_then_ai.paired +
+    dbDashboard.diagnostics.bySequence.ai_then_manual.paired,
+  dbDashboard.summary.completion.paired
+);
+assert.equal(
+  Object.values(dbDashboard.diagnostics.timingQuality).reduce(
+    (sum, count) => sum + count,
+    0
+  ),
+  dbDashboard.summary.completion.total
+);
 
 assert.doesNotMatch(
   JSON.stringify(dbDashboard),
-  /gold|scoringRules|scoring_rules/i,
-  "public dashboard objects must not expose gold answers or scoring rules"
+  /"gold"|"scoringRules"|scoring_rules|"aliases"|"tolerance"|"anyKeywordSets"|"taskPrompt"|"aiModel"/i,
+  "public dashboard objects must not expose gold answers, rules, prompts, or AI model secrets"
 );
 
 closeTeachingStoreForTests();

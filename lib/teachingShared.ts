@@ -96,6 +96,7 @@ export type TeachingAiBehavior = {
 };
 
 export type TeachingTimingQuality = "valid" | "zero_active" | "excessive_idle";
+export type TeachingParticipantTimingStatus = TeachingTimingQuality | "unavailable";
 
 export type TeachingRoundAnalysis = {
   submissionId: string;
@@ -125,6 +126,7 @@ export type TeachingModeSummary = {
   meanAccuracy: number | null;
   medianCoverage: number | null;
   medianEvidenceAccuracy: number | null;
+  medianEvidenceCoverage: number | null;
 };
 
 export type TeachingDifferenceSummary = {
@@ -157,10 +159,82 @@ export type TeachingPairedResult = TeachingExperimentAnalysisRow & {
   accuracyDifference: number | null;
 };
 
+export type TeachingDashboardParticipantQuality = {
+  completion: "completed" | "incomplete";
+  timing: TeachingParticipantTimingStatus;
+  excluded: boolean;
+  paired: boolean;
+};
+
+export type TeachingTeacherReview = {
+  reviewedAt: string;
+  finalValueScores: TeachingScores;
+  aiInitialValueScores: TeachingScores;
+};
+
+type TeachingTeacherRoundBase = TeachingRoundAnalysis & {
+  finalAnswers: TeachingAnswers;
+  review: TeachingTeacherReview | null;
+};
+
+export type TeachingTeacherManualRound = TeachingTeacherRoundBase & {
+  mode: "manual";
+  aiInitial?: never;
+};
+
+export type TeachingTeacherAiRound = TeachingTeacherRoundBase & {
+  mode: "ai_assisted";
+  aiInitial: TeachingAnswers;
+};
+
+export type TeachingTeacherRound = TeachingTeacherManualRound | TeachingTeacherAiRound;
+
+export type TeachingDashboardParticipant = Omit<
+  TeachingPairedResult,
+  "manual" | "aiAssisted"
+> & {
+  manual: TeachingTeacherManualRound | null;
+  aiAssisted: TeachingTeacherAiRound | null;
+  quality: TeachingDashboardParticipantQuality;
+};
+
+export type TeachingSafeExperimentPaper = {
+  id: string;
+  code: "A" | "B";
+  title: string;
+  doi: string;
+  journal: string;
+  sourceUrl: string;
+};
+
+export type TeachingSequenceDiagnostics = {
+  total: number;
+  completed: number;
+  paired: number;
+  manual: TeachingModeSummary;
+  aiAssisted: TeachingModeSummary;
+};
+
+export type TeachingExperimentDiagnostics = {
+  byPaper: Record<
+    "A" | "B",
+    { manual: TeachingModeSummary; aiAssisted: TeachingModeSummary }
+  >;
+  bySequence: Record<TeachingSequence, TeachingSequenceDiagnostics>;
+  timingQuality: Record<TeachingParticipantTimingStatus, number>;
+};
+
 export type TeachingExperimentDashboard = {
-  experiment: { id: string; name: string; version: string; scoringVersion: string };
+  experiment: {
+    id: string;
+    name: string;
+    version: string;
+    scoringVersion: string;
+    papers: TeachingSafeExperimentPaper[];
+  };
   summary: TeachingExperimentSummary;
-  participants: TeachingPairedResult[];
+  diagnostics: TeachingExperimentDiagnostics;
+  participants: TeachingDashboardParticipant[];
 };
 
 export type TeachingExperimentPaper = {

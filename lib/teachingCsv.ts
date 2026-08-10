@@ -195,8 +195,6 @@ export function teachingExperimentToCsv(
 
   for (const [index, participant] of dashboard.participants.entries()) {
     const behavior = participant.aiAssisted?.aiBehavior;
-    const paired =
-      participant.activeTimeDifference !== null && participant.accuracyDifference !== null;
     const values: unknown[] = [
       dashboard.experiment.id,
       dashboard.experiment.name,
@@ -204,12 +202,10 @@ export function teachingExperimentToCsv(
       dashboard.experiment.scoringVersion,
       options.anonymize ? labels[index] : participant.studentAlias,
       participant.sequence,
-      participant.completed ? "completed" : "incomplete",
-      paired ? "paired" : "not_paired",
+      participant.quality.completion,
+      participant.quality.paired ? "paired" : "not_paired",
       options.anonymize
-        ? participant.exclusionReason === null
-          ? ""
-          : "excluded"
+        ? participant.quality.excluded ? "excluded" : ""
         : participant.exclusionReason ?? "",
       ...roundCells(participant.manual),
       ...roundCells(participant.aiAssisted),

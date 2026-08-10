@@ -5,7 +5,9 @@ import path from "node:path";
 import { closeTeachingStoreForTests, getTeachingDb, teachingDataDir } from "./teaching/store";
 import {
   isTeachingExperimentAnalysisEligible,
+  summarizeTeachingExperimentDiagnostics,
   summarizeTeachingExperiment,
+  teachingParticipantQuality,
   teachingPairedDifferences,
 } from "./teaching/analytics";
 import {
@@ -19,8 +21,8 @@ import {
   TEACHING_FIELDS,
   type TeachingAutoScore,
   type TeachingAnswers,
+  type TeachingDashboardParticipant,
   type TeachingDashboardRow,
-  type TeachingExperimentAnalysisRow,
   type TeachingExperimentDashboard,
   type TeachingExperimentPaper,
   type TeachingFieldScore,
@@ -28,11 +30,13 @@ import {
   type TeachingGoldRule,
   type TeachingMetrics,
   type TeachingMode,
-  type TeachingPairedResult,
   type TeachingRole,
-  type TeachingRoundAnalysis,
   type TeachingScores,
   type TeachingSequence,
+  type TeachingTeacherAiRound,
+  type TeachingTeacherManualRound,
+  type TeachingTeacherReview,
+  type TeachingTeacherRound,
 } from "./teachingShared";
 export {
   getCurrentTeachingRound,
@@ -56,23 +60,33 @@ export {
   TEACHING_FIELDS,
   type TeachingAnswer,
   type TeachingAnswers,
+  type TeachingDashboardParticipant,
+  type TeachingDashboardParticipantQuality,
   type TeachingDashboardRow,
   type TeachingDifferenceSummary,
   type TeachingExperimentAnalysisRow,
   type TeachingExperimentDashboard,
+  type TeachingExperimentDiagnostics,
   type TeachingExperimentSummary,
   type TeachingFieldKey,
   type TeachingMetrics,
   type TeachingMode,
   type TeachingModeSummary,
+  type TeachingParticipantTimingStatus,
   type TeachingPairedResult,
   type TeachingRole,
   type TeachingRoundAnalysis,
   type TeachingRoundTransition,
   type TeachingScore,
   type TeachingScores,
+  type TeachingSafeExperimentPaper,
   type TeachingSequence,
+  type TeachingSequenceDiagnostics,
   type TeachingStudentState,
+  type TeachingTeacherAiRound,
+  type TeachingTeacherManualRound,
+  type TeachingTeacherReview,
+  type TeachingTeacherRound,
   type TeachingTimingQuality,
 } from "./teachingShared";
 
@@ -591,6 +605,9 @@ type DefaultTeachingSubmissionRow = {
   taskPrompt: string;
   aiModel: string | null;
   scoringRulesJson: string;
+  reviewedAt: string | null;
+  finalValueScoresJson: string | null;
+  aiInitialValueScoresJson: string | null;
 };
 
 function defaultTeachingSequence(value: string | null, participantId: string): TeachingSequence {
@@ -639,6 +656,28 @@ function parsedFieldScores(value: string): TeachingAutoScore["values"] | null {
   return scores;
 }
 
+function parsedTeachingScores(value: string | null): TeachingScores {
+  const parsed = value ? parsedObject<Record<string, unknown>>(value) : null;
+  if (!parsed) return {};
+  const scores: TeachingScores = {};
+  for (const field of TEACHING_FIELDS) {
+    const score = parsed[field.key];
+    if (score === "correct" || score === "incorrect" || score === "pending") {
+      scores[field.key] = score;
+    }
+  }
+  return scores;
+}
+
+function defaultTeachingReview(row: DefaultTeachingSubmissionRow): TeachingTeacherReview | null {
+  if (!row.reviewedAt) return null;
+  return {
+    reviewedAt: row.reviewedAt,
+    finalValueScores: parsedTeachingScores(row.finalValueScoresJson),
+    aiInitialValueScores: parsedTeachingScores(row.aiInitialValueScoresJson),
+  };
+}
+
 function reconstructedAutomaticScore(
   row: DefaultTeachingSubmissionRow,
   answers: TeachingAnswers,
@@ -672,7 +711,7 @@ function reconstructedAutomaticScore(
 function defaultTeachingRoundAnalysis(
   row: DefaultTeachingSubmissionRow,
   expected: { roundNo: 1 | 2; mode: TeachingMode; paperCode: "A" | "B" }
-): TeachingRoundAnalysis | null {
+): TeachingTeacherRound | null {
   if (
     row.roundNo !== expected.roundNo ||
     row.mode !== expected.mode ||
@@ -726,16 +765,20 @@ function defaultTeachingRoundAnalysis(
     }
   }
   const wallSeconds = (submittedAt - startedAt) / 1_000;
-  return {
+  const common = {
     submissionId: row.submissionId,
     paperCode: expected.paperCode,
-    mode: expected.mode,
     activeSeconds: row.activeSeconds,
     wallSeconds,
     score,
     aiBehavior,
     timingQuality: classifyTeachingTiming(row.activeSeconds, wallSeconds),
+    finalAnswers: answers,
+    review: defaultTeachingReview(row),
   };
+  return expected.mode === "manual"
+    ? { ...common, mode: "manual" }
+    : { ...common, mode: "ai_assisted", aiInitial };
 }
 
 function defaultTeachingAssignments(sequence: TeachingSequence): Array<{
@@ -784,9 +827,13 @@ export function getDefaultTeachingDashboard(): TeachingExperimentDashboard {
               s.auto_scored_at AS autoScoredAt,
               p.id AS paperId, p.paper_no AS paperCode, p.title, p.doi, p.journal,
               p.source_url AS sourceUrl, p.task_prompt AS taskPrompt,
-              p.ai_model AS aiModel, p.scoring_rules_json AS scoringRulesJson
+              p.ai_model AS aiModel, p.scoring_rules_json AS scoringRulesJson,
+              r.reviewed_at AS reviewedAt,
+              r.human_scores_json AS finalValueScoresJson,
+              r.ai_scores_json AS aiInitialValueScoresJson
        FROM teaching_submissions s
        JOIN teaching_papers p ON p.id = s.paper_id
+       LEFT JOIN teaching_reviews r ON r.submission_id = s.id
        WHERE s.project_id = ?
        ORDER BY s.participant_id ASC, s.round_no ASC, s.id ASC`
     )
@@ -798,10 +845,13 @@ export function getDefaultTeachingDashboard(): TeachingExperimentDashboard {
     else submissionsByParticipant.set(submission.participantId, [submission]);
   }
 
-  const analysisRows = participants.map((participant): TeachingExperimentAnalysisRow => {
+  const analysisRows = participants.map((participant) => {
     const sequence = defaultTeachingSequence(participant.sequenceCode, participant.participantId);
     const participantSubmissions = submissionsByParticipant.get(participant.participantId) ?? [];
-    const rounds: Pick<TeachingExperimentAnalysisRow, "manual" | "aiAssisted"> = {
+    const rounds: {
+      manual: TeachingTeacherManualRound | null;
+      aiAssisted: TeachingTeacherAiRound | null;
+    } = {
       manual: null,
       aiAssisted: null,
     };
@@ -812,9 +862,14 @@ export function getDefaultTeachingDashboard(): TeachingExperimentDashboard {
           submission.mode === assignment.mode &&
           submission.paperCode === assignment.paperCode
       );
-      rounds[assignment.key] = candidates.length === 1
+      const round = candidates.length === 1
         ? defaultTeachingRoundAnalysis(candidates[0], assignment)
         : null;
+      if (assignment.key === "manual") {
+        rounds.manual = round?.mode === "manual" ? round : null;
+      } else {
+        rounds.aiAssisted = round?.mode === "ai_assisted" ? round : null;
+      }
     }
     return {
       participantId: participant.participantId,
@@ -826,12 +881,14 @@ export function getDefaultTeachingDashboard(): TeachingExperimentDashboard {
     };
   });
   const summary = summarizeTeachingExperiment(analysisRows);
-  const results = analysisRows.map((row): TeachingPairedResult => {
+  const diagnostics = summarizeTeachingExperimentDiagnostics(analysisRows);
+  const results = analysisRows.map((row): TeachingDashboardParticipant => {
     const differences = isTeachingExperimentAnalysisEligible(row)
       ? teachingPairedDifferences(row)
       : null;
     return {
       ...row,
+      quality: teachingParticipantQuality(row),
       activeTimeDifference: differences?.activeTimeDifference ?? null,
       accuracyDifference: differences?.accuracyDifference ?? null,
     };
@@ -843,8 +900,19 @@ export function getDefaultTeachingDashboard(): TeachingExperimentDashboard {
       name: DEFAULT_EXPERIMENT.name,
       version: DEFAULT_EXPERIMENT.version,
       scoringVersion: DEFAULT_EXPERIMENT.scoringVersion,
+      papers: DEFAULT_EXPERIMENT.papers.map(
+        ({ id, code, title, doi, journal, sourceUrl }) => ({
+          id,
+          code,
+          title,
+          doi,
+          journal,
+          sourceUrl,
+        })
+      ),
     },
     summary,
+    diagnostics,
     participants: results,
   };
 }

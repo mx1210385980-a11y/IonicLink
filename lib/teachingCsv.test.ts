@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
-import { summarizeTeachingExperiment } from "./teaching/analytics";
+import {
+  summarizeTeachingExperiment,
+  summarizeTeachingExperimentDiagnostics,
+} from "./teaching/analytics";
 import {
   TEACHING_FIELDS,
   type TeachingAiBehavior,
   type TeachingAutoScore,
+  type TeachingDashboardParticipant,
   type TeachingDashboardRow,
   type TeachingExperimentDashboard,
-  type TeachingPairedResult,
-  type TeachingRoundAnalysis,
+  type TeachingTeacherAiRound,
+  type TeachingTeacherManualRound,
+  type TeachingTeacherRound,
 } from "./teachingShared";
 import { teachingExperimentToCsv, teachingRowsToCsv } from "./teachingCsv";
 
@@ -103,7 +108,7 @@ const csvAiBehavior: TeachingAiBehavior = {
   incorrectAdoptionRate: null,
 };
 
-function experimentRound(input: {
+type ExperimentRoundInput = {
   submissionId: string;
   paperCode: "A" | "B";
   mode: "manual" | "ai_assisted";
@@ -111,21 +116,49 @@ function experimentRound(input: {
   wallSeconds: number;
   correctCount: number;
   aiBehavior?: TeachingAiBehavior | null;
-}): TeachingRoundAnalysis {
-  return {
+};
+
+function experimentRound(
+  input: ExperimentRoundInput & { mode: "manual" }
+): TeachingTeacherManualRound;
+function experimentRound(
+  input: ExperimentRoundInput & { mode: "ai_assisted" }
+): TeachingTeacherAiRound;
+function experimentRound(input: ExperimentRoundInput): TeachingTeacherRound {
+  const common = {
     submissionId: input.submissionId,
     paperCode: input.paperCode,
-    mode: input.mode,
     activeSeconds: input.activeSeconds,
     wallSeconds: input.wallSeconds,
     score: experimentScore(input.correctCount),
     aiBehavior: input.aiBehavior ?? null,
-    timingQuality: "valid",
+    timingQuality: "valid" as const,
+    finalAnswers: {
+      cation: {
+        value: "FINAL_ANSWER_SECRET",
+        page: "42",
+        evidence: "EVIDENCE_SECRET",
+      },
+    },
+    review: null,
   };
+  return input.mode === "manual"
+    ? { ...common, mode: "manual" }
+    : {
+        ...common,
+        mode: "ai_assisted",
+        aiInitial: {
+          cation: {
+            value: "AI_INITIAL_SECRET",
+            page: "41",
+            evidence: "AI_EVIDENCE_SECRET",
+          },
+        },
+      };
 }
 
 const dangerousAlias = `\t =2+2,"student"`;
-const pairedParticipant: TeachingPairedResult = {
+const pairedParticipant: TeachingDashboardParticipant = {
   participantId: "participant-dangerous-alias",
   studentAlias: dangerousAlias,
   sequence: "manual_then_ai",
@@ -150,10 +183,16 @@ const pairedParticipant: TeachingPairedResult = {
   }),
   activeTimeDifference: -600,
   accuracyDifference: 1 / 6,
+  quality: {
+    completion: "completed",
+    timing: "valid",
+    excluded: false,
+    paired: true,
+  },
 };
 
 const rawAlias = "Raw Alias";
-const incompleteParticipant: TeachingPairedResult = {
+const incompleteParticipant: TeachingDashboardParticipant = {
   participantId: "participant-incomplete",
   studentAlias: rawAlias,
   sequence: "ai_then_manual",
@@ -164,6 +203,12 @@ const incompleteParticipant: TeachingPairedResult = {
   aiAssisted: null,
   activeTimeDifference: null,
   accuracyDifference: null,
+  quality: {
+    completion: "incomplete",
+    timing: "unavailable",
+    excluded: true,
+    paired: false,
+  },
 };
 
 const experimentParticipants = [pairedParticipant, incompleteParticipant];
@@ -173,8 +218,10 @@ const experimentDashboard: TeachingExperimentDashboard = {
     name: "Experiment, with quote \"A\"",
     version: "v-test",
     scoringVersion: "score-test",
+    papers: [],
   },
   summary: summarizeTeachingExperiment(experimentParticipants),
+  diagnostics: summarizeTeachingExperimentDiagnostics(experimentParticipants),
   participants: experimentParticipants,
 };
 
@@ -196,7 +243,35 @@ assert.match(experimentCsv, /"66\.7%"/);
 assert.match(experimentCsv, /"completed","paired"/);
 assert.match(experimentCsv, /"incomplete","not_paired"/);
 assert.doesNotMatch(experimentCsv, /undefined|null/);
+assert.doesNotMatch(
+  experimentCsv,
+  /FINAL_ANSWER_SECRET|EVIDENCE_SECRET|AI_INITIAL_SECRET|AI_EVIDENCE_SECRET/,
+  "teacher detail answers and evidence must never enter participant-grain CSV exports"
+);
 assert.equal(experimentCsv.split("\r\n").filter(Boolean).length, 3);
+
+const qualityIsCanonicalParticipant: TeachingDashboardParticipant = {
+  ...pairedParticipant,
+  participantId: "quality-source",
+  studentAlias: "Quality Source",
+  quality: {
+    completion: "incomplete",
+    timing: "unavailable",
+    excluded: true,
+    paired: false,
+  },
+};
+const qualityIsCanonicalCsv = teachingExperimentToCsv({
+  ...experimentDashboard,
+  summary: summarizeTeachingExperiment([qualityIsCanonicalParticipant]),
+  diagnostics: summarizeTeachingExperimentDiagnostics([qualityIsCanonicalParticipant]),
+  participants: [qualityIsCanonicalParticipant],
+});
+assert.match(
+  qualityIsCanonicalCsv,
+  /"incomplete","not_paired"/,
+  "CSV status must use the enriched dashboard quality contract"
+);
 
 const anonymized = teachingExperimentToCsv(experimentDashboard, { anonymize: true });
 assert.equal(
@@ -226,8 +301,10 @@ const aliasVariantCsv = teachingExperimentToCsv(
       name: "Alias variant export",
       version: "v-alias",
       scoringVersion: "score-alias",
+      papers: [],
     },
     summary: summarizeTeachingExperiment(aliasVariantParticipants),
+    diagnostics: summarizeTeachingExperimentDiagnostics(aliasVariantParticipants),
     participants: aliasVariantParticipants,
   },
   { anonymize: true }
@@ -242,7 +319,7 @@ for (const alias of aliasVariants) {
 assert.match(aliasVariantCsv, /"S001"/);
 assert.match(aliasVariantCsv, /"S004"/);
 
-const negativeComputedParticipant: TeachingPairedResult = {
+const negativeComputedParticipant: TeachingDashboardParticipant = {
   ...pairedParticipant,
   participantId: "negative-computed-id",
   studentAlias: "-600 user alias",
@@ -252,6 +329,7 @@ const negativeComputedParticipant: TeachingPairedResult = {
 const negativeComputedCsv = teachingExperimentToCsv({
   ...experimentDashboard,
   summary: summarizeTeachingExperiment([negativeComputedParticipant]),
+  diagnostics: summarizeTeachingExperimentDiagnostics([negativeComputedParticipant]),
   participants: [negativeComputedParticipant],
 });
 assert.match(
@@ -266,18 +344,20 @@ assert.match(
 );
 assert.doesNotMatch(negativeComputedCsv, /"'-600"|"'-16\.7%"/);
 
-const collisionParticipants: TeachingPairedResult[] = [
+const collisionParticipants: TeachingDashboardParticipant[] = [
   {
     ...pairedParticipant,
     participantId: "collision-alice-id",
     studentAlias: "Alice",
     exclusionReason: "Alice",
+    quality: { ...pairedParticipant.quality, excluded: true, paired: false },
   },
   {
     ...incompleteParticipant,
     participantId: "collision-s001-id",
     studentAlias: "S001",
     exclusionReason: null,
+    quality: { ...incompleteParticipant.quality, excluded: false },
   },
 ];
 const collisionDashboard: TeachingExperimentDashboard = {
@@ -286,8 +366,10 @@ const collisionDashboard: TeachingExperimentDashboard = {
     name: "Alice",
     version: "v-collision",
     scoringVersion: "score-collision",
+    papers: [],
   },
   summary: summarizeTeachingExperiment(collisionParticipants),
+  diagnostics: summarizeTeachingExperimentDiagnostics(collisionParticipants),
   participants: collisionParticipants,
 };
 const collisionCsv = teachingExperimentToCsv(collisionDashboard, { anonymize: true });

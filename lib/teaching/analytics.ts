@@ -4,9 +4,12 @@ import {
   type TeachingAiBehavior,
   type TeachingDifferenceSummary,
   type TeachingExperimentAnalysisRow,
+  type TeachingExperimentDiagnostics,
   type TeachingExperimentSummary,
+  type TeachingDashboardParticipantQuality,
   type TeachingModeSummary,
   type TeachingRoundAnalysis,
+  type TeachingSequence,
 } from "../teachingShared";
 
 const DEFAULT_BOOTSTRAP_SEED = 20260809;
@@ -127,6 +130,40 @@ export function isTeachingExperimentAnalysisEligible(
   );
 }
 
+export function teachingParticipantQuality(
+  row: TeachingExperimentAnalysisRow
+): TeachingDashboardParticipantQuality {
+  let timing: TeachingDashboardParticipantQuality["timing"] = "unavailable";
+  if (
+    row.manual?.mode === "manual" &&
+    row.aiAssisted?.mode === "ai_assisted" &&
+    Number.isFinite(row.manual.activeSeconds) &&
+    row.manual.activeSeconds >= 0 &&
+    Number.isFinite(row.aiAssisted.activeSeconds) &&
+    row.aiAssisted.activeSeconds >= 0
+  ) {
+    if (
+      row.manual.timingQuality === "zero_active" ||
+      row.aiAssisted.timingQuality === "zero_active"
+    ) {
+      timing = "zero_active";
+    } else if (
+      row.manual.timingQuality === "excessive_idle" ||
+      row.aiAssisted.timingQuality === "excessive_idle"
+    ) {
+      timing = "excessive_idle";
+    } else {
+      timing = "valid";
+    }
+  }
+  return {
+    completion: row.completed ? "completed" : "incomplete",
+    timing,
+    excluded: row.exclusionReason !== null,
+    paired: isTeachingExperimentAnalysisEligible(row),
+  };
+}
+
 function mean(values: number[]): number | null {
   const finite = finiteValues(values);
   if (finite.length === 0) return null;
@@ -144,6 +181,57 @@ function summarizeMode(rounds: TeachingRoundAnalysis[]): TeachingModeSummary {
     meanAccuracy: mean(rounds.map((round) => round.score.valueAccuracy)),
     medianCoverage: median(rounds.map((round) => round.score.valueCoverage)),
     medianEvidenceAccuracy: median(rounds.map((round) => round.score.evidenceAccuracy)),
+    medianEvidenceCoverage: median(rounds.map((round) => round.score.evidenceCoverage)),
+  };
+}
+
+export function summarizeTeachingExperimentDiagnostics(
+  rows: TeachingExperimentAnalysisRow[]
+): TeachingExperimentDiagnostics {
+  const eligible = rows.filter(isTeachingExperimentAnalysisEligible);
+  const summarizePaper = (paperCode: "A" | "B") => ({
+    manual: summarizeMode(
+      eligible
+        .map((row) => row.manual!)
+        .filter((round) => round.paperCode === paperCode)
+    ),
+    aiAssisted: summarizeMode(
+      eligible
+        .map((row) => row.aiAssisted!)
+        .filter((round) => round.paperCode === paperCode)
+    ),
+  });
+  const summarizeSequence = (sequence: TeachingSequence) => {
+    const sequenceRows = rows.filter((row) => row.sequence === sequence);
+    const sequenceEligible = eligible.filter((row) => row.sequence === sequence);
+    return {
+      total: sequenceRows.length,
+      completed: sequenceRows.filter((row) => row.completed).length,
+      paired: sequenceEligible.length,
+      manual: summarizeMode(sequenceEligible.map((row) => row.manual!)),
+      aiAssisted: summarizeMode(sequenceEligible.map((row) => row.aiAssisted!)),
+    };
+  };
+  const timingQuality: TeachingExperimentDiagnostics["timingQuality"] = {
+    valid: 0,
+    zero_active: 0,
+    excessive_idle: 0,
+    unavailable: 0,
+  };
+  for (const row of rows) {
+    timingQuality[teachingParticipantQuality(row).timing] += 1;
+  }
+
+  return {
+    byPaper: {
+      A: summarizePaper("A"),
+      B: summarizePaper("B"),
+    },
+    bySequence: {
+      manual_then_ai: summarizeSequence("manual_then_ai"),
+      ai_then_manual: summarizeSequence("ai_then_manual"),
+    },
+    timingQuality,
   };
 }
 
