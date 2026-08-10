@@ -626,6 +626,26 @@ function parsedObject<T extends object>(value: string): T | null {
   }
 }
 
+function parsedTeachingAnswers(value: string): TeachingAnswers | null {
+  const parsed = parsedObject<Record<string, unknown>>(value);
+  if (!parsed) return null;
+  const answers: TeachingAnswers = {};
+  for (const field of TEACHING_FIELDS) {
+    const candidate = parsed[field.key];
+    if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) {
+      continue;
+    }
+    const answer = candidate as Record<string, unknown>;
+    if (typeof answer.value !== "string") continue;
+    answers[field.key] = {
+      value: answer.value,
+      ...(typeof answer.page === "string" ? { page: answer.page } : {}),
+      ...(typeof answer.evidence === "string" ? { evidence: answer.evidence } : {}),
+    };
+  }
+  return answers;
+}
+
 function parsedFieldScores(value: string): TeachingAutoScore["values"] | null {
   const parsed = parsedObject<Record<string, unknown>>(value);
   if (!parsed) return null;
@@ -736,8 +756,8 @@ function defaultTeachingRoundAnalysis(
     return null;
   }
 
-  const answers = parsedObject<TeachingAnswers>(row.answersJson);
-  const aiInitial = parsedObject<TeachingAnswers>(row.aiInitialJson);
+  const answers = parsedTeachingAnswers(row.answersJson);
+  const aiInitial = parsedTeachingAnswers(row.aiInitialJson);
   const gold = parsedObject<Record<TeachingFieldKey, TeachingGoldRule>>(row.scoringRulesJson);
   if (!answers || !aiInitial || !gold) return null;
   const paper: TeachingExperimentPaper = {

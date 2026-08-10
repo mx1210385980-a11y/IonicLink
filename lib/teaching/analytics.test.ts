@@ -1131,6 +1131,207 @@ assert.equal(
   dbDashboard.summary.completion.total
 );
 
+type StoredTeacherAnswerPayload = {
+  answersJson: string;
+  aiInitialJson: string;
+};
+
+function storedTeacherAnswerPayload(submissionId: string): StoredTeacherAnswerPayload {
+  const payload = database
+    .prepare(
+      `SELECT answers_json AS answersJson, ai_initial_json AS aiInitialJson
+       FROM teaching_submissions WHERE id = ?`
+    )
+    .get(submissionId) as StoredTeacherAnswerPayload | undefined;
+  assert.ok(payload);
+  return payload;
+}
+
+function withTeacherDtoLeaks(serialized: string, marker: string): string {
+  const parsed = JSON.parse(serialized) as Record<string, unknown>;
+  const substrate = parsed.substrate;
+  return JSON.stringify({
+    ...parsed,
+    extraTopLevel: { value: 42, page: false, evidence: [marker] },
+    gold: { secret: marker },
+    scoringRules: { secret: marker },
+    ...(substrate && typeof substrate === "object" && !Array.isArray(substrate)
+      ? {
+          substrate: {
+            ...(substrate as Record<string, unknown>),
+            nestedExtra: { secret: marker },
+            gold: { secret: marker },
+          },
+        }
+      : {}),
+  });
+}
+
+function withInvalidTeacherAnswerProperties(serialized: string, marker: string): string {
+  const parsed = JSON.parse(withTeacherDtoLeaks(serialized, marker)) as Record<
+    string,
+    unknown
+  >;
+  const cation = parsed.cation;
+  const anion = parsed.anion;
+  return JSON.stringify({
+    ...parsed,
+    cation: {
+      ...(cation && typeof cation === "object" && !Array.isArray(cation)
+        ? cation as Record<string, unknown>
+        : {}),
+      value: { secret: marker },
+    },
+    anion: {
+      ...(anion && typeof anion === "object" && !Array.isArray(anion)
+        ? anion as Record<string, unknown>
+        : {}),
+      page: 99,
+      evidence: [marker],
+    },
+  });
+}
+
+function expectedTeacherAnswerWhitelist(serialized: string): Record<string, unknown> {
+  const parsed = JSON.parse(serialized) as Record<string, unknown>;
+  const expected: Record<string, unknown> = {};
+  for (const field of TEACHING_FIELDS) {
+    const candidate = parsed[field.key];
+    if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) {
+      continue;
+    }
+    const answer = candidate as Record<string, unknown>;
+    if (typeof answer.value !== "string") continue;
+    expected[field.key] = {
+      value: answer.value,
+      ...(typeof answer.page === "string" ? { page: answer.page } : {}),
+      ...(typeof answer.evidence === "string" ? { evidence: answer.evidence } : {}),
+    };
+  }
+  return expected;
+}
+
+function assertTeacherAnswersWhitelisted(actual: unknown, serialized: string): void {
+  assert.deepEqual(actual, expectedTeacherAnswerWhitelist(serialized));
+  assert.ok(actual && typeof actual === "object" && !Array.isArray(actual));
+  for (const [fieldKey, answer] of Object.entries(actual)) {
+    assert.ok(TEACHING_FIELDS.some((field) => field.key === fieldKey));
+    assert.ok(answer && typeof answer === "object" && !Array.isArray(answer));
+    for (const [key, value] of Object.entries(answer)) {
+      assert.ok(key === "value" || key === "page" || key === "evidence");
+      assert.equal(typeof value, "string");
+    }
+  }
+}
+
+function replaceStoredTeacherAnswers(
+  submissionId: string,
+  answersJson: string,
+  aiInitialJson: string
+): void {
+  database
+    .prepare(
+      `UPDATE teaching_submissions
+       SET answers_json = ?, ai_initial_json = ?
+       WHERE id = ?`
+    )
+    .run(answersJson, aiInitialJson, submissionId);
+}
+
+const storedManualAnswers = storedTeacherAnswerPayload(
+  completedSubmissionIds.manualSubmissionId
+);
+const storedAiAnswers = storedTeacherAnswerPayload(completedSubmissionIds.aiSubmissionId);
+const leakyManualAnswers = withTeacherDtoLeaks(
+  storedManualAnswers.answersJson,
+  "MANUAL_FINAL_DTO_SECRET"
+);
+const leakyManualInitial = withTeacherDtoLeaks(
+  storedManualAnswers.aiInitialJson,
+  "MANUAL_INITIAL_DTO_SECRET"
+);
+const leakyAiAnswers = withTeacherDtoLeaks(
+  storedAiAnswers.answersJson,
+  "AI_FINAL_DTO_SECRET"
+);
+const leakyAiInitial = withTeacherDtoLeaks(
+  storedAiAnswers.aiInitialJson,
+  "AI_INITIAL_DTO_SECRET"
+);
+replaceStoredTeacherAnswers(
+  completedSubmissionIds.manualSubmissionId,
+  leakyManualAnswers,
+  leakyManualInitial
+);
+replaceStoredTeacherAnswers(
+  completedSubmissionIds.aiSubmissionId,
+  leakyAiAnswers,
+  leakyAiInitial
+);
+const whitelistDashboard = getDefaultTeachingDashboard();
+const whitelistParticipant = whitelistDashboard.participants.find(
+  (participant) => participant.participantId === completedDb.participantId
+);
+assert.ok(whitelistParticipant?.manual && whitelistParticipant.aiAssisted);
+assertTeacherAnswersWhitelisted(whitelistParticipant.manual.finalAnswers, leakyManualAnswers);
+assertTeacherAnswersWhitelisted(whitelistParticipant.aiAssisted.finalAnswers, leakyAiAnswers);
+assertTeacherAnswersWhitelisted(whitelistParticipant.aiAssisted.aiInitial, leakyAiInitial);
+assert.equal(
+  Object.prototype.hasOwnProperty.call(whitelistParticipant.manual, "aiInitial"),
+  false,
+  "manual teacher DTO must never expose the stored AI snapshot"
+);
+assert.doesNotMatch(JSON.stringify(whitelistParticipant), /DTO_SECRET/);
+
+const invalidManualAnswers = withInvalidTeacherAnswerProperties(
+  storedManualAnswers.answersJson,
+  "MANUAL_INVALID_DTO_SECRET"
+);
+const invalidManualInitial = withInvalidTeacherAnswerProperties(
+  storedManualAnswers.aiInitialJson,
+  "MANUAL_INITIAL_INVALID_DTO_SECRET"
+);
+const invalidAiAnswers = withInvalidTeacherAnswerProperties(
+  storedAiAnswers.answersJson,
+  "AI_INVALID_DTO_SECRET"
+);
+const invalidAiInitial = withInvalidTeacherAnswerProperties(
+  storedAiAnswers.aiInitialJson,
+  "AI_INITIAL_INVALID_DTO_SECRET"
+);
+replaceStoredTeacherAnswers(
+  completedSubmissionIds.manualSubmissionId,
+  invalidManualAnswers,
+  invalidManualInitial
+);
+replaceStoredTeacherAnswers(
+  completedSubmissionIds.aiSubmissionId,
+  invalidAiAnswers,
+  invalidAiInitial
+);
+const invalidPropertyDashboard = getDefaultTeachingDashboard();
+const invalidPropertyParticipant = invalidPropertyDashboard.participants.find(
+  (participant) => participant.participantId === completedDb.participantId
+);
+assert.ok(invalidPropertyParticipant?.manual && invalidPropertyParticipant.aiAssisted);
+assertTeacherAnswersWhitelisted(
+  invalidPropertyParticipant.manual.finalAnswers,
+  invalidManualAnswers
+);
+assertTeacherAnswersWhitelisted(
+  invalidPropertyParticipant.aiAssisted.finalAnswers,
+  invalidAiAnswers
+);
+assertTeacherAnswersWhitelisted(
+  invalidPropertyParticipant.aiAssisted.aiInitial,
+  invalidAiInitial
+);
+assert.equal(
+  Object.prototype.hasOwnProperty.call(invalidPropertyParticipant.manual, "aiInitial"),
+  false
+);
+assert.doesNotMatch(JSON.stringify(invalidPropertyParticipant), /DTO_SECRET/);
+
 assert.doesNotMatch(
   JSON.stringify(dbDashboard),
   /"gold"|"scoringRules"|scoring_rules|"aliases"|"tolerance"|"anyKeywordSets"|"taskPrompt"|"aiModel"/i,
