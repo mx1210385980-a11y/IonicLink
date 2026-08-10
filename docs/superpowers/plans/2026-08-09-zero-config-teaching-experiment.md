@@ -603,7 +603,7 @@ export function normalizeStudentAlias(value: string): string;
 export function joinDefaultTeachingExperiment(studentAlias: string): { projectId: string; participantId: string };
 export function getCurrentTeachingRound(participantId: string): TeachingStudentState | null;
 export function saveCurrentTeachingDraft(participantId: string, expectedVersion: number, answers: TeachingAnswers): { version: number; updatedAt: string };
-export function submitCurrentTeachingRound(participantId: string): TeachingRoundTransition;
+export function submitCurrentTeachingRound(participantId: string, expected?: TeachingRoundExpectation): TeachingRoundTransition;
 export function rescoreTeachingSubmission(submissionId: string): TeachingAutoScore;
 export function rescoreErroredTeachingSubmissions(limit?: number): number;
 ```
@@ -1220,7 +1220,7 @@ Filters cover alias, paper, sequence, completion and timing quality. A detail di
 
 - [ ] **Step 6: Add automatic refresh and export controls**
 
-Refresh dashboard data every 30 seconds while visible, plus manual refresh. Provide normal and anonymized CSV links. Ensure refresh preserves filters and selected detail when the row still exists.
+Refresh dashboard data every 30 seconds while visible and immediately after the tab becomes visible again. Provide normal and anonymized CSV links. Ensure refresh preserves filters and selected detail when the row still exists.
 
 - [ ] **Step 7: Run dashboard, CSV, and accessibility-oriented tests**
 
