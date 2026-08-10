@@ -34,7 +34,8 @@ PDF / text   ─▶    Review Queue   ─▶   Checked Database   ─▶  CSV
 ## Stack
 
 - **Next.js 14** (App Router) + **TypeScript** + **Tailwind**
-- **better-sqlite3** — one local file per domain (`data/<domain>.db`), no DB server
+- **better-sqlite3** — one local file per domain (`data/<domain>.db`) plus the isolated
+  classroom store (`data/teaching.db`), with no DB server
 - **OpenAI-compatible chat completions** + **@anthropic-ai/sdk fallback** — structured extraction via forced tool-use
 - **unpdf** — serverless-friendly PDF text extraction
 - **smiles-drawer** — 2D structure rendering from SMILES
@@ -69,7 +70,61 @@ npm run seed:diffusion -- --reset
 ```
 
 For live AI extraction, copy `.env.local.example` → `.env.local` and set `OPENAI_BASE_URL` plus `OPENAI_API_KEY`.
-Without it, the Extract page runs in mock mode.
+Without it, the Extract page runs in mock mode. The teaching experiment uses checked-in,
+frozen AI suggestions and does not require a live AI key.
+
+### Zero-configuration teaching experiment
+
+Open `/teaching`. Students enter only a pseudonymous ID (a student number or initials; no
+real name, invite code, group code, or paper selection) and complete two automatically
+assigned rounds. Reusing the same ID restores the current round and draft. For a 30-student
+class, balanced assignment produces 15 students in each sequence:
+
+| Sequence | Round 1 | Round 2 |
+| --- | --- | --- |
+| Manual → AI | Paper A, blank manual form | Paper B, frozen AI suggestions to verify or edit |
+| AI → Manual | Paper A, frozen AI suggestions to verify or edit | Paper B, blank manual form |
+
+All six values are required before a round can be submitted. Page and evidence fields remain
+optional, but missing or incorrect citations reduce the evidence metrics. Drafts save
+automatically. The client sends activity heartbeats every 15 seconds only while the page is
+visible and the student has been active within the previous 120 seconds; no keystroke,
+clipboard, or paper text is recorded.
+
+The server bootstraps the versioned experiment from
+`config/teaching/default-experiment.v1.json` on the first student join or teacher-dashboard
+load. Teaching schema migrations are automatic; `npm run migrate` and the domain seed/reset
+commands do not operate on teaching data. Runtime state is stored in
+`${IONICLINK_DATA_DIR:-<repository>/data}/teaching.db` and is ignored by Git. For a fresh local
+trial, point `IONICLINK_DATA_DIR` at a new empty directory instead of deleting or reusing a
+real class database.
+
+Set a long, unique `TEACHING_TEACHER_PASSWORD` before the teacher needs access. The teacher
+uses the same `/teaching` entry and is redirected to `/teaching/admin`, which opens the
+current experiment directly, refreshes while visible, and provides paired results,
+paper/sequence/timing diagnostics, participant drill-down, and CSV exports. Teachers do not
+create a project, configure papers, assign groups, or grade fields for the default workflow.
+
+The primary analysis includes only students who completed both rounds, were not excluded,
+have current automatic scores, have positive active time in both modes, and have `valid`
+timing in both modes. Accuracy is `correct fields / 6`; coverage is `non-empty fields / 6`.
+Within-student time and accuracy differences are `AI - manual`, so a negative time difference
+means AI was faster. The saved-time headline is
+`(manual median - AI median) / manual median`. The dashboard reports paired median
+differences, seeded bootstrap 95% confidence intervals, and a two-sided Wilcoxon signed-rank
+approximation (shown as unavailable with fewer than five non-zero differences). It also shows
+evidence coverage/accuracy, AI adoption/modification, AI error correction/error adoption, and
+the strict count that was both faster and more accurate with AI.
+
+The normal CSV contains the entered student IDs; the anonymized export replaces them with
+stable `S001`, `S002`, … labels. Both exports contain one row per participant with the two
+rounds' aggregate metrics and an exclusion flag. Neither export contains final answer or
+evidence text, frozen AI text, gold answers, scoring rules, participant IDs, or free-text
+exclusion reasons. CSV output includes a UTF-8 BOM and spreadsheet-formula escaping.
+
+The student UI and API never send gold rules, future-round answers, or AI suggestions during
+a manual round. The gold rules are nevertheless part of the server source configuration; do
+not give students repository/config access before a blind classroom run.
 
 ## Data model
 
@@ -90,12 +145,16 @@ filtering — schema can evolve without migrations.
 | `app/page.tsx` | Global landing — chooser between the modules |
 | `app/[domain]/` | Per-domain `page` (hero) + `extract` / `database` / `library` / `design` |
 | `app/api/[domain]/` | `extract`, `batch`, `records` (CRUD + bulk delete), `export`, `source` |
+| `app/teaching/`, `app/api/teaching/` | Zero-configuration student/teacher pages and role-protected teaching APIs |
 | `components/` | React UI components for extraction, records, navigation, and Design Studio |
+| `components/teaching/` | Student gateway/workspace and the live paired teacher dashboard |
 | `lib/domain.ts` | `Domain`, the generic `DomainRecord`, the per-domain DB-file boundary |
 | `lib/modules/` | The `Module` contract + `tribology` / `conductivity` / `diffusion` implementations + registry |
 | `lib/conductivity/`, `lib/diffusion/` | Per-domain schema, ingest, and extractor |
 | `lib/predict/` | The Design Studio engine — ion descriptors, kernel regression, Arrhenius fits, LOO calibration, candidate atlas |
-| `lib/` | shared `db`, `extract`, `units`, `pdf`, `csv`, `ionStructures` |
+| `lib/` | shared `db`, `extract`, `units`, `pdf`, `csv`, `ionStructures`, and teaching facade |
+| `lib/teaching/` | Versioned bootstrap, migrations, assignment, scoring, activity, and paired analytics |
+| `config/teaching/` | Immutable default paper pair, frozen AI suggestions, and deterministic gold rules |
 | `scripts/` | seed, migration, WFF reproduction, cache prewarm, and evaluation utilities |
 | `data/wff/` | small WFF model/evaluation fixture CSV files used by tests and local reproduction |
 | `data/tribology/gold-standard/` | small extraction-evaluation fixture JSON |
@@ -105,7 +164,8 @@ filtering — schema can evolve without migrations.
 The repository intentionally keeps only source code, configuration, tests, and small
 reproducible fixtures. Runtime and research-library artifacts stay outside Git:
 
-- local SQLite databases: `data/*.db`, `data/*.db-*`, `data/*.sqlite*`
+- local SQLite databases: `data/*.db`, `data/*.db-*`, `data/*.sqlite*` (including the
+  pseudonymous classroom responses in `teaching.db`)
 - uploaded source PDFs and rendered page images: `data/*/sources/`
 - generated reports and local cache folders: `reports/`, `.next*`, `.superpowers/`
 - large literature/reference dumps, thesis drafts, debug exports, and personal notes

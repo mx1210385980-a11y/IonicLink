@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Implementation status (2026-08-10):** Tasks 1–9 are implemented on the feature branch, and the Task 10 documentation slice is current; Task 10 integration regressions and Task 11 browser verification remain. The unchecked boxes below preserve the original TDD execution script and expected red/green checkpoints.
+
 **Goal:** Build a zero-configuration, two-round crossover experiment that compares manual literature extraction with AI-assisted extraction for 30 students and automatically reports paired speed, accuracy, evidence, and AI-use metrics.
 
 **Architecture:** Keep `lib/teaching.ts` as the compatibility facade while moving new responsibilities into focused `lib/teaching/*` modules. A checked-in immutable experiment configuration bootstraps a default SQLite project, two papers, gold rules, and frozen AI suggestions; submissions carry round/mode state, and pure scoring/analytics modules drive both the dashboard and CSV export.
@@ -19,12 +21,15 @@ New files:
 - `lib/teaching/store.ts` — own the teaching SQLite connection and run migrations.
 - `lib/teaching/migrations.ts` — idempotent schema upgrades that preserve legacy rows.
 - `lib/teaching/scoring.ts` — deterministic value/evidence normalization and AI-behavior scoring.
+- `lib/teaching/answerComparison.ts` — client-safe answer normalization shared by UI edit markers and AI-behavior scoring.
 - `lib/teaching/assignment.ts` — balanced sequence assignment and two-round creation/restoration.
 - `lib/teaching/activity.ts` — idempotent heartbeat handling and active-time accumulation.
 - `lib/teaching/analytics.ts` — paired summaries, bootstrap intervals, Wilcoxon detail, and quality flags.
 - `lib/teaching/config.test.ts`, `migrations.test.ts`, `scoring.test.ts`, `assignment.test.ts`, `activity.test.ts`, `analytics.test.ts` — focused TDD coverage.
 - `lib/teaching/testFixtures.ts` — shared SQLite/query and deterministic analysis fixtures used only by teaching tests.
 - `components/teaching/TeachingGateway.test.tsx`, `StudentWorkspace.test.tsx`, `TeacherDashboard.test.tsx` — static UI contract tests.
+- `components/teaching/studentWorkspaceModel.ts` — pure heartbeat, submit-payload, idle, and answer-comparison helpers.
+- `app/api/teaching/_route.ts` — bounded JSON parsing and public-safe teaching error responses.
 - `app/api/teaching/teachingRoutes.test.ts` — route-level role, leakage, heartbeat, and transition tests.
 
 Modified files:
@@ -72,7 +77,11 @@ for (const paper of DEFAULT_EXPERIMENT.papers) {
   assert.deepEqual(Object.keys(paper.gold).sort(), TEACHING_FIELDS.map((field) => field.key).sort());
 }
 assert.match(defaultExperimentChecksum(), /^[a-f0-9]{64}$/);
-assert.equal(defaultExperimentChecksum(), defaultExperimentChecksum(), "checksum must be stable");
+assert.equal(
+  defaultExperimentChecksum(),
+  "a36d0f9be5be402f2510f8919cacd6228e333ad975683e21033ea5acebf1058d",
+  "versioned config checksum must not drift"
+);
 
 const invalid = structuredClone(DEFAULT_EXPERIMENT);
 delete (invalid.papers[0].gold as Partial<typeof invalid.papers[0]["gold"]>).cof;
@@ -176,7 +185,7 @@ Create `config/teaching/default-experiment.v1.json` with the following values. K
         "anion": { "value": { "kind": "text", "expected": "TFSI", "aliases": ["[TFSI]", "NTf2", "bis(trifluoromethylsulfonyl)imide"] }, "evidence": { "pages": [2], "anyKeywordSets": [["tfsi"], ["trifluoromethylsulfonyl"]] } },
         "substrate": { "value": { "kind": "text", "expected": "mica", "aliases": ["freshly cleaved mica"] }, "evidence": { "pages": [14], "anyKeywordSets": [["mica"]] } },
         "temperature": { "value": { "kind": "not_reported", "aliases": ["not reported", "未报告", "未说明", "NR", "N/A"] }, "evidence": { "pages": [], "anyKeywordSets": [["not reported"], ["未报告"]], "notReported": true } },
-        "load": { "value": { "kind": "force-range", "min": 15, "max": 75, "unit": "nN", "tolerance": 1, "aliases": ["15-75 nN", "15 to 75 nN"] }, "evidence": { "pages": [5], "anyKeywordSets": [["15", "75", "nN"]] } },
+        "load": { "value": { "kind": "force-range", "min": 5, "max": 75, "unit": "nN", "tolerance": 1, "aliases": ["5-75 nN", "5 to 75 nN"] }, "evidence": { "pages": [14], "anyKeywordSets": [["load", "5", "75", "nN"]] } },
         "cof": { "value": { "kind": "number", "expected": 0.04, "tolerance": 0.005, "aliases": ["μ = 0.04", "COF 0.04"] }, "evidence": { "pages": [5], "anyKeywordSets": [["0.04"], ["IL-44%", "coefficient"]] } }
       }
     },
@@ -201,14 +210,21 @@ Create `config/teaching/default-experiment.v1.json` with the following values. K
         "cation": { "value": { "kind": "text", "expected": "P66614", "aliases": ["[P66614]", "trihexyltetradecylphosphonium"] }, "evidence": { "pages": [4], "anyKeywordSets": [["p66614"], ["phosphonium"]] } },
         "anion": { "value": { "kind": "text", "expected": "BTA/Doc (4:1)", "aliases": ["BTA/Doc", "BTA:Doc 4:1", "[BTA]/[Doc] = 4:1"] }, "evidence": { "pages": [4], "anyKeywordSets": [["bta", "doc", "4:1"]] } },
         "substrate": { "value": { "kind": "text", "expected": "100Cr6 steel pins", "aliases": ["100Cr6 steel", "stationary steel pins"] }, "evidence": { "pages": [6], "anyKeywordSets": [["100cr6", "pins"]] } },
-        "temperature": { "value": { "kind": "not_reported", "aliases": ["not reported", "未报告", "未说明", "NR", "N/A"] }, "evidence": { "pages": [], "anyKeywordSets": [["not reported"], ["未报告"]], "notReported": true } },
-        "load": { "value": { "kind": "text", "expected": "5 N total load", "aliases": ["5 N", "5N total", "total load 5 N"] }, "evidence": { "pages": [6], "anyKeywordSets": [["5", "N", "load"]] } },
-        "cof": { "value": { "kind": "number", "expected": 0.17, "tolerance": 0.005, "aliases": ["μ = 0.17", "COF 0.17"] }, "evidence": { "pages": [11], "anyKeywordSets": [["cof", "0.17"], ["mean", "0.17"]] } }
+        "temperature": { "value": { "kind": "text", "expected": "room temperature", "aliases": ["at room temperature", "ambient temperature", "室温"] }, "evidence": { "pages": [6, 11], "anyKeywordSets": [["room", "temperature"]] } },
+        "load": { "value": { "kind": "text", "expected": "5 N total load", "aliases": ["5 N", "5N total", "total load 5 N"] }, "evidence": { "pages": [6, 11], "anyKeywordSets": [["5", "N", "normal force"]] } },
+        "cof": { "value": { "kind": "number", "expected": 0.17, "tolerance": 0.005, "aliases": ["μ = 0.17", "COF 0.17"] }, "evidence": { "pages": [11, 12], "anyKeywordSets": [["cof", "0.17"], ["mean", "0.17"]] } }
       }
     }
   ]
 }
 ```
+
+The frozen AI snapshots intentionally remain different from the gold rules in useful places:
+paper A suggests `15–75 nN` on page 5 while the gold load is `5–75 nN` on page 14, and paper B
+suggests `298.15 K` without a page while its gold temperature is `room temperature` on pages
+6 or 11. Do not “correct” these frozen suggestions; they create observable AI-error correction
+and error-adoption cases. The complete JSON above has checksum
+`a36d0f9be5be402f2510f8919cacd6228e333ad975683e21033ea5acebf1058d`.
 
 - [ ] **Step 5: Implement parsing, validation, and checksum**
 
@@ -674,16 +690,16 @@ Create an active round and assert:
 
 ```ts
 assert.deepEqual(recordTeachingHeartbeat(participantId, {
-  eventId: "hb-1", clientAt: "2026-08-09T00:00:15.000Z", activeDeltaSeconds: 15, visible: true
+  eventId: "hb-1", roundNo: 1, clientAt: "2026-08-09T00:00:15.000Z", activeDeltaSeconds: 15, visible: true
 }), { activeSeconds: 15 });
 assert.deepEqual(recordTeachingHeartbeat(participantId, {
-  eventId: "hb-1", clientAt: "2026-08-09T00:00:15.000Z", activeDeltaSeconds: 15, visible: true
+  eventId: "hb-1", roundNo: 1, clientAt: "2026-08-09T00:00:15.000Z", activeDeltaSeconds: 15, visible: true
 }), { activeSeconds: 15 }, "duplicate heartbeat must not double count");
 assert.equal(recordTeachingHeartbeat(participantId, {
-  eventId: "hb-2", clientAt: "2026-08-09T00:00:30.000Z", activeDeltaSeconds: 99, visible: true
+  eventId: "hb-2", roundNo: 1, clientAt: "2026-08-09T00:00:30.000Z", activeDeltaSeconds: 99, visible: true
 }).activeSeconds, 35, "server caps each heartbeat at 20 seconds");
 assert.equal(recordTeachingHeartbeat(participantId, {
-  eventId: "hb-3", clientAt: "2026-08-09T00:00:45.000Z", activeDeltaSeconds: 15, visible: false
+  eventId: "hb-3", roundNo: 1, clientAt: "2026-08-09T00:00:45.000Z", activeDeltaSeconds: 15, visible: false
 }).activeSeconds, 35);
 ```
 
@@ -697,7 +713,7 @@ Expected: FAIL because `recordTeachingHeartbeat` is missing.
 
 - [ ] **Step 3: Implement server heartbeat handling**
 
-Export `recordTeachingHeartbeat(participantId, input)`. Validate a UUID-like/non-empty event ID, ISO timestamp, integer delta `0..20`, visible state, and the participant's current unlocked round. In one transaction, `INSERT OR IGNORE` the activity event and increment `active_seconds` only when insertion succeeds and `visible === true`.
+Export `recordTeachingHeartbeat(participantId, input)`. Validate a safe non-empty event ID, `roundNo` 1 or 2, ISO timestamp, nonnegative finite integer delta, visible state, and the participant's matching current unlocked round. Credit at most 20 seconds per visible event. In one transaction, `INSERT OR IGNORE` the activity event and increment `active_seconds` only when insertion succeeds and `visible === true`.
 
 Edit events use `event_type='edit'` and `field_key`; heartbeat metadata must not contain answer text, clipboard content, or PDF content.
 
@@ -760,6 +776,7 @@ export type TeachingModeSummary = {
   meanAccuracy: number | null;
   medianCoverage: number | null;
   medianEvidenceAccuracy: number | null;
+  medianEvidenceCoverage: number | null;
 };
 export type TeachingDifferenceSummary = {
   median: number | null;
@@ -881,7 +898,7 @@ Add `getDefaultTeachingDashboard()` to `lib/teaching.ts`. Query both submissions
 
 - [ ] **Step 5: Make CSV consume the same dashboard object**
 
-Add `teachingExperimentToCsv(dashboard, { anonymize?: boolean })`. Include experiment/scoring versions, alias or deterministic `S001` anonymized label, sequence, both modes' active/wall time, correct/6, coverage, evidence, AI adoption/modification/correction/error-adoption values, quality flags, and exclusion reason. Keep UTF-8 BOM and spreadsheet-formula escaping.
+Add `teachingExperimentToCsv(dashboard, { anonymize?: boolean })`. Include experiment/scoring versions, alias or deterministic `S001` anonymized label, sequence, both modes' active/wall time, correct/6, coverage, evidence, AI adoption/modification/correction/error-adoption values, quality flags, and an exclusion flag. Export no participant ID, free-text exclusion reason, answer/evidence text, AI initial text, gold, or scoring rules. Keep UTF-8 BOM and spreadsheet-formula escaping.
 
 - [ ] **Step 6: Run analytics and CSV tests**
 
@@ -944,7 +961,7 @@ assert.equal("aiInitial" in manualPayload, false);
 assert.equal(JSON.stringify(manualPayload).includes("gold"), false);
 
 const heartbeat = await studentPost(request("/api/teaching/student", "POST", {
-  action: "heartbeat", eventId: "route-hb-1", clientAt: new Date().toISOString(), activeDeltaSeconds: 15, visible: true
+  action: "heartbeat", eventId: "route-hb-1", roundNo: 1, clientAt: new Date().toISOString(), activeDeltaSeconds: 15, visible: true
 }, cookie));
 assert.equal(heartbeat.status, 200);
 ```
@@ -967,11 +984,11 @@ In `session/route.ts`, student payload accepts only `{ role: "student", studentA
 
 ```ts
 type StudentAction =
-  | { action: "heartbeat"; eventId: string; clientAt: string; activeDeltaSeconds: number; visible: boolean; fieldKey?: TeachingFieldKey }
-  | { action: "submit" };
+  | { action: "heartbeat"; eventId: string; roundNo: 1 | 2; clientAt: string; activeDeltaSeconds: number; visible: boolean; fieldKey?: TeachingFieldKey }
+  | { action: "submit"; roundNo: 1 | 2; version: number };
 ```
 
-Return 409 for locked/version conflicts, 400 for malformed actions, and no sensitive scoring fields in student responses.
+`PATCH` uses `{ version, answers }`. Return 409 for locked, stale-round, or version conflicts, 400 for malformed actions, and no sensitive scoring fields in student responses. Binding submit to both round and version prevents a delayed round-1 retry from submitting the prefilled round 2.
 
 - [ ] **Step 5: Make admin and export read-only by default**
 
@@ -1000,8 +1017,11 @@ git commit -m "feat: expose zero-config teaching experiment APIs"
 
 - Create: `components/teaching/TeachingGateway.test.tsx`
 - Create: `components/teaching/StudentWorkspace.test.tsx`
+- Create: `components/teaching/studentWorkspaceModel.ts`
 - Modify: `components/teaching/TeachingGateway.tsx`
 - Modify: `components/teaching/StudentWorkspace.tsx`
+- Create: `lib/teaching/answerComparison.ts`
+- Modify: `lib/teaching/scoring.ts`
 
 - [ ] **Step 1: Write failing static component tests**
 
@@ -1087,7 +1107,7 @@ Expected: component contracts pass; lint exits 0.
 - [ ] **Step 7: Commit the student UI slice**
 
 ```bash
-git add components/teaching/TeachingGateway.tsx components/teaching/TeachingGateway.test.tsx components/teaching/StudentWorkspace.tsx components/teaching/StudentWorkspace.test.tsx
+git add components/teaching/TeachingGateway.tsx components/teaching/TeachingGateway.test.tsx components/teaching/StudentWorkspace.tsx components/teaching/StudentWorkspace.test.tsx components/teaching/studentWorkspaceModel.ts lib/teaching/answerComparison.ts lib/teaching/scoring.ts
 git commit -m "feat: add two-round teaching experiment workspace"
 ```
 
@@ -1097,6 +1117,12 @@ git commit -m "feat: add two-round teaching experiment workspace"
 
 - Create: `components/teaching/TeacherDashboard.test.tsx`
 - Modify: `components/teaching/TeacherDashboard.tsx`
+- Modify: `app/teaching/admin/page.tsx`
+- Modify: `lib/teaching.ts`
+- Modify: `lib/teaching/analytics.ts`
+- Modify: `lib/teaching/analytics.test.ts`
+- Modify: `lib/teachingShared.ts`
+- Modify: `lib/teachingCsv.ts`
 - Modify: `lib/teachingCsv.test.ts`
 
 - [ ] **Step 1: Write a failing dashboard component test**
@@ -1117,10 +1143,14 @@ const mode = (n: number, seconds: number, accuracy: number) => ({
   medianAccuracy: accuracy,
   meanAccuracy: accuracy,
   medianCoverage: 1,
-  medianEvidenceAccuracy: accuracy
+  medianEvidenceAccuracy: accuracy,
+  medianEvidenceCoverage: 1
 });
 const dashboard: TeachingExperimentDashboard = {
-  experiment: { id: "p", name: "教学实验", version: "2026.1", scoringVersion: "teaching-score-v1" },
+  experiment: {
+    id: "p", name: "教学实验", version: "2026.1", scoringVersion: "teaching-score-v1",
+    papers: []
+  },
   summary: {
     completion: { total: 30, completed: 28, paired: 28, incomplete: 2, excluded: 0 },
     sequenceCounts: { manual_then_ai: 15, ai_then_manual: 15 },
@@ -1133,18 +1163,29 @@ const dashboard: TeachingExperimentDashboard = {
     accuracyDifference: { median: 1 / 6, ci95: { low: 0, high: 1 / 3 }, wilcoxonP: 0.004 },
     aiBehavior: { suggested: 168, adopted: 121, modified: 47, initiallyIncorrect: 28, corrected: 18, incorrectlyAdopted: 10, adoptionRate: 0.72, modificationRate: 0.28, correctionRate: 0.64, incorrectAdoptionRate: 0.36 }
   },
+  diagnostics: {
+    byPaper: {
+      A: { manual: mode(14, 1120, 0.78), aiAssisted: mode(14, 552, 0.91) },
+      B: { manual: mode(14, 1120, 0.78), aiAssisted: mode(14, 552, 0.91) }
+    },
+    bySequence: {
+      manual_then_ai: { total: 15, completed: 14, paired: 14, manual: mode(14, 1120, 0.78), aiAssisted: mode(14, 552, 0.91) },
+      ai_then_manual: { total: 15, completed: 14, paired: 14, manual: mode(14, 1120, 0.78), aiAssisted: mode(14, 552, 0.91) }
+    },
+    timingQuality: { valid: 28, zero_active: 0, excessive_idle: 0, unavailable: 2 }
+  },
   participants: []
 };
 const html = renderToStaticMarkup(createElement(TeacherDashboard, { initial: dashboard }));
 
 assert.match(html, /28 \/ 30/);
-assert.match(html, /有效配对/);
-assert.match(html, /AI 辅助节省/);
-assert.match(html, /准确率提升/);
-assert.match(html, /更快且更准/);
-assert.match(html, /建议采纳率/);
-assert.match(html, /错误纠正率/);
-assert.match(html, /按论文与顺序检查/);
+assert.match(html, /主分析/);
+assert.match(html, /中位有效时间/);
+assert.match(html, /中位值准确率/);
+assert.match(html, /更快且更准确/);
+assert.match(html, /AI 建议如何被使用/);
+assert.match(html, /初始错误/);
+assert.match(html, /设计平衡与计时诊断/);
 assert.doesNotMatch(html, /新建项目|配置文献|邀请码/);
 ```
 
@@ -1167,7 +1208,7 @@ Use semantic HTML plus inline SVG/CSS, without a new chart dependency:
 - two horizontal bars for manual vs AI time;
 - two bars for accuracy;
 - a paired-change table/mini-line view for each student;
-- four AI behavior tiles;
+- six AI behavior tiles: suggested, adopted, modified, initially incorrect, corrected, and incorrectly adopted;
 - paper A/B and sequence balance table;
 - completion/exclusion/quality breakdown.
 
@@ -1175,7 +1216,7 @@ Charts require text equivalents and `aria-label`; color is supplementary, not th
 
 - [ ] **Step 5: Keep optional drill-down compact**
 
-Filters cover alias, paper, sequence, completion and timing quality. A detail drawer shows both rounds, field-level automatic score/reason, initial AI value, final value, and any manual override side by side. No required review/save action appears in the main flow.
+Filters cover alias, paper, sequence, completion and timing quality. A detail dialog shows both rounds, field-level automatic score/reason, initial AI value, final value, and any historical manual override side by side. No required review/save action appears in the main flow.
 
 - [ ] **Step 6: Add automatic refresh and export controls**
 
@@ -1190,7 +1231,7 @@ Expected: all display/null/export assertions pass; lint exits 0.
 - [ ] **Step 8: Commit the dashboard slice**
 
 ```bash
-git add components/teaching/TeacherDashboard.tsx components/teaching/TeacherDashboard.test.tsx lib/teachingCsv.test.ts
+git add components/teaching/TeacherDashboard.tsx components/teaching/TeacherDashboard.test.tsx app/teaching/admin/page.tsx lib/teaching.ts lib/teaching/analytics.ts lib/teaching/analytics.test.ts lib/teachingShared.ts lib/teachingCsv.ts lib/teachingCsv.test.ts
 git commit -m "feat: show paired teaching experiment dashboard"
 ```
 
@@ -1201,6 +1242,10 @@ git commit -m "feat: show paired teaching experiment dashboard"
 - Modify: `lib/teaching.test.ts`
 - Modify: `app/api/teaching/teachingRoutes.test.ts`
 - Modify: `README.md`
+- Modify: `.env.local.example`
+- Modify: `docs/deployment.md`
+- Modify: `docs/superpowers/specs/2026-08-09-zero-config-teaching-experiment-design.md`
+- Modify: `docs/superpowers/plans/2026-08-09-zero-config-teaching-experiment.md`
 
 - [ ] **Step 1: Add the 30-student end-to-end service scenario**
 
@@ -1214,14 +1259,18 @@ Serialize the manual workspace and assert it contains none of: `aiInitial`, `ai_
 
 Close/reopen the teaching database after round 1, restore the same student, and finish round 2. Re-run migrations twice, replay a heartbeat event, replay submit, and assert no duplicate time, participants, submissions, or scores.
 
-- [ ] **Step 4: Document deployment behavior**
+- [ ] **Step 4: Document operation, deployment, metrics, and privacy behavior**
 
 Add a concise README section:
 
 ```md
 ### Zero-configuration teaching experiment
 
-Open `/teaching`. Students enter only a pseudonymous ID and complete two automatically assigned rounds. The server seeds the versioned experiment from `config/teaching/default-experiment.v1.json`; teachers do not create projects or grade fields manually. `/teaching/admin` uses `TEACHING_TEACHER_PASSWORD` and shows paired results. Runtime submissions remain in `data/teaching.db` and are not committed.
+Open `/teaching`. Students enter only a pseudonymous ID and complete two automatically assigned rounds; no invite or group code is needed. The server bootstraps the versioned experiment from `config/teaching/default-experiment.v1.json`; teachers do not create projects or grade fields manually. `/teaching/admin` uses `TEACHING_TEACHER_PASSWORD` and shows paired results. Frozen teaching AI suggestions do not need a live AI key.
+
+Runtime submissions remain in `${IONICLINK_DATA_DIR:-<repository>/data}/teaching.db` and are not committed. Teaching migrations are automatic; domain migration/seed/reset commands do not operate on this database. Use a new empty `IONICLINK_DATA_DIR` for a fresh local trial.
+
+The primary analysis uses valid completed pairs and reports active-time/accuracy differences as `AI - manual`, paired medians, bootstrap 95% CIs, Wilcoxon detail, evidence metrics, and AI adoption/correction behavior. Normal CSV includes the entered alias and anonymized CSV uses stable `S001` labels; both exports contain aggregate metrics only, never answer/evidence text, AI suggestions, gold, or scoring rules.
 ```
 
 - [ ] **Step 5: Run the complete automated verification**
@@ -1233,7 +1282,7 @@ Expected: lint passes, typecheck passes, every test file passes, and the product
 - [ ] **Step 6: Commit integration and documentation**
 
 ```bash
-git add lib/teaching.test.ts app/api/teaching/teachingRoutes.test.ts README.md
+git add lib/teaching.test.ts app/api/teaching/teachingRoutes.test.ts README.md .env.local.example docs/deployment.md docs/superpowers/specs/2026-08-09-zero-config-teaching-experiment-design.md docs/superpowers/plans/2026-08-09-zero-config-teaching-experiment.md
 git commit -m "test: verify zero-config teaching experiment end to end"
 ```
 
@@ -1257,7 +1306,7 @@ Use the test helper or a dedicated local-only script, not production UI shortcut
 
 - [ ] **Step 4: Verify exports**
 
-Download normal and anonymized CSVs. Confirm BOM, formula escaping, 30 participants/60 round values, scoring/config versions, paired metrics, and absence of `undefined`/`null` strings.
+Download normal and anonymized CSVs. Confirm BOM, formula escaping, 30 participant rows covering 60 round metric sets, scoring/config versions, paired metrics, and absence of `undefined`/`null` strings. Confirm neither export contains final answer/evidence text, frozen AI text, gold, scoring rules, participant IDs, or free-text exclusion reasons.
 
 - [ ] **Step 5: Re-run the full verification after any browser fix**
 
