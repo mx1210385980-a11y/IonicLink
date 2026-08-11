@@ -289,6 +289,16 @@ export function fmtNum(n: number | null | undefined): string {
   return String(Number(n.toPrecision(4)));
 }
 
+function formatScientific(value: number): string {
+  if (value === 0) return "0";
+  const exponent = Math.floor(Math.log10(Math.abs(value)));
+  const mantissa = fmtNum(value / 10 ** exponent);
+  const superscript = String(exponent)
+    .replace(/-/g, "⁻")
+    .replace(/\d/g, (digit) => "⁰¹²³⁴⁵⁶⁷⁸⁹"[Number(digit)]);
+  return `${mantissa} × 10${superscript}`;
+}
+
 // SI sub-unit ladders (descending) for dimensions whose canonical value is often
 // tiny — so the standardized view reads "5 nN" / "2 µm/s", not "5e-9 N".
 const SI_LADDERS: Record<string, { unit: string; factor: number }[]> = {
@@ -335,6 +345,7 @@ const SI_LADDERS: Record<string, { unit: string; factor: number }[]> = {
  * without a ladder (K, V, Hz) render in their canonical unit unchanged.
  */
 export function formatStd(value: number, base: string): string {
+  if (base === "m²/s") return `${formatScientific(value)} ${base}`;
   const parts = formatStdParts(value, base);
   return `${parts.value} ${parts.unit}`;
 }
@@ -361,6 +372,7 @@ export function formatStdParts(value: number, base: string): { value: string; un
 }
 
 export function formatStdRangeParts(min: number, max: number, base: string): { min: string; max: string; unit: string } {
+  if (base === "m²/s") return { min: formatScientific(min), max: formatScientific(max), unit: base };
   const step = pickStdStep(Math.max(Math.abs(min), Math.abs(max)), base);
   if (!step) return { min: fmtNum(min), max: fmtNum(max), unit: base };
   return { min: fmtNum(min / step.factor), max: fmtNum(max / step.factor), unit: step.unit };

@@ -1,4 +1,5 @@
 import type { Domain } from "@/lib/domain";
+import { getDiffusionMode, type DiffusionMode } from "@/lib/diffusion/mode";
 import { normalizeIonKey, resolveIonStructure, standardizeIonLabel, type IonKind } from "@/lib/ionStructures";
 import { standardizeSubstrate } from "@/lib/substrates";
 
@@ -15,6 +16,8 @@ export interface RecordFilters {
   anions: string[];
   /** Normalized substrate/surface keys. Empty = any. */
   surfaces: string[];
+  /** Confined-system geometry modes. Empty = any. Only used by diffusion. */
+  confinedSystems: DiffusionMode[];
   /** Load window in N (canonical SI). null = unbounded. */
   loadMinN: number | null;
   loadMaxN: number | null;
@@ -27,6 +30,7 @@ export const EMPTY_FILTERS: RecordFilters = {
   cations: [],
   anions: [],
   surfaces: [],
+  confinedSystems: [],
   loadMinN: null,
   loadMaxN: null,
   tempMinK: null,
@@ -43,6 +47,7 @@ export function countActiveFilters(f: RecordFilters): number {
   if (f.cations.length) n++;
   if (f.anions.length) n++;
   if (f.surfaces.length) n++;
+  if (f.confinedSystems.length) n++;
   if (f.loadMinN != null || f.loadMaxN != null) n++;
   if (f.tempMinK != null || f.tempMaxK != null) n++;
   return n;
@@ -118,6 +123,25 @@ export function surfaceOptions(domain: Domain, records: any[]): FilterOption[] {
   );
 }
 
+const DIFFUSION_MODE_LABELS: Record<DiffusionMode, string> = {
+  "1D": "1D channel",
+  "2D": "2D slit",
+  "3D-Cage": "3D cage",
+  Membrane: "Membrane",
+  "0D-Pools": "0D pools",
+  Gyroid: "Gyroid",
+};
+
+/** Confined-system options use the same geometry classification as the diffusion illustration. */
+export function confinedSystemOptions(records: any[]): FilterOption[] {
+  return collectOptions(
+    records.map((record) => {
+      const mode = getDiffusionMode(record.extended?.geometry);
+      return { key: mode, label: DIFFUSION_MODE_LABELS[mode] };
+    })
+  );
+}
+
 /** [min, max] of a numeric field across the records, or null when absent. */
 export function numericExtent(records: any[], get: (rec: any) => number | null): [number, number] | null {
   const values = records.map(get).filter((v): v is number => v != null && Number.isFinite(v));
@@ -144,6 +168,7 @@ export function applyRecordFilters(domain: Domain, records: any[], f: RecordFilt
       const s = surfaceOf(domain, r);
       if (!s || !f.surfaces.includes(surfaceKeyOf(s))) return false;
     }
+    if (domain === "diffusion" && f.confinedSystems.length && !f.confinedSystems.includes(getDiffusionMode(r.extended?.geometry))) return false;
     if (!inRange(recordLoadN(r), f.loadMinN, f.loadMaxN)) return false;
     if (!inRange(recordTempK(r), f.tempMinK, f.tempMaxK)) return false;
     return true;

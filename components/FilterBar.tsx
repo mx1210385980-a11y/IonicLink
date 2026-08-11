@@ -5,6 +5,7 @@ import type { Domain } from "@/lib/domain";
 import { formatStd, parseQuantity } from "@/lib/units";
 import {
   countActiveFilters,
+  confinedSystemOptions,
   ionOptions,
   numericExtent,
   recordLoadN,
@@ -304,6 +305,7 @@ export function FilterBar({
   const cationOpts = useMemo(() => ionOptions(records, "cation"), [records]);
   const anionOpts = useMemo(() => ionOptions(records, "anion"), [records]);
   const surfaceOpts = useMemo(() => surfaceOptions(domain, records), [domain, records]);
+  const confinedSystemOpts = useMemo(() => (domain === "diffusion" ? confinedSystemOptions(records) : []), [domain, records]);
   const loadExtent = useMemo(() => numericExtent(records, recordLoadN), [records]);
   const tempExtent = useMemo(() => numericExtent(records, recordTempK), [records]);
   const activeCount = countActiveFilters(filters);
@@ -333,6 +335,14 @@ export function FilterBar({
           onChange={(surfaces) => onChange({ ...filters, surfaces })}
         />
       )}
+      {domain === "diffusion" && (
+        <MultiPill
+          label="Confined system"
+          options={confinedSystemOpts}
+          selected={filters.confinedSystems}
+          onChange={(confinedSystems) => onChange({ ...filters, confinedSystems: confinedSystems as RecordFilters["confinedSystems"] })}
+        />
+      )}
       {domain === "tribology" && (
         <RangePill
           label="Load"
@@ -359,7 +369,7 @@ export function FilterBar({
         <>
           <button
             onClick={() =>
-              onChange({ cations: [], anions: [], surfaces: [], loadMinN: null, loadMaxN: null, tempMinK: null, tempMaxK: null })
+              onChange({ cations: [], anions: [], surfaces: [], confinedSystems: [], loadMinN: null, loadMaxN: null, tempMinK: null, tempMaxK: null })
             }
             className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-ink-500 transition hover:bg-ink-100 hover:text-ink-900"
           >
