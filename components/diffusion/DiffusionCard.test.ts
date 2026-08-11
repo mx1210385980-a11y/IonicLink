@@ -31,12 +31,12 @@ const actionsHtml = renderToStaticMarkup(
 
 // D readout renders the reported value + label
 assert.match(html, /6\.2 × 10⁻¹¹ m² s⁻¹/);
-assert.match(html, /Self-diffusion/);
+assert.match(html, /Diffusion coefficient/);
 assert.match(html, />checked</);
 assert.doesNotMatch(html, />official</);
 assert.match(html, /record-card-unified-text/);
-// standardized line uses the µm²/s ladder
-assert.match(html, /62 µm²\/s/);
+// standardized line is hidden for checked records
+assert.doesNotMatch(html, /62 µm²\/s/);
 // the ionic-identity section is reused from the shared parts
 assert.match(html, /data-testid="ionic-liquid-panel"/);
 assert.match(html, /\[EMIM\]/);
@@ -55,14 +55,22 @@ assert.match(actionsHtml, />Edit<\/button>/);
 
 const record1D = { ...record, extended: { ...record.extended, geometry: "carbon nanotube" } };
 const html1D = renderToStaticMarkup(createElement(DiffusionCard, { record: record1D }));
-assert.match(html1D, /one-dimensional confined channel/);
+assert.match(html1D, /one-dimensional cylindrical channel/);
 
 const record2D = { ...record, extended: { ...record.extended, geometry: "slit pore" } };
 const html2D = renderToStaticMarkup(createElement(DiffusionCard, { record: record2D }));
-assert.match(html2D, /two-dimensional slit channel/);
+assert.match(html2D, /two-dimensional slit pore/);
 
-const record3D = { ...record, extended: { ...record.extended, geometry: "mesoporous carbon network" } };
+const recordMembrane = { ...record, extended: { ...record.extended, geometry: "mesoporous carbon network" } };
+const htmlMembrane = renderToStaticMarkup(createElement(DiffusionCard, { record: recordMembrane }));
+assert.match(htmlMembrane, /tortuous porous membrane/);
+
+const record3D = { ...record, extended: { ...record.extended, geometry: "MOF cage" } };
 const html3D = renderToStaticMarkup(createElement(DiffusionCard, { record: record3D }));
-assert.match(html3D, /three-dimensional porous network/);
+assert.match(html3D, /three-dimensional framework cage/);
+
+const reviewRecord = { ...record, status: "review" as const, confidence: 0.81 };
+const htmlReview = renderToStaticMarkup(createElement(DiffusionCard, { record: reviewRecord }));
+assert.match(htmlReview, /standardized · 6\.2 × 10⁻¹¹ m²\/s/);
 
 console.log("DiffusionCard tests passed");
