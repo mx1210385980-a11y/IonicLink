@@ -178,14 +178,14 @@ export function DiffusionCard({
   const showConfidence = record.status === "review" && typeof record.confidence === "number";
   const confidencePct = showConfidence ? Math.round((record.confidence as number) * 100) : null;
   const dValue = core.diffusion ? quantityLabel(core.diffusion, units) : formatD(core.diffusion);
-  const standardizedDValue = core.diffusion?.std != null ? formatStd(core.diffusion.std, "m²/s") : null;
+  const standardizedDValue = record.status === "review" && core.diffusion?.std != null ? formatStd(core.diffusion.std, "m²/s") : null;
   const isCationSpecies = /cation|\+$/i.test(core.species);
   const isAnionSpecies = /anion|-$/i.test(core.species);
   const mode = getDiffusionMode(e.geometry);
   const diffusionReadoutContent = (
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
-        <div className="label-eyebrow text-black">Self-diffusion · D</div>
+        <div className="label-eyebrow text-black">Diffusion coefficient</div>
         <div className="mt-1 font-mono text-[1.8rem] font-semibold leading-none tnum text-black [overflow-wrap:anywhere]">{dValue}</div>
         {standardizedDValue && <div className="mt-2 text-[10px] font-medium text-black">standardized · {standardizedDValue}</div>}
       </div>
@@ -261,7 +261,7 @@ export function DiffusionCard({
               <ConfinedSystemValue label="Material" value={e.material || "—"} field="material" prov={record.provenance?.material} sourceId={record.sourceId} recordId={record.id} domain={domain} />
               <ConfinedSystemValue label="Geometry" value={e.geometry || "—"} field="geometry" prov={record.provenance?.geometry} sourceId={record.sourceId} recordId={record.id} domain={domain} />
               <ConfinedSystemValue label="Functional groups" value={e.functionalGroups || "—"} field="functionalGroups" prov={record.provenance?.functionalGroups} sourceId={record.sourceId} recordId={record.id} domain={domain} />
-              <ConfinedSystemValue label="Scale value" value={e.poreSize ? quantityLabel(e.poreSize, units) : "—"} field="poreSize" prov={record.provenance?.poreSize} sourceId={record.sourceId} recordId={record.id} domain={domain} />
+              <ConfinedSystemValue label="Pore size" value={e.poreSize ? quantityLabel(e.poreSize, units) : "—"} field="poreSize" prov={record.provenance?.poreSize} sourceId={record.sourceId} recordId={record.id} domain={domain} />
               <ConfinedSystemValue label="Polarizable" value={e.polarizable || "—"} field="polarizable" prov={record.provenance?.polarizable} sourceId={record.sourceId} recordId={record.id} domain={domain} />
             </div>
           </div>
@@ -334,7 +334,10 @@ function DiffusionIllustration({ idPrefix, active, mode }: { idPrefix?: string; 
   const slitPath = `${pfx}-slit-path`;
   const membranePath = `${pfx}-membrane-path`;
   const gyroidPath = `${pfx}-gyroid-path`;
+  const cageTravelPath = `${pfx}-cage-travel-path`;
+  const steelBall = `${pfx}-steel-ball`;
   const membraneMask = `${pfx}-vector-membrane-mask`;
+  const tubeFadeMask = `${pfx}-tube-fade-mask`;
   const denseMembrane = useMemo(() => {
     const lines = [];
     const pores = [];
@@ -361,41 +364,118 @@ function DiffusionIllustration({ idPrefix, active, mode }: { idPrefix?: string; 
 
     return { lines, pores };
   }, []);
+  const tubeData = useMemo(() => {
+    const length = 500;
+    const radius = 50;
+    const centerY = 120;
+    const rings = 50;
+    const pointsPerRing = 16;
+    const nodes: Array<{ x: number; y: number; z: number }> = [];
+    const edges: Array<{ id: string; x1: number; y1: number; x2: number; y2: number; z: number }> = [];
+
+    for (let ring = 0; ring < rings; ring++) {
+      const x = (ring / (rings - 1)) * length;
+      const angleOffset = (ring % 2) * (Math.PI / pointsPerRing);
+      for (let point = 0; point < pointsPerRing; point++) {
+        const theta = (point / pointsPerRing) * Math.PI * 2 + angleOffset;
+        nodes.push({ x, y: centerY + radius * Math.cos(theta), z: radius * Math.sin(theta) });
+      }
+    }
+
+    for (let ring = 0; ring < rings - 1; ring++) {
+      for (let point = 0; point < pointsPerRing; point++) {
+        const nextPoint = (point - 1 + pointsPerRing) % pointsPerRing;
+        const current = nodes[ring * pointsPerRing + point];
+        const straight = nodes[(ring + 1) * pointsPerRing + point];
+        const diagonal = nodes[(ring + 1) * pointsPerRing + nextPoint];
+        edges.push({ id: `tube-${ring}-${point}-straight`, x1: current.x, y1: current.y, x2: straight.x, y2: straight.y, z: (current.z + straight.z) / 2 });
+        edges.push({ id: `tube-${ring}-${point}-diagonal`, x1: current.x, y1: current.y, x2: diagonal.x, y2: diagonal.y, z: (current.z + diagonal.z) / 2 });
+      }
+    }
+
+    return { backEdges: edges.filter((edge) => edge.z < 0), frontEdges: edges.filter((edge) => edge.z >= 0) };
+  }, []);
 
   const defaultViewBox = "0 0 300 200";
-  const viewBox = mode === "3D-Cage" ? "-200 -190 400 356" : defaultViewBox;
+  const viewBox = mode === "3D-Cage" ? "-240 -240 480 480" : mode === "1D" ? "0 20 500 200" : defaultViewBox;
   const ariaLabel = {
-    "1D": "one-dimensional confined channel",
-    "2D": "two-dimensional slit channel",
-    "3D-Cage": "three-dimensional porous network",
-    Membrane: "three-dimensional porous network",
+    "1D": "one-dimensional cylindrical channel",
+    "2D": "two-dimensional slit pore",
+    "3D-Cage": "three-dimensional framework cage",
+    Membrane: "tortuous porous membrane",
     "0D-Pools": "isolated liquid pools",
     Gyroid: "bicontinuous gyroid channel",
   }[mode];
 
-  const frameworkNodes = [
-    { id: "n02", x: -22, y: -74 }, { id: "n03", x: -74, y: -48 }, { id: "n04", x: -33, y: -35 }, { id: "n05", x: 53, y: -45 },
-    { id: "n06", x: -78, y: 28 }, { id: "n07", x: -46, y: 43 }, { id: "n08", x: 1, y: 43 }, { id: "n09", x: 50, y: 27 }, { id: "n10", x: -136, y: 51 },
-    { id: "n11", x: -94, y: 72 }, { id: "n12", x: 29, y: 73 }, { id: "n13", x: 123, y: 63 }, { id: "n14", x: -134, y: 125 }, { id: "n15", x: -50, y: 141 },
-    { id: "n16", x: -3, y: 127 }, { id: "n17", x: 117, y: 126 }, { id: "n18", x: -184, y: 150 }, { id: "n19", x: -151, y: 174 }, { id: "n20", x: -104, y: 156 },
-    { id: "n21", x: -63, y: 181 }, { id: "n22", x: -25, y: 174 }, { id: "n23", x: 28, y: 163 }, { id: "n24", x: 62, y: 153 }, { id: "n25", x: 110, y: 184 },
-    { id: "n26", x: 185, y: 159 }, { id: "n27", x: -121, y: 198 }, { id: "n28", x: -80, y: 189 }, { id: "n29", x: 16, y: 169 },
-  ];
-  const frameworkNodeById = new Map(frameworkNodes.map((node) => [node.id, node]));
-  const frameworkEdges = [
-    ["n02", "n03"], ["n02", "n04"], ["n02", "n05"], ["n03", "n06"], ["n04", "n07"], ["n05", "n09"],
-    ["n06", "n07"], ["n06", "n10"], ["n06", "n11"], ["n07", "n08"], ["n07", "n11"], ["n08", "n09"], ["n08", "n12"], ["n09", "n12"], ["n09", "n13"],
-    ["n10", "n14"], ["n11", "n14"], ["n11", "n15"], ["n11", "n16"], ["n12", "n16"], ["n12", "n23"], ["n13", "n17"], ["n13", "n24"],
-    ["n14", "n18"], ["n14", "n19"], ["n15", "n20"], ["n15", "n21"], ["n16", "n22"], ["n16", "n23"], ["n17", "n24"], ["n17", "n25"], ["n17", "n26"],
-    ["n18", "n19"], ["n19", "n20"], ["n20", "n22"], ["n20", "n27"], ["n21", "n22"], ["n21", "n28"], ["n22", "n29"], ["n23", "n24"], ["n23", "n29"], ["n24", "n25"], ["n25", "n26"],
-  ] as const;
-  const frameworkLinks = frameworkEdges.map(([startId, endId]) => {
-    const start = frameworkNodeById.get(startId)!;
-    const end = frameworkNodeById.get(endId)!;
-    return { x1: start.x, y1: start.y, x2: end.x, y2: end.y };
-  });
+  const pcuModel = useMemo(() => {
+    const S = 55;
+    const L = 94;
+    const yaw = 0.65;
+    const pitch = -0.35;
+    const rotate3D = (x: number, y: number, z: number) => {
+      const x1 = x * Math.cos(yaw) + z * Math.sin(yaw);
+      const z1 = -x * Math.sin(yaw) + z * Math.cos(yaw);
+      const y2 = y * Math.cos(pitch) - z1 * Math.sin(pitch);
+      const z2 = y * Math.sin(pitch) + z1 * Math.cos(pitch);
+      const fov = 900;
+      const scale = fov / (fov - z2);
+      return { x: x1 * scale, y: y2 * scale, z: z2, scale };
+    };
+    type Point3 = { x: number; y: number; z: number };
+    type ProjectedPoint = ReturnType<typeof rotate3D>;
+    type PcuItem =
+      | { type: "octa_face"; id: string; points: ProjectedPoint[]; z: number; scale: number }
+      | { type: "octa_edge" | "linker"; id: string; from: ProjectedPoint; to: ProjectedPoint; z: number; scale: number }
+      | { type: "vertex"; id: string; point: ProjectedPoint; z: number; scale: number };
+    const items: PcuItem[] = [];
+    const bases = [-1, 1].flatMap((x) => [-1, 1].flatMap((y) => [-1, 1].map((z) => ({ x: x * L, y: y * L, z: z * L }))));
+    const pointKey = (point: Point3) => `${point.x},${point.y},${point.z}`;
+    const octahedra = new Map<string, Record<"xp" | "xn" | "yp" | "yn" | "zp" | "zn", Point3>>();
+    const faceIndices = [["xp", "yp", "zp"], ["xp", "yp", "zn"], ["xp", "yn", "zp"], ["xp", "yn", "zn"], ["xn", "yp", "zp"], ["xn", "yp", "zn"], ["xn", "yn", "zp"], ["xn", "yn", "zn"]] as const;
+    const vertexNames = ["xp", "xn", "yp", "yn", "zp", "zn"] as const;
+
+    for (const base of bases) {
+      const vertices = {
+        xp: { x: base.x + S, y: base.y, z: base.z }, xn: { x: base.x - S, y: base.y, z: base.z },
+        yp: { x: base.x, y: base.y + S, z: base.z }, yn: { x: base.x, y: base.y - S, z: base.z },
+        zp: { x: base.x, y: base.y, z: base.z + S }, zn: { x: base.x, y: base.y, z: base.z - S },
+      };
+      octahedra.set(pointKey(base), vertices);
+      const projected = Object.fromEntries(vertexNames.map((name) => [name, rotate3D(vertices[name].x, vertices[name].y, vertices[name].z)])) as Record<typeof vertexNames[number], ProjectedPoint>;
+      for (const name of vertexNames) items.push({ type: "vertex", id: `vertex-${pointKey(base)}-${name}`, point: projected[name], z: projected[name].z, scale: projected[name].scale });
+      for (const face of faceIndices) {
+        const points = face.map((name) => projected[name]);
+        items.push({ type: "octa_face", id: `face-${pointKey(base)}-${face.join("-")}`, points, z: points.reduce((sum, point) => sum + point.z, 0) / 3, scale: points.reduce((sum, point) => sum + point.scale, 0) / 3 });
+      }
+      for (let left = 0; left < vertexNames.length; left++) {
+        for (let right = left + 1; right < vertexNames.length; right++) {
+          const fromName = vertexNames[left];
+          const toName = vertexNames[right];
+          if (fromName[0] !== toName[0]) {
+            const from = projected[fromName];
+            const to = projected[toName];
+            items.push({ type: "octa_edge", id: `edge-${pointKey(base)}-${fromName}-${toName}`, from, to, z: (from.z + to.z) / 2, scale: (from.scale + to.scale) / 2 });
+          }
+        }
+      }
+    }
+    for (const base of bases) {
+      for (const axis of ["x", "y", "z"] as const) {
+        if (base[axis] !== -L) continue;
+        const neighbor = { ...base, [axis]: L };
+        const current = octahedra.get(pointKey(base))!;
+        const adjacent = octahedra.get(pointKey(neighbor))!;
+        const fromName = `${axis}p` as "xp" | "yp" | "zp";
+        const toName = `${axis}n` as "xn" | "yn" | "zn";
+        const from = rotate3D(current[fromName].x, current[fromName].y, current[fromName].z);
+        const to = rotate3D(adjacent[toName].x, adjacent[toName].y, adjacent[toName].z);
+        items.push({ type: "linker", id: `linker-${pointKey(base)}-${axis}`, from, to, z: (from.z + to.z) / 2, scale: (from.scale + to.scale) / 2 });
+      }
+    }
+    return items.sort((left, right) => left.z - right.z);
+  }, []);
   return (
-    <svg viewBox={viewBox} preserveAspectRatio="xMidYMid slice" className="block h-full w-full" role="img" aria-label={ariaLabel}>
+    <svg viewBox={viewBox} preserveAspectRatio={mode === "3D-Cage" ? "xMidYMid meet" : "xMidYMid slice"} className="block h-full w-full" role="img" aria-label={ariaLabel}>
       <defs>
         <linearGradient id={`${pfx}-grad-cap`} x1="0" x2="1" y1="0" y2="0">
           <stop offset="0" stopColor="#e6f2ff" />
@@ -427,6 +507,21 @@ function DiffusionIllustration({ idPrefix, active, mode }: { idPrefix?: string; 
           <stop offset="0.25" stopColor="rgba(255,255,255,0.6)" />
           <stop offset="1" stopColor="rgba(0,0,0,0)" />
         </radialGradient>
+        <radialGradient id={steelBall} cx="32%" cy="27%" r="72%">
+          <stop offset="0" stopColor="#ffffff" />
+          <stop offset="0.35" stopColor="#cbd5e1" />
+          <stop offset="1" stopColor="#475569" />
+        </radialGradient>
+
+        <linearGradient id={`${pfx}-tube-fade`} x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stopColor="black" stopOpacity="0" />
+          <stop offset="0.09" stopColor="white" />
+          <stop offset="0.91" stopColor="white" />
+          <stop offset="1" stopColor="black" stopOpacity="0" />
+        </linearGradient>
+        <mask id={tubeFadeMask}>
+          <rect x="0" y="20" width="500" height="200" fill={`url(#${pfx}-tube-fade)`} />
+        </mask>
 
         {/* 管道纵深渐变：用于 1D 圆柱透视 */}
         <linearGradient id={`${pfx}-tube-grad`} x1="0" x2="0" y1="0" y2="1">
@@ -455,41 +550,28 @@ function DiffusionIllustration({ idPrefix, active, mode }: { idPrefix?: string; 
         <path id={slitPath} d="M28 100 C 80 92, 125 108, 176 99 S 240 91, 272 100" fill="none" stroke="none" />
         <path id={membranePath} d="M 10,100 L 65,100 Q 95,140 125,90 T 175,120 T 225,100 L 290,100" fill="none" stroke="none" />
         <path id={gyroidPath} d="M12 132 C 44 178, 76 178, 108 132 S 172 86, 204 132 S 260 178, 292 132" fill="none" stroke="none" />
+        <path id={cageTravelPath} d="M-102 22 C-74 22 -52 8 -34 -2 C-12 -14 12 -14 34 -2 C54 10 74 22 102 22" fill="none" stroke="none" />
 
       </defs>
 
-      <rect x={mode === "3D-Cage" ? -200 : 0} y={mode === "3D-Cage" ? -190 : 0} width="100%" height="100%" rx="16" fill={softBg} />
+      {mode !== "3D-Cage" && <rect x="0" y="0" width="100%" height="100%" rx="16" fill={softBg} />}
 
-      {/* 1D: 极简并规整的二维剖面，平行原子墙与居中水平单排扩散 */}
+      {/* 1D: a depth-sorted carbon nanotube lattice encloses strictly axial ion motion. */}
       {mode === "1D" && (
-        <g>
-          <rect x="0" y="0" width="300" height="200" fill="none" />
-
-          {/* 上下两条平行原子墙（小圆点） */}
-          <g fill={bgSkeleton} aria-hidden>
-            {Array.from({ length: 22 }).map((_, i) => (
-              <circle key={`t-${i}`} cx={20 + i * 12} cy={72} r={3} />
-            ))}
-            {Array.from({ length: 22 }).map((_, i) => (
-              <circle key={`b-${i}`} cx={20 + i * 12} cy={128} r={3} />
-            ))}
+        <g mask={`url(#${tubeFadeMask})`}>
+          <g opacity="0.15">
+            {tubeData.backEdges.map((edge) => <line key={edge.id} x1={edge.x1} y1={edge.y1} x2={edge.x2} y2={edge.y2} stroke={bgSkeleton} strokeWidth="1.2" />)}
           </g>
-
-          {/* 中央留白通道（干净利落） */}
-          <rect x="18" y="78" width="264" height="44" fill="none" />
-
-          {/* 离子：固定在中心线上，仅沿 X 轴平移 */}
-          <g transform="translate(0,100)">
-            <g>
-              <circle cx={-90} cy={0} r={9} fill={cationColor} />
-              <circle cx={-90} cy={0} r={14} fill={`url(#${pfx}-ion-glow)`} opacity={0.14} />
-              {active && <animateTransform attributeName="transform" type="translate" values="-90 0; 90 0; -90 0" dur="1.4s" repeatCount="indefinite" />}
-            </g>
-            <g>
-              <circle cx={90} cy={0} r={9} fill={anionColor} />
-              <circle cx={90} cy={0} r={14} fill={`url(#${pfx}-ion-glow)`} opacity={0.14} />
-              {active && <animateTransform attributeName="transform" type="translate" values="90 0; -90 0; 90 0" dur="1.8s" repeatCount="indefinite" />}
-            </g>
+          <line x1="0" y1="70" x2="500" y2="70" stroke={bgSkeleton} strokeWidth="2.5" strokeDasharray="8 4" opacity="0.6" />
+          <line x1="0" y1="170" x2="500" y2="170" stroke={bgSkeleton} strokeWidth="2.5" strokeDasharray="8 4" opacity="0.6" />
+          <circle cy="115" r="9" fill={cationColor}>
+            {active && <animate attributeName="cx" values="50; 450; 50" dur="4s" repeatCount="indefinite" calcMode="spline" keyTimes="0; 0.5; 1" keySplines="0.42 0 0.58 1; 0.42 0 0.58 1" />}
+          </circle>
+          <circle cy="125" r="9" fill={anionColor}>
+            {active && <animate attributeName="cx" values="430; 70; 430" dur="5.5s" repeatCount="indefinite" calcMode="spline" keyTimes="0; 0.5; 1" keySplines="0.42 0 0.58 1; 0.42 0 0.58 1" />}
+          </circle>
+          <g opacity="0.75">
+            {tubeData.frontEdges.map((edge) => <line key={edge.id} x1={edge.x1} y1={edge.y1} x2={edge.x2} y2={edge.y2} stroke={bgSkeleton} strokeWidth="1.5" />)}
           </g>
         </g>
       )}
@@ -574,26 +656,26 @@ function DiffusionIllustration({ idPrefix, active, mode }: { idPrefix?: string; 
         </g>
       )}
 
-      {/* 3D-Cage: hard-coded F-framework projection with an irregular, open central cavity. */}
+      {/* 3D-Cage: a pcu net of octahedral nodes, depth sorted with Painter's Algorithm. */}
       {mode === "3D-Cage" && (
         <g>
-          <g transform="translate(0 -64)">
-            <g fill="none" stroke="#64748b" strokeWidth="1.1" strokeLinecap="round" opacity="0.82">
-              {frameworkLinks.map((link, index) => <line key={`f-bond-${index}`} {...link} />)}
-            </g>
-            <g fill="#334155">
-              {frameworkNodes.map((node) => <circle key={`f-node-${node.id}`} cx={node.x} cy={node.y} r="8.8" />)}
-            </g>
-            <g opacity="0.22" fill="none" stroke="#94a3b8" strokeWidth="0.9">
-              <path d="M-78 28 L-46 43 L1 43 L50 27 L29 73 L-3 127 L-50 141 L-94 72 Z" />
-              <path d="M-33 -35 L1 43 L-3 127" />
-            </g>
+          <g data-testid="pcu-octahedral-mof" transform="scale(1.12)">
+            {pcuModel.map((item) => {
+              const depthOpacity = Math.max(0.25, Math.min(1, (item.z + 180) / 320));
+              if (item.type === "octa_face") {
+                return <polygon key={item.id} points={item.points.map((point) => `${point.x},${point.y}`).join(" ")} fill="rgba(241, 245, 249, 0.92)" stroke="#cbd5e1" strokeWidth="0.5" />;
+              }
+              if (item.type === "vertex") {
+                return <circle key={item.id} cx={item.point.x} cy={item.point.y} r={6 * item.scale} fill={`url(#${steelBall})`} opacity={depthOpacity} />;
+              }
+              return <line key={item.id} x1={item.from.x} y1={item.from.y} x2={item.to.x} y2={item.to.y} stroke={item.type === "octa_edge" ? "#475569" : "#334155"} strokeWidth={(item.type === "octa_edge" ? 3 : 5) * item.scale} strokeLinecap="round" opacity={depthOpacity} />;
+            })}
           </g>
-          <circle cx="0" cy="-44" r="11.5" fill={cationColor}>
-            {active && <animateTransform attributeName="transform" type="translate" values="0 0; -23 -17; -36 8; -20 37; 16 31; 37 4; 18 -21; 0 0" dur="5.8s" repeatCount="indefinite" />}
+          <circle r="20" fill={cationColor}>
+            {active && <animateMotion dur="5.8s" repeatCount="indefinite"><mpath href={`#${cageTravelPath}`} /></animateMotion>}
           </circle>
-          <circle cx="0" cy="-44" r="8.5" fill={anionColor}>
-            {active && <animateTransform attributeName="transform" type="translate" values="0 0; 28 18; 38 -4; 21 -28; -9 -24; -32 -1; -21 25; 0 0" dur="6.6s" begin="-1.7s" repeatCount="indefinite" />}
+          <circle r="20" fill={anionColor}>
+            {active && <animateMotion dur="6.7s" begin="-2.1s" repeatCount="indefinite"><mpath href={`#${cageTravelPath}`} /></animateMotion>}
           </circle>
         </g>
       )}

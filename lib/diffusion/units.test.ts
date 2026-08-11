@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { parseQuantity, formatStd, stdLabel } from "../units";
+import { parseQuantity, formatStd, stdLabel, stdRangeLabel } from "../units";
 
 const close = (a: number | null | undefined, b: number, tol?: number) =>
   a != null && Math.abs(a - b) < (tol ?? Math.abs(b) * 1e-9);
@@ -18,10 +18,11 @@ assert.ok(close(parseQuantity("6.2 × 10⁻¹¹ m² s⁻¹", "diffusion")?.value
 // ranges keep the upper value
 assert.ok(close(parseQuantity("1–5 × 10⁻¹¹ m² s⁻¹", "diffusion")?.std, 5e-11), "range upper value");
 assert.equal(parseQuantity("1–5 × 10⁻¹¹ m² s⁻¹", "diffusion")?.approx, true, "range flagged approx");
+assert.equal(stdRangeLabel(parseQuantity("1–5 × 10⁻¹¹ m² s⁻¹", "diffusion")), "1 × 10⁻¹¹-5 × 10⁻¹¹ m²/s");
 
-// display: canonical ladder reads in µm²/s for typical IL magnitudes
-assert.equal(formatStd(5.2e-11, "m²/s"), "52 µm²/s");
-assert.equal(stdLabel(parseQuantity("8.0e-12 m2/s", "diffusion")), "8 µm²/s");
+// display: standardized diffusion is always in m²/s with an explicit exponent.
+assert.equal(formatStd(5.2e-11, "m²/s"), "5.2 × 10⁻¹¹ m²/s");
+assert.equal(stdLabel(parseQuantity("8.0e-12 m2/s", "diffusion")), "8 × 10⁻¹² m²/s");
 
 // the sci-notation collapse only fires on signed exponents — "× 10 nN" is NOT
 // rewritten to e-notation (the value stays the leading number, 5 nN)

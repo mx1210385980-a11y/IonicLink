@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   applyRecordFilters,
+  confinedSystemOptions,
   countActiveFilters,
   EMPTY_FILTERS,
   hasActiveFilters,
@@ -15,6 +16,23 @@ import {
 
 function quantity(value: number, stdUnit: string) {
   return { raw: `${value} ${stdUnit}`, value, unit: stdUnit, std: value, stdUnit };
+}
+
+/* ---- diffusion confined-system geometry uses the illustration's mode categories ---- */
+{
+  const diffusionRecords = [
+    { id: "#d1", core: { ionicLiquid: { cation: "[EMIM]", anion: "[TFSI]" }, temperature: quantity(298, "K") }, extended: { geometry: "carbon nanotube" }, flexible: [] },
+    { id: "#d2", core: { ionicLiquid: { cation: "[BMIM]", anion: "[BF4]" }, temperature: quantity(298, "K") }, extended: { geometry: "slit pore" }, flexible: [] },
+    { id: "#d3", core: { ionicLiquid: { cation: "[PYR14]", anion: "[TFSI]" }, temperature: quantity(298, "K") }, extended: { geometry: "MOF framework" }, flexible: [] },
+    { id: "#d4", core: { ionicLiquid: { cation: "[PYR14]", anion: "[TFSI]" }, temperature: quantity(298, "K") }, extended: { geometry: "another nanotube" }, flexible: [] },
+  ];
+  const options = confinedSystemOptions(diffusionRecords);
+  assert.equal(options.find((option) => option.key === "1D")?.count, 2);
+  assert.equal(options.find((option) => option.key === "2D")?.label, "2D slit");
+  assert.equal(options.find((option) => option.key === "3D-Cage")?.label, "3D cage");
+
+  const filtered = applyRecordFilters("diffusion", diffusionRecords, { ...EMPTY_FILTERS, confinedSystems: ["1D"] });
+  assert.deepEqual(filtered.map((record) => record.id), ["#d1", "#d4"]);
 }
 
 let n = 0;
