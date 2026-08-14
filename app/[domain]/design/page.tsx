@@ -1,23 +1,14 @@
 import { notFound } from "next/navigation";
-import { listRecords } from "@/lib/db";
 import { isDomain } from "@/lib/domain";
-import { DesignStudio } from "@/components/design/DesignStudio";
+import { WffStrategyPanel } from "@/components/design/WffStrategyPanel";
 
 export const dynamic = "force-dynamic";
 
-/**
- * Design Studio — property prediction & new-materials design, per domain.
- * The server hands the domain's records to one generic client component;
- * all prediction math runs client-side and is never persisted.
- */
 export default function DesignPage({ params }: { params: { domain: string } }) {
-  if (!isDomain(params.domain)) notFound();
-  const domain = params.domain;
+  if (!isDomain(params.domain) || params.domain !== "tribology") notFound();
   return (
-    <DesignStudio
-      domain={domain}
-      records={listRecords(domain) as any[]}
-      evaluationLabHref={domain === "tribology" ? `/${domain}/design/evaluation` : null}
-    />
+    <main className="mx-auto w-full max-w-5xl px-4 pb-8 pt-5 sm:px-6 lg:px-8">
+      <WffStrategyPanel />
+    </main>
   );
 }

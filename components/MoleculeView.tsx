@@ -29,7 +29,7 @@ export function MoleculeView({
   const resolvedSmiles = smiles?.trim() || inferred?.smiles;
   const hasIonLabel = Boolean(ionLabel?.trim());
   const source = smiles?.trim() ? "record" : inferred?.source ?? (hasIonLabel ? "label" : "missing");
-  const structureTag = inferred?.family ?? (resolvedSmiles ? "smiles" : hasIonLabel ? "label only" : "missing");
+  const displayName = inferred?.name ?? ionLabel?.trim() ?? "Unknown ion";
   const viewKind = kind ?? "cation";
   const isCation = viewKind === "cation";
   const drawWidth = isCation ? width : Math.max(width, 320);
@@ -120,10 +120,12 @@ export function MoleculeView({
       }`}
       title={inferred ? `${label}: ${inferred.name}` : `${label}: ${ionLabel ?? "unknown ion"}`}
     >
-      <div className="relative z-10 flex items-center justify-between gap-2">
-        <span className={`label-eyebrow mb-0.5 text-[9px] ${isCation ? "text-cyan-600" : "text-emerald-600"}`}>{label}</span>
-        <span className={`truncate font-mono text-[9px] font-semibold ${isCation ? "text-cyan-700/70" : "text-emerald-700/70"}`}>
-          {structureTag}
+      <div className="relative z-10 min-h-8 min-w-0">
+        <span
+          data-testid={`molecule-name-${viewKind}`}
+          className={`block break-words text-[10px] font-semibold leading-snug ${isCation ? "text-cyan-800" : "text-emerald-800"}`}
+        >
+          {displayName}
         </span>
       </div>
       <div className={`molecule-field molecule-field-${viewKind}`}>

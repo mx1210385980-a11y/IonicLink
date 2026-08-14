@@ -145,34 +145,36 @@ assert.equal(designAction.key, "design-ready");
 assert.equal(designAction.href, "/tribology/design");
 assert.equal(designAction.title, "Open Design Studio");
 
-// Empty-db render: one prominent next action, scoped shortcuts, and the exact-count workflow rail.
+// The domain home stays intentionally small: two honest, reachable core tools.
 const html = renderToStaticMarkup(createElement(DomainHome, { params: { domain: "tribology" } }));
 
-assert.match(html, /TRIBOLOGY WORKSPACE/);
-assert.match(html, /Tribology workbench/);
-assert.equal((html.match(/Next action ·/g) ?? []).length, 1);
-assert.match(html, /Start extraction/);
-assert.match(html, /Upload papers/);
-assert.match(html, /Database/);
-assert.match(html, /Review Queue/);
-assert.match(html, /Library/);
-assert.match(html, /Design Studio/);
-assert.match(html, /Workflow/);
-assert.match(html, /Papers/);
-assert.match(html, /Extraction/);
-assert.match(html, /Checked/);
-assert.doesNotMatch(html, />Official</);
-assert.match(html, /0 queued · 0 extracting · 0 done · 0 error · 0 committed/);
-assert.match(html, /0 ready · 0 incomplete · 0 mock locked/);
-assert.match(html, /0 \/ 8/);
-
+assert.match(html, /Tribology workspace/);
+assert.match(html, /Hello, researcher/);
+assert.match(html, /two focused tools, one clear workflow/i);
+assert.equal((html.match(/data-testid="core-tool-card"/g) ?? []).length, 2);
+assert.equal((html.match(/<a /g) ?? []).length, 2, "each tool card exposes one clear CTA without nested links");
+assert.match(html, /IonicLink · Extraction Tool/);
+assert.match(html, /Model Training Preview/);
+assert.match(html, /Extract structures, properties, and conditions from source files/);
+assert.match(html, /Compare CatBoost, Random Forest, XGBoost, SVR, and MLP/);
+assert.match(html, /Teaching-grade trend sandbox · opening it does not start a training run/);
+assert.match(html, /lg:grid-cols-2/, "the two cards share a row on desktop and collapse naturally on smaller screens");
 assert.match(html, /href="\/tribology\/extract"/);
-assert.match(html, /href="\/tribology\/database"/);
-assert.match(html, /href="\/tribology\/database\?status=review"/);
-assert.match(html, /href="\/tribology\/database\?status=official"/);
-assert.match(html, /href="\/tribology\/library"/);
 assert.match(html, /href="\/tribology\/design"/);
-assert.doesNotMatch(html, /completion rate|ETA/);
-assert.doesNotMatch(html, /Add papers\. Get data\.|Start a clean extraction run\./);
+assert.doesNotMatch(html, /Next action|Workflow|Review Queue|Design Studio/);
+assert.doesNotMatch(html, /accuracy|completion rate|ETA/i);
+
+// Conductivity and Diffusion keep their scoped extractor, while the model sandbox
+// deliberately targets the only currently reachable model-preview route.
+const conductivityHtml = renderToStaticMarkup(createElement(DomainHome, { params: { domain: "conductivity" } }));
+assert.equal((conductivityHtml.match(/data-testid="core-tool-card"/g) ?? []).length, 2);
+assert.match(conductivityHtml, /Conductivity workspace/);
+assert.match(conductivityHtml, /href="\/conductivity\/extract"/);
+assert.match(conductivityHtml, /href="\/tribology\/design"/);
+assert.doesNotMatch(conductivityHtml, /href="\/conductivity\/design"/);
+
+const diffusionHtml = renderToStaticMarkup(createElement(DomainHome, { params: { domain: "diffusion" } }));
+assert.match(diffusionHtml, /href="\/diffusion\/extract"/);
+assert.match(diffusionHtml, /href="\/tribology\/design"/);
 
 console.log("DomainHome workspace progress tests passed");

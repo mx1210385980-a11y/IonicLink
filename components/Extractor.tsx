@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DatasetImporter } from "@/components/DatasetImporter";
+import { ExtractionWorkspaceView } from "@/components/ExtractionWorkspaceView";
 import { getClientModule } from "@/components/registry.client";
 import { RequestError, requestErrorMessage, requestJson } from "@/components/request";
 import { DEFAULT_DOMAIN, type Domain } from "@/lib/domain";
@@ -333,13 +335,59 @@ export function commitAllIssueMessage({
   return parts.length ? parts.join(" ") : null;
 }
 
+export type ExtractionFileFilter = "all" | "analyzing" | "finished" | "error";
+
+export function jobMatchesFileFilter(status: JobStatus, filter: ExtractionFileFilter): boolean {
+  if (filter === "analyzing") return status === "queued" || status === "extracting";
+  if (filter === "finished") return status === "done" || status === "committed";
+  if (filter === "error") return status === "error";
+  return true;
+}
+
+export function filterExtractionJobs(
+  jobs: readonly BatchJob[],
+  filter: ExtractionFileFilter,
+  query: string
+): BatchJob[] {
+  const needle = query.trim().toLocaleLowerCase();
+  return jobs.filter((job) => {
+    if (!jobMatchesFileFilter(job.status, filter)) return false;
+    if (!needle) return true;
+    return [job.filename, job.model, job.source, job.error]
+      .filter((value): value is string => typeof value === "string")
+      .some((value) => value.toLocaleLowerCase().includes(needle));
+  });
+}
+
+const STATUS_LABELS: Record<JobStatus, string> = {
+  queued: "Waiting",
+  extracting: "Extracting",
+  done: "Ready for review",
+  error: "Extraction failed",
+  committed: "Sent to review",
+};
+
+const STATUS_DOTS: Record<JobStatus, string> = {
+  queued: "bg-slate-400",
+  extracting: "bg-blue-500",
+  done: "bg-emerald-500",
+  error: "bg-rose-500",
+  committed: "bg-violet-500",
+};
+
 /**
  * Unified extraction surface. Drop one or many PDFs (or paste text) — every
  * input becomes a background job in one queue. When a job finishes, its
  * candidates are individually reviewable: deselect any you don't want, then
  * commit just the selected ones to the Review Queue.
  */
-export function Extractor({ domain = DEFAULT_DOMAIN }: { domain?: Domain }) {
+export function Extractor({
+  domain = DEFAULT_DOMAIN,
+  live = null,
+}: {
+  domain?: Domain;
+  live?: boolean | null;
+}) {
   const Card = getClientModule(domain).Card;
   const [jobs, setJobs] = useState<BatchJob[]>([]);
   const [history, setHistory] = useState<JobHistorySummary>(EMPTY_JOB_HISTORY);
@@ -353,6 +401,13 @@ export function Extractor({ domain = DEFAULT_DOMAIN }: { domain?: Domain }) {
   const [skipped, setSkipped] = useState<SkippedFile[] | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<Record<string, Set<number>>>({});
+  const [fileFilter, setFileFilter] = useState<ExtractionFileFilter>("all");
+  const [query, setQuery] = useState("");
+  const [inputMode, setInputMode] = useState<"text" | "dataset" | null>(null);
+  const [showInsights, setShowInsights] = useState(false);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshGenerationRef = useRef(0);
   const refreshRequestRef = useRef<AbortController | null>(null);
@@ -412,6 +467,11 @@ export function Extractor({ domain = DEFAULT_DOMAIN }: { domain?: Domain }) {
     setDraining(false);
     setExpanded(new Set());
     setSelection({});
+    setFileFilter("all");
+    setQuery("");
+    setInputMode(null);
+    setShowInsights(false);
+    setPage(1);
     return () => {
       refreshGenerationRef.current += 1;
       refreshRequestRef.current?.abort();
@@ -633,175 +693,122 @@ export function Extractor({ domain = DEFAULT_DOMAIN }: { domain?: Domain }) {
     );
   };
 
+  const manualRefresh = async () => {
+    if (processing || busy) return;
+    setProcessing("refresh");
+    setError(null);
+    try {
+      await refresh();
+    } catch (refreshError) {
+      setError(requestErrorMessage(refreshError, "Could not refresh the extraction queue."));
+    } finally {
+      setProcessing(null);
+    }
+  };
+
   const counts = summarizeQueue(jobs);
   const clearableCount = counts.done + counts.error + counts.committed;
+  const filterCounts: Record<ExtractionFileFilter, number> = {
+    all: jobs.length,
+    analyzing: counts.queued + counts.extracting,
+    finished: counts.done + counts.committed,
+    error: counts.error,
+  };
+  const filteredJobs = useMemo(() => {
+    const matches = filterExtractionJobs(jobs, fileFilter, query);
+    return matches.sort((left, right) => {
+      const comparison = left.createdAt.localeCompare(right.createdAt);
+      return sortDirection === "asc" ? comparison : -comparison;
+    });
+  }, [fileFilter, jobs, query, sortDirection]);
+  const totalPages = Math.max(1, Math.ceil(filteredJobs.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageJobs = filteredJobs.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   return (
-    <div className="space-y-6">
-      {/* one input surface: files + text */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        <label
-          onDragOver={(e) => {
-            e.preventDefault();
-            setOver(true);
-          }}
-          onDragLeave={() => setOver(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setOver(false);
-            uploadFiles(e.dataTransfer.files);
-          }}
-          className={`panel flex cursor-pointer flex-col items-center justify-center gap-3 p-10 text-center transition ${
-            over ? "border-brand-400 bg-brand-50/50" : ""
-          }`}
-        >
-          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-brand-50 text-brand-600">
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
-              <path d="M12 16V4m0 0L8 8m4-4l4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-              <path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-            </svg>
-          </span>
-          <div>
-            <p className="font-medium text-ink-900">{busy ? "Uploading…" : "Drop one or many PDFs"}</p>
-            <p className="text-xs text-ink-700">or click to browse · each is queued and processed in the background</p>
-          </div>
-          <input type="file" accept=".pdf,.txt" multiple className="hidden" disabled={busy || !!processing} onChange={(e) => e.target.files && uploadFiles(e.target.files)} />
-        </label>
-
-        <div className="panel flex flex-col p-4">
-          <span className="label-eyebrow mb-2">Or paste paper text</span>
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Paste an abstract, results section, or full text…"
-            className="h-40 w-full resize-none rounded-xl border border-slate-200 bg-white p-3 text-sm outline-none focus:border-brand-300 focus:ring-2 focus:ring-brand-100"
-          />
-          <button onClick={submitText} disabled={busy || !!processing || !text.trim()} className="btn-primary mt-3 self-start">
-            Add to queue
-          </button>
-        </div>
-      </div>
-
-      {error && <RequestError>{error}</RequestError>}
-      {skipped && <SkipNotice skipped={skipped} onDismiss={dismissSkipped} />}
-
-      <div className="panel overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3">
-          <div className="flex items-center gap-2 text-sm">
-            <span className="font-semibold">Queue</span>
-            <span className="font-mono text-[10px] text-ink-500">{jobs.length} current job{jobs.length === 1 ? "" : "s"}</span>
-          </div>
-          {jobs.length > 0 && (
-            <div className="flex items-center gap-2">
-              <button onClick={commitAll} disabled={counts.done === 0 || busy || !!processing} className="btn-primary px-3 py-1.5 text-xs">
-                Commit all ready
-              </button>
-              <button onClick={clearFinished} disabled={clearableCount === 0 || busy || !!processing} className="btn px-3 py-1.5 text-xs">
-                Clear finished
-              </button>
-            </div>
-          )}
-        </div>
-
-        <QueueProgress jobs={jobs} draining={draining} concurrency={concurrency} />
-        <HistoryProgress history={history} />
-
-        {jobs.length > 0 && (
-          <ul className="divide-y divide-slate-100">
-            {jobs.map((job) => {
-              const isOpen = expanded.has(job.id);
-              const sel = selection[job.id];
-              const selCount = sel ? sel.size : job.recordCount;
-              return (
-                <li key={job.id}>
-                  <div className="flex flex-wrap items-center gap-3 px-5 py-3">
-                    <FileIcon />
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink-800">{job.filename}</span>
-                    <StatusPill status={job.status} />
-                    {job.status === "done" && (
-                      <button
-                        onClick={() => toggleExpand(job)}
-                        className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-ink-700 hover:border-brand-300 hover:text-brand-700"
-                      >
-                        {isOpen ? "Hide" : `Review ${job.recordCount} candidate${job.recordCount === 1 ? "" : "s"}`}
-                      </button>
-                    )}
-                    {job.status === "committed" && (
-                      <span className="text-xs text-ink-700">{job.recordCount} sent to review</span>
-                    )}
-                    {job.status === "error" && (
-                      <span className="max-w-xs truncate text-xs text-rose-600" title={job.error ?? ""}>
-                        {job.error}
-                      </span>
-                    )}
-                    <button
-                      onClick={() => remove(job.id)}
-                      disabled={busy || !!processing}
-                      className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-ink-400 hover:border-rose-200 hover:text-rose-600"
-                      aria-label="Remove job"
-                    >
-                      ✕
-                    </button>
-                  </div>
-
-                  <JobStageTrack status={job.status} filename={job.filename} />
-
-                  {isOpen && job.status === "done" && (
-                    <div className="border-t border-slate-100 bg-slate-50/40 px-5 py-4">
-                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                        <span className="text-xs text-ink-700">
-                          {selCount} of {job.candidates.length} selected
-                          {job.model ? ` · ${job.model}` : ""}
-                        </span>
-                        {job.source === "mock" && (
-                          <span
-                            role="status"
-                            className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800"
-                          >
-                            Mock demo · review only
-                          </span>
-                        )}
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => setAll(job.id, job.candidates.length, true)} className="text-xs font-medium text-ink-700 hover:text-brand-700">
-                            Select all
-                          </button>
-                          <button onClick={() => setAll(job.id, job.candidates.length, false)} className="text-xs font-medium text-ink-700 hover:text-brand-700">
-                            None
-                          </button>
-                          <button
-                            onClick={() => commit(job)}
-                            disabled={selCount === 0 || busy || !!processing}
-                            title={job.source === "mock" ? "Mock candidates can be reviewed, but cannot be published as Checked records." : undefined}
-                            className="btn-primary px-3 py-1.5 text-xs"
-                          >
-                            Commit {selCount} to Review →
-                          </button>
-                        </div>
-                      </div>
-                      <div className="space-y-3">
-                        {job.candidates.map((c, i) => (
-                          <Card
-                            key={i}
-                            record={toPreview(c, i)}
-                            domain={domain}
-                            selected={(sel ?? new Set(job.candidates.map((_, k) => k))).has(i)}
-                            onToggle={() => toggleCandidate(job.id, i, job.candidates.length)}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-
-        {counts.committed > 0 && (
-          <CommittedJobsNotice domain={domain} />
-        )}
-      </div>
-    </div>
+    <ExtractionWorkspaceView
+      domain={domain}
+      live={live}
+      jobs={jobs}
+      pageJobs={pageJobs}
+      filteredCount={filteredJobs.length}
+      counts={counts}
+      clearableCount={clearableCount}
+      filterCounts={filterCounts}
+      fileFilter={fileFilter}
+      onFilterChange={(filter) => {
+        setFileFilter(filter);
+        setPage(1);
+      }}
+      query={query}
+      onQueryChange={(value) => {
+        setQuery(value);
+        setPage(1);
+      }}
+      inputMode={inputMode}
+      onInputModeChange={setInputMode}
+      showInsights={showInsights}
+      onToggleInsights={() => setShowInsights((current) => !current)}
+      busy={busy}
+      processing={processing}
+      over={over}
+      onDragStateChange={setOver}
+      onUploadFiles={uploadFiles}
+      onCommitAll={commitAll}
+      onClearFinished={clearFinished}
+      onRefresh={manualRefresh}
+      text={text}
+      onTextChange={setText}
+      onSubmitText={submitText}
+      datasetPanel={<DatasetImporter domain={domain} />}
+      insightsPanel={
+        <>
+          <QueueProgress jobs={jobs} draining={draining} concurrency={concurrency} />
+          <HistoryProgress history={history} />
+        </>
+      }
+      notices={
+        error || skipped ? (
+          <>
+            {error && <RequestError>{error}</RequestError>}
+            {skipped && <SkipNotice skipped={skipped} onDismiss={dismissSkipped} />}
+          </>
+        ) : null
+      }
+      committedNotice={counts.committed > 0 ? <CommittedJobsNotice domain={domain} /> : null}
+      sortDirection={sortDirection}
+      onToggleSort={() => setSortDirection((current) => current === "asc" ? "desc" : "asc")}
+      expanded={expanded}
+      selection={selection}
+      onToggleExpand={toggleExpand}
+      onSetAll={setAll}
+      onRemove={remove}
+      onCommit={commit}
+      renderStatus={(status) => <StatusPill status={status} />}
+      renderFileIcon={() => <FileIcon />}
+      renderStageTrack={(job) => <JobStageTrack status={job.status} filename={job.filename} />}
+      renderCandidate={(job, index, isSelected) => (
+        <Card
+          key={index}
+          record={toPreview(job.candidates[index], index)}
+          domain={domain}
+          selected={isSelected}
+          onToggle={() => toggleCandidate(job.id, index, job.candidates.length)}
+        />
+      )}
+      currentPage={currentPage}
+      totalPages={totalPages}
+      pageSize={pageSize}
+      onPageChange={setPage}
+      onPageSizeChange={(size) => {
+        setPageSize(size);
+        setPage(1);
+      }}
+    />
   );
 }
 
@@ -829,12 +836,17 @@ function StatusPill({ status }: { status: JobStatus }) {
     error: "border-rose-200 bg-rose-50 text-rose-700",
     committed: "border-violet-200 bg-violet-50 text-violet-700",
   };
-  return <span className={`status-mini ${map[status]}`}>{status}</span>;
+  return (
+    <span className={`inline-flex min-w-[8.75rem] items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold ${map[status]}`}>
+      <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${STATUS_DOTS[status]}`} />
+      <span className="truncate">{STATUS_LABELS[status]}</span>
+    </span>
+  );
 }
 
 function FileIcon() {
   return (
-    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-slate-100 text-ink-400">
+    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#edf3ff] text-[#4b77dc]">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
         <path d="M7 3h7l5 5v13H7a2 2 0 01-2-2V5a2 2 0 012-2z" stroke="currentColor" strokeWidth="1.6" />
         <path d="M14 3v5h5" stroke="currentColor" strokeWidth="1.6" />

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import * as React from "react";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import HomePage from "./page";
+import { HomePageContent } from "../components/HomePageContent";
 import DomainHome from "./[domain]/page";
 
 (globalThis as typeof globalThis & { React: typeof React }).React = React;
@@ -15,7 +15,7 @@ assert.match(globals, /\.label-eyebrow[\s\S]*text-ink-500/, "shared eyebrow labe
 assert.match(globals, /\.status-mini-muted[\s\S]*text-ink-500/, "muted status labels should not be too pale when actionable");
 assert.match(globals, /\.btn[\s\S]*text-ink-800/, "secondary buttons should be readable before hover");
 
-const homeSource = file("app/page.tsx");
+const homeSource = file("components/HomePageContent.tsx");
 assert.match(homeSource, /leading-8 text-ink-700/, "global landing supporting copy should be stronger than gray");
 assert.match(homeSource, /text-sm font-semibold text-ink-700/, "workspace secondary links should be readable before hover");
 assert.match(homeSource, /label="Review" tone="amber"/, "landing review metric should be amber");
@@ -25,9 +25,9 @@ assert.match(homeSource, /tone === "amber" \? "text-amber-700"/, "landing review
 assert.match(homeSource, /Review queue[\s\S]*hover:text-amber-700|hover:text-amber-700[\s\S]*Review queue/, "review links should keep amber semantics");
 
 const domainSource = file("app/[domain]/page.tsx");
-assert.match(domainSource, /leading-7 text-ink-700/, "domain tagline should be readable");
-assert.match(domainSource, /tone\?: "brand" \| "amber" \| "cyan" \| "violet"/, "domain action cards should expose semantic tones");
-assert.match(domainSource, /text-ink-700/, "non-primary action-card body copy should be stronger than gray");
+assert.match(domainSource, /text-\[#536786\]/, "domain home supporting copy should remain readable");
+assert.match(domainSource, /text-\[#2456d6\]/, "domain home extraction actions should use the established blue accent");
+assert.match(domainSource, /text-violet-700/, "domain home should retain violet semantics for the model preview");
 
 const navSource = file("components/TopNav.tsx");
 assert.doesNotMatch(navSource, /text-ink-500 hover:bg-ink-50 hover:text-ink-900/, "domain nav inactive text should no longer be washed out");
@@ -54,10 +54,10 @@ const librarySource = file("app/[domain]/library/page.tsx");
 assert.match(librarySource, /text-ink-700/, "Library summaries and empty-state instructions should be readable");
 assert.match(librarySource, /panel flex min-w-0 flex-col gap-4 overflow-hidden/, "Library source rows should not overflow on mobile");
 
-const homeHtml = renderToStaticMarkup(createElement(HomePage));
+const homeHtml = renderToStaticMarkup(createElement(HomePageContent));
 const domainHtml = renderToStaticMarkup(createElement(DomainHome, { params: { domain: "tribology" } }));
 assert.match(homeHtml, /Add papers\. Get data\./);
-assert.match(domainHtml, /Tribology workbench/);
-assert.match(domainHtml, /Review Queue/);
+assert.match(domainHtml, /IonicLink · Extraction Tool/);
+assert.match(domainHtml, /Model Training Preview/);
 
 console.log("Global color hierarchy tests passed");

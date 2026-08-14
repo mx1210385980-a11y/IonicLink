@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import * as React from "react";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import HomePage from "./page";
+import { HomePageContent } from "../components/HomePageContent";
 
 (globalThis as typeof globalThis & { React: typeof React }).React = React;
 
-const html = renderToStaticMarkup(createElement(HomePage));
+const html = renderToStaticMarkup(createElement(HomePageContent));
 
 assert.match(html, /IONICLINK EXTRACT/);
 assert.match(html, /Add papers\. Get data\./);

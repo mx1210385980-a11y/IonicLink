@@ -13,5 +13,14 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  if (domain) {
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set(
+      "x-ioniclink-request-path",
+      `${request.nextUrl.pathname}${request.nextUrl.search}`
+    );
+    return NextResponse.next({ request: { headers: requestHeaders } });
+  }
+
   return NextResponse.next();
 }

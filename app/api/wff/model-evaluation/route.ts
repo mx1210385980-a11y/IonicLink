@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
+import { requireAppApiSession } from "@/lib/auth.server";
 import { normalizeStrategyRequest, runWffStrategy, streamWffStrategy } from "@/lib/predict/wffStrategy";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  const access = await requireAppApiSession(request);
+  if (!access.ok) return access.response;
   try {
     const body = await request.json().catch(() => ({}));
     const normalized = normalizeStrategyRequest(body);

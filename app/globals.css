@@ -7,6 +7,25 @@
   --grid-line: rgba(15, 23, 42, 0.024);
 }
 
+/* Ketcher is mounted lazily inside the structure-search dialog. */
+.structure-ketcher-shell {
+  position: relative;
+  height: 100%;
+  min-height: 520px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.structure-ketcher-shell > div {
+  height: 100%;
+}
+
+@media (min-width: 1024px) {
+  .structure-ketcher-shell {
+    min-height: 0;
+  }
+}
+
 body {
   @apply text-ink-900 antialiased;
   min-height: 100vh;

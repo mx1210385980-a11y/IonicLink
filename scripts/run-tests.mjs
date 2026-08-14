@@ -49,6 +49,12 @@ try {
       cwd: root,
       env: {
         ...process.env,
+        BETTER_AUTH_SECRET: "ioniclink-test-secret-only-2026-at-least-32-characters",
+        BETTER_AUTH_URL: "http://localhost:3000",
+        IONICLINK_ALLOW_SIGNUP: "true",
+        IONICLINK_BOOTSTRAP_EMAIL: "",
+        IONICLINK_BOOTSTRAP_PASSWORD: "",
+        IONICLINK_BOOTSTRAP_NAME: "",
         IONICLINK_DATA_DIR: dataDir,
         WFF_STRATEGY_CACHE_DIR: path.join(dataDir, "wff-strategy-cache"),
       },

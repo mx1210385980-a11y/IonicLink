@@ -80,7 +80,7 @@ health_check() {
   local attempt
   for attempt in {1..30}; do
     if curl --fail --silent --show-error --max-time 5 \
-      http://127.0.0.1/ >/dev/null; then
+      http://127.0.0.1/api/auth/get-session >/dev/null; then
       return 0
     fi
     sleep 2

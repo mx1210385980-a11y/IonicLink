@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { requireAppApiSession } from "@/lib/auth.server";
 import { commitDatasetImport } from "@/lib/db";
 import { adaptDiffusionDataset, DIFFUSION_DATASET_ADAPTER } from "@/lib/datasets/diffusion";
 import { parseTabularFile } from "@/lib/datasets/parse";
@@ -13,6 +14,8 @@ export const maxDuration = 120;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 
 export async function POST(req: NextRequest, { params }: { params: { domain: string } }) {
+  const access = await requireAppApiSession(req);
+  if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
   if (params.domain !== "diffusion") {
     return NextResponse.json({ error: `No tabular adapter is configured for ${params.domain} yet.` }, { status: 422 });

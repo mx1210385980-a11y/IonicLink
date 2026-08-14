@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAppApiSession } from "@/lib/auth.server";
 import { extractRecords, isLiveExtractionEnabled } from "@/lib/extract";
 import { isDomain } from "@/lib/domain";
 import { createSourceFromPdf } from "@/lib/sources";
@@ -11,6 +12,8 @@ export const maxDuration = 120;
  * (JSON { text }). Returns extracted candidate records WITHOUT saving.
  */
 export async function POST(req: NextRequest, { params }: { params: { domain: string } }) {
+  const access = await requireAppApiSession(req);
+  if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
   const domain = params.domain;
   try {
@@ -56,6 +59,8 @@ export async function POST(req: NextRequest, { params }: { params: { domain: str
 }
 
 export async function GET(_req: NextRequest, { params }: { params: { domain: string } }) {
+  const access = await requireAppApiSession(_req);
+  if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
   return NextResponse.json({ live: isLiveExtractionEnabled() });
 }

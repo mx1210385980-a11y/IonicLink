@@ -1,15 +1,17 @@
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 import { createJobs } from "../../../../lib/db";
+import { createTestAppSession } from "../../../../lib/auth.test-helpers";
 import { GET } from "./route";
 
 async function main() {
+  const { cookie } = await createTestAppSession();
   const [created] = createJobs("tribology", [
     { filename: "history-route-test.txt", text: "A route-level history test." },
   ]);
 
   const response = await GET(
-    new NextRequest("http://localhost/api/tribology/batch"),
+    new NextRequest("http://localhost/api/tribology/batch", { headers: { cookie } }),
     { params: { domain: "tribology" } }
   );
 

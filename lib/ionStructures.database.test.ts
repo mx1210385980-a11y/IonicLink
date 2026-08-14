@@ -9,9 +9,10 @@ type Domain = "tribology" | "conductivity" | "diffusion";
 const KNOWN_AMBIGUOUS = new Set(["anion\t[BTA]/[Doc]", "cation\t[DOP-IL]"]);
 const unresolved = new Map<string, number>();
 let totalRecords = 0;
+const dataDir = path.resolve(process.env.IONICLINK_DATA_DIR || path.join(process.cwd(), "data"));
 
 for (const domain of ["tribology", "conductivity", "diffusion"] as Domain[]) {
-  const dbPath = path.join(process.cwd(), "data", `${domain}.db`);
+  const dbPath = path.join(dataDir, `${domain}.db`);
   if (!existsSync(dbPath)) {
     console.log(`Ion structure database coverage skipped: missing ${dbPath}`);
     process.exit(0);

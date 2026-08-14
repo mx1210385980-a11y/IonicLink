@@ -8,8 +8,11 @@ const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: ["better-sqlite3", "@napi-rs/canvas", "unpdf"],
   },
-  webpack: (config) => {
+  webpack: (config, { isServer }) => {
     config.externals = [...(config.externals || []), "better-sqlite3", "@napi-rs/canvas"];
+    // Ketcher is client-only. Avoid following Paper.js' optional Node adapter
+    // while still bundling Paper.js into the browser editor.
+    if (isServer) config.externals.push("paper");
     return config;
   },
 };

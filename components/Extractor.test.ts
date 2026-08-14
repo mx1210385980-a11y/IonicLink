@@ -6,9 +6,11 @@ import type { BatchJob, JobHistorySummary, JobStatus } from "../lib/schema";
 import {
   commitAllIssueMessage,
   CommittedJobsNotice,
+  filterExtractionJobs,
   formatDuration,
   HistoryProgress,
   jobHistoryFromPayload,
+  jobMatchesFileFilter,
   JobStageTrack,
   jobStageStates,
   mutationRefreshFailureMessage,
@@ -106,6 +108,20 @@ const queueSummary = summarizeQueue([
   job("committed"),
 ]);
 assert.deepEqual(queueSummary, { queued: 1, extracting: 1, done: 1, error: 2, committed: 1 });
+
+assert.equal(jobMatchesFileFilter("queued", "analyzing"), true);
+assert.equal(jobMatchesFileFilter("extracting", "analyzing"), true);
+assert.equal(jobMatchesFileFilter("done", "finished"), true);
+assert.equal(jobMatchesFileFilter("committed", "finished"), true);
+assert.equal(jobMatchesFileFilter("error", "error"), true);
+assert.equal(jobMatchesFileFilter("error", "finished"), false);
+const searchableJobs = [
+  { ...job("done", "alpha-paper"), filename: "Alpha friction.pdf", model: "model-one" },
+  { ...job("error", "beta-paper"), filename: "Beta conductivity.pdf", error: "provider timeout" },
+];
+assert.deepEqual(filterExtractionJobs(searchableJobs, "all", "friction").map((item) => item.id), ["alpha-paper"]);
+assert.deepEqual(filterExtractionJobs(searchableJobs, "all", "TIMEOUT").map((item) => item.id), ["beta-paper"]);
+assert.deepEqual(filterExtractionJobs(searchableJobs, "finished", "model-one").map((item) => item.id), ["alpha-paper"]);
 
 const emptyQueueHtml = renderToStaticMarkup(
   createElement(QueueProgress, { jobs: [], draining: false, concurrency: 2 })

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAppApiSession } from "@/lib/auth.server";
 import { getSourcePageText } from "@/lib/db";
 import { isDomain } from "@/lib/domain";
 import { findEvidenceOnPage, renderSourcePage } from "@/lib/sources";
@@ -12,6 +13,8 @@ export const maxDuration = 60;
  * normalized boxes locating the quote on the page image, for on-image highlights.
  */
 export async function GET(req: NextRequest, { params }: { params: { domain: string; id: string; n: string } }) {
+  const access = await requireAppApiSession(req);
+  if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
   const domain = params.domain;
   const id = decodeURIComponent(params.id);
