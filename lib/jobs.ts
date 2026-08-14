@@ -18,7 +18,7 @@ import { extractRecords } from "./extract";
 
 export function extractionConcurrency(): number {
   const n = Number(process.env.EXTRACT_CONCURRENCY);
-  if (!Number.isFinite(n) || n < 1) return 4;
+  if (!Number.isFinite(n) || n < 1) return 8;
   return Math.min(16, Math.floor(n));
 }
 

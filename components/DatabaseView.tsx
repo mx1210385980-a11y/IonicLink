@@ -9,6 +9,14 @@ import { openRecordEvidence, type ConditionItem } from "@/components/recordCardP
 import { getClientModule } from "@/components/registry.client";
 import { FilterBar } from "@/components/FilterBar";
 import { applyRecordFilters, EMPTY_FILTERS, hasActiveFilters, type RecordFilters } from "@/components/recordFilters";
+import { StructureSearchDialog } from "@/components/StructureSearchDialog";
+import {
+  STRUCTURE_MODE_PARAM,
+  STRUCTURE_SMILES_PARAM,
+  STRUCTURE_TARGET_PARAM,
+  structureTargetLabel,
+  type StructureSearchValue,
+} from "@/lib/structureSearch";
 
 type AnyRecord = any;
 type DatabasePayload = {
@@ -25,16 +33,23 @@ export function buildDatabaseQuery({
   facet,
   paper,
   search,
+  structure,
 }: {
   status: RecordStatus;
   facet: string;
   paper: string;
   search: string;
+  structure?: StructureSearchValue | null;
 }): string {
   const params = new URLSearchParams({ status });
   if (facet !== "all") params.set("facet", facet);
   if (paper !== "all") params.set("paper", paper);
   if (search.trim()) params.set("search", search.trim());
+  if (structure?.smiles.trim()) {
+    params.set(STRUCTURE_SMILES_PARAM, structure.smiles.trim());
+    params.set(STRUCTURE_TARGET_PARAM, structure.target);
+    params.set(STRUCTURE_MODE_PARAM, structure.mode);
+  }
   return params.toString();
 }
 
@@ -198,6 +213,12 @@ export function filterSources<T extends { title: string }>(papers: T[], query: s
 export async function parseDatabaseResponse(res: Response): Promise<DatabasePayload> {
   if (!res.ok) {
     const body = await res.text().catch(() => "");
+    let apiError: string | null = null;
+    try {
+      const payload = JSON.parse(body) as { error?: unknown };
+      if (typeof payload.error === "string" && payload.error.trim()) apiError = payload.error;
+    } catch {}
+    if (apiError) throw new Error(apiError);
     const snippet = body.replace(/\s+/g, " ").trim().slice(0, 120);
     throw new Error(`Database API returned ${res.status}${snippet ? `: ${snippet}` : ""}`);
   }
@@ -226,6 +247,8 @@ export function DatabaseView({ domain }: { domain: Domain }) {
   const [papers, setPapers] = useState<{ title: string; n: number }[]>([]);
   const [search, setSearch] = useState("");
   const [committedSearch, setCommittedSearch] = useState("");
+  const [structureSearch, setStructureSearch] = useState<StructureSearchValue | null>(null);
+  const [structureDialogOpen, setStructureDialogOpen] = useState(false);
   const [groupByPaper, setGroupByPaper] = useState(true);
   const [units, setUnits] = useState<UnitMode>("raw");
   const [records, setRecords] = useState<AnyRecord[]>([]);
@@ -248,8 +271,8 @@ export function DatabaseView({ domain }: { domain: Domain }) {
   const searchTimeoutRef = useRef<number | null>(null);
 
   const query = useMemo(
-    () => buildDatabaseQuery({ status, facet, paper, search: committedSearch }),
-    [status, facet, paper, committedSearch]
+    () => buildDatabaseQuery({ status, facet, paper, search: committedSearch, structure: structureSearch }),
+    [status, facet, paper, committedSearch, structureSearch]
   );
   const queryKey = `${domain}?${query}`;
   const queryReady = statusReady && isLoadedQueryReady(loadedQuery, queryKey, search, committedSearch);
@@ -348,6 +371,19 @@ export function DatabaseView({ domain }: { domain: Domain }) {
     invalidateQueryInteractions();
     setSearch(next);
   }, [invalidateQueryInteractions]);
+
+  const applyStructureSearch = useCallback((next: StructureSearchValue) => {
+    invalidateQueryInteractions();
+    commitPendingSearch();
+    setStructureSearch(next);
+    setStructureDialogOpen(false);
+  }, [commitPendingSearch, invalidateQueryInteractions]);
+
+  const clearStructureSearch = useCallback(() => {
+    invalidateQueryInteractions();
+    commitPendingSearch();
+    setStructureSearch(null);
+  }, [commitPendingSearch, invalidateQueryInteractions]);
 
   const changeReadinessFilter = useCallback((next: ReviewReadinessFilter) => {
     setReadinessFilter(next);
@@ -625,6 +661,27 @@ export function DatabaseView({ domain }: { domain: Domain }) {
             className="w-full min-w-0 rounded-[8px] border border-ink-200 bg-white py-1.5 pl-9 pr-3 text-xs outline-none transition focus:border-brand-300 focus:ring-2 focus:ring-brand-100 sm:w-64"
           />
         </div>
+        <button
+          type="button"
+          onClick={() => setStructureDialogOpen(true)}
+          className={`inline-flex items-center gap-1.5 rounded-[8px] border px-2.5 py-1.5 text-xs font-semibold transition ${
+            structureSearch
+              ? "border-brand-300 bg-brand-50 text-brand-700"
+              : "border-ink-200 bg-white text-ink-700 hover:border-brand-300 hover:text-brand-700"
+          }`}
+        >
+          <StructureIcon /> 化学结构搜索
+        </button>
+        {structureSearch ? (
+          <button
+            type="button"
+            onClick={clearStructureSearch}
+            title="清除结构筛选"
+            className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-[11px] font-semibold text-brand-700"
+          >
+            {structureTargetLabel(structureSearch.target)} · 精确匹配 <span aria-hidden>×</span>
+          </button>
+        ) : null}
         {refreshing && !loading && (
           <span aria-live="polite" className="font-mono text-[10px] text-ink-400">
             Refreshing…
@@ -919,6 +976,12 @@ export function DatabaseView({ domain }: { domain: Domain }) {
           {paper !== "all" && ` · filtered from ${papers.length}`}
         </span>
       </div>
+      <StructureSearchDialog
+        open={structureDialogOpen}
+        value={structureSearch}
+        onApply={applyStructureSearch}
+        onClose={() => setStructureDialogOpen(false)}
+      />
     </div>
   );
 }
@@ -1538,6 +1601,13 @@ function SearchIcon() {
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400">
       <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.8" />
       <path d="M20 20l-3.2-3.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+function StructureIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <path d="m8 4 4-2 4 2v5l-4 2-4-2V4Zm0 5-4 2v5l4 2 4-2v-5M16 9l4 2v5l-4 2-4-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

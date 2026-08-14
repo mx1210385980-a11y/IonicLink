@@ -18,6 +18,8 @@ import { getModule } from "./modules/registry.server";
 import { parseQuantity, ROOM_TEMPERATURE_RAW, type Dimension, type Quantity } from "./units";
 import { standardizeSubstrate } from "./substrates";
 import { applySurfaceDescriptorsToRecord } from "./surfaceDescriptors";
+import { recordStructureKey } from "./structureSearch.server";
+import type { ExactStructureFilter } from "./structureSearch";
 
 /** JSON-safe provenance patch; `null` explicitly removes a persisted crop. */
 export type FieldProvenancePatch = Omit<FieldProvenance, "figureBox"> & {
@@ -47,7 +49,17 @@ const _dbs = new Map<Domain, Database.Database>();
 const _counters = new Map<Domain, number>();
 
 /** Columns present for every domain. The rest come from `module.promotedColumns`. */
-const SHARED_COLUMNS = ["id", "status", "paper_title", "cation", "anion", "created_at", "payload"];
+const SHARED_COLUMNS = [
+  "id",
+  "status",
+  "paper_title",
+  "cation",
+  "anion",
+  "cation_structure_key",
+  "anion_structure_key",
+  "created_at",
+  "payload",
+];
 
 const JOBS_DDL = `
     CREATE TABLE IF NOT EXISTS jobs (
@@ -105,6 +117,8 @@ function getDb(domain: Domain): Database.Database {
       paper_title  TEXT NOT NULL,
       cation       TEXT NOT NULL,
       anion        TEXT NOT NULL,
+      cation_structure_key TEXT,
+      anion_structure_key  TEXT,
       ${promoted ? promoted + "," : ""}
       created_at   TEXT NOT NULL,
       payload      TEXT NOT NULL
@@ -123,7 +137,25 @@ function getDb(domain: Domain): Database.Database {
   for (const c of mod.promotedColumns) {
     if (!existing.has(c.name)) db.exec(`ALTER TABLE records ADD COLUMN ${c.name} ${c.type}`);
   }
+  let needsStructureBackfill = false;
+  if (!existing.has("cation_structure_key")) {
+    db.exec("ALTER TABLE records ADD COLUMN cation_structure_key TEXT");
+    needsStructureBackfill = true;
+  }
+  if (!existing.has("anion_structure_key")) {
+    db.exec("ALTER TABLE records ADD COLUMN anion_structure_key TEXT");
+    needsStructureBackfill = true;
+  }
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_records_cation_structure
+      ON records(cation_structure_key, status)
+      WHERE cation_structure_key IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_records_anion_structure
+      ON records(anion_structure_key, status)
+      WHERE anion_structure_key IS NOT NULL;
+  `);
   _dbs.set(domain, db);
+  if (needsStructureBackfill) backfillStructureKeys(domain);
   return db;
 }
 
@@ -327,6 +359,8 @@ export interface ListOptions {
   facet?: string;
   /** Restrict to one source paper (exact `paper_title` match). */
   paper?: string;
+  /** Exact canonical molecular identity for one ion position. */
+  structure?: ExactStructureFilter;
 }
 
 export function listRecords(domain: Domain, opts: ListOptions = {}): AnyRecord[] {
@@ -351,6 +385,18 @@ export function listRecords(domain: Domain, opts: ListOptions = {}): AnyRecord[]
     clauses.push("(" + cols.map((c) => `${c} LIKE ?`).join(" OR ") + ")");
     const q = `%${opts.search}%`;
     for (let i = 0; i < cols.length; i++) params.push(q);
+  }
+  if (opts.structure) {
+    if (opts.structure.target === "cation") {
+      clauses.push("cation_structure_key = ?");
+      params.push(opts.structure.key);
+    } else if (opts.structure.target === "anion") {
+      clauses.push("anion_structure_key = ?");
+      params.push(opts.structure.key);
+    } else {
+      clauses.push("(cation_structure_key = ? OR anion_structure_key = ?)");
+      params.push(opts.structure.key, opts.structure.key);
+    }
   }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const rows = db
@@ -401,6 +447,8 @@ function write(db: Database.Database, domain: Domain, rec: AnyRecord): void {
     paper_title: rec.paper.title,
     cation: rec.core.ionicLiquid.cation,
     anion: rec.core.ionicLiquid.anion,
+    cation_structure_key: recordStructureKey(rec, "cation"),
+    anion_structure_key: recordStructureKey(rec, "anion"),
     created_at: rec.createdAt,
     payload: JSON.stringify(rec),
   };
@@ -602,14 +650,67 @@ export function backupDomainDatabase(domain: Domain): string | null {
   const source = dbPath(domain);
   if (!existsSync(source)) return null;
 
-  const db = getDb(domain);
-  db.pragma("wal_checkpoint(TRUNCATE)");
+  const cached = _dbs.get(domain);
+  if (cached) {
+    cached.pragma("wal_checkpoint(TRUNCATE)");
+  } else {
+    const snapshotDb = new Database(source);
+    snapshotDb.pragma("wal_checkpoint(TRUNCATE)");
+    snapshotDb.close();
+  }
   const backupDir = path.join(DATA_DIR, "backups");
   mkdirSync(backupDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const target = path.join(backupDir, `${domain}-${stamp}-${randomUUID().slice(0, 8)}.db`);
   copyFileSync(source, target);
   return target;
+}
+
+export interface StructureKeyBackfillResult {
+  total: number;
+  updated: number;
+  cationIndexed: number;
+  anionIndexed: number;
+  unindexed: { id: string; kind: "cation" | "anion" }[];
+}
+
+/** Idempotently derive exact-search keys from payload SMILES or known ion labels. */
+export function backfillStructureKeys(domain: Domain): StructureKeyBackfillResult {
+  const db = getDb(domain);
+  const rows = db
+    .prepare("SELECT id, payload, cation_structure_key, anion_structure_key FROM records ORDER BY id")
+    .all() as {
+      id: string;
+      payload: string;
+      cation_structure_key: string | null;
+      anion_structure_key: string | null;
+    }[];
+  const update = db.prepare(
+    "UPDATE records SET cation_structure_key = ?, anion_structure_key = ? WHERE id = ?"
+  );
+  let updated = 0;
+  let cationIndexed = 0;
+  let anionIndexed = 0;
+  const unindexed: StructureKeyBackfillResult["unindexed"] = [];
+
+  const tx = db.transaction(() => {
+    for (const row of rows) {
+      const record = rowToRecord(domain, row, db);
+      const cationKey = recordStructureKey(record, "cation");
+      const anionKey = recordStructureKey(record, "anion");
+      if (cationKey) cationIndexed += 1;
+      else unindexed.push({ id: row.id, kind: "cation" });
+      if (anionKey) anionIndexed += 1;
+      else unindexed.push({ id: row.id, kind: "anion" });
+      if (cationKey !== row.cation_structure_key || anionKey !== row.anion_structure_key) {
+        update.run(cationKey, anionKey, row.id);
+        updated += 1;
+      }
+    }
+  });
+  tx();
+
+  return { total: rows.length, updated, cationIndexed, anionIndexed, unindexed };
 }
 
 /* ------------------------------------------------------------------ */

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAppApiSession } from "@/lib/auth.server";
 import { getRecord } from "@/lib/db";
 import { isDomain } from "@/lib/domain";
 import { recordsToCsv } from "@/lib/csv";
@@ -7,6 +8,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest, { params }: { params: { domain: string } }) {
+  const access = await requireAppApiSession(req);
+  if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
   const domain = params.domain;
   let body: unknown;

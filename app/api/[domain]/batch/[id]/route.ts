@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAppApiSession } from "@/lib/auth.server";
 import { commitJob, deleteJob } from "@/lib/db";
 import { isDomain } from "@/lib/domain";
 
@@ -6,6 +7,8 @@ export const runtime = "nodejs";
 
 /** Commit a finished job's candidates into the review queue. */
 export async function POST(req: NextRequest, { params }: { params: { domain: string; id: string } }) {
+  const access = await requireAppApiSession(req);
+  if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
   const body = (await req.json().catch(() => ({}))) as { action?: string; indices?: number[] };
   if (body.action !== "commit") {
@@ -19,6 +22,8 @@ export async function POST(req: NextRequest, { params }: { params: { domain: str
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: { domain: string; id: string } }) {
+  const access = await requireAppApiSession(_req);
+  if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
   return NextResponse.json({ deleted: deleteJob(params.domain, decodeURIComponent(params.id)) });
 }

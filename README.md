@@ -39,12 +39,15 @@ PDF / text   ─▶    Review Queue   ─▶   Checked Database   ─▶  CSV
 - **OpenAI-compatible chat completions** + **@anthropic-ai/sdk fallback** — structured extraction via forced tool-use
 - **unpdf** — serverless-friendly PDF text extraction
 - **smiles-drawer** — 2D structure rendering from SMILES
+- **Ketcher standalone** — browser-based molecular structure editor
+- **OpenChemLib** — canonical molecular-graph keys for indexed exact structure search
 
 ## Run it
 
 ```bash
 npm install
 npm run migrate            # one-time: data/ioniclink.db → data/tribology.db (no-op on fresh installs)
+npm run migrate:structures # optional backup + rebuild of exact-search structure keys
 npm run dev                # http://localhost:3000
 npm test                   # run the standalone node:assert test suite
 npm run check:fast         # lint + TypeScript check

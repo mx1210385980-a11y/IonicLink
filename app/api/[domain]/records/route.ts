@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAppApiSession } from "@/lib/auth.server";
 import { countByStatus, createRecords, listPapers, listRecords, type ListOptions } from "@/lib/db";
 import { isDomain } from "@/lib/domain";
 import type { RecordDraft } from "@/lib/schema";
+import { parseExactStructureSearch, StructureSearchInputError } from "@/lib/structureSearch.server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest, { params }: { params: { domain: string } }) {
+  const access = await requireAppApiSession(req);
+  if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
   const domain = params.domain;
   const sp = req.nextUrl.searchParams;
@@ -19,6 +23,15 @@ export async function GET(req: NextRequest, { params }: { params: { domain: stri
   if (search) opts.search = search;
   const paper = sp.get("paper");
   if (paper) opts.paper = paper;
+  try {
+    const structure = parseExactStructureSearch(sp);
+    if (structure) opts.structure = structure;
+  } catch (error) {
+    if (error instanceof StructureSearchInputError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    throw error;
+  }
 
   return NextResponse.json({
     records: listRecords(domain, opts),
@@ -30,6 +43,8 @@ export async function GET(req: NextRequest, { params }: { params: { domain: stri
 }
 
 export async function POST(req: NextRequest, { params }: { params: { domain: string } }) {
+  const access = await requireAppApiSession(req);
+  if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
   const body = (await req.json()) as { records: RecordDraft[]; status?: "review" | "official" };
   if (!Array.isArray(body.records)) {

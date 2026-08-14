@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
+import { createTestAppSession } from "@/lib/auth.test-helpers";
 import { POST } from "./route";
 
 const providerKeys = [
@@ -12,12 +13,13 @@ const providerKeys = [
 const saved = new Map(providerKeys.map((key) => [key, process.env[key]]));
 
 async function main() {
+  const { cookie } = await createTestAppSession();
   try {
     for (const key of providerKeys) delete process.env[key];
     const response = await POST(
       new NextRequest("http://localhost/api/tribology/extract", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", cookie, origin: "http://localhost" },
         body: JSON.stringify({
           text: "Mock API metadata test. At 298 K, [BMIM][PF6] on mica under a 5 nN load had nanoscale AFM COF = 0.12.",
         }),

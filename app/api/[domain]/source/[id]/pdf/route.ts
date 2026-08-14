@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAppApiSession } from "@/lib/auth.server";
 import { getSource } from "@/lib/db";
 import { isDomain } from "@/lib/domain";
 import { getSourcePdf } from "@/lib/sources";
@@ -7,6 +8,8 @@ export const runtime = "nodejs";
 
 /** Serve the original uploaded PDF, so the curator can open the full source. */
 export async function GET(_req: NextRequest, { params }: { params: { domain: string; id: string } }) {
+  const access = await requireAppApiSession(_req);
+  if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
   const domain = params.domain;
   const id = decodeURIComponent(params.id);

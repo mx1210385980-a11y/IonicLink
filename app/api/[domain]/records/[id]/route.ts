@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAppApiSession } from "@/lib/auth.server";
 import { deleteRecords, updateRecord, type FieldProvenancePatch } from "@/lib/db";
 import { isDomain } from "@/lib/domain";
 import type { ExtractedFields, RecordStatus } from "@/lib/schema";
@@ -6,6 +7,8 @@ import type { ExtractedFields, RecordStatus } from "@/lib/schema";
 export const runtime = "nodejs";
 
 export async function PATCH(req: NextRequest, { params }: { params: { domain: string; id: string } }) {
+  const access = await requireAppApiSession(req);
+  if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
   const body = (await req.json()) as {
     fields?: ExtractedFields;
@@ -20,6 +23,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { domain: st
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: { domain: string; id: string } }) {
+  const access = await requireAppApiSession(_req);
+  if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
   const n = deleteRecords(params.domain, [decodeURIComponent(params.id)]);
   return NextResponse.json({ deleted: n });

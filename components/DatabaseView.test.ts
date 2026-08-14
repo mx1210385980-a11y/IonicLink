@@ -109,6 +109,16 @@ assert.equal(
   "status=official",
   "only committed, non-empty filters enter the server query"
 );
+assert.equal(
+  buildDatabaseQuery({
+    status: "official",
+    facet: "all",
+    paper: "all",
+    search: "",
+    structure: { smiles: "F[P-](F)(F)(F)(F)F", target: "anion", mode: "exact" },
+  }),
+  "status=official&structureSmiles=F%5BP-%5D%28F%29%28F%29%28F%29%28F%29F&structureTarget=anion&structureMode=exact"
+);
 const manyRecords = Array.from({ length: 120 }, (_, index) => ({ id: index + 1 }));
 assert.deepEqual(takeVisibleRecords(manyRecords, VISIBLE_BATCH_SIZE), manyRecords.slice(0, 50));
 assert.deepEqual(takeVisibleRecords(manyRecords, 100), manyRecords.slice(0, 100));

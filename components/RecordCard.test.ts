@@ -171,6 +171,10 @@ assert.match(compactHtml, /data-testid="ion-pill-cation"/);
 assert.match(compactHtml, /data-testid="ion-pill-anion"/);
 assert.match(compactHtml, /data-testid="molecule-view-cation"/);
 assert.match(compactHtml, /data-testid="molecule-view-anion"/);
+assert.match(compactHtml, /data-testid="molecule-name-cation"[^>]*>1-butyl-3-methylimidazolium</);
+assert.match(compactHtml, /data-testid="molecule-name-anion"[^>]*>hexafluorophosphate</);
+assert.doesNotMatch(compactHtml, /label-eyebrow[^>]*>Cation<\/span>/);
+assert.doesNotMatch(compactHtml, /label-eyebrow[^>]*>Anion<\/span>/);
 assert.match(compactHtml, /xl:grid-cols-2/);
 assert.doesNotMatch(compactHtml, /data-testid="ion-orbit-cation"/);
 assert.doesNotMatch(compactHtml, /data-testid="ion-orbit-anion"/);
@@ -365,7 +369,8 @@ unmappedAnionRecord.core.ionicLiquid = {
 };
 const unmappedAnionHtml = renderToStaticMarkup(createElement(RecordCard, { record: unmappedAnionRecord }));
 assert.doesNotMatch(unmappedAnionHtml, />unknown</);
-assert.match(unmappedAnionHtml, />label only</);
+assert.match(unmappedAnionHtml, /data-testid="molecule-name-anion"[^>]*>\[X-TEST\]</);
+assert.doesNotMatch(unmappedAnionHtml, />label only</);
 
 console.log("RecordCard unmapped anion display tests passed");
 

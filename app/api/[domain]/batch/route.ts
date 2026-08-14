@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAppApiSession } from "@/lib/auth.server";
 import {
   clearFinishedJobs,
   createJobs,
@@ -18,6 +19,8 @@ export const maxDuration = 120;
 
 /** Upload one or more PDFs/text files → enqueue jobs → start processing. */
 export async function POST(req: NextRequest, { params }: { params: { domain: string } }) {
+  const access = await requireAppApiSession(req);
+  if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
   const domain = params.domain;
   const form = await req.formData();
@@ -85,6 +88,8 @@ export async function POST(req: NextRequest, { params }: { params: { domain: str
 
 /** Poll the queue. */
 export async function GET(_req: NextRequest, { params }: { params: { domain: string } }) {
+  const access = await requireAppApiSession(_req);
+  if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
   return NextResponse.json({
     jobs: listJobs(params.domain),
@@ -96,6 +101,8 @@ export async function GET(_req: NextRequest, { params }: { params: { domain: str
 
 /** Clear all finished/errored/committed jobs from the queue. */
 export async function DELETE(_req: NextRequest, { params }: { params: { domain: string } }) {
+  const access = await requireAppApiSession(_req);
+  if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
   return NextResponse.json({ cleared: clearFinishedJobs(params.domain) });
 }
