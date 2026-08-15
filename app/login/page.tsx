@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { LoginForm } from "@/components/auth/LoginForm";
-import { getCurrentAppSession, isSelfRegistrationEnabled } from "@/lib/auth.server";
+import { getCurrentAppSession, isAppAuthEnabled, isSelfRegistrationEnabled } from "@/lib/auth.server";
 import { safeAuthRedirect } from "@/lib/auth-redirect";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +13,7 @@ export default async function LoginPage({
 }) {
   const nextValue = Array.isArray(searchParams.next) ? searchParams.next[0] : searchParams.next;
   const nextPath = safeAuthRedirect(nextValue);
+  if (!isAppAuthEnabled()) redirect(nextPath);
   const session = await getCurrentAppSession();
   if (session) redirect(nextPath);
 
