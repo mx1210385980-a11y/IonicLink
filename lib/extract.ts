@@ -100,6 +100,11 @@ interface OpenAIChatCompletion {
   choices?: Array<{ message?: { content?: string | null; tool_calls?: OpenAIToolCall[] } }>;
 }
 
+function extractionTemperature(model: string): number {
+  // Kimi K3 rejects every temperature value except 1.
+  return model.toLowerCase().startsWith("kimi-k3") ? 1 : 0;
+}
+
 function getOpenAIConfig(): OpenAIConfig | null {
   const apiKey = process.env.OPENAI_API_KEY || process.env.openai_api_key;
   const baseURL = process.env.OPENAI_BASE_URL || process.env.openai_base_url;
@@ -125,7 +130,7 @@ async function extractWithOpenAICompatible(
       },
       body: JSON.stringify({
         model,
-        temperature: 0,
+        temperature: extractionTemperature(model),
         max_tokens: 8000,
         messages: [
           { role: "system", content: mod.systemPrompt },
