@@ -22,6 +22,10 @@ const configuredSecret = value("BETTER_AUTH_SECRET");
 const configuredBaseURL = value("BETTER_AUTH_URL");
 const authSecret = configuredSecret ?? DEV_SECRET;
 
+export function isAppAuthEnabled(): boolean {
+  return Boolean(configuredSecret && configuredBaseURL);
+}
+
 function resolvedBaseURL(): string {
   if (!configuredBaseURL) return DEV_BASE_URL;
   try {
@@ -49,6 +53,7 @@ function authTrustedOrigins(): string[] {
 }
 
 export function isSelfRegistrationEnabled(): boolean {
+  if (!isAppAuthEnabled()) return false;
   const configured = value("IONICLINK_ALLOW_SIGNUP");
   if (configured) return configured.toLowerCase() === "true";
   return process.env.NODE_ENV !== "production";
@@ -126,26 +131,30 @@ if (process.env.NODE_ENV !== "production") {
 let authReadyPromise: Promise<void> | null = null;
 
 function validateRuntimeConfig(): void {
-  if (configuredSecret && configuredSecret.length < 32) {
+  const configurationStarted = Boolean(configuredSecret || configuredBaseURL);
+  if (!configurationStarted) return;
+
+  if (!configuredSecret) {
+    throw new Error("BETTER_AUTH_SECRET is required when application authentication is enabled.");
+  }
+  if (configuredSecret.length < 32) {
     throw new Error("BETTER_AUTH_SECRET must contain at least 32 characters.");
   }
-  if (configuredBaseURL) {
-    let parsed: URL;
-    try {
-      parsed = new URL(configuredBaseURL);
-    } catch {
-      throw new Error("BETTER_AUTH_URL must be a valid absolute URL.");
-    }
-    if (parsed.pathname !== "/" || parsed.search || parsed.hash) {
-      throw new Error("BETTER_AUTH_URL must be an origin without a path, query, or hash.");
-    }
-    if (process.env.NODE_ENV === "production" && parsed.protocol !== "https:") {
-      throw new Error("BETTER_AUTH_URL must use HTTPS in production.");
-    }
+  if (!configuredBaseURL) {
+    throw new Error("BETTER_AUTH_URL is required when application authentication is enabled.");
   }
-  if (process.env.NODE_ENV === "production") {
-    if (!configuredSecret) throw new Error("BETTER_AUTH_SECRET is required in production.");
-    if (!configuredBaseURL) throw new Error("BETTER_AUTH_URL is required in production.");
+
+  let parsed: URL;
+  try {
+    parsed = new URL(configuredBaseURL);
+  } catch {
+    throw new Error("BETTER_AUTH_URL must be a valid absolute URL.");
+  }
+  if (parsed.pathname !== "/" || parsed.search || parsed.hash) {
+    throw new Error("BETTER_AUTH_URL must be an origin without a path, query, or hash.");
+  }
+  if (process.env.NODE_ENV === "production" && parsed.protocol !== "https:") {
+    throw new Error("BETTER_AUTH_URL must use HTTPS in production.");
   }
 }
 
@@ -184,9 +193,11 @@ async function ensureBootstrapAdmin(): Promise<void> {
 }
 
 export async function ensureAuthReady(): Promise<void> {
+  validateRuntimeConfig();
+  if (!isAppAuthEnabled()) return;
+
   if (!authReadyPromise) {
     authReadyPromise = (async () => {
-      validateRuntimeConfig();
       const migrations = await getMigrations(auth.options);
       if (migrations.toBeCreated.length || migrations.toBeAdded.length) {
         await migrations.runMigrations();
@@ -209,6 +220,7 @@ export async function ensureAuthReady(): Promise<void> {
 }
 
 export async function getAppSession(requestHeaders: Headers) {
+  if (!isAppAuthEnabled()) return null;
   await ensureAuthReady();
   return auth.api.getSession({ headers: requestHeaders });
 }
@@ -220,6 +232,7 @@ export async function getCurrentAppSession() {
 }
 
 export async function requireAppPageSession(nextPath: string) {
+  if (!isAppAuthEnabled()) return null;
   const requestHeaders = headers();
   const session = await getAppSession(requestHeaders);
   if (!session) {
@@ -230,7 +243,7 @@ export async function requireAppPageSession(nextPath: string) {
 }
 
 type AppApiAccess =
-  | { ok: true; session: NonNullable<Awaited<ReturnType<typeof getAppSession>>> }
+  | { ok: true; session: NonNullable<Awaited<ReturnType<typeof getAppSession>>> | null }
   | { ok: false; response: NextResponse };
 
 function crossOriginResponse(request: Request): NextResponse | null {
@@ -254,6 +267,7 @@ function crossOriginResponse(request: Request): NextResponse | null {
 export async function requireAppApiSession(request: Request): Promise<AppApiAccess> {
   const crossOrigin = crossOriginResponse(request);
   if (crossOrigin) return { ok: false, response: crossOrigin };
+  if (!isAppAuthEnabled()) return { ok: true, session: null };
 
   try {
     const session = await getAppSession(request.headers);
