@@ -14,11 +14,11 @@ async function main() {
     let requestBody: Record<string, unknown> | undefined;
     globalThis.fetch = async (_input, init) => {
       requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-      if (requestBody.temperature !== 1) {
+      if (requestBody.tool_choice !== "required") {
         return new Response(
           JSON.stringify({
             error: {
-              message: "invalid temperature: only 1 is allowed for this model",
+              message: "tool_choice 'specified' is incompatible with thinking enabled",
               type: "invalid_request_error",
             },
           }),
@@ -39,7 +39,10 @@ async function main() {
 
     const result = await extractRecords("tribology", "A minimal paper excerpt.");
 
-    assert.equal(requestBody?.temperature, 1);
+    assert.equal(requestBody?.tool_choice, "required");
+    assert.equal("temperature" in (requestBody ?? {}), false);
+    assert.equal(requestBody?.max_completion_tokens, 8000);
+    assert.equal("max_tokens" in (requestBody ?? {}), false);
     assert.equal(result.source, "openai-compatible");
     assert.equal(result.model, "kimi-k3");
   } finally {

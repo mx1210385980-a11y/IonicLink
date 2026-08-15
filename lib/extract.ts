@@ -100,9 +100,8 @@ interface OpenAIChatCompletion {
   choices?: Array<{ message?: { content?: string | null; tool_calls?: OpenAIToolCall[] } }>;
 }
 
-function extractionTemperature(model: string): number {
-  // Kimi K3 rejects every temperature value except 1.
-  return model.toLowerCase().startsWith("kimi-k3") ? 1 : 0;
+function isKimiK3(model: string): boolean {
+  return model.toLowerCase().startsWith("kimi-k3");
 }
 
 function getOpenAIConfig(): OpenAIConfig | null {
@@ -119,6 +118,7 @@ async function extractWithOpenAICompatible(
   mod: Module<any, any>
 ): Promise<any[]> {
   const body = text.slice(0, 120_000);
+  const kimiK3 = isKimiK3(model);
 
   let response: Response;
   try {
@@ -130,8 +130,7 @@ async function extractWithOpenAICompatible(
       },
       body: JSON.stringify({
         model,
-        temperature: extractionTemperature(model),
-        max_tokens: 8000,
+        ...(kimiK3 ? { max_completion_tokens: 8000 } : { temperature: 0, max_tokens: 8000 }),
         messages: [
           { role: "system", content: mod.systemPrompt },
           { role: "user", content: mod.userPrompt(body) },
@@ -146,7 +145,9 @@ async function extractWithOpenAICompatible(
             },
           },
         ],
-        tool_choice: { type: "function", function: { name: mod.toolName } },
+        tool_choice: kimiK3
+          ? "required"
+          : { type: "function", function: { name: mod.toolName } },
       }),
     });
   } catch (err) {
