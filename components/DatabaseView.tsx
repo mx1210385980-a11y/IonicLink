@@ -606,6 +606,9 @@ export function DatabaseView({ domain }: { domain: Domain }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Link href={`/${domain}/library`} className="btn" title="Manage source documents and all linked records">
+            Manage documents
+          </Link>
           <button
             type="button"
             onClick={exportVisible}

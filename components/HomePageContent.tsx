@@ -81,7 +81,7 @@ function WorkspaceCard({
           Review queue
         </Link>
         <Link className="transition hover:text-brand-700" href={`/${domain}/library`}>
-          Library
+          Documents
         </Link>
       </nav>
 

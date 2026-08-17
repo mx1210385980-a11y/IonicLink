@@ -27,7 +27,7 @@ const SECTION_LINKS: readonly {
   { segment: "extract", label: "Extract", icon: <ExtractIcon /> },
   { segment: "database", label: "Database", icon: <DatabaseIcon /> },
   { segment: "design", label: "Model preview", icon: <ModelIcon /> },
-  { segment: "library", label: "Library", icon: <LibraryIcon /> },
+  { segment: "library", label: "Documents", icon: <LibraryIcon /> },
 ];
 
 export function WorkspaceNavigationRail() {
