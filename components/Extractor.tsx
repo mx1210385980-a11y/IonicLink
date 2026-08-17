@@ -4,6 +4,13 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DatasetImporter } from "@/components/DatasetImporter";
 import { ExtractionWorkspaceView } from "@/components/ExtractionWorkspaceView";
+import {
+  enabledPendingPaperFiles,
+  isSupportedPaper,
+  mergePendingPaperUploads,
+  PaperUploadDialog,
+  type PendingPaperUpload,
+} from "@/components/PaperUploadDialog";
 import { getClientModule } from "@/components/registry.client";
 import { RequestError, requestErrorMessage, requestJson } from "@/components/request";
 import { DEFAULT_DOMAIN, type Domain } from "@/lib/domain";
@@ -408,6 +415,8 @@ export function Extractor({
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [pendingUploads, setPendingUploads] = useState<PendingPaperUpload[]>([]);
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshGenerationRef = useRef(0);
   const refreshRequestRef = useRef<AbortController | null>(null);
@@ -472,6 +481,9 @@ export function Extractor({
     setInputMode(null);
     setShowInsights(false);
     setPage(1);
+    setPendingUploads([]);
+    setUploadDialogOpen(false);
+    setError(null);
     return () => {
       refreshGenerationRef.current += 1;
       refreshRequestRef.current?.abort();
@@ -495,8 +507,21 @@ export function Extractor({
     };
   }, [refresh]);
 
-  const uploadFiles = async (files: FileList | File[]) => {
+  const stagePaperFiles = (files: FileList | File[]) => {
     const list = Array.from(files);
+    if (list.length === 0 || busy || processing) return;
+    const supported = list.filter(isSupportedPaper);
+    if (supported.length === 0) {
+      setError("Choose a PDF or TXT file to prepare an extraction.");
+      return;
+    }
+    setError(null);
+    setPendingUploads((current) => mergePendingPaperUploads(current, supported));
+    setUploadDialogOpen(true);
+  };
+
+  const analyzePendingFiles = async () => {
+    const list = enabledPendingPaperFiles(pendingUploads);
     if (list.length === 0 || busy || processing) return;
     setBusy(true);
     setError(null);
@@ -510,6 +535,8 @@ export function Extractor({
         "Could not upload files"
       );
       setSkipped(data.skipped?.length ? data.skipped : null);
+      setPendingUploads([]);
+      setUploadDialogOpen(false);
       try {
         await refresh();
       } catch (refreshError) {
@@ -521,6 +548,13 @@ export function Extractor({
       setBusy(false);
     }
   };
+
+  const cancelPendingUploads = useCallback(() => {
+    if (busy) return;
+    setPendingUploads([]);
+    setUploadDialogOpen(false);
+    setError(null);
+  }, [busy]);
 
   const submitText = async () => {
     if (!text.trim() || busy || processing) return;
@@ -730,85 +764,104 @@ export function Extractor({
   }, [page, totalPages]);
 
   return (
-    <ExtractionWorkspaceView
-      domain={domain}
-      live={live}
-      jobs={jobs}
-      pageJobs={pageJobs}
-      filteredCount={filteredJobs.length}
-      counts={counts}
-      clearableCount={clearableCount}
-      filterCounts={filterCounts}
-      fileFilter={fileFilter}
-      onFilterChange={(filter) => {
-        setFileFilter(filter);
-        setPage(1);
-      }}
-      query={query}
-      onQueryChange={(value) => {
-        setQuery(value);
-        setPage(1);
-      }}
-      inputMode={inputMode}
-      onInputModeChange={setInputMode}
-      showInsights={showInsights}
-      onToggleInsights={() => setShowInsights((current) => !current)}
-      busy={busy}
-      processing={processing}
-      over={over}
-      onDragStateChange={setOver}
-      onUploadFiles={uploadFiles}
-      onCommitAll={commitAll}
-      onClearFinished={clearFinished}
-      onRefresh={manualRefresh}
-      text={text}
-      onTextChange={setText}
-      onSubmitText={submitText}
-      datasetPanel={<DatasetImporter domain={domain} />}
-      insightsPanel={
-        <>
-          <QueueProgress jobs={jobs} draining={draining} concurrency={concurrency} />
-          <HistoryProgress history={history} />
-        </>
-      }
-      notices={
-        error || skipped ? (
+    <>
+      <ExtractionWorkspaceView
+        domain={domain}
+        live={live}
+        jobs={jobs}
+        pageJobs={pageJobs}
+        filteredCount={filteredJobs.length}
+        counts={counts}
+        clearableCount={clearableCount}
+        filterCounts={filterCounts}
+        fileFilter={fileFilter}
+        onFilterChange={(filter) => {
+          setFileFilter(filter);
+          setPage(1);
+        }}
+        query={query}
+        onQueryChange={(value) => {
+          setQuery(value);
+          setPage(1);
+        }}
+        inputMode={inputMode}
+        onInputModeChange={setInputMode}
+        showInsights={showInsights}
+        onToggleInsights={() => setShowInsights((current) => !current)}
+        busy={busy}
+        processing={processing}
+        over={over}
+        onDragStateChange={setOver}
+        onUploadFiles={stagePaperFiles}
+        onCommitAll={commitAll}
+        onClearFinished={clearFinished}
+        onRefresh={manualRefresh}
+        text={text}
+        onTextChange={setText}
+        onSubmitText={submitText}
+        datasetPanel={<DatasetImporter domain={domain} />}
+        insightsPanel={
           <>
-            {error && <RequestError>{error}</RequestError>}
-            {skipped && <SkipNotice skipped={skipped} onDismiss={dismissSkipped} />}
+            <QueueProgress jobs={jobs} draining={draining} concurrency={concurrency} />
+            <HistoryProgress history={history} />
           </>
-        ) : null
-      }
-      committedNotice={counts.committed > 0 ? <CommittedJobsNotice domain={domain} /> : null}
-      sortDirection={sortDirection}
-      onToggleSort={() => setSortDirection((current) => current === "asc" ? "desc" : "asc")}
-      expanded={expanded}
-      selection={selection}
-      onToggleExpand={toggleExpand}
-      onSetAll={setAll}
-      onRemove={remove}
-      onCommit={commit}
-      renderStatus={(status) => <StatusPill status={status} />}
-      renderFileIcon={() => <FileIcon />}
-      renderStageTrack={(job) => <JobStageTrack status={job.status} filename={job.filename} />}
-      renderCandidate={(job, index, isSelected) => (
-        <Card
-          key={index}
-          record={toPreview(job.candidates[index], index)}
-          domain={domain}
-          selected={isSelected}
-          onToggle={() => toggleCandidate(job.id, index, job.candidates.length)}
-        />
-      )}
-      currentPage={currentPage}
-      totalPages={totalPages}
-      pageSize={pageSize}
-      onPageChange={setPage}
-      onPageSizeChange={(size) => {
-        setPageSize(size);
-        setPage(1);
-      }}
-    />
+        }
+        notices={
+          error || skipped ? (
+            <>
+              {error && <RequestError>{error}</RequestError>}
+              {skipped && <SkipNotice skipped={skipped} onDismiss={dismissSkipped} />}
+            </>
+          ) : null
+        }
+        committedNotice={counts.committed > 0 ? <CommittedJobsNotice domain={domain} /> : null}
+        sortDirection={sortDirection}
+        onToggleSort={() => setSortDirection((current) => current === "asc" ? "desc" : "asc")}
+        expanded={expanded}
+        selection={selection}
+        onToggleExpand={toggleExpand}
+        onSetAll={setAll}
+        onRemove={remove}
+        onCommit={commit}
+        renderStatus={(status) => <StatusPill status={status} />}
+        renderFileIcon={() => <FileIcon />}
+        renderStageTrack={(job) => <JobStageTrack status={job.status} filename={job.filename} />}
+        renderCandidate={(job, index, isSelected) => (
+          <Card
+            key={index}
+            record={toPreview(job.candidates[index], index)}
+            domain={domain}
+            selected={isSelected}
+            onToggle={() => toggleCandidate(job.id, index, job.candidates.length)}
+          />
+        )}
+        currentPage={currentPage}
+        totalPages={totalPages}
+        pageSize={pageSize}
+        onPageChange={setPage}
+        onPageSizeChange={(size) => {
+          setPageSize(size);
+          setPage(1);
+        }}
+      />
+      <PaperUploadDialog
+        open={uploadDialogOpen}
+        items={pendingUploads}
+        busy={busy}
+        error={uploadDialogOpen ? error : null}
+        onAddFiles={stagePaperFiles}
+        onToggle={(id) => {
+          setPendingUploads((current) => current.map((item) => (
+            item.id === id ? { ...item, enabled: !item.enabled } : item
+          )));
+        }}
+        onRemove={(id) => {
+          setPendingUploads((current) => current.filter((item) => item.id !== id));
+        }}
+        onCancel={cancelPendingUploads}
+        onAnalyze={analyzePendingFiles}
+      />
+    </>
   );
 }
 
