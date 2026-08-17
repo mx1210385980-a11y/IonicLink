@@ -11,10 +11,9 @@ import {
   PaperUploadDialog,
   type PendingPaperUpload,
 } from "@/components/PaperUploadDialog";
-import { getClientModule } from "@/components/registry.client";
 import { RequestError, requestErrorMessage, requestJson } from "@/components/request";
 import { DEFAULT_DOMAIN, type Domain } from "@/lib/domain";
-import type { BatchJob, JobHistorySummary, JobStatus, RecordDraft } from "@/lib/schema";
+import type { BatchJob, JobHistorySummary, JobStatus } from "@/lib/schema";
 
 type QueuePayload = {
   jobs: BatchJob[];
@@ -240,65 +239,6 @@ export function QueueProgress({
   );
 }
 
-export type JobStageState = "done" | "current" | "pending" | "error";
-
-const JOB_STAGE_LABELS = ["Received", "Extracting", "Candidates", "Review"] as const;
-const JOB_STAGE_BY_STATUS: Record<JobStatus, readonly JobStageState[]> = {
-  queued: ["current", "pending", "pending", "pending"],
-  extracting: ["done", "current", "pending", "pending"],
-  done: ["done", "done", "current", "pending"],
-  committed: ["done", "done", "done", "current"],
-  error: ["done", "error", "pending", "pending"],
-};
-
-export function jobStageStates(status: JobStatus): readonly JobStageState[] {
-  return JOB_STAGE_BY_STATUS[status];
-}
-
-const JOB_STAGE_TONE: Record<JobStageState, string> = {
-  done: "border-brand-300 bg-brand-100 text-brand-800",
-  current: "border-amber-300 bg-amber-100 text-amber-900",
-  pending: "border-slate-200 bg-white text-ink-400",
-  error: "border-rose-300 bg-rose-100 text-rose-800",
-};
-
-const JOB_STAGE_A11Y: Record<JobStageState, string> = {
-  done: "complete",
-  current: "current",
-  pending: "pending",
-  error: "failed",
-};
-
-export function JobStageTrack({ status, filename }: { status: JobStatus; filename: string }) {
-  const states = jobStageStates(status);
-  return (
-    <div
-      role="group"
-      aria-label={`${filename} progress`}
-      data-testid="job-stage-track"
-      className="px-5 pb-3"
-    >
-      <ol className="grid grid-cols-4 gap-1.5">
-        {JOB_STAGE_LABELS.map((label, index) => {
-          const state = states[index];
-          return (
-            <li
-              key={label}
-              aria-current={state === "current" ? "step" : undefined}
-              aria-label={`${label}: ${JOB_STAGE_A11Y[state]}`}
-              data-stage={label.toLowerCase()}
-              data-state={state}
-              className={`min-w-0 rounded-md border px-2 py-1 text-[10px] font-semibold ${JOB_STAGE_TONE[state]}`}
-            >
-              <span className="block truncate">{label}</span>
-            </li>
-          );
-        })}
-      </ol>
-    </div>
-  );
-}
-
 export function queueRefreshIsCurrent(
   generation: number,
   currentGeneration: number,
@@ -395,7 +335,6 @@ export function Extractor({
   domain?: Domain;
   live?: boolean | null;
 }) {
-  const Card = getClientModule(domain).Card;
   const [jobs, setJobs] = useState<BatchJob[]>([]);
   const [history, setHistory] = useState<JobHistorySummary>(EMPTY_JOB_HISTORY);
   const [draining, setDraining] = useState(false);
@@ -406,8 +345,6 @@ export function Extractor({
   const [over, setOver] = useState(false);
   const [text, setText] = useState("");
   const [skipped, setSkipped] = useState<SkippedFile[] | null>(null);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [selection, setSelection] = useState<Record<string, Set<number>>>({});
   const [fileFilter, setFileFilter] = useState<ExtractionFileFilter>("all");
   const [query, setQuery] = useState("");
   const [inputMode, setInputMode] = useState<"text" | "dataset" | null>(null);
@@ -474,8 +411,6 @@ export function Extractor({
     setJobs([]);
     setHistory(EMPTY_JOB_HISTORY);
     setDraining(false);
-    setExpanded(new Set());
-    setSelection({});
     setFileFilter("all");
     setQuery("");
     setInputMode(null);
@@ -582,30 +517,6 @@ export function Extractor({
     }
   };
 
-  const toggleExpand = (job: BatchJob) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(job.id)) {
-        next.delete(job.id);
-      } else {
-        next.add(job.id);
-        setSelection((s) =>
-          s[job.id] ? s : { ...s, [job.id]: new Set(job.candidates.map((_, i) => i)) }
-        );
-      }
-      return next;
-    });
-
-  const toggleCandidate = (jobId: string, idx: number, total: number) =>
-    setSelection((prev) => {
-      const cur = new Set(prev[jobId] ?? Array.from({ length: total }, (_, i) => i));
-      cur.has(idx) ? cur.delete(idx) : cur.add(idx);
-      return { ...prev, [jobId]: cur };
-    });
-
-  const setAll = (jobId: string, total: number, all: boolean) =>
-    setSelection((prev) => ({ ...prev, [jobId]: new Set(all ? Array.from({ length: total }, (_, i) => i) : []) }));
-
   const runQueueAction = async (
     key: string,
     fallback: string,
@@ -632,32 +543,6 @@ export function Extractor({
     } finally {
       setProcessing(null);
     }
-  };
-
-  const commit = async (job: BatchJob) => {
-    const sel = selection[job.id] ?? new Set(job.candidates.map((_, i) => i));
-    if (sel.size === 0) return;
-    await runQueueAction(
-      `commit:${job.id}`,
-      "Could not commit this job. Please try again.",
-      "The selected candidates were committed",
-      async () => {
-        await requestJson(
-          `/api/${domain}/batch/${encodeURIComponent(job.id)}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "commit", indices: [...sel] }),
-          },
-          "Could not commit this job"
-        );
-      },
-      () => setExpanded((prev) => {
-        const next = new Set(prev);
-        next.delete(job.id);
-        return next;
-      })
-    );
   };
 
   const commitAll = async () => {
@@ -817,24 +702,9 @@ export function Extractor({
         committedNotice={counts.committed > 0 ? <CommittedJobsNotice domain={domain} /> : null}
         sortDirection={sortDirection}
         onToggleSort={() => setSortDirection((current) => current === "asc" ? "desc" : "asc")}
-        expanded={expanded}
-        selection={selection}
-        onToggleExpand={toggleExpand}
-        onSetAll={setAll}
         onRemove={remove}
-        onCommit={commit}
         renderStatus={(status) => <StatusPill status={status} />}
         renderFileIcon={() => <FileIcon />}
-        renderStageTrack={(job) => <JobStageTrack status={job.status} filename={job.filename} />}
-        renderCandidate={(job, index, isSelected) => (
-          <Card
-            key={index}
-            record={toPreview(job.candidates[index], index)}
-            domain={domain}
-            selected={isSelected}
-            onToggle={() => toggleCandidate(job.id, index, job.candidates.length)}
-          />
-        )}
         currentPage={currentPage}
         totalPages={totalPages}
         pageSize={pageSize}
@@ -875,10 +745,6 @@ export function CommittedJobsNotice({ domain }: { domain: Domain }) {
       .
     </div>
   );
-}
-
-function toPreview(c: RecordDraft, i: number): any {
-  return { ...c, id: `~${String(i + 1).padStart(3, "0")}`, status: "review", createdAt: "" };
 }
 
 function StatusPill({ status }: { status: JobStatus }) {

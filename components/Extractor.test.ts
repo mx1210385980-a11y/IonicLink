@@ -11,8 +11,6 @@ import {
   HistoryProgress,
   jobHistoryFromPayload,
   jobMatchesFileFilter,
-  JobStageTrack,
-  jobStageStates,
   mutationRefreshFailureMessage,
   QueueProgress,
   queueRefreshIsCurrent,
@@ -223,24 +221,5 @@ const sampledWithoutMedianHtml = renderToStaticMarkup(
 );
 assert.match(sampledWithoutMedianHtml, /Median Queue wait/);
 assert.match(sampledWithoutMedianHtml, /— \(n=2\)/, "sample-size gating remains explicit when a median is unavailable");
-
-const expectedStages: Record<JobStatus, readonly string[]> = {
-  queued: ["current", "pending", "pending", "pending"],
-  extracting: ["done", "current", "pending", "pending"],
-  done: ["done", "done", "current", "pending"],
-  error: ["done", "error", "pending", "pending"],
-  committed: ["done", "done", "done", "current"],
-};
-for (const status of statuses) {
-  assert.deepEqual(jobStageStates(status), expectedStages[status], `${status} maps to the expected four-stage track`);
-}
-
-const errorTrackHtml = renderToStaticMarkup(
-  createElement(JobStageTrack, { status: "error", filename: "failed-paper.pdf" })
-);
-assert.match(errorTrackHtml, /role="group"/);
-assert.match(errorTrackHtml, /aria-label="failed-paper.pdf progress"/);
-assert.match(errorTrackHtml, /data-stage="extracting" data-state="error"/, "errors branch from Extracting");
-assert.match(errorTrackHtml, /aria-label="Extracting: failed"/, "the failure is explicit to screen readers");
 
 console.log("Extractor tests passed");

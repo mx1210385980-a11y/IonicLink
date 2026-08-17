@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import type { Domain } from "@/lib/domain";
 import type { BatchJob, JobStatus } from "@/lib/schema";
 
@@ -65,16 +65,9 @@ export interface ExtractionWorkspaceViewProps {
   committedNotice: ReactNode;
   sortDirection: "asc" | "desc";
   onToggleSort: () => void;
-  expanded: Set<string>;
-  selection: Record<string, Set<number>>;
-  onToggleExpand: (job: BatchJob) => void;
-  onSetAll: (jobId: string, total: number, all: boolean) => void;
   onRemove: (jobId: string) => void;
-  onCommit: (job: BatchJob) => void;
   renderStatus: (status: JobStatus) => ReactNode;
   renderFileIcon: () => ReactNode;
-  renderCandidate: (job: BatchJob, index: number, selected: boolean) => ReactNode;
-  renderStageTrack: (job: BatchJob) => ReactNode;
   currentPage: number;
   totalPages: number;
   pageSize: number;
@@ -116,16 +109,9 @@ export function ExtractionWorkspaceView({
   committedNotice,
   sortDirection,
   onToggleSort,
-  expanded,
-  selection,
-  onToggleExpand,
-  onSetAll,
   onRemove,
-  onCommit,
   renderStatus,
   renderFileIcon,
-  renderCandidate,
-  renderStageTrack,
   currentPage,
   totalPages,
   pageSize,
@@ -325,14 +311,13 @@ export function ExtractionWorkspaceView({
         {notices && <div className="space-y-2 border-b border-[#e9edf5] px-5 py-3 lg:px-7">{notices}</div>}
 
         <div className="min-h-[28rem] flex-1 overflow-auto">
-          <table className="w-full min-w-[1180px] table-fixed border-separate border-spacing-0 text-left">
+          <table className="w-full min-w-[1100px] table-fixed border-separate border-spacing-0 text-left">
             <colgroup>
-              <col className="w-[82px]" /><col className="w-[285px]" /><col className="w-[185px]" /><col className="w-[105px]" />
+              <col className="w-[305px]" /><col className="w-[185px]" /><col className="w-[105px]" />
               <col className="w-[190px]" /><col className="w-[170px]" /><col className="w-[170px]" /><col className="w-[165px]" />
             </colgroup>
             <thead className="sticky top-0 z-10 bg-[#f5f7fd] text-[#818baa]">
               <tr>
-                <th scope="col" className="h-14 border-b border-[#e9edf5] px-4 text-xs font-medium"><span className="sr-only">Select or expand</span></th>
                 <th scope="col" className="h-14 border-b border-[#e9edf5] px-3 text-xs font-medium">File name</th>
                 <th scope="col" className="h-14 border-b border-[#e9edf5] px-3 text-xs font-medium">Extraction status</th>
                 <th scope="col" className="h-14 border-b border-[#e9edf5] px-3 text-center text-xs font-medium">Records</th>
@@ -347,36 +332,8 @@ export function ExtractionWorkspaceView({
               </tr>
             </thead>
             <tbody className="bg-white">
-              {pageJobs.map((job) => {
-                const isOpen = expanded.has(job.id);
-                const selected = selection[job.id];
-                const selectedCount = selected ? selected.size : job.recordCount;
-                const allSelected = job.status === "done" && job.candidates.length > 0 && selectedCount === job.candidates.length;
-                return (
-                  <Fragment key={job.id}>
-                    <tr className="group h-24 transition hover:bg-[#fbfcff]">
-                      <td className="border-b border-[#edf0f6] px-4">
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => job.status === "done" && onToggleExpand(job)}
-                            disabled={job.status !== "done"}
-                            aria-label={`${isOpen ? "Collapse" : "Expand"} ${job.filename}`}
-                            aria-expanded={job.status === "done" ? isOpen : undefined}
-                            className="grid h-8 w-8 place-items-center rounded-lg text-[#91a0bd] transition hover:bg-[#edf3ff] hover:text-[#2456d6] focus:outline-none focus:ring-2 focus:ring-[#b9cbff] disabled:cursor-default disabled:opacity-35"
-                          >
-                            <ChevronIcon open={isOpen} />
-                          </button>
-                          <input
-                            type="checkbox"
-                            checked={allSelected}
-                            disabled={job.status !== "done" || job.candidates.length === 0}
-                            onChange={(event) => onSetAll(job.id, job.candidates.length, event.target.checked)}
-                            aria-label={`Select all candidates from ${job.filename}`}
-                            className="h-4 w-4 rounded border-[#ccd5e5] accent-[#2456d6] disabled:opacity-35"
-                          />
-                        </div>
-                      </td>
+              {pageJobs.map((job) => (
+                    <tr key={job.id} className="group h-24 transition hover:bg-[#fbfcff]">
                       <td className="border-b border-[#edf0f6] px-3">
                         <div className="flex min-w-0 items-center gap-3">
                           {renderFileIcon()}
@@ -394,11 +351,6 @@ export function ExtractionWorkspaceView({
                       <td className="border-b border-[#edf0f6] px-3 font-mono text-[11px] text-[#4a566e] tnum">{formatJobTime(job.completedAt ?? job.committedAt)}</td>
                       <td className="border-b border-[#edf0f6] px-3">
                         <div className="flex items-center justify-end gap-2">
-                          {job.status === "done" && (
-                            <button type="button" onClick={() => onToggleExpand(job)} className="min-h-9 rounded-xl border border-[#dbe3f2] bg-white px-3 text-[11px] font-semibold text-[#2456d6] transition hover:border-[#9eb4eb] hover:bg-[#f4f7ff] focus:outline-none focus:ring-2 focus:ring-[#b9cbff]">
-                              {isOpen ? "Hide review" : `Review ${job.recordCount}`}
-                            </button>
-                          )}
                           {job.status === "committed" && <Link href={`/${domain}/database?status=review`} className="min-h-9 rounded-xl border border-[#dbe3f2] bg-white px-3 py-2 text-[11px] font-semibold text-[#2456d6] transition hover:border-[#9eb4eb] hover:bg-[#f4f7ff]">Open review</Link>}
                           <button
                             type="button"
@@ -412,43 +364,11 @@ export function ExtractionWorkspaceView({
                         </div>
                       </td>
                     </tr>
-
-                    {isOpen && job.status === "done" && (
-                      <tr>
-                        <td colSpan={8} className="border-b border-[#e3e9f3] bg-[#f8faff] px-5 py-5">
-                          <div className="rounded-2xl border border-[#e2e8f2] bg-white py-4 shadow-[0_8px_24px_rgba(18,52,112,0.05)]">
-                            <div className="flex flex-wrap items-center justify-between gap-3 px-5">
-                              <span className="text-xs text-ink-700">{selectedCount} of {job.candidates.length} selected{job.model ? ` · ${job.model}` : ""}</span>
-                              {job.source === "mock" && <span role="status" className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800">Demo candidates · review only</span>}
-                              <div className="flex items-center gap-2">
-                                <button type="button" onClick={() => onSetAll(job.id, job.candidates.length, true)} className="text-xs font-medium text-ink-700 hover:text-brand-700">Select all</button>
-                                <button type="button" onClick={() => onSetAll(job.id, job.candidates.length, false)} className="text-xs font-medium text-ink-700 hover:text-brand-700">None</button>
-                                <button
-                                  type="button"
-                                  onClick={() => onCommit(job)}
-                                  disabled={selectedCount === 0 || controlsDisabled}
-                                  title={job.source === "mock" ? "Demo candidates can be reviewed, but cannot be published as Checked records." : undefined}
-                                  className="inline-flex min-h-9 items-center rounded-xl bg-[#2456d6] px-3 text-xs font-semibold text-white hover:bg-[#1847c2] disabled:cursor-not-allowed disabled:opacity-40"
-                                >
-                                  Commit {selectedCount} to Review →
-                                </button>
-                              </div>
-                            </div>
-                            {renderStageTrack(job)}
-                            <div className="space-y-3 px-5">
-                              {job.candidates.map((_, index) => renderCandidate(job, index, (selected ?? new Set(job.candidates.map((__, candidateIndex) => candidateIndex))).has(index)))}
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                );
-              })}
+              ))}
 
               {pageJobs.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="h-[28rem] border-b border-[#edf0f6] px-6 text-center">
+                  <td colSpan={7} className="h-[28rem] border-b border-[#edf0f6] px-6 text-center">
                     <div className="mx-auto flex max-w-sm flex-col items-center">
                       <span className="grid h-14 w-14 place-items-center rounded-2xl bg-[#f2f5fb] text-[#8ea0c1]"><EmptyFilesIcon /></span>
                       <h2 className="mt-4 text-base font-semibold text-[#263653]">{jobs.length === 0 ? "No extraction files yet" : "No files in this view"}</h2>
@@ -548,10 +468,6 @@ function RefreshIcon({ spinning }: { spinning: boolean }) {
 
 function SortIcon({ direction }: { direction: "asc" | "desc" }) {
   return <svg className={direction === "asc" ? "rotate-180" : ""} width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden><path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-}
-
-function ChevronIcon({ open }: { open: boolean }) {
-  return <svg className={`transition-transform ${open ? "rotate-90" : ""}`} width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden><path d="M5 2.5L9.5 7 5 11.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
 function TrashIcon() {
