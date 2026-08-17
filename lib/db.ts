@@ -943,6 +943,63 @@ export function getSource(domain: Domain, id: string): SourceDoc | null {
   return row ? (JSON.parse(row.payload) as SourceDoc) : null;
 }
 
+export interface SourceCascadeDeleteResult {
+  sourceId: string;
+  filename: string;
+  deletedJobs: number;
+  deletedJobEvents: number;
+  deletedRecords: number;
+}
+
+function payloadSourceId(payload: string): string | null {
+  try {
+    const value = (JSON.parse(payload) as { sourceId?: unknown }).sourceId;
+    return typeof value === "string" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Delete every database row owned by one uploaded source in one transaction. */
+export function deleteSourceCascadeData(domain: Domain, sourceId: string): SourceCascadeDeleteResult | null {
+  const db = getDb(domain);
+  const tx = db.transaction(() => {
+    const source = db.prepare("SELECT filename FROM sources WHERE id = ?").get(sourceId) as
+      | { filename: string }
+      | undefined;
+    if (!source) return null;
+
+    const jobIds = (db.prepare("SELECT id, payload FROM jobs").all() as { id: string; payload: string }[])
+      .filter((row) => payloadSourceId(row.payload) === sourceId)
+      .map((row) => row.id);
+    const recordIds = (db.prepare("SELECT id, payload FROM records").all() as { id: string; payload: string }[])
+      .filter((row) => payloadSourceId(row.payload) === sourceId)
+      .map((row) => row.id);
+
+    const deleteEvents = db.prepare("DELETE FROM job_events WHERE job_id = ?");
+    const deleteJobRow = db.prepare("DELETE FROM jobs WHERE id = ?");
+    const deleteRecordRow = db.prepare("DELETE FROM records WHERE id = ?");
+    let deletedJobEvents = 0;
+    let deletedJobs = 0;
+    let deletedRecords = 0;
+    for (const jobId of jobIds) {
+      deletedJobEvents += deleteEvents.run(jobId).changes;
+      deletedJobs += deleteJobRow.run(jobId).changes;
+    }
+    for (const recordId of recordIds) deletedRecords += deleteRecordRow.run(recordId).changes;
+    db.prepare("DELETE FROM sources WHERE id = ?").run(sourceId);
+
+    return {
+      sourceId,
+      filename: source.filename,
+      deletedJobs,
+      deletedJobEvents,
+      deletedRecords,
+    };
+  });
+  return tx();
+}
+
 /**
  * Find an already-uploaded source by DOI — the upload duplicate check.
  * Sources stored before DOIs were captured compute theirs lazily from the

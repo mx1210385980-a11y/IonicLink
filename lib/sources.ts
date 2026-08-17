@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { Domain } from "./domain";
-import { createSource } from "./db";
+import { createSource, deleteSourceCascadeData, getDataDir, type SourceCascadeDeleteResult } from "./db";
 import { extractDoiFromPages } from "./doi";
 import { findQuoteBoxes, type EvidenceBoxes, type TextSpan } from "./evidence";
 import { pdfPageTextSpans, pdfToPages, pagesToTaggedText, renderPdfPage } from "./pdf";
@@ -18,7 +18,7 @@ import { pdfPageTextSpans, pdfToPages, pagesToTaggedText, renderPdfPage } from "
 const ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function sourcesDir(domain: Domain): string {
-  return path.join(process.cwd(), "data", domain, "sources");
+  return path.join(getDataDir(), domain, "sources");
 }
 function dir(domain: Domain, id: string): string {
   return path.join(sourcesDir(domain), id);
@@ -70,6 +70,31 @@ export async function getSourcePdf(domain: Domain, id: string): Promise<Uint8Arr
  */
 const spanCache = new Map<string, TextSpan[]>();
 const SPAN_CACHE_MAX = 64;
+
+export interface SourceDocumentDeleteResult extends SourceCascadeDeleteResult {
+  storedFilesRemoved: boolean;
+}
+
+/** Delete the source's database ownership graph, stored PDF, and rendered-page cache. */
+export async function deleteSourceDocument(
+  domain: Domain,
+  sourceId: string
+): Promise<SourceDocumentDeleteResult | null> {
+  if (!ID_RE.test(sourceId)) return null;
+  const deleted = deleteSourceCascadeData(domain, sourceId);
+  if (!deleted) return null;
+
+  for (const key of spanCache.keys()) {
+    if (key.startsWith(`${domain}/${sourceId}/`)) spanCache.delete(key);
+  }
+  let storedFilesRemoved = true;
+  try {
+    await rm(dir(domain, sourceId), { recursive: true, force: true });
+  } catch {
+    storedFilesRemoved = false;
+  }
+  return { ...deleted, storedFilesRemoved };
+}
 
 async function sourcePageSpans(domain: Domain, id: string, page: number): Promise<TextSpan[] | null> {
   const key = `${domain}/${id}/${page}`;

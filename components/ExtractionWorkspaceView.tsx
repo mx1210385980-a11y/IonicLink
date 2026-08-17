@@ -65,7 +65,7 @@ export interface ExtractionWorkspaceViewProps {
   committedNotice: ReactNode;
   sortDirection: "asc" | "desc";
   onToggleSort: () => void;
-  onRemove: (jobId: string) => void;
+  onRemove: (job: BatchJob) => void;
   renderStatus: (status: JobStatus) => ReactNode;
   renderFileIcon: () => ReactNode;
   currentPage: number;
@@ -354,10 +354,15 @@ export function ExtractionWorkspaceView({
                           {job.status === "committed" && <Link href={`/${domain}/database?status=review`} className="min-h-9 rounded-xl border border-[#dbe3f2] bg-white px-3 py-2 text-[11px] font-semibold text-[#2456d6] transition hover:border-[#9eb4eb] hover:bg-[#f4f7ff]">Open review</Link>}
                           <button
                             type="button"
-                            onClick={() => onRemove(job.id)}
+                            onClick={() => onRemove(job)}
                             disabled={controlsDisabled}
                             className="grid h-9 w-9 place-items-center rounded-xl border border-[#e1e6ef] text-[#9aa5ba] transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
-                            aria-label={`Remove ${job.filename}`}
+                            aria-label={job.sourceId
+                              ? `Delete document and all extracted data: ${job.filename}`
+                              : `Remove extraction job: ${job.filename}`}
+                            title={job.sourceId
+                              ? "Delete document and all extracted data"
+                              : "Remove extraction job"}
                           >
                             <TrashIcon />
                           </button>

@@ -22,6 +22,7 @@ const candidate = {
 };
 const job: BatchJob = {
   id: "ready-job",
+  sourceId: "11111111-1111-4111-8111-111111111111",
   filename: "ready-paper.pdf",
   status: "done",
   createdAt: "2026-08-17T01:00:00.000Z",
@@ -86,6 +87,7 @@ const html = renderToStaticMarkup(createElement(ExtractionWorkspaceView, props))
 assert.match(html, /ready-paper\.pdf/);
 assert.match(html, />2<\/td>/, "the extracted record count remains visible");
 assert.match(html, /Commit ready/, "the single bulk handoff remains available");
+assert.match(html, /Delete document and all extracted data: ready-paper\.pdf/);
 assert.doesNotMatch(html, /aria-label="Expand|aria-label="Collapse/);
 assert.doesNotMatch(html, /type="checkbox"/);
 assert.doesNotMatch(html, /Review 2|Hide review|job-stage-track/);

@@ -587,14 +587,44 @@ export function Extractor({
     }
   };
 
-  const remove = async (id: string) => {
+  const remove = async (job: BatchJob) => {
+    if (job.sourceId) {
+      const confirmed = window.confirm(
+        `Delete "${job.filename}" and all related data?\n\nThis permanently removes the stored PDF, extraction history, Review records, and Checked database records. You can upload the document again afterward.`
+      );
+      if (!confirmed) return;
+
+      let storedFilesRemoved = true;
+      await runQueueAction(
+        `remove:${job.id}`,
+        "Could not delete this document. Please try again.",
+        "The document and all extracted data were deleted",
+        async () => {
+          const payload = await requestJson<{
+            deleted: { storedFilesRemoved: boolean };
+          }>(
+            `/api/${domain}/source/${encodeURIComponent(job.sourceId!)}`,
+            { method: "DELETE" },
+            "Could not delete this document"
+          );
+          storedFilesRemoved = payload.deleted.storedFilesRemoved;
+        },
+        () => {
+          if (!storedFilesRemoved) {
+            setError("The document data was deleted, but its stored PDF could not be removed. Please check server file permissions before uploading it again.");
+          }
+        }
+      );
+      return;
+    }
+
     await runQueueAction(
-      `remove:${id}`,
+      `remove:${job.id}`,
       "Could not remove this job. Please try again.",
       "The job was removed",
       async () => {
         await requestJson(
-          `/api/${domain}/batch/${encodeURIComponent(id)}`,
+          `/api/${domain}/batch/${encodeURIComponent(job.id)}`,
           { method: "DELETE" },
           "Could not remove this job"
         );
