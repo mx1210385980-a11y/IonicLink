@@ -256,8 +256,16 @@ function crossOriginResponse(request: Request): NextResponse | null {
   if (!origin) return null;
   try {
     const requestOrigin = new URL(request.url).origin;
-    const suppliedOrigin = new URL(origin).origin;
+    const suppliedURL = new URL(origin);
+    const suppliedOrigin = suppliedURL.origin;
     if (suppliedOrigin === requestOrigin || suppliedOrigin === authBaseURL) return null;
+
+    // In public compatibility mode, a reverse proxy may expose the app on a
+    // public Host while Next.js still reports the internal container URL.
+    const requestHost = request.headers.get("host")?.split(",")[0]?.trim().toLowerCase();
+    if (!isAppAuthEnabled() && requestHost && suppliedURL.host.toLowerCase() === requestHost) {
+      return null;
+    }
   } catch {
     // Invalid origins are rejected below.
   }

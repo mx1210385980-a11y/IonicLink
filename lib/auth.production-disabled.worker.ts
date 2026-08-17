@@ -25,6 +25,18 @@ async function main() {
   assert.equal(access.ok, true, "public compatibility mode keeps application APIs available");
   if (access.ok) assert.equal(access.session, null);
 
+  const proxiedSameOrigin = await requireAppApiSession(
+    new Request("http://localhost:3000/api/tribology/records", {
+      method: "POST",
+      headers: { host: "47.82.82.215", origin: "http://47.82.82.215" },
+    })
+  );
+  assert.equal(
+    proxiedSameOrigin.ok,
+    true,
+    "public compatibility mode accepts the browser origin preserved in the proxy Host header"
+  );
+
   const crossOrigin = await requireAppApiSession(
     new Request("http://localhost/api/tribology/records", {
       method: "POST",
