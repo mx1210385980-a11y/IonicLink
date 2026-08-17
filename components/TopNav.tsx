@@ -10,7 +10,7 @@ const SUBROUTES = [
   { seg: "extract", label: "Extract" },
   { seg: "database", label: "Database" },
   { seg: "design", label: "Design" },
-  { seg: "library", label: "Library" },
+  { seg: "library", label: "Documents" },
 ];
 
 const DOMAIN_LABELS: Record<Domain, string> = {
