@@ -1,0 +1,1062 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-16T13:21:40.873Z",
+  "sourceCorpus": "上传文献中包含离子液体电化学参数的论文",
+  "evaluator": "IonicLink deterministic conductivity/electrochem extractor",
+  "scope": "Screening benchmark. Positive/negative labels come from the supplied folders; every extracted value still requires source review.",
+  "summary": {
+    "pdfFiles": 46,
+    "uniquePapers": 23,
+    "duplicateFiles": 23,
+    "expectedPositive": 20,
+    "expectedNegative": 3,
+    "detectedPositive": 9,
+    "rejectedNegative": 3,
+    "falsePositive": 0,
+    "falseNegative": 11,
+    "candidateRecords": 35
+  },
+  "records": [
+    {
+      "file": "1-s2.0-S001346862200295X-main.pdf",
+      "relativePath": "1-s2.0-S001346862200295X-main.pdf",
+      "sha256": "d3cbc42315c6c1be8ee8da94c04ff2173ab90c94c8402eda44fa813d4643636d",
+      "duplicateCount": 2,
+      "expected": "positive",
+      "outcome": "true-positive",
+      "recordCount": 1,
+      "properties": [
+        "electrochemicalWindow"
+      ],
+      "candidates": [
+        {
+          "cation": "[Pyr13+]",
+          "anion": "",
+          "surface": "PT",
+          "temperature": null,
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": "0.1–5.0 V",
+          "chargeTransferResistance": null,
+          "potentialReference": "Na+/Na on three-electrod",
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 2,
+              "quote": "oltage range 0.1–5.0 V vs. Na+/Na on three-electrodes Sw",
+              "basis": "direct"
+            }
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "file": "1-s2.0-S0039914024010671-main.pdf",
+      "relativePath": "1-s2.0-S0039914024010671-main.pdf",
+      "sha256": "6cfea0cf7b3482a54decf2b96cf93754731bfa872ec9e74ed1ff36bf5e426f3d",
+      "duplicateCount": 2,
+      "expected": "positive",
+      "outcome": "false-negative",
+      "recordCount": 0,
+      "properties": [],
+      "candidates": [],
+      "error": null
+    },
+    {
+      "file": "1-s2.0-S0167732222006134-main.pdf",
+      "relativePath": "1-s2.0-S0167732222006134-main.pdf",
+      "sha256": "d2e55dd860c9080ab250ca286084d36f13b7b746e4a66fe7c00ae57c22222cdd",
+      "duplicateCount": 2,
+      "expected": "positive",
+      "outcome": "true-positive",
+      "recordCount": 1,
+      "properties": [
+        "conductivity"
+      ],
+      "candidates": [
+        {
+          "cation": "[C2mim]",
+          "anion": "[PF6]",
+          "surface": "pt",
+          "temperature": "100 °C",
+          "conductivity": "10-5 S/cm",
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": null,
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 3,
+              "quote": "nductivity (10-5 S/cm) from their mobility at room tempe",
+              "basis": "direct"
+            }
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "file": "1-s2.0-S0925400522012357-main.pdf",
+      "relativePath": "1-s2.0-S0925400522012357-main.pdf",
+      "sha256": "eb4bef177d1dc9c8d11dd131b50669dba77ca77a47d2b45b3833ae022c7b0203",
+      "duplicateCount": 2,
+      "expected": "positive",
+      "outcome": "true-positive",
+      "recordCount": 6,
+      "properties": [
+        "chargeTransferResistance"
+      ],
+      "candidates": [
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "gold",
+          "temperature": null,
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": "618.6 Ω",
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 2,
+              "quote": "ws: CPO/GCE:618.6 Ω, CPO-ILBMB/rGO/GCE:370.5 Ω, CPO-ILBM",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "gold",
+          "temperature": null,
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": "370.5 Ω",
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 2,
+              "quote": "BMB/rGO/GCE:370.5 Ω, CPO-ILBMB/rGO-Au NPs/GCE:260.8 Ω, b",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "gold",
+          "temperature": null,
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": "260.8 Ω",
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 2,
+              "quote": "-Au NPs/GCE:260.8 Ω, bare GCE:84.1 Ω, rGO/GCE:69.7 Ω, rG",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "gold",
+          "temperature": null,
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": "84.1 Ω",
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 2,
+              "quote": "Ω, bare GCE:84.1 Ω, rGO/GCE:69.7 Ω, rGO-Au NPs/GCE:13.23",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "gold",
+          "temperature": null,
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": "69.7 Ω",
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 2,
+              "quote": "Ω, rGO/GCE:69.7 Ω, rGO-Au NPs/GCE:13.23 Ω. The lowest R",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "gold",
+          "temperature": null,
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": "13.23 Ω",
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 2,
+              "quote": "-Au NPs/GCE:13.23 Ω. The lowest Rct at the rGO-Au NPs/GC",
+              "basis": "direct"
+            }
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "file": "1-s2.0-S0927775723019593-main.pdf",
+      "relativePath": "1-s2.0-S0927775723019593-main.pdf",
+      "sha256": "52f580bcabfb3c465cffc3c1814b9f8c42beb152e816f3ac73aac6ce44e14d33",
+      "duplicateCount": 2,
+      "expected": "positive",
+      "outcome": "true-positive",
+      "recordCount": 2,
+      "properties": [
+        "conductivity"
+      ],
+      "candidates": [
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "steel",
+          "temperature": "100°C",
+          "conductivity": "> 1 S cm−1",
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": null,
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 7,
+              "quote": "sted limit (> 1 S cm−1) for preventing tribo-corrosion r",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "steel",
+          "temperature": "100°C",
+          "conductivity": "2 × 10−4 S cm−1",
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": null,
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 7,
+              "quote": "(3 × 10−5 to2 × 10−4 S cm−1) [21]. Gaining an understand",
+              "basis": "direct"
+            }
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "file": "1-s2.0-S0927775725019363-main.pdf",
+      "relativePath": "1-s2.0-S0927775725019363-main.pdf",
+      "sha256": "4c41034fe8033b27b46331dbf9d3f5bc7b96d4f97ec90c86ad87000409201765",
+      "duplicateCount": 2,
+      "expected": "positive",
+      "outcome": "false-negative",
+      "recordCount": 0,
+      "properties": [],
+      "candidates": [],
+      "error": null
+    },
+    {
+      "file": "1-s2.0-S0927776520308973-main.pdf",
+      "relativePath": "1-s2.0-S0927776520308973-main.pdf",
+      "sha256": "98d1b370b62b1eb945ebdb42a9f28478a67e77cf34992b5758a5296a2eb870ac",
+      "duplicateCount": 2,
+      "expected": "positive",
+      "outcome": "true-positive",
+      "recordCount": 5,
+      "properties": [
+        "electrodePotential",
+        "chargeTransferResistance"
+      ],
+      "candidates": [
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "glassy carbon",
+          "temperature": "329K",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": "0.21 V",
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": "411 Ω",
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 4,
+              "quote": "Rct value of 411 Ω for the electron transfer process tha",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "glassy carbon",
+          "temperature": "329K",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": "268 Ω",
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 4,
+              "quote": "e reduced to 268 Ω, due to the conducting nature of MWCN",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "glassy carbon",
+          "temperature": "329K",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": "144 Ω",
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 4,
+              "quote": "he lowest of 144 Ω, indicating the high conducting natur",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "glassy carbon",
+          "temperature": "329K",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": "733 Ω",
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 4,
+              "quote": "e maximum of 733 Ω, demonstrating the effective immobili",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "glassy carbon",
+          "temperature": "329K",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": "603 Ω",
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 4,
+              "quote": "s the Rct to 603 Ω, denoting the synergic behaviour betw",
+              "basis": "direct"
+            }
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "file": "1-s2.0-S1572665722007603-main.pdf",
+      "relativePath": "1-s2.0-S1572665722007603-main.pdf",
+      "sha256": "3196777c42dc1895a07bfd8136c7934e27d7a09ccf3c6b793c3145e11f040341",
+      "duplicateCount": 2,
+      "expected": "positive",
+      "outcome": "false-negative",
+      "recordCount": 0,
+      "properties": [],
+      "candidates": [],
+      "error": null
+    },
+    {
+      "file": "1-s2.0-S1876107015000607-main.pdf",
+      "relativePath": "1-s2.0-S1876107015000607-main.pdf",
+      "sha256": "9da05b1567e9bbf2c61c4033a85aa0e77439d6c624750a29a5f2689c35a8895f",
+      "duplicateCount": 2,
+      "expected": "positive",
+      "outcome": "false-negative",
+      "recordCount": 0,
+      "properties": [],
+      "candidates": [],
+      "error": null
+    },
+    {
+      "file": "1-s2.0-S2405829722006572-main.pdf",
+      "relativePath": "1-s2.0-S2405829722006572-main.pdf",
+      "sha256": "b7582819b77219db58b76f11d7455b58797e3e12088fc8753bd6174f81134a6f",
+      "duplicateCount": 2,
+      "expected": "positive",
+      "outcome": "false-negative",
+      "recordCount": 0,
+      "properties": [],
+      "candidates": [],
+      "error": null
+    },
+    {
+      "file": "1-s2.0-S0278691522002733-main.pdf",
+      "relativePath": "不包含电化学相关参数论文\\1-s2.0-S0278691522002733-main.pdf",
+      "sha256": "360c1e0a15e32f37911769d056a09f07749ffb22f1eea368a8288180064248af",
+      "duplicateCount": 2,
+      "expected": "negative",
+      "outcome": "true-negative",
+      "recordCount": 0,
+      "properties": [],
+      "candidates": [],
+      "error": null
+    },
+    {
+      "file": "s10967-022-08543-3.pdf",
+      "relativePath": "不包含电化学相关参数论文\\s10967-022-08543-3.pdf",
+      "sha256": "33c3a80c0129f46e09d339242fe1b921d1985e5bffa39c639f1a70e8f37994f9",
+      "duplicateCount": 2,
+      "expected": "negative",
+      "outcome": "true-negative",
+      "recordCount": 0,
+      "properties": [],
+      "candidates": [],
+      "error": null
+    },
+    {
+      "file": "s13738-020-02088-6.pdf",
+      "relativePath": "不包含电化学相关参数论文\\s13738-020-02088-6.pdf",
+      "sha256": "129d44bfa433ef5cca8e972bea99a581a8693cc2c6b489c69ae595cb4feda528",
+      "duplicateCount": 2,
+      "expected": "negative",
+      "outcome": "true-negative",
+      "recordCount": 0,
+      "properties": [],
+      "candidates": [],
+      "error": null
+    },
+    {
+      "file": "Angew Chem Int Ed - 2022 - Yang - Modifying the Electrocatalytic Selectivity of Oxidation Reactions with Ionic Liquids.pdf",
+      "relativePath": "上传文献中包含离子液体电化学参数的论文\\Angew Chem Int Ed - 2022 - Yang - Modifying the Electrocatalytic Selectivity of Oxidation Reactions with Ionic Liquids.pdf",
+      "sha256": "b76fc9e9e292f7b57b9784776f7cf072c918f9ca14ea80c28b7f60daaa349063",
+      "duplicateCount": 2,
+      "expected": "positive",
+      "outcome": "false-negative",
+      "recordCount": 0,
+      "properties": [],
+      "candidates": [],
+      "error": null
+    },
+    {
+      "file": "Batteries   Supercaps - 2023 - Valurouthu - Ambipolar Electrochemistry of Pre‐Intercalated Ti3C2Tx MXene in Ionic Liquid.pdf",
+      "relativePath": "上传文献中包含离子液体电化学参数的论文\\Batteries   Supercaps - 2023 - Valurouthu - Ambipolar Electrochemistry of Pre‐Intercalated Ti3C2Tx MXene in Ionic Liquid.pdf",
+      "sha256": "8ea533e4a238c840e4f416310838535e2dec38b696763d89ff793668962bc80a",
+      "duplicateCount": 2,
+      "expected": "positive",
+      "outcome": "true-positive",
+      "recordCount": 6,
+      "properties": [
+        "capacitance",
+        "chargeTransferResistance",
+        "electrochemicalWindow"
+      ],
+      "candidates": [
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "glassy carbon",
+          "temperature": "200 °C",
+          "conductivity": null,
+          "capacitance": "1500 F/cm3",
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": null,
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "capacitance",
+              "page": 1,
+              "quote": "tance up to 1500 F/cm3 in acidic electrolytes, which is",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "glassy carbon",
+          "temperature": "200 °C",
+          "conductivity": null,
+          "capacitance": "140 F/cm3",
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": null,
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "capacitance",
+              "page": 4,
+              "quote": "acitance of 140 F/cm3) at 5 mV/s. The integrated value o",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "glassy carbon",
+          "temperature": "200 °C",
+          "conductivity": null,
+          "capacitance": "64 F/g",
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": null,
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "capacitance",
+              "page": 4,
+              "quote": "responds to 64 F/g in the voltage window of 2.7 V. The t",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "glassy carbon",
+          "temperature": "200 °C",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": "2.75 Ω cm2",
+          "potentialReference": "Ag wire",
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 5,
+              "quote": "creases from 2.75 Ω cm2 to 3 Ω cm2 by changing the poten",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "glassy carbon",
+          "temperature": "200 °C",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": "3 Ω cm2",
+          "potentialReference": "Ag wire",
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 5,
+              "quote": ".75 Ω cm2 to 3 Ω cm2 by changing the potential of the wo",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "glassy carbon",
+          "temperature": "70 °C",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": "1.5 to 1.0 V",
+          "chargeTransferResistance": null,
+          "potentialReference": "were",
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 8,
+              "quote": "al window of 1.5 to 1.0 V (vs. Ag wire). The 3-electrode",
+              "basis": "direct"
+            }
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "file": "ChemElectroChem - 2021 - Qin - Understanding Electric Field‐Dependent Structure Variation of Functional Ionic Liquids at.pdf",
+      "relativePath": "上传文献中包含离子液体电化学参数的论文\\ChemElectroChem - 2021 - Qin - Understanding Electric Field‐Dependent Structure Variation of Functional Ionic Liquids at.pdf",
+      "sha256": "4d9db463b98aab694b18f5196e8d5a480fbadbfe04085f91e9b596a441455841",
+      "duplicateCount": 2,
+      "expected": "positive",
+      "outcome": "true-positive",
+      "recordCount": 9,
+      "properties": [
+        "electricField"
+      ],
+      "candidates": [
+        {
+          "cation": "[C2mim]",
+          "anion": "[OTf]",
+          "surface": "Pt",
+          "temperature": "200 K",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": "< 0.05 V/Å",
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": null,
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "electricField",
+              "page": 2,
+              "quote": "st stage (E < 0.05 V/Å), the intensity for peak1 of anio",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "[C2mim]",
+          "anion": "[OTf]",
+          "surface": "Pt",
+          "temperature": "200 K",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": "0.05 V/Å",
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": null,
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "electricField",
+              "page": 2,
+              "quote": "E is beyond 0.05 V/Å, the intensity for peak1 start to",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "[C2mim]",
+          "anion": "[OTf]",
+          "surface": "Pt",
+          "temperature": "200 K",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": "0.3 V/Å",
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": null,
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "electricField",
+              "page": 2,
+              "quote": ".0, 0.05 and 0.3 V/Å are 15.93, 25.60 and 5.87 nm 3, res",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "[C2mim]",
+          "anion": "[OTf]",
+          "surface": "Pt",
+          "temperature": "200 K",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": "0 V/Å",
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": null,
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "electricField",
+              "page": 3,
+              "quote": "ce under E = 0 V/Å. c) 1N of anion for C2mimOTf and C2SO",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "[C2mim]",
+          "anion": "[OTf]",
+          "surface": "Pt",
+          "temperature": "200 K",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": "0.2 V/Å",
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": null,
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "electricField",
+              "page": 4,
+              "quote": "E = 0.0 and 0.2 V/Å. c–d) Average orientation (Pave) of",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "[C2mim]",
+          "anion": "[OTf]",
+          "surface": "Pt",
+          "temperature": "200 K",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": "0.3 V/Å",
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": null,
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "electricField",
+              "page": 4,
+              "quote": "ly, when E = 0.3 V/Å.ChemElectroChem Articles doi.org/10",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "[C2mim]",
+          "anion": "[OTf]",
+          "surface": "Pt",
+          "temperature": "200 K",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": "0.3 V/Å",
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": null,
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "electricField",
+              "page": 5,
+              "quote": "imOTf at E = 0.3 V/Å are 0.38 and 0.60 e · Å, respective",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "[C2mim]",
+          "anion": "[OTf]",
+          "surface": "Pt",
+          "temperature": "200 K",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": "0.2 V/Å",
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": null,
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "electricField",
+              "page": 5,
+              "quote": "OTf when E = 0.2 V/Å. b) The dipole moment as a function",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "[C2mim]",
+          "anion": "[OTf]",
+          "surface": "Pt",
+          "temperature": "200 K",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": "< 0.4 V/Å",
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": null,
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "electricField",
+              "page": 7,
+              "quote": "tructure, E < 0.4 V/Å is considered for all imidazole IL",
+              "basis": "direct"
+            }
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "file": "ChemistrySelect - 2020 - Eavani - Electrochemical  Surface Morphological and Spectral Studies of A Polyoxometalate‐Ionic.pdf",
+      "relativePath": "上传文献中包含离子液体电化学参数的论文\\ChemistrySelect - 2020 - Eavani - Electrochemical  Surface Morphological and Spectral Studies of A Polyoxometalate‐Ionic.pdf",
+      "sha256": "3e59da6e925d73d7c416e6bb401edc9ea834f2e3a4a4e105f0afc379e289115a",
+      "duplicateCount": 2,
+      "expected": "positive",
+      "outcome": "false-negative",
+      "recordCount": 0,
+      "properties": [],
+      "candidates": [],
+      "error": null
+    },
+    {
+      "file": "ChemistrySelect - 2021 - Kong - Experimental Study of Poly 1‐Acetamide‐3‐vinylimidazolium Bromide  as a Corrosion Inhibitor.pdf",
+      "relativePath": "上传文献中包含离子液体电化学参数的论文\\ChemistrySelect - 2021 - Kong - Experimental Study of Poly 1‐Acetamide‐3‐vinylimidazolium Bromide  as a Corrosion Inhibitor.pdf",
+      "sha256": "158f41043c0c13e2b1a9d78959762a937577c12af84dffd5da8d5cb535b0a72d",
+      "duplicateCount": 2,
+      "expected": "positive",
+      "outcome": "false-negative",
+      "recordCount": 0,
+      "properties": [],
+      "candidates": [],
+      "error": null
+    },
+    {
+      "file": "electropolymerization-of-pyrrole-based-ionic-liquids-on-selected-wireless-bipolar-electrodes.pdf",
+      "relativePath": "上传文献中包含离子液体电化学参数的论文\\electropolymerization-of-pyrrole-based-ionic-liquids-on-selected-wireless-bipolar-electrodes.pdf",
+      "sha256": "e1c3b5eee50dae62af70b7026658f860fe15ae624ad119a0009faa305173c9c8",
+      "duplicateCount": 2,
+      "expected": "positive",
+      "outcome": "true-positive",
+      "recordCount": 1,
+      "properties": [
+        "electricField"
+      ],
+      "candidates": [
+        {
+          "cation": "[pyrrole-C6MIm+]",
+          "anion": "",
+          "surface": "platinum",
+          "temperature": "400K",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": "13.8 kV/m",
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": null,
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "electricField",
+              "page": 5,
+              "quote": "pproximately 13.8 kV/m for the parallel-channel design.",
+              "basis": "direct"
+            }
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "file": "s10800-022-01689-8.pdf",
+      "relativePath": "上传文献中包含离子液体电化学参数的论文\\s10800-022-01689-8.pdf",
+      "sha256": "e373b4b0f471da500c2cbff285b230c1a8c09500f4a384b13ae10ae1370c57be",
+      "duplicateCount": 2,
+      "expected": "positive",
+      "outcome": "true-positive",
+      "recordCount": 4,
+      "properties": [
+        "chargeTransferResistance"
+      ],
+      "candidates": [
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "Au",
+          "temperature": "40 °C",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": "198 Ω",
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 4,
+              "quote": "at bare GC (198 Ω) has the lowest charge transfer resist",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "Au",
+          "temperature": "40 °C",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": "2003 Ω",
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 4,
+              "quote": "nd CPO- GC (2003 Ω) has the largest Rct. The Rct of both",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "Au",
+          "temperature": "40 °C",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": "1374 Ω",
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 4,
+              "quote": "MB/MoS2/GC (1374 Ω) and CPO-ILEMB/Au@MoS2/ GC (1020 Ω) a",
+              "basis": "direct"
+            }
+          ]
+        },
+        {
+          "cation": "",
+          "anion": "",
+          "surface": "Au",
+          "temperature": "40 °C",
+          "conductivity": null,
+          "capacitance": null,
+          "electricField": null,
+          "electrodePotential": null,
+          "electrochemicalWindow": null,
+          "chargeTransferResistance": "1020 Ω",
+          "potentialReference": null,
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 4,
+              "quote": "u@MoS2/ GC (1020 Ω) are smaller than that of CPO-GC, whe",
+              "basis": "direct"
+            }
+          ]
+        }
+      ],
+      "error": null
+    },
+    {
+      "file": "s11696-021-01716-6.pdf",
+      "relativePath": "上传文献中包含离子液体电化学参数的论文\\s11696-021-01716-6.pdf",
+      "sha256": "41e4ab1e604db15d4e885c39084f3ac18e8d6f055cae71fa970db86beac5a7c0",
+      "duplicateCount": 2,
+      "expected": "positive",
+      "outcome": "false-negative",
+      "recordCount": 0,
+      "properties": [],
+      "candidates": [],
+      "error": null
+    },
+    {
+      "file": "Small - 2024 - Krushinski - Single Liquid Aerosol Microparticle Electrochemistry on a Suspended Ionic Liquid Film.pdf",
+      "relativePath": "上传文献中包含离子液体电化学参数的论文\\Small - 2024 - Krushinski - Single Liquid Aerosol Microparticle Electrochemistry on a Suspended Ionic Liquid Film.pdf",
+      "sha256": "8e681c2eb4ef236bf852af12c9468a0b85a33e151992d4c36ee3a5691a2b616c",
+      "duplicateCount": 2,
+      "expected": "positive",
+      "outcome": "false-negative",
+      "recordCount": 0,
+      "properties": [],
+      "candidates": [],
+      "error": null
+    },
+    {
+      "file": "The Chemical Record - 2021 - Sagara - Redox of Viologen for Powering and Coloring (1).pdf",
+      "relativePath": "上传文献中包含离子液体电化学参数的论文\\The Chemical Record - 2021 - Sagara - Redox of Viologen for Powering and Coloring (1).pdf",
+      "sha256": "ca1c9bf81692eb2e5c709a0721c49efd4a2aed40e73f225beba0e5b83029b6d9",
+      "duplicateCount": 2,
+      "expected": "positive",
+      "outcome": "false-negative",
+      "recordCount": 0,
+      "properties": [],
+      "candidates": [],
+      "error": null
+    }
+  ]
+}

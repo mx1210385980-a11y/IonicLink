@@ -59,6 +59,36 @@ function buildConductivityConditions(record: ConductivityRecord, units: UnitMode
       field: "temperature",
     });
   }
+  if (core.capacitance) {
+    items.push({
+      label: "Capacitance",
+      value: quantityLabel(core.capacitance, units),
+      title: quantityTitle(core.capacitance, units),
+      prov: prov.capacitance,
+      field: "capacitance",
+    });
+  }
+  if (core.electricField) {
+    items.push({
+      label: "Electric field",
+      value: quantityLabel(core.electricField, units),
+      title: quantityTitle(core.electricField, units),
+      prov: prov.electricField,
+      field: "electricField",
+    });
+  }
+  if (core.electrodePotential) {
+    items.push({ label: "Potential", value: quantityLabel(core.electrodePotential, units), title: quantityTitle(core.electrodePotential, units), prov: prov.electrodePotential, field: "electrodePotential" });
+  }
+  if (e.potentialReference) {
+    items.push({ label: "Reference", value: e.potentialReference, prov: prov.potentialReference, field: "potentialReference" });
+  }
+  if (core.electrochemicalWindow) {
+    items.push({ label: "Window", value: quantityLabel(core.electrochemicalWindow, units), title: quantityTitle(core.electrochemicalWindow, units), prov: prov.electrochemicalWindow, field: "electrochemicalWindow" });
+  }
+  if (core.chargeTransferResistance) {
+    items.push({ label: "Rct / Rp", value: quantityLabel(core.chargeTransferResistance, units), title: quantityTitle(core.chargeTransferResistance, units), prov: prov.chargeTransferResistance, field: "chargeTransferResistance" });
+  }
   if (e.viscosity) {
     items.push({
       label: "Viscosity",
@@ -120,6 +150,19 @@ export function ConductivityCard({
   const confidencePct = showConfidence ? Math.round((record.confidence as number) * 100) : null;
   const band = sigmaBand(core.conductivity?.std);
   const sigmaValue = core.conductivity ? quantityLabel(core.conductivity, units) : formatSigma(core.conductivity);
+  const primary = core.conductivity
+    ? { label: "Ionic conductivity · σ", value: sigmaValue, field: "conductivity" }
+    : core.capacitance
+      ? { label: "Capacitance · C", value: quantityLabel(core.capacitance, units), field: "capacitance" }
+      : core.electricField
+        ? { label: "Electric field · E", value: quantityLabel(core.electricField, units), field: "electricField" }
+        : core.electrodePotential
+          ? { label: "Electrode potential", value: quantityLabel(core.electrodePotential, units), field: "electrodePotential" }
+          : core.electrochemicalWindow
+            ? { label: "Electrochemical window", value: quantityLabel(core.electrochemicalWindow, units), field: "electrochemicalWindow" }
+            : core.chargeTransferResistance
+              ? { label: "Charge-transfer resistance", value: quantityLabel(core.chargeTransferResistance, units), field: "chargeTransferResistance" }
+              : { label: "Target property", value: "—", field: "conductivity" };
 
   return (
     <article
@@ -204,13 +247,13 @@ export function ConductivityCard({
           <div className="pointer-events-none absolute -right-6 -top-8 h-20 w-20 rounded-full bg-brand-400/25 blur-2xl" />
           <div className="relative flex items-end justify-between gap-3">
             <div className="min-w-0">
-              <div className="label-eyebrow text-white/65">Ionic conductivity · σ</div>
+              <div className="label-eyebrow text-white/65">{primary.label}</div>
               <div
                 className={`mt-0.5 font-mono text-[2rem] font-semibold leading-none tnum ${
-                  core.conductivity == null ? "text-amber-200" : "text-white"
+                  primary.value === "—" ? "text-amber-200" : "text-white"
                 }`}
               >
-                {sigmaValue}
+                {primary.value}
               </div>
             </div>
             <div className="flex shrink-0 flex-col items-end gap-1 pb-1 text-right">
@@ -218,18 +261,18 @@ export function ConductivityCard({
                 <span className="whitespace-nowrap rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-semibold text-white/90">{band.label}</span>
               )}
               {showConfidence && <span className="whitespace-nowrap text-[10px] font-medium text-white/70">conf {confidencePct}%</span>}
-              {record.provenance?.conductivity && (
-                <ProvBadge p={record.provenance.conductivity} sourceId={record.sourceId} recordId={record.id} field="conductivity" value={sigmaValue} domain={domain} />
+              {record.provenance?.[primary.field] && (
+                <ProvBadge p={record.provenance[primary.field]} sourceId={record.sourceId} recordId={record.id} field={primary.field} value={primary.value} domain={domain} />
               )}
             </div>
           </div>
           {/* conductivity magnitude meter (log 0.01 – 10 S/m) */}
-          <div className="relative mt-3 h-1 overflow-hidden rounded-full bg-white/10">
+          {core.conductivity ? <div className="relative mt-3 h-1 overflow-hidden rounded-full bg-white/10">
             <span
               className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-brand-400 to-brand-300 transition-[width] duration-500"
               style={{ width: `${band.pct}%` }}
             />
-          </div>
+          </div> : null}
           {core.conductivity?.std != null && (
             <div className="mt-2 truncate text-[10px] font-medium text-white/70" title={`standardized: ${fmtNum(core.conductivity.std)} S/m`}>
               {units === "std"

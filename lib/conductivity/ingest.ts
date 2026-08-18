@@ -28,9 +28,14 @@ export function ingest(f: ConductivityExtractedFields): ConductivityDraft {
 
   const temperature = parseQuantity(f.temperature?.trim() || ROOM_TEMPERATURE_RAW, "temperature");
   const conductivity = parseQuantity(f.conductivity, "conductivity");
-
+  const capacitance = parseQuantity(f.capacitance, "capacitance");
+  const electricField = parseQuantity(f.electricField, "electricField");
+  const electrodePotential = parseQuantity(f.electrodePotential, "potential");
+  const electrochemicalWindow = parseQuantity(f.electrochemicalWindow, "potential");
+  const chargeTransferResistance = parseQuantity(f.chargeTransferResistance, "resistance");
   const extended: ConductivityExtended = {
     method: f.method?.trim() || undefined,
+    potentialReference: f.potentialReference?.trim() || undefined,
     viscosity: parseQuantity(f.viscosity, "viscosity") ?? undefined,
     waterContent: f.waterContent?.trim() || undefined,
     concentration: f.concentration?.trim() || undefined,
@@ -83,6 +88,11 @@ export function ingest(f: ConductivityExtractedFields): ConductivityDraft {
       surface: (f.surface ?? "").trim(),
       temperature,
       conductivity,
+      capacitance,
+      electricField,
+      electrodePotential,
+      electrochemicalWindow,
+      chargeTransferResistance,
     },
     extended,
     flexible,
@@ -101,6 +111,12 @@ export function toFields(r: ConductivityDraft): ConductivityExtractedFields {
     surface: r.core.surface,
     temperature: r.core.temperature?.raw,
     conductivity: r.core.conductivity?.raw,
+    capacitance: r.core.capacitance?.raw,
+    electricField: r.core.electricField?.raw,
+    electrodePotential: r.core.electrodePotential?.raw,
+    electrochemicalWindow: r.core.electrochemicalWindow?.raw,
+    chargeTransferResistance: r.core.chargeTransferResistance?.raw,
+    potentialReference: r.extended.potentialReference,
     method: r.extended.method,
     viscosity: r.extended.viscosity?.raw,
     waterContent: r.extended.waterContent,

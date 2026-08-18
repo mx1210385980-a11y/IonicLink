@@ -9,6 +9,7 @@ const rootLayoutSource = readFileSync("app/layout.tsx", "utf8");
 assert.match(railSource, /data-testid="workspace-navigation-rail"/, "the app exposes a dedicated desktop navigation rail");
 assert.match(railSource, /Property workspaces/, "the rail retains the domain switcher");
 assert.match(railSource, /data-testid="workspace-switcher"/, "domain choices are visually grouped into one compact dock");
+assert.match(railSource, /href="\/afm" label="AFM workspace"/, "AFM is a fourth top-level workspace in the desktop rail");
 assert.match(railSource, /data-testid="section-dock"/, "workspace sections are visually grouped into one compact dock");
 assert.match(railSource, /data-testid="utility-dock"/, "teaching and account actions form a separate utility dock");
 assert.match(railSource, /tribology: "μ"[\s\S]*conductivity: "σ"[\s\S]*diffusion: "D"/, "scientific domain marks replace ambiguous decorative icons");
@@ -29,6 +30,7 @@ assert.match(rootLayoutSource, /<WorkspaceNavigationRail \/>/, "the rail is moun
 assert.match(rootLayoutSource, /lg:pl-20/, "desktop content is offset by the fixed global rail width");
 assert.match(topNavSource, /<header className="[^"]*lg:hidden"/, "the horizontal navigation is mobile-only on every page");
 assert.match(topNavSource, /<AuthControls \/>/, "mobile navigation retains the existing auth controls");
+assert.match(topNavSource, /href="\/afm"/, "AFM is a fourth top-level workspace in the mobile navigation");
 assert.match(topNavSource, /r\.seg === "design" \? "\/tribology\/design"/, "mobile Design uses the same reachable Tribology preview route");
 assert.match(topNavSource, /aria-label="教学实验"/, "the compact mobile teaching shortcut keeps an accessible name");
 assert.match(topNavSource, /hidden text-base[^"]*sm:inline/, "the wordmark yields space to mobile workspace controls");

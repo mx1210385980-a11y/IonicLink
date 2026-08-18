@@ -23,14 +23,14 @@ const stdCell = (q: Quantity | null | undefined) => (q && q.std != null ? fmtNum
 export const conductivityModule: Module<ConductivityRecord, ConductivityExtractedFields> = {
   domain: "conductivity",
   label: "Conductivity",
-  tagline: "Ionic-liquid conductivity — one σ per temperature & surface.",
+  tagline: "Ionic-liquid transport and interfacial electrochemistry — one property point per condition.",
 
   systemPrompt: CONDUCTIVITY_SYSTEM_PROMPT,
   toolName: "submit_conductivity_records",
-  toolDescription: "Submit the standardized conductivity records extracted from the paper.",
+  toolDescription: "Submit source-grounded ionic-liquid conductivity and interfacial electrochemical property records.",
   toolSchema: CONDUCTIVITY_EXTRACTION_TOOL_SCHEMA,
   userPrompt: (body) =>
-    `Extract all conductivity records from this paper text:\n\n<paper>\n${body}\n</paper>`,
+    `Extract only the in-scope ionic-liquid electrical/interfacial target properties from this paper text. Return an empty records array when none is reported.\n\n<paper>\n${body}\n</paper>`,
   mockExtract: conductivityMockExtract,
 
   ingest,
@@ -43,10 +43,15 @@ export const conductivityModule: Module<ConductivityRecord, ConductivityExtracte
     { name: "method", type: "TEXT", get: (r) => r.extended.method || null },
     { name: "temp_k", type: "REAL", get: (r) => r.core.temperature?.std ?? null },
     { name: "sigma_si", type: "REAL", get: (r) => r.core.conductivity?.std ?? null },
+    { name: "capacitance_f", type: "REAL", get: (r) => r.core.capacitance?.std ?? null },
+    { name: "electric_field_v_m", type: "REAL", get: (r) => r.core.electricField?.std ?? null },
+    { name: "electrode_potential_v", type: "REAL", get: (r) => r.core.electrodePotential?.std ?? null },
+    { name: "electrochemical_window_v", type: "REAL", get: (r) => r.core.electrochemicalWindow?.std ?? null },
+    { name: "charge_transfer_resistance_ohm", type: "REAL", get: (r) => r.core.chargeTransferResistance?.std ?? null },
     { name: "viscosity_pa_s", type: "REAL", get: (r) => r.extended.viscosity?.std ?? null },
   ],
   searchColumns: ["paper_title", "cation", "anion", "surface"],
-  facet: { key: "method", column: "method", values: ["EIS", "conductivity cell"] },
+  facet: { key: "method", column: "method", values: ["EIS", "conductivity cell", "CV", "chronoamperometry", "galvanostatic charge-discharge", "MD simulation"] },
 
   csvHeaders: [
     "id",
@@ -61,6 +66,17 @@ export const conductivityModule: Module<ConductivityRecord, ConductivityExtracte
     "temperature_K",
     "conductivity_raw",
     "conductivity_S_m",
+    "capacitance_raw",
+    "capacitance_F",
+    "electric_field_raw",
+    "electric_field_V_m",
+    "electrode_potential_raw",
+    "electrode_potential_V",
+    "potential_reference",
+    "electrochemical_window_raw",
+    "electrochemical_window_V",
+    "charge_transfer_resistance_raw",
+    "charge_transfer_resistance_ohm",
     "method",
     "viscosity_raw",
     "viscosity_Pa_s",
@@ -88,6 +104,17 @@ export const conductivityModule: Module<ConductivityRecord, ConductivityExtracte
       stdCell(c.temperature),
       rawCell(c.conductivity),
       stdCell(c.conductivity),
+      rawCell(c.capacitance),
+      stdCell(c.capacitance),
+      rawCell(c.electricField),
+      stdCell(c.electricField),
+      rawCell(c.electrodePotential),
+      stdCell(c.electrodePotential),
+      e.potentialReference ?? "",
+      rawCell(c.electrochemicalWindow),
+      stdCell(c.electrochemicalWindow),
+      rawCell(c.chargeTransferResistance),
+      stdCell(c.chargeTransferResistance),
       e.method ?? "",
       rawCell(e.viscosity),
       stdCell(e.viscosity),
@@ -100,5 +127,18 @@ export const conductivityModule: Module<ConductivityRecord, ConductivityExtracte
       r.status,
     ];
   },
-  recordHeadline: (r) => `σ ${formatSigma(r.core.conductivity)}`,
+  acceptDraft: (r) => Boolean(
+    r.core.conductivity ||
+    r.core.capacitance ||
+    r.core.electricField ||
+    r.core.electrochemicalWindow ||
+    r.core.chargeTransferResistance
+  ),
+  recordHeadline: (r) => {
+    if (r.core.conductivity) return `σ ${formatSigma(r.core.conductivity)}`;
+    if (r.core.capacitance) return `C ${rawCell(r.core.capacitance)}`;
+    if (r.core.electricField) return `E ${rawCell(r.core.electricField)}`;
+    if (r.core.electrochemicalWindow) return `Window ${rawCell(r.core.electrochemicalWindow)}`;
+    return `Rct ${rawCell(r.core.chargeTransferResistance)}`;
+  },
 };

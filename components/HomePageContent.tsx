@@ -2,6 +2,7 @@ import Link from "next/link";
 import { countByStatus, listPapers } from "@/lib/db";
 import { DOMAINS, type Domain } from "@/lib/domain";
 import { getModule } from "@/lib/modules/registry.server";
+import { AFM_CURVE_DATASET } from "@/lib/afm/afmCurves";
 
 export function HomePageContent() {
   const workspaces = DOMAINS.map((domain) => ({
@@ -20,11 +21,11 @@ export function HomePageContent() {
             Add papers. Get data.
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-balance text-lg font-medium leading-8 text-ink-700 sm:text-xl">
-            Choose the property you are extracting. Each workspace keeps its papers, review queue, and database separate.
+            Choose a data workspace. Property records and AFM curve assets keep their own scope, provenance, and quality gates.
           </p>
         </div>
 
-        <div className="mt-11 grid gap-4 text-left md:grid-cols-3">
+        <div className="mt-11 grid gap-4 text-left md:grid-cols-2 xl:grid-cols-4">
           {workspaces.map(({ domain, mod, counts, papers }) => (
             <WorkspaceCard
               key={domain}
@@ -36,9 +37,43 @@ export function HomePageContent() {
               papers={papers}
             />
           ))}
+          <AfmWorkspaceCard />
         </div>
       </section>
     </div>
+  );
+}
+
+function AfmWorkspaceCard() {
+  const summary = AFM_CURVE_DATASET.summary;
+  return (
+    <article className="group flex min-h-[22rem] flex-col rounded-[16px] border border-cyan-200 bg-white/90 p-5 shadow-[0_24px_64px_-48px_rgba(15,23,42,0.7)] transition duration-200 hover:-translate-y-1 hover:border-cyan-400 hover:shadow-[0_28px_72px_-44px_rgba(8,145,178,0.4)] sm:p-6">
+      <p className="label-eyebrow text-cyan-700">AFM workspace</p>
+      <h2 className="mt-4 min-h-[4.5rem] text-lg font-semibold leading-6 text-ink-900">
+        Solvation-force curves, interfacial structure, experimental context, and electrochemical linkage.
+      </h2>
+
+      <Link
+        href="/afm"
+        className="mt-6 flex min-h-16 items-center justify-between gap-3 rounded-[12px] bg-cyan-700 px-4 py-3 text-base font-semibold text-white transition hover:bg-cyan-800 focus:outline-none focus:ring-2 focus:ring-cyan-200"
+        aria-label="Open AFM workspace"
+      >
+        <span>Open AFM workspace</span>
+        <span className="text-xl transition group-hover:translate-x-0.5" aria-hidden>→</span>
+      </Link>
+
+      <nav className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-sm font-semibold text-ink-700" aria-label="AFM workspace">
+        <Link className="transition hover:text-cyan-700" href="/afm">
+          Curve explorer
+        </Link>
+      </nav>
+
+      <div className="mt-auto grid grid-cols-3 gap-2 border-t border-ink-100 pt-5">
+        <Metric value={summary.totalCurves} label="Curves" />
+        <Metric value={summary.sourceVerifiedCurves} label="Verified" tone="brand" />
+        <Metric value={summary.modelEligibleCurves} label="Model ready" tone="brand" />
+      </div>
+    </article>
   );
 }
 

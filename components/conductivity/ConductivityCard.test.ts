@@ -14,6 +14,11 @@ const draft = ingest({
   surface: "Pt",
   temperature: "298.15 K",
   conductivity: "3.5 mS/cm",
+  capacitance: "120 pF",
+  electricField: "2 kV/cm",
+  electrodePotential: "-1.0 V",
+  potentialReference: "Ag/AgCl",
+  chargeTransferResistance: "4.2 kΩ",
   method: "EIS",
   viscosity: "104 cP",
 });
@@ -41,6 +46,14 @@ assert.match(html, /\[BMIM\]/);
 assert.match(html, /data-testid="cell-panel"/);
 assert.match(html, /Pt/);
 assert.match(html, /EIS/);
+// optional electrical measurements render in the condition area
+assert.match(html, /Capacitance/);
+assert.match(html, /120 pF/);
+assert.match(html, /Electric field/);
+assert.match(html, /2 kV\/cm/);
+assert.match(html, /Potential/);
+assert.match(html, /Ag\/AgCl/);
+assert.match(html, /Rct \/ Rp/);
 // friction visuals must NOT leak into the conductivity card
 assert.doesNotMatch(html, /afm-probe-illustration/);
 assert.doesNotMatch(html, /Coefficient of friction/);

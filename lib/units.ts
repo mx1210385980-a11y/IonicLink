@@ -20,7 +20,10 @@ export type Dimension =
   | "diffusion"
   | "surfaceEnergy"
   | "surfaceChargeDensity"
-  | "angle";
+  | "angle"
+  | "capacitance" // 新增字段
+  | "electricField" // 新增字段
+  | "resistance";
 
 export interface Quantity {
   /** Original text exactly as written, e.g. "25 °C", ">5 nN", "0–2 V". */
@@ -61,6 +64,9 @@ export const CANONICAL_UNIT: Record<Dimension, string> = {
   surfaceEnergy: "mJ/m²",
   surfaceChargeDensity: "C/m²",
   angle: "°",
+  capacitance: "F", // 电容的标准单位为法拉
+  electricField: "V/m", // 电场的标准单位为伏特每米
+  resistance: "Ω",
 };
 
 // Linear (multiplicative) conversion factors → canonical unit.
@@ -82,6 +88,19 @@ const LINEAR_FACTORS: Record<Exclude<Dimension, "temperature">, Record<string, n
   // Surface charge density σ_s.
   surfaceChargeDensity: { "C/m2": 1, "mC/m2": 1e-3, "µC/m2": 1e-6, "µC/cm2": 1e-2 },
   angle: { "°": 1, deg: 1, degree: 1, degrees: 1 },
+  capacitance: { F: 1, mF: 1e-3, µF: 1e-6, nF: 1e-9, pF: 1e-12 }, // 电容单位
+  electricField: {
+    "V/m": 1,
+    "kV/m": 1e3,
+    "MV/m": 1e6,
+    "V/cm": 100,
+    "kV/cm": 1e5,
+    "V/µm": 1e6,
+    "mV/nm": 1e6,
+    "V/nm": 1e9,
+    "V/Å": 1e10,
+  }, // 电场单位
+  resistance: { Ω: 1, kΩ: 1e3, MΩ: 1e6 },
 };
 
 // Alternate spellings → canonical key in LINEAR_FACTORS.
@@ -101,6 +120,14 @@ const ALIASES: Record<string, string> = {
   // conductivity
   "uS/cm": "µS/cm",
   "uS/m": "µS/m",
+  // capacitance
+  "uF": "µF",
+  "V/um": "V/µm",
+  "V/μm": "V/µm",
+  "V/A": "V/Å",
+  "ohm": "Ω",
+  "kohm": "kΩ",
+  "Mohm": "MΩ",
   // viscosity — ASCII / spacing variants of Pa·s and mPa·s
   "mPa.s": "mPa·s",
   "mPa s": "mPa·s",
@@ -153,6 +180,7 @@ function normalizeText(raw: string): string {
     .replace(/◦\s*C/gi, "°C")
     .replace(/℃/g, "°C")
     .replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺]/g, (ch) => SUPERSCRIPTS[ch])
+    .replace(/\b10\s*\^?\s*-\s*(\d+)(?=\s*(?:S|mS|µS|uS))/g, "1e-$1")
     .replace(/\s*[×x·]\s*10\^?(?=[-+]\d)/g, "e")
     .replace(/\b(µm|um|cm|mm|nm|m)\s+s\s*\^?\s*-\s*1\b/gi, "$1/s");
 }
@@ -266,6 +294,18 @@ export function parseQuantity(raw: string | null | undefined, dim: Dimension): Q
   if (dim === "temperature") return parseTemperature(raw);
 
   const norm = normalizeText(raw);
+  const normalizedUnit = detectNormalizedElectrochemicalUnit(norm, dim);
+  if (normalizedUnit) {
+    const { value, approx } = extractValue(norm.replace(normalizedUnit.literal, " "));
+    return {
+      raw: raw.trim(),
+      value,
+      unit: normalizedUnit.unit,
+      std: null,
+      stdUnit: CANONICAL_UNIT[dim],
+      approx,
+    };
+  }
   const found = detectLinearUnit(norm, dim);
   const { value, approx, range: rawRange } = extractValue(found ? norm.replace(found.literal, " ") : norm);
   const factor = found ? LINEAR_FACTORS[dim][found.key] : null;
@@ -281,6 +321,39 @@ export function parseQuantity(raw: string | null | undefined, dim: Dimension): Q
         }
       : undefined;
   return { raw: raw.trim(), value, unit: found?.key ?? "", std, stdUnit: CANONICAL_UNIT[dim], approx, range };
+}
+
+function detectNormalizedElectrochemicalUnit(
+  norm: string,
+  dim: Dimension,
+): { literal: string; unit: string } | null {
+  if (dim === "capacitance") {
+    const match = norm.match(/(?:pF|nF|µF|uF|mF|F)\s*(?:\/|\s)\s*(?:g|kg|cm(?:\s*[-−]?\s*[23]|[²³])|m(?:\s*[-−]?\s*[23]|[²³]))(?:\s*[-−]?\s*1)?/i);
+    if (!match) return null;
+    return { literal: match[0], unit: normalizeElectrochemicalUnit(match[0]) };
+  }
+  if (dim === "resistance") {
+    const match = norm.match(/(?:MΩ|kΩ|Ω|Mohm|kohm|ohm)\s*(?:\/|\s)\s*(?:cm(?:\s*[-−]?\s*2|²)|m(?:\s*[-−]?\s*2|²))(?:\s*[-−]?\s*1)?/i);
+    if (!match) return null;
+    return { literal: match[0], unit: normalizeElectrochemicalUnit(match[0]) };
+  }
+  return null;
+}
+
+function normalizeElectrochemicalUnit(unit: string): string {
+  return unit
+    .replace(/μ|u/g, "µ")
+    .replace(/Mohm/gi, "MΩ")
+    .replace(/kohm/gi, "kΩ")
+    .replace(/ohm/gi, "Ω")
+    .replace(/cm²/g, "cm2")
+    .replace(/cm³/g, "cm3")
+    .replace(/m²/g, "m2")
+    .replace(/m³/g, "m3")
+    .replace(/(cm|m)\s*[-−]\s*([23])/g, "$1$2")
+    .replace(/\s*\/\s*|\s+(?=(?:g|kg|cm|m))/g, "/")
+    .replace(/\s*[-−]?\s*1$/, "")
+    .replace(/\s+/g, "");
 }
 
 /** Compact numeric formatter (4 sig figs, no trailing zeros). */
