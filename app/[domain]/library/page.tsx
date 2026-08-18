@@ -99,16 +99,16 @@ export default function LibraryPage({ params }: { params: { domain: string } }) 
       {noSource.length > 0 && (
         <section className="space-y-3">
           <h2 className="label-eyebrow">Without an indexed source PDF · pasted, seeded, or orphaned</h2>
-          <div className="grid gap-3">
+          <div className="grid min-w-0 gap-3">
             {[...noSourcePapers.entries()].map(([title, recs]) => (
-              <div key={title} className="panel flex flex-wrap items-center justify-between gap-4 p-4">
-                <div className="min-w-0">
+              <div key={title} className="panel flex w-full min-w-0 flex-wrap items-center justify-between gap-4 p-4">
+                <div className="min-w-0 flex-1 basis-full sm:basis-auto">
                   <h3 className="truncate font-semibold text-ink-900">{title}</h3>
                   <p className="text-xs text-ink-400">
                     {[recs[0].paper.journal, recs[0].paper.year].filter(Boolean).join(" · ") || "—"}
                   </p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex w-full flex-wrap items-center justify-between gap-3 sm:w-auto sm:justify-start">
                   <span className="chip shrink-0">{recs.length} record{recs.length > 1 ? "s" : ""}</span>
                   <DeleteLiteratureButton
                     domain={domain}

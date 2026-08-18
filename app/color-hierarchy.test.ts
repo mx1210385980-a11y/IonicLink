@@ -53,6 +53,8 @@ assert.match(extractorSource, /— \{s\.reason\}<\/span>[\s\S]*text-ink-700|text
 const librarySource = file("app/[domain]/library/page.tsx");
 assert.match(librarySource, /text-ink-700/, "Library summaries and empty-state instructions should be readable");
 assert.match(librarySource, /panel flex min-w-0 flex-col gap-4 overflow-hidden/, "Library source rows should not overflow on mobile");
+assert.match(librarySource, /grid min-w-0 gap-3/, "Unlinked literature groups should constrain grid content on mobile");
+assert.match(librarySource, /panel flex w-full min-w-0 flex-wrap/, "Unlinked literature rows should not expand beyond the mobile viewport");
 
 const homeHtml = renderToStaticMarkup(createElement(HomePageContent));
 const domainHtml = renderToStaticMarkup(createElement(DomainHome, { params: { domain: "tribology" } }));
