@@ -3,16 +3,15 @@
 import { useId } from "react";
 import {
   conductivityCoreCompleteness,
-  formatSigma,
   type ConductivityRecord,
 } from "@/lib/conductivity/schema";
 import { DEFAULT_DOMAIN, type Domain } from "@/lib/domain";
-import { fmtNum } from "@/lib/units";
+import type { FieldProvenance } from "@/lib/schema";
+import { parseQuantity, type Quantity } from "@/lib/units";
 import { MoleculeView } from "../MoleculeView";
 import {
   ConditionChip,
   IonPill,
-  MissingChip,
   ProvBadge,
   ionDisplayLabel,
   quantityLabel,
@@ -44,7 +43,49 @@ export function buildConductivityGroupConditions(record: ConductivityRecord, uni
   return items;
 }
 
-function buildConductivityConditions(record: ConductivityRecord, units: UnitMode): ConditionItem[] {
+export interface ConductivityPerformanceItem {
+  label: string;
+  symbol: string;
+  value: string;
+  title: string;
+  field: string;
+  quantity: Quantity;
+  primary?: boolean;
+}
+
+/** Comparable output properties. Applied electrode potential remains a condition. */
+export function buildConductivityPerformance(record: ConductivityRecord, units: UnitMode): ConductivityPerformanceItem[] {
+  const { core, extended } = record;
+  const items: ConductivityPerformanceItem[] = [];
+  const add = (label: string, symbol: string, field: string, quantity: Quantity | null | undefined, primary = false) => {
+    if (!quantity) return;
+    items.push({
+      label,
+      symbol,
+      field,
+      quantity,
+      primary,
+      value: quantityLabel(quantity, units),
+      title: quantityTitle(quantity, units),
+    });
+  };
+
+  add("Ionic conductivity", "σ", "conductivity", core.conductivity, true);
+  add("Capacitance", "C", "capacitance", core.capacitance);
+  add("Electric field", "E", "electricField", core.electricField);
+  add("Viscosity", "η", "viscosity", extended.viscosity);
+  add("Electrochemical window", "ΔE", "electrochemicalWindow", core.electrochemicalWindow);
+  add("Charge-transfer resistance", "Rct", "chargeTransferResistance", core.chargeTransferResistance);
+  return items;
+}
+
+function legacyPressure(record: ConductivityRecord): Quantity | null {
+  const entry = record.flexible.find((item) => /^(?:pressure|press\.?|压力|压强)$/i.test(item.key.trim()));
+  if (!entry) return null;
+  return parseQuantity(`${entry.value}${entry.unit ? ` ${entry.unit}` : ""}`, "pressure");
+}
+
+export function buildConductivityConditions(record: ConductivityRecord, units: UnitMode): ConditionItem[] {
   const { core, extended: e } = record;
   const prov = record.provenance ?? {};
   const items: ConditionItem[] = [];
@@ -59,22 +100,14 @@ function buildConductivityConditions(record: ConductivityRecord, units: UnitMode
       field: "temperature",
     });
   }
-  if (core.capacitance) {
+  const pressure = e.pressure ?? legacyPressure(record);
+  if (pressure) {
     items.push({
-      label: "Capacitance",
-      value: quantityLabel(core.capacitance, units),
-      title: quantityTitle(core.capacitance, units),
-      prov: prov.capacitance,
-      field: "capacitance",
-    });
-  }
-  if (core.electricField) {
-    items.push({
-      label: "Electric field",
-      value: quantityLabel(core.electricField, units),
-      title: quantityTitle(core.electricField, units),
-      prov: prov.electricField,
-      field: "electricField",
+      label: "Pressure",
+      value: quantityLabel(pressure, units),
+      title: quantityTitle(pressure, units),
+      prov: prov.pressure,
+      field: "pressure",
     });
   }
   if (core.electrodePotential) {
@@ -82,21 +115,6 @@ function buildConductivityConditions(record: ConductivityRecord, units: UnitMode
   }
   if (e.potentialReference) {
     items.push({ label: "Reference", value: e.potentialReference, prov: prov.potentialReference, field: "potentialReference" });
-  }
-  if (core.electrochemicalWindow) {
-    items.push({ label: "Window", value: quantityLabel(core.electrochemicalWindow, units), title: quantityTitle(core.electrochemicalWindow, units), prov: prov.electrochemicalWindow, field: "electrochemicalWindow" });
-  }
-  if (core.chargeTransferResistance) {
-    items.push({ label: "Rct / Rp", value: quantityLabel(core.chargeTransferResistance, units), title: quantityTitle(core.chargeTransferResistance, units), prov: prov.chargeTransferResistance, field: "chargeTransferResistance" });
-  }
-  if (e.viscosity) {
-    items.push({
-      label: "Viscosity",
-      value: quantityLabel(e.viscosity, units),
-      title: quantityTitle(e.viscosity, units),
-      prov: prov.viscosity,
-      field: "viscosity",
-    });
   }
   if (e.waterContent) {
     items.push({ label: "Water", value: e.waterContent, title: "Water content", prov: prov.waterContent, field: "waterContent" });
@@ -109,6 +127,14 @@ function buildConductivityConditions(record: ConductivityRecord, units: UnitMode
   }
   if (e.cellConstant) {
     items.push({ label: "Cell k", value: e.cellConstant, title: "Conductivity-cell constant" });
+  }
+  for (const field of record.flexible) {
+    if (/^(?:pressure|press\.?|压力|压强)$/i.test(field.key.trim())) continue;
+    items.push({
+      label: field.key,
+      value: `${field.value}${field.unit ? ` ${field.unit}` : ""}`,
+      title: field.note,
+    });
   }
   return items;
 }
@@ -146,23 +172,9 @@ export function ConductivityCard({
   const { missing } = conductivityCoreCompleteness(record);
   const svgId = useId().replace(/:/g, "");
   const conditions = buildConductivityConditions(record, units);
+  const performance = buildConductivityPerformance(record, units);
   const showConfidence = record.status === "review" && typeof record.confidence === "number";
   const confidencePct = showConfidence ? Math.round((record.confidence as number) * 100) : null;
-  const band = sigmaBand(core.conductivity?.std);
-  const sigmaValue = core.conductivity ? quantityLabel(core.conductivity, units) : formatSigma(core.conductivity);
-  const primary = core.conductivity
-    ? { label: "Ionic conductivity · σ", value: sigmaValue, field: "conductivity" }
-    : core.capacitance
-      ? { label: "Capacitance · C", value: quantityLabel(core.capacitance, units), field: "capacitance" }
-      : core.electricField
-        ? { label: "Electric field · E", value: quantityLabel(core.electricField, units), field: "electricField" }
-        : core.electrodePotential
-          ? { label: "Electrode potential", value: quantityLabel(core.electrodePotential, units), field: "electrodePotential" }
-          : core.electrochemicalWindow
-            ? { label: "Electrochemical window", value: quantityLabel(core.electrochemicalWindow, units), field: "electrochemicalWindow" }
-            : core.chargeTransferResistance
-              ? { label: "Charge-transfer resistance", value: quantityLabel(core.chargeTransferResistance, units), field: "chargeTransferResistance" }
-              : { label: "Target property", value: "—", field: "conductivity" };
 
   return (
     <article
@@ -241,56 +253,47 @@ export function ConductivityCard({
         </div>
       </section>
 
-      {/* ── result: σ readout ── */}
+      {/* ── electrochemical performance + reported conditions ── */}
       <section className="flex min-w-0 flex-col gap-2.5 px-3 py-3 xl:border-l xl:border-ink-100">
-        <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-ink-900 to-ink-800 px-3.5 py-2.5 text-white shadow-readout">
+        <div data-testid="electrochemical-performance" className="conductivity-performance-readout relative overflow-hidden rounded-xl bg-gradient-to-br from-ink-900 to-ink-800 px-3.5 py-3 text-white shadow-readout">
           <div className="pointer-events-none absolute -right-6 -top-8 h-20 w-20 rounded-full bg-brand-400/25 blur-2xl" />
-          <div className="relative flex items-end justify-between gap-3">
-            <div className="min-w-0">
-              <div className="label-eyebrow text-white/65">{primary.label}</div>
-              <div
-                className={`mt-0.5 font-mono text-[2rem] font-semibold leading-none tnum ${
-                  primary.value === "—" ? "text-amber-200" : "text-white"
-                }`}
-              >
-                {primary.value}
-              </div>
-            </div>
-            <div className="flex shrink-0 flex-col items-end gap-1 pb-1 text-right">
-              {core.conductivity != null && (
-                <span className="whitespace-nowrap rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-semibold text-white/90">{band.label}</span>
-              )}
-              {showConfidence && <span className="whitespace-nowrap text-[10px] font-medium text-white/70">conf {confidencePct}%</span>}
-              {record.provenance?.[primary.field] && (
-                <ProvBadge p={record.provenance[primary.field]} sourceId={record.sourceId} recordId={record.id} field={primary.field} value={primary.value} domain={domain} />
-              )}
-            </div>
+          <div className="relative mb-2 flex items-center justify-between gap-3">
+            <span className="label-eyebrow text-white/70">Electrochemical performance</span>
+            {showConfidence && <span className="whitespace-nowrap text-[10px] font-medium text-white/70">conf {confidencePct}%</span>}
           </div>
-          {/* conductivity magnitude meter (log 0.01 – 10 S/m) */}
-          {core.conductivity ? <div className="relative mt-3 h-1 overflow-hidden rounded-full bg-white/10">
-            <span
-              className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-brand-400 to-brand-300 transition-[width] duration-500"
-              style={{ width: `${band.pct}%` }}
-            />
-          </div> : null}
-          {core.conductivity?.std != null && (
-            <div className="mt-2 truncate text-[10px] font-medium text-white/70" title={`standardized: ${fmtNum(core.conductivity.std)} S/m`}>
-              {units === "std"
-                ? "as reported · " + (core.conductivity.raw || "—")
-                : "standardized · " + fmtNum(core.conductivity.std) + " S/m"}
+          {performance.length > 0 ? (
+            <div className={`relative grid gap-1.5 ${performance.length > 1 ? "sm:grid-cols-2" : "grid-cols-1"}`}>
+              {performance.map((item) => (
+                <PerformanceTile
+                  key={item.field}
+                  item={item}
+                  provenance={record.provenance?.[item.field]}
+                  sourceId={record.sourceId}
+                  recordId={record.id}
+                  domain={domain}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="relative rounded-lg border border-amber-200/25 bg-white/10 px-3 py-3 text-sm font-semibold text-amber-100">
+              No verified performance value
             </div>
           )}
         </div>
 
         <div>
-          <div className="mb-1.5">
-            <span className="label-eyebrow">{units === "std" ? "Standardized Conditions" : "Reported Conditions"}</span>
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <span className="label-eyebrow">Reported conditions</span>
+            {units === "std" && (
+              <span className="rounded-full border border-brand-100 bg-brand-50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand-700">
+                standardized units
+              </span>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-1.5 lg:grid-cols-3">
             {conditions.map((item) => (
               <ConditionChip key={`${item.label}-${item.value}`} item={item} sourceId={record.sourceId} recordId={record.id} domain={domain} />
             ))}
-            {!core.temperature && <MissingChip label="Temp" />}
           </div>
         </div>
       </section>
@@ -305,6 +308,63 @@ export function ConductivityCard({
         </div>
       )}
     </article>
+  );
+}
+
+function PerformanceTile({
+  item,
+  provenance,
+  sourceId,
+  recordId,
+  domain,
+}: {
+  item: ConductivityPerformanceItem;
+  provenance?: FieldProvenance;
+  sourceId?: string;
+  recordId: string;
+  domain: Domain;
+}) {
+  const band = item.field === "conductivity" ? sigmaBand(item.quantity.std) : null;
+  return (
+    <div
+      data-testid={`performance-${item.field}`}
+      className={`min-w-0 rounded-lg border px-2.5 py-2 ${
+        item.primary ? "border-brand-300/35 bg-brand-400/15" : "border-white/10 bg-white/[0.07]"
+      }`}
+      title={item.title}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="truncate text-[9px] font-bold uppercase tracking-eyebrow text-white/60">
+            {item.label} · {item.symbol}
+          </div>
+          <div className="mt-0.5 break-words font-mono text-[15px] font-semibold leading-tight text-white tnum">
+            {item.value}
+          </div>
+        </div>
+        {provenance && (
+          <ProvBadge
+            p={provenance}
+            sourceId={sourceId}
+            recordId={recordId}
+            field={item.field}
+            value={item.value}
+            domain={domain}
+          />
+        )}
+      </div>
+      {band && (
+        <div className="mt-2">
+          <div className="mb-1 text-[9px] font-semibold text-white/65">{band.label}</div>
+          <div className="h-1 overflow-hidden rounded-full bg-white/10">
+            <span
+              className="block h-full rounded-full bg-gradient-to-r from-brand-400 to-brand-300"
+              style={{ width: `${band.pct}%` }}
+            />
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

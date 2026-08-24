@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "auditedAt": "2026-08-20",
+  "scope": "Manual source audit for ionic-liquid conductivity, capacitance, dynamic viscosity, applied electric field, electrochemical stability window, and charge-transfer/polarization resistance. Figure-only values are flagged and are never guessed from PDF text.",
+  "papers": [
+    {
+      "file": "1-s2.0-S001346862200295X-main.pdf",
+      "doi": "10.1016/j.electacta.2022.140123",
+      "classification": "text-values",
+      "reviewSummary": "The 0.1–5.0 V CV scan range is a test condition, not the result. After five cycles Na002, Na005 and Na01 were stable below 4.2 V; the conclusion reports stability higher than 4.2 V.",
+      "records": [
+        { "paper": { "title": "Physicochemical and electrochemical properties of Pyr13TFSI/NaTFSI electrolytes", "year": 2022, "doi": "10.1016/j.electacta.2022.140123" }, "cation": "[Pyr13]", "anion": "[TFSI]", "surface": "carbon-coated aluminum", "electrochemicalWindow": ">4.2 V", "potentialReference": "Na+/Na", "concentration": "Na002, Na005 and Na01", "waterContent": "<5 ppm", "method": "CV", "flexible": [{ "key": "Scan rate", "value": "1", "unit": "mV/s" }, { "key": "CV test range", "value": "0.1–5.0", "unit": "V" }, { "key": "Cell setup", "value": "three-electrode Swagelok cell; Na counter/reference" }], "provenance": [{ "field": "electrochemicalWindow", "page": 8, "section": "Conclusions", "basis": "direct" }], "confidence": 0.95 }
+      ]
+    },
+    { "file": "1-s2.0-S0039914024010671-main.pdf", "doi": "10.1016/j.talanta.2024.126688", "classification": "no-in-scope-value", "reviewSummary": "Sensor paper contains qualitative conductivity/charge-transfer discussion but no explicit numeric in-scope ionic-liquid property in searchable text.", "records": [] },
+    { "file": "1-s2.0-S0167732222006134-main.pdf", "doi": "10.1016/j.molliq.2022.119075", "classification": "no-in-scope-value", "reviewSummary": "The 10^-5 S/cm value is general background on lithium-ion mobility, not a measurement of the paper's ionic-liquid system.", "records": [] },
+    {
+      "file": "1-s2.0-S0925400522012357-main.pdf",
+      "doi": "10.1016/j.snb.2022.132592",
+      "classification": "text-values",
+      "reviewSummary": "Only the two composite electrodes containing ILBMB are retained; CPO/GCE, bare GCE, rGO/GCE and rGO-Au NPs/GCE are non-IL controls.",
+      "records": [
+        { "paper": { "title": "ILBMB/rGO-Au nanoparticle electrochemical sensor", "year": 2022, "doi": "10.1016/j.snb.2022.132592" }, "cation": "[BMIM]", "anion": "[Br]", "surface": "CPO-ILBMB/rGO/GCE", "chargeTransferResistance": "370.5 Ω", "potentialReference": "SCE", "method": "EIS", "flexible": [{ "key": "Cell setup", "value": "three-electrode system" }, { "key": "Counter electrode", "value": "carbon rod" }], "provenance": [{ "field": "chargeTransferResistance", "page": 2, "basis": "direct" }], "confidence": 0.96 },
+        { "paper": { "title": "ILBMB/rGO-Au nanoparticle electrochemical sensor", "year": 2022, "doi": "10.1016/j.snb.2022.132592" }, "cation": "[BMIM]", "anion": "[Br]", "surface": "CPO-ILBMB/rGO-Au NPs/GCE", "chargeTransferResistance": "260.8 Ω", "potentialReference": "SCE", "method": "EIS", "flexible": [{ "key": "Cell setup", "value": "three-electrode system" }, { "key": "Counter electrode", "value": "carbon rod" }], "provenance": [{ "field": "chargeTransferResistance", "page": 2, "basis": "direct" }], "confidence": 0.96 }
+      ]
+    },
+    { "file": "1-s2.0-S0927775723019593-main.pdf", "doi": "10.1016/j.colsurfa.2023.132875", "classification": "figure-only", "reviewSummary": "The ionic-liquid grease conductivity results are plotted in Figures 6–7/ESI; nearby textual conductivity ranges are literature/background values.", "records": [] },
+    { "file": "1-s2.0-S0927775725019363-main.pdf", "doi": "10.1016/j.colsurfa.2025.138033", "classification": "no-in-scope-value", "reviewSummary": "No explicit numeric target property for an ionic-liquid system was found.", "records": [] },
+    {
+      "file": "1-s2.0-S0927776520308973-main.pdf",
+      "doi": "10.1016/j.colsurfb.2020.111540",
+      "classification": "text-values",
+      "reviewSummary": "Three NIBA-IL-containing electrodes are retained; bare GCE and MWCNT/GCE controls are excluded. The generic 5.0 V statement in the introduction is not a result of this study.",
+      "records": [
+        { "paper": { "title": "NIBA ionic-liquid/MWCNT electrochemical interface", "year": 2020, "doi": "10.1016/j.colsurfb.2020.111540" }, "cation": "[NIBA]", "anion": "[TFSI]", "surface": "NIBA-IL/MWCNT/GCE", "electrodePotential": "0.21 V", "chargeTransferResistance": "144 Ω", "method": "EIS", "concentration": "0.1 M KCl + 5 mM Fe(CN)6^3−/4−", "flexible": [{ "key": "Frequency range", "value": "1×10^6–0.1", "unit": "Hz" }, { "key": "AC amplitude", "value": "0.01", "unit": "V" }], "provenance": [{ "field": "chargeTransferResistance", "page": 4, "basis": "direct" }], "confidence": 0.95 },
+        { "paper": { "title": "NIBA ionic-liquid/MWCNT electrochemical interface", "year": 2020, "doi": "10.1016/j.colsurfb.2020.111540" }, "cation": "[NIBA]", "anion": "[TFSI]", "surface": "Hb/NIBA-IL/GCE", "electrodePotential": "0.21 V", "chargeTransferResistance": "733 Ω", "method": "EIS", "concentration": "0.1 M KCl + 5 mM Fe(CN)6^3−/4−", "flexible": [{ "key": "Frequency range", "value": "1×10^6–0.1", "unit": "Hz" }, { "key": "AC amplitude", "value": "0.01", "unit": "V" }], "provenance": [{ "field": "chargeTransferResistance", "page": 4, "basis": "direct" }], "confidence": 0.95 },
+        { "paper": { "title": "NIBA ionic-liquid/MWCNT electrochemical interface", "year": 2020, "doi": "10.1016/j.colsurfb.2020.111540" }, "cation": "[NIBA]", "anion": "[TFSI]", "surface": "Hb/NIBA-IL/MWCNT/GCE", "electrodePotential": "0.21 V", "chargeTransferResistance": "603 Ω", "method": "EIS", "concentration": "0.1 M KCl + 5 mM Fe(CN)6^3−/4−", "flexible": [{ "key": "Frequency range", "value": "1×10^6–0.1", "unit": "Hz" }, { "key": "AC amplitude", "value": "0.01", "unit": "V" }], "provenance": [{ "field": "chargeTransferResistance", "page": 4, "basis": "direct" }], "confidence": 0.95 }
+      ]
+    },
+    {
+      "file": "1-s2.0-S1572665722007603-main.pdf",
+      "doi": "10.1016/j.jelechem.2022.116768",
+      "classification": "text-values",
+      "reviewSummary": "The electrochemical window is approximately 3.4 V at 23±1 °C. The 10^-9 mbar value belongs to the XPS analyzer chamber and is excluded from electrochemical conditions.",
+      "records": [
+        { "paper": { "title": "Lanthanide electrodeposition from [BMP][DCA] on Pt(111)", "year": 2022, "doi": "10.1016/j.jelechem.2022.116768" }, "cation": "[BMP]", "anion": "[DCA]", "surface": "Pt(111)", "temperature": "23 ± 1 °C", "electrochemicalWindow": "approximately 3.4 V", "waterContent": "0.012 M residual water", "method": "CV", "provenance": [{ "field": "electrochemicalWindow", "page": 3, "basis": "direct" }], "confidence": 0.98 }
+      ]
+    },
+    { "file": "1-s2.0-S1876107015000607-main.pdf", "doi": "10.1016/j.jtice.2015.02.017", "classification": "figure-only", "reviewSummary": "Measured conductivity and viscosity are graph-only (Figures 3–4); Table 2 contains VTF fit parameters σ0/η0, not raw measurements.", "records": [] },
+    { "file": "1-s2.0-S2405829722006572-main.pdf", "doi": "10.1016/j.ensm.2022.11.057", "classification": "no-in-scope-value", "reviewSummary": "Battery application metrics are reported, but no explicit intrinsic target value within the present platform scope was identified.", "records": [] },
+    { "file": "Angew Chem Int Ed - 2022 - Yang - Modifying the Electrocatalytic Selectivity of Oxidation Reactions with Ionic Liquids.pdf", "classification": "no-in-scope-value", "reviewSummary": "Electrocatalytic selectivity/current metrics are outside the present intrinsic-property target set.", "records": [] },
+    {
+      "file": "Batteries   Supercaps - 2023 - Valurouthu - Ambipolar Electrochemistry of Pre‐Intercalated Ti3C2Tx MXene in Ionic Liquid.pdf",
+      "doi": "10.1002/batt.202300009",
+      "classification": "text-values",
+      "reviewSummary": "Current Ti3C2Tx/EMIM-TFSI results are retained. The 1500 F/cm3 acidic-electrolyte number, 200 °C synthesis temperature and literature windows are excluded.",
+      "records": [
+        { "paper": { "title": "Ambipolar electrochemistry of pre-intercalated Ti3C2Tx MXene in ionic liquid", "year": 2023, "doi": "10.1002/batt.202300009" }, "cation": "[EMIM]", "anion": "[TFSI]", "surface": "pre-intercalated Ti3C2Tx", "temperature": "room temperature", "capacitance": "140 F/cm3", "method": "CV", "flexible": [{ "key": "scan rate", "value": "5", "unit": "mV/s" }], "provenance": [{ "field": "capacitance", "page": 4, "basis": "direct" }], "confidence": 0.98 },
+        { "paper": { "title": "Ambipolar electrochemistry of pre-intercalated Ti3C2Tx MXene in ionic liquid", "year": 2023, "doi": "10.1002/batt.202300009" }, "cation": "[EMIM]", "anion": "[TFSI]", "surface": "pre-intercalated Ti3C2Tx", "temperature": "room temperature", "capacitance": "64 F/g", "method": "CV", "provenance": [{ "field": "capacitance", "page": 4, "basis": "direct" }], "confidence": 0.98 },
+        { "paper": { "title": "Ambipolar electrochemistry of pre-intercalated Ti3C2Tx MXene in ionic liquid", "year": 2023, "doi": "10.1002/batt.202300009" }, "cation": "[EMIM]", "anion": "[TFSI]", "surface": "pre-intercalated Ti3C2Tx", "temperature": "room temperature", "electrochemicalWindow": "about 2.7 V", "potentialReference": "Ag wire", "method": "CV", "provenance": [{ "field": "electrochemicalWindow", "page": 7, "section": "Conclusion", "basis": "direct" }], "confidence": 0.98 },
+        { "paper": { "title": "Ambipolar electrochemistry of pre-intercalated Ti3C2Tx MXene in ionic liquid", "year": 2023, "doi": "10.1002/batt.202300009" }, "cation": "[EMIM]", "anion": "[TFSI]", "surface": "pre-intercalated Ti3C2Tx", "temperature": "room temperature", "electrodePotential": "0 V", "chargeTransferResistance": "2.75 Ω cm2", "potentialReference": "Ag wire", "method": "EIS", "provenance": [{ "field": "chargeTransferResistance", "page": 5, "basis": "direct" }], "confidence": 0.96 },
+        { "paper": { "title": "Ambipolar electrochemistry of pre-intercalated Ti3C2Tx MXene in ionic liquid", "year": 2023, "doi": "10.1002/batt.202300009" }, "cation": "[EMIM]", "anion": "[TFSI]", "surface": "pre-intercalated Ti3C2Tx", "temperature": "room temperature", "electrodePotential": "1 V", "chargeTransferResistance": "3 Ω cm2", "potentialReference": "Ag wire", "method": "EIS", "provenance": [{ "field": "chargeTransferResistance", "page": 5, "basis": "direct" }], "confidence": 0.96 }
+      ]
+    },
+    {
+      "file": "ChemElectroChem - 2021 - Qin - Understanding Electric Field‐Dependent Structure Variation of Functional Ionic Liquids at.pdf",
+      "doi": "10.1002/celc.202100135",
+      "classification": "text-values",
+      "reviewSummary": "Applied fields are study variables for imidazolium/OTf at Pt(111). The 200 K initialization is excluded; analyzed production trajectories are at 300 K.",
+      "records": [
+        { "paper": { "title": "Electric-field-dependent structure of functional ionic liquids at Pt(111)", "year": 2021, "doi": "10.1002/celc.202100135" }, "cation": "[C2mim]", "anion": "[OTf]", "surface": "Pt(111)", "temperature": "300 K", "electricField": "<0.05 V/Å", "method": "MD", "confidence": 0.9 },
+        { "paper": { "title": "Electric-field-dependent structure of functional ionic liquids at Pt(111)", "year": 2021, "doi": "10.1002/celc.202100135" }, "cation": "[CNmim]", "anion": "[OTf]", "surface": "Pt(111)", "temperature": "300 K", "electricField": "0 V/Å", "method": "MD", "confidence": 0.9 },
+        { "paper": { "title": "Electric-field-dependent structure of functional ionic liquids at Pt(111)", "year": 2021, "doi": "10.1002/celc.202100135" }, "cation": "[C4mim]", "anion": "[OTf]", "surface": "Pt(111)", "temperature": "300 K", "electricField": "0.2 V/Å", "method": "MD", "confidence": 0.9 },
+        { "paper": { "title": "Electric-field-dependent structure of functional ionic liquids at Pt(111)", "year": 2021, "doi": "10.1002/celc.202100135" }, "cation": "[C4mim]", "anion": "[OTf]", "surface": "Pt(111)", "temperature": "300 K", "electricField": "0.3 V/Å", "method": "MD", "confidence": 0.9 },
+        { "paper": { "title": "Electric-field-dependent structure of functional ionic liquids at Pt(111)", "year": 2021, "doi": "10.1002/celc.202100135" }, "cation": "[C2mim]", "anion": "[OTf]", "surface": "Pt(111)", "temperature": "300 K", "electricField": "0.3 V/Å", "method": "MD", "confidence": 0.9 },
+        { "paper": { "title": "Electric-field-dependent structure of functional ionic liquids at Pt(111)", "year": 2021, "doi": "10.1002/celc.202100135" }, "cation": "[CNSO3mim]", "anion": "[OTf]", "surface": "Pt(111)", "temperature": "300 K", "electricField": "0.2 V/Å", "method": "MD", "confidence": 0.9 },
+        { "paper": { "title": "Electric-field-dependent structure of functional ionic liquids at Pt(111)", "year": 2021, "doi": "10.1002/celc.202100135" }, "cation": "imidazolium IL series", "anion": "[OTf]", "surface": "Pt(111)", "temperature": "300 K", "electricField": "<0.4 V/Å", "method": "MD", "confidence": 0.85 }
+      ]
+    },
+    { "file": "ChemistrySelect - 2020 - Eavani - Electrochemical  Surface Morphological and Spectral Studies of A Polyoxometalate‐Ionic.pdf", "doi": "10.1002/slct.201903978", "classification": "figure-only", "reviewSummary": "Capacitance-frequency data are plotted in Figure 11; the searchable text does not state exact points.", "records": [] },
+    {
+      "file": "ChemistrySelect - 2021 - Kong - Experimental Study of Poly 1‐Acetamide‐3‐vinylimidazolium Bromide  as a Corrosion Inhibitor.pdf",
+      "doi": "10.1002/slct.202100878",
+      "classification": "text-values",
+      "reviewSummary": "Table 3 contains paired Cdl and Rp values. The blank HCl row is excluded; five PCVIB concentrations are retained.",
+      "records": [
+        { "paper": { "title": "Poly(1-acetamide-3-vinylimidazolium bromide) as a corrosion inhibitor", "year": 2021, "doi": "10.1002/slct.202100878" }, "cation": "[PCVIm]", "anion": "[Br]", "surface": "N80-CS", "temperature": "25.0 ± 0.1 °C", "capacitance": "149.3 ± 8.2 µF/cm2", "chargeTransferResistance": "95.64 ± 6.29 Ω cm2", "concentration": "5 ppm PCVIB in 1.0 mol/L HCl", "method": "EIS", "provenance": [{ "field": "capacitance", "page": 3, "table": "Table 3", "basis": "direct" }, { "field": "chargeTransferResistance", "page": 3, "table": "Table 3", "basis": "direct" }], "confidence": 0.99 },
+        { "paper": { "title": "Poly(1-acetamide-3-vinylimidazolium bromide) as a corrosion inhibitor", "year": 2021, "doi": "10.1002/slct.202100878" }, "cation": "[PCVIm]", "anion": "[Br]", "surface": "N80-CS", "temperature": "25.0 ± 0.1 °C", "capacitance": "115.4 ± 8.1 µF/cm2", "chargeTransferResistance": "149.57 ± 4.03 Ω cm2", "concentration": "10 ppm PCVIB in 1.0 mol/L HCl", "method": "EIS", "provenance": [{ "field": "capacitance", "page": 3, "table": "Table 3", "basis": "direct" }, { "field": "chargeTransferResistance", "page": 3, "table": "Table 3", "basis": "direct" }], "confidence": 0.99 },
+        { "paper": { "title": "Poly(1-acetamide-3-vinylimidazolium bromide) as a corrosion inhibitor", "year": 2021, "doi": "10.1002/slct.202100878" }, "cation": "[PCVIm]", "anion": "[Br]", "surface": "N80-CS", "temperature": "25.0 ± 0.1 °C", "capacitance": "102.7 ± 4.3 µF/cm2", "chargeTransferResistance": "172.63 ± 3.67 Ω cm2", "concentration": "50 ppm PCVIB in 1.0 mol/L HCl", "method": "EIS", "provenance": [{ "field": "capacitance", "page": 3, "table": "Table 3", "basis": "direct" }, { "field": "chargeTransferResistance", "page": 3, "table": "Table 3", "basis": "direct" }], "confidence": 0.99 },
+        { "paper": { "title": "Poly(1-acetamide-3-vinylimidazolium bromide) as a corrosion inhibitor", "year": 2021, "doi": "10.1002/slct.202100878" }, "cation": "[PCVIm]", "anion": "[Br]", "surface": "N80-CS", "temperature": "25.0 ± 0.1 °C", "capacitance": "83.2 ± 0.9 µF/cm2", "chargeTransferResistance": "217.03 ± 6.34 Ω cm2", "concentration": "100 ppm PCVIB in 1.0 mol/L HCl", "method": "EIS", "provenance": [{ "field": "capacitance", "page": 3, "table": "Table 3", "basis": "direct" }, { "field": "chargeTransferResistance", "page": 3, "table": "Table 3", "basis": "direct" }], "confidence": 0.99 },
+        { "paper": { "title": "Poly(1-acetamide-3-vinylimidazolium bromide) as a corrosion inhibitor", "year": 2021, "doi": "10.1002/slct.202100878" }, "cation": "[PCVIm]", "anion": "[Br]", "surface": "N80-CS", "temperature": "25.0 ± 0.1 °C", "capacitance": "82.9 ± 2.0 µF/cm2", "chargeTransferResistance": "255.50 ± 5.90 Ω cm2", "concentration": "300 ppm PCVIB in 1.0 mol/L HCl", "method": "EIS", "provenance": [{ "field": "capacitance", "page": 3, "table": "Table 3", "basis": "direct" }, { "field": "chargeTransferResistance", "page": 3, "table": "Table 3", "basis": "direct" }], "confidence": 0.99 }
+      ]
+    },
+    {
+      "file": "electropolymerization-of-pyrrole-based-ionic-liquids-on-selected-wireless-bipolar-electrodes.pdf",
+      "doi": "10.1021/acsami.1c25230",
+      "classification": "text-values",
+      "reviewSummary": "Measured CPIL viscosities and simulated maximum field are retained. The generic <500 cP processing guideline and synthesis temperatures are excluded.",
+      "records": [
+        { "paper": { "title": "Electropolymerization of pyrrole-based ionic liquids on wireless bipolar electrodes", "year": 2022, "doi": "10.1021/acsami.1c25230" }, "cation": "[pyrrole-C6MIm]", "anion": "[PF6]", "surface": "bulk liquid", "temperature": "20 °C", "viscosity": "682 cP", "density": "1.55 g/cm3", "confidence": 0.98, "provenance": [{ "field": "viscosity", "page": 6, "basis": "direct" }] },
+        { "paper": { "title": "Electropolymerization of pyrrole-based ionic liquids on wireless bipolar electrodes", "year": 2022, "doi": "10.1021/acsami.1c25230" }, "cation": "[pyrrole-C6MIm]", "anion": "[NTf2]", "surface": "bulk liquid", "temperature": "20 °C", "viscosity": "363 cP", "density": "1.48 g/cm3", "confidence": 0.98, "provenance": [{ "field": "viscosity", "page": 6, "basis": "direct" }] },
+        { "paper": { "title": "Electropolymerization of pyrrole-based ionic liquids on wireless bipolar electrodes", "year": 2022, "doi": "10.1021/acsami.1c25230" }, "cation": "CPIL1/CPIL2", "anion": "[PF6]/[NTf2]", "surface": "wireless bipolar electrode tips", "electricField": "13.8 kV/m", "method": "finite-element simulation", "flexible": [{ "key": "Software", "value": "COMSOL Multiphysics 5.6" }, { "key": "Simulation geometry", "value": "parallel-channel BPE design" }, { "key": "Field location", "value": "BPE tips" }], "confidence": 0.95, "provenance": [{ "field": "electricField", "page": 5, "basis": "direct" }] }
+      ]
+    },
+    {
+      "file": "s10800-022-01689-8.pdf",
+      "doi": "10.1007/s10800-022-01689-8",
+      "classification": "text-values",
+      "reviewSummary": "Only CPO-ILEMB/MoS2/GC and CPO-ILEMB/Au@MoS2/GC contain the ionic liquid; bare GC and CPO-GC controls are excluded.",
+      "records": [
+        { "paper": { "title": "ILEMB/Au@MoS2 electrochemical sensor", "year": 2022, "doi": "10.1007/s10800-022-01689-8" }, "cation": "[EMIM]", "anion": "[Br]", "surface": "CPO-ILEMB/MoS2/GC", "chargeTransferResistance": "1374 Ω", "potentialReference": "SCE", "method": "EIS", "flexible": [{ "key": "Cell setup", "value": "three-electrode system" }, { "key": "Counter electrode", "value": "platinum" }, { "key": "Atmosphere", "value": "N2 / deoxygenated" }], "confidence": 0.96, "provenance": [{ "field": "chargeTransferResistance", "page": 4, "basis": "direct" }] },
+        { "paper": { "title": "ILEMB/Au@MoS2 electrochemical sensor", "year": 2022, "doi": "10.1007/s10800-022-01689-8" }, "cation": "[EMIM]", "anion": "[Br]", "surface": "CPO-ILEMB/Au@MoS2/GC", "chargeTransferResistance": "1020 Ω", "potentialReference": "SCE", "method": "EIS", "flexible": [{ "key": "Cell setup", "value": "three-electrode system" }, { "key": "Counter electrode", "value": "platinum" }, { "key": "Atmosphere", "value": "N2 / deoxygenated" }], "confidence": 0.96, "provenance": [{ "field": "chargeTransferResistance", "page": 4, "basis": "direct" }] }
+      ]
+    },
+    { "file": "s11696-021-01716-6.pdf", "doi": "10.1007/s11696-021-01716-6", "classification": "figure-only", "reviewSummary": "Ethaline/CrCl3 conductivity and viscosity at 40 °C are plotted in Figure 1. Approximate visual readings are not imported as exact text values.", "records": [] },
+    { "file": "Small - 2024 - Krushinski - Single Liquid Aerosol Microparticle Electrochemistry on a Suspended Ionic Liquid Film.pdf", "doi": "10.1002/smll.202308637", "classification": "no-in-scope-value", "reviewSummary": "The paper discusses qualitative capacitance fluctuation but does not provide an explicit numeric target value for import.", "records": [] },
+    { "file": "The Chemical Record - 2021 - Sagara - Redox of Viologen for Powering and Coloring (1).pdf", "doi": "10.1002/tcr.202100082", "classification": "no-in-scope-value", "reviewSummary": "Review article contains qualitative/background discussion, not a current-study numeric target value.", "records": [] },
+    { "file": "1-s2.0-S0278691522002733-main.pdf", "classification": "no-in-scope-value", "reviewSummary": "Negative-control paper: no in-scope ionic-liquid electrochemical property found.", "records": [] },
+    { "file": "s10967-022-08543-3.pdf", "doi": "10.1007/s10967-022-08543-3", "classification": "no-in-scope-value", "reviewSummary": "Negative-control paper: no in-scope ionic-liquid electrochemical property found.", "records": [] },
+    { "file": "s13738-020-02088-6.pdf", "doi": "10.1007/s13738-020-02088-6", "classification": "no-in-scope-value", "reviewSummary": "Negative-control paper: no in-scope ionic-liquid electrochemical property found.", "records": [] }
+  ]
+}

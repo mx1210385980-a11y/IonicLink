@@ -26,9 +26,14 @@ export function MoleculeView({
   const svgRef = useRef<SVGSVGElement>(null);
   const [ok, setOk] = useState(false);
   const inferred = resolveIonStructure(ionLabel, kind);
-  const resolvedSmiles = smiles?.trim() || inferred?.smiles;
+  // A curated/pattern-resolved identity is authoritative. Extracted SMILES are
+  // used only when the label is not in the verified catalog.
+  const resolvedSmiles = inferred?.smiles || smiles?.trim();
+  const monatomic = parseMonatomicIon(resolvedSmiles);
+  const monatomicAtom = monatomic?.atom;
+  const monatomicCharge = monatomic?.charge;
   const hasIonLabel = Boolean(ionLabel?.trim());
-  const source = smiles?.trim() ? "record" : inferred?.source ?? (hasIonLabel ? "label" : "missing");
+  const source = inferred?.source ?? (smiles?.trim() ? "record" : hasIonLabel ? "unresolved" : "missing");
   const displayName = inferred?.name ?? ionLabel?.trim() ?? "Unknown ion";
   const viewKind = kind ?? "cation";
   const isCation = viewKind === "cation";
@@ -42,7 +47,7 @@ export function MoleculeView({
 
   useEffect(() => {
     let cancelled = false;
-    if (!resolvedSmiles || !svgRef.current) {
+    if (!resolvedSmiles || monatomicAtom || !svgRef.current) {
       setOk(false);
       return;
     }
@@ -105,7 +110,7 @@ export function MoleculeView({
     return () => {
       cancelled = true;
     };
-  }, [atomFontSize, atomFontSizeSmall, bondLength, bondThickness, drawHeight, drawPadding, drawWidth, resolvedSmiles]);
+  }, [atomFontSize, atomFontSizeSmall, bondLength, bondThickness, drawHeight, drawPadding, drawWidth, monatomicAtom, monatomicCharge, resolvedSmiles]);
 
   return (
     <div
@@ -131,14 +136,20 @@ export function MoleculeView({
       <div className={`molecule-field molecule-field-${viewKind}`}>
         <div data-testid={`molecule-spin-stage-${viewKind}`} className="molecule-spin-stage">
           <div className={`molecule-spin molecule-spin-${viewKind}`}>
-            <svg
-              ref={svgRef}
-              width={drawWidth}
-              height={drawHeight}
-              aria-hidden="true"
-              className={ok ? "molecule-canvas relative z-10 block h-auto max-w-full" : "hidden"}
-            />
-            {!ok && <StructurePlaceholder kind={viewKind} ionLabel={ionLabel} />}
+            {monatomic ? (
+              <MonatomicIon atom={monatomic.atom} charge={monatomic.charge} kind={viewKind} />
+            ) : (
+              <>
+                <svg
+                  ref={svgRef}
+                  width={drawWidth}
+                  height={drawHeight}
+                  aria-hidden="true"
+                  className={ok ? "molecule-canvas relative z-10 block h-auto max-w-full" : "hidden"}
+                />
+                {!ok && <StructurePlaceholder kind={viewKind} ionLabel={ionLabel} hasSmiles={Boolean(resolvedSmiles)} />}
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -146,33 +157,38 @@ export function MoleculeView({
   );
 }
 
-function StructurePlaceholder({ kind, ionLabel }: { kind: IonKind; ionLabel?: string }) {
+function parseMonatomicIon(smiles: string | undefined): { atom: string; charge: string } | null {
+  const match = smiles?.match(/^\[([A-Z][a-z]?)([+-])\]$/);
+  if (!match) return null;
+  return { atom: match[1], charge: match[2] === "+" ? "+" : "−" };
+}
+
+function MonatomicIon({ atom, charge, kind }: { atom: string; charge: string; kind: IonKind }) {
   const isCation = kind === "cation";
   const stroke = isCation ? "#0891b2" : "#059669";
-  const charge = isCation ? "+" : "-";
-  const label = ionLabel?.replace(/^\[/, "").replace(/\]$/, "").slice(0, 10) || "ion";
   return (
-    <svg width="112" height="66" viewBox="0 0 112 66" fill="none" className="molecule-placeholder relative z-10 text-ink-300" aria-hidden="true">
-      <path
-        d="M18 42 L33 24 L51 36 L68 18 L87 32"
-        stroke={stroke}
-        strokeWidth="2.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        opacity=".55"
-      />
-      <g>
-        <animateTransform attributeName="transform" type="translate" values="0 0;0 -2;0 0" dur="2.8s" repeatCount="indefinite" />
-        <circle cx="18" cy="42" r="4" fill={stroke} opacity=".55" />
-        <circle cx="87" cy="32" r="4" fill={stroke} opacity=".35" />
-        <circle cx="56" cy="32" r="15" fill="white" stroke={stroke} strokeWidth="1.5" opacity=".88" />
-        <text x="56" y="35" textAnchor="middle" className="fill-ink-600 font-mono text-[10px] font-bold">
-          {charge}
-        </text>
-      </g>
-      <text x="56" y="60" textAnchor="middle" className="fill-ink-400 font-mono text-[9px] font-semibold">
-        {label}
-      </text>
-    </svg>
+    <div data-testid={`monatomic-ion-${kind}`} className="relative z-10 grid h-[66px] w-[112px] place-items-center" aria-label={`${atom}${charge} ion`}>
+      <div className="relative grid h-12 w-12 place-items-center rounded-full border-2 bg-white font-serif text-2xl font-semibold" style={{ borderColor: stroke, color: stroke }}>
+        {atom}
+        <sup className="absolute -right-2 -top-2 text-sm font-bold">{charge}</sup>
+      </div>
+    </div>
+  );
+}
+
+function StructurePlaceholder({ kind, ionLabel, hasSmiles }: { kind: IonKind; ionLabel?: string; hasSmiles: boolean }) {
+  const isCation = kind === "cation";
+  const stroke = isCation ? "#0891b2" : "#059669";
+  const label = ionLabel?.trim() || "Unknown ion";
+  return (
+    <div
+      data-testid={`unverified-structure-${kind}`}
+      className="relative z-10 flex h-[66px] w-[132px] flex-col items-center justify-center rounded-lg border border-dashed bg-white/80 px-2 text-center"
+      style={{ borderColor: `${stroke}66` }}
+      title={`${label}: ${hasSmiles ? "SMILES could not be rendered" : "no verified SMILES"}`}
+    >
+      <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: stroke }}>Structure not verified</span>
+      <span className="mt-1 line-clamp-2 max-w-full break-all font-mono text-[9px] text-ink-500">{label}</span>
+    </div>
   );
 }

@@ -4,8 +4,8 @@ import type { ExtractedFieldsBase, IonicLiquidCore } from "../schema";
 
 /**
  * Conductivity domain model. Mirrors the tribology three-layer shape but for
- * ionic-liquid CONDUCTIVITY: the atomic unit is one conductivity value (σ) bound
- * to its temperature, electrode surface, and composition.
+ * ionic-liquid electrical and interfacial properties. The atomic unit is one
+ * unique condition set, which may contain several compatible target properties.
  */
 
 /** BASE LAYER — required to approve a conductivity record into the official DB. */
@@ -25,6 +25,7 @@ export interface ConductivityCore {
 export interface ConductivityExtended {
   method?: string; // EIS / conductivity cell
   potentialReference?: string;
+  pressure?: Quantity; // measurement pressure → Pa
   viscosity?: Quantity; // dynamic viscosity η → Pa·s
   waterContent?: string; // ppm or wt% (kept raw — not a single clean dimension)
   concentration?: string; // mol/L or wt% for IL solutions / electrolytes
@@ -46,6 +47,7 @@ export interface ConductivityExtractedFields extends ExtractedFieldsBase {
   electrochemicalWindow?: string;
   chargeTransferResistance?: string;
   potentialReference?: string;
+  pressure?: string; // e.g. "1 atm" or "250 kPa"
   method?: string;
   viscosity?: string; // e.g. "45 cP"
   waterContent?: string; // e.g. "120 ppm"
@@ -79,6 +81,7 @@ export const CONDUCTIVITY_PROVENANCE_FIELDS = [
   "electrochemicalWindow",
   "chargeTransferResistance",
   "potentialReference",
+  "pressure",
   "viscosity",
   "waterContent",
   "concentration",
@@ -94,13 +97,13 @@ export function conductivityCoreCompleteness(
   if (!c.ionicLiquid.cation?.trim()) missing.push("Cation");
   if (!c.ionicLiquid.anion?.trim()) missing.push("Anion");
   if (!c.surface?.trim()) missing.push("Surface");
-  if (!c.temperature || c.temperature.value == null) missing.push("Temperature");
   if (
     !c.conductivity &&
     !c.capacitance &&
     !c.electricField &&
     !c.electrochemicalWindow &&
-    !c.chargeTransferResistance
+    !c.chargeTransferResistance &&
+    !r.extended.viscosity
   ) {
     missing.push("Target electrochemical property");
   }
@@ -122,7 +125,7 @@ export const CONDUCTIVITY_EXTRACTION_TOOL_SCHEMA = {
     records: {
       type: "array",
       description:
-        "One entry per CONDITION-PROPERTY point: an ionic conductivity bound to its temperature, electrode surface, and composition. Sweeping a variable (e.g. temperature) → one record per reported point.",
+        "One entry per UNIQUE CONDITION SET. Merge compatible target properties reported for the same ionic liquid, composition, surface, temperature, pressure, potential, and method. Split records when any of those conditions changes.",
       items: {
         type: "object",
         properties: {
@@ -147,7 +150,7 @@ export const CONDUCTIVITY_EXTRACTION_TOOL_SCHEMA = {
           },
           temperature: {
             type: "string",
-            description: "Temperature WITH unit, e.g. '298.15 K' or '25 °C'. REQUIRED.",
+            description: "Temperature WITH unit, e.g. '298.15 K' or '25 °C', only when the paper reports or clearly identifies it. Never invent a missing temperature.",
           },
           conductivity: {
             type: ["string", "null"],
@@ -178,6 +181,10 @@ export const CONDUCTIVITY_EXTRACTION_TOOL_SCHEMA = {
             type: ["string", "null"],
             description: "Reference electrode or potential scale, e.g. 'Ag/AgCl', 'Pt quasi-reference', or 'Na+/Na'.",
           },
+          pressure: {
+            type: ["string", "null"],
+            description: "Measurement pressure WITH unit, e.g. '1 atm', '250 kPa', or '20 MPa', if explicitly reported.",
+          },
           method: {
             type: "string",
             description: "How σ was measured: 'EIS' (impedance spectroscopy) or 'conductivity cell'.",
@@ -199,11 +206,11 @@ export const CONDUCTIVITY_EXTRACTION_TOOL_SCHEMA = {
           flexible: {
             type: "array",
             description:
-              "Anything notable that has no formal field yet (pressure, atmosphere, purity, unusual cell setup). Keep it rather than discard it.",
+              "Anything notable that has no formal field yet (atmosphere, purity, humidity, unusual cell setup). Keep it rather than discard it.",
             items: {
               type: "object",
               properties: {
-                key: { type: "string", description: "Short label, e.g. 'pressure'." },
+                key: { type: "string", description: "Short label, e.g. 'atmosphere'." },
                 value: { type: "string" },
                 unit: { type: "string" },
                 note: { type: "string", description: "Why it's here / source context." },
@@ -221,7 +228,7 @@ export const CONDUCTIVITY_EXTRACTION_TOOL_SCHEMA = {
                 field: {
                   type: "string",
                   description:
-                    "Field name: cation, anion, surface, temperature, conductivity, capacitance, electricField, electrodePotential, electrochemicalWindow, chargeTransferResistance, potentialReference, viscosity, waterContent, concentration, density, or method.",
+                    "Field name: cation, anion, surface, temperature, conductivity, capacitance, electricField, electrodePotential, electrochemicalWindow, chargeTransferResistance, potentialReference, pressure, viscosity, waterContent, concentration, density, or method.",
                 },
                 page: { type: "integer", description: "Page number from the [PAGE n] markers." },
                 figure: { type: "string", description: "e.g. 'Fig. 4a'." },

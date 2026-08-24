@@ -21,8 +21,8 @@ assert.match(html, /13/);
 assert.match(html, /23/);
 assert.match(html, /\[Py1,4\]\[FAP\] on Au\(111\)/);
 assert.match(html, /14\.9 µF\/cm²/);
-assert.match(html, new RegExp(`${benchmark.summary.detectedPositive}/${benchmark.summary.expectedPositive}`));
-assert.match(html, new RegExp(`${benchmark.summary.rejectedNegative}/${benchmark.summary.expectedNegative}`));
+assert.match(html, new RegExp(`${benchmark.summary.textValuePapersDetected}/${benchmark.summary.textValuePapers}`));
+assert.match(html, new RegExp(`${benchmark.summary.nonTextPapersCorrectlyEmpty}/${benchmark.summary.nonTextPapers}`));
 assert.match(html, /False positives/);
 assert.match(html, /No MD in current scope/);
 

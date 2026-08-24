@@ -56,12 +56,21 @@ electricalTests.forEach(({ input, dimension, expected, description }) => {
 const arealCapacitance = parseQuantity("82.9 µF/cm²", "capacitance");
 assert.equal(arealCapacitance?.value, 82.9);
 assert.equal(arealCapacitance?.unit, "µF/cm2");
-assert.equal(arealCapacitance?.std, null, "areal capacitance must not be converted to absolute F");
+assert.ok(close(arealCapacitance?.std, 0.829), "82.9 µF/cm² = 0.829 F/m²");
+assert.equal(arealCapacitance?.stdUnit, "F/m²");
+
+const gravimetricCapacitance = parseQuantity("64 F/g", "capacitance");
+assert.ok(close(gravimetricCapacitance?.std, 64000), "64 F/g = 64000 F/kg");
+assert.equal(gravimetricCapacitance?.stdUnit, "F/kg");
 
 const specificResistance = parseQuantity("255.5 Ω cm²", "resistance");
 assert.equal(specificResistance?.value, 255.5);
 assert.equal(specificResistance?.unit, "Ω/cm2");
-assert.equal(specificResistance?.std, null, "area-normalized resistance must not be converted to absolute Ω");
+assert.ok(close(specificResistance?.std, 0.02555), "255.5 Ω cm² = 0.02555 Ω·m²");
+assert.equal(specificResistance?.stdUnit, "Ω·m²");
+
+assert.ok(close(parseQuantity("1 atm", "pressure")?.std, 101325), "1 atm = 101325 Pa");
+assert.ok(close(parseQuantity("2.5 bar", "pressure")?.std, 250000), "2.5 bar = 250000 Pa");
 
 // 测试原始单位是否保留
 const rawUnitTests = [

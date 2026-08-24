@@ -10,6 +10,7 @@
 
 export type Dimension =
   | "temperature"
+  | "pressure"
   | "force"
   | "velocity"
   | "potential"
@@ -53,6 +54,7 @@ export const ROOM_TEMPERATURE_RAW = "not stated";
 
 export const CANONICAL_UNIT: Record<Dimension, string> = {
   temperature: "K",
+  pressure: "Pa",
   force: "N",
   velocity: "m/s",
   potential: "V",
@@ -71,6 +73,16 @@ export const CANONICAL_UNIT: Record<Dimension, string> = {
 
 // Linear (multiplicative) conversion factors → canonical unit.
 const LINEAR_FACTORS: Record<Exclude<Dimension, "temperature">, Record<string, number>> = {
+  pressure: {
+    Pa: 1,
+    kPa: 1e3,
+    MPa: 1e6,
+    bar: 1e5,
+    mbar: 100,
+    atm: 101325,
+    Torr: 101325 / 760,
+    psi: 6894.757293168,
+  },
   force: { kN: 1e3, N: 1, mN: 1e-3, cN: 1e-2, "µN": 1e-6, nN: 1e-9, pN: 1e-12 },
   velocity: { "m/s": 1, "cm/s": 1e-2, "mm/s": 1e-3, "µm/s": 1e-6, "nm/s": 1e-9 },
   potential: { kV: 1e3, V: 1, mV: 1e-3, "µV": 1e-6 },
@@ -105,6 +117,11 @@ const LINEAR_FACTORS: Record<Exclude<Dimension, "temperature">, Record<string, n
 
 // Alternate spellings → canonical key in LINEAR_FACTORS.
 const ALIASES: Record<string, string> = {
+  "k Pa": "kPa",
+  "M Pa": "MPa",
+  atmosphere: "atm",
+  atmospheres: "atm",
+  torr: "Torr",
   "k N": "kN",
   "m N": "mN",
   "c N": "cN",
@@ -296,14 +313,25 @@ export function parseQuantity(raw: string | null | undefined, dim: Dimension): Q
   const norm = normalizeText(raw);
   const normalizedUnit = detectNormalizedElectrochemicalUnit(norm, dim);
   if (normalizedUnit) {
-    const { value, approx } = extractValue(norm.replace(normalizedUnit.literal, " "));
+    const { value, approx, range: rawRange } = extractValue(norm.replace(normalizedUnit.literal, " "));
+    const std = value != null ? normalizeConverted(value * normalizedUnit.factor) : null;
+    const range = rawRange
+      ? {
+          min: rawRange.min,
+          max: rawRange.max,
+          unit: normalizedUnit.unit,
+          stdMin: normalizeConverted(rawRange.min * normalizedUnit.factor),
+          stdMax: normalizeConverted(rawRange.max * normalizedUnit.factor),
+        }
+      : undefined;
     return {
       raw: raw.trim(),
       value,
       unit: normalizedUnit.unit,
-      std: null,
-      stdUnit: CANONICAL_UNIT[dim],
+      std,
+      stdUnit: normalizedUnit.stdUnit,
       approx,
+      range,
     };
   }
   const found = detectLinearUnit(norm, dim);
@@ -326,16 +354,45 @@ export function parseQuantity(raw: string | null | undefined, dim: Dimension): Q
 function detectNormalizedElectrochemicalUnit(
   norm: string,
   dim: Dimension,
-): { literal: string; unit: string } | null {
+): { literal: string; unit: string; factor: number; stdUnit: string } | null {
   if (dim === "capacitance") {
     const match = norm.match(/(?:pF|nF|µF|uF|mF|F)\s*(?:\/|\s)\s*(?:g|kg|cm(?:\s*[-−]?\s*[23]|[²³])|m(?:\s*[-−]?\s*[23]|[²³]))(?:\s*[-−]?\s*1)?/i);
     if (!match) return null;
-    return { literal: match[0], unit: normalizeElectrochemicalUnit(match[0]) };
+    const unit = normalizeElectrochemicalUnit(match[0]);
+    const [numerator, denominator] = unit.split("/");
+    const prefixFactor: Record<string, number> = { F: 1, mF: 1e-3, "µF": 1e-6, nF: 1e-9, pF: 1e-12 };
+    const basis: Record<string, { factor: number; stdUnit: string }> = {
+      g: { factor: 1e3, stdUnit: "F/kg" },
+      kg: { factor: 1, stdUnit: "F/kg" },
+      cm2: { factor: 1e4, stdUnit: "F/m²" },
+      m2: { factor: 1, stdUnit: "F/m²" },
+      cm3: { factor: 1e6, stdUnit: "F/m³" },
+      m3: { factor: 1, stdUnit: "F/m³" },
+    };
+    const normalizedBasis = basis[denominator];
+    const normalizedPrefix = prefixFactor[numerator];
+    if (!normalizedBasis || normalizedPrefix == null) return null;
+    return {
+      literal: match[0],
+      unit,
+      factor: normalizedPrefix * normalizedBasis.factor,
+      stdUnit: normalizedBasis.stdUnit,
+    };
   }
   if (dim === "resistance") {
     const match = norm.match(/(?:MΩ|kΩ|Ω|Mohm|kohm|ohm)\s*(?:\/|\s)\s*(?:cm(?:\s*[-−]?\s*2|²)|m(?:\s*[-−]?\s*2|²))(?:\s*[-−]?\s*1)?/i);
     if (!match) return null;
-    return { literal: match[0], unit: normalizeElectrochemicalUnit(match[0]) };
+    const unit = normalizeElectrochemicalUnit(match[0]);
+    const [numerator, denominator] = unit.split("/");
+    const prefixFactor: Record<string, number> = { "Ω": 1, "kΩ": 1e3, "MΩ": 1e6 };
+    const areaFactor = denominator === "cm2" ? 1e-4 : denominator === "m2" ? 1 : null;
+    if (prefixFactor[numerator] == null || areaFactor == null) return null;
+    return {
+      literal: match[0],
+      unit,
+      factor: prefixFactor[numerator] * areaFactor,
+      stdUnit: "Ω·m²",
+    };
   }
   return null;
 }
@@ -375,6 +432,11 @@ function formatScientific(value: number): string {
 // SI sub-unit ladders (descending) for dimensions whose canonical value is often
 // tiny — so the standardized view reads "5 nN" / "2 µm/s", not "5e-9 N".
 const SI_LADDERS: Record<string, { unit: string; factor: number }[]> = {
+  Pa: [
+    { unit: "MPa", factor: 1e6 },
+    { unit: "kPa", factor: 1e3 },
+    { unit: "Pa", factor: 1 },
+  ],
   N: [
     { unit: "kN", factor: 1e3 },
     { unit: "N", factor: 1 },

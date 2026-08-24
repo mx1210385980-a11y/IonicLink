@@ -4,7 +4,7 @@ import path from "node:path";
 import { pdfToTaggedText } from "../lib/pdf";
 import { conductivityMockExtract } from "../lib/conductivity/extract";
 
-type Expected = "positive" | "negative";
+type Expected = "positive" | "negative" | "unknown";
 
 async function main() {
 const rootArg = process.argv[2];
@@ -21,7 +21,7 @@ const byHash = new Map<string, { path: string; expected: Expected; duplicates: s
 for (const file of files) {
   const bytes = await readFile(file);
   const digest = createHash("sha256").update(bytes).digest("hex");
-  const expected: Expected = file.includes("不包含电化学相关参数论文") ? "negative" : "positive";
+  const expected = expectedLabel(file);
   const existing = byHash.get(digest);
   if (!existing) {
     byHash.set(digest, { path: file, expected, duplicates: [file] });
@@ -51,11 +51,14 @@ for (const [sha256, paper] of [...byHash.entries()].sort((a, b) => a[1].path.loc
     candidate.electrodePotential ? "electrodePotential" : null,
     candidate.electrochemicalWindow ? "electrochemicalWindow" : null,
     candidate.chargeTransferResistance ? "chargeTransferResistance" : null,
+    candidate.viscosity ? "viscosity" : null,
   ]).filter((value): value is string => Boolean(value));
   const detected = properties.length > 0;
   const outcome = paper.expected === "positive"
     ? (detected ? "true-positive" : "false-negative")
-    : (detected ? "false-positive" : "true-negative");
+    : paper.expected === "negative"
+      ? (detected ? "false-positive" : "true-negative")
+      : (detected ? "unreviewed-detected" : "unreviewed-empty");
   records.push({
     file: path.basename(paper.path),
     relativePath: path.relative(root, paper.path),
@@ -76,7 +79,12 @@ for (const [sha256, paper] of [...byHash.entries()].sort((a, b) => a[1].path.loc
       electrodePotential: candidate.electrodePotential ?? null,
       electrochemicalWindow: candidate.electrochemicalWindow ?? null,
       chargeTransferResistance: candidate.chargeTransferResistance ?? null,
+      viscosity: candidate.viscosity ?? null,
       potentialReference: candidate.potentialReference ?? null,
+      pressure: candidate.pressure ?? null,
+      waterContent: candidate.waterContent ?? null,
+      concentration: candidate.concentration ?? null,
+      method: candidate.method ?? null,
       provenance: candidate.provenance ?? [],
     })),
     error,
@@ -85,16 +93,20 @@ for (const [sha256, paper] of [...byHash.entries()].sort((a, b) => a[1].path.loc
 
 const positives = records.filter((record) => record.expected === "positive");
 const negatives = records.filter((record) => record.expected === "negative");
+const unknown = records.filter((record) => record.expected === "unknown");
 const summary = {
   pdfFiles: files.length,
   uniquePapers: records.length,
   duplicateFiles: files.length - records.length,
   expectedPositive: positives.length,
   expectedNegative: negatives.length,
+  expectedUnknown: unknown.length,
   detectedPositive: positives.filter((record) => record.recordCount > 0).length,
   rejectedNegative: negatives.filter((record) => record.recordCount === 0).length,
   falsePositive: negatives.filter((record) => record.recordCount > 0).length,
   falseNegative: positives.filter((record) => record.recordCount === 0).length,
+  unreviewedDetected: unknown.filter((record) => record.recordCount > 0).length,
+  unreviewedEmpty: unknown.filter((record) => record.recordCount === 0).length,
   candidateRecords: records.reduce((sum, record) => sum + record.recordCount, 0),
 };
 
@@ -103,12 +115,18 @@ await writeFile(output, JSON.stringify({
   generatedAt: new Date().toISOString(),
   sourceCorpus: path.basename(root),
   evaluator: "IonicLink deterministic conductivity/electrochem extractor",
-  scope: "Screening benchmark. Positive/negative labels come from the supplied folders; every extracted value still requires source review.",
+  scope: "Screening benchmark. Positive/negative labels are used only when the supplied folder names explicitly provide them; otherwise papers remain unknown until manual source review.",
   summary,
   records,
 }, null, 2), "utf8");
 
 console.log(JSON.stringify(summary, null, 2));
+}
+
+function expectedLabel(file: string): Expected {
+  if (file.includes("不包含电化学相关参数论文")) return "negative";
+  if (file.includes("包含离子液体电化学参数") || file.includes("包含电化学相关参数论文")) return "positive";
+  return "unknown";
 }
 
 async function findPdfs(directory: string): Promise<string[]> {

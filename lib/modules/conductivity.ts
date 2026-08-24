@@ -48,6 +48,7 @@ export const conductivityModule: Module<ConductivityRecord, ConductivityExtracte
     { name: "electrode_potential_v", type: "REAL", get: (r) => r.core.electrodePotential?.std ?? null },
     { name: "electrochemical_window_v", type: "REAL", get: (r) => r.core.electrochemicalWindow?.std ?? null },
     { name: "charge_transfer_resistance_ohm", type: "REAL", get: (r) => r.core.chargeTransferResistance?.std ?? null },
+    { name: "pressure_pa", type: "REAL", get: (r) => r.extended.pressure?.std ?? null },
     { name: "viscosity_pa_s", type: "REAL", get: (r) => r.extended.viscosity?.std ?? null },
   ],
   searchColumns: ["paper_title", "cation", "anion", "surface"],
@@ -73,6 +74,8 @@ export const conductivityModule: Module<ConductivityRecord, ConductivityExtracte
     "electrode_potential_raw",
     "electrode_potential_V",
     "potential_reference",
+    "pressure_raw",
+    "pressure_Pa",
     "electrochemical_window_raw",
     "electrochemical_window_V",
     "charge_transfer_resistance_raw",
@@ -111,6 +114,8 @@ export const conductivityModule: Module<ConductivityRecord, ConductivityExtracte
       rawCell(c.electrodePotential),
       stdCell(c.electrodePotential),
       e.potentialReference ?? "",
+      rawCell(e.pressure),
+      stdCell(e.pressure),
       rawCell(c.electrochemicalWindow),
       stdCell(c.electrochemicalWindow),
       rawCell(c.chargeTransferResistance),
@@ -132,13 +137,15 @@ export const conductivityModule: Module<ConductivityRecord, ConductivityExtracte
     r.core.capacitance ||
     r.core.electricField ||
     r.core.electrochemicalWindow ||
-    r.core.chargeTransferResistance
+    r.core.chargeTransferResistance ||
+    r.extended.viscosity
   ),
   recordHeadline: (r) => {
     if (r.core.conductivity) return `σ ${formatSigma(r.core.conductivity)}`;
     if (r.core.capacitance) return `C ${rawCell(r.core.capacitance)}`;
     if (r.core.electricField) return `E ${rawCell(r.core.electricField)}`;
     if (r.core.electrochemicalWindow) return `Window ${rawCell(r.core.electrochemicalWindow)}`;
-    return `Rct ${rawCell(r.core.chargeTransferResistance)}`;
+    if (r.core.chargeTransferResistance) return `Rct ${rawCell(r.core.chargeTransferResistance)}`;
+    return `η ${rawCell(r.extended.viscosity)}`;
   },
 };

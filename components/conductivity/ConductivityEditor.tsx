@@ -43,6 +43,7 @@ export function ConductivityEditor({
   const [electrochemicalWindow, setElectrochemicalWindow] = useState(record.core.electrochemicalWindow?.raw ?? "");
   const [chargeTransferResistance, setChargeTransferResistance] = useState(record.core.chargeTransferResistance?.raw ?? "");
   const [potentialReference, setPotentialReference] = useState(e.potentialReference ?? "");
+  const [pressure, setPressure] = useState(e.pressure?.raw ?? "");
 
   const [method, setMethod] = useState(e.method ?? "");
   const [viscosity, setViscosity] = useState(e.viscosity?.raw ?? "");
@@ -64,6 +65,7 @@ export function ConductivityEditor({
   const electrodePotentialQ = parseQuantity(electrodePotential, "potential");
   const electrochemicalWindowQ = parseQuantity(electrochemicalWindow, "potential");
   const chargeTransferResistanceQ = parseQuantity(chargeTransferResistance, "resistance");
+  const pressureQ = parseQuantity(pressure, "pressure");
   const viscQ = parseQuantity(viscosity, "viscosity");
 
   const missing = useMemo(() => {
@@ -71,12 +73,11 @@ export function ConductivityEditor({
     if (!cation.trim()) m.push("Cation");
     if (!anion.trim()) m.push("Anion");
     if (!surface.trim()) m.push("Surface");
-    if (!tempQ || tempQ.value == null) m.push("Temperature");
-    if (!sigmaQ && !capacitanceQ && !electricFieldQ && !electrochemicalWindowQ && !chargeTransferResistanceQ) {
+    if (!sigmaQ && !capacitanceQ && !electricFieldQ && !electrochemicalWindowQ && !chargeTransferResistanceQ && !viscQ) {
       m.push("Target electrochemical property");
     }
     return m;
-  }, [cation, anion, surface, tempQ, sigmaQ, capacitanceQ, electricFieldQ, electrochemicalWindowQ, chargeTransferResistanceQ]);
+  }, [cation, anion, surface, sigmaQ, capacitanceQ, electricFieldQ, electrochemicalWindowQ, chargeTransferResistanceQ, viscQ]);
 
   const setFlex = (i: number, key: keyof FlexibleField, value: string) =>
     setFlexible((prev) => prev.map((f, idx) => (idx === i ? { ...f, [key]: value } : f)));
@@ -102,6 +103,7 @@ export function ConductivityEditor({
       electrochemicalWindow,
       chargeTransferResistance,
       potentialReference,
+      pressure,
       method,
       viscosity,
       waterContent,
@@ -161,8 +163,8 @@ export function ConductivityEditor({
         <Field req label="Cation" value={cation} onChange={setCation} placeholder="[BMIM]" mono missing={!cation.trim()} />
         <Field req label="Anion" value={anion} onChange={setAnion} placeholder="[BF4]" mono missing={!anion.trim()} />
         <Field req label="Surface" value={surface} onChange={setSurface} placeholder="Pt / glassy carbon" missing={!surface.trim()} />
-        <Field req label="Temperature" value={temperature} onChange={setTemperature} placeholder="298.15 K / 25 °C"
-          std={stdLabel(tempQ)} missing={!tempQ || tempQ.value == null} />
+        <Field label="Temperature" value={temperature} onChange={setTemperature} placeholder="298.15 K / 25 °C"
+          std={stdLabel(tempQ)} />
         <Field label="Conductivity (σ)" value={conductivity} onChange={setConductivity} placeholder="12 mS/cm"
           std={stdLabel(sigmaQ)} mono />
       </Layer>
@@ -184,6 +186,7 @@ export function ConductivityEditor({
       {/* MIDDLE LAYER */}
       <Layer tone="slate" name="Middle layer · extended (optional)">
         <SelectField label="Method" value={method} onChange={setMethod} options={["", "EIS", "conductivity cell", "CV", "chronoamperometry", "galvanostatic charge-discharge", "MD simulation"]} />
+        <Field label="Pressure" value={pressure} onChange={setPressure} placeholder="1 atm / 250 kPa" std={stdLabel(pressureQ)} />
         <Field label="Viscosity" value={viscosity} onChange={setViscosity} placeholder="45 cP" std={stdLabel(viscQ)} />
         <Field label="Water content" value={waterContent} onChange={setWaterContent} placeholder="120 ppm" />
         <Field label="Concentration" value={concentration} onChange={setConcentration} placeholder="0.5 mol/L" />

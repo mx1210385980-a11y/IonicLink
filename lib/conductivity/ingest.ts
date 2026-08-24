@@ -1,5 +1,5 @@
 import type { FlexibleField, ProvenanceMap } from "../schema";
-import { parseQuantity, ROOM_TEMPERATURE_RAW } from "../units";
+import { parseQuantity, type Quantity } from "../units";
 import { resolveIonSmiles } from "../ionStructures";
 import type {
   ConductivityDraft,
@@ -17,7 +17,7 @@ export function ingest(f: ConductivityExtractedFields): ConductivityDraft {
   const cation = (f.cation ?? "").trim();
   const anion = (f.anion ?? "").trim();
 
-  const flexible: FlexibleField[] = (f.flexible ?? [])
+  const flexibleInput: FlexibleField[] = (f.flexible ?? [])
     .filter((x) => x && x.key && x.value)
     .map((x) => ({
       key: x.key.trim(),
@@ -25,8 +25,15 @@ export function ingest(f: ConductivityExtractedFields): ConductivityDraft {
       unit: x.unit?.trim() || undefined,
       note: x.note?.trim() || undefined,
     }));
+  const pressureIndex = flexibleInput.findIndex((item) => /^(?:pressure|press\.?|压力|压强)$/i.test(item.key));
+  const pressureField = pressureIndex >= 0 ? flexibleInput[pressureIndex] : undefined;
+  const pressureRaw = f.pressure?.trim() || (pressureField ? `${pressureField.value}${pressureField.unit ? ` ${pressureField.unit}` : ""}` : "");
+  const pressure = parseQuantity(pressureRaw, "pressure");
+  const flexible = pressure && pressureIndex >= 0
+    ? flexibleInput.filter((_, index) => index !== pressureIndex)
+    : flexibleInput;
 
-  const temperature = parseQuantity(f.temperature?.trim() || ROOM_TEMPERATURE_RAW, "temperature");
+  const temperature = parseConductivityTemperature(f.temperature);
   const conductivity = parseQuantity(f.conductivity, "conductivity");
   const capacitance = parseQuantity(f.capacitance, "capacitance");
   const electricField = parseQuantity(f.electricField, "electricField");
@@ -36,6 +43,7 @@ export function ingest(f: ConductivityExtractedFields): ConductivityDraft {
   const extended: ConductivityExtended = {
     method: f.method?.trim() || undefined,
     potentialReference: f.potentialReference?.trim() || undefined,
+    pressure: pressure ?? undefined,
     viscosity: parseQuantity(f.viscosity, "viscosity") ?? undefined,
     waterContent: f.waterContent?.trim() || undefined,
     concentration: f.concentration?.trim() || undefined,
@@ -82,8 +90,8 @@ export function ingest(f: ConductivityExtractedFields): ConductivityDraft {
       ionicLiquid: {
         cation,
         anion,
-        cationSmiles: f.cationSmiles?.trim() || resolveIonSmiles(cation, "cation"),
-        anionSmiles: f.anionSmiles?.trim() || resolveIonSmiles(anion, "anion"),
+        cationSmiles: resolveIonSmiles(cation, "cation") || f.cationSmiles?.trim() || undefined,
+        anionSmiles: resolveIonSmiles(anion, "anion") || f.anionSmiles?.trim() || undefined,
       },
       surface: (f.surface ?? "").trim(),
       temperature,
@@ -98,6 +106,26 @@ export function ingest(f: ConductivityExtractedFields): ConductivityDraft {
     flexible,
     confidence,
   };
+}
+
+/**
+ * Conductivity records must not turn a qualitative condition such as "room
+ * temperature" into an unlabelled exact value.  Preserve the reported wording;
+ * only temperatures with an explicit number can be standardized to kelvin.
+ */
+function parseConductivityTemperature(raw: string | null | undefined): Quantity | null {
+  if (!raw?.trim()) return null;
+  if (!/[-+]?\d/.test(raw)) {
+    return {
+      raw: raw.trim(),
+      value: null,
+      unit: "",
+      std: null,
+      stdUnit: "K",
+      approx: true,
+    };
+  }
+  return parseQuantity(raw, "temperature");
 }
 
 /** Reverse of ingest: flatten a record back to editable raw fields. */
@@ -117,6 +145,7 @@ export function toFields(r: ConductivityDraft): ConductivityExtractedFields {
     electrochemicalWindow: r.core.electrochemicalWindow?.raw,
     chargeTransferResistance: r.core.chargeTransferResistance?.raw,
     potentialReference: r.extended.potentialReference,
+    pressure: r.extended.pressure?.raw,
     method: r.extended.method,
     viscosity: r.extended.viscosity?.raw,
     waterContent: r.extended.waterContent,

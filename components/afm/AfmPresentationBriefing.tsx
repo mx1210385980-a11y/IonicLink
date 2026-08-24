@@ -1,13 +1,15 @@
 import type { AfmCurveDataset } from "@/lib/afm/afmCurves";
 
 interface ElectrochemBenchmarkSummary {
-  uniquePapers: number;
-  expectedPositive: number;
-  expectedNegative: number;
-  detectedPositive: number;
-  rejectedNegative: number;
-  falsePositive: number;
-  falseNegative: number;
+  auditedPapers: number;
+  auditedAvailablePapers: number;
+  unavailableAuditedPapers: number;
+  textValuePapers: number;
+  textValuePapersDetected: number;
+  nonTextPapers: number;
+  nonTextPapersCorrectlyEmpty: number;
+  nonTextFalsePositive: number;
+  figureOnlyPapers: number;
 }
 
 export function AfmPresentationBriefing({
@@ -41,7 +43,7 @@ export function AfmPresentationBriefing({
               <BriefMetric label="Curves online" value={dataset.summary.totalCurves} detail={`${dataset.summary.qualifiedNewCurves} new`} />
               <BriefMetric label="Source verified" value={dataset.summary.sourceVerifiedCurves} detail="paper + figure" />
               <BriefMetric label="Model ready" value={dataset.summary.modelEligibleCurves} detail="quality gated" />
-              <BriefMetric label="Paper QA set" value={benchmark.uniquePapers} detail={`${benchmark.expectedPositive} + ${benchmark.expectedNegative} controls`} />
+              <BriefMetric label="Paper QA set" value={benchmark.auditedPapers} detail={`${benchmark.auditedAvailablePapers} available · ${benchmark.unavailableAuditedPapers} missing`} />
             </div>
           </div>
         </div>
@@ -67,10 +69,10 @@ export function AfmPresentationBriefing({
         <div className="border-b border-ink-200 p-5 lg:border-b-0 lg:border-r sm:p-6">
           <p className="label-eyebrow text-violet-700">Electrochemical extraction QA</p>
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <QaMetric label="Positive papers screened" value={`${benchmark.detectedPositive}/${benchmark.expectedPositive}`} tone="brand" />
-            <QaMetric label="Negative controls rejected" value={`${benchmark.rejectedNegative}/${benchmark.expectedNegative}`} tone="brand" />
-            <QaMetric label="False positives" value={String(benchmark.falsePositive)} tone="brand" />
-            <QaMetric label="Figure/table review" value={String(benchmark.falseNegative)} tone="amber" />
+            <QaMetric label="Text-value papers detected" value={`${benchmark.textValuePapersDetected}/${benchmark.textValuePapers}`} tone="brand" />
+            <QaMetric label="Non-text papers kept empty" value={`${benchmark.nonTextPapersCorrectlyEmpty}/${benchmark.nonTextPapers}`} tone="brand" />
+            <QaMetric label="False positives" value={String(benchmark.nonTextFalsePositive)} tone="brand" />
+            <QaMetric label="Figure digitization queue" value={String(benchmark.figureOnlyPapers)} tone="amber" />
           </div>
           <p className="mt-3 text-[11px] leading-5 text-ink-600">This is the deterministic offline screening benchmark. Every candidate still enters human source review before becoming checked data.</p>
         </div>
