@@ -32,6 +32,15 @@ const actionsHtml = renderToStaticMarkup(
 // D readout renders the reported value + label
 assert.match(html, /6\.2 × 10⁻¹¹ m² s⁻¹/);
 assert.match(html, /Diffusion coefficient/);
+// title reflects the diffusing species, and the Species chip is gone from conditions
+assert.match(html, /Diffusion coefficient of cation/);
+assert.doesNotMatch(html, /Species/);
+const anionRecord = { ...record, core: { ...record.core, species: "anion" } };
+const anionHtml = renderToStaticMarkup(createElement(DiffusionCard, { record: anionRecord }));
+assert.match(anionHtml, /Diffusion coefficient of anion/);
+const overallRecord = { ...record, core: { ...record.core, species: "overall" } };
+const overallHtml = renderToStaticMarkup(createElement(DiffusionCard, { record: overallRecord }));
+assert.match(overallHtml, /Diffusion coefficient of all species/);
 assert.match(html, />checked</);
 assert.doesNotMatch(html, />official</);
 assert.match(html, /record-card-unified-text/);
