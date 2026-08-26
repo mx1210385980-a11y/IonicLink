@@ -61,18 +61,6 @@ function buildDiffusionConditions(record: DiffusionRecord, units: UnitMode): Con
   const prov = record.provenance ?? {};
   const items: ConditionItem[] = [];
 
-  // Show species in the right-side conditions (with cation/anion indicator)
-  if (core.species) {
-    const isCation = /cation|\+$/i.test(core.species);
-    const isAnion = /anion|-$/i.test(core.species);
-    const kind = isCation ? "Cation" : isAnion ? "Anion" : undefined;
-    // Show only the ion kind label (Cation / Anion) in the condition chips
-    if (kind) items.push({ label: "Species", value: kind, prov: prov.species, field: "species" });
-    else items.push({ label: "Species", value: core.species, prov: prov.species, field: "species" });
-  }
-  if (e.nucleus) {
-    items.push({ label: "Nucleus", value: e.nucleus, prov: prov.nucleus, field: "nucleus" });
-  }
   if (core.temperature) {
     items.push({
       label: "Temp",
@@ -181,11 +169,19 @@ export function DiffusionCard({
   const standardizedDValue = record.status === "review" && core.diffusion?.std != null ? formatStd(core.diffusion.std, "m²/s") : null;
   const isCationSpecies = /cation|\+$/i.test(core.species);
   const isAnionSpecies = /anion|-$/i.test(core.species);
+  const isOverallSpecies = /overall|all/i.test(core.species);
+  const diffusionTitle = isOverallSpecies
+    ? "Diffusion coefficient of all species"
+    : isCationSpecies
+      ? "Diffusion coefficient of cation"
+      : isAnionSpecies
+        ? "Diffusion coefficient of anion"
+        : "Diffusion coefficient";
   const mode = getDiffusionMode(e.geometry);
   const diffusionReadoutContent = (
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
-        <div className="label-eyebrow text-black">Diffusion coefficient</div>
+        <div className="label-eyebrow text-black">{diffusionTitle}</div>
         <div className="mt-1 font-mono text-[1.8rem] font-semibold leading-none tnum text-black [overflow-wrap:anywhere]">{dValue}</div>
         {standardizedDValue && <div className="mt-2 text-[10px] font-medium text-black">standardized · {standardizedDValue}</div>}
       </div>
