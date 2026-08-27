@@ -26,22 +26,21 @@ async function main() {
         );
       }
 
-      return Response.json({
-        choices: [
-          {
-            message: {
-              tool_calls: [{ function: { arguments: JSON.stringify({ records: [] }) } }],
-            },
-          },
-        ],
-      });
+      const sse = [
+        `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ function: { arguments: '{"records":' } }] } }] })}`,
+        `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ function: { arguments: " []}" } }] } }] })}`,
+        "data: [DONE]",
+        "",
+      ].join("\n");
+      return new Response(sse, { headers: { "Content-Type": "text/event-stream" } });
     };
 
     const result = await extractRecords("tribology", "A minimal paper excerpt.");
 
     assert.equal(requestBody?.tool_choice, "required");
     assert.equal("temperature" in (requestBody ?? {}), false);
-    assert.equal(requestBody?.max_completion_tokens, 8000);
+    assert.equal(requestBody?.stream, true);
+    assert.equal(requestBody?.max_completion_tokens, 32768);
     assert.equal("max_tokens" in (requestBody ?? {}), false);
     assert.equal(result.source, "openai-compatible");
     assert.equal(result.model, "kimi-k3");
