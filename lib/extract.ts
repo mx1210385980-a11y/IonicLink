@@ -104,6 +104,18 @@ function isKimiK3(model: string): boolean {
   return model.toLowerCase().startsWith("kimi-k3");
 }
 
+/**
+ * Output-token budget for one extraction call. Kimi-k3 is a thinking model:
+ * reasoning and the visible answer SHARE this budget, so the old 8000 cap
+ * truncated long papers mid-JSON and surfaced as "0 records". 32k leaves
+ * ample room for thinking plus a full record list; override with
+ * EXTRACT_MAX_TOKENS if a provider rejects it.
+ */
+function extractMaxTokens(): number {
+  const fromEnv = Number(process.env.EXTRACT_MAX_TOKENS);
+  return Number.isFinite(fromEnv) && fromEnv > 0 ? Math.floor(fromEnv) : 32768;
+}
+
 function getOpenAIConfig(): OpenAIConfig | null {
   const apiKey = process.env.OPENAI_API_KEY || process.env.openai_api_key;
   const baseURL = process.env.OPENAI_BASE_URL || process.env.openai_base_url;
@@ -130,7 +142,13 @@ async function extractWithOpenAICompatible(
       },
       body: JSON.stringify({
         model,
-        ...(kimiK3 ? { max_completion_tokens: 8000 } : { temperature: 0, max_tokens: 8000 }),
+        // Stream for thinking models: a non-streamed call only gets its
+        // response headers AFTER the whole generation finishes, so a long
+        // think + 32k-token answer blew past undici's headers timeout
+        // (UND_ERR_HEADERS_TIMEOUT). Streaming returns headers immediately.
+        ...(kimiK3
+          ? { max_completion_tokens: extractMaxTokens(), stream: true }
+          : { temperature: 0, max_tokens: extractMaxTokens() }),
         messages: [
           { role: "system", content: mod.systemPrompt },
           { role: "user", content: mod.userPrompt(body) },
@@ -163,6 +181,13 @@ async function extractWithOpenAICompatible(
     throw new Error(`OpenAI-compatible extraction failed (${response.status}): ${detail}`);
   }
 
+  if (kimiK3) {
+    const args = await readStreamedToolArguments(response);
+    if (!args) return [];
+    const parsed = JSON.parse(args) as { records?: any[] };
+    return parsed.records ?? [];
+  }
+
   const data = (await response.json()) as OpenAIChatCompletion;
   const message = data.choices?.[0]?.message;
   const args = message?.tool_calls?.[0]?.function?.arguments || message?.content;
@@ -170,4 +195,47 @@ async function extractWithOpenAICompatible(
 
   const parsed = JSON.parse(args) as { records?: any[] };
   return parsed.records ?? [];
+}
+
+/**
+ * Reassembles a streamed (SSE) chat completion. Kimi-k3 requests use
+ * stream:true — a thinking model with a 32k-token budget takes minutes, and a
+ * non-streamed call only sends its response headers AFTER generation fully
+ * completes, tripping undici's headersTimeout (UND_ERR_HEADERS_TIMEOUT).
+ * Streaming returns headers immediately; the tool-call arguments then arrive
+ * as incremental deltas we concatenate here. Falls back to the content
+ * channel if the model answered in prose instead of a tool call.
+ */
+async function readStreamedToolArguments(response: Response): Promise<string | null> {
+  const reader = response.body?.getReader();
+  if (!reader) return null;
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let args = "";
+  let content = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let newline = buffer.indexOf("\n");
+    while (newline >= 0) {
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      newline = buffer.indexOf("\n");
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice(5).trim();
+      if (!payload || payload === "[DONE]") continue;
+      try {
+        const delta = (JSON.parse(payload) as {
+          choices?: Array<{ delta?: { content?: string | null; tool_calls?: OpenAIToolCall[] } }>;
+        }).choices?.[0]?.delta;
+        const piece = delta?.tool_calls?.[0]?.function?.arguments;
+        if (typeof piece === "string") args += piece;
+        if (typeof delta?.content === "string") content += delta.content;
+      } catch {
+        // Tolerate a partial JSON line; the stream continues.
+      }
+    }
+  }
+  return args || content || null;
 }
