@@ -111,7 +111,7 @@ function ConfinedSystemValue({
   recordId?: string;
   domain: Domain;
 }) {
-  const className = `min-w-0 px-3 py-2 text-left ${
+  const className = `block w-full min-w-0 px-3 py-2 text-left ${
     prov ? "cursor-pointer transition hover:bg-brand-50/45 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-200" : ""
   }`;
   const content = (
