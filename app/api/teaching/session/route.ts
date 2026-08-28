@@ -3,8 +3,10 @@ import {
   createTeachingSession,
   deleteTeachingSession,
   joinDefaultTeachingExperiment,
+  joinGroupCrossoverExperiment,
   normalizeStudentAlias,
   teacherLoginConfigured,
+  TeachingRosterError,
   verifyTeacherPassword,
 } from "@/lib/teaching";
 import {
@@ -29,6 +31,7 @@ export async function POST(request: NextRequest) {
     role?: unknown;
     studentAlias?: unknown;
     password?: unknown;
+    inviteCode?: unknown;
   } | null;
   try {
     const parsed = await readTeachingJson(request);
@@ -83,8 +86,11 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const inviteCode = typeof body.inviteCode === "string" ? body.inviteCode.trim() : "";
   try {
-    const joined = joinDefaultTeachingExperiment(studentAlias);
+    const joined = inviteCode
+      ? joinGroupCrossoverExperiment(inviteCode, studentAlias)
+      : joinDefaultTeachingExperiment(studentAlias);
     const token = createTeachingSession({
       role: "student",
       projectId: joined.projectId,
@@ -92,8 +98,11 @@ export async function POST(request: NextRequest) {
     });
     return withTeachingCookie(NextResponse.json({ redirect: "/teaching/student" }), token, request);
   } catch (error) {
+    if (error instanceof TeachingRosterError) {
+      return NextResponse.json({ error: error.message }, { status: 403 });
+    }
     return internalTeachingErrorResponse(
-      "join default teaching experiment",
+      "join teaching experiment",
       error,
       { status: 503, message: "教学实验暂不可用，请稍后重试。" }
     );

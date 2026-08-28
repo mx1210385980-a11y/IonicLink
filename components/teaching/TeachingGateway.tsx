@@ -17,7 +17,11 @@ export function TeachingGateway({ initialMode = "student" }: { initialMode?: Mod
     setError("");
     const form = new FormData(event.currentTarget);
     const payload = mode === "student"
-      ? { role: "student", studentAlias: form.get("studentAlias") }
+      ? {
+          role: "student",
+          studentAlias: form.get("studentAlias"),
+          inviteCode: form.get("inviteCode") || "",
+        }
       : { role: "teacher", password: form.get("password") };
     try {
       const result = await requestJson<{ redirect: string }>(
@@ -95,19 +99,36 @@ export function TeachingGateway({ initialMode = "student" }: { initialMode?: Mod
 
           <form className="mt-8" onSubmit={submit}>
             {mode === "student" ? (
-              <label className="block">
-                <span className="mb-2 block text-xs font-semibold text-ink-800">学号或姓名缩写</span>
-                <input
-                  required
-                  type="text"
-                  name="studentAlias"
-                  maxLength={80}
-                  autoComplete="username"
-                  placeholder="例如：S001"
-                  className="min-h-11 w-full rounded-[8px] border border-ink-300 bg-white px-3.5 text-sm text-ink-950 outline-none transition placeholder:text-ink-400 focus:border-brand-600 focus:ring-2 focus:ring-brand-100"
-                />
-                <span className="mt-2 block text-xs leading-5 text-ink-500">再次使用同一标识可恢复当前轮次和草稿。</span>
-              </label>
+              <>
+                <label className="block">
+                  <span className="mb-2 block text-xs font-semibold text-ink-800">学号或姓名缩写</span>
+                  <input
+                    required
+                    type="text"
+                    name="studentAlias"
+                    maxLength={80}
+                    autoComplete="username"
+                    placeholder="例如：S001"
+                    className="min-h-11 w-full rounded-[8px] border border-ink-300 bg-white px-3.5 text-sm text-ink-950 outline-none transition placeholder:text-ink-400 focus:border-brand-600 focus:ring-2 focus:ring-brand-100"
+                  />
+                  <span className="mt-2 block text-xs leading-5 text-ink-500">再次使用同一标识可恢复当前轮次和草稿。</span>
+                </label>
+                <label className="mt-4 block">
+                  <span className="mb-2 block text-xs font-semibold text-ink-800">
+                    分组实验代码<span className="ml-1 font-normal text-ink-400">(老师提供,选填)</span>
+                  </span>
+                  <input
+                    type="text"
+                    name="inviteCode"
+                    maxLength={40}
+                    placeholder="参加分组交叉实验时填写"
+                    className="min-h-11 w-full rounded-[8px] border border-ink-300 bg-white px-3.5 text-sm text-ink-950 outline-none transition placeholder:text-ink-400 focus:border-brand-600 focus:ring-2 focus:ring-brand-100"
+                  />
+                  <span className="mt-2 block text-xs leading-5 text-ink-500">
+                    留空则进入默认的两轮对比实验;填写后须在老师导入的名单内才能加入。
+                  </span>
+                </label>
+              </>
             ) : (
               <label className="block">
                 <span className="mb-2 block text-xs font-semibold text-ink-800">教师密码</span>

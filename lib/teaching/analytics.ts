@@ -1,5 +1,6 @@
 import {
   TEACHING_FIELDS,
+  type GroupCrossoverDiagnostics,
   type TeachingAutoScore,
   type TeachingAiBehavior,
   type TeachingDifferenceSummary,
@@ -230,6 +231,71 @@ export function summarizeTeachingExperimentDiagnostics(
     bySequence: {
       manual_then_ai: summarizeSequence("manual_then_ai"),
       ai_then_manual: summarizeSequence("ai_then_manual"),
+    },
+    timingQuality,
+  };
+}
+
+/**
+ * Group-crossover diagnostics: same mode summaries as the default experiment,
+ * but keyed dynamically — per paper code, per group number, and per pairing
+ * parity (AI-first odd groups vs manual-first even groups).
+ */
+export function summarizeGroupCrossoverDiagnostics(
+  rows: Array<TeachingExperimentAnalysisRow & { groupNo: number }>
+): GroupCrossoverDiagnostics {
+  const eligible = rows.filter(isTeachingExperimentAnalysisEligible);
+  const summarizePaper = (paperCode: string) => ({
+    manual: summarizeMode(
+      eligible.map((row) => row.manual!).filter((round) => round.paperCode === paperCode)
+    ),
+    aiAssisted: summarizeMode(
+      eligible.map((row) => row.aiAssisted!).filter((round) => round.paperCode === paperCode)
+    ),
+  });
+  const summarizeSubset = (subset: Array<TeachingExperimentAnalysisRow & { groupNo: number }>) => {
+    const subsetEligible = subset.filter(isTeachingExperimentAnalysisEligible);
+    return {
+      total: subset.length,
+      completed: subset.filter((row) => row.completed).length,
+      paired: subsetEligible.length,
+      manual: summarizeMode(subsetEligible.map((row) => row.manual!)),
+      aiAssisted: summarizeMode(subsetEligible.map((row) => row.aiAssisted!)),
+    };
+  };
+
+  const paperCodes = new Set<string>();
+  for (const row of rows) {
+    if (row.manual) paperCodes.add(row.manual.paperCode);
+    if (row.aiAssisted) paperCodes.add(row.aiAssisted.paperCode);
+  }
+  const byPaper: GroupCrossoverDiagnostics["byPaper"] = {};
+  for (const code of [...paperCodes].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))) {
+    byPaper[code] = summarizePaper(code);
+  }
+
+  const groupNumbers = [...new Set(rows.map((row) => row.groupNo))].sort((a, b) => a - b);
+  const byGroup: GroupCrossoverDiagnostics["byGroup"] = {};
+  for (const groupNo of groupNumbers) {
+    byGroup[String(groupNo)] = summarizeSubset(rows.filter((row) => row.groupNo === groupNo));
+  }
+
+  const timingQuality: GroupCrossoverDiagnostics["timingQuality"] = {
+    valid: 0,
+    zero_active: 0,
+    excessive_idle: 0,
+    unavailable: 0,
+  };
+  for (const row of rows) {
+    timingQuality[teachingParticipantQuality(row).timing] += 1;
+  }
+
+  return {
+    byPaper,
+    byGroup,
+    byParity: {
+      aiFirst: summarizeSubset(rows.filter((row) => row.sequence === "ai_then_manual")),
+      manualFirst: summarizeSubset(rows.filter((row) => row.sequence === "manual_then_ai")),
     },
     timingQuality,
   };

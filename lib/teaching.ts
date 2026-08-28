@@ -57,7 +57,29 @@ export {
   type TeachingHeartbeatInput,
 } from "./teaching/activity";
 export {
+  createGroupCrossoverExperiment,
+  deleteGroupRosterEntry,
+  getGroupCrossoverDashboard,
+  importGroupRoster,
+  joinGroupCrossoverExperiment,
+  listGroupCrossoverExperiments,
+  listGroupRoster,
+  TeachingRosterError,
+  type GroupRosterImportEntry,
+  type GroupRosterImportResult,
+} from "./teaching/groupCrossover";
+export {
+  listCheckedTribologyRecords,
+  type CheckedRecordOption,
+} from "./teaching/groupGold";
+export {
+  GROUP_CROSSOVER_SCORING_VERSION,
   TEACHING_FIELDS,
+  type GroupCrossoverDashboard,
+  type GroupCrossoverDiagnostics,
+  type GroupCrossoverGroupProgress,
+  type GroupCrossoverListItem,
+  type GroupCrossoverRosterEntry,
   type TeachingAnswer,
   type TeachingAnswers,
   type TeachingDashboardParticipant,

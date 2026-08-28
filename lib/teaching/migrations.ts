@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 
-export const TEACHING_SCHEMA_VERSION = 2;
+export const TEACHING_SCHEMA_VERSION = 3;
 
 const COLUMN_MIGRATIONS: ReadonlyArray<{
   table: string;
@@ -13,6 +13,8 @@ const COLUMN_MIGRATIONS: ReadonlyArray<{
       "config_version TEXT",
       "config_checksum TEXT",
       "is_default INTEGER NOT NULL DEFAULT 0",
+      // Group-crossover experiments freeze their group count at creation.
+      "group_count INTEGER",
     ],
   },
   {
@@ -22,6 +24,8 @@ const COLUMN_MIGRATIONS: ReadonlyArray<{
       "gold_snapshot_json TEXT NOT NULL DEFAULT '{}'",
       "scoring_rules_json TEXT NOT NULL DEFAULT '{}'",
       "config_version TEXT",
+      // Group-crossover papers are assigned to exactly one group (1..group_count).
+      "group_no INTEGER",
     ],
   },
   {
@@ -58,11 +62,13 @@ const REQUIRED_SCHEMA_OBJECTS = [
   { type: "table", name: "teaching_reviews" },
   { type: "table", name: "teaching_sessions" },
   { type: "table", name: "teaching_activity_events" },
+  { type: "table", name: "teaching_roster" },
   { type: "index", name: "idx_teaching_submissions_project" },
   { type: "index", name: "idx_teaching_sessions_expiry" },
   { type: "index", name: "idx_teaching_default_identity" },
   { type: "index", name: "idx_teaching_participant_round" },
   { type: "index", name: "idx_teaching_activity_submission" },
+  { type: "index", name: "idx_teaching_roster_project" },
 ] as const;
 
 function existingColumns(db: Database.Database, table: string): Set<string> {
@@ -128,6 +134,18 @@ export function migrateTeachingSchema(db: Database.Database): void {
         ON teaching_submissions(participant_id, round_no) WHERE round_no IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_teaching_activity_submission
         ON teaching_activity_events(submission_id, received_at);
+      CREATE TABLE IF NOT EXISTS teaching_roster (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES teaching_projects(id) ON DELETE CASCADE,
+        student_name TEXT NOT NULL,
+        identity_key TEXT NOT NULL,
+        group_no INTEGER NOT NULL,
+        participant_id TEXT REFERENCES teaching_participants(id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(project_id, identity_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_teaching_roster_project
+        ON teaching_roster(project_id, group_no);
     `);
 
     db.pragma(`user_version = ${TEACHING_SCHEMA_VERSION}`);

@@ -165,7 +165,6 @@ async function main(): Promise<void> {
   assert.equal(emptyAlias.status, 400);
 
   const first = await loginStudent("Route S001", {
-    inviteCode: "WRONG-LEGACY-INVITE",
     groupCode: "obsolete group",
   });
   assert.equal(first.projectId, DEFAULT_EXPERIMENT.id);
