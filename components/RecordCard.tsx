@@ -285,7 +285,7 @@ function TribopairInlineSpec({
   const content = (
     <>
       <span className="flex min-w-0 items-center gap-x-1.5">
-        <span className="shrink-0 whitespace-nowrap font-sans text-[8.5px] font-bold uppercase leading-relaxed tracking-eyebrow text-ink-400">{label}</span>
+        <span className="min-w-0 break-words font-sans text-[8.5px] font-bold uppercase leading-relaxed tracking-eyebrow text-ink-400">{label}</span>
       </span>
       <span className={`mt-0.5 block break-words font-mono text-[12px] font-semibold leading-tight ${toneClass}`}>{value}</span>
     </>

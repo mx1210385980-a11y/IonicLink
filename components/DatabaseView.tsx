@@ -1160,13 +1160,13 @@ function EvidenceInline({
   const content = (
     <>
       <span className={`text-[9px] font-semibold uppercase tracking-eyebrow ${labelClassName}`}>{label}</span>
-      <span className={`font-mono text-xs ${valueClassName}`}>{value}</span>
+      <span className={`inline-block max-w-[18rem] truncate align-baseline font-mono text-xs ${valueClassName}`}>{value}</span>
       {after}
     </>
   );
   if (!prov) {
     return (
-      <span className="inline-flex items-baseline gap-1.5" title={title}>
+      <span className="inline-flex items-baseline gap-1.5" title={title ?? value}>
         {content}
       </span>
     );

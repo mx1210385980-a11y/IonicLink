@@ -195,7 +195,7 @@ export function ConditionChip({
           </span>
         </span>
       ) : (
-        <span className="block font-mono text-xs font-semibold tnum [overflow-wrap:anywhere]">{item.value}</span>
+        <span className="block truncate font-mono text-xs font-semibold tnum">{item.value}</span>
       )}
     </>
   );
@@ -214,7 +214,7 @@ export function ConditionChip({
     );
   }
   return (
-    <span className={className} title={item.title}>
+    <span className={className} title={item.title ?? item.value}>
       {content}
     </span>
   );
