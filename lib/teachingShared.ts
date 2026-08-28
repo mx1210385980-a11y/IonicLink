@@ -17,13 +17,18 @@ export type TeachingRole = "teacher" | "student";
 export type TeachingMode = "manual" | "ai_assisted";
 export type TeachingSequence = "manual_then_ai" | "ai_then_manual";
 
+/** Scoring version stamped on group-crossover submissions (distinct from the default experiment's). */
+export const GROUP_CROSSOVER_SCORING_VERSION = "group-crossover-v1";
+
 type TeachingStudentActiveBase = {
   status: "active";
   project: { id: string; name: string; fields: typeof TEACHING_FIELDS };
   participant: { studentAlias: string };
   paper: {
     id: string;
-    code: "A" | "B";
+    // Default crossover papers are coded "A"/"B"; group-crossover papers use
+    // the owning group number as their code.
+    code: string;
     title: string;
     doi: string;
     journal: string;
@@ -100,7 +105,7 @@ export type TeachingParticipantTimingStatus = TeachingTimingQuality | "unavailab
 
 export type TeachingRoundAnalysis = {
   submissionId: string;
-  paperCode: "A" | "B";
+  paperCode: string;
   mode: TeachingMode;
   activeSeconds: number;
   wallSeconds: number;
@@ -200,7 +205,7 @@ export type TeachingDashboardParticipant = Omit<
 
 export type TeachingSafeExperimentPaper = {
   id: string;
-  code: "A" | "B";
+  code: string;
   title: string;
   doi: string;
   journal: string;
@@ -239,7 +244,7 @@ export type TeachingExperimentDashboard = {
 
 export type TeachingExperimentPaper = {
   id: string;
-  code: "A" | "B";
+  code: string;
   title: string;
   doi: string;
   journal: string;
@@ -290,4 +295,70 @@ export type TeachingDashboardRow = {
   aiScores: TeachingScores;
   metrics: TeachingMetrics;
   status: "draft" | "pending" | "reviewed";
+};
+
+// ---------------------------------------------------------------------------
+// Group crossover experiment (experiment_kind = "group_crossover")
+//
+// Students are pre-assigned to an even number of groups by the teacher. Groups
+// are paired by number — (1,2), (3,4), … — into super-groups. Within a
+// super-group the odd group starts AI-assisted on its own paper while the even
+// group starts manual on its own paper; round 2 swaps papers and flips modes.
+// ---------------------------------------------------------------------------
+
+export type GroupCrossoverRosterEntry = {
+  id: string;
+  studentName: string;
+  groupNo: number;
+  claimed: boolean;
+};
+
+export type GroupCrossoverGroupProgress = {
+  groupNo: number;
+  paperCode: string;
+  paperTitle: string;
+  rosterSize: number;
+  joined: number;
+  completed: number;
+};
+
+export type GroupCrossoverDiagnostics = {
+  byPaper: Record<
+    string,
+    { manual: TeachingModeSummary; aiAssisted: TeachingModeSummary }
+  >;
+  byGroup: Record<string, TeachingSequenceDiagnostics>;
+  byParity: {
+    aiFirst: TeachingSequenceDiagnostics;
+    manualFirst: TeachingSequenceDiagnostics;
+  };
+  timingQuality: Record<TeachingParticipantTimingStatus, number>;
+};
+
+export type GroupCrossoverDashboard = {
+  experiment: {
+    id: string;
+    name: string;
+    inviteCode: string;
+    groupCount: number;
+    scoringVersion: string;
+    papers: Array<TeachingSafeExperimentPaper & { groupNo: number }>;
+  };
+  roster: GroupCrossoverRosterEntry[];
+  groupProgress: GroupCrossoverGroupProgress[];
+  summary: TeachingExperimentSummary;
+  diagnostics: GroupCrossoverDiagnostics;
+  participants: TeachingDashboardParticipant[];
+};
+
+export type GroupCrossoverListItem = {
+  id: string;
+  name: string;
+  inviteCode: string;
+  groupCount: number;
+  status: string;
+  paperCount: number;
+  rosterCount: number;
+  participantCount: number;
+  createdAt: string;
 };

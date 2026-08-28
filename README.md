@@ -129,6 +129,19 @@ The student UI and API never send gold rules, future-round answers, or AI sugges
 a manual round. The gold rules are nevertheless part of the server source configuration; do
 not give students repository/config access before a blind classroom run.
 
+### Group crossover experiment (optional second experiment type)
+
+Alongside the default experiment, teachers can create **group crossover** experiments from the
+admin page: the class is split into an even number of groups, adjacent groups pair into
+super-groups, and the two groups in a super-group swap papers and flip extraction mode between
+rounds (odd group: AI-assisted first, even group: manual first). The teacher picks one checked
+tribology record per group as the paper pool (one record = one operating-condition point),
+imports a roster mapping student names/IDs to groups, and shares the experiment invite code.
+Students join with their rostered name plus the code; auto-scoring uses the checked record as
+the gold standard and teachers can override per-field verdicts, which then win in all
+analytics and exports. See `docs/teaching-group-crossover.md` for the full teacher workflow
+(Chinese).
+
 ## Data model
 
 One record = one measured result (a COF for tribology, a σ for conductivity, a per-species D

@@ -1,5 +1,6 @@
 import {
   TEACHING_FIELDS,
+  type GroupCrossoverDashboard,
   type TeachingDashboardRow,
   type TeachingExperimentDashboard,
   type TeachingRoundAnalysis,
@@ -226,6 +227,122 @@ export function teachingExperimentToCsv(
       values
         .map((value, columnIndex) =>
           options.anonymize && columnIndex === 4
+            ? value
+            : replaceAliases(value)
+        )
+        .map(safeCell)
+        .join(",")
+    );
+  }
+  return `\uFEFF${lines.join("\r\n")}\r\n`;
+}
+
+const GROUP_EXPERIMENT_HEADERS = [
+  "\u5B9E\u9A8CID",
+  "\u5B9E\u9A8C\u540D\u79F0",
+  "\u5B9E\u9A8C\u4EE3\u7801",
+  "\u8BC4\u5206\u7248\u672C",
+  "\u7EC4\u53F7",
+  "\u5927\u7EC4",
+  "\u5B66\u751F\u6807\u8BC6",
+  "\u5E8F\u5217",
+  "\u5B8C\u6210\u72B6\u6001",
+  "\u4E3B\u5206\u6790\u914D\u5BF9\u72B6\u6001",
+  "\u6392\u9664\u539F\u56E0",
+  "\u4EBA\u5DE5\u6587\u732E\u7F16\u53F7",
+  "\u4EBA\u5DE5\u6D3B\u8DC3\u65F6\u95F4(s)",
+  "\u4EBA\u5DE5\u5899\u949F\u65F6\u95F4(s)",
+  "\u4EBA\u5DE5\u8BA1\u65F6\u8D28\u91CF",
+  "\u4EBA\u5DE5\u6B63\u786E\u6570/6",
+  "\u4EBA\u5DE5\u503C\u51C6\u786E\u7387",
+  "\u4EBA\u5DE5\u503C\u8986\u76D6\u7387",
+  "\u4EBA\u5DE5\u8BC1\u636E\u51C6\u786E\u7387",
+  "\u4EBA\u5DE5\u8BC1\u636E\u8986\u76D6\u7387",
+  "\u4EBA\u5DE5\u5DF2\u590D\u6838",
+  "AI\u6587\u732E\u7F16\u53F7",
+  "AI\u6D3B\u8DC3\u65F6\u95F4(s)",
+  "AI\u5899\u949F\u65F6\u95F4(s)",
+  "AI\u8BA1\u65F6\u8D28\u91CF",
+  "AI\u6B63\u786E\u6570/6",
+  "AI\u503C\u51C6\u786E\u7387",
+  "AI\u503C\u8986\u76D6\u7387",
+  "AI\u8BC1\u636E\u51C6\u786E\u7387",
+  "AI\u8BC1\u636E\u8986\u76D6\u7387",
+  "AI\u5DF2\u590D\u6838",
+  "AI\u5EFA\u8BAE\u6570",
+  "AI\u91C7\u7EB3\u6570",
+  "AI\u4FEE\u6539\u6570",
+  "AI\u521D\u59CB\u9519\u8BEF\u6570",
+  "AI\u7EA0\u6B63\u6570",
+  "AI\u9519\u8BEF\u7167\u6284\u6570",
+  "AI\u91C7\u7EB3\u7387",
+  "AI\u4FEE\u6539\u7387",
+  "AI\u7EA0\u9519\u7387",
+  "AI\u9519\u8BEF\u7167\u6284\u7387",
+  "AI-\u4EBA\u5DE5\u6D3B\u8DC3\u65F6\u95F4\u5DEE(s)",
+  "AI-\u4EBA\u5DE5\u51C6\u786E\u7387\u5DEE",
+] as const;
+
+export function groupCrossoverToCsv(
+  dashboard: GroupCrossoverDashboard,
+  options: { anonymize?: boolean } = {}
+): string {
+  const labels = dashboard.participants.map(
+    (_, index) => `S${String(index + 1).padStart(3, "0")}`
+  );
+  const replacements = options.anonymize
+    ? dashboard.participants
+        .flatMap((participant, index) => [
+          { raw: participant.studentAlias, anonymized: labels[index] },
+          { raw: participant.participantId, anonymized: labels[index] },
+        ])
+        .filter(({ raw }) => raw.length > 0)
+        .sort((left, right) => right.raw.length - left.raw.length)
+    : [];
+  const replaceAliases = createAliasReplacer(replacements);
+  const groupNoByName = new Map(
+    dashboard.roster.map((entry) => [entry.studentName, entry.groupNo])
+  );
+  const lines = [GROUP_EXPERIMENT_HEADERS.map(safeCell).join(",")];
+
+  for (const [index, participant] of dashboard.participants.entries()) {
+    const behavior = participant.aiAssisted?.aiBehavior;
+    const groupNo = groupNoByName.get(participant.studentAlias) ?? "";
+    const values: unknown[] = [
+      dashboard.experiment.id,
+      dashboard.experiment.name,
+      dashboard.experiment.inviteCode,
+      dashboard.experiment.scoringVersion,
+      groupNo,
+      groupNo === "" ? "" : Math.ceil(groupNo / 2),
+      options.anonymize ? labels[index] : participant.studentAlias,
+      participant.sequence,
+      participant.quality.completion,
+      participant.quality.paired ? "paired" : "not_paired",
+      participant.quality.excluded ? "excluded" : "",
+      ...roundCells(participant.manual),
+      participant.manual?.review ? "yes" : "",
+      ...roundCells(participant.aiAssisted),
+      participant.aiAssisted?.review ? "yes" : "",
+      behavior ? trustedNumber(behavior.suggested) : "",
+      behavior ? trustedNumber(behavior.adopted) : "",
+      behavior ? trustedNumber(behavior.modified) : "",
+      behavior ? trustedNumber(behavior.initiallyIncorrect) : "",
+      behavior ? trustedNumber(behavior.corrected) : "",
+      behavior ? trustedNumber(behavior.incorrectlyAdopted) : "",
+      behavior ? trustedPercentage(behavior.adoptionRate) : "",
+      behavior ? trustedPercentage(behavior.modificationRate) : "",
+      behavior ? trustedPercentage(behavior.correctionRate) : "",
+      behavior ? trustedPercentage(behavior.incorrectAdoptionRate) : "",
+      participant.activeTimeDifference === null
+        ? ""
+        : trustedNumber(participant.activeTimeDifference),
+      trustedPercentage(participant.accuracyDifference),
+    ];
+    lines.push(
+      values
+        .map((value, columnIndex) =>
+          options.anonymize && columnIndex === 6
             ? value
             : replaceAliases(value)
         )

@@ -106,8 +106,10 @@ export function recordTeachingHeartbeat(
          JOIN teaching_projects pr ON pr.id = pt.project_id
          WHERE pt.id = ?
            AND pt.sequence_code IN ('manual_then_ai', 'ai_then_manual')
-           AND pr.is_default = 1
-           AND pr.experiment_kind = 'crossover'`
+           AND (
+             (pr.is_default = 1 AND pr.experiment_kind = 'crossover')
+             OR pr.experiment_kind = 'group_crossover'
+           )`
       )
       .get(participantId) as { completedAt: string | null; projectId: string } | undefined;
     if (!participant) throw new Error("Teaching participant was not found.");

@@ -172,10 +172,23 @@ assert.equal(columnNames(db, "teaching_participants").has("sequence_code"), true
 assert.equal(columnNames(db, "teaching_participants").has("identity_key"), true);
 assert.equal(columnNames(db, "teaching_submissions").has("active_seconds"), true);
 assert.equal(tableNames(db).has("teaching_activity_events"), true);
-assert.equal(db.pragma("user_version", { simple: true }), 2);
+assert.equal(tableNames(db).has("teaching_roster"), true);
+assert.equal(db.pragma("user_version", { simple: true }), 3);
 for (const [table, expectedColumns] of Object.entries({
-  teaching_projects: ["experiment_kind", "config_version", "config_checksum", "is_default"],
-  teaching_papers: ["task_prompt", "gold_snapshot_json", "scoring_rules_json", "config_version"],
+  teaching_projects: [
+    "experiment_kind",
+    "config_version",
+    "config_checksum",
+    "is_default",
+    "group_count",
+  ],
+  teaching_papers: [
+    "task_prompt",
+    "gold_snapshot_json",
+    "scoring_rules_json",
+    "config_version",
+    "group_no",
+  ],
   teaching_participants: [
     "sequence_code",
     "identity_key",
@@ -210,8 +223,21 @@ for (const index of [
   "idx_teaching_default_identity",
   "idx_teaching_participant_round",
   "idx_teaching_activity_submission",
+  "idx_teaching_roster_project",
 ]) {
   assert.equal(migrationIndexes.has(index), true, `${index} should exist`);
+}
+const rosterColumns = columnNames(db, "teaching_roster");
+for (const column of [
+  "id",
+  "project_id",
+  "student_name",
+  "identity_key",
+  "group_no",
+  "participant_id",
+  "created_at",
+]) {
+  assert.equal(rosterColumns.has(column), true, `teaching_roster.${column} should exist`);
 }
 assert.equal(
   db.prepare("SELECT name FROM teaching_projects WHERE id = 'legacy-project'").pluck().get(),
@@ -273,7 +299,7 @@ assert.equal(db.pragma("quick_check", { simple: true }), "ok");
 const readonlyCompleteDb = new Database(databasePath, { readonly: true, fileMustExist: true });
 assert.doesNotThrow(
   () => migrateTeachingSchema(readonlyCompleteDb),
-  "opening a complete v2 schema must not attempt DDL or a write transaction"
+  "opening a complete v3 schema must not attempt DDL or a write transaction"
 );
 readonlyCompleteDb.close();
 
@@ -285,7 +311,7 @@ db.exec(`
   DROP TABLE teaching_activity_events;
   ALTER TABLE teaching_projects DROP COLUMN config_checksum;
 `);
-assert.equal(db.pragma("user_version", { simple: true }), 2);
+assert.equal(db.pragma("user_version", { simple: true }), 3);
 closeTeachingStoreForTests();
 const repairedDb = getTeachingDb();
 assert.equal(columnNames(repairedDb, "teaching_projects").has("config_checksum"), true);
@@ -303,9 +329,9 @@ for (const index of [
   "idx_teaching_participant_round",
   "idx_teaching_activity_submission",
 ]) {
-  assert.equal(repairedIndexes.has(index), true, `${index} should be repaired at version 2`);
+  assert.equal(repairedIndexes.has(index), true, `${index} should be repaired at version 3`);
 }
-assert.equal(repairedDb.pragma("user_version", { simple: true }), 2);
+assert.equal(repairedDb.pragma("user_version", { simple: true }), 3);
 assert.equal(repairedDb.pragma("quick_check", { simple: true }), "ok");
 
 const rollbackDb = new Database(":memory:");
@@ -348,20 +374,20 @@ mkdirSync(futureDataDir, { recursive: true });
 const futureDb = new Database(futureDatabasePath);
 futureDb.exec(`
   CREATE TABLE future_only (id TEXT PRIMARY KEY);
-  PRAGMA user_version = 3;
+  PRAGMA user_version = 4;
 `);
 futureDb.close();
 
 try {
   process.env.IONICLINK_DATA_DIR = futureDataDir;
-  assert.throws(() => getTeachingDb(), /schema version 3.*supports version 2/i);
+  assert.throws(() => getTeachingDb(), /schema version 4.*supports version 3/i);
 } finally {
   closeTeachingStoreForTests();
   process.env.IONICLINK_DATA_DIR = originalDataDir;
 }
 
 const unchangedFutureDb = new Database(futureDatabasePath, { readonly: true, fileMustExist: true });
-assert.equal(unchangedFutureDb.pragma("user_version", { simple: true }), 3);
+assert.equal(unchangedFutureDb.pragma("user_version", { simple: true }), 4);
 assert.deepEqual([...tableNames(unchangedFutureDb)].sort(), ["future_only"]);
 assert.equal(unchangedFutureDb.pragma("quick_check", { simple: true }), "ok");
 unchangedFutureDb.close();

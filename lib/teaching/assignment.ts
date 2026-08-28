@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import {
+  GROUP_CROSSOVER_SCORING_VERSION,
   TEACHING_FIELDS,
   type TeachingAnswers,
   type TeachingAutoScore,
@@ -38,6 +39,7 @@ type ScoringRow = {
   aiModel: string | null;
   aiSnapshotJson: string;
   scoringRulesJson: string;
+  isDefault: number;
 };
 
 export type TeachingRoundExpectation = {
@@ -101,10 +103,22 @@ function assertPaperCode(value: string): "A" | "B" {
   return value;
 }
 
+// Both the default crossover experiment and group-crossover experiments run
+// the same two-round machinery. Legacy projects (sequence_code IS NULL) stay
+// excluded; group experiments are matched by their experiment kind instead of
+// the default flag.
+const PARTICIPANT_SCOPE_PREDICATE = `
+  pt.sequence_code IN ('manual_then_ai', 'ai_then_manual')
+  AND (pr.is_default = 1 OR pr.experiment_kind = 'group_crossover')`;
+
+function scoringVersionFor(isDefault: number): string {
+  return isDefault === 1 ? DEFAULT_EXPERIMENT.scoringVersion : GROUP_CROSSOVER_SCORING_VERSION;
+}
+
 function scoringPaper(row: ScoringRow): TeachingExperimentPaper {
   return {
     id: row.paperId,
-    code: assertPaperCode(row.paperCode),
+    code: row.paperCode,
     title: row.title,
     doi: row.doi ?? "",
     journal: row.journal ?? "",
@@ -128,7 +142,8 @@ function saveAutomaticScore(
   store: Database.Database,
   submissionId: string,
   score: TeachingAutoScore,
-  scoredAt: string
+  scoredAt: string,
+  scoringVersion: string
 ): void {
   store
     .prepare(
@@ -140,7 +155,7 @@ function saveAutomaticScore(
     .run(
       JSON.stringify(score.values),
       JSON.stringify(score.evidence),
-      DEFAULT_EXPERIMENT.scoringVersion,
+      scoringVersion,
       scoredAt,
       submissionId
     );
@@ -154,14 +169,14 @@ function loadScoringRow(store: Database.Database, submissionId: string): Scoring
          p.id AS paperId, p.paper_no AS paperCode, p.title,
          p.doi, p.journal, p.source_url AS sourceUrl, p.task_prompt AS taskPrompt,
          p.ai_model AS aiModel, p.ai_snapshot_json AS aiSnapshotJson,
-         p.scoring_rules_json AS scoringRulesJson
+         p.scoring_rules_json AS scoringRulesJson,
+         pr.is_default AS isDefault
        FROM teaching_submissions s
        JOIN teaching_papers p ON p.id = s.paper_id
        JOIN teaching_participants pt ON pt.id = s.participant_id
        JOIN teaching_projects pr ON pr.id = s.project_id
        WHERE s.id = ? AND s.round_no IN (1, 2)
-         AND pt.sequence_code IN ('manual_then_ai', 'ai_then_manual')
-         AND pr.is_default = 1`
+         AND ${PARTICIPANT_SCOPE_PREDICATE}`
     )
     .get(submissionId) as ScoringRow | undefined;
 }
@@ -175,7 +190,7 @@ export function normalizeStudentAlias(value: string): string {
   return alias;
 }
 
-function studentIdentityKey(displayAlias: string): string {
+export function studentIdentityKey(displayAlias: string): string {
   return displayAlias.normalize("NFKC").replace(/\s+/gu, " ").trim().toLowerCase();
 }
 
@@ -295,8 +310,7 @@ export function getCurrentTeachingRound(participantId: string): TeachingStudentS
        FROM teaching_participants pt
        JOIN teaching_projects pr ON pr.id = pt.project_id
        WHERE pt.id = ?
-         AND pt.sequence_code IN ('manual_then_ai', 'ai_then_manual')
-         AND pr.is_default = 1`
+         AND ${PARTICIPANT_SCOPE_PREDICATE}`
     )
     .get(participantId) as
     | {
@@ -360,7 +374,7 @@ export function getCurrentTeachingRound(participantId: string): TeachingStudentS
     participant: { studentAlias: participant.studentAlias },
     paper: {
       id: round.paperId,
-      code: assertPaperCode(round.paperCode),
+      code: round.paperCode,
       title: round.title,
       doi: round.doi ?? "",
       journal: round.journal ?? "",
@@ -397,8 +411,7 @@ export function saveCurrentTeachingDraft(
          FROM teaching_participants pt
          JOIN teaching_projects pr ON pr.id = pt.project_id
          WHERE pt.id = ?
-           AND pt.sequence_code IN ('manual_then_ai', 'ai_then_manual')
-           AND pr.is_default = 1`
+           AND ${PARTICIPANT_SCOPE_PREDICATE}`
       )
       .get(participantId) as { completedAt: string | null } | undefined;
     if (!participant) throw new Error("Teaching participant was not found.");
@@ -436,18 +449,18 @@ export function submitCurrentTeachingRound(
   const store = getTeachingDb();
   let failure: unknown;
   const transition = store.transaction((): TeachingRoundTransition => {
-    ensureCanonicalTeachingScoring(store);
     const participant = store
       .prepare(
-        `SELECT pt.completed_at AS completedAt
+        `SELECT pt.completed_at AS completedAt, pr.is_default AS isDefault
          FROM teaching_participants pt
          JOIN teaching_projects pr ON pr.id = pt.project_id
          WHERE pt.id = ?
-           AND pt.sequence_code IN ('manual_then_ai', 'ai_then_manual')
-           AND pr.is_default = 1`
+           AND ${PARTICIPANT_SCOPE_PREDICATE}`
       )
-      .get(participantId) as { completedAt: string | null } | undefined;
+      .get(participantId) as { completedAt: string | null; isDefault: number } | undefined;
     if (!participant) throw new Error("Teaching participant was not found.");
+    if (participant.isDefault === 1) ensureCanonicalTeachingScoring(store);
+    const scoringVersion = scoringVersionFor(participant.isDefault);
     if (participant.completedAt) {
       if (expected) {
         const completedRound = store
@@ -517,7 +530,7 @@ export function submitCurrentTeachingRound(
     try {
       const scoringRow = loadScoringRow(store, current.id);
       if (!scoringRow) throw new Error("Submitted teaching round was not found for scoring.");
-      saveAutomaticScore(store, current.id, scoreStoredSubmission(scoringRow), submittedAt);
+      saveAutomaticScore(store, current.id, scoreStoredSubmission(scoringRow), submittedAt, scoringVersion);
     } catch (error) {
       store
         .prepare(
@@ -525,7 +538,7 @@ export function submitCurrentTeachingRound(
            SET scoring_version = ?, scoring_status = 'scoring_error', auto_scored_at = NULL
            WHERE id = ?`
         )
-        .run(DEFAULT_EXPERIMENT.scoringVersion, current.id);
+        .run(scoringVersion, current.id);
       failure = error;
     }
 
@@ -557,11 +570,13 @@ export function rescoreTeachingSubmission(submissionId: string): TeachingAutoSco
   store.transaction(() => {
     ensureCanonicalTeachingScoring(store);
     const row = loadScoringRow(store, submissionId);
-    if (!row) throw new Error("Teaching submission was not found.");
+    // Rescoring stays default-experiment-only; group-crossover submissions are
+    // scored inline at submit time and corrected through teacher review.
+    if (!row || row.isDefault !== 1) throw new Error("Teaching submission was not found.");
     if (!row.submittedAt) throw new Error("Teaching submission must be submitted and locked before rescoring.");
     try {
       result = scoreStoredSubmission(row);
-      saveAutomaticScore(store, submissionId, result, now());
+      saveAutomaticScore(store, submissionId, result, now(), scoringVersionFor(row.isDefault));
     } catch (error) {
       store
         .prepare(
