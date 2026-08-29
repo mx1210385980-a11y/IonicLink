@@ -55,9 +55,20 @@ assert.match(html, /cation/);
 assert.doesNotMatch(html, /afm-probe-illustration/);
 assert.doesNotMatch(html, /Coefficient of friction/);
 assert.doesNotMatch(html, /Ionic conductivity/);
-// flexible/raw context stays in the record model but is omitted from the reading card
-assert.doesNotMatch(html, /data-testid="raw-flexible-panel"/);
-assert.doesNotMatch(html, /kept as flexible diffusion context/);
+// flexible context is shown verbatim as chips in the Reported Conditions grid
+assert.match(html, /kept as flexible diffusion context/);
+assert.doesNotMatch(html, /Additional data/);
+assert.doesNotMatch(html, /flexible-fields-panel/);
+// internal dataset lineage keys are bookkeeping and stay hidden
+const lineageRecord = {
+  ...record,
+  flexible: [
+    { key: "dataset_filename", value: "import.xlsx" },
+    { key: "dataset_row", value: "7" },
+  ],
+};
+const lineageHtml = renderToStaticMarkup(createElement(DiffusionCard, { record: lineageRecord }));
+assert.doesNotMatch(lineageHtml, /import\.xlsx/);
 assert.match(html, /Reported Conditions/);
 assert.doesNotMatch(actionsHtml, /core complete/);
 assert.match(actionsHtml, />Edit<\/button>/);

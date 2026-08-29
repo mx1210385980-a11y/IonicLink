@@ -525,11 +525,19 @@ export function commitDatasetImport(
       .get(input.fingerprint) as { record_count: number; payload: string } | undefined;
     if (existing) {
       const payload = JSON.parse(existing.payload) as { recordIds?: string[] };
-      return {
-        alreadyCommitted: true,
-        recordIds: payload.recordIds ?? [],
-        recordCount: existing.record_count,
-      };
+      const recordIds = payload.recordIds ?? [];
+      // A receipt whose records were all deleted afterwards (e.g. the review
+      // queue was cleared) must not block re-importing the same file.
+      const probe = db.prepare("SELECT 1 FROM records WHERE id = ?");
+      const surviving = recordIds.some((id) => probe.get(id));
+      if (surviving) {
+        return {
+          alreadyCommitted: true,
+          recordIds,
+          recordCount: existing.record_count,
+        };
+      }
+      db.prepare("DELETE FROM dataset_imports WHERE fingerprint = ?").run(input.fingerprint);
     }
 
     const createdAt = new Date().toISOString();

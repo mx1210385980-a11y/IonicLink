@@ -13,6 +13,20 @@ type CommitPayload = DatasetImportResult & {
   recordCount: number;
 };
 
+const MAPPING_MODE_LABELS = {
+  direct: "直接映射",
+  expanded: "拆分映射",
+  preserved: "保留在 flexible 层",
+  ignored: "忽略（不入库）",
+} as const;
+
+const MAPPING_MODE_STYLES = {
+  direct: "bg-emerald-100 text-emerald-800",
+  expanded: "bg-brand-100 text-brand-800",
+  preserved: "bg-amber-100 text-amber-800",
+  ignored: "bg-red-100 text-red-700",
+} as const;
+
 export function DatasetImporter({ domain }: { domain: Domain }) {
   const [file, setFile] = useState<File | null>(null);
   const [paperTitle, setPaperTitle] = useState("");
@@ -156,6 +170,45 @@ export function DatasetImporter({ domain }: { domain: Domain }) {
                 </tbody>
               </table>
             </div>
+
+            <div>
+              <p className="mb-1.5 text-xs font-semibold text-ink-700">Column mapping — check what happens to each column before importing</p>
+              <div className="max-h-64 overflow-y-auto rounded-lg border border-ink-200">
+                <table className="min-w-full text-left text-xs" data-testid="dataset-column-mappings">
+                  <thead className="sticky top-0 bg-ink-50 text-ink-600">
+                    <tr>
+                      <th className="whitespace-nowrap px-3 py-2 font-semibold">Source column</th>
+                      <th className="whitespace-nowrap px-3 py-2 font-semibold">Target</th>
+                      <th className="whitespace-nowrap px-3 py-2 font-semibold">Handling</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-ink-100 bg-white">
+                    {preview.mappings.map((mapping) => (
+                      <tr key={mapping.source} className={mapping.mode === "ignored" ? "bg-red-50/50" : mapping.mode === "preserved" ? "bg-amber-50/40" : ""}>
+                        <td className="max-w-56 truncate px-3 py-2 font-mono" title={mapping.source}>{mapping.source}</td>
+                        <td className="max-w-64 truncate px-3 py-2 font-mono text-ink-600" title={mapping.target}>{mapping.target}</td>
+                        <td className="whitespace-nowrap px-3 py-2">
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${MAPPING_MODE_STYLES[mapping.mode]}`}>
+                            {MAPPING_MODE_LABELS[mapping.mode]}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {preview.invalidRows.length > 0 && (
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900">
+                <div className="font-semibold">These rows will NOT be imported ({preview.invalidRows.length})</div>
+                <ul className="mt-1 max-h-32 list-disc space-y-1 overflow-y-auto pl-4">
+                  {preview.invalidRows.map((row) => (
+                    <li key={`${row.sheet}-${row.row}`}>{row.sheet}!row {row.row}: {row.reason}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-brand-200 bg-brand-50/60 px-3 py-3">
               <p className="text-xs leading-5 text-brand-900">
