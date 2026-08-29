@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { adaptDiffusionDataset } from "./datasets/diffusion";
 import type { TabularSheet } from "./datasets/types";
-import { commitDatasetImport, listRecords, resetAll } from "./db";
+import { commitDatasetImport, deleteRecords, listRecords, resetAll } from "./db";
 
 resetAll("diffusion");
 const sheet: TabularSheet = {
@@ -35,4 +35,18 @@ assert.equal(second.alreadyCommitted, true);
 assert.deepEqual(second.recordIds, first.recordIds);
 assert.equal(listRecords("diffusion").length, 2, "retry does not duplicate records");
 
+// A stale receipt (records deleted after import) must not block re-import.
+deleteRecords("diffusion", first.recordIds);
+assert.equal(listRecords("diffusion").length, 0);
+const reimport = commitDatasetImport("diffusion", {
+  fingerprint: "same-file",
+  filename: "fixture.xlsx",
+  adapter: adaptation.adapter,
+  drafts: adaptation.drafts,
+});
+assert.equal(reimport.alreadyCommitted, false, "stale receipt is dropped and the file imports again");
+assert.equal(reimport.recordCount, 2);
+assert.equal(listRecords("diffusion").length, 2);
+
+resetAll("diffusion");
 console.log("dataset import idempotency tests passed");
