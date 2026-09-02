@@ -4,22 +4,28 @@ import type { ExtractedFieldsBase, IonicLiquidCore } from "../schema";
 
 /**
  * Conductivity domain model. Mirrors the tribology three-layer shape but for
- * ionic-liquid CONDUCTIVITY: the atomic unit is one conductivity value (σ) bound
- * to its temperature, electrode surface, and composition.
+ * ionic-liquid electrical and interfacial properties. The atomic unit is one
+ * unique condition set, which may contain several compatible target properties.
  */
 
 /** BASE LAYER — required to approve a conductivity record into the official DB. */
 export interface ConductivityCore {
   ionicLiquid: IonicLiquidCore;
-  /** Electrode / contact surface used in the measurement (e.g. Pt, glassy carbon, Au). */
-  surface: string;
-  temperature: Quantity | null; // → K
-  conductivity: Quantity | null; // ionic conductivity σ → S/m
+  surface: string; // 测量表面
+  temperature: Quantity | null; // 温度 → K
+  conductivity: Quantity | null; // 导电性 → S/m
+  capacitance: Quantity | null; // capacitance → F
+  electricField: Quantity | null; // electric field strength → V/m
+  electrodePotential: Quantity | null; // applied/electrode potential → V
+  electrochemicalWindow: Quantity | null; // electrochemical stability window → V
+  chargeTransferResistance: Quantity | null; // Rct / polarization resistance → ohm
 }
 
 /** MIDDLE LAYER — standardized when present, but never mandatory. */
 export interface ConductivityExtended {
   method?: string; // EIS / conductivity cell
+  potentialReference?: string;
+  pressure?: Quantity; // measurement pressure → Pa
   viscosity?: Quantity; // dynamic viscosity η → Pa·s
   waterContent?: string; // ppm or wt% (kept raw — not a single clean dimension)
   concentration?: string; // mol/L or wt% for IL solutions / electrolytes
@@ -35,6 +41,13 @@ export interface ConductivityExtractedFields extends ExtractedFieldsBase {
   surface?: string;
   temperature?: string;
   conductivity?: string; // e.g. "12 mS/cm"
+  capacitance?: string; // e.g. "2 pF" 新增字段
+  electricField?: string; // e.g. "1 kV/m" 新增字段
+  electrodePotential?: string;
+  electrochemicalWindow?: string;
+  chargeTransferResistance?: string;
+  potentialReference?: string;
+  pressure?: string; // e.g. "1 atm" or "250 kPa"
   method?: string;
   viscosity?: string; // e.g. "45 cP"
   waterContent?: string; // e.g. "120 ppm"
@@ -49,15 +62,26 @@ export const CONDUCTIVITY_CORE_FIELDS = [
   { key: "surface", label: "Surface" },
   { key: "temperature", label: "Temperature" },
   { key: "conductivity", label: "Conductivity" },
+  { key: "capacitance", label: "Capacitance" }, // 新增字段
+  { key: "electricField", label: "Electric Field" }, // 新增字段
+  { key: "electrodePotential", label: "Electrode Potential" },
+  { key: "electrochemicalWindow", label: "Electrochemical Window" },
+  { key: "chargeTransferResistance", label: "Charge-transfer Resistance" },
 ] as const;
 
-/** Fields that can carry provenance (for the editor's field picker). */
 export const CONDUCTIVITY_PROVENANCE_FIELDS = [
   "cation",
   "anion",
   "surface",
   "temperature",
   "conductivity",
+  "capacitance", // 新增字段
+  "electricField", // 新增字段
+  "electrodePotential",
+  "electrochemicalWindow",
+  "chargeTransferResistance",
+  "potentialReference",
+  "pressure",
   "viscosity",
   "waterContent",
   "concentration",
@@ -73,8 +97,16 @@ export function conductivityCoreCompleteness(
   if (!c.ionicLiquid.cation?.trim()) missing.push("Cation");
   if (!c.ionicLiquid.anion?.trim()) missing.push("Anion");
   if (!c.surface?.trim()) missing.push("Surface");
-  if (!c.temperature || c.temperature.value == null) missing.push("Temperature");
-  if (!c.conductivity || c.conductivity.value == null) missing.push("Conductivity");
+  if (
+    !c.conductivity &&
+    !c.capacitance &&
+    !c.electricField &&
+    !c.electrochemicalWindow &&
+    !c.chargeTransferResistance &&
+    !r.extended.viscosity
+  ) {
+    missing.push("Target electrochemical property");
+  }
   return { complete: missing.length === 0, missing };
 }
 
@@ -93,7 +125,7 @@ export const CONDUCTIVITY_EXTRACTION_TOOL_SCHEMA = {
     records: {
       type: "array",
       description:
-        "One entry per CONDITION-PROPERTY point: an ionic conductivity bound to its temperature, electrode surface, and composition. Sweeping a variable (e.g. temperature) → one record per reported point.",
+        "One entry per UNIQUE CONDITION SET. Merge compatible target properties reported for the same ionic liquid, composition, surface, temperature, pressure, potential, and method. Split records when any of those conditions changes.",
       items: {
         type: "object",
         properties: {
@@ -118,12 +150,40 @@ export const CONDUCTIVITY_EXTRACTION_TOOL_SCHEMA = {
           },
           temperature: {
             type: "string",
-            description: "Temperature WITH unit, e.g. '298.15 K' or '25 °C'. REQUIRED.",
+            description: "Temperature WITH unit, e.g. '298.15 K' or '25 °C', only when the paper reports or clearly identifies it. Never invent a missing temperature.",
           },
           conductivity: {
             type: ["string", "null"],
             description:
               "Ionic conductivity σ WITH unit, e.g. '12 mS/cm', '1.2 S/m', or '120 µS/cm'. Keep the reported unit exactly. REQUIRED if reported.",
+          },
+          capacitance: {
+            type: ["string", "null"],
+            description: "Capacitance WITH unit, e.g. '120 pF', '2 nF', or '1 µF', if reported.",
+          },
+          electricField: {
+            type: ["string", "null"],
+            description: "Electric field strength WITH unit, e.g. '1 kV/m', '500 V/m', or '2 kV/cm', if reported. Do not infer it.",
+          },
+          electrodePotential: {
+            type: ["string", "null"],
+            description: "Applied or electrode potential WITH unit and reference when reported, e.g. '-1.0 V vs Ag/AgCl'. Do not convert a voltage window into a single electrode potential.",
+          },
+          electrochemicalWindow: {
+            type: ["string", "null"],
+            description: "Electrochemical/stability window as a reported range WITH unit, e.g. '-2.0 to 2.5 V' or '4.5 V'.",
+          },
+          chargeTransferResistance: {
+            type: ["string", "null"],
+            description: "Charge-transfer or polarization resistance WITH unit, e.g. '255.5 ohm cm2' or '4.2 kOhm'. Only when explicitly assigned to Rct/Rp.",
+          },
+          potentialReference: {
+            type: ["string", "null"],
+            description: "Reference electrode or potential scale, e.g. 'Ag/AgCl', 'Pt quasi-reference', or 'Na+/Na'.",
+          },
+          pressure: {
+            type: ["string", "null"],
+            description: "Measurement pressure WITH unit, e.g. '1 atm', '250 kPa', or '20 MPa', if explicitly reported.",
           },
           method: {
             type: "string",
@@ -146,11 +206,11 @@ export const CONDUCTIVITY_EXTRACTION_TOOL_SCHEMA = {
           flexible: {
             type: "array",
             description:
-              "Anything notable that has no formal field yet (pressure, atmosphere, purity, unusual cell setup). Keep it rather than discard it.",
+              "Anything notable that has no formal field yet (atmosphere, purity, humidity, unusual cell setup). Keep it rather than discard it.",
             items: {
               type: "object",
               properties: {
-                key: { type: "string", description: "Short label, e.g. 'pressure'." },
+                key: { type: "string", description: "Short label, e.g. 'atmosphere'." },
                 value: { type: "string" },
                 unit: { type: "string" },
                 note: { type: "string", description: "Why it's here / source context." },
@@ -168,7 +228,7 @@ export const CONDUCTIVITY_EXTRACTION_TOOL_SCHEMA = {
                 field: {
                   type: "string",
                   description:
-                    "Field name: cation, anion, surface, temperature, conductivity, viscosity, waterContent, concentration, density, or method.",
+                    "Field name: cation, anion, surface, temperature, conductivity, capacitance, electricField, electrodePotential, electrochemicalWindow, chargeTransferResistance, potentialReference, pressure, viscosity, waterContent, concentration, density, or method.",
                 },
                 page: { type: "integer", description: "Page number from the [PAGE n] markers." },
                 figure: { type: "string", description: "e.g. 'Fig. 4a'." },
@@ -196,7 +256,7 @@ export const CONDUCTIVITY_EXTRACTION_TOOL_SCHEMA = {
           },
           confidence: { type: "number", description: "0–1 confidence in this record." },
         },
-        required: ["paper", "cation", "anion", "surface", "temperature", "conductivity"],
+        required: ["paper"],
       },
     },
   },

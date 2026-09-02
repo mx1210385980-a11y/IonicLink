@@ -24,6 +24,7 @@ export function TopNav() {
   const parts = pathname.split("/");
   const first = parts[1];
   const onDomainPage = isDomain(first);
+  const onAfmPage = first === "afm";
   const onTeachingPage = first === "teaching";
   const domain: Domain = onDomainPage ? (first as Domain) : DEFAULT_DOMAIN;
   const sub = parts[2] ?? "";
@@ -40,10 +41,13 @@ export function TopNav() {
           </Link>
 
           {!onTeachingPage ? (
-            <div aria-label="Property workspace" className="flex shrink-0 rounded-[9px] border border-ink-200/90 bg-white/90 p-0.5 text-xs shadow-sm">
+            <div aria-label="Data workspace" className="flex shrink-0 rounded-[9px] border border-ink-200/90 bg-white/90 p-0.5 text-xs shadow-sm">
               {DOMAINS.map((d) => {
                 const active = onDomainPage && d === domain;
-                const href = sub === "design" && d !== "tribology" ? `/${d}` : `/${d}${sub ? "/" + sub : ""}`;
+                const targetSub = SUBROUTES.some((route) => route.seg === sub) ? sub : "";
+                const href = targetSub === "design" && d !== "tribology"
+                  ? `/${d}`
+                  : `/${d}${targetSub ? "/" + targetSub : ""}`;
                 return (
                   <Link
                     key={d}
@@ -56,6 +60,14 @@ export function TopNav() {
                   </Link>
                 );
               })}
+              <Link
+                href="/afm"
+                className={`min-h-8 rounded-[7px] px-2.5 py-1.5 font-semibold transition focus:outline-none focus:ring-2 focus:ring-brand-200 ${
+                  onAfmPage ? "bg-ink-950 text-white shadow-sm" : "text-ink-700 hover:bg-ink-50 hover:text-brand-700"
+                }`}
+              >
+                AFM
+              </Link>
             </div>
           ) : null}
           <Link

@@ -7,6 +7,7 @@ import {
   buildDatabaseQuery,
   databaseStatusUrl,
   DatabaseView,
+  defaultUnitModeForDomain,
   filterRecordsByReadiness,
   filterSources,
   isMockExtractionRecord,
@@ -37,6 +38,8 @@ assert.equal(recordListUnitsForStatus("review", "raw"), "raw");
 assert.equal(recordListUnitsForStatus("review", "std"), "std");
 assert.equal(shouldShowUnitModeControl("official"), false);
 assert.equal(shouldShowUnitModeControl("review"), true);
+assert.equal(defaultUnitModeForDomain("conductivity"), "std");
+assert.equal(defaultUnitModeForDomain("tribology"), "raw");
 assert.equal(isMockExtractionRecord({ extraction: { source: "mock" } }), true);
 assert.equal(isMockExtractionRecord({ extraction: { source: "openai-compatible" } }), false);
 assert.equal(isMockExtractionRecord({}), false, "legacy records without extractor metadata remain publishable");

@@ -10,7 +10,7 @@ const html = renderToStaticMarkup(createElement(HomePageContent));
 
 assert.match(html, /IONICLINK EXTRACT/);
 assert.match(html, /Add papers\. Get data\./);
-assert.match(html, /Choose the property you are extracting/);
+assert.match(html, /Choose a data workspace/);
 
 for (const [domain, label] of [
   ["tribology", "Tribology"],
@@ -24,6 +24,13 @@ for (const [domain, label] of [
   assert.match(html, new RegExp(`href="/${domain}/database\\?status=review"`));
   assert.match(html, new RegExp(`href="/${domain}/library"`));
 }
+
+assert.match(html, /AFM workspace/);
+assert.match(html, /Open AFM workspace/);
+assert.match(html, /href="\/afm"/);
+assert.match(html, /158 Curves/);
+assert.match(html, /14 Verified/);
+assert.match(html, /13 Model ready/);
 
 assert.doesNotMatch(html, />Upload PDF papers</);
 assert.doesNotMatch(html, /Start a clean extraction run/);

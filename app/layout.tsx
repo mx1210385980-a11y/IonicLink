@@ -5,9 +5,9 @@ import { SourceViewer } from "@/components/SourceViewer";
 import { WorkspaceNavigationRail } from "@/components/WorkspaceNavigationRail";
 
 export const metadata: Metadata = {
-  title: "IonicLink — Ionic Liquid Tribology Database",
+  title: "IonicLink — Ionic Liquid Data Platform",
   description:
-    "Extract, standardize, review, and publish ionic-liquid lubrication measurements from scientific papers.",
+    "Extract, standardize, review, and connect ionic-liquid property records and AFM solvation-force curves.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

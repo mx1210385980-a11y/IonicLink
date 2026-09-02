@@ -14,8 +14,9 @@ import { Field, Group, Layer, ProvenanceRows, SelectField, provRowsFromRecord, p
 
 /**
  * Inline editor for a conductivity record. The curator edits raw values; the
- * platform re-standardizes σ → S/m and viscosity → Pa·s on save. Core fields
- * (cation, anion, surface, temperature, conductivity) gate official approval.
+ * platform re-standardizes supported units while preserving normalized raw
+ * units such as µF/cm² and Ω cm². Identity, conditions, and at least one
+ * target electrochemical property gate official approval.
  */
 export function ConductivityEditor({
   record,
@@ -36,6 +37,13 @@ export function ConductivityEditor({
   const [surface, setSurface] = useState(record.core.surface);
   const [temperature, setTemperature] = useState(record.core.temperature?.raw ?? "");
   const [conductivity, setConductivity] = useState(record.core.conductivity?.raw ?? "");
+  const [capacitance, setCapacitance] = useState(record.core.capacitance?.raw ?? "");
+  const [electricField, setElectricField] = useState(record.core.electricField?.raw ?? "");
+  const [electrodePotential, setElectrodePotential] = useState(record.core.electrodePotential?.raw ?? "");
+  const [electrochemicalWindow, setElectrochemicalWindow] = useState(record.core.electrochemicalWindow?.raw ?? "");
+  const [chargeTransferResistance, setChargeTransferResistance] = useState(record.core.chargeTransferResistance?.raw ?? "");
+  const [potentialReference, setPotentialReference] = useState(e.potentialReference ?? "");
+  const [pressure, setPressure] = useState(e.pressure?.raw ?? "");
 
   const [method, setMethod] = useState(e.method ?? "");
   const [viscosity, setViscosity] = useState(e.viscosity?.raw ?? "");
@@ -52,6 +60,12 @@ export function ConductivityEditor({
 
   const tempQ = parseQuantity(temperature, "temperature");
   const sigmaQ = parseQuantity(conductivity, "conductivity");
+  const capacitanceQ = parseQuantity(capacitance, "capacitance");
+  const electricFieldQ = parseQuantity(electricField, "electricField");
+  const electrodePotentialQ = parseQuantity(electrodePotential, "potential");
+  const electrochemicalWindowQ = parseQuantity(electrochemicalWindow, "potential");
+  const chargeTransferResistanceQ = parseQuantity(chargeTransferResistance, "resistance");
+  const pressureQ = parseQuantity(pressure, "pressure");
   const viscQ = parseQuantity(viscosity, "viscosity");
 
   const missing = useMemo(() => {
@@ -59,10 +73,11 @@ export function ConductivityEditor({
     if (!cation.trim()) m.push("Cation");
     if (!anion.trim()) m.push("Anion");
     if (!surface.trim()) m.push("Surface");
-    if (!tempQ || tempQ.value == null) m.push("Temperature");
-    if (!sigmaQ || sigmaQ.value == null) m.push("Conductivity");
+    if (!sigmaQ && !capacitanceQ && !electricFieldQ && !electrochemicalWindowQ && !chargeTransferResistanceQ && !viscQ) {
+      m.push("Target electrochemical property");
+    }
     return m;
-  }, [cation, anion, surface, tempQ, sigmaQ]);
+  }, [cation, anion, surface, sigmaQ, capacitanceQ, electricFieldQ, electrochemicalWindowQ, chargeTransferResistanceQ, viscQ]);
 
   const setFlex = (i: number, key: keyof FlexibleField, value: string) =>
     setFlexible((prev) => prev.map((f, idx) => (idx === i ? { ...f, [key]: value } : f)));
@@ -82,6 +97,13 @@ export function ConductivityEditor({
       surface,
       temperature,
       conductivity,
+      capacitance,
+      electricField,
+      electrodePotential,
+      electrochemicalWindow,
+      chargeTransferResistance,
+      potentialReference,
+      pressure,
       method,
       viscosity,
       waterContent,
@@ -141,15 +163,30 @@ export function ConductivityEditor({
         <Field req label="Cation" value={cation} onChange={setCation} placeholder="[BMIM]" mono missing={!cation.trim()} />
         <Field req label="Anion" value={anion} onChange={setAnion} placeholder="[BF4]" mono missing={!anion.trim()} />
         <Field req label="Surface" value={surface} onChange={setSurface} placeholder="Pt / glassy carbon" missing={!surface.trim()} />
-        <Field req label="Temperature" value={temperature} onChange={setTemperature} placeholder="298.15 K / 25 °C"
-          std={stdLabel(tempQ)} missing={!tempQ || tempQ.value == null} />
-        <Field req label="Conductivity (σ)" value={conductivity} onChange={setConductivity} placeholder="12 mS/cm"
-          std={stdLabel(sigmaQ)} mono missing={!sigmaQ || sigmaQ.value == null} />
+        <Field label="Temperature" value={temperature} onChange={setTemperature} placeholder="298.15 K / 25 °C"
+          std={stdLabel(tempQ)} />
+        <Field label="Conductivity (σ)" value={conductivity} onChange={setConductivity} placeholder="12 mS/cm"
+          std={stdLabel(sigmaQ)} mono />
+      </Layer>
+
+      <Layer tone="slate" name="Electrical measurements · optional">
+        <Field label="Capacitance" value={capacitance} onChange={setCapacitance} placeholder="120 pF / 82.9 µF/cm²"
+          std={stdLabel(capacitanceQ)} mono />
+        <Field label="Electric field" value={electricField} onChange={setElectricField} placeholder="1 kV/m / 0.2 V/Å"
+          std={stdLabel(electricFieldQ)} mono />
+        <Field label="Electrode potential" value={electrodePotential} onChange={setElectrodePotential} placeholder="-1.0 V"
+          std={stdLabel(electrodePotentialQ)} mono />
+        <Field label="Potential reference" value={potentialReference} onChange={setPotentialReference} placeholder="Ag/AgCl / Na+/Na" />
+        <Field label="Electrochemical window" value={electrochemicalWindow} onChange={setElectrochemicalWindow} placeholder="0.1–5.0 V"
+          std={stdLabel(electrochemicalWindowQ)} mono />
+        <Field label="Charge-transfer resistance" value={chargeTransferResistance} onChange={setChargeTransferResistance} placeholder="255.5 Ω cm²"
+          std={stdLabel(chargeTransferResistanceQ)} mono />
       </Layer>
 
       {/* MIDDLE LAYER */}
       <Layer tone="slate" name="Middle layer · extended (optional)">
-        <SelectField label="Method" value={method} onChange={setMethod} options={["", "EIS", "conductivity cell"]} />
+        <SelectField label="Method" value={method} onChange={setMethod} options={["", "EIS", "conductivity cell", "CV", "chronoamperometry", "galvanostatic charge-discharge", "MD simulation"]} />
+        <Field label="Pressure" value={pressure} onChange={setPressure} placeholder="1 atm / 250 kPa" std={stdLabel(pressureQ)} />
         <Field label="Viscosity" value={viscosity} onChange={setViscosity} placeholder="45 cP" std={stdLabel(viscQ)} />
         <Field label="Water content" value={waterContent} onChange={setWaterContent} placeholder="120 ppm" />
         <Field label="Concentration" value={concentration} onChange={setConcentration} placeholder="0.5 mol/L" />

@@ -102,6 +102,10 @@ export function shouldShowUnitModeControl(status: RecordStatus): boolean {
   return status === "review";
 }
 
+export function defaultUnitModeForDomain(domain: Domain): UnitMode {
+  return domain === "conductivity" ? "std" : "raw";
+}
+
 export function isMockExtractionRecord(record: { extraction?: { source?: string } }): boolean {
   return record.extraction?.source === "mock";
 }
@@ -250,7 +254,7 @@ export function DatabaseView({ domain }: { domain: Domain }) {
   const [structureSearch, setStructureSearch] = useState<StructureSearchValue | null>(null);
   const [structureDialogOpen, setStructureDialogOpen] = useState(false);
   const [groupByPaper, setGroupByPaper] = useState(true);
-  const [units, setUnits] = useState<UnitMode>("raw");
+  const [units, setUnits] = useState<UnitMode>(() => defaultUnitModeForDomain(domain));
   const [records, setRecords] = useState<AnyRecord[]>([]);
   const [filters, setFilters] = useState<RecordFilters>(EMPTY_FILTERS);
   const [readinessFilter, setReadinessFilter] = useState<ReviewReadinessFilter>("all");

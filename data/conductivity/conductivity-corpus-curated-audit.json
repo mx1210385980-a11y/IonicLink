@@ -1,0 +1,3892 @@
+{
+  "schemaVersion": 1,
+  "auditedAt": "2026-08-24",
+  "scope": "Source-checked high-confidence subset of the 2026-08 conductivity corpus. Only explicit text/table measurements are curated here; all PDFs are preserved separately as source documents.",
+  "papers": [
+    {
+      "file": "1-s2.0-S0013468610008790-main.pdf",
+      "doi": "10.1016/j.electacta.2010.06.063",
+      "classification": "text-values",
+      "reviewSummary": "Manually checked Table 1 (viscosity and specific conductivity at 25 °C) and the electrochemical-window table. KFSI/LiFSI non-IL rows and binary-electrolyte rows without both bulk properties are excluded.",
+      "records": [
+        {
+          "paper": {
+            "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+            "doi": "10.1016/j.electacta.2010.06.063"
+          },
+          "cation": "[N22.2(1O2)]",
+          "anion": "[FSI]",
+          "surface": "bulk liquid",
+          "temperature": "25 °C",
+          "conductivity": "2.77 mS/cm",
+          "method": "viscometer; conductivity cell",
+          "viscosity": "81 cP",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "viscosity",
+              "page": 4,
+              "quote": "i (mS cm−1) 1 N22.2(1O2)[FSI] 15 94.3 303 1.3263 81 2.7",
+              "basis": "direct"
+            },
+            {
+              "field": "conductivity",
+              "page": 4,
+              "quote": "i (mS cm−1) 1 N22.2(1O2)[FSI] 15 94.3 303 1.3263 81 2.7",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+            "doi": "10.1016/j.electacta.2010.06.063"
+          },
+          "cation": "[N1.3(1O2)]",
+          "anion": "[FSI]",
+          "surface": "bulk liquid",
+          "temperature": "25 °C",
+          "conductivity": "2.4 mS/cm",
+          "method": "viscometer; conductivity cell",
+          "viscosity": "79 cP",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "viscosity",
+              "page": 4,
+              "quote": "263 81 2.77 2 N1.3(1O2)[FSI] −86 300 1.3528 79 2.40 3 N2",
+              "basis": "direct"
+            },
+            {
+              "field": "conductivity",
+              "page": 4,
+              "quote": "263 81 2.77 2 N1.3(1O2)[FSI] −86 300 1.3528 79 2.40 3 N2",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+            "doi": "10.1016/j.electacta.2010.06.063"
+          },
+          "cation": "[N2.3(1O2)]",
+          "anion": "[FSI]",
+          "surface": "bulk liquid",
+          "temperature": "25 °C",
+          "conductivity": "1.89 mS/cm",
+          "method": "viscometer; conductivity cell",
+          "viscosity": "99 cP",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "viscosity",
+              "page": 4,
+              "quote": "528 79 2.40 3 N2.3(1O2)[FSI] −75 295 1.3098 99 1.89 4 N4",
+              "basis": "direct"
+            },
+            {
+              "field": "conductivity",
+              "page": 4,
+              "quote": "528 79 2.40 3 N2.3(1O2)[FSI] −75 295 1.3098 99 1.89 4 N4",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+            "doi": "10.1016/j.electacta.2010.06.063"
+          },
+          "cation": "[N4(1O2) ]",
+          "anion": "[FSI]",
+          "surface": "bulk liquid",
+          "temperature": "25 °C",
+          "conductivity": "1.34 mS/cm",
+          "method": "viscometer; conductivity cell",
+          "viscosity": "127 cP",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "viscosity",
+              "page": 4,
+              "quote": "098 99 1.89 4 N4(1O2) [FSI] −57 −22 21 88.6 287 1.3178 1",
+              "basis": "direct"
+            },
+            {
+              "field": "conductivity",
+              "page": 4,
+              "quote": "098 99 1.89 4 N4(1O2) [FSI] −57 −22 21 88.6 287 1.3178 1",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+            "doi": "10.1016/j.electacta.2010.06.063"
+          },
+          "cation": "[N22.2(1O2)]",
+          "anion": "[TFSI]",
+          "surface": "bulk liquid",
+          "temperature": "25 °C",
+          "conductivity": "1.77 mS/cm",
+          "method": "viscometer; conductivity cell",
+          "viscosity": "101 cP",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "viscosity",
+              "page": 4,
+              "quote": "78 127 1.34 5 N22.2(1O2)[TFSI] −76 −23, 2 −2 7 19.9 366",
+              "basis": "direct"
+            },
+            {
+              "field": "conductivity",
+              "page": 4,
+              "quote": "78 127 1.34 5 N22.2(1O2)[TFSI] −76 −23, 2 −2 7 19.9 366",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+            "doi": "10.1016/j.electacta.2010.06.063"
+          },
+          "cation": "[N1.3(1O2) ]",
+          "anion": "[TFSI]",
+          "surface": "bulk liquid",
+          "temperature": "25 °C",
+          "conductivity": "1.5 mS/cm",
+          "method": "viscometer; conductivity cell",
+          "viscosity": "96 cP",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "viscosity",
+              "page": 4,
+              "quote": "01 101 1.77 6 N1.3(1O2) [TFSI] −76 343 1.4136 96 1.50 7",
+              "basis": "direct"
+            },
+            {
+              "field": "conductivity",
+              "page": 4,
+              "quote": "01 101 1.77 6 N1.3(1O2) [TFSI] −76 343 1.4136 96 1.50 7",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+            "doi": "10.1016/j.electacta.2010.06.063"
+          },
+          "cation": "[N2.3(1O2) ]",
+          "anion": "[TFSI]",
+          "surface": "bulk liquid",
+          "temperature": "25 °C",
+          "conductivity": "1.38 mS/cm",
+          "method": "viscometer; conductivity cell",
+          "viscosity": "114 cP",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "viscosity",
+              "page": 4,
+              "quote": "136 96 1.50 7 N2.3(1O2) [TFSI] −69 337 1.4032 114 1.38 8",
+              "basis": "direct"
+            },
+            {
+              "field": "conductivity",
+              "page": 4,
+              "quote": "136 96 1.50 7 N2.3(1O2) [TFSI] −69 337 1.4032 114 1.38 8",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+            "doi": "10.1016/j.electacta.2010.06.063"
+          },
+          "cation": "[N4(1O2) ]",
+          "anion": "[TFSI]",
+          "surface": "bulk liquid",
+          "temperature": "25 °C",
+          "conductivity": "1.01 mS/cm",
+          "method": "viscometer; conductivity cell",
+          "viscosity": "135 cP",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "viscosity",
+              "page": 4,
+              "quote": "32 114 1.38 8 N4(1O2) [TFSI] 1 26 99.1 320 1.4086 135 1.",
+              "basis": "direct"
+            },
+            {
+              "field": "conductivity",
+              "page": 4,
+              "quote": "32 114 1.38 8 N4(1O2) [TFSI] 1 26 99.1 320 1.4086 135 1.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+            "doi": "10.1016/j.electacta.2010.06.063"
+          },
+          "cation": "[N22,2(1O2)]",
+          "anion": "[FSI]",
+          "surface": "glassy carbon electrode",
+          "temperature": "25 °C",
+          "electrochemicalWindow": "5.48 V",
+          "potentialReference": "Fc+/Fc",
+          "method": "linear sweep voltammetry",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 6,
+              "quote": "(V) EWs (V) N22,2(1O2)[FSI] −3.06 2.42 5.48 N1,3(1O2)[F",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+            "doi": "10.1016/j.electacta.2010.06.063"
+          },
+          "cation": "[N1,3(1O2)]",
+          "anion": "[FSI]",
+          "surface": "glassy carbon electrode",
+          "temperature": "25 °C",
+          "electrochemicalWindow": "5.42 V",
+          "potentialReference": "Fc+/Fc",
+          "method": "linear sweep voltammetry",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 6,
+              "quote": "6 2.42 5.48 N1,3(1O2)[FSI] −3.05 2.37 5.42 N2,3(1O2)[FSI",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+            "doi": "10.1016/j.electacta.2010.06.063"
+          },
+          "cation": "[N2,3(1O2)]",
+          "anion": "[FSI]",
+          "surface": "glassy carbon electrode",
+          "temperature": "25 °C",
+          "electrochemicalWindow": "5.42 V",
+          "potentialReference": "Fc+/Fc",
+          "method": "linear sweep voltammetry",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 6,
+              "quote": "5 2.37 5.42 N2,3(1O2)[FSI] −3.05 2.37 5.42 N4(1O2)[FSI]",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+            "doi": "10.1016/j.electacta.2010.06.063"
+          },
+          "cation": "[N4(1O2)]",
+          "anion": "[FSI]",
+          "surface": "glassy carbon electrode",
+          "temperature": "25 °C",
+          "electrochemicalWindow": "5.45 V",
+          "potentialReference": "Fc+/Fc",
+          "method": "linear sweep voltammetry",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 6,
+              "quote": "5 2.37 5.42 N4(1O2)[FSI] −3.07 2.38 5.45 N22,2(1O2)[TFSI",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+            "doi": "10.1016/j.electacta.2010.06.063"
+          },
+          "cation": "[N22,2(1O2)]",
+          "anion": "[TFSI]",
+          "surface": "glassy carbon electrode",
+          "temperature": "25 °C",
+          "electrochemicalWindow": "5.73 V",
+          "potentialReference": "Fc+/Fc",
+          "method": "linear sweep voltammetry",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 6,
+              "quote": "7 2.38 5.45 N22,2(1O2)[TFSI] −3.25 2.48 5.73 N1,3(1O2)[T",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+            "doi": "10.1016/j.electacta.2010.06.063"
+          },
+          "cation": "[N1,3(1O2)]",
+          "anion": "[TFSI]",
+          "surface": "glassy carbon electrode",
+          "temperature": "25 °C",
+          "electrochemicalWindow": "5.61 V",
+          "potentialReference": "Fc+/Fc",
+          "method": "linear sweep voltammetry",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 6,
+              "quote": "5 2.48 5.73 N1,3(1O2)[TFSI] −3.20 2.41 5.61 N2,3(1O2)[TF",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+            "doi": "10.1016/j.electacta.2010.06.063"
+          },
+          "cation": "[N2,3(1O2)]",
+          "anion": "[TFSI]",
+          "surface": "glassy carbon electrode",
+          "temperature": "25 °C",
+          "electrochemicalWindow": "5.62 V",
+          "potentialReference": "Fc+/Fc",
+          "method": "linear sweep voltammetry",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 6,
+              "quote": "0 2.41 5.61 N2,3(1O2)[TFSI] −3.21 2.41 5.62 N4(1O2)[TFSI",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+            "doi": "10.1016/j.electacta.2010.06.063"
+          },
+          "cation": "[N4(1O2)]",
+          "anion": "[TFSI]",
+          "surface": "glassy carbon electrode",
+          "temperature": "25 °C",
+          "electrochemicalWindow": "5.69 V",
+          "potentialReference": "Fc+/Fc",
+          "method": "linear sweep voltammetry",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 6,
+              "quote": "1 2.41 5.62 N4(1O2)[TFSI] −3.34 2.35 5.69 7140",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        }
+      ]
+    },
+    {
+      "file": "1-s2.0-S0013468616307848-main.pdf",
+      "doi": "10.1016/j.electacta.2016.03.201",
+      "classification": "text-values",
+      "reviewSummary": "Manually checked the six [sTFSI]-IL rows reporting viscosity and ionic conductivity at 25 °C. The abstract's aggregate electrochemical-window range is not entered as a single-IL record.",
+      "records": [
+        {
+          "paper": {
+            "title": "New ionic liquids based on a super-delocalized perfluorinated sulfonimide anion: physical and electrochemical properties",
+            "doi": "10.1016/j.electacta.2016.03.201"
+          },
+          "cation": "[EMI]",
+          "anion": "[sTFSI]",
+          "surface": "bulk liquid",
+          "temperature": "25 °C",
+          "conductivity": "6 mS/cm",
+          "method": "viscometer; conductivity cell",
+          "viscosity": "36 cP",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "viscosity",
+              "page": 3,
+              "quote": "cP se/mS cm1 1 EMI[sTFSI] 92 434 1.60 36 6.0 2 PY13[sTFS",
+              "basis": "direct"
+            },
+            {
+              "field": "conductivity",
+              "page": 3,
+              "quote": "cP se/mS cm1 1 EMI[sTFSI] 92 434 1.60 36 6.0 2 PY13[sTFS",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "New ionic liquids based on a super-delocalized perfluorinated sulfonimide anion: physical and electrochemical properties",
+            "doi": "10.1016/j.electacta.2016.03.201"
+          },
+          "cation": "[PY13]",
+          "anion": "[sTFSI]",
+          "surface": "bulk liquid",
+          "temperature": "25 °C",
+          "conductivity": "2.5 mS/cm",
+          "method": "viscometer; conductivity cell",
+          "viscosity": "60 cP",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "viscosity",
+              "page": 3,
+              "quote": "1.60 36 6.0 2 PY13[sTFSI] 91 420 1.52 60 2.5 3 N122.1O2[",
+              "basis": "direct"
+            },
+            {
+              "field": "conductivity",
+              "page": 3,
+              "quote": "1.60 36 6.0 2 PY13[sTFSI] 91 420 1.52 60 2.5 3 N122.1O2[",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "New ionic liquids based on a super-delocalized perfluorinated sulfonimide anion: physical and electrochemical properties",
+            "doi": "10.1016/j.electacta.2016.03.201"
+          },
+          "cation": "[N122.1O2]",
+          "anion": "[sTFSI]",
+          "surface": "bulk liquid",
+          "temperature": "25 °C",
+          "conductivity": "2.5 mS/cm",
+          "method": "viscometer; conductivity cell",
+          "viscosity": "57 cP",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "viscosity",
+              "page": 3,
+              "quote": "1.52 60 2.5 3 N122.1O2[sTFSI] 95 425 1.49 57 2.5 4 N1223",
+              "basis": "direct"
+            },
+            {
+              "field": "conductivity",
+              "page": 3,
+              "quote": "1.52 60 2.5 3 N122.1O2[sTFSI] 95 425 1.49 57 2.5 4 N1223",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "New ionic liquids based on a super-delocalized perfluorinated sulfonimide anion: physical and electrochemical properties",
+            "doi": "10.1016/j.electacta.2016.03.201"
+          },
+          "cation": "[N1223]",
+          "anion": "[sTFSI]",
+          "surface": "bulk liquid",
+          "temperature": "25 °C",
+          "conductivity": "1.7 mS/cm",
+          "method": "viscometer; conductivity cell",
+          "viscosity": "84 cP",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "viscosity",
+              "page": 3,
+              "quote": "1.49 57 2.5 4 N1223[sTFSI] 92 408 1.48 84 1.7 5 N1224[sT",
+              "basis": "direct"
+            },
+            {
+              "field": "conductivity",
+              "page": 3,
+              "quote": "1.49 57 2.5 4 N1223[sTFSI] 92 408 1.48 84 1.7 5 N1224[sT",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "New ionic liquids based on a super-delocalized perfluorinated sulfonimide anion: physical and electrochemical properties",
+            "doi": "10.1016/j.electacta.2016.03.201"
+          },
+          "cation": "[N1224]",
+          "anion": "[sTFSI]",
+          "surface": "bulk liquid",
+          "temperature": "25 °C",
+          "conductivity": "1.6 mS/cm",
+          "method": "viscometer; conductivity cell",
+          "viscosity": "96 cP",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "viscosity",
+              "page": 3,
+              "quote": "1.48 84 1.7 5 N1224[sTFSI] 90 430 1.45 96 1.6 6 PI13[sTF",
+              "basis": "direct"
+            },
+            {
+              "field": "conductivity",
+              "page": 3,
+              "quote": "1.48 84 1.7 5 N1224[sTFSI] 90 430 1.45 96 1.6 6 PI13[sTF",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "New ionic liquids based on a super-delocalized perfluorinated sulfonimide anion: physical and electrochemical properties",
+            "doi": "10.1016/j.electacta.2016.03.201"
+          },
+          "cation": "[PI13]",
+          "anion": "[sTFSI]",
+          "surface": "bulk liquid",
+          "temperature": "25 °C",
+          "conductivity": "1.3 mS/cm",
+          "method": "viscometer; conductivity cell",
+          "viscosity": "120 cP",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "viscosity",
+              "page": 3,
+              "quote": "1.45 96 1.6 6 PI13[sTFSI] 81 434 1.50 120 1.3 a Glass tr",
+              "basis": "direct"
+            },
+            {
+              "field": "conductivity",
+              "page": 3,
+              "quote": "1.45 96 1.6 6 PI13[sTFSI] 81 434 1.50 120 1.3 a Glass tr",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        }
+      ]
+    },
+    {
+      "file": "1-s2.0-S0167732218325492-main.pdf",
+      "doi": "10.1016/j.molliq.2018.09.139",
+      "classification": "text-values",
+      "reviewSummary": "Manually checked the EIS table rows for [bmim][Cl], [bmim][CF3SO3], and [bmim][Ac]. Rct and Cdl from each concentration row are retained together; Rs and inhibition efficiency are excluded.",
+      "records": [
+        {
+          "paper": {
+            "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+            "doi": "10.1016/j.molliq.2018.09.139"
+          },
+          "cation": "[bmim]",
+          "anion": "[Cl]",
+          "surface": "mild steel",
+          "capacitance": "112.80 µF/cm²",
+          "chargeTransferResistance": "58.81 Ω cm²",
+          "method": "EIS",
+          "concentration": "1.73 × 10−4 mol/L",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 9,
+              "quote": "222.68 – – [bmim][Cl] 1.73 × 10−4 0.883 58.81 0.997 112",
+              "basis": "direct"
+            },
+            {
+              "field": "capacitance",
+              "page": 9,
+              "quote": "222.68 – – [bmim][Cl] 1.73 × 10−4 0.883 58.81 0.997 112",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+            "doi": "10.1016/j.molliq.2018.09.139"
+          },
+          "cation": "[bmim]",
+          "anion": "[Cl]",
+          "surface": "mild steel",
+          "capacitance": "195.59 µF/cm²",
+          "chargeTransferResistance": "98.07 Ω cm²",
+          "method": "EIS",
+          "concentration": "3.47 × 10−4 mol/L",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 9,
+              "quote": "3.64 0.7364 3.47 × 10−4 1.63 98.07 0.997 195.59 84.19 0.",
+              "basis": "direct"
+            },
+            {
+              "field": "capacitance",
+              "page": 9,
+              "quote": "3.64 0.7364 3.47 × 10−4 1.63 98.07 0.997 195.59 84.19 0.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+            "doi": "10.1016/j.molliq.2018.09.139"
+          },
+          "cation": "[bmim]",
+          "anion": "[Cl]",
+          "surface": "mild steel",
+          "capacitance": "110.98 µF/cm²",
+          "chargeTransferResistance": "148.37 Ω cm²",
+          "method": "EIS",
+          "concentration": "5.20 × 10−4 mol/L",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 9,
+              "quote": "4.19 0.8419 5.20 × 10−4 1.63 148.37 0.997 110.98 89.55 0",
+              "basis": "direct"
+            },
+            {
+              "field": "capacitance",
+              "page": 9,
+              "quote": "4.19 0.8419 5.20 × 10−4 1.63 148.37 0.997 110.98 89.55 0",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+            "doi": "10.1016/j.molliq.2018.09.139"
+          },
+          "cation": "[bmim]",
+          "anion": "[Cl]",
+          "surface": "mild steel",
+          "capacitance": "81.41 µF/cm²",
+          "chargeTransferResistance": "230.68 Ω cm²",
+          "method": "EIS",
+          "concentration": "6.94 × 10−4 mol/L",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 9,
+              "quote": "9.55 0.8955 6.94 × 10−4 1.32 230.68 0.997 81.41 93.28 0.",
+              "basis": "direct"
+            },
+            {
+              "field": "capacitance",
+              "page": 9,
+              "quote": "9.55 0.8955 6.94 × 10−4 1.32 230.68 0.997 81.41 93.28 0.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+            "doi": "10.1016/j.molliq.2018.09.139"
+          },
+          "cation": "[bmim]",
+          "anion": "[CF3SO3]",
+          "surface": "mild steel",
+          "capacitance": "191.27 µF/cm²",
+          "chargeTransferResistance": "76.64 Ω cm²",
+          "method": "EIS",
+          "concentration": "1.73 × 10−4 mol/L",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 9,
+              "quote": "3.28 0.9328 [bmim][CF3SO3] 1.73 × 10−4 0.851 76.64 0.997",
+              "basis": "direct"
+            },
+            {
+              "field": "capacitance",
+              "page": 9,
+              "quote": "3.28 0.9328 [bmim][CF3SO3] 1.73 × 10−4 0.851 76.64 0.997",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+            "doi": "10.1016/j.molliq.2018.09.139"
+          },
+          "cation": "[bmim]",
+          "anion": "[CF3SO3]",
+          "surface": "mild steel",
+          "capacitance": "92.00 µF/cm²",
+          "chargeTransferResistance": "199.61 Ω cm²",
+          "method": "EIS",
+          "concentration": "3.47 × 10−4 mol/L",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 9,
+              "quote": "9.77 0.7977 3.47 × 10−4 1.39 199.61 0.997 92.00 92.23 0.",
+              "basis": "direct"
+            },
+            {
+              "field": "capacitance",
+              "page": 9,
+              "quote": "9.77 0.7977 3.47 × 10−4 1.39 199.61 0.997 92.00 92.23 0.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+            "doi": "10.1016/j.molliq.2018.09.139"
+          },
+          "cation": "[bmim]",
+          "anion": "[CF3SO3]",
+          "surface": "mild steel",
+          "capacitance": "87.09 µF/cm²",
+          "chargeTransferResistance": "217.83 Ω cm²",
+          "method": "EIS",
+          "concentration": "5.20 × 10−4 mol/L",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 9,
+              "quote": "2.23 0.9223 5.20 × 10−4 1.17 217.83 0.997 87.09 92.88 0.",
+              "basis": "direct"
+            },
+            {
+              "field": "capacitance",
+              "page": 9,
+              "quote": "2.23 0.9223 5.20 × 10−4 1.17 217.83 0.997 87.09 92.88 0.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+            "doi": "10.1016/j.molliq.2018.09.139"
+          },
+          "cation": "[bmim]",
+          "anion": "[CF3SO3]",
+          "surface": "mild steel",
+          "capacitance": "73.82 µF/cm²",
+          "chargeTransferResistance": "313.25 Ω cm²",
+          "method": "EIS",
+          "concentration": "6.94 × 10−4 mol/L",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 9,
+              "quote": "2.88 0.9288 6.94 × 10−4 1.75 313.25 0.997 73.82 95.05 0.",
+              "basis": "direct"
+            },
+            {
+              "field": "capacitance",
+              "page": 9,
+              "quote": "2.88 0.9288 6.94 × 10−4 1.75 313.25 0.997 73.82 95.05 0.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+            "doi": "10.1016/j.molliq.2018.09.139"
+          },
+          "cation": "[bmim]",
+          "anion": "[Ac]",
+          "surface": "mild steel",
+          "capacitance": "123.59 µF/cm²",
+          "chargeTransferResistance": "87.83 Ω cm²",
+          "method": "EIS",
+          "concentration": "1.73 × 10−4 mol/L",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 9,
+              "quote": "5.05 0.9505 [bmim][Ac] 1.73 × 10−4 1.57 87.83 0.997 123.",
+              "basis": "direct"
+            },
+            {
+              "field": "capacitance",
+              "page": 9,
+              "quote": "5.05 0.9505 [bmim][Ac] 1.73 × 10−4 1.57 87.83 0.997 123.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+            "doi": "10.1016/j.molliq.2018.09.139"
+          },
+          "cation": "[bmim]",
+          "anion": "[Ac]",
+          "surface": "mild steel",
+          "capacitance": "59.07 µF/cm²",
+          "chargeTransferResistance": "121.73 Ω cm²",
+          "method": "EIS",
+          "concentration": "3.47 × 10−4 mol/L",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 9,
+              "quote": "2.35 0.8235 3.47 × 10−4 9.27 121.73 0.997 59.07 87.26 0.",
+              "basis": "direct"
+            },
+            {
+              "field": "capacitance",
+              "page": 9,
+              "quote": "2.35 0.8235 3.47 × 10−4 9.27 121.73 0.997 59.07 87.26 0.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+            "doi": "10.1016/j.molliq.2018.09.139"
+          },
+          "cation": "[bmim]",
+          "anion": "[Ac]",
+          "surface": "mild steel",
+          "capacitance": "51.55 µF/cm²",
+          "chargeTransferResistance": "230.24 Ω cm²",
+          "method": "EIS",
+          "concentration": "5.20 × 10−4 mol/L",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 9,
+              "quote": "7.26 0.8726 5.20 × 10−4 1.76 230.24 0.997 51.55 93.26 0.",
+              "basis": "direct"
+            },
+            {
+              "field": "capacitance",
+              "page": 9,
+              "quote": "7.26 0.8726 5.20 × 10−4 1.76 230.24 0.997 51.55 93.26 0.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+            "doi": "10.1016/j.molliq.2018.09.139"
+          },
+          "cation": "[bmim]",
+          "anion": "[Ac]",
+          "surface": "mild steel",
+          "capacitance": "48.09 µF/cm²",
+          "chargeTransferResistance": "337.28 Ω cm²",
+          "method": "EIS",
+          "concentration": "6.94 × 10−4 mol/L",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "chargeTransferResistance",
+              "page": 9,
+              "quote": "3.26 0.9326 6.94 × 10−4 1.72 337.28 0.997 48.09 95.40 0.",
+              "basis": "direct"
+            },
+            {
+              "field": "capacitance",
+              "page": 9,
+              "quote": "3.26 0.9326 6.94 × 10−4 1.72 337.28 0.997 48.09 95.40 0.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        }
+      ]
+    },
+    {
+      "file": "1-s2.0-S235234092100860X-main.pdf",
+      "doi": "10.1016/j.dib.2021.107585",
+      "classification": "text-values",
+      "reviewSummary": "Manually checked Tables 2, 4, 6, 8, and 10. Each ionic liquid, Au crystal face, and cut-off current density is a separate condition set; ND rows are excluded.",
+      "records": [
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mim]",
+          "anion": "[PF6]",
+          "surface": "Au(111)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "4.60 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.1",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.80",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "1.80",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 7,
+              "table": "Table 2",
+              "quote": "/Fc+ Epw /V 0.1 Au(111) –2.80 1.80 4.60 Au(100) –2.79 1.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mim]",
+          "anion": "[PF6]",
+          "surface": "Au(100)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "4.57 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.1",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.79",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "1.78",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 7,
+              "table": "Table 2",
+              "quote": "0 1.80 4.60 Au(100) –2.79 1.78 4.57 Au(110) –2.69 1.75 4",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mim]",
+          "anion": "[PF6]",
+          "surface": "Au(110)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "4.44 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.1",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.69",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "1.75",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 7,
+              "table": "Table 2",
+              "quote": "9 1.78 4.57 Au(110) –2.69 1.75 4.44 0.5 Au(111) –2.92 1.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mim]",
+          "anion": "[PF6]",
+          "surface": "Au(111)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "4.91 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.5",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.92",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "1.99",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 7,
+              "table": "Table 2",
+              "quote": "9 1.75 4.44 0.5 Au(111) –2.92 1.99 4.91 Au(100) –2.89 1.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mim]",
+          "anion": "[PF6]",
+          "surface": "Au(100)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "4.85 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.5",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.89",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "1.96",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 7,
+              "table": "Table 2",
+              "quote": "2 1.99 4.91 Au(100) –2.89 1.96 4.85 Au(110) –2.86 1.95 4",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mim]",
+          "anion": "[PF6]",
+          "surface": "Au(110)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "4.81 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.5",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.86",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "1.95",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 7,
+              "table": "Table 2",
+              "quote": "9 1.96 4.85 Au(110) –2.86 1.95 4.81 1.0 Au(111) –2.99 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mim]",
+          "anion": "[PF6]",
+          "surface": "Au(111)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "5.05 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±1.0",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.99",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "2.05",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 7,
+              "table": "Table 2",
+              "quote": "6 1.95 4.81 1.0 Au(111) –2.99 2.05 5.05 Au(100) –2.94 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mim]",
+          "anion": "[PF6]",
+          "surface": "Au(100)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "4.94 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±1.0",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.94",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "2.01",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 7,
+              "table": "Table 2",
+              "quote": "9 2.05 5.05 Au(100) –2.94 2.01 4.94 Au(110) –2.92 2.00 4",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mim]",
+          "anion": "[PF6]",
+          "surface": "Au(110)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "4.91 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±1.0",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.92",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "2.00",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 7,
+              "table": "Table 2",
+              "quote": "4 2.01 4.94 Au(110) –2.92 2.00 4.91 Table 3 The Edl-AL ,",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mpyrr]",
+          "anion": "[Tf2 N]",
+          "surface": "Au(111)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "5.40 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.1",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−3.13",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "2.26",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 7,
+              "table": "Table 4",
+              "quote": "/Fc+ Epw /V 0.1 Au(111) –3.13 2.26 5.40 Au(100) –3.14 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mpyrr]",
+          "anion": "[Tf2 N]",
+          "surface": "Au(100)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "5.44 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.1",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−3.14",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "2.30",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 7,
+              "table": "Table 4",
+              "quote": "3 2.26 5.40 Au(100) –3.14 2.30 5.44 Au(110) –3.13 2.30 5",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mpyrr]",
+          "anion": "[Tf2 N]",
+          "surface": "Au(110)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "5.43 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.1",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−3.13",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "2.30",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 7,
+              "table": "Table 4",
+              "quote": "4 2.30 5.44 Au(110) –3.13 2.30 5.43 0.5 Au(111) –3.34 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mpyrr]",
+          "anion": "[Tf2 N]",
+          "surface": "Au(111)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "5.74 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.5",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−3.34",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "2.40",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 7,
+              "table": "Table 4",
+              "quote": "3 2.30 5.43 0.5 Au(111) –3.34 2.40 5.74 Au(100) –3.33 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mpyrr]",
+          "anion": "[Tf2 N]",
+          "surface": "Au(100)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "5.73 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.5",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−3.33",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "2.40",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 7,
+              "table": "Table 4",
+              "quote": "4 2.40 5.74 Au(100) –3.33 2.40 5.73 Au(110) –3.36 2.41 5",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mpyrr]",
+          "anion": "[Tf2 N]",
+          "surface": "Au(110)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "5.77 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.5",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−3.36",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "2.41",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 7,
+              "table": "Table 4",
+              "quote": "3 2.40 5.73 Au(110) –3.36 2.41 5.77 1.0 Au(111) –3.42 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mpyrr]",
+          "anion": "[Tf2 N]",
+          "surface": "Au(111)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "5.87 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±1.0",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−3.42",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "2.46",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 7,
+              "table": "Table 4",
+              "quote": "6 2.41 5.77 1.0 Au(111) –3.42 2.46 5.87 Au(100) –3.40 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mpyrr]",
+          "anion": "[Tf2 N]",
+          "surface": "Au(100)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "5.85 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±1.0",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−3.40",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "2.45",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 7,
+              "table": "Table 4",
+              "quote": "2 2.46 5.87 Au(100) –3.40 2.45 5.85 Au(110) –3.43 2.45 5",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mpyrr]",
+          "anion": "[Tf2 N]",
+          "surface": "Au(110)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "5.88 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±1.0",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−3.43",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "2.45",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 7,
+              "table": "Table 4",
+              "quote": "0 2.45 5.85 Au(110) –3.43 2.45 5.88 the jcut-off values,",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[N1,4,4,4]",
+          "anion": "[Tf2 N]",
+          "surface": "Au(111)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "5.29 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.1",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−3.28",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "2.02",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 8,
+              "table": "Table 6",
+              "quote": "/Fc+ Epw /V 0.1 Au(111) –3.28 2.02 5.29 Au(100) –3.58 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[N1,4,4,4]",
+          "anion": "[Tf2 N]",
+          "surface": "Au(100)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "5.68 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.1",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−3.58",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "2.10",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 8,
+              "table": "Table 6",
+              "quote": "8 2.02 5.29 Au(100) –3.58 2.10 5.68 Au(110) –3.31 2.03 5",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[N1,4,4,4]",
+          "anion": "[Tf2 N]",
+          "surface": "Au(110)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "5.34 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.1",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−3.31",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "2.03",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 8,
+              "table": "Table 6",
+              "quote": "8 2.10 5.68 Au(110) –3.31 2.03 5.34 0.5 Au(111) –3.85 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[N1,4,4,4]",
+          "anion": "[Tf2 N]",
+          "surface": "Au(111)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "6.13 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.5",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−3.85",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "2.28",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 8,
+              "table": "Table 6",
+              "quote": "1 2.03 5.34 0.5 Au(111) –3.85 2.28 6.13 Au(100) –3.97 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[N1,4,4,4]",
+          "anion": "[Tf2 N]",
+          "surface": "Au(100)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "6.39 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.5",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−3.97",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "2.41",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 8,
+              "table": "Table 6",
+              "quote": "5 2.28 6.13 Au(100) –3.97 2.41 6.39 Au(110) –3.87 2.30 6",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[N1,4,4,4]",
+          "anion": "[Tf2 N]",
+          "surface": "Au(110)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "6.17 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.5",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−3.87",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "2.30",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 8,
+              "table": "Table 6",
+              "quote": "7 2.41 6.39 Au(110) –3.87 2.30 6.17 1.0 Au(111) –4.05 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[N1,4,4,4]",
+          "anion": "[Tf2 N]",
+          "surface": "Au(111)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "6.54 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±1.0",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−4.05",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "2.49",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 8,
+              "table": "Table 6",
+              "quote": "7 2.30 6.17 1.0 Au(111) –4.05 2.49 6.54 Au(100) –4.27 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[N1,4,4,4]",
+          "anion": "[Tf2 N]",
+          "surface": "Au(100)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "6.99 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±1.0",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−4.27",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "2.72",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 8,
+              "table": "Table 6",
+              "quote": "5 2.49 6.54 Au(100) –4.27 2.72 6.99 Au(110) –4.08 2.52 6",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[N1,4,4,4]",
+          "anion": "[Tf2 N]",
+          "surface": "Au(110)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "6.60 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±1.0",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−4.08",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "2.52",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 8,
+              "table": "Table 6",
+              "quote": "7 2.72 6.99 Au(110) –4.08 2.52 6.60 Table 7 The Edl-AL ,",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mim]",
+          "anion": "[I]",
+          "surface": "Au(111)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "1.74 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.1",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.15",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "−0.41",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 9,
+              "table": "Table 8",
+              "quote": "/Fc+ Epw /V 0.1 Au(111) –2.15 –0.41 1.74 Au(100) –2.49 –",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mim]",
+          "anion": "[I]",
+          "surface": "Au(100)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "2.08 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.1",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.49",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "−0.41",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 9,
+              "table": "Table 8",
+              "quote": "–0.41 1.74 Au(100) –2.49 –0.41 2.08 Au(110) –2.20 –0.40",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mim]",
+          "anion": "[I]",
+          "surface": "Au(110)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "1.79 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.1",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.20",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "−0.40",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 9,
+              "table": "Table 8",
+              "quote": "–0.41 2.08 Au(110) –2.20 –0.40 1.79 0.5 Au(111) –2.65 –",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mim]",
+          "anion": "[I]",
+          "surface": "Au(111)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "2.39 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.5",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.65",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "−0.26",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 9,
+              "table": "Table 8",
+              "quote": "–0.40 1.79 0.5 Au(111) –2.65 –0.26 2.39 Au(100) –2.64 –",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mim]",
+          "anion": "[I]",
+          "surface": "Au(100)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "2.38 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.5",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.64",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "−0.26",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 9,
+              "table": "Table 8",
+              "quote": "–0.26 2.39 Au(100) –2.64 –0.26 2.38 Au(110) –2.67 –0.25",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mim]",
+          "anion": "[I]",
+          "surface": "Au(110)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "2.42 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.5",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.67",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "−0.25",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 9,
+              "table": "Table 8",
+              "quote": "–0.26 2.38 Au(110) –2.67 –0.25 2.42 1.0 Au(111) –2.80 –",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mim]",
+          "anion": "[I]",
+          "surface": "Au(111)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "2.68 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±1.0",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.80",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "−0.13",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 9,
+              "table": "Table 8",
+              "quote": "–0.25 2.42 1.0 Au(111) –2.80 –0.13 2.68 Au(100) –2.79 –",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mim]",
+          "anion": "[I]",
+          "surface": "Au(100)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "2.65 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±1.0",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.79",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "−0.14",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 9,
+              "table": "Table 8",
+              "quote": "–0.13 2.68 Au(100) –2.79 –0.14 2.65 Au(110) –2.86 –0.11",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C4 mim]",
+          "anion": "[I]",
+          "surface": "Au(110)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "2.74 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±1.0",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.86",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "−0.11",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 9,
+              "table": "Table 8",
+              "quote": "–0.14 2.65 Au(110) –2.86 –0.11 2.74 Table 9 The Edl-AL",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C6 mim]",
+          "anion": "[I]",
+          "surface": "Au(111)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "2.14 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.1",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.61",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "−0.47",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 9,
+              "table": "Table 10",
+              "quote": "/Fc+ Epw /V 0.1 Au(111) –2.61 –0.47 2.14 Au(100) –2.61 –",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C6 mim]",
+          "anion": "[I]",
+          "surface": "Au(100)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "2.17 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.1",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.61",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "−0.43",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 9,
+              "table": "Table 10",
+              "quote": "–0.47 2.14 Au(100) –2.61 –0.43 2.17 Au(110) –2.63 –0.44",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C6 mim]",
+          "anion": "[I]",
+          "surface": "Au(110)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "2.18 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.1",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.63",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "−0.44",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 9,
+              "table": "Table 10",
+              "quote": "–0.43 2.17 Au(110) –2.63 –0.44 2.18 0.5 Au(111) –2.82 –",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C6 mim]",
+          "anion": "[I]",
+          "surface": "Au(111)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "2.55 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.5",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.82",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "−0.27",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 9,
+              "table": "Table 10",
+              "quote": "–0.44 2.18 0.5 Au(111) –2.82 –0.27 2.55 Au(100) –2.94 –",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C6 mim]",
+          "anion": "[I]",
+          "surface": "Au(100)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "2.80 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.5",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.94",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "−0.14",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 9,
+              "table": "Table 10",
+              "quote": "–0.27 2.55 Au(100) –2.94 –0.14 2.80 Au(110) –2.95 –0.14",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+            "doi": "10.1016/j.dib.2021.107585"
+          },
+          "cation": "[C6 mim]",
+          "anion": "[I]",
+          "surface": "Au(110)",
+          "temperature": "25 ± 1°C",
+          "electrochemicalWindow": "2.81 V",
+          "potentialReference": "Fc/Fc+",
+          "method": "LSV",
+          "flexible": [
+            {
+              "key": "Cut-off current density",
+              "value": "±0.5",
+              "unit": "mA/cm²"
+            },
+            {
+              "key": "Cathodic limit",
+              "value": "−2.95",
+              "unit": "V vs Fc/Fc+"
+            },
+            {
+              "key": "Anodic limit",
+              "value": "−0.14",
+              "unit": "V vs Fc/Fc+"
+            }
+          ],
+          "provenance": [
+            {
+              "field": "electrochemicalWindow",
+              "page": 9,
+              "table": "Table 10",
+              "quote": "–0.14 2.80 Au(110) –2.95 –0.14 2.81 1.0 Au(111) ND a ND",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        }
+      ]
+    },
+    {
+      "file": "Giroud_2008_Meet._Abstr._MA2008-02_26.pdf",
+      "classification": "text-values",
+      "reviewSummary": "Manually checked the meeting-abstract table. Viscosity and ionic conductivity at 20 °C are merged for each of the five ionic liquids.",
+      "records": [
+        {
+          "paper": {
+            "title": "Physicochemical Study of Ionic Liquids' Structure and Influence of the Lithium Salt Associated"
+          },
+          "cation": "[BMPyr]",
+          "anion": "[TFSI]",
+          "surface": "bulk liquid",
+          "temperature": "20 °C",
+          "conductivity": "2.29 S/m",
+          "method": "viscometer; impedance spectroscopy",
+          "viscosity": "0.092 Pa·s",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "viscosity",
+              "page": 2,
+              "quote": "20°C (S.m-1) BMPyrTFSI 0.092 2.29 BMITFSI 0.047 3.39 BMI",
+              "basis": "direct"
+            },
+            {
+              "field": "conductivity",
+              "page": 2,
+              "quote": "20°C (S.m-1) BMPyrTFSI 0.092 2.29 BMITFSI 0.047 3.39 BMI",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Physicochemical Study of Ionic Liquids' Structure and Influence of the Lithium Salt Associated"
+          },
+          "cation": "[BMI]",
+          "anion": "[TFSI]",
+          "surface": "bulk liquid",
+          "temperature": "20 °C",
+          "conductivity": "3.39 S/m",
+          "method": "viscometer; impedance spectroscopy",
+          "viscosity": "0.047 Pa·s",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "viscosity",
+              "page": 2,
+              "quote": "0.092 2.29 BMITFSI 0.047 3.39 BMIBF4 0.107 2.62 EMITFSI",
+              "basis": "direct"
+            },
+            {
+              "field": "conductivity",
+              "page": 2,
+              "quote": "0.092 2.29 BMITFSI 0.047 3.39 BMIBF4 0.107 2.62 EMITFSI",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Physicochemical Study of Ionic Liquids' Structure and Influence of the Lithium Salt Associated"
+          },
+          "cation": "[BMI]",
+          "anion": "[BF4]",
+          "surface": "bulk liquid",
+          "temperature": "20 °C",
+          "conductivity": "2.62 S/m",
+          "method": "viscometer; impedance spectroscopy",
+          "viscosity": "0.107 Pa·s",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "viscosity",
+              "page": 2,
+              "quote": "0.047 3.39 BMIBF4 0.107 2.62 EMITFSI 0.038 7.39 DMBIBF4",
+              "basis": "direct"
+            },
+            {
+              "field": "conductivity",
+              "page": 2,
+              "quote": "0.047 3.39 BMIBF4 0.107 2.62 EMITFSI 0.038 7.39 DMBIBF4",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Physicochemical Study of Ionic Liquids' Structure and Influence of the Lithium Salt Associated"
+          },
+          "cation": "[EMI]",
+          "anion": "[TFSI]",
+          "surface": "bulk liquid",
+          "temperature": "20 °C",
+          "conductivity": "7.39 S/m",
+          "method": "viscometer; impedance spectroscopy",
+          "viscosity": "0.038 Pa·s",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "viscosity",
+              "page": 2,
+              "quote": "0.107 2.62 EMITFSI 0.038 7.39 DMBIBF4 0.713 0.58 Ionic",
+              "basis": "direct"
+            },
+            {
+              "field": "conductivity",
+              "page": 2,
+              "quote": "0.107 2.62 EMITFSI 0.038 7.39 DMBIBF4 0.713 0.58 Ionic",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Physicochemical Study of Ionic Liquids' Structure and Influence of the Lithium Salt Associated"
+          },
+          "cation": "[DMBI]",
+          "anion": "[BF4]",
+          "surface": "bulk liquid",
+          "temperature": "20 °C",
+          "conductivity": "0.58 S/m",
+          "method": "viscometer; impedance spectroscopy",
+          "viscosity": "0.713 Pa·s",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "viscosity",
+              "page": 2,
+              "quote": "0.038 7.39 DMBIBF4 0.713 0.58 Ionic liquids Lithium sal",
+              "basis": "direct"
+            },
+            {
+              "field": "conductivity",
+              "page": 2,
+              "quote": "0.038 7.39 DMBIBF4 0.713 0.58 Ionic liquids Lithium sal",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        }
+      ]
+    },
+    {
+      "file": "Hwang_2021_J._Electrochem._Soc._168_030508.pdf",
+      "doi": "10.1149/1945-7111/",
+      "classification": "text-values",
+      "reviewSummary": "Manually checked Tables II and III. Conductivity and viscosity are merged for ILOL 20/50/80/100 at each reported temperature; ILOL 0 and literature-reference columns are excluded.",
+      "records": [
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "273 K",
+          "conductivity": "3.6 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "22.9 mPa·s",
+          "concentration": "ILOL 20",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "Ref 2 Ref 3 273 2.9 3.6 3.2 1.8 1.2 2.4 3.0 3.0 283 4.2",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "Ref 2 Ref 3 273 15.4 22.9 54.5 158.0 320.4 15.4 15.5 17.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "273 K",
+          "conductivity": "3.2 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "54.5 mPa·s",
+          "concentration": "ILOL 50",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "Ref 2 Ref 3 273 2.9 3.6 3.2 1.8 1.2 2.4 3.0 3.0 283 4.2",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "Ref 2 Ref 3 273 15.4 22.9 54.5 158.0 320.4 15.4 15.5 17.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "273 K",
+          "conductivity": "1.8 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "158.0 mPa·s",
+          "concentration": "ILOL 80",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "Ref 2 Ref 3 273 2.9 3.6 3.2 1.8 1.2 2.4 3.0 3.0 283 4.2",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "Ref 2 Ref 3 273 15.4 22.9 54.5 158.0 320.4 15.4 15.5 17.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "273 K",
+          "conductivity": "1.2 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "320.4 mPa·s",
+          "concentration": "ILOL 100",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "Ref 2 Ref 3 273 2.9 3.6 3.2 1.8 1.2 2.4 3.0 3.0 283 4.2",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "Ref 2 Ref 3 273 15.4 22.9 54.5 158.0 320.4 15.4 15.5 17.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "283 K",
+          "conductivity": "5.2 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "15.3 mPa·s",
+          "concentration": "ILOL 20",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "2.4 3.0 3.0 283 4.2 5.2 4.9 3.0 2.2 3.6 4.2 4.7 293 5.5",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "4 15.5 17.1 283 10.6 15.3 33.7 93.0 183.6 10.8 10.6 11.2",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "283 K",
+          "conductivity": "4.9 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "33.7 mPa·s",
+          "concentration": "ILOL 50",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "2.4 3.0 3.0 283 4.2 5.2 4.9 3.0 2.2 3.6 4.2 4.7 293 5.5",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "4 15.5 17.1 283 10.6 15.3 33.7 93.0 183.6 10.8 10.6 11.2",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "283 K",
+          "conductivity": "3.0 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "93.0 mPa·s",
+          "concentration": "ILOL 80",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "2.4 3.0 3.0 283 4.2 5.2 4.9 3.0 2.2 3.6 4.2 4.7 293 5.5",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "4 15.5 17.1 283 10.6 15.3 33.7 93.0 183.6 10.8 10.6 11.2",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "283 K",
+          "conductivity": "2.2 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "183.6 mPa·s",
+          "concentration": "ILOL 100",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "2.4 3.0 3.0 283 4.2 5.2 4.9 3.0 2.2 3.6 4.2 4.7 293 5.5",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "4 15.5 17.1 283 10.6 15.3 33.7 93.0 183.6 10.8 10.6 11.2",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "293 K",
+          "conductivity": "7.1 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "10.9 mPa·s",
+          "concentration": "ILOL 20",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "3.6 4.2 4.7 293 5.5 7.1 7.1 4.6 3.4 4.9 5.6 6.9 303 6.9",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "8 10.6 11.2 293 7.7 10.9 23.2 58.7 114.0 7.8 7.7 7.7 303",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "293 K",
+          "conductivity": "7.1 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "23.2 mPa·s",
+          "concentration": "ILOL 50",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "3.6 4.2 4.7 293 5.5 7.1 7.1 4.6 3.4 4.9 5.6 6.9 303 6.9",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "8 10.6 11.2 293 7.7 10.9 23.2 58.7 114.0 7.8 7.7 7.7 303",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "293 K",
+          "conductivity": "4.6 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "58.7 mPa·s",
+          "concentration": "ILOL 80",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "3.6 4.2 4.7 293 5.5 7.1 7.1 4.6 3.4 4.9 5.6 6.9 303 6.9",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "8 10.6 11.2 293 7.7 10.9 23.2 58.7 114.0 7.8 7.7 7.7 303",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "293 K",
+          "conductivity": "3.4 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "114.0 mPa·s",
+          "concentration": "ILOL 100",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "3.6 4.2 4.7 293 5.5 7.1 7.1 4.6 3.4 4.9 5.6 6.9 303 6.9",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "8 10.6 11.2 293 7.7 10.9 23.2 58.7 114.0 7.8 7.7 7.7 303",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "303 K",
+          "conductivity": "9.3 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "8.0 mPa·s",
+          "concentration": "ILOL 20",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "4.9 5.6 6.9 303 6.9 9.3 9.7 6.6 5.0 6.3 7.0 9.5 313 8.5",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "7.8 7.7 7.7 303 5.8 8.0 16.0 39.4 74.8 5.9 5.8 5.9 313 4",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "303 K",
+          "conductivity": "9.7 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "16.0 mPa·s",
+          "concentration": "ILOL 50",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "4.9 5.6 6.9 303 6.9 9.3 9.7 6.6 5.0 6.3 7.0 9.5 313 8.5",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "7.8 7.7 7.7 303 5.8 8.0 16.0 39.4 74.8 5.9 5.8 5.9 313 4",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "303 K",
+          "conductivity": "6.6 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "39.4 mPa·s",
+          "concentration": "ILOL 80",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "4.9 5.6 6.9 303 6.9 9.3 9.7 6.6 5.0 6.3 7.0 9.5 313 8.5",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "7.8 7.7 7.7 303 5.8 8.0 16.0 39.4 74.8 5.9 5.8 5.9 313 4",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "303 K",
+          "conductivity": "5.0 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "74.8 mPa·s",
+          "concentration": "ILOL 100",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "4.9 5.6 6.9 303 6.9 9.3 9.7 6.6 5.0 6.3 7.0 9.5 313 8.5",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "7.8 7.7 7.7 303 5.8 8.0 16.0 39.4 74.8 5.9 5.8 5.9 313 4",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "313 K",
+          "conductivity": "11.7 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "6.2 mPa·s",
+          "concentration": "ILOL 20",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "6.3 7.0 9.5 313 8.5 11.7 12.6 9.0 7.0 8.0 8.7 12.4 323 1",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "5.9 5.8 5.9 313 4.6 6.2 11.7 27.7 51.8 4.6 4.4 4.5 323 3",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "313 K",
+          "conductivity": "12.6 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "11.7 mPa·s",
+          "concentration": "ILOL 50",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "6.3 7.0 9.5 313 8.5 11.7 12.6 9.0 7.0 8.0 8.7 12.4 323 1",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "5.9 5.8 5.9 313 4.6 6.2 11.7 27.7 51.8 4.6 4.4 4.5 323 3",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "313 K",
+          "conductivity": "9.0 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "27.7 mPa·s",
+          "concentration": "ILOL 80",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "6.3 7.0 9.5 313 8.5 11.7 12.6 9.0 7.0 8.0 8.7 12.4 323 1",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "5.9 5.8 5.9 313 4.6 6.2 11.7 27.7 51.8 4.6 4.4 4.5 323 3",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "313 K",
+          "conductivity": "7.0 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "51.8 mPa·s",
+          "concentration": "ILOL 100",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "6.3 7.0 9.5 313 8.5 11.7 12.6 9.0 7.0 8.0 8.7 12.4 323 1",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "5.9 5.8 5.9 313 4.6 6.2 11.7 27.7 51.8 4.6 4.4 4.5 323 3",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "323 K",
+          "conductivity": "14.4 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "4.8 mPa·s",
+          "concentration": "ILOL 20",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": ".0 8.7 12.4 323 10.0 14.4 15.9 11.8 9.3 9.6 10.4 15.8 33",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "4.6 4.4 4.5 323 3.6 4.8 8.8 20.4 37.4 3.8 3.6 3.8 333 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "323 K",
+          "conductivity": "15.9 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "8.8 mPa·s",
+          "concentration": "ILOL 50",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": ".0 8.7 12.4 323 10.0 14.4 15.9 11.8 9.3 9.6 10.4 15.8 33",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "4.6 4.4 4.5 323 3.6 4.8 8.8 20.4 37.4 3.8 3.6 3.8 333 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "323 K",
+          "conductivity": "11.8 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "20.4 mPa·s",
+          "concentration": "ILOL 80",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": ".0 8.7 12.4 323 10.0 14.4 15.9 11.8 9.3 9.6 10.4 15.8 33",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "4.6 4.4 4.5 323 3.6 4.8 8.8 20.4 37.4 3.8 3.6 3.8 333 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "323 K",
+          "conductivity": "9.3 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "37.4 mPa·s",
+          "concentration": "ILOL 100",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": ".0 8.7 12.4 323 10.0 14.4 15.9 11.8 9.3 9.6 10.4 15.8 33",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "4.6 4.4 4.5 323 3.6 4.8 8.8 20.4 37.4 3.8 3.6 3.8 333 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "333 K",
+          "conductivity": "17.1 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "3.9 mPa·s",
+          "concentration": "ILOL 20",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "6 10.4 15.8 333 12.1 17.1 19.4 14.8 12.3 11.5 12.2 19.3",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "3.8 3.6 3.8 333 2.9 3.9 7.0 15.6 27.9 3.2 2.9 3.3 343 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "333 K",
+          "conductivity": "19.4 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "7.0 mPa·s",
+          "concentration": "ILOL 50",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "6 10.4 15.8 333 12.1 17.1 19.4 14.8 12.3 11.5 12.2 19.3",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "3.8 3.6 3.8 333 2.9 3.9 7.0 15.6 27.9 3.2 2.9 3.3 343 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "333 K",
+          "conductivity": "14.8 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "15.6 mPa·s",
+          "concentration": "ILOL 80",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "6 10.4 15.8 333 12.1 17.1 19.4 14.8 12.3 11.5 12.2 19.3",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "3.8 3.6 3.8 333 2.9 3.9 7.0 15.6 27.9 3.2 2.9 3.3 343 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "333 K",
+          "conductivity": "12.3 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "27.9 mPa·s",
+          "concentration": "ILOL 100",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "6 10.4 15.8 333 12.1 17.1 19.4 14.8 12.3 11.5 12.2 19.3",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "3.8 3.6 3.8 333 2.9 3.9 7.0 15.6 27.9 3.2 2.9 3.3 343 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "343 K",
+          "conductivity": "20.1 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "3.2 mPa·s",
+          "concentration": "ILOL 20",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "5 12.2 19.3 343 13.6 20.1 23.2 18.3 15.3 13.4 14.3 23.5",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "3.2 2.9 3.3 343 2.5 3.2 5.6 12.2 21.4 2.8 2.5 2.7 353 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "343 K",
+          "conductivity": "23.2 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "5.6 mPa·s",
+          "concentration": "ILOL 50",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "5 12.2 19.3 343 13.6 20.1 23.2 18.3 15.3 13.4 14.3 23.5",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "3.2 2.9 3.3 343 2.5 3.2 5.6 12.2 21.4 2.8 2.5 2.7 353 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "343 K",
+          "conductivity": "18.3 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "12.2 mPa·s",
+          "concentration": "ILOL 80",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "5 12.2 19.3 343 13.6 20.1 23.2 18.3 15.3 13.4 14.3 23.5",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "3.2 2.9 3.3 343 2.5 3.2 5.6 12.2 21.4 2.8 2.5 2.7 353 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "343 K",
+          "conductivity": "15.3 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "21.4 mPa·s",
+          "concentration": "ILOL 100",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "5 12.2 19.3 343 13.6 20.1 23.2 18.3 15.3 13.4 14.3 23.5",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "3.2 2.9 3.3 343 2.5 3.2 5.6 12.2 21.4 2.8 2.5 2.7 353 2.",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "353 K",
+          "conductivity": "23.0 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "2.7 mPa·s",
+          "concentration": "ILOL 20",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "4 14.3 23.5 353 15.2 23.0 27.2 21.9 19.1 15.1 16.2 27.6",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "2.8 2.5 2.7 353 2.1 2.7 4.6 9.8 16.9 2.5 2.2 2.4 102 × A",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "353 K",
+          "conductivity": "27.2 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "4.6 mPa·s",
+          "concentration": "ILOL 50",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "4 14.3 23.5 353 15.2 23.0 27.2 21.9 19.1 15.1 16.2 27.6",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "2.8 2.5 2.7 353 2.1 2.7 4.6 9.8 16.9 2.5 2.2 2.4 102 × A",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "353 K",
+          "conductivity": "21.9 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "9.8 mPa·s",
+          "concentration": "ILOL 80",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "4 14.3 23.5 353 15.2 23.0 27.2 21.9 19.1 15.1 16.2 27.6",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "2.8 2.5 2.7 353 2.1 2.7 4.6 9.8 16.9 2.5 2.2 2.4 102 × A",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        },
+        {
+          "paper": {
+            "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+            "doi": "10.1149/1945-7111/"
+          },
+          "cation": "[C3C1pyrr]",
+          "anion": "[FSA]",
+          "surface": "bulk liquid",
+          "temperature": "353 K",
+          "conductivity": "19.1 mS/cm",
+          "method": "conductivity cell; viscometer",
+          "viscosity": "16.9 mPa·s",
+          "concentration": "ILOL 100",
+          "flexible": [],
+          "provenance": [
+            {
+              "field": "conductivity",
+              "page": 5,
+              "quote": "4 14.3 23.5 353 15.2 23.0 27.2 21.9 19.1 15.1 16.2 27.6",
+              "basis": "direct"
+            },
+            {
+              "field": "viscosity",
+              "page": 5,
+              "quote": "2.8 2.5 2.7 353 2.1 2.7 4.6 9.8 16.9 2.5 2.2 2.4 102 × A",
+              "basis": "direct"
+            }
+          ],
+          "confidence": 0.98
+        }
+      ]
+    }
+  ]
+}
