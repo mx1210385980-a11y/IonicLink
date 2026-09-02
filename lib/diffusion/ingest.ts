@@ -1,6 +1,7 @@
 import type { FlexibleField, ProvenanceMap } from "../schema";
 import { parseQuantity } from "../units";
 import { resolveIonSmiles } from "../ionStructures";
+import { normalizeFlexibleFields } from "./flexible";
 import type {
   DiffusionDraft,
   DiffusionExtended,
@@ -19,7 +20,7 @@ export function ingest(f: DiffusionExtractedFields): DiffusionDraft {
   const cation = (f.cation ?? "").trim();
   const anion = (f.anion ?? "").trim();
 
-  const flexible: FlexibleField[] = (f.flexible ?? [])
+  const rawFlexible: FlexibleField[] = (f.flexible ?? [])
     .filter((x) => x && x.key && x.value)
     .map((x) => ({
       key: x.key.trim(),
@@ -45,6 +46,8 @@ export function ingest(f: DiffusionExtractedFields): DiffusionDraft {
     waterContent: f.waterContent?.trim() || undefined,
     concentration: f.concentration?.trim() || undefined,
   };
+  // Merge/drop/rename known flexible keys before they reach the draft.
+  const flexible = normalizeFlexibleFields(rawFlexible, extended);
 
   // Per-field provenance: array → map, keeping only entries with content.
   const provenance: ProvenanceMap = {};
