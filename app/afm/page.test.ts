@@ -12,7 +12,13 @@ assert.match(html, /AFM · interfacial structure workspace/);
 assert.match(html, /AFM solvation-force curves/);
 assert.match(html, /independent workspace/);
 assert.match(html, /Presentation snapshot/);
-assert.match(html, />158</);
+assert.match(html, />164</);
+assert.match(html, /AFM curve digitization/);
+assert.match(html, /Digitize curves from papers or figure images/);
+assert.match(html, /locates figure pages, separates panels, extracts curves/);
+assert.match(html, /manual controls are reserved for low-confidence exceptions/);
+assert.match(html, /Source comparison/);
+assert.match(html, /PDF · PNG · JPG · WEBP/);
 assert.match(html, /Curve browser/);
 assert.doesNotMatch(html, /Conductivity · interfacial data asset/);
 

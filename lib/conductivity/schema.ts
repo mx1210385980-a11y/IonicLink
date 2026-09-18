@@ -1,6 +1,6 @@
 import type { Quantity } from "../units";
 import type { DomainDraft, DomainRecord } from "../domain";
-import type { ExtractedFieldsBase, IonicLiquidCore } from "../schema";
+import type { BBox, ExtractedFieldsBase, IonicLiquidCore } from "../schema";
 
 /**
  * Conductivity domain model. Mirrors the tribology three-layer shape but for
@@ -21,16 +21,140 @@ export interface ConductivityCore {
   chargeTransferResistance: Quantity | null; // Rct / polarization resistance → ohm
 }
 
+export type ElectrochemicalCellConfiguration = "two-electrode" | "three-electrode";
+
+/** A paper curve that supports the target value(s) in one conductivity record. */
+export interface ConductivityCurveKeyPoint {
+  /** Human-readable condition or landmark, e.g. "298 K" or "onset". */
+  label: string;
+  /** Value exactly as reported in the caption/text, e.g. "12.4 mS/cm". */
+  value: string;
+  /** Stable record field used by downstream modelling/export. */
+  field?: string;
+  /** Legend/series identity when several curves share one panel. */
+  seriesLabel?: string;
+  /** Printed subplot label when this reading belongs to one panel only. */
+  panelLabel?: string;
+  /** Structured measurement context, e.g. "298 K · 5 wt%". */
+  condition?: string;
+  /** Scientific landmark represented by this item. */
+  kind?: "coordinate" | "slope" | "peak" | "onset" | "intercept" | "plateau" | "range" | "reported-value";
+  /** Explicit coordinate components when the paper/figure provides them. */
+  x?: string;
+  y?: string;
+  /** A fitted/local gradient, kept separately from point coordinates. */
+  slope?: string;
+  /** Whether the number came from paper text, printed graph annotation, or image estimation. */
+  source?: "paper-text" | "figure-annotation" | "image-estimated";
+  /** Confidence for image-derived readings; reported values normally use 1. */
+  confidence?: number;
+  note?: string;
+  /** Platform-written explanation of this reading; not the original caption. */
+  interpretation?: string;
+  /** Exact supporting excerpt and its PDF page, retained for evidence/export. */
+  evidence?: string;
+  sourcePage?: number;
+  /** Figure-wide comparisons must not be consumed as current-record measurements. */
+  scope?: "record" | "figure-comparison";
+}
+
+/** A sparse, source-grounded Y=f(X) relationship recovered from a plot/table. */
+export interface ConductivityPropertyDependency {
+  /** Short label, e.g. "Conductivity vs temperature". */
+  label: string;
+  /** Stable target property consumed by export/modelling. */
+  dependentField: string;
+  /** Experimental variable that changes across the compared observations. */
+  independentVariable: string;
+  /** Human-readable axis names including units when available. */
+  xAxis?: string;
+  yAxis?: string;
+  /** Descriptive direction only; it must not be presented as causation. */
+  trend: "increases" | "decreases" | "non-monotonic" | "approximately-constant" | "comparison";
+  /** Platform-written, evidence-grounded statement in Chinese. */
+  statement: string;
+  /** Sparse observations are sufficient; a complete digitized curve is not required. */
+  observations: Array<{
+    x: string;
+    y: string;
+    seriesLabel?: string;
+    condition?: string;
+  }>;
+  /** Whether the relation applies to one series or compares several plotted series. */
+  scope?: "record-series" | "figure-comparison";
+  source?: "paper-text" | "figure-annotation" | "image-estimated" | "record-comparison";
+  confidence?: number;
+  evidence?: string;
+  sourcePage?: number;
+}
+
+/** One plot inside a multi-panel paper figure. Boxes use source-page fractions. */
+export interface ConductivityPerformancePanel {
+  /** Panel label such as A, B, or C. */
+  label: string;
+  /** Short scientific description recovered from the caption. */
+  title?: string;
+  curveType?: string;
+  xAxis?: string;
+  yAxis?: string;
+  /** Page-level crop for this panel. */
+  figureBox?: BBox;
+  /** Series labels represented by this panel. */
+  seriesLabels?: string[];
+  /** Panel-specific reported or image-estimated graph landmarks. */
+  keyPoints?: ConductivityCurveKeyPoint[];
+  /** How this panel and its readings were obtained. */
+  source?: "paper-text" | "figure-annotation" | "image-estimated";
+  confidence?: number;
+}
+
+export interface ConductivityPerformanceFigure {
+  /** Paper label such as "Fig. 4a". */
+  figure: string;
+  page?: number;
+  /** Scientific curve family, not an image-processing guess. */
+  curveType: string;
+  /** Axis labels including units where the paper supplies them. */
+  xAxis?: string;
+  yAxis?: string;
+  /** The series in a multi-series plot that belongs to this record. */
+  seriesLabel?: string;
+  caption?: string;
+  /** Target field chiefly supported by this figure. */
+  primaryField?: string;
+  /** Exact readings stated by the paper; never silently estimated from pixels. */
+  keyPoints?: ConductivityCurveKeyPoint[];
+  /** Explicit property-condition dependencies extracted without requiring a full curve. */
+  dependencies?: ConductivityPropertyDependency[];
+  /** Relevant subplots shown one at a time in the card carousel. */
+  panels?: ConductivityPerformancePanel[];
+  /** Distinguishes sparse reported values from an actually digitized curve. */
+  dataStatus?: "reported-key-points" | "estimated-key-points" | "mixed-key-points" | "digitized-series" | "source-data-series";
+  /** Exact or automatically inferred source-page crop. */
+  figureBox?: BBox;
+}
+
 /** MIDDLE LAYER — standardized when present, but never mandatory. */
 export interface ConductivityExtended {
   method?: string; // EIS / conductivity cell
   potentialReference?: string;
+  cellConfiguration?: ElectrochemicalCellConfiguration;
+  /** Original wording, e.g. "three-electrode Swagelok cell". */
+  cellSetup?: string;
+  workingElectrode?: string;
+  counterElectrode?: string;
+  referenceElectrode?: string;
+  positiveElectrode?: string;
+  negativeElectrode?: string;
   pressure?: Quantity; // measurement pressure → Pa
   viscosity?: Quantity; // dynamic viscosity η → Pa·s
   waterContent?: string; // ppm or wt% (kept raw — not a single clean dimension)
   concentration?: string; // mol/L or wt% for IL solutions / electrolytes
   density?: string; // kept raw
   cellConstant?: string; // conductivity-cell constant, if reported
+  performanceFigure?: ConductivityPerformanceFigure;
+  /** Curve-, table-, or text-derived relationships not tied to one image artifact. */
+  propertyDependencies?: ConductivityPropertyDependency[];
 }
 
 export type ConductivityRecord = DomainRecord<ConductivityCore, ConductivityExtended>;
@@ -47,6 +171,13 @@ export interface ConductivityExtractedFields extends ExtractedFieldsBase {
   electrochemicalWindow?: string;
   chargeTransferResistance?: string;
   potentialReference?: string;
+  cellConfiguration?: string;
+  cellSetup?: string;
+  workingElectrode?: string;
+  counterElectrode?: string;
+  referenceElectrode?: string;
+  positiveElectrode?: string;
+  negativeElectrode?: string;
   pressure?: string; // e.g. "1 atm" or "250 kPa"
   method?: string;
   viscosity?: string; // e.g. "45 cP"
@@ -54,6 +185,8 @@ export interface ConductivityExtractedFields extends ExtractedFieldsBase {
   concentration?: string;
   density?: string;
   cellConstant?: string;
+  performanceFigure?: ConductivityPerformanceFigure;
+  propertyDependencies?: ConductivityPropertyDependency[];
 }
 
 export const CONDUCTIVITY_CORE_FIELDS = [
@@ -81,12 +214,21 @@ export const CONDUCTIVITY_PROVENANCE_FIELDS = [
   "electrochemicalWindow",
   "chargeTransferResistance",
   "potentialReference",
+  "cellConfiguration",
+  "cellSetup",
+  "workingElectrode",
+  "counterElectrode",
+  "referenceElectrode",
+  "positiveElectrode",
+  "negativeElectrode",
   "pressure",
   "viscosity",
   "waterContent",
   "concentration",
   "density",
   "method",
+  "performanceFigure",
+  "propertyDependencies",
 ] as const;
 
 export function conductivityCoreCompleteness(
@@ -125,7 +267,7 @@ export const CONDUCTIVITY_EXTRACTION_TOOL_SCHEMA = {
     records: {
       type: "array",
       description:
-        "One entry per UNIQUE CONDITION SET. Merge compatible target properties reported for the same ionic liquid, composition, surface, temperature, pressure, potential, and method. Split records when any of those conditions changes.",
+        "One entry per UNIQUE IONIC-LIQUID SERIES AND CONDITION SET. A paper or figure containing different cation/anion pairs, formulations, concentrations, surfaces, temperatures, potentials, or methods MUST produce separate records. Never combine several ionic liquids into slash-separated identity fields. Merge only compatible target properties for the same series and condition set.",
       items: {
         type: "object",
         properties: {
@@ -181,6 +323,20 @@ export const CONDUCTIVITY_EXTRACTION_TOOL_SCHEMA = {
             type: ["string", "null"],
             description: "Reference electrode or potential scale, e.g. 'Ag/AgCl', 'Pt quasi-reference', or 'Na+/Na'.",
           },
+          cellConfiguration: {
+            type: ["string", "null"],
+            enum: ["two-electrode", "three-electrode", null],
+            description: "Electrochemical cell configuration. Use only when the paper explicitly identifies a two- or three-electrode setup.",
+          },
+          cellSetup: {
+            type: ["string", "null"],
+            description: "Original reported cell wording, e.g. 'three-electrode Swagelok cell'.",
+          },
+          workingElectrode: { type: ["string", "null"], description: "Working-electrode material or named assembly, if reported." },
+          counterElectrode: { type: ["string", "null"], description: "Counter/auxiliary-electrode material, if reported." },
+          referenceElectrode: { type: ["string", "null"], description: "Reference-electrode material/type, e.g. SCE or Ag/AgCl, if reported." },
+          positiveElectrode: { type: ["string", "null"], description: "Positive-electrode material in a two-electrode cell, only when explicitly identified." },
+          negativeElectrode: { type: ["string", "null"], description: "Negative-electrode material in a two-electrode cell, only when explicitly identified." },
           pressure: {
             type: ["string", "null"],
             description: "Measurement pressure WITH unit, e.g. '1 atm', '250 kPa', or '20 MPa', if explicitly reported.",
@@ -203,10 +359,169 @@ export const CONDUCTIVITY_EXTRACTION_TOOL_SCHEMA = {
           },
           density: { type: "string", description: "Density with unit, e.g. '1.21 g/cm3', if reported." },
           cellConstant: { type: "string", description: "Conductivity-cell constant, if stated." },
+          performanceFigure: {
+            type: ["object", "null"],
+            description:
+              "The source-paper curve that supports this record. Use only when the paper contains a relevant conductivity/viscosity/CV/LSV/EIS/capacitance curve and bind the record to its matching plotted series. Do not invent graph readings.",
+            properties: {
+              figure: { type: "string", description: "Exact paper label, e.g. 'Fig. 4a'." },
+              page: { type: "integer", description: "PDF page from the [PAGE n] marker." },
+              curveType: {
+                type: "string",
+                description:
+                  "Scientific curve type, e.g. 'conductivity-temperature', 'conductivity-concentration', 'viscosity-temperature', 'CV', 'LSV', 'EIS Nyquist', 'EIS Bode', or 'capacitance-cycle'.",
+              },
+              xAxis: { type: "string", description: "Reported x-axis quantity and unit." },
+              yAxis: { type: "string", description: "Reported y-axis quantity and unit." },
+              seriesLabel: {
+                type: "string",
+                description: "Exact legend/series label that corresponds to THIS record's ionic liquid or formulation.",
+              },
+              caption: { type: "string", description: "Short exact caption or caption fragment." },
+              primaryField: {
+                type: "string",
+                enum: ["conductivity", "capacitance", "viscosity", "electrochemicalWindow", "chargeTransferResistance", "electricField"],
+              },
+              keyPoints: {
+                type: "array",
+                description:
+                  "Important coordinates, slopes, peaks, onsets, plateaus, ranges, or fitted values only when explicitly printed in the caption, body text, table, or point annotation. Pixel estimates are added later by the image-analysis stage, never by this text-only stage.",
+                items: {
+                  type: "object",
+                  properties: {
+                    label: { type: "string" },
+                    value: { type: "string" },
+                    field: {
+                      type: "string",
+                      description: "Stable target field name, e.g. conductivity or chargeTransferResistance.",
+                    },
+                    seriesLabel: { type: "string", description: "Exact legend label for this reading in a multi-series graph." },
+                    panelLabel: { type: "string", description: "Printed subplot label (A, B, ...) for this reading; omit for genuinely shared figure conditions." },
+                    condition: {
+                      type: "string",
+                      description: "Reported condition applying to the reading, e.g. '298 K · 5 wt%'.",
+                    },
+                    kind: {
+                      type: "string",
+                      enum: ["coordinate", "slope", "peak", "onset", "intercept", "plateau", "range", "reported-value"],
+                    },
+                    x: { type: "string", description: "Exact reported x coordinate with unit, when available." },
+                    y: { type: "string", description: "Exact reported y coordinate with unit, when available." },
+                    slope: { type: "string", description: "Exact reported slope/gradient with unit, when available." },
+                    source: {
+                      type: "string",
+                      enum: ["paper-text", "figure-annotation"],
+                      description: "paper-text for caption/body/table values; figure-annotation for a value printed inside the plot.",
+                    },
+                    confidence: { type: "number", minimum: 0, maximum: 1 },
+                    note: { type: "string" },
+                    interpretation: { type: "string", description: "Concise platform-written scientific meaning of this specific reading, grounded in the paper. Do not paste the Figure caption or infer causation without support." },
+                    evidence: { type: "string", description: "Exact short supporting source excerpt." },
+                    sourcePage: { type: "integer", minimum: 1 },
+                    scope: { type: "string", enum: ["record", "figure-comparison"] },
+                  },
+                  required: ["label", "value"],
+                },
+              },
+              dependencies: {
+                type: "array",
+                description:
+                  "Sparse, model-ready Y=f(X) relationships explicitly supported by a curve, table, caption, or result paragraph. Use this for temperature, scan-rate, potential, concentration, water-content, cycle, frequency, or ionic-liquid identity dependence. Never infer causation and never require a complete digitized curve.",
+                items: {
+                  type: "object",
+                  properties: {
+                    label: { type: "string" },
+                    dependentField: { type: "string" },
+                    independentVariable: { type: "string" },
+                    xAxis: { type: "string" },
+                    yAxis: { type: "string" },
+                    trend: { type: "string", enum: ["increases", "decreases", "non-monotonic", "approximately-constant", "comparison"] },
+                    statement: { type: "string", description: "Concise Chinese description of the observed dependence, not a causal claim." },
+                    observations: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          x: { type: "string" },
+                          y: { type: "string" },
+                          seriesLabel: { type: "string" },
+                          condition: { type: "string" },
+                        },
+                        required: ["x", "y"],
+                      },
+                    },
+                    scope: { type: "string", enum: ["record-series", "figure-comparison"] },
+                    source: { type: "string", enum: ["paper-text", "figure-annotation"] },
+                    confidence: { type: "number", minimum: 0, maximum: 1 },
+                    evidence: { type: "string" },
+                    sourcePage: { type: "integer", minimum: 1 },
+                  },
+                  required: ["label", "dependentField", "independentVariable", "trend", "statement", "observations"],
+                },
+              },
+              panels: {
+                type: "array",
+                description:
+                  "Relevant subplots in a multi-panel figure. Include one item per relevant curve panel (A, B, C...) so the platform can crop and paginate them; omit microscopy and unrelated schematics.",
+                items: {
+                  type: "object",
+                  properties: {
+                    label: { type: "string", description: "Panel label, e.g. A." },
+                    title: { type: "string", description: "Short exact scientific description from the caption." },
+                    curveType: { type: "string" },
+                    xAxis: { type: "string" },
+                    yAxis: { type: "string" },
+                    seriesLabels: { type: "array", items: { type: "string" } },
+                    source: { type: "string", enum: ["paper-text", "figure-annotation"] },
+                    confidence: { type: "number", minimum: 0, maximum: 1 },
+                  },
+                  required: ["label"],
+                },
+              },
+              dataStatus: {
+                type: "string",
+                enum: ["reported-key-points", "estimated-key-points", "mixed-key-points", "digitized-series", "source-data-series"],
+                description:
+                  "Use reported-key-points in this text stage. estimated-key-points and mixed-key-points are reserved for the later image-analysis stage. Never label an image-only curve as a digitized series.",
+              },
+            },
+            required: ["figure", "curveType"],
+          },
+          propertyDependencies: {
+            type: "array",
+            description:
+              "Source-grounded Y=f(X) relationships from a table, curve, caption, or result paragraph. Use this when the relation is not tied to one performanceFigure image. At least two comparable observations are required.",
+            items: {
+              type: "object",
+              properties: {
+                label: { type: "string" },
+                dependentField: { type: "string" },
+                independentVariable: { type: "string" },
+                xAxis: { type: "string" },
+                yAxis: { type: "string" },
+                trend: { type: "string", enum: ["increases", "decreases", "non-monotonic", "approximately-constant", "comparison"] },
+                statement: { type: "string" },
+                observations: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: { x: { type: "string" }, y: { type: "string" }, seriesLabel: { type: "string" }, condition: { type: "string" } },
+                    required: ["x", "y"],
+                  },
+                },
+                scope: { type: "string", enum: ["record-series", "figure-comparison"] },
+                source: { type: "string", enum: ["paper-text", "figure-annotation"] },
+                confidence: { type: "number", minimum: 0, maximum: 1 },
+                evidence: { type: "string" },
+                sourcePage: { type: "integer", minimum: 1 },
+              },
+              required: ["label", "dependentField", "independentVariable", "trend", "statement", "observations"],
+            },
+          },
           flexible: {
             type: "array",
             description:
-              "Anything notable that has no formal field yet (atmosphere, purity, humidity, unusual cell setup). Keep it rather than discard it.",
+              "Anything notable that has no formal field yet (atmosphere, purity, humidity). Cell/electrode details belong in their dedicated fields. Keep other context rather than discard it.",
             items: {
               type: "object",
               properties: {
@@ -228,7 +543,7 @@ export const CONDUCTIVITY_EXTRACTION_TOOL_SCHEMA = {
                 field: {
                   type: "string",
                   description:
-                    "Field name: cation, anion, surface, temperature, conductivity, capacitance, electricField, electrodePotential, electrochemicalWindow, chargeTransferResistance, potentialReference, pressure, viscosity, waterContent, concentration, density, or method.",
+                    "Field name: cation, anion, surface, temperature, conductivity, capacitance, electricField, electrodePotential, electrochemicalWindow, chargeTransferResistance, potentialReference, cellConfiguration, cellSetup, workingElectrode, counterElectrode, referenceElectrode, positiveElectrode, negativeElectrode, pressure, viscosity, waterContent, concentration, density, or method.",
                 },
                 page: { type: "integer", description: "Page number from the [PAGE n] markers." },
                 figure: { type: "string", description: "e.g. 'Fig. 4a'." },

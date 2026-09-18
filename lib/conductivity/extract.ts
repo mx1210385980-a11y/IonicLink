@@ -3,12 +3,19 @@ import type { ConductivityExtractedFields } from "./schema";
 
 export const CONDUCTIVITY_SYSTEM_PROMPT = `You are a meticulous physical-chemistry data extractor for IonicLink's ionic-liquid electrical and interfacial-property workspace.
 
-The atomic unit is one UNIQUE CONDITION SET. A valid record must contain at least ONE in-scope target property bound to its conditions. Target properties are: ionic conductivity, capacitance, dynamic viscosity, explicitly applied electric-field strength, electrochemical stability window, and charge-transfer/polarization resistance. Electrode/applied potential is a CONDITION, not a standalone result. When the same ionic-liquid system under the same conditions reports several target properties (for example Cdl and Rp in one table row), put ALL of them in the SAME record. Split records only when the composition, surface, temperature, pressure, potential, concentration, method, or other measurement condition changes.
+The atomic unit is one UNIQUE IONIC-LIQUID SERIES AND CONDITION SET. A valid record must contain at least ONE in-scope target property bound to its conditions. Target properties are: ionic conductivity, capacitance, dynamic viscosity, explicitly applied electric-field strength, electrochemical stability window, and charge-transfer/polarization resistance. Electrode/applied potential is a CONDITION, not a standalone result. When the same ionic-liquid system under the same conditions reports several target properties (for example Cdl and Rp in one table row), put ALL of them in the SAME record. Split records whenever the cation/anion pair, formulation, plotted series, surface, temperature, pressure, potential, concentration, method, or other measurement condition changes.
 
-Identify whenever reported: cation, anion, surface/electrode, temperature, pressure, concentration/composition, measurement method, and potential reference. Leave an unknown field empty; NEVER substitute a familiar ionic liquid.
+Paper/figure splitting rules:
+  - A paper containing several ionic liquids or formulations MUST yield separate records for them. Never place multiple alternatives into one cation, anion, concentration, or surface string separated by "/", commas, or "and".
+  - A multi-series plot MUST be mapped series-by-series. Set performanceFigure.seriesLabel to the exact legend label corresponding to THIS record.
+  - Shared methods and figure metadata may be repeated across records, but a reported value or key point must remain attached only to its matching ionic liquid, formulation, and conditions.
+  - A temperature/concentration/potential sweep may yield several unique-condition records for one ionic liquid. Those records may cite the same source figure and matching series.
+
+Identify whenever reported: cation, anion, surface/electrode, temperature, pressure, concentration/composition, measurement method, potential reference, and electrochemical-cell/electrode configuration. Leave an unknown field empty; NEVER substitute a familiar ionic liquid.
   - Use the paper's own shorthand for ions (e.g. [BMIM], [BF4]). Add SMILES only if confident.
   - surface = the electrode/contact surface for this measurement, not an unrelated current collector or characterization substrate.
   - Keep values and units exactly as reported, including normalized units such as µF/cm², F/g, or Ω cm².
+  - For a three-electrode setup, capture cellConfiguration="three-electrode" plus workingElectrode, counterElectrode, and referenceElectrode materials/types. For a two-electrode setup, capture cellConfiguration="two-electrode" plus positiveElectrode and negativeElectrode materials when explicitly assigned. Preserve the paper's full wording in cellSetup. Do not invent electrode polarity or material.
 
 Strict inclusion rules:
   - conductivity: ionic/electrolyte conductivity only. Exclude electronic conductivity of an electrode, current collector, carbon, MXene, film, or support unless the ionic liquid/electrolyte itself is the measured material.
@@ -21,16 +28,22 @@ Strict inclusion rules:
 
 Do not copy comparison/background numbers from the introduction into this paper's results. In a control series, include only samples that actually contain the ionic liquid. Temperatures used for synthesis, drying, annealing, XPS, or equilibration are not measurement temperatures for an electrochemical result.
 
-Out of scope: battery capacity, energy/power density, current/current density, peak height, inhibition efficiency, detection limit, Tafel slope, diffusion coefficient, generic impedance, frequency, and plain cell voltage unless they are necessary conditions for one target property. Do not emit a record containing only out-of-scope values. If the paper reports no in-scope target property, return an empty records array.
+Core record scope still excludes standalone battery capacity, energy/power density, inhibition efficiency, detection limit, Tafel slope, diffusion coefficient, generic impedance, and plain cell voltage. Current/current density, peak current, peak potential, onset potential and frequency must not create an otherwise empty standalone record, but they MAY and SHOULD be retained as figure key points or as propertyDependencies when they describe a CV/LSV/EIS relationship attached to a valid ionic-liquid electrochemical record (for example peak current versus scan rate, peak-potential shift versus scan rate, current response versus potential, or impedance response versus frequency). If the paper reports no in-scope target property or valid attached relationship, return an empty records array.
 
-Common (extended layer), include when present: method ("EIS" for impedance spectroscopy, or "conductivity cell"), pressure, waterContent, concentration, density, cellConstant.
+Common (extended layer), include when present: method ("EIS" for impedance spectroscopy, or "conductivity cell"), pressure, waterContent, concentration, density, cellConstant, cellConfiguration, cellSetup, and the relevant electrode-role/material fields.
   - pressure = the explicitly reported measurement pressure WITH unit (Pa, kPa, MPa, bar, atm, Torr, or psi).
   - viscosity = dynamic viscosity WITH unit (cP, mPa·s, Pa·s).
   - waterContent = e.g. "120 ppm" or "0.5 wt%" — water strongly affects conductivity, so capture it whenever stated.
 
-Unusual (flexible layer): anything notable without a formal field (atmosphere, humidity, purity, unusual cell setup) goes in flexible[] as {key, value, note}. Keep it rather than discard it.
+Unusual (flexible layer): anything notable without a formal field (atmosphere, humidity, purity) goes in flexible[] as {key, value, note}. Keep it rather than discard it; do not put formal cell/electrode fields here.
+
+Performance-curve evidence: when a source figure directly supports an in-scope target, populate performanceFigure with its exact figure label, PDF page, curveType, axis quantities/units, matching seriesLabel, and primaryField. Typical types include conductivity-temperature, conductivity-concentration, viscosity-temperature, CV, LSV, EIS Nyquist, EIS Bode, and capacitance-cycle. Capture scientifically useful sparse landmarks: explicit point coordinates, peaks, onsets, plateaus, ranges, fitted slopes/intercepts and equations. Set kind plus x/y/slope where applicable. Use source="paper-text" for caption/body/table values and source="figure-annotation" only for a number printed in the graph text layer. In this text-only stage, NEVER estimate numerical values by eye from image pixels; a separate image-analysis stage may add clearly labelled source="image-estimated" values with confidence. For a multi-panel figure, populate performanceFigure.panels with every relevant curve panel A/B/C... and omit unrelated microscopy or schematics; the UI crops and paginates these panels in one image slot. Do not attach a visually nearby but unrelated curve. If the source does not contain a relevant performance curve, leave performanceFigure empty.
+
+Dependency extraction: when a curve, table, caption, or result paragraph compares at least two observations, populate the explicit relationship Y=f(X). Put it in performanceFigure.dependencies when it belongs to that displayed figure; otherwise put it in the record-level propertyDependencies field (especially for tables or body-text comparisons). X may be temperature, scan rate, electrode potential, concentration, water content, cycle number, frequency, ionic-liquid identity, or substrate/electrode. Preserve sparse observation pairs (x,y), exact units, matching seriesLabel and other fixed conditions. State only the observed direction (increases, decreases, non-monotonic, approximately-constant, or comparison). Do not claim causation. Do not collapse a multi-factor sweep into a one-variable dependence unless the other conditions are fixed. A table is equally valid evidence; full curve digitization is not required. For CV at different scan rates, distinguish peak-current dependence, peak-potential shift, and stability-window/onset evidence. For temperature series, do not derive activation energy unless the paper supplies the transform and fit.
 
 Provenance: for each value you can locate, add a provenance[] entry {field, page, figure, table, section, quote}. Use the [PAGE n] markers in the text for the page number. The quote must be copied CHARACTER-FOR-CHARACTER from the text — quotes are verified by exact search against the source PDF, so never paraphrase, reword, or elide with "..."; for a table value quote one contiguous run of the row as printed (never stitch header and value cells together); if no contiguous snippet states the value, omit the quote and cite the figure/table instead. Prioritize the target property and its conditions. Set basis honestly: "direct" only when the text states the value for THIS measurement; "inferred" (with a basisNote) when it comes from general/methods context.
+
+For each curve key point, write interpretation as one concise Chinese explanation of what that specific value says about the reported ionic liquid/electrode system. Store the original supporting excerpt in evidence and its PDF page in sourcePage; do not copy the full caption into interpretation. Preserve the matching sample, potential and temperature. A figure-wide comparison uses scope="figure-comparison", not a current-record measurement. For CV/LSV, distinguish applied scan limits from electrochemical stability thresholds and retain the threshold criterion/reference if reported. For EIS, distinguish series resistance, fitted Rct and diffusion-related slopes; the Nyquist peak is not Rct. For conductivity fits, retain the exact transformed axes and logarithm convention before interpreting a slope. Do not manufacture a peak, zero, slope or activation energy just to fill a card.
 
 Keep units exactly as reported. Set confidence (0–1) honestly. Do not invent measurements.`;
 
@@ -79,6 +92,13 @@ export function conductivityMockExtract(text: string): ConductivityExtractedFiel
       else if (/^1020\b/.test(target.value)) surface = "CPO-ILEMB/Au@MoS2/GC";
     }
     const water = findWaterContent(nearby, text);
+    const concentration = target.concentration ?? findMeasurementConcentration(nearby, text, target.field) ?? undefined;
+    const performanceFigure = findNearbyPerformanceFigure(text, target, {
+      cation: ions.cation,
+      anion: ions.anion,
+      temperature,
+      concentration,
+    });
     const provenance: ConductivityExtractedFields["provenance"] = [];
     provenance.push({ field: target.field, page: pageOf(text, target.index), table: target.table, quote: snippet(text, target.index), basis: "direct" });
     const flexible = [
@@ -109,7 +129,8 @@ export function conductivityMockExtract(text: string): ConductivityExtractedFiel
       method: target.method ?? findMeasurementMethod(nearby, target.field, text),
       viscosity: target.field === "viscosity" ? target.value : undefined,
       waterContent: water ?? undefined,
-      concentration: target.concentration ?? findMeasurementConcentration(nearby, text, target.field) ?? undefined,
+      concentration,
+      performanceFigure: performanceFigure ?? undefined,
       flexible,
       provenance,
       confidence: 0.4,
@@ -173,6 +194,58 @@ function normalizePdfText(text: string): string {
     .replace(/◦\s*C/gi, "°C")
     .replace(/℃/g, "°C")
     .replace(/(\d)\s*�\s*(\d)/g, "$1 ± $2");
+}
+
+function findNearbyPerformanceFigure(
+  text: string,
+  target: ElectrochemicalTarget,
+  context: { cation: string; anion: string; temperature?: string | null; concentration?: string },
+): ConductivityExtractedFields["performanceFigure"] | null {
+  const start = Math.max(0, target.index - 1_200);
+  const end = Math.min(text.length, target.index + target.value.length + 1_200);
+  const scope = text.slice(start, end);
+  const matches = Array.from(scope.matchAll(/\b(?:Fig(?:ure)?\.?)\s*([A-Z]?\d+(?:\s*[a-z])?)(?!\w)/gi));
+  if (!matches.length) return null;
+  const nearest = matches.sort((a, b) => {
+    const aIndex = start + (a.index ?? 0);
+    const bIndex = start + (b.index ?? 0);
+    return Math.abs(aIndex - target.index) - Math.abs(bIndex - target.index);
+  })[0];
+  const figureIndex = start + (nearest.index ?? 0);
+  const figure = `Fig. ${nearest[1].replace(/\s+/g, "")}`;
+  const axes: Partial<Pick<NonNullable<ConductivityExtractedFields["performanceFigure"]>, "curveType" | "xAxis" | "yAxis">> =
+    target.field === "conductivity"
+      ? context.concentration && !context.temperature
+        ? { curveType: "conductivity-concentration", xAxis: "Concentration", yAxis: "Ionic conductivity" }
+        : { curveType: "conductivity-temperature", xAxis: "Temperature", yAxis: "Ionic conductivity" }
+      : target.field === "viscosity"
+        ? { curveType: "viscosity-temperature", xAxis: "Temperature", yAxis: "Dynamic viscosity" }
+        : target.field === "electrochemicalWindow"
+          ? { curveType: /LSV|linear\s+sweep/i.test(scope) ? "LSV" : "CV", xAxis: "Potential", yAxis: "Current or current density" }
+          : target.field === "chargeTransferResistance"
+            ? { curveType: "EIS Nyquist", xAxis: "Z′", yAxis: "−Z″" }
+            : target.field === "capacitance"
+              ? { curveType: "capacitance curve", yAxis: "Capacitance" }
+              : { curveType: "field-dependent curve", xAxis: "Electric field" };
+  const pointLabel = context.temperature || context.concentration || "reported point";
+  return {
+    figure,
+    page: pageOf(text, figureIndex),
+    curveType: axes.curveType || "performance curve",
+    xAxis: axes.xAxis,
+    yAxis: axes.yAxis,
+    seriesLabel: `${context.cation}${context.anion}${context.concentration ? ` · ${context.concentration}` : ""}`,
+    primaryField: target.field,
+    keyPoints: [{
+      label: pointLabel,
+      value: target.value,
+      field: target.field,
+      kind: "reported-value",
+      source: "paper-text",
+      confidence: 1,
+    }],
+    dataStatus: "reported-key-points",
+  };
 }
 
 function detectIonPair(
@@ -775,6 +848,9 @@ function mergeSameConditionRecords(
       if (item.record[field]) match.record[field] = item.record[field];
     }
     match.record.method = mergeMethodLabels(match.record.method, item.record.method);
+    if (!match.record.performanceFigure && item.record.performanceFigure) {
+      match.record.performanceFigure = item.record.performanceFigure;
+    }
     match.record.provenance = [...(match.record.provenance ?? []), ...(item.record.provenance ?? [])];
     match.lastIndex = item.index;
   }

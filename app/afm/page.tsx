@@ -1,4 +1,5 @@
 import { AfmCurveExplorer } from "@/components/afm/AfmCurveExplorer";
+import { AfmDigitizationWorkspace } from "@/components/afm/AfmDigitizationWorkspace";
 import { AfmPresentationBriefing } from "@/components/afm/AfmPresentationBriefing";
 import { AFM_CURVE_DATASET } from "@/lib/afm/afmCurves";
 import benchmark from "@/data/conductivity/electrochem-extractor-benchmark.json";
@@ -18,6 +19,7 @@ export default function AfmWorkspacePage() {
         </p>
       </header>
       <AfmPresentationBriefing dataset={AFM_CURVE_DATASET} benchmark={benchmark.summary} />
+      <AfmDigitizationWorkspace />
       <AfmCurveExplorer dataset={AFM_CURVE_DATASET} />
     </div>
   );

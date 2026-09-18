@@ -72,8 +72,8 @@ export function TopNav() {
           ) : null}
           <Link
             href="/teaching"
-            aria-label="教学实验"
-            title="教学实验"
+            aria-label="Teaching laboratory"
+            title="Teaching laboratory"
             className={`inline-flex min-h-8 shrink-0 items-center justify-center rounded-[8px] px-2 py-1.5 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-brand-200 sm:px-2.5 ${
               onTeachingPage
                 ? "bg-brand-50 text-brand-800 ring-1 ring-brand-100"
@@ -81,7 +81,7 @@ export function TopNav() {
             }`}
           >
             <span className="sm:hidden" aria-hidden><TeachingGlyph /></span>
-            <span className="hidden sm:inline">教学实验</span>
+            <span className="hidden sm:inline">Teaching lab</span>
           </Link>
         </div>
 

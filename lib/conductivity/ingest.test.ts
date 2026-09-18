@@ -16,12 +16,32 @@ const fields: ConductivityExtractedFields = {
   electricField: "2 kV/m", // 添加电场测试数据
   electrodePotential: "-1.0 V",
   potentialReference: "Ag/AgCl",
+  cellConfiguration: "three-electrode",
+  cellSetup: "three-electrode glass cell",
+  workingElectrode: "Pt disk",
+  counterElectrode: "Pt wire",
+  referenceElectrode: "Ag/AgCl",
   electrochemicalWindow: "-2.0–2.5 V",
   chargeTransferResistance: "4.2 kΩ",
   method: "EIS",
   viscosity: "37 cP",
   waterContent: "50 ppm",
   density: "1.24 g/cm3",
+  performanceFigure: {
+    figure: "Fig. 4a",
+    page: 6,
+    curveType: "conductivity-temperature",
+    xAxis: "Temperature / K",
+    yAxis: "Ionic conductivity / mS cm−1",
+    seriesLabel: "[EMIM][BF4]",
+    primaryField: "conductivity",
+    keyPoints: [{ label: "298 K", value: "14 mS/cm", kind: "coordinate", x: "298 K", y: "14 mS/cm", source: "figure-annotation", confidence: 0.98 }],
+    panels: [
+      { label: "A", title: "conductivity plot", figureBox: { x: 0.1, y: 0.2, w: 0.34, h: 0.4 }, source: "paper-text", confidence: 0.8 },
+      { label: "B", title: "VTF fit", figureBox: { x: 0.46, y: 0.2, w: 0.34, h: 0.4 }, source: "image-estimated", confidence: 0.7 },
+    ],
+    figureBox: { x: 0.1, y: 0.2, w: 0.7, h: 0.4 },
+  },
   flexible: [{ key: "pressure", value: "1 atm" }],
   provenance: [{ field: "conductivity", page: 2, quote: "σ = 14 mS/cm" }],
   confidence: 0.9,
@@ -39,12 +59,21 @@ assert.ok(close(draft.core.electricField?.std, 2000), "2 kV/m → 2000 V/m"); //
 assert.ok(close(draft.core.electrodePotential?.std, -1), "-1.0 V → -1 V");
 assert.ok(close(draft.core.chargeTransferResistance?.std, 4200), "4.2 kΩ → 4200 Ω");
 assert.equal(draft.extended.potentialReference, "Ag/AgCl");
+assert.equal(draft.extended.cellConfiguration, "three-electrode");
+assert.equal(draft.extended.workingElectrode, "Pt disk");
+assert.equal(draft.extended.counterElectrode, "Pt wire");
+assert.equal(draft.extended.referenceElectrode, "Ag/AgCl");
 
 // extended layer — viscosity standardized, method/water/density kept
 assert.equal(draft.extended.method, "EIS");
 assert.ok(close(draft.extended.viscosity?.std, 0.037), "37 cP → 0.037 Pa·s");
 assert.equal(draft.extended.waterContent, "50 ppm");
 assert.equal(draft.extended.density, "1.24 g/cm3");
+assert.equal(draft.extended.performanceFigure?.figure, "Fig. 4a");
+assert.equal(draft.extended.performanceFigure?.seriesLabel, "[EMIM][BF4]");
+assert.equal(draft.extended.performanceFigure?.keyPoints?.[0]?.value, "14 mS/cm");
+assert.equal(draft.extended.performanceFigure?.keyPoints?.[0]?.source, "figure-annotation");
+assert.equal(draft.extended.performanceFigure?.panels?.[1]?.label, "B");
 
 // flexible kept
 assert.equal(draft.flexible.length, 0, "legacy pressure is promoted out of the catch-all layer");
@@ -93,11 +122,15 @@ assert.equal(back.capacitance, "2 F");
 assert.equal(back.electricField, "2 kV/m");
 assert.equal(back.electrodePotential, "-1.0 V");
 assert.equal(back.potentialReference, "Ag/AgCl");
+assert.equal(back.cellConfiguration, "three-electrode");
+assert.equal(back.cellSetup, "three-electrode glass cell");
+assert.equal(back.workingElectrode, "Pt disk");
 assert.equal(back.pressure, "1 atm");
 assert.equal(back.electrochemicalWindow, "-2.0–2.5 V");
 assert.equal(back.chargeTransferResistance, "4.2 kΩ");
 assert.equal(back.surface, "Pt");
 assert.equal(back.method, "EIS");
+assert.deepEqual(back.performanceFigure, draft.extended.performanceFigure, "curve evidence survives editor round-trips");
 
 const missingTemperature = ingest({ ...fields, temperature: undefined });
 assert.equal(missingTemperature.core.temperature, null, "missing temperature stays missing rather than being invented");

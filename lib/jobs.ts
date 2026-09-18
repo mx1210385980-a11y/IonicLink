@@ -57,6 +57,11 @@ async function worker(domain: Domain): Promise<void> {
     const { job, text } = claimed;
     try {
       const result = await extractRecords(domain, text, job.sourceId);
+      if (domain === "conductivity" && job.sourceId) {
+        const { enrichConductivityDraftsWithFigureAnalysis } = await import("./conductivity/figureVision.server");
+        const enhanced = await enrichConductivityDraftsWithFigureAnalysis(result.records, job.sourceId);
+        result.records = enhanced.records;
+      }
       updateJob(domain, job.id, {
         status: "done",
         candidates: result.records,

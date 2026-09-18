@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { conductivityMockExtract } from "./extract";
+import { CONDUCTIVITY_SYSTEM_PROMPT, conductivityMockExtract } from "./extract";
+
+assert.match(CONDUCTIVITY_SYSTEM_PROMPT, /several ionic liquids or formulations MUST yield separate records/);
+assert.match(CONDUCTIVITY_SYSTEM_PROMPT, /performanceFigure\.seriesLabel/);
+assert.match(CONDUCTIVITY_SYSTEM_PROMPT, /propertyDependencies/);
+assert.match(CONDUCTIVITY_SYSTEM_PROMPT, /Do not claim causation/);
+assert.match(CONDUCTIVITY_SYSTEM_PROMPT, /NEVER estimate numerical values by eye/);
 
 const text = `[PAGE 1]
 Electrical properties of [EMIM][BF4]

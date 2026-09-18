@@ -1,0 +1,25 @@
+{
+  "schema": "ioniclink.afm-upload-regressions",
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "jstage-2024-alcl3-emimcl-hopg",
+      "title": "Arrangement of Al Ions between Ionic Liquid and Graphite Electrode Interface by AFM Force Curve Measurement",
+      "doi": "10.5796/electrochemistry.23-69151",
+      "sourceUrl": "https://www.jstage.jst.go.jp/article/electrochemistry/92/4/92_23-69151/_pdf/-char/en",
+      "license": "CC BY 4.0",
+      "expected": {
+        "page": 4,
+        "figure": "6a",
+        "ionicLiquid": "[EMIM][Al2Cl7]",
+        "substrate": "HOPG",
+        "potential": "OCP",
+        "xAxis": "Apparent Separation / nm",
+        "yAxis": "Normal Force / nN",
+        "traceColour": "blue",
+        "excludedAnnotations": ["red zoom rectangle", "red dashed zoom connector"],
+        "reportedLayerWidthsNm": [0.3, 0.4, 0.5]
+      }
+    }
+  ]
+}

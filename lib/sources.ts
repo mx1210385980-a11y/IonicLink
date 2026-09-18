@@ -6,7 +6,9 @@ import type { Domain } from "./domain";
 import { createSource, deleteSourceCascadeData, getDataDir, type SourceCascadeDeleteResult } from "./db";
 import { extractDoiFromPages } from "./doi";
 import { findQuoteBoxes, type EvidenceBoxes, type TextSpan } from "./evidence";
-import { pdfPageTextSpans, pdfToPages, pagesToTaggedText, renderPdfPage } from "./pdf";
+import { pdfPageTextSpans, pdfPageImageBoxes, pdfToPages, pagesToTaggedText, renderPdfPage } from "./pdf";
+import type { BBox } from "./schema";
+import { inferFigureBoxFromSpans, matchEmbeddedFigureBox, validFigureBox } from "./sourceFigures";
 
 /**
  * Source documents: the uploaded PDF is kept on disk so we can always refer back
@@ -142,4 +144,52 @@ export async function renderSourcePage(
   const png = await renderPdfPage(pdf, page, scale);
   await writeFile(cache, png);
   return png;
+}
+
+/** Locate a cited figure caption and return the inferred crop on that page. */
+export async function inferSourceFigureBox(
+  domain: Domain,
+  id: string,
+  page: number,
+  figureLabel: string,
+): Promise<BBox | null> {
+  const spans = await sourcePageSpans(domain, id, page);
+  const candidate = spans ? inferFigureBoxFromSpans(spans, figureLabel) : null;
+  if (!candidate) return null;
+  const pdf = await getSourcePdf(domain, id);
+  if (pdf) {
+    const images = await pdfPageImageBoxes(pdf, page);
+    const exactArtwork = matchEmbeddedFigureBox(candidate, images);
+    if (exactArtwork) return exactArtwork;
+  }
+  return candidate;
+}
+
+/** Render an exact or caption-inferred source-paper figure crop as PNG. */
+export async function renderSourceFigure(
+  domain: Domain,
+  id: string,
+  page: number,
+  figureLabel: string,
+  requestedBox?: BBox | null,
+): Promise<{ png: Uint8Array; box: BBox; inferred: boolean } | null> {
+  const exact = validFigureBox(requestedBox);
+  const box = exact ?? (figureLabel ? await inferSourceFigureBox(domain, id, page, figureLabel) : null);
+  if (!box) return null;
+  const pagePng = await renderSourcePage(domain, id, page, 2);
+  if (!pagePng) return null;
+
+  const { createCanvas, loadImage } = await import("@napi-rs/canvas");
+  const image = await loadImage(pagePng);
+  const sx = Math.max(0, Math.round(box.x * image.width));
+  const sy = Math.max(0, Math.round(box.y * image.height));
+  const sw = Math.max(1, Math.min(image.width - sx, Math.round(box.w * image.width)));
+  const sh = Math.max(1, Math.min(image.height - sy, Math.round(box.h * image.height)));
+  const canvas = createCanvas(sw, sh);
+  canvas.getContext("2d").drawImage(image, sx, sy, sw, sh, 0, 0, sw, sh);
+  return {
+    png: new Uint8Array(canvas.toBuffer("image/png")),
+    box,
+    inferred: !exact,
+  };
 }

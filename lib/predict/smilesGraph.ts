@@ -203,6 +203,27 @@ export function molecularWeight(g: MolGraph): number {
   return Number(mw.toFixed(3));
 }
 
+/** Hill-system molecular formula, including implicit hydrogens and net charge. */
+export function molecularFormula(g: MolGraph): string {
+  const counts = new Map<string, number>();
+  let charge = 0;
+  for (const atom of g.atoms) {
+    counts.set(atom.el, (counts.get(atom.el) ?? 0) + 1);
+    if (atom.hCount > 0) counts.set("H", (counts.get("H") ?? 0) + atom.hCount);
+    charge += atom.charge;
+  }
+
+  const ordered = [
+    ...(counts.has("C") ? ["C"] : []),
+    ...(counts.has("H") ? ["H"] : []),
+    ...[...counts.keys()].filter((element) => element !== "C" && element !== "H").sort(),
+  ];
+  const formula = ordered.map((element) => `${element}${(counts.get(element) ?? 0) > 1 ? counts.get(element) : ""}`).join("");
+  if (!charge) return formula;
+  const magnitude = Math.abs(charge);
+  return `${formula}${magnitude > 1 ? magnitude : ""}${charge > 0 ? "+" : "−"}`;
+}
+
 /** Rotatable bonds: acyclic single non-aromatic bonds between non-terminal heavy atoms, excluding bonds adjacent to triples. */
 export function rotatableBonds(g: MolGraph): number {
   const tripleAtoms = new Set<number>();

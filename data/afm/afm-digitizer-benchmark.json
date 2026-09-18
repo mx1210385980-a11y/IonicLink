@@ -1,0 +1,1907 @@
+{
+  "schema": "ioniclink.afm-digitizer-benchmark",
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-26T09:34:07.251Z",
+  "corpus": "qualified AFM curve/image pairs from the manually digitized local corpus",
+  "method": {
+    "note": "Reference and detected point clouds are independently min-max normalized. This measures curve-shape pixel recovery, not physical-axis OCR accuracy.",
+    "matchRadius": 0.06,
+    "requiredReview": "Axis limits and units are always confirmed by a reviewer."
+  },
+  "summary": {
+    "eligible": 97,
+    "evaluated": 97,
+    "missing": 0,
+    "highConfidence": 27,
+    "mediumConfidence": 69,
+    "lowConfidence": 1,
+    "medianShapeF1At006": 0.4842,
+    "p25ShapeF1At006": 0.2252,
+    "p75ShapeF1At006": 0.8238,
+    "meanShapeF1At006": 0.5049
+  },
+  "lowestScoring": [
+    {
+      "id": "AFM-26-07-28-09-C001",
+      "source": "26-07-28/09/1.png",
+      "confidence": 0.7753,
+      "axisConfidence": 0.8923,
+      "traceConfidence": 0.6906,
+      "quality": "medium",
+      "points": 307,
+      "referencePoints": 120,
+      "precisionAt006": 0,
+      "recallAt006": 0,
+      "shapeF1At006": 0,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-09-C005",
+      "source": "26-07-28/09/5.png",
+      "confidence": 0.7686,
+      "axisConfidence": 0.8766,
+      "traceConfidence": 0.6904,
+      "quality": "medium",
+      "points": 469,
+      "referencePoints": 124,
+      "precisionAt006": 0.0128,
+      "recallAt006": 0.0484,
+      "shapeF1At006": 0.0202,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-09-C014",
+      "source": "26-07-28/09/14.png",
+      "confidence": 0.7873,
+      "axisConfidence": 0.9332,
+      "traceConfidence": 0.6817,
+      "quality": "medium",
+      "points": 253,
+      "referencePoints": 99,
+      "precisionAt006": 0.0237,
+      "recallAt006": 0.0606,
+      "shapeF1At006": 0.0341,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-09-C003",
+      "source": "26-07-28/09/3.png",
+      "confidence": 0.7681,
+      "axisConfidence": 0.8743,
+      "traceConfidence": 0.6913,
+      "quality": "medium",
+      "points": 448,
+      "referencePoints": 126,
+      "precisionAt006": 0.0201,
+      "recallAt006": 0.1825,
+      "shapeF1At006": 0.0362,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-06-C004",
+      "source": "26-07-28/06/5.png",
+      "confidence": 0.7789,
+      "axisConfidence": 0.8973,
+      "traceConfidence": 0.6932,
+      "quality": "medium",
+      "points": 441,
+      "referencePoints": 146,
+      "precisionAt006": 0.0544,
+      "recallAt006": 0.1027,
+      "shapeF1At006": 0.0712,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-09-C010",
+      "source": "26-07-28/09/10.png",
+      "confidence": 0.7873,
+      "axisConfidence": 0.9275,
+      "traceConfidence": 0.6857,
+      "quality": "medium",
+      "points": 504,
+      "referencePoints": 113,
+      "precisionAt006": 0.0575,
+      "recallAt006": 0.0973,
+      "shapeF1At006": 0.0723,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C016",
+      "source": "26-07-28/07/17.png",
+      "confidence": 0.8246,
+      "axisConfidence": 0.9975,
+      "traceConfidence": 0.6993,
+      "quality": "medium",
+      "points": 547,
+      "referencePoints": 150,
+      "precisionAt006": 0.0457,
+      "recallAt006": 0.2,
+      "shapeF1At006": 0.0744,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-09-C013",
+      "source": "26-07-28/09/13.png",
+      "confidence": 0.7701,
+      "axisConfidence": 0.8804,
+      "traceConfidence": 0.6902,
+      "quality": "medium",
+      "points": 443,
+      "referencePoints": 142,
+      "precisionAt006": 0.0542,
+      "recallAt006": 0.1901,
+      "shapeF1At006": 0.0843,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C009",
+      "source": "26-07-28/07/10.png",
+      "confidence": 0.8238,
+      "axisConfidence": 0.9957,
+      "traceConfidence": 0.6993,
+      "quality": "medium",
+      "points": 613,
+      "referencePoints": 169,
+      "precisionAt006": 0.0555,
+      "recallAt006": 0.1775,
+      "shapeF1At006": 0.0845,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C023",
+      "source": "26-07-28/07/24.png",
+      "confidence": 0.8068,
+      "axisConfidence": 0.9569,
+      "traceConfidence": 0.6981,
+      "quality": "medium",
+      "points": 516,
+      "referencePoints": 125,
+      "precisionAt006": 0.0562,
+      "recallAt006": 0.296,
+      "shapeF1At006": 0.0945,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-09-C006",
+      "source": "26-07-28/09/6.png",
+      "confidence": 0.7917,
+      "axisConfidence": 0.9307,
+      "traceConfidence": 0.691,
+      "quality": "medium",
+      "points": 305,
+      "referencePoints": 112,
+      "precisionAt006": 0.0918,
+      "recallAt006": 0.1518,
+      "shapeF1At006": 0.1144,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-013-C003",
+      "source": "26-07-27/013/4.png",
+      "confidence": 0.5366,
+      "axisConfidence": 0.18,
+      "traceConfidence": 0.7948,
+      "quality": "medium",
+      "points": 364,
+      "referencePoints": 94,
+      "precisionAt006": 0.1291,
+      "recallAt006": 0.117,
+      "shapeF1At006": 0.1228,
+      "warnings": [
+        "Plot axes were estimated. Confirm the crop before using the coordinates.",
+        "The plot rectangle was tightened around the recognised trace and still requires visual confirmation.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    }
+  ],
+  "rows": [
+    {
+      "id": "AFM-26-07-27-02-C001",
+      "source": "26-07-27/02/QQ20260727-215840.png",
+      "confidence": 0.4295,
+      "axisConfidence": 0.18,
+      "traceConfidence": 0.6101,
+      "quality": "low",
+      "points": 595,
+      "referencePoints": 71,
+      "precisionAt006": 0.2773,
+      "recallAt006": 0.9577,
+      "shapeF1At006": 0.4301,
+      "warnings": [
+        "Plot axes were estimated. Confirm the crop before using the coordinates.",
+        "The plot rectangle was tightened around the recognised trace and still requires visual confirmation.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-02-C002",
+      "source": "26-07-27/02/QQ20260727-215857.png",
+      "confidence": 0.5084,
+      "axisConfidence": 0.4561,
+      "traceConfidence": 0.5463,
+      "quality": "medium",
+      "points": 602,
+      "referencePoints": 75,
+      "precisionAt006": 0.3439,
+      "recallAt006": 0.8933,
+      "shapeF1At006": 0.4966,
+      "warnings": [
+        "Plot axes were estimated. Confirm the crop before using the coordinates.",
+        "The plot rectangle was tightened around the recognised trace and still requires visual confirmation.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-06-Adsorbed-and-near-surface-structure-of-ionic-liquids-at-C001",
+      "source": "26-07-27/06 Adsorbed and near surface structure of ionic liquids at/QQ20260727-231734.png",
+      "confidence": 0.7095,
+      "axisConfidence": 0.7259,
+      "traceConfidence": 0.6976,
+      "quality": "medium",
+      "points": 254,
+      "referencePoints": 106,
+      "precisionAt006": 0.1457,
+      "recallAt006": 0.2453,
+      "shapeF1At006": 0.1828,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-012-C001",
+      "source": "26-07-27/012/QQ20260729-112137.png",
+      "confidence": 0.8073,
+      "axisConfidence": 0.9564,
+      "traceConfidence": 0.6994,
+      "quality": "medium",
+      "points": 276,
+      "referencePoints": 105,
+      "precisionAt006": 0.4312,
+      "recallAt006": 0.6571,
+      "shapeF1At006": 0.5207,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-013-C001",
+      "source": "26-07-27/013/2.png",
+      "confidence": 0.5463,
+      "axisConfidence": 0.18,
+      "traceConfidence": 0.8115,
+      "quality": "medium",
+      "points": 543,
+      "referencePoints": 123,
+      "precisionAt006": 0.291,
+      "recallAt006": 0.2358,
+      "shapeF1At006": 0.2605,
+      "warnings": [
+        "Plot axes were estimated. Confirm the crop before using the coordinates.",
+        "The plot rectangle was tightened around the recognised trace and still requires visual confirmation.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-013-C002",
+      "source": "26-07-27/013/3.png",
+      "confidence": 0.6532,
+      "axisConfidence": 0.18,
+      "traceConfidence": 0.9959,
+      "quality": "medium",
+      "points": 431,
+      "referencePoints": 107,
+      "precisionAt006": 0.6914,
+      "recallAt006": 0.5981,
+      "shapeF1At006": 0.6414,
+      "warnings": [
+        "Plot axes were estimated. Confirm the crop before using the coordinates.",
+        "The plot rectangle was tightened around the recognised trace and still requires visual confirmation.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-013-C003",
+      "source": "26-07-27/013/4.png",
+      "confidence": 0.5366,
+      "axisConfidence": 0.18,
+      "traceConfidence": 0.7948,
+      "quality": "medium",
+      "points": 364,
+      "referencePoints": 94,
+      "precisionAt006": 0.1291,
+      "recallAt006": 0.117,
+      "shapeF1At006": 0.1228,
+      "warnings": [
+        "Plot axes were estimated. Confirm the crop before using the coordinates.",
+        "The plot rectangle was tightened around the recognised trace and still requires visual confirmation.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-013-C004",
+      "source": "26-07-27/013/5.png",
+      "confidence": 0.7312,
+      "axisConfidence": 0.42,
+      "traceConfidence": 0.9565,
+      "quality": "medium",
+      "points": 570,
+      "referencePoints": 82,
+      "precisionAt006": 0.1965,
+      "recallAt006": 0.4756,
+      "shapeF1At006": 0.2781,
+      "warnings": [
+        "Plot axes were estimated. Confirm the crop before using the coordinates.",
+        "The plot rectangle was tightened around the recognised trace and still requires visual confirmation.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-013-C005",
+      "source": "26-07-27/013/6.png",
+      "confidence": 0.5492,
+      "axisConfidence": 0.18,
+      "traceConfidence": 0.8165,
+      "quality": "medium",
+      "points": 390,
+      "referencePoints": 112,
+      "precisionAt006": 0.8128,
+      "recallAt006": 0.6696,
+      "shapeF1At006": 0.7343,
+      "warnings": [
+        "Plot axes were estimated. Confirm the crop before using the coordinates.",
+        "The plot rectangle was tightened around the recognised trace and still requires visual confirmation.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-013-C006",
+      "source": "26-07-27/013/7.png",
+      "confidence": 0.556,
+      "axisConfidence": 0.18,
+      "traceConfidence": 0.8283,
+      "quality": "medium",
+      "points": 512,
+      "referencePoints": 151,
+      "precisionAt006": 0.4199,
+      "recallAt006": 0.3311,
+      "shapeF1At006": 0.3703,
+      "warnings": [
+        "Plot axes were estimated. Confirm the crop before using the coordinates.",
+        "The plot rectangle was tightened around the recognised trace and still requires visual confirmation.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-013-C007",
+      "source": "26-07-27/013/8.png",
+      "confidence": 0.5437,
+      "axisConfidence": 0.18,
+      "traceConfidence": 0.807,
+      "quality": "medium",
+      "points": 544,
+      "referencePoints": 63,
+      "precisionAt006": 0.1967,
+      "recallAt006": 0.2857,
+      "shapeF1At006": 0.233,
+      "warnings": [
+        "Plot axes were estimated. Confirm the crop before using the coordinates.",
+        "The plot rectangle was tightened around the recognised trace and still requires visual confirmation.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-013-C008",
+      "source": "26-07-27/013/9.png",
+      "confidence": 0.55,
+      "axisConfidence": 0.18,
+      "traceConfidence": 0.818,
+      "quality": "medium",
+      "points": 414,
+      "referencePoints": 109,
+      "precisionAt006": 0.2415,
+      "recallAt006": 0.211,
+      "shapeF1At006": 0.2252,
+      "warnings": [
+        "Plot axes were estimated. Confirm the crop before using the coordinates.",
+        "The plot rectangle was tightened around the recognised trace and still requires visual confirmation.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-013-C009",
+      "source": "26-07-27/013/10.png",
+      "confidence": 0.6982,
+      "axisConfidence": 0.42,
+      "traceConfidence": 0.8997,
+      "quality": "medium",
+      "points": 611,
+      "referencePoints": 104,
+      "precisionAt006": 0.6694,
+      "recallAt006": 0.8462,
+      "shapeF1At006": 0.7475,
+      "warnings": [
+        "Plot axes were estimated. Confirm the crop before using the coordinates.",
+        "The plot rectangle was tightened around the recognised trace and still requires visual confirmation.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-013-C010",
+      "source": "26-07-27/013/11.png",
+      "confidence": 0.5953,
+      "axisConfidence": 0.18,
+      "traceConfidence": 0.8961,
+      "quality": "medium",
+      "points": 356,
+      "referencePoints": 94,
+      "precisionAt006": 0.4354,
+      "recallAt006": 0.6809,
+      "shapeF1At006": 0.5311,
+      "warnings": [
+        "Plot axes were estimated. Confirm the crop before using the coordinates.",
+        "The plot rectangle was tightened around the recognised trace and still requires visual confirmation.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-013-C011",
+      "source": "26-07-27/013/QQ20260729-112356.png",
+      "confidence": 0.652,
+      "axisConfidence": 0.18,
+      "traceConfidence": 0.9938,
+      "quality": "medium",
+      "points": 591,
+      "referencePoints": 103,
+      "precisionAt006": 0.6904,
+      "recallAt006": 0.7282,
+      "shapeF1At006": 0.7088,
+      "warnings": [
+        "Plot axes were estimated. Confirm the crop before using the coordinates.",
+        "The plot rectangle was tightened around the recognised trace and still requires visual confirmation.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-014-C001",
+      "source": "26-07-27/014/1.png",
+      "confidence": 0.9817,
+      "axisConfidence": 0.9726,
+      "traceConfidence": 0.9883,
+      "quality": "high",
+      "points": 412,
+      "referencePoints": 171,
+      "precisionAt006": 1,
+      "recallAt006": 1,
+      "shapeF1At006": 1,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-014-C002",
+      "source": "26-07-27/014/2.png",
+      "confidence": 0.9808,
+      "axisConfidence": 0.9719,
+      "traceConfidence": 0.9872,
+      "quality": "high",
+      "points": 443,
+      "referencePoints": 182,
+      "precisionAt006": 1,
+      "recallAt006": 1,
+      "shapeF1At006": 1,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-014-C003",
+      "source": "26-07-27/014/3.png",
+      "confidence": 0.9804,
+      "axisConfidence": 0.9698,
+      "traceConfidence": 0.9881,
+      "quality": "high",
+      "points": 411,
+      "referencePoints": 168,
+      "precisionAt006": 1,
+      "recallAt006": 1,
+      "shapeF1At006": 1,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-014-C004",
+      "source": "26-07-27/014/4.png",
+      "confidence": 0.9812,
+      "axisConfidence": 0.9746,
+      "traceConfidence": 0.986,
+      "quality": "high",
+      "points": 433,
+      "referencePoints": 178,
+      "precisionAt006": 1,
+      "recallAt006": 1,
+      "shapeF1At006": 1,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-014-C005",
+      "source": "26-07-27/014/5.png",
+      "confidence": 0.9783,
+      "axisConfidence": 0.9743,
+      "traceConfidence": 0.9812,
+      "quality": "high",
+      "points": 430,
+      "referencePoints": 190,
+      "precisionAt006": 1,
+      "recallAt006": 1,
+      "shapeF1At006": 1,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-014-C006",
+      "source": "26-07-27/014/6.png",
+      "confidence": 0.9758,
+      "axisConfidence": 0.9616,
+      "traceConfidence": 0.9861,
+      "quality": "high",
+      "points": 443,
+      "referencePoints": 179,
+      "precisionAt006": 1,
+      "recallAt006": 1,
+      "shapeF1At006": 1,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-014-C007",
+      "source": "26-07-27/014/7.png",
+      "confidence": 0.9836,
+      "axisConfidence": 0.9782,
+      "traceConfidence": 0.9874,
+      "quality": "high",
+      "points": 544,
+      "referencePoints": 165,
+      "precisionAt006": 1,
+      "recallAt006": 1,
+      "shapeF1At006": 1,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-014-C008",
+      "source": "26-07-27/014/8.png",
+      "confidence": 0.9805,
+      "axisConfidence": 0.9707,
+      "traceConfidence": 0.9876,
+      "quality": "high",
+      "points": 545,
+      "referencePoints": 162,
+      "precisionAt006": 1,
+      "recallAt006": 1,
+      "shapeF1At006": 1,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-014-C009",
+      "source": "26-07-27/014/9.png",
+      "confidence": 0.9752,
+      "axisConfidence": 0.97,
+      "traceConfidence": 0.9789,
+      "quality": "high",
+      "points": 368,
+      "referencePoints": 174,
+      "precisionAt006": 0.9891,
+      "recallAt006": 1,
+      "shapeF1At006": 0.9945,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-014-C010",
+      "source": "26-07-27/014/10.png",
+      "confidence": 0.9801,
+      "axisConfidence": 0.9732,
+      "traceConfidence": 0.9851,
+      "quality": "high",
+      "points": 395,
+      "referencePoints": 167,
+      "precisionAt006": 1,
+      "recallAt006": 1,
+      "shapeF1At006": 1,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-15-C001",
+      "source": "26-07-27/15/1.png",
+      "confidence": 0.8351,
+      "axisConfidence": 0.9711,
+      "traceConfidence": 0.7366,
+      "quality": "high",
+      "points": 464,
+      "referencePoints": 130,
+      "precisionAt006": 1,
+      "recallAt006": 1,
+      "shapeF1At006": 1,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-15-C002",
+      "source": "26-07-27/15/2.png",
+      "confidence": 0.8278,
+      "axisConfidence": 0.9693,
+      "traceConfidence": 0.7253,
+      "quality": "high",
+      "points": 697,
+      "referencePoints": 161,
+      "precisionAt006": 0.4218,
+      "recallAt006": 0.6522,
+      "shapeF1At006": 0.5123,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-15-C003",
+      "source": "26-07-27/15/3.png",
+      "confidence": 0.7479,
+      "axisConfidence": 0.4399,
+      "traceConfidence": 0.971,
+      "quality": "medium",
+      "points": 183,
+      "referencePoints": 184,
+      "precisionAt006": 0.153,
+      "recallAt006": 0.663,
+      "shapeF1At006": 0.2486,
+      "warnings": [
+        "Plot axes were estimated. Confirm the crop before using the coordinates.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-15-C004",
+      "source": "26-07-27/15/4.png",
+      "confidence": 0.8382,
+      "axisConfidence": 0.9708,
+      "traceConfidence": 0.7422,
+      "quality": "high",
+      "points": 584,
+      "referencePoints": 149,
+      "precisionAt006": 0.464,
+      "recallAt006": 0.6779,
+      "shapeF1At006": 0.5509,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-15-C005",
+      "source": "26-07-27/15/5.png",
+      "confidence": 0.5253,
+      "axisConfidence": 0.18,
+      "traceConfidence": 0.7753,
+      "quality": "medium",
+      "points": 393,
+      "referencePoints": 100,
+      "precisionAt006": 0.112,
+      "recallAt006": 0.32,
+      "shapeF1At006": 0.1659,
+      "warnings": [
+        "Plot axes were estimated. Confirm the crop before using the coordinates.",
+        "The plot rectangle was tightened around the recognised trace and still requires visual confirmation.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-15-C006",
+      "source": "26-07-27/15/6.png",
+      "confidence": 0.9811,
+      "axisConfidence": 0.9714,
+      "traceConfidence": 0.9881,
+      "quality": "high",
+      "points": 534,
+      "referencePoints": 172,
+      "precisionAt006": 1,
+      "recallAt006": 1,
+      "shapeF1At006": 1,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-15-C007",
+      "source": "26-07-27/15/7.png",
+      "confidence": 0.9537,
+      "axisConfidence": 0.969,
+      "traceConfidence": 0.9426,
+      "quality": "high",
+      "points": 494,
+      "referencePoints": 99,
+      "precisionAt006": 0.7004,
+      "recallAt006": 1,
+      "shapeF1At006": 0.8238,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-15-C008",
+      "source": "26-07-27/15/8.png",
+      "confidence": 0.9801,
+      "axisConfidence": 0.9687,
+      "traceConfidence": 0.9883,
+      "quality": "high",
+      "points": 539,
+      "referencePoints": 122,
+      "precisionAt006": 0.7199,
+      "recallAt006": 1,
+      "shapeF1At006": 0.8371,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-15-C009",
+      "source": "26-07-27/15/9.png",
+      "confidence": 0.942,
+      "axisConfidence": 0.9676,
+      "traceConfidence": 0.9234,
+      "quality": "high",
+      "points": 483,
+      "referencePoints": 168,
+      "precisionAt006": 0.7909,
+      "recallAt006": 0.8631,
+      "shapeF1At006": 0.8254,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-15-C010",
+      "source": "26-07-27/15/10.png",
+      "confidence": 0.9378,
+      "axisConfidence": 0.9699,
+      "traceConfidence": 0.9146,
+      "quality": "high",
+      "points": 451,
+      "referencePoints": 149,
+      "precisionAt006": 0.9579,
+      "recallAt006": 0.9933,
+      "shapeF1At006": 0.9753,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-016-C001",
+      "source": "26-07-27/016/1.png",
+      "confidence": 0.6426,
+      "axisConfidence": 0.36,
+      "traceConfidence": 0.8472,
+      "quality": "medium",
+      "points": 539,
+      "referencePoints": 146,
+      "precisionAt006": 0.525,
+      "recallAt006": 0.6027,
+      "shapeF1At006": 0.5612,
+      "warnings": [
+        "Plot axes were estimated. Confirm the crop before using the coordinates.",
+        "The plot rectangle was tightened around the recognised trace and still requires visual confirmation.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-016-C002",
+      "source": "26-07-27/016/2.png",
+      "confidence": 0.6385,
+      "axisConfidence": 0.36,
+      "traceConfidence": 0.8402,
+      "quality": "medium",
+      "points": 509,
+      "referencePoints": 131,
+      "precisionAt006": 0.4244,
+      "recallAt006": 0.4427,
+      "shapeF1At006": 0.4334,
+      "warnings": [
+        "Plot axes were estimated. Confirm the crop before using the coordinates.",
+        "The plot rectangle was tightened around the recognised trace and still requires visual confirmation.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-016-C003",
+      "source": "26-07-27/016/3.png",
+      "confidence": 0.5708,
+      "axisConfidence": 0.18,
+      "traceConfidence": 0.8538,
+      "quality": "medium",
+      "points": 472,
+      "referencePoints": 133,
+      "precisionAt006": 0.2564,
+      "recallAt006": 0.2632,
+      "shapeF1At006": 0.2597,
+      "warnings": [
+        "Plot axes were estimated. Confirm the crop before using the coordinates.",
+        "The plot rectangle was tightened around the recognised trace and still requires visual confirmation.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-017-C001",
+      "source": "26-07-27/017/1.png",
+      "confidence": 0.9066,
+      "axisConfidence": 0.9707,
+      "traceConfidence": 0.8602,
+      "quality": "high",
+      "points": 491,
+      "referencePoints": 150,
+      "precisionAt006": 0.4481,
+      "recallAt006": 0.5267,
+      "shapeF1At006": 0.4842,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-27-017-C002",
+      "source": "26-07-27/017/2.png",
+      "confidence": 0.9067,
+      "axisConfidence": 0.9692,
+      "traceConfidence": 0.8614,
+      "quality": "high",
+      "points": 474,
+      "referencePoints": 124,
+      "precisionAt006": 0.2553,
+      "recallAt006": 0.2581,
+      "shapeF1At006": 0.2567,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-01-C001",
+      "source": "26-07-28/01/3.png",
+      "confidence": 0.6931,
+      "axisConfidence": 0.7499,
+      "traceConfidence": 0.652,
+      "quality": "medium",
+      "points": 49,
+      "referencePoints": 171,
+      "precisionAt006": 0.2041,
+      "recallAt006": 0.2456,
+      "shapeF1At006": 0.2229,
+      "warnings": [
+        "Only part of the plot contains a recognised trace; inspect the overlay for gaps.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-01-C002",
+      "source": "26-07-28/01/4.png",
+      "confidence": 0.725,
+      "axisConfidence": 0.7623,
+      "traceConfidence": 0.698,
+      "quality": "medium",
+      "points": 440,
+      "referencePoints": 156,
+      "precisionAt006": 0.8091,
+      "recallAt006": 0.5833,
+      "shapeF1At006": 0.6779,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-01-C003",
+      "source": "26-07-28/01/5.png",
+      "confidence": 0.682,
+      "axisConfidence": 0.7775,
+      "traceConfidence": 0.6128,
+      "quality": "medium",
+      "points": 27,
+      "referencePoints": 230,
+      "precisionAt006": 0.2222,
+      "recallAt006": 0.1217,
+      "shapeF1At006": 0.1573,
+      "warnings": [
+        "Only part of the plot contains a recognised trace; inspect the overlay for gaps.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-01-C004",
+      "source": "26-07-28/01/6.png",
+      "confidence": 0.7869,
+      "axisConfidence": 0.7648,
+      "traceConfidence": 0.8029,
+      "quality": "high",
+      "points": 107,
+      "referencePoints": 221,
+      "precisionAt006": 0.2056,
+      "recallAt006": 0.2217,
+      "shapeF1At006": 0.2134,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-01-C005",
+      "source": "26-07-28/01/QQ20260730-102457.png",
+      "confidence": 0.6321,
+      "axisConfidence": 0.7748,
+      "traceConfidence": 0.5287,
+      "quality": "medium",
+      "points": 13,
+      "referencePoints": 216,
+      "precisionAt006": 0.2308,
+      "recallAt006": 0.088,
+      "shapeF1At006": 0.1274,
+      "warnings": [
+        "Only part of the plot contains a recognised trace; inspect the overlay for gaps.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-01-C006",
+      "source": "26-07-28/01/QQ20260730-102508.png",
+      "confidence": 0.7314,
+      "axisConfidence": 0.7776,
+      "traceConfidence": 0.6979,
+      "quality": "medium",
+      "points": 258,
+      "referencePoints": 208,
+      "precisionAt006": 0.655,
+      "recallAt006": 0.5962,
+      "shapeF1At006": 0.6242,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-02-C001",
+      "source": "26-07-28/02/1.png",
+      "confidence": 0.8561,
+      "axisConfidence": 0.9742,
+      "traceConfidence": 0.7706,
+      "quality": "high",
+      "points": 617,
+      "referencePoints": 207,
+      "precisionAt006": 0.5802,
+      "recallAt006": 1,
+      "shapeF1At006": 0.7344,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-02-C002",
+      "source": "26-07-28/02/2.png",
+      "confidence": 0.8033,
+      "axisConfidence": 0.9876,
+      "traceConfidence": 0.6698,
+      "quality": "high",
+      "points": 510,
+      "referencePoints": 163,
+      "precisionAt006": 0.3725,
+      "recallAt006": 0.9755,
+      "shapeF1At006": 0.5392,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-03-C001",
+      "source": "26-07-28/03/1.png",
+      "confidence": 0.823,
+      "axisConfidence": 0.7269,
+      "traceConfidence": 0.8925,
+      "quality": "high",
+      "points": 691,
+      "referencePoints": 124,
+      "precisionAt006": 0.3256,
+      "recallAt006": 0.4516,
+      "shapeF1At006": 0.3784,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-05-C001",
+      "source": "26-07-28/05/1.png",
+      "confidence": 0.9761,
+      "axisConfidence": 0.9625,
+      "traceConfidence": 0.986,
+      "quality": "high",
+      "points": 594,
+      "referencePoints": 177,
+      "precisionAt006": 1,
+      "recallAt006": 1,
+      "shapeF1At006": 1,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-05-C002",
+      "source": "26-07-28/05/2.png",
+      "confidence": 0.9806,
+      "axisConfidence": 0.9713,
+      "traceConfidence": 0.9873,
+      "quality": "high",
+      "points": 531,
+      "referencePoints": 189,
+      "precisionAt006": 0.9849,
+      "recallAt006": 1,
+      "shapeF1At006": 0.9924,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-05-C003",
+      "source": "26-07-28/05/3.png",
+      "confidence": 0.98,
+      "axisConfidence": 0.9682,
+      "traceConfidence": 0.9886,
+      "quality": "high",
+      "points": 480,
+      "referencePoints": 167,
+      "precisionAt006": 0.9917,
+      "recallAt006": 1,
+      "shapeF1At006": 0.9958,
+      "warnings": [
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-06-C001",
+      "source": "26-07-28/06/2.png",
+      "confidence": 0.7858,
+      "axisConfidence": 0.9144,
+      "traceConfidence": 0.6928,
+      "quality": "medium",
+      "points": 579,
+      "referencePoints": 147,
+      "precisionAt006": 0.9741,
+      "recallAt006": 0.9456,
+      "shapeF1At006": 0.9596,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-06-C002",
+      "source": "26-07-28/06/3.png",
+      "confidence": 0.7857,
+      "axisConfidence": 0.9126,
+      "traceConfidence": 0.6938,
+      "quality": "medium",
+      "points": 538,
+      "referencePoints": 150,
+      "precisionAt006": 0.9257,
+      "recallAt006": 0.94,
+      "shapeF1At006": 0.9328,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-06-C003",
+      "source": "26-07-28/06/4.png",
+      "confidence": 0.7881,
+      "axisConfidence": 0.9187,
+      "traceConfidence": 0.6935,
+      "quality": "medium",
+      "points": 565,
+      "referencePoints": 157,
+      "precisionAt006": 0.9239,
+      "recallAt006": 0.9427,
+      "shapeF1At006": 0.9332,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-06-C004",
+      "source": "26-07-28/06/5.png",
+      "confidence": 0.7789,
+      "axisConfidence": 0.8973,
+      "traceConfidence": 0.6932,
+      "quality": "medium",
+      "points": 441,
+      "referencePoints": 146,
+      "precisionAt006": 0.0544,
+      "recallAt006": 0.1027,
+      "shapeF1At006": 0.0712,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-06-C005",
+      "source": "26-07-28/06/6.png",
+      "confidence": 0.7882,
+      "axisConfidence": 0.9214,
+      "traceConfidence": 0.6918,
+      "quality": "medium",
+      "points": 551,
+      "referencePoints": 159,
+      "precisionAt006": 0.3757,
+      "recallAt006": 0.3899,
+      "shapeF1At006": 0.3827,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-06-C006",
+      "source": "26-07-28/06/QQ20260730-102827.png",
+      "confidence": 0.7846,
+      "axisConfidence": 0.9118,
+      "traceConfidence": 0.6924,
+      "quality": "medium",
+      "points": 585,
+      "referencePoints": 157,
+      "precisionAt006": 0.2581,
+      "recallAt006": 0.3121,
+      "shapeF1At006": 0.2826,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C001",
+      "source": "26-07-28/07/2.png",
+      "confidence": 0.8151,
+      "axisConfidence": 0.976,
+      "traceConfidence": 0.6986,
+      "quality": "medium",
+      "points": 464,
+      "referencePoints": 167,
+      "precisionAt006": 0.6595,
+      "recallAt006": 0.7844,
+      "shapeF1At006": 0.7166,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C002",
+      "source": "26-07-28/07/3.png",
+      "confidence": 0.8154,
+      "axisConfidence": 0.9768,
+      "traceConfidence": 0.6986,
+      "quality": "medium",
+      "points": 443,
+      "referencePoints": 175,
+      "precisionAt006": 0.1038,
+      "recallAt006": 0.2914,
+      "shapeF1At006": 0.1531,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C003",
+      "source": "26-07-28/07/4.png",
+      "confidence": 0.8206,
+      "axisConfidence": 0.9938,
+      "traceConfidence": 0.6952,
+      "quality": "medium",
+      "points": 312,
+      "referencePoints": 159,
+      "precisionAt006": 0.4936,
+      "recallAt006": 0.5597,
+      "shapeF1At006": 0.5246,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C004",
+      "source": "26-07-28/07/5.png",
+      "confidence": 0.8216,
+      "axisConfidence": 0.9938,
+      "traceConfidence": 0.697,
+      "quality": "medium",
+      "points": 428,
+      "referencePoints": 160,
+      "precisionAt006": 0.1799,
+      "recallAt006": 0.4562,
+      "shapeF1At006": 0.2581,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C005",
+      "source": "26-07-28/07/6.png",
+      "confidence": 0.8209,
+      "axisConfidence": 0.995,
+      "traceConfidence": 0.6948,
+      "quality": "medium",
+      "points": 293,
+      "referencePoints": 170,
+      "precisionAt006": 0.1945,
+      "recallAt006": 0.3882,
+      "shapeF1At006": 0.2592,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C006",
+      "source": "26-07-28/07/7.png",
+      "confidence": 0.8213,
+      "axisConfidence": 0.995,
+      "traceConfidence": 0.6955,
+      "quality": "medium",
+      "points": 407,
+      "referencePoints": 176,
+      "precisionAt006": 0.113,
+      "recallAt006": 0.2557,
+      "shapeF1At006": 0.1568,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C007",
+      "source": "26-07-28/07/8.png",
+      "confidence": 0.81,
+      "axisConfidence": 0.9674,
+      "traceConfidence": 0.6961,
+      "quality": "medium",
+      "points": 445,
+      "referencePoints": 178,
+      "precisionAt006": 0.0966,
+      "recallAt006": 0.427,
+      "shapeF1At006": 0.1576,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C008",
+      "source": "26-07-28/07/9.png",
+      "confidence": 0.8235,
+      "axisConfidence": 0.9975,
+      "traceConfidence": 0.6975,
+      "quality": "medium",
+      "points": 377,
+      "referencePoints": 166,
+      "precisionAt006": 0.2361,
+      "recallAt006": 0.4157,
+      "shapeF1At006": 0.3011,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C009",
+      "source": "26-07-28/07/10.png",
+      "confidence": 0.8238,
+      "axisConfidence": 0.9957,
+      "traceConfidence": 0.6993,
+      "quality": "medium",
+      "points": 613,
+      "referencePoints": 169,
+      "precisionAt006": 0.0555,
+      "recallAt006": 0.1775,
+      "shapeF1At006": 0.0845,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C010",
+      "source": "26-07-28/07/11.png",
+      "confidence": 0.8229,
+      "axisConfidence": 0.9952,
+      "traceConfidence": 0.6981,
+      "quality": "medium",
+      "points": 596,
+      "referencePoints": 146,
+      "precisionAt006": 0.8138,
+      "recallAt006": 0.637,
+      "shapeF1At006": 0.7146,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C011",
+      "source": "26-07-28/07/12.png",
+      "confidence": 0.8211,
+      "axisConfidence": 0.9903,
+      "traceConfidence": 0.6986,
+      "quality": "medium",
+      "points": 634,
+      "referencePoints": 139,
+      "precisionAt006": 0.1782,
+      "recallAt006": 0.6115,
+      "shapeF1At006": 0.276,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C012",
+      "source": "26-07-28/07/13.png",
+      "confidence": 0.8131,
+      "axisConfidence": 0.9757,
+      "traceConfidence": 0.6954,
+      "quality": "medium",
+      "points": 642,
+      "referencePoints": 151,
+      "precisionAt006": 0.6791,
+      "recallAt006": 0.6755,
+      "shapeF1At006": 0.6773,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C013",
+      "source": "26-07-28/07/14.png",
+      "confidence": 0.82,
+      "axisConfidence": 0.9947,
+      "traceConfidence": 0.6935,
+      "quality": "medium",
+      "points": 578,
+      "referencePoints": 141,
+      "precisionAt006": 0.2042,
+      "recallAt006": 0.5177,
+      "shapeF1At006": 0.2928,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C014",
+      "source": "26-07-28/07/15.png",
+      "confidence": 0.8221,
+      "axisConfidence": 1,
+      "traceConfidence": 0.6932,
+      "quality": "medium",
+      "points": 549,
+      "referencePoints": 171,
+      "precisionAt006": 0.4991,
+      "recallAt006": 0.8129,
+      "shapeF1At006": 0.6185,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C015",
+      "source": "26-07-28/07/16.png",
+      "confidence": 0.8224,
+      "axisConfidence": 0.9947,
+      "traceConfidence": 0.6975,
+      "quality": "medium",
+      "points": 598,
+      "referencePoints": 155,
+      "precisionAt006": 0.8194,
+      "recallAt006": 0.6129,
+      "shapeF1At006": 0.7013,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C016",
+      "source": "26-07-28/07/17.png",
+      "confidence": 0.8246,
+      "axisConfidence": 0.9975,
+      "traceConfidence": 0.6993,
+      "quality": "medium",
+      "points": 547,
+      "referencePoints": 150,
+      "precisionAt006": 0.0457,
+      "recallAt006": 0.2,
+      "shapeF1At006": 0.0744,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C017",
+      "source": "26-07-28/07/18.png",
+      "confidence": 0.8235,
+      "axisConfidence": 0.995,
+      "traceConfidence": 0.6993,
+      "quality": "medium",
+      "points": 559,
+      "referencePoints": 141,
+      "precisionAt006": 0.1878,
+      "recallAt006": 0.4113,
+      "shapeF1At006": 0.2579,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C018",
+      "source": "26-07-28/07/19.png",
+      "confidence": 0.8236,
+      "axisConfidence": 0.9976,
+      "traceConfidence": 0.6976,
+      "quality": "medium",
+      "points": 601,
+      "referencePoints": 141,
+      "precisionAt006": 0.2446,
+      "recallAt006": 0.4823,
+      "shapeF1At006": 0.3246,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C019",
+      "source": "26-07-28/07/20.png",
+      "confidence": 0.8154,
+      "axisConfidence": 0.9822,
+      "traceConfidence": 0.6946,
+      "quality": "medium",
+      "points": 349,
+      "referencePoints": 134,
+      "precisionAt006": 0.2006,
+      "recallAt006": 0.4328,
+      "shapeF1At006": 0.2741,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C020",
+      "source": "26-07-28/07/21.png",
+      "confidence": 0.8232,
+      "axisConfidence": 0.9975,
+      "traceConfidence": 0.6971,
+      "quality": "medium",
+      "points": 516,
+      "referencePoints": 132,
+      "precisionAt006": 0.2054,
+      "recallAt006": 0.553,
+      "shapeF1At006": 0.2996,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C021",
+      "source": "26-07-28/07/22.png",
+      "confidence": 0.7658,
+      "axisConfidence": 0.8609,
+      "traceConfidence": 0.697,
+      "quality": "medium",
+      "points": 601,
+      "referencePoints": 139,
+      "precisionAt006": 0.1265,
+      "recallAt006": 0.4029,
+      "shapeF1At006": 0.1925,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C022",
+      "source": "26-07-28/07/23.png",
+      "confidence": 0.8168,
+      "axisConfidence": 0.9863,
+      "traceConfidence": 0.694,
+      "quality": "medium",
+      "points": 245,
+      "referencePoints": 125,
+      "precisionAt006": 0.9959,
+      "recallAt006": 0.968,
+      "shapeF1At006": 0.9818,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C023",
+      "source": "26-07-28/07/24.png",
+      "confidence": 0.8068,
+      "axisConfidence": 0.9569,
+      "traceConfidence": 0.6981,
+      "quality": "medium",
+      "points": 516,
+      "referencePoints": 125,
+      "precisionAt006": 0.0562,
+      "recallAt006": 0.296,
+      "shapeF1At006": 0.0945,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-07-C024",
+      "source": "26-07-28/07/QQ20260730-113643.png",
+      "confidence": 0.8228,
+      "axisConfidence": 0.9958,
+      "traceConfidence": 0.6976,
+      "quality": "medium",
+      "points": 527,
+      "referencePoints": 138,
+      "precisionAt006": 0.0911,
+      "recallAt006": 0.3913,
+      "shapeF1At006": 0.1478,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-09-C001",
+      "source": "26-07-28/09/1.png",
+      "confidence": 0.7753,
+      "axisConfidence": 0.8923,
+      "traceConfidence": 0.6906,
+      "quality": "medium",
+      "points": 307,
+      "referencePoints": 120,
+      "precisionAt006": 0,
+      "recallAt006": 0,
+      "shapeF1At006": 0,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-09-C002",
+      "source": "26-07-28/09/2.png",
+      "confidence": 0.793,
+      "axisConfidence": 0.9401,
+      "traceConfidence": 0.6864,
+      "quality": "medium",
+      "points": 312,
+      "referencePoints": 126,
+      "precisionAt006": 0.1154,
+      "recallAt006": 0.254,
+      "shapeF1At006": 0.1587,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-09-C003",
+      "source": "26-07-28/09/3.png",
+      "confidence": 0.7681,
+      "axisConfidence": 0.8743,
+      "traceConfidence": 0.6913,
+      "quality": "medium",
+      "points": 448,
+      "referencePoints": 126,
+      "precisionAt006": 0.0201,
+      "recallAt006": 0.1825,
+      "shapeF1At006": 0.0362,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-09-C004",
+      "source": "26-07-28/09/4.png",
+      "confidence": 0.7988,
+      "axisConfidence": 0.9463,
+      "traceConfidence": 0.6921,
+      "quality": "medium",
+      "points": 416,
+      "referencePoints": 138,
+      "precisionAt006": 0.262,
+      "recallAt006": 0.5145,
+      "shapeF1At006": 0.3472,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-09-C005",
+      "source": "26-07-28/09/5.png",
+      "confidence": 0.7686,
+      "axisConfidence": 0.8766,
+      "traceConfidence": 0.6904,
+      "quality": "medium",
+      "points": 469,
+      "referencePoints": 124,
+      "precisionAt006": 0.0128,
+      "recallAt006": 0.0484,
+      "shapeF1At006": 0.0202,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-09-C006",
+      "source": "26-07-28/09/6.png",
+      "confidence": 0.7917,
+      "axisConfidence": 0.9307,
+      "traceConfidence": 0.691,
+      "quality": "medium",
+      "points": 305,
+      "referencePoints": 112,
+      "precisionAt006": 0.0918,
+      "recallAt006": 0.1518,
+      "shapeF1At006": 0.1144,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-09-C007",
+      "source": "26-07-28/09/7.png",
+      "confidence": 0.7662,
+      "axisConfidence": 0.872,
+      "traceConfidence": 0.6895,
+      "quality": "medium",
+      "points": 484,
+      "referencePoints": 117,
+      "precisionAt006": 0.374,
+      "recallAt006": 0.6923,
+      "shapeF1At006": 0.4856,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-09-C008",
+      "source": "26-07-28/09/8.png",
+      "confidence": 0.7882,
+      "axisConfidence": 0.9279,
+      "traceConfidence": 0.687,
+      "quality": "medium",
+      "points": 574,
+      "referencePoints": 97,
+      "precisionAt006": 0.6132,
+      "recallAt006": 0.567,
+      "shapeF1At006": 0.5892,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-09-C009",
+      "source": "26-07-28/09/9.png",
+      "confidence": 0.7658,
+      "axisConfidence": 0.8676,
+      "traceConfidence": 0.6921,
+      "quality": "medium",
+      "points": 468,
+      "referencePoints": 128,
+      "precisionAt006": 0.9679,
+      "recallAt006": 0.9688,
+      "shapeF1At006": 0.9683,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-09-C010",
+      "source": "26-07-28/09/10.png",
+      "confidence": 0.7873,
+      "axisConfidence": 0.9275,
+      "traceConfidence": 0.6857,
+      "quality": "medium",
+      "points": 504,
+      "referencePoints": 113,
+      "precisionAt006": 0.0575,
+      "recallAt006": 0.0973,
+      "shapeF1At006": 0.0723,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-09-C011",
+      "source": "26-07-28/09/11.png",
+      "confidence": 0.7654,
+      "axisConfidence": 0.8688,
+      "traceConfidence": 0.6905,
+      "quality": "medium",
+      "points": 526,
+      "referencePoints": 156,
+      "precisionAt006": 0.2072,
+      "recallAt006": 0.4359,
+      "shapeF1At006": 0.2809,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-09-C012",
+      "source": "26-07-28/09/12.png",
+      "confidence": 0.7953,
+      "axisConfidence": 0.9463,
+      "traceConfidence": 0.686,
+      "quality": "medium",
+      "points": 322,
+      "referencePoints": 114,
+      "precisionAt006": 1,
+      "recallAt006": 0.9561,
+      "shapeF1At006": 0.9776,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-09-C013",
+      "source": "26-07-28/09/13.png",
+      "confidence": 0.7701,
+      "axisConfidence": 0.8804,
+      "traceConfidence": 0.6902,
+      "quality": "medium",
+      "points": 443,
+      "referencePoints": 142,
+      "precisionAt006": 0.0542,
+      "recallAt006": 0.1901,
+      "shapeF1At006": 0.0843,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-09-C014",
+      "source": "26-07-28/09/14.png",
+      "confidence": 0.7873,
+      "axisConfidence": 0.9332,
+      "traceConfidence": 0.6817,
+      "quality": "medium",
+      "points": 253,
+      "referencePoints": 99,
+      "precisionAt006": 0.0237,
+      "recallAt006": 0.0606,
+      "shapeF1At006": 0.0341,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    },
+    {
+      "id": "AFM-26-07-28-09-C015",
+      "source": "26-07-28/09/15.png",
+      "confidence": 0.7977,
+      "axisConfidence": 0.9517,
+      "traceConfidence": 0.6861,
+      "quality": "medium",
+      "points": 257,
+      "referencePoints": 104,
+      "precisionAt006": 0.5175,
+      "recallAt006": 0.8173,
+      "shapeF1At006": 0.6337,
+      "warnings": [
+        "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+        "Coloured labels or arrows may be mixed with the extracted trace.",
+        "Axis values and units require confirmation before the curve can enter the review queue."
+      ]
+    }
+  ]
+}

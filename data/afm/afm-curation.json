@@ -1,1 +1,734 @@
-{"schemaVersion":2,"requiredReviewFields":["ionicLiquid","cation","anion","substrate","temperature","separationUnit","forceUnit","curveBranch","sourcePaper"],"legacySmiles":{"cations":{"BMIM":"CCCC[n+]1c[nH]c2ccccc12","C2MIM":"CC[n+]1c[nH]c2ccccc12","C4C1Im":"CCCC[n+]1c[nH]c2ccccc12","C4MIM":"CCCC[n+]1c[nH]c2ccccc12","C6MIM":"CCCCCC[n+]1c[nH]c2ccccc12","Dema":"CC[N+](C)(CC)CC","EMIM":"CC[n+]1c[nH]c2ccccc12","HMIM":"CCCCCC[n+]1c[nH]c2ccccc12"},"anions":{"AOT":"CCCCCCCC(=O)O[S](=O)(=O)OCCCCCCCC","AlCl4":"[Al-](Cl)(Cl)(Cl)Cl","BF4":"[B-](F)(F)(F)F","FAP":"[P-](=O)(F)(F)(F)(F)(F)","TFSA":"[S-](=O)(=O)N(S(=O)(=O)C(F)(F)F)C(F)(F)F","TFSI":"[S-](=O)(=O)N(S(=O)(=O)C(F)(F)F)C(F)(F)F","Tf2N":"[S-](=O)(=O)N(S(=O)(=O)C(F)(F)F)C(F)(F)F","TfO":"C(F)(F)S(=O)(=O)[O-]"},"warning":"Copied from the legacy prediction platform only. Several structures appear chemically suspicious and must be validated before RDKit descriptors or modeling."},"verifiedPaperProfiles":{"10.1039/c0cp02846k":{"paperFile":"c0cp02846k.pdf","substrate":"Au(111)","probeMaterial":"Si3N4","surfaceState":"Au(111) film on mica, H2-flame cleaned immediately before use","technique":"potential-controlled AFM contact-mode force profiling","instrument":"Digital Instruments Nanoscope IIIa Multimode AFM","scanRateHz":"0.1–0.5","scanSizeNm":"10–50","springConstantNPerM":0.07,"separationUnit":"nm","forceUnit":"nN","curveBranch":"approach","atmosphere":"sealed AFM fluid cell","methodLocator":"Experimental section, p. 6851","axisLocator":"Figure 7, p. 6854"},"10.1039/c3cp44163f":{"paperFile":"c3cp44163f.pdf","substrate":"mica","probeMaterial":"Si3N4","surfaceState":"freshly cleaved mica basal plane","technique":"AFM contact-mode force profiling","instrument":"Asylum Research Cypher AFM","scanRateHz":null,"scanSizeNm":"30–50","springConstantNPerM":0.06,"separationUnit":"nm","forceUnit":"nN","curveBranch":"approach","atmosphere":"ambient atmosphere inside a sealed AFM enclosure","waterContent":"<1 wt% for the presented data","methodLocator":"Experimental section, p. 3321","axisLocator":"Figure 1(a), p. 3322"},"10.1021/jp900815q":{"paperFile":"jp900815q.pdf","substrate":"mica","probeMaterial":"Si3N4","surfaceState":"freshly cleaved mica basal plane","technique":"AFM contact-mode force profiling","instrument":"Digital Instruments Nanoscope III Multimode AFM","scanRateHz":0.1,"scanSizeNm":20,"springConstantNPerM":0.07,"separationUnit":"nm","forceUnit":"nN","curveBranch":"approach","methodLocator":"Materials and Methods","axisLocator":"Figures 1-4"}},"sourceOverrides":{"AFM-26-07-28-05-C001":{"pdfFile":"c0cp02846k.pdf","pdfPath":"external://paper-library/26-07-28/c0cp02846k.pdf","doi":"10.1039/c0cp02846k"},"AFM-26-07-28-05-C002":{"pdfFile":"c0cp02846k.pdf","pdfPath":"external://paper-library/26-07-28/c0cp02846k.pdf","doi":"10.1039/c0cp02846k"},"AFM-26-07-28-05-C003":{"pdfFile":"c0cp02846k.pdf","pdfPath":"external://paper-library/26-07-28/c0cp02846k.pdf","doi":"10.1039/c0cp02846k"},"AFM-26-07-27-06-Adsorbed-and-near-surface-structure-of-ionic-liquids-at-C001":{"pdfFile":"c3cp44163f.pdf","pdfPath":"external://paper-library/26-07-27/c3cp44163f.pdf","doi":"10.1039/c3cp44163f"}},"curveOverrides":{"AFM-26-07-28-05-C001":{"ionicLiquid":"[Py1,4][FAP]","cation":"1-butyl-1-methylpyrrolidinium","anion":"tris(pentafluoroethyl)trifluorophosphate","temperatureK":294.15,"potentialV":-0.2,"potentialReference":"Pt quasi-reference","displayLabel":"[Py1,4][FAP] · OCP (−0.2 V vs Pt)","figure":"Figure 7a","layerRange":"C2:C6","layerPositionsNm":[0.35,1.3,2.2,3.1,4],"digitizationQuality":"partial","digitizationNote":"Workbook A:B contains only the lower-force portion of Figure 7a and omits the approximately 18–40 nN near-surface segment; retain for audit but exclude from modeling."},"AFM-26-07-28-05-C002":{"ionicLiquid":"[Py1,4][FAP]","cation":"1-butyl-1-methylpyrrolidinium","anion":"tris(pentafluoroethyl)trifluorophosphate","temperatureK":294.15,"potentialV":-1,"potentialReference":"Pt quasi-reference","displayLabel":"[Py1,4][FAP] · −1.0 V vs Pt","figure":"Figure 7b","layerRange":"F2:F7","layerPositionsNm":[0.25,1.2,2.1,3,3.9,4.8],"digitizationQuality":"complete","digitizationNote":"Digitized force range and layer sequence agree with Figure 7b.","relatedElectrochemistry":[{"quantity":"capacitance","kind":"slow capacitive process relaxation strength (ΔC2)","value":14.9,"unit":"µF/cm²","electrodePotentialV":-1,"potentialReference":"Pt quasi-reference","temperatureK":303.15,"relation":"same paper, ionic-liquid/electrode system and potential; separate EIS experiment","confidence":0.8,"figure":"Figure 6, digitized approximate value at −1.0 V"}]},"AFM-26-07-28-05-C003":{"ionicLiquid":"[Py1,4][FAP]","cation":"1-butyl-1-methylpyrrolidinium","anion":"tris(pentafluoroethyl)trifluorophosphate","temperatureK":294.15,"potentialV":-2,"potentialReference":"Pt quasi-reference","displayLabel":"[Py1,4][FAP] · −2.0 V vs Pt","figure":"Figure 7c","layerRange":"I2:I9","layerPositionsNm":[0.55,1.4,2.3,3.2,4.1,5,5.9,6.8],"digitizationQuality":"complete","digitizationNote":"Digitized force range and layer sequence agree with Figure 7c."},"AFM-26-07-27-06-Adsorbed-and-near-surface-structure-of-ionic-liquids-at-C001":{"ionicLiquid":"EAN","cation":"ethylammonium","anion":"nitrate","temperatureK":298.15,"figure":"Figure 1(a)"},"AFM-26-07-27-15-C001":{"ionicLiquid":"EAN","cation":"ethylammonium","anion":"nitrate","temperatureK":287.15,"figure":"Figure 1, 14 °C"},"AFM-26-07-27-15-C002":{"ionicLiquid":"EAN","cation":"ethylammonium","anion":"nitrate","temperatureK":289.15,"figure":"Figure 1, 16 °C"},"AFM-26-07-27-15-C003":{"ionicLiquid":"EAN","cation":"ethylammonium","anion":"nitrate","temperatureK":291.15,"figure":"Figure 1, 18 °C"},"AFM-26-07-27-15-C004":{"ionicLiquid":"EAN","cation":"ethylammonium","anion":"nitrate","temperatureK":293.15,"figure":"Figure 1, 20 °C"},"AFM-26-07-27-15-C005":{"ionicLiquid":"EAN","cation":"ethylammonium","anion":"nitrate","temperatureK":303.15,"figure":"Figure 1, 30 °C"},"AFM-26-07-27-15-C006":{"ionicLiquid":"EtAN","cation":"ethanolammonium","anion":"nitrate","temperatureK":294.15,"figure":"Figure 2"},"AFM-26-07-27-15-C007":{"ionicLiquid":"EAF","cation":"ethylammonium","anion":"formate","temperatureK":294.15,"figure":"Figure 3a"},"AFM-26-07-27-15-C008":{"ionicLiquid":"PAF","cation":"propylammonium","anion":"formate","temperatureK":294.15,"figure":"Figure 3b"},"AFM-26-07-27-15-C009":{"ionicLiquid":"EMAF","cation":"ethylmethylammonium","anion":"formate","temperatureK":294.15,"figure":"Figure 4a"},"AFM-26-07-27-15-C010":{"ionicLiquid":"DMEAF","cation":"dimethylethylammonium","anion":"formate","temperatureK":294.15,"figure":"Figure 4b"}}}
+{
+  "schemaVersion": 3,
+  "requiredReviewFields": [
+    "ionicLiquid",
+    "cation",
+    "anion",
+    "substrate",
+    "temperature",
+    "separationUnit",
+    "forceUnit",
+    "curveBranch",
+    "sourcePaper"
+  ],
+  "legacySmiles": {
+    "cations": {
+      "BMIM": "CCCC[n+]1c[nH]c2ccccc12",
+      "C2MIM": "CC[n+]1c[nH]c2ccccc12",
+      "C4C1Im": "CCCC[n+]1c[nH]c2ccccc12",
+      "C4MIM": "CCCC[n+]1c[nH]c2ccccc12",
+      "C6MIM": "CCCCCC[n+]1c[nH]c2ccccc12",
+      "Dema": "CC[N+](C)(CC)CC",
+      "EMIM": "CC[n+]1c[nH]c2ccccc12",
+      "HMIM": "CCCCCC[n+]1c[nH]c2ccccc12"
+    },
+    "anions": {
+      "AOT": "CCCCCCCC(=O)O[S](=O)(=O)OCCCCCCCC",
+      "AlCl4": "[Al-](Cl)(Cl)(Cl)Cl",
+      "BF4": "[B-](F)(F)(F)F",
+      "FAP": "[P-](=O)(F)(F)(F)(F)(F)",
+      "TFSA": "[S-](=O)(=O)N(S(=O)(=O)C(F)(F)F)C(F)(F)F",
+      "TFSI": "[S-](=O)(=O)N(S(=O)(=O)C(F)(F)F)C(F)(F)F",
+      "Tf2N": "[S-](=O)(=O)N(S(=O)(=O)C(F)(F)F)C(F)(F)F",
+      "TfO": "C(F)(F)S(=O)(=O)[O-]"
+    },
+    "warning": "Copied from the legacy prediction platform only. Several structures appear chemically suspicious and must be validated before RDKit descriptors or modeling."
+  },
+  "verifiedFigureSystems": {
+    "10.1039/c7cp08243f": {
+      "ionicLiquid": "[Py1,4][TFSA]",
+      "cation": "1-butyl-1-methylpyrrolidinium",
+      "anion": "bis(trifluoromethylsulfonyl)amide",
+      "substrate": "Au(111)",
+      "evidence": "Verified against the paper identity and the 24 human-confirmed Figure 2–4 mappings."
+    }
+  },
+  "verifiedCurveSystems": [
+    {
+      "curveIds": ["AFM-26-07-27-02-C001"],
+      "ionicLiquid": "[EMIM][TFSI]",
+      "cation": "1-ethyl-3-methylimidazolium",
+      "anion": "bis(trifluoromethanesulfonyl)imide",
+      "substrate": "Au(111)",
+      "pdfFile": "2.pdf",
+      "pdfPath": "external://paper-library/26-07-27/2.pdf",
+      "doi": "10.1016/j.electacta.2019.04.066",
+      "figureLocator": "Figure 5",
+      "note": "The cropped image caption identifies the EMITFSI/Au(111) force-separation histograms."
+    },
+    {
+      "curveIds": ["AFM-26-07-27-02-C002"],
+      "ionicLiquid": "[EMMIM][TFSI]",
+      "cation": "1-ethyl-2,3-dimethylimidazolium",
+      "anion": "bis(trifluoromethanesulfonyl)imide",
+      "substrate": "Au(111)",
+      "pdfFile": "2.pdf",
+      "pdfPath": "external://paper-library/26-07-27/2.pdf",
+      "doi": "10.1016/j.electacta.2019.04.066",
+      "figureLocator": "Figure 6",
+      "note": "The cropped image caption identifies the EMMITFSI/Au(111) force-separation histograms."
+    },
+    {
+      "curveIds": ["AFM-26-07-27-012-C001"],
+      "ionicLiquid": "[Py1,4][FAP]",
+      "cation": "1-butyl-1-methylpyrrolidinium",
+      "anion": "tris(pentafluoroethyl)trifluorophosphate",
+      "substrate": "Au(111)",
+      "pdfFile": "12.pdf",
+      "pdfPath": "external://paper-library/26-07-27/12.pdf",
+      "doi": "10.1088/0953-8984/26/28/284110",
+      "figureLocator": "Figure 1",
+      "note": "The paper reports [Py1,4][FAP] confined between a SiOx AFM tip and Au(111)."
+    },
+    {
+      "curveIds": ["AFM-26-07-27-013-C001", "AFM-26-07-27-013-C002"],
+      "ionicLiquid": "EAN",
+      "cation": "ethylammonium",
+      "anion": "nitrate",
+      "substrate": "mica",
+      "pdfFile": "13.pdf",
+      "pdfPath": "external://paper-library/26-07-27/13.pdf",
+      "doi": "10.1021/jp067420g",
+      "figureLocator": "Figure 2A-B",
+      "note": "Figure 2 identifies EAN force profiles on mica."
+    },
+    {
+      "curveIds": ["AFM-26-07-27-013-C003", "AFM-26-07-27-013-C004"],
+      "ionicLiquid": "PAN",
+      "cation": "propylammonium",
+      "anion": "nitrate",
+      "substrate": "mica",
+      "pdfFile": "13.pdf",
+      "pdfPath": "external://paper-library/26-07-27/13.pdf",
+      "doi": "10.1021/jp067420g",
+      "figureLocator": "Figure 3A-B",
+      "note": "Figure 3 identifies PAN force profiles on mica."
+    },
+    {
+      "curveIds": ["AFM-26-07-27-013-C005"],
+      "ionicLiquid": "[C2mim][Ac]",
+      "cation": "1-ethyl-3-methylimidazolium",
+      "anion": "acetate",
+      "substrate": "mica",
+      "pdfFile": "13.pdf",
+      "pdfPath": "external://paper-library/26-07-27/13.pdf",
+      "doi": "10.1021/jp067420g",
+      "figureLocator": "Figure 4",
+      "note": "Figure 4 identifies [C2mim][Ac] force profiles on mica."
+    },
+    {
+      "curveIds": ["AFM-26-07-27-013-C006"],
+      "ionicLiquid": "EAN",
+      "cation": "ethylammonium",
+      "anion": "nitrate",
+      "substrate": "silica",
+      "pdfFile": "13.pdf",
+      "pdfPath": "external://paper-library/26-07-27/13.pdf",
+      "doi": "10.1021/jp067420g",
+      "figureLocator": "Figure 5A",
+      "note": "Figure 5A identifies EAN force profiles on silica."
+    },
+    {
+      "curveIds": ["AFM-26-07-27-013-C007"],
+      "ionicLiquid": "PAN",
+      "cation": "propylammonium",
+      "anion": "nitrate",
+      "substrate": "silica",
+      "pdfFile": "13.pdf",
+      "pdfPath": "external://paper-library/26-07-27/13.pdf",
+      "doi": "10.1021/jp067420g",
+      "figureLocator": "Figure 5B",
+      "note": "Figure 5B identifies PAN force profiles on silica."
+    },
+    {
+      "curveIds": ["AFM-26-07-27-013-C008"],
+      "ionicLiquid": "[C2mim][Ac]",
+      "cation": "1-ethyl-3-methylimidazolium",
+      "anion": "acetate",
+      "substrate": "silica",
+      "pdfFile": "13.pdf",
+      "pdfPath": "external://paper-library/26-07-27/13.pdf",
+      "doi": "10.1021/jp067420g",
+      "figureLocator": "Figure 5C",
+      "note": "Figure 5C identifies [C2mim][Ac] force profiles on silica."
+    },
+    {
+      "curveIds": ["AFM-26-07-27-013-C009"],
+      "ionicLiquid": "EAN",
+      "cation": "ethylammonium",
+      "anion": "nitrate",
+      "substrate": "graphite",
+      "pdfFile": "13.pdf",
+      "pdfPath": "external://paper-library/26-07-27/13.pdf",
+      "doi": "10.1021/jp067420g",
+      "figureLocator": "Figure 6A",
+      "note": "Figure 6A identifies EAN force profiles on graphite."
+    },
+    {
+      "curveIds": ["AFM-26-07-27-013-C010"],
+      "ionicLiquid": "PAN",
+      "cation": "propylammonium",
+      "anion": "nitrate",
+      "substrate": "graphite",
+      "pdfFile": "13.pdf",
+      "pdfPath": "external://paper-library/26-07-27/13.pdf",
+      "doi": "10.1021/jp067420g",
+      "figureLocator": "Figure 6B",
+      "note": "Figure 6B identifies PAN force profiles on graphite."
+    },
+    {
+      "curveIds": ["AFM-26-07-27-013-C011"],
+      "ionicLiquid": "[C2mim][Ac]",
+      "cation": "1-ethyl-3-methylimidazolium",
+      "anion": "acetate",
+      "substrate": "graphite",
+      "pdfFile": "13.pdf",
+      "pdfPath": "external://paper-library/26-07-27/13.pdf",
+      "doi": "10.1021/jp067420g",
+      "figureLocator": "Figure 6C",
+      "note": "Figure 6C identifies [C2mim][Ac] force profiles on graphite."
+    },
+    {
+      "curveIds": ["AFM-26-07-27-014-C001", "AFM-26-07-27-014-C002", "AFM-26-07-27-014-C003", "AFM-26-07-27-014-C004", "AFM-26-07-27-014-C005"],
+      "ionicLiquid": "[EMIM][FAP]",
+      "cation": "1-ethyl-3-methylimidazolium",
+      "anion": "tris(pentafluoroethyl)trifluorophosphate",
+      "substrate": "Au(111)",
+      "pdfFile": "14.pdf",
+      "pdfPath": "external://paper-library/26-07-27/14.pdf",
+      "doi": "10.1021/jp200544b",
+      "figureLocator": "Figure 1A-E",
+      "note": "Figure 1 identifies the five potential-dependent [EMIM][FAP]/Au(111) force profiles."
+    },
+    {
+      "curveIds": ["AFM-26-07-27-014-C006", "AFM-26-07-27-014-C007", "AFM-26-07-27-014-C008", "AFM-26-07-27-014-C009", "AFM-26-07-27-014-C010"],
+      "ionicLiquid": "[Py1,4][FAP]",
+      "cation": "1-butyl-1-methylpyrrolidinium",
+      "anion": "tris(pentafluoroethyl)trifluorophosphate",
+      "substrate": "Au(111)",
+      "pdfFile": "14.pdf",
+      "pdfPath": "external://paper-library/26-07-27/14.pdf",
+      "doi": "10.1021/jp200544b",
+      "figureLocator": "Figure 2A-E",
+      "note": "Figure 2 identifies the five potential-dependent [Py1,4][FAP]/Au(111) force profiles."
+    },
+    {
+      "curveIds": ["AFM-26-07-27-016-C001"],
+      "ionicLiquid": "[EMIM][TFSA]",
+      "cation": "1-ethyl-3-methylimidazolium",
+      "anion": "bis(trifluoromethanesulfonyl)amide",
+      "substrate": "mica",
+      "pdfFile": "16.pdf",
+      "pdfPath": "external://paper-library/26-07-27/16.pdf",
+      "doi": "10.1021/jp902837s",
+      "figureLocator": "Figure 1A",
+      "note": "Figure 1A identifies [EMIM][TFSA] force profiles on mica."
+    },
+    {
+      "curveIds": ["AFM-26-07-27-016-C002"],
+      "ionicLiquid": "[BMP][TFSA]",
+      "cation": "1-butyl-1-methylpyrrolidinium",
+      "anion": "bis(trifluoromethanesulfonyl)amide",
+      "substrate": "mica",
+      "pdfFile": "16.pdf",
+      "pdfPath": "external://paper-library/26-07-27/16.pdf",
+      "doi": "10.1021/jp902837s",
+      "figureLocator": "Figure 1B",
+      "note": "Figure 1B identifies [BMP][TFSA] force profiles on mica."
+    },
+    {
+      "curveIds": ["AFM-26-07-27-016-C003"],
+      "ionicLiquid": "[BMIM][PF6]",
+      "cation": "1-butyl-3-methylimidazolium",
+      "anion": "hexafluorophosphate",
+      "substrate": "mica",
+      "pdfFile": "16.pdf",
+      "pdfPath": "external://paper-library/26-07-27/16.pdf",
+      "doi": "10.1021/jp902837s",
+      "figureLocator": "Figure 1C",
+      "note": "Figure 1C identifies [BMIM][PF6] force profiles on mica."
+    },
+    {
+      "curveIds": ["AFM-26-07-27-017-C001"],
+      "ionicLiquid": "[EMIM][TFSA]",
+      "cation": "1-ethyl-3-methylimidazolium",
+      "anion": "bis(trifluoromethanesulfonyl)amide",
+      "substrate": "Au(111)",
+      "pdfFile": "17.pdf",
+      "pdfPath": "external://paper-library/26-07-27/17.pdf",
+      "doi": "10.1021/jp9026755",
+      "figureLocator": "Figure 2",
+      "note": "Figure 2 identifies [EMIM][TFSA] force profiles on Au(111)."
+    },
+    {
+      "curveIds": ["AFM-26-07-27-017-C002"],
+      "ionicLiquid": "[BMP][TFSA]",
+      "cation": "1-butyl-1-methylpyrrolidinium",
+      "anion": "bis(trifluoromethanesulfonyl)amide",
+      "substrate": "Au(111)",
+      "pdfFile": "17.pdf",
+      "pdfPath": "external://paper-library/26-07-27/17.pdf",
+      "doi": "10.1021/jp9026755",
+      "figureLocator": "Figure 3",
+      "note": "Figure 3 identifies [BMP][TFSA] force profiles on Au(111)."
+    },
+    {
+      "curveIds": ["legacy-027", "legacy-028", "legacy-029", "legacy-030", "legacy-031"],
+      "ionicLiquid": "[EMIM][TFSA]",
+      "cation": "1-ethyl-3-methylimidazolium",
+      "anion": "bis(trifluoromethanesulfonyl)amide",
+      "substrate": "HOPG",
+      "pdfFile": "18.pdf",
+      "pdfPath": "external://paper-library/26-07-27/18.pdf",
+      "doi": "10.1088/0953-8984/26/28/284115",
+      "figureLocator": "Figure 3A-E",
+      "note": "Figure 3 reports the five potential-dependent [EMIM][TFSA]/HOPG force-distance profiles that match the legacy 0, -1.0, +1.0, -1.5 and +1.5 V series. TFSA and TFSI are naming variants for the same anion."
+    },
+    {
+      "curveIds": ["AFM-26-07-28-01-C001"],
+      "ionicLiquid": "[N4,4,4,4][DS]",
+      "cation": "tetrabutylammonium",
+      "anion": "dodecyl sulfate",
+      "substrate": "Au(111)",
+      "pdfFile": "1.pdf",
+      "pdfPath": "external://paper-library/26-07-28/1.pdf",
+      "doi": "10.1016/j.jcis.2022.10.074",
+      "figureLocator": "Figure 5C",
+      "note": "The cropped panel label identifies [N4,4,4,4][DS] on Au(111)."
+    },
+    {
+      "curveIds": ["AFM-26-07-28-01-C002"],
+      "ionicLiquid": "[P4,4,4,4][AOT]",
+      "cation": "tetrabutylphosphonium",
+      "anion": "bis(2-ethylhexyl) sulfosuccinate",
+      "substrate": "Au(111)",
+      "pdfFile": "1.pdf",
+      "pdfPath": "external://paper-library/26-07-28/1.pdf",
+      "doi": "10.1016/j.jcis.2022.10.074",
+      "figureLocator": "Figure 5D",
+      "note": "The cropped panel label identifies [P4,4,4,4][AOT] on Au(111)."
+    },
+    {
+      "curveIds": ["AFM-26-07-28-01-C003"],
+      "ionicLiquid": "[N4,4,4,4][AOT]",
+      "cation": "tetrabutylammonium",
+      "anion": "bis(2-ethylhexyl) sulfosuccinate",
+      "substrate": "Au(111)",
+      "pdfFile": "1.pdf",
+      "pdfPath": "external://paper-library/26-07-28/1.pdf",
+      "doi": "10.1016/j.jcis.2022.10.074",
+      "figureLocator": "Figure 5E",
+      "note": "The cropped panel label identifies [N4,4,4,4][AOT] on Au(111)."
+    },
+    {
+      "curveIds": ["AFM-26-07-28-01-C004"],
+      "ionicLiquid": "[BMIM][AOT]",
+      "cation": "1-butyl-3-methylimidazolium",
+      "anion": "bis(2-ethylhexyl) sulfosuccinate",
+      "substrate": "Au(111)",
+      "pdfFile": "1.pdf",
+      "pdfPath": "external://paper-library/26-07-28/1.pdf",
+      "doi": "10.1016/j.jcis.2022.10.074",
+      "figureLocator": "Figure 5F",
+      "note": "The cropped panel label identifies [BMIM][AOT] on Au(111)."
+    },
+    {
+      "curveIds": ["AFM-26-07-28-01-C005"],
+      "ionicLiquid": "[P6,6,6,14][DS]",
+      "cation": "trihexyltetradecylphosphonium",
+      "anion": "dodecyl sulfate",
+      "substrate": "Au(111)",
+      "pdfFile": "1.pdf",
+      "pdfPath": "external://paper-library/26-07-28/1.pdf",
+      "doi": "10.1016/j.jcis.2022.10.074",
+      "figureLocator": "Figure 5A",
+      "note": "The cropped panel label identifies [P6,6,6,14][DS] on Au(111)."
+    },
+    {
+      "curveIds": ["AFM-26-07-28-01-C006"],
+      "ionicLiquid": "[P4,4,4,4][DS]",
+      "cation": "tetrabutylphosphonium",
+      "anion": "dodecyl sulfate",
+      "substrate": "Au(111)",
+      "pdfFile": "1.pdf",
+      "pdfPath": "external://paper-library/26-07-28/1.pdf",
+      "doi": "10.1016/j.jcis.2022.10.074",
+      "figureLocator": "Figure 5B",
+      "note": "The cropped panel label identifies [P4,4,4,4][DS] on Au(111)."
+    },
+    {
+      "curveIds": ["AFM-26-07-28-02-C001"],
+      "ionicLiquid": "[BMIM][BF4]",
+      "cation": "1-butyl-3-methylimidazolium",
+      "anion": "tetrafluoroborate",
+      "substrate": "Au(111)",
+      "pdfFile": "2.pdf",
+      "pdfPath": "external://paper-library/26-07-28/2.pdf",
+      "doi": "10.1016/j.coelec.2016.12.004",
+      "figureLocator": "Figure 3B",
+      "note": "The review figure caption identifies the [BMIM][BF4]/Au(111) force-distance curve."
+    },
+    {
+      "curveIds": ["AFM-26-07-28-02-C002"],
+      "ionicLiquid": "[OMIM][PF6]",
+      "cation": "1-octyl-3-methylimidazolium",
+      "anion": "hexafluorophosphate",
+      "substrate": "Au(111)",
+      "pdfFile": "2.pdf",
+      "pdfPath": "external://paper-library/26-07-28/2.pdf",
+      "doi": "10.1016/j.coelec.2016.12.004",
+      "figureLocator": "Figure 4C",
+      "note": "The review figure caption identifies the [OMIM][PF6]/Au(111) force-separation curve."
+    },
+    {
+      "curveIds": ["AFM-26-07-28-03-C001"],
+      "ionicLiquid": "EAN",
+      "cation": "ethylammonium",
+      "anion": "nitrate",
+      "substrate": "mica",
+      "pdfFile": "3.pdf",
+      "pdfPath": "external://paper-library/26-07-28/3.pdf",
+      "doi": "10.1002/admi.202202110",
+      "figureLocator": "Figure 1B",
+      "note": "Figure 1B identifies the representative EAN/mica force-distance curve."
+    },
+    {
+      "curveIds": ["AFM-26-07-28-06-C001", "AFM-26-07-28-06-C002", "AFM-26-07-28-06-C003", "AFM-26-07-28-06-C004", "AFM-26-07-28-06-C005", "AFM-26-07-28-06-C006"],
+      "ionicLiquid": "1-butylpyrrolidine/ZnCl2 (1:0.5) + 10 vol% toluene",
+      "cation": "mixed [ZnClx(1-butylpyrrolidine)y]+ complexes",
+      "anion": "mixed chlorozincate species",
+      "substrate": "Au(111)",
+      "pdfFile": "6.pdf",
+      "pdfPath": "external://paper-library/26-07-28/6.pdf",
+      "doi": "10.1039/c6dt04149c",
+      "figureLocator": "Figure 5A-F",
+      "note": "Figure 5 reports the multicomponent 1-butylpyrrolidine/ZnCl2/toluene electrolyte on Au(111); it is not represented as a single discrete ion pair."
+    },
+    {
+      "curveIds": ["AFM-26-07-28-09-C001", "AFM-26-07-28-09-C002", "AFM-26-07-28-09-C003", "AFM-26-07-28-09-C004", "AFM-26-07-28-09-C005", "AFM-26-07-28-09-C006", "AFM-26-07-28-09-C007", "AFM-26-07-28-09-C008", "AFM-26-07-28-09-C009", "AFM-26-07-28-09-C010", "AFM-26-07-28-09-C011", "AFM-26-07-28-09-C012", "AFM-26-07-28-09-C013", "AFM-26-07-28-09-C014", "AFM-26-07-28-09-C015"],
+      "ionicLiquid": "[EMIM][TfO]",
+      "cation": "1-ethyl-3-methylimidazolium",
+      "anion": "trifluoromethanesulfonate",
+      "substrate": "Au(111)",
+      "pdfFile": "9.pdf",
+      "pdfPath": "external://paper-library/26-07-28/9.pdf",
+      "doi": "10.1021/acs.jpcc.6b02549",
+      "figureLocator": "Figures 3-5",
+      "note": "Figures 3-5 identify [EMIM][TfO] with varying water content and electrode potential on Au(111)."
+    }
+  ],
+  "verifiedPaperProfiles": {
+    "10.1039/c0cp02846k": {
+      "paperFile": "c0cp02846k.pdf",
+      "substrate": "Au(111)",
+      "probeMaterial": "Si3N4",
+      "surfaceState": "Au(111) film on mica, H2-flame cleaned immediately before use",
+      "technique": "potential-controlled AFM contact-mode force profiling",
+      "instrument": "Digital Instruments Nanoscope IIIa Multimode AFM",
+      "scanRateHz": "0.1–0.5",
+      "scanSizeNm": "10–50",
+      "springConstantNPerM": 0.07,
+      "separationUnit": "nm",
+      "forceUnit": "nN",
+      "curveBranch": "approach",
+      "atmosphere": "sealed AFM fluid cell",
+      "methodLocator": "Experimental section, p. 6851",
+      "axisLocator": "Figure 7, p. 6854"
+    },
+    "10.1039/c3cp44163f": {
+      "paperFile": "c3cp44163f.pdf",
+      "substrate": "mica",
+      "probeMaterial": "Si3N4",
+      "surfaceState": "freshly cleaved mica basal plane",
+      "technique": "AFM contact-mode force profiling",
+      "instrument": "Asylum Research Cypher AFM",
+      "scanRateHz": null,
+      "scanSizeNm": "30–50",
+      "springConstantNPerM": 0.06,
+      "separationUnit": "nm",
+      "forceUnit": "nN",
+      "curveBranch": "approach",
+      "atmosphere": "ambient atmosphere inside a sealed AFM enclosure",
+      "waterContent": "<1 wt% for the presented data",
+      "methodLocator": "Experimental section, p. 3321",
+      "axisLocator": "Figure 1(a), p. 3322"
+    },
+    "10.1021/jp900815q": {
+      "paperFile": "jp900815q.pdf",
+      "substrate": "mica",
+      "probeMaterial": "Si3N4",
+      "surfaceState": "freshly cleaved mica basal plane",
+      "technique": "AFM contact-mode force profiling",
+      "instrument": "Digital Instruments Nanoscope III Multimode AFM",
+      "scanRateHz": 0.1,
+      "scanSizeNm": 20,
+      "springConstantNPerM": 0.07,
+      "separationUnit": "nm",
+      "forceUnit": "nN",
+      "curveBranch": "approach",
+      "methodLocator": "Materials and Methods",
+      "axisLocator": "Figures 1-4"
+    },
+    "10.1088/0953-8984/26/28/284115": {
+      "paperFile": "18.pdf",
+      "substrate": "HOPG",
+      "probeMaterial": "silicon",
+      "surfaceState": "freshly cleaved ZYB-grade HOPG working electrode",
+      "technique": "in situ potential-controlled contact-mode AFM force-distance profiling",
+      "instrument": "NanoScope IV and VIII Multimode AFMs with E vertical scanner",
+      "scanRateHz": 0.1,
+      "scanSizeNm": 30,
+      "springConstantNPerM": "1.5-2.0",
+      "separationUnit": "nm",
+      "forceUnit": "nN",
+      "curveBranch": "approach",
+      "waterContent": "<700 ppm for supplied [EMIM][TFSA]; used as received",
+      "methodLocator": "Experimental section, PDF pp. 4-6",
+      "axisLocator": "Figure 3, PDF p. 7"
+    }
+  },
+  "sourceOverrides": {
+    "AFM-26-07-28-05-C001": {
+      "pdfFile": "c0cp02846k.pdf",
+      "pdfPath": "external://paper-library/26-07-28/c0cp02846k.pdf",
+      "doi": "10.1039/c0cp02846k"
+    },
+    "AFM-26-07-28-05-C002": {
+      "pdfFile": "c0cp02846k.pdf",
+      "pdfPath": "external://paper-library/26-07-28/c0cp02846k.pdf",
+      "doi": "10.1039/c0cp02846k"
+    },
+    "AFM-26-07-28-05-C003": {
+      "pdfFile": "c0cp02846k.pdf",
+      "pdfPath": "external://paper-library/26-07-28/c0cp02846k.pdf",
+      "doi": "10.1039/c0cp02846k"
+    },
+    "AFM-26-07-27-06-Adsorbed-and-near-surface-structure-of-ionic-liquids-at-C001": {
+      "pdfFile": "c3cp44163f.pdf",
+      "pdfPath": "external://paper-library/26-07-27/c3cp44163f.pdf",
+      "doi": "10.1039/c3cp44163f"
+    }
+  },
+  "curveOverrides": {
+    "AFM-26-07-28-05-C001": {
+      "ionicLiquid": "[Py1,4][FAP]",
+      "cation": "1-butyl-1-methylpyrrolidinium",
+      "anion": "tris(pentafluoroethyl)trifluorophosphate",
+      "temperatureK": 294.15,
+      "potentialV": -0.2,
+      "potentialReference": "Pt quasi-reference",
+      "displayLabel": "[Py1,4][FAP] · OCP (−0.2 V vs Pt)",
+      "figure": "Figure 7a",
+      "layerRange": "C2:C6",
+      "layerPositionsNm": [
+        0.35,
+        1.3,
+        2.2,
+        3.1,
+        4
+      ],
+      "digitizationQuality": "partial",
+      "digitizationNote": "Workbook A:B contains only the lower-force portion of Figure 7a and omits the approximately 18–40 nN near-surface segment; retain for audit but exclude from modeling."
+    },
+    "AFM-26-07-28-05-C002": {
+      "ionicLiquid": "[Py1,4][FAP]",
+      "cation": "1-butyl-1-methylpyrrolidinium",
+      "anion": "tris(pentafluoroethyl)trifluorophosphate",
+      "temperatureK": 294.15,
+      "potentialV": -1,
+      "potentialReference": "Pt quasi-reference",
+      "displayLabel": "[Py1,4][FAP] · −1.0 V vs Pt",
+      "figure": "Figure 7b",
+      "layerRange": "F2:F7",
+      "layerPositionsNm": [
+        0.25,
+        1.2,
+        2.1,
+        3,
+        3.9,
+        4.8
+      ],
+      "digitizationQuality": "complete",
+      "digitizationNote": "Digitized force range and layer sequence agree with Figure 7b.",
+      "relatedElectrochemistry": [
+        {
+          "quantity": "capacitance",
+          "kind": "slow capacitive process relaxation strength (ΔC2)",
+          "value": 14.9,
+          "unit": "µF/cm²",
+          "electrodePotentialV": -1,
+          "potentialReference": "Pt quasi-reference",
+          "temperatureK": 303.15,
+          "relation": "same paper, ionic-liquid/electrode system and potential; separate EIS experiment",
+          "confidence": 0.8,
+          "figure": "Figure 6, digitized approximate value at −1.0 V"
+        }
+      ]
+    },
+    "AFM-26-07-28-05-C003": {
+      "ionicLiquid": "[Py1,4][FAP]",
+      "cation": "1-butyl-1-methylpyrrolidinium",
+      "anion": "tris(pentafluoroethyl)trifluorophosphate",
+      "temperatureK": 294.15,
+      "potentialV": -2,
+      "potentialReference": "Pt quasi-reference",
+      "displayLabel": "[Py1,4][FAP] · −2.0 V vs Pt",
+      "figure": "Figure 7c",
+      "layerRange": "I2:I9",
+      "layerPositionsNm": [
+        0.55,
+        1.4,
+        2.3,
+        3.2,
+        4.1,
+        5,
+        5.9,
+        6.8
+      ],
+      "digitizationQuality": "complete",
+      "digitizationNote": "Digitized force range and layer sequence agree with Figure 7c."
+    },
+    "AFM-26-07-27-06-Adsorbed-and-near-surface-structure-of-ionic-liquids-at-C001": {
+      "ionicLiquid": "EAN",
+      "cation": "ethylammonium",
+      "anion": "nitrate",
+      "temperatureK": 298.15,
+      "figure": "Figure 1(a)"
+    },
+    "AFM-26-07-27-15-C001": {
+      "ionicLiquid": "EAN",
+      "cation": "ethylammonium",
+      "anion": "nitrate",
+      "temperatureK": 287.15,
+      "figure": "Figure 1, 14 °C"
+    },
+    "AFM-26-07-27-15-C002": {
+      "ionicLiquid": "EAN",
+      "cation": "ethylammonium",
+      "anion": "nitrate",
+      "temperatureK": 289.15,
+      "figure": "Figure 1, 16 °C"
+    },
+    "AFM-26-07-27-15-C003": {
+      "ionicLiquid": "EAN",
+      "cation": "ethylammonium",
+      "anion": "nitrate",
+      "temperatureK": 291.15,
+      "figure": "Figure 1, 18 °C"
+    },
+    "AFM-26-07-27-15-C004": {
+      "ionicLiquid": "EAN",
+      "cation": "ethylammonium",
+      "anion": "nitrate",
+      "temperatureK": 293.15,
+      "figure": "Figure 1, 20 °C"
+    },
+    "AFM-26-07-27-15-C005": {
+      "ionicLiquid": "EAN",
+      "cation": "ethylammonium",
+      "anion": "nitrate",
+      "temperatureK": 303.15,
+      "figure": "Figure 1, 30 °C"
+    },
+    "AFM-26-07-27-15-C006": {
+      "ionicLiquid": "EtAN",
+      "cation": "ethanolammonium",
+      "anion": "nitrate",
+      "temperatureK": 294.15,
+      "figure": "Figure 2"
+    },
+    "AFM-26-07-27-15-C007": {
+      "ionicLiquid": "EAF",
+      "cation": "ethylammonium",
+      "anion": "formate",
+      "temperatureK": 294.15,
+      "figure": "Figure 3a"
+    },
+    "AFM-26-07-27-15-C008": {
+      "ionicLiquid": "PAF",
+      "cation": "propylammonium",
+      "anion": "formate",
+      "temperatureK": 294.15,
+      "figure": "Figure 3b"
+    },
+    "AFM-26-07-27-15-C009": {
+      "ionicLiquid": "EMAF",
+      "cation": "ethylmethylammonium",
+      "anion": "formate",
+      "temperatureK": 294.15,
+      "figure": "Figure 4a"
+    },
+    "AFM-26-07-27-15-C010": {
+      "ionicLiquid": "DMEAF",
+      "cation": "dimethylethylammonium",
+      "anion": "formate",
+      "temperatureK": 294.15,
+      "figure": "Figure 4b"
+    },
+    "legacy-027": {
+      "ionicLiquid": "[EMIM][TFSA]",
+      "cation": "1-ethyl-3-methylimidazolium",
+      "anion": "bis(trifluoromethanesulfonyl)amide",
+      "temperatureK": null,
+      "potentialV": 0,
+      "potentialReference": "Pt quasi-reference",
+      "displayLabel": "[EMIM][TFSA] · 0 V vs Pt · temperature not reported",
+      "figure": "Figure 3a",
+      "layerPositionsNm": [0.31, 1.2, 2.1],
+      "digitizationQuality": "complete",
+      "digitizationNote": "Figure 3a was isolated as a single panel and re-digitized at source-pixel density. Physical axes are calibrated to -1 to 9 nm and -4 to 10 nN; no legacy endpoint extrapolation is retained."
+    },
+    "legacy-028": {
+      "ionicLiquid": "[EMIM][TFSA]",
+      "cation": "1-ethyl-3-methylimidazolium",
+      "anion": "bis(trifluoromethanesulfonyl)amide",
+      "temperatureK": null,
+      "potentialV": -1,
+      "potentialReference": "Pt quasi-reference",
+      "displayLabel": "[EMIM][TFSA] · -1.0 V vs Pt · temperature not reported",
+      "figure": "Figure 3b",
+      "layerPositionsNm": [0.3, 0.85, 1.7, 2.6],
+      "digitizationQuality": "complete",
+      "digitizationNote": "Figure 3b was isolated as a single panel and re-digitized at source-pixel density. Physical axes are calibrated to -1 to 9 nm and -4 to 10 nN; disconnected solvation-force features are preserved."
+    },
+    "legacy-029": {
+      "ionicLiquid": "[EMIM][TFSA]",
+      "cation": "1-ethyl-3-methylimidazolium",
+      "anion": "bis(trifluoromethanesulfonyl)amide",
+      "temperatureK": null,
+      "potentialV": 1,
+      "potentialReference": "Pt quasi-reference",
+      "displayLabel": "[EMIM][TFSA] · +1.0 V vs Pt · temperature not reported",
+      "figure": "Figure 3c",
+      "layerPositionsNm": [0.48, 1.2, 2.0, 2.7],
+      "digitizationQuality": "complete",
+      "digitizationNote": "Figure 3c was isolated as a single panel and re-digitized at source-pixel density. Physical axes are calibrated to -1 to 9 nm and -4 to 10 nN; disconnected solvation-force features are preserved."
+    },
+    "legacy-030": {
+      "ionicLiquid": "[EMIM][TFSA]",
+      "cation": "1-ethyl-3-methylimidazolium",
+      "anion": "bis(trifluoromethanesulfonyl)amide",
+      "temperatureK": null,
+      "potentialV": -1.5,
+      "potentialReference": "Pt quasi-reference",
+      "displayLabel": "[EMIM][TFSA] · -1.5 V vs Pt · temperature not reported",
+      "figure": "Figure 3d",
+      "layerPositionsNm": [0.35, 1.1, 1.9, 2.7, 3.4],
+      "digitizationQuality": "complete",
+      "digitizationNote": "Figure 3d was isolated as a single panel and re-digitized at source-pixel density. Physical axes are calibrated to -1 to 9 nm and -4 to 10 nN; disconnected solvation-force features are preserved."
+    },
+    "legacy-031": {
+      "ionicLiquid": "[EMIM][TFSA]",
+      "cation": "1-ethyl-3-methylimidazolium",
+      "anion": "bis(trifluoromethanesulfonyl)amide",
+      "temperatureK": null,
+      "potentialV": 1.5,
+      "potentialReference": "Pt quasi-reference",
+      "displayLabel": "[EMIM][TFSA] · +1.5 V vs Pt · temperature not reported",
+      "figure": "Figure 3e",
+      "layerPositionsNm": [0.47, 1.2, 2.0, 2.8, 3.5],
+      "digitizationQuality": "complete",
+      "digitizationNote": "Figure 3e was isolated as a single panel and re-digitized at source-pixel density. Physical axes are calibrated to -1 to 9 nm and -4 to 10 nN; disconnected solvation-force features are preserved."
+    }
+  }
+}

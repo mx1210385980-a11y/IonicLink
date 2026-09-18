@@ -27,6 +27,7 @@ frontend/.vite/
 .eslintcache
 /.next/
 /.next-dev/
+/.next-dev-qa/
 /.next-build-verified-*/
 /out/
 next-env.d.ts
@@ -71,7 +72,9 @@ backend/temp_uploads/
 /Lubrication_sources/
 /reports/
 /outputs/
+/tmp/
 /data/wff-strategy-cache/
+/data/conductivity/electrode-backfill-preview.json
 /wff-strategy-cache-shard-*.tar.gz
 
 # Frontend local outputs

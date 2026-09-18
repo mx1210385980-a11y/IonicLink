@@ -1,0 +1,2059 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": "修改3.csv",
+  "scope": "Row-level provenance linking the old prediction-platform source CSV to the 61 retained representative AFM curves.",
+  "policy": {
+    "trustedFields": [
+      "ionicLiquid",
+      "potentialV",
+      "temperatureK",
+      "raw coordinate row mapping",
+      "replicate count"
+    ],
+    "unavailableFields": [
+      "substrate",
+      "probe",
+      "atmosphere",
+      "pressure",
+      "water content",
+      "scan rate",
+      "instrument",
+      "paper DOI",
+      "figure locator"
+    ],
+    "smiles": "Legacy/unverified only; do not use for RDKit descriptors or modeling until chemically validated."
+  },
+  "summary": {
+    "rawRows": 136,
+    "conditionGroups": 61,
+    "linkedRepresentativeCurves": 61,
+    "distinctIonicLiquids": 17,
+    "coordinateLengthMismatches": 0
+  },
+  "records": [
+    {
+      "curveId": "legacy-001",
+      "conditionKey": "[C2MIM][FAP]|-0.2|273",
+      "ionicLiquid": "[C2MIM][FAP]",
+      "potentialV": -0.2,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          2
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          43
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-002",
+      "conditionKey": "[C2MIM][FAP]|0|273",
+      "ionicLiquid": "[C2MIM][FAP]",
+      "potentialV": 0,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          3
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          35
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-003",
+      "conditionKey": "[C2MIM][FAP]|1.5|273",
+      "ionicLiquid": "[C2MIM][FAP]",
+      "potentialV": 1.5,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          4
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          44
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-004",
+      "conditionKey": "[C4MIM][FAP]|-1|273",
+      "ionicLiquid": "[C4MIM][FAP]",
+      "potentialV": -1,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          5
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          46
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-005",
+      "conditionKey": "[C4MIM][FAP]|0|273",
+      "ionicLiquid": "[C4MIM][FAP]",
+      "potentialV": 0,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          6
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          50
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-006",
+      "conditionKey": "[C4MIM][FAP]|1|273",
+      "ionicLiquid": "[C4MIM][FAP]",
+      "potentialV": 1,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          7
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          57
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-007",
+      "conditionKey": "[C6MIM][FAP]|-2|273",
+      "ionicLiquid": "[C6MIM][FAP]",
+      "potentialV": -2,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          8
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          61
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-008",
+      "conditionKey": "[C6MIM][FAP]|0|273",
+      "ionicLiquid": "[C6MIM][FAP]",
+      "potentialV": 0,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          9
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          47
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-009",
+      "conditionKey": "[C6MIM][FAP]|1.5|273",
+      "ionicLiquid": "[C6MIM][FAP]",
+      "potentialV": 1.5,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          10
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          53
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-010",
+      "conditionKey": "[BMIM][BF4]|-1.4|273",
+      "ionicLiquid": "[BMIM][BF4]",
+      "potentialV": -1.4,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          11
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          57
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[B-](F)(F)(F)F"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-011",
+      "conditionKey": "[BMIM][AOT]|1|298",
+      "ionicLiquid": "[BMIM][AOT]",
+      "potentialV": 1,
+      "temperatureK": 298,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          12
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          45
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "CCCCCCCC(=O)O[S](=O)(=O)OCCCCCCCC"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-012",
+      "conditionKey": "[Dema][TfO]|-1.5|273",
+      "ionicLiquid": "[Dema][TfO]",
+      "potentialV": -1.5,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          13
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          32
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[N+](C)(CC)CC"
+        ],
+        "anionCandidates": [
+          "C(F)(F)S(=O)(=O)[O-]"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-013",
+      "conditionKey": "[Dema][TfO]|0.5|273",
+      "ionicLiquid": "[Dema][TfO]",
+      "potentialV": 0.5,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          14
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          38
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[N+](C)(CC)CC"
+        ],
+        "anionCandidates": [
+          "C(F)(F)S(=O)(=O)[O-]"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-014",
+      "conditionKey": "[Dema][TfO]|2|273",
+      "ionicLiquid": "[Dema][TfO]",
+      "potentialV": 2,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          15
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          39
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[N+](C)(CC)CC"
+        ],
+        "anionCandidates": [
+          "C(F)(F)S(=O)(=O)[O-]"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-015",
+      "conditionKey": "[HMIM][FAP]|0|273",
+      "ionicLiquid": "[HMIM][FAP]",
+      "potentialV": 0,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          16,
+          19,
+          68,
+          69,
+          70,
+          71,
+          91,
+          92,
+          93,
+          94,
+          102,
+          103,
+          104,
+          105
+        ],
+        "replicateCount": 14
+      },
+      "rawCurves": {
+        "pointCounts": [
+          54,
+          47,
+          48,
+          41,
+          45,
+          47,
+          68,
+          56,
+          52,
+          52,
+          51,
+          49,
+          57,
+          67
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCCCCn1c[n+](c2ccccc2)c1C",
+          "CCCCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Conflicting SMILES occur within this condition group; chemical identity review is required."
+      }
+    },
+    {
+      "curveId": "legacy-016",
+      "conditionKey": "[C4C1Im][BF4]|2|273",
+      "ionicLiquid": "[C4C1Im][BF4]",
+      "potentialV": 2,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          17
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          50
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[B-](F)(F)(F)F"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-017",
+      "conditionKey": "[C4C1Im][BF4]|-2|273",
+      "ionicLiquid": "[C4C1Im][BF4]",
+      "potentialV": -2,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          18
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          43
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[B-](F)(F)(F)F"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-018",
+      "conditionKey": "[HMIM][FAP]|-1|273",
+      "ionicLiquid": "[HMIM][FAP]",
+      "potentialV": -1,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          20,
+          63,
+          64,
+          65,
+          66,
+          67,
+          89,
+          90,
+          98,
+          99,
+          100,
+          101
+        ],
+        "replicateCount": 12
+      },
+      "rawCurves": {
+        "pointCounts": [
+          50,
+          49,
+          43,
+          50,
+          50,
+          56,
+          77,
+          88,
+          60,
+          47,
+          50,
+          63
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-019",
+      "conditionKey": "[HMIM][FAP]|1|273",
+      "ionicLiquid": "[HMIM][FAP]",
+      "potentialV": 1,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          21,
+          72,
+          73,
+          74,
+          75,
+          95,
+          96,
+          97,
+          106,
+          107,
+          108,
+          109
+        ],
+        "replicateCount": 12
+      },
+      "rawCurves": {
+        "pointCounts": [
+          56,
+          50,
+          53,
+          51,
+          60,
+          48,
+          55,
+          66,
+          50,
+          57,
+          75,
+          61
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-020",
+      "conditionKey": "[HMIM][FAP]|-1.5|273",
+      "ionicLiquid": "[HMIM][FAP]",
+      "potentialV": -1.5,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          22
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          63
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-021",
+      "conditionKey": "[HMIM][FAP]|1.5|273",
+      "ionicLiquid": "[HMIM][FAP]",
+      "potentialV": 1.5,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          23
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          61
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-022",
+      "conditionKey": "[EMIM][FAP]|0|273",
+      "ionicLiquid": "[EMIM][FAP]",
+      "potentialV": 0,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          24,
+          34,
+          46
+        ],
+        "replicateCount": 3
+      },
+      "rawCurves": {
+        "pointCounts": [
+          80,
+          96,
+          58
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-023",
+      "conditionKey": "[EMIM][FAP]|-1|273",
+      "ionicLiquid": "[EMIM][FAP]",
+      "potentialV": -1,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          25,
+          35,
+          47
+        ],
+        "replicateCount": 3
+      },
+      "rawCurves": {
+        "pointCounts": [
+          68,
+          116,
+          49
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-024",
+      "conditionKey": "[EMIM][FAP]|1|273",
+      "ionicLiquid": "[EMIM][FAP]",
+      "potentialV": 1,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          26,
+          48
+        ],
+        "replicateCount": 2
+      },
+      "rawCurves": {
+        "pointCounts": [
+          57,
+          60
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-025",
+      "conditionKey": "[EMIM][FAP]|-1.5|273",
+      "ionicLiquid": "[EMIM][FAP]",
+      "potentialV": -1.5,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          27
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          65
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-026",
+      "conditionKey": "[EMIM][FAP]|1.5|273",
+      "ionicLiquid": "[EMIM][FAP]",
+      "potentialV": 1.5,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          28,
+          50
+        ],
+        "replicateCount": 2
+      },
+      "rawCurves": {
+        "pointCounts": [
+          61,
+          63
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-027",
+      "conditionKey": "[EMIM][TFSA]|0|273",
+      "ionicLiquid": "[EMIM][TFSA]",
+      "potentialV": 0,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          29
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          65
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[S-](=O)(=O)N(S(=O)(=O)C(F)(F)F)C(F)(F)F"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-028",
+      "conditionKey": "[EMIM][TFSA]|-1|273",
+      "ionicLiquid": "[EMIM][TFSA]",
+      "potentialV": -1,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          30
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          59
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[S-](=O)(=O)N(S(=O)(=O)C(F)(F)F)C(F)(F)F"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-029",
+      "conditionKey": "[EMIM][TFSA]|1|273",
+      "ionicLiquid": "[EMIM][TFSA]",
+      "potentialV": 1,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          31
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          60
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[S-](=O)(=O)N(S(=O)(=O)C(F)(F)F)C(F)(F)F"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-030",
+      "conditionKey": "[EMIM][TFSA]|-1.5|273",
+      "ionicLiquid": "[EMIM][TFSA]",
+      "potentialV": -1.5,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          32
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          59
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[S-](=O)(=O)N(S(=O)(=O)C(F)(F)F)C(F)(F)F"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-031",
+      "conditionKey": "[EMIM][TFSA]|1.5|273",
+      "ionicLiquid": "[EMIM][TFSA]",
+      "potentialV": 1.5,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          33
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          55
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[S-](=O)(=O)N(S(=O)(=O)C(F)(F)F)C(F)(F)F"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-032",
+      "conditionKey": "[HMIM][FAP]|-0.11|294",
+      "ionicLiquid": "[HMIM][FAP]",
+      "potentialV": -0.11,
+      "temperatureK": 294,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          36
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          87
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-033",
+      "conditionKey": "[HMIM][FAP]|-1|294",
+      "ionicLiquid": "[HMIM][FAP]",
+      "potentialV": -1,
+      "temperatureK": 294,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          37
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          89
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-034",
+      "conditionKey": "[HMIM][FAP]|1|294",
+      "ionicLiquid": "[HMIM][FAP]",
+      "potentialV": 1,
+      "temperatureK": 294,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          38
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          90
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-035",
+      "conditionKey": "[HMIM][FAP]|-2|294",
+      "ionicLiquid": "[HMIM][FAP]",
+      "potentialV": -2,
+      "temperatureK": 294,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          39
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          91
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-036",
+      "conditionKey": "[HMIM][FAP]|2|294",
+      "ionicLiquid": "[HMIM][FAP]",
+      "potentialV": 2,
+      "temperatureK": 294,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          40
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          93
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-037",
+      "conditionKey": "[BMIM][FAP]|0|273",
+      "ionicLiquid": "[BMIM][FAP]",
+      "potentialV": 0,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          41,
+          126,
+          127,
+          128,
+          129
+        ],
+        "replicateCount": 5
+      },
+      "rawCurves": {
+        "pointCounts": [
+          65,
+          57,
+          66,
+          57,
+          45
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-038",
+      "conditionKey": "[BMIM][FAP]|-0.5|273",
+      "ionicLiquid": "[BMIM][FAP]",
+      "potentialV": -0.5,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          42
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          47
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-039",
+      "conditionKey": "[BMIM][FAP]|0.5|273",
+      "ionicLiquid": "[BMIM][FAP]",
+      "potentialV": 0.5,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          43
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          65
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-040",
+      "conditionKey": "[BMIM][FAP]|-1|273",
+      "ionicLiquid": "[BMIM][FAP]",
+      "potentialV": -1,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          44,
+          122,
+          123,
+          124,
+          125,
+          130,
+          131,
+          132,
+          133
+        ],
+        "replicateCount": 9
+      },
+      "rawCurves": {
+        "pointCounts": [
+          51,
+          53,
+          49,
+          55,
+          62,
+          57,
+          59,
+          50,
+          76
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-041",
+      "conditionKey": "[BMIM][FAP]|1|273",
+      "ionicLiquid": "[BMIM][FAP]",
+      "potentialV": 1,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          45
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          47
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-042",
+      "conditionKey": "[EMIM][FAP]|-2|273",
+      "ionicLiquid": "[EMIM][FAP]",
+      "potentialV": -2,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          49
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          55
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-043",
+      "conditionKey": "[BMIM][I]|-0.5|273",
+      "ionicLiquid": "[BMIM][I]",
+      "potentialV": -0.5,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          51
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          74
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-044",
+      "conditionKey": "[BMIM][I]|0|273",
+      "ionicLiquid": "[BMIM][I]",
+      "potentialV": 0,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          52
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          77
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-045",
+      "conditionKey": "[BMIM][I]|-1|273",
+      "ionicLiquid": "[BMIM][I]",
+      "potentialV": -1,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          53
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          72
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-046",
+      "conditionKey": "[BMIM][I]|0.5|273",
+      "ionicLiquid": "[BMIM][I]",
+      "potentialV": 0.5,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          54
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          63
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-047",
+      "conditionKey": "[EMIM][I]|0|273",
+      "ionicLiquid": "[EMIM][I]",
+      "potentialV": 0,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          55
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          53
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-048",
+      "conditionKey": "[EMIM][I]|-1|273",
+      "ionicLiquid": "[EMIM][I]",
+      "potentialV": -1,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          56
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          50
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-049",
+      "conditionKey": "[EMIM][I]|1|273",
+      "ionicLiquid": "[EMIM][I]",
+      "potentialV": 1,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          57
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          66
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-050",
+      "conditionKey": "[EMIM][I]|-2|273",
+      "ionicLiquid": "[EMIM][I]",
+      "potentialV": -2,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          58
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          54
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-051",
+      "conditionKey": "[EMIM][I]|1.5|273",
+      "ionicLiquid": "[EMIM][I]",
+      "potentialV": 1.5,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          59
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          61
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-052",
+      "conditionKey": "[EMIM][Tf2N]|0|273",
+      "ionicLiquid": "[EMIM][Tf2N]",
+      "potentialV": 0,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          60
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          77
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[S-](=O)(=O)N(S(=O)(=O)C(F)(F)F)C(F)(F)F"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-053",
+      "conditionKey": "[EMIM][Tf2N]|1|273",
+      "ionicLiquid": "[EMIM][Tf2N]",
+      "potentialV": 1,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          61
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          55
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[S-](=O)(=O)N(S(=O)(=O)C(F)(F)F)C(F)(F)F"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-054",
+      "conditionKey": "[EMIM][AlCl4]|0|273",
+      "ionicLiquid": "[EMIM][AlCl4]",
+      "potentialV": 0,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          62
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          97
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[Al-](Cl)(Cl)(Cl)Cl"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-055",
+      "conditionKey": "[HMIM][TFSI]|-1|273",
+      "ionicLiquid": "[HMIM][TFSI]",
+      "potentialV": -1,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          76,
+          77,
+          78,
+          79,
+          88,
+          110,
+          111,
+          112,
+          113
+        ],
+        "replicateCount": 9
+      },
+      "rawCurves": {
+        "pointCounts": [
+          59,
+          56,
+          62,
+          64,
+          54,
+          61,
+          60,
+          65,
+          65
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[S-](=O)(=O)N(S(=O)(=O)C(F)(F)F)C(F)(F)F"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-056",
+      "conditionKey": "[HMIM][TFSI]|0|273",
+      "ionicLiquid": "[HMIM][TFSI]",
+      "potentialV": 0,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          80,
+          81,
+          82,
+          83,
+          114,
+          115,
+          116,
+          117
+        ],
+        "replicateCount": 8
+      },
+      "rawCurves": {
+        "pointCounts": [
+          55,
+          57,
+          51,
+          73,
+          65,
+          71,
+          59,
+          50
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[S-](=O)(=O)N(S(=O)(=O)C(F)(F)F)C(F)(F)F"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-057",
+      "conditionKey": "[HMIM][TFSI]|1|273",
+      "ionicLiquid": "[HMIM][TFSI]",
+      "potentialV": 1,
+      "temperatureK": 273,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          84,
+          85,
+          86,
+          87,
+          118,
+          119,
+          120,
+          121
+        ],
+        "replicateCount": 8
+      },
+      "rawCurves": {
+        "pointCounts": [
+          61,
+          69,
+          63,
+          65,
+          52,
+          63,
+          58,
+          70
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[S-](=O)(=O)N(S(=O)(=O)C(F)(F)F)C(F)(F)F"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-058",
+      "conditionKey": "[HMIM][FAP]|0|298",
+      "ionicLiquid": "[HMIM][FAP]",
+      "potentialV": 0,
+      "temperatureK": 298,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          134
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          33
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[P-](=O)(F)(F)(F)(F)(F)"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-059",
+      "conditionKey": "[BMIM][TFSI]|0|298",
+      "ionicLiquid": "[BMIM][TFSI]",
+      "potentialV": 0,
+      "temperatureK": 298,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          135
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          33
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[S-](=O)(=O)N(S(=O)(=O)C(F)(F)F)C(F)(F)F"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-060",
+      "conditionKey": "[BMIM][TFSI]|-1|298",
+      "ionicLiquid": "[BMIM][TFSI]",
+      "potentialV": -1,
+      "temperatureK": 298,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          136
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          34
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[S-](=O)(=O)N(S(=O)(=O)C(F)(F)F)C(F)(F)F"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    },
+    {
+      "curveId": "legacy-061",
+      "conditionKey": "[BMIM][TFSI]|1|298",
+      "ionicLiquid": "[BMIM][TFSI]",
+      "potentialV": 1,
+      "temperatureK": 298,
+      "sourceCsv": {
+        "file": "修改3.csv",
+        "path": "external://legacy-afm-platform/修改3.csv",
+        "rows": [
+          137
+        ],
+        "replicateCount": 1
+      },
+      "rawCurves": {
+        "pointCounts": [
+          36
+        ],
+        "allCoordinateLengthsMatch": true
+      },
+      "legacySmiles": {
+        "cationCandidates": [
+          "CCCC[n+]1c[nH]c2ccccc12"
+        ],
+        "anionCandidates": [
+          "[S-](=O)(=O)N(S(=O)(=O)C(F)(F)F)C(F)(F)F"
+        ],
+        "status": "legacy-unverified",
+        "warning": "Copied for audit only; chemical identity must be validated before descriptors or modeling."
+      }
+    }
+  ]
+}

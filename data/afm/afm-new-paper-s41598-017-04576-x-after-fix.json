@@ -1,0 +1,676 @@
+{
+  "generatedAt": "2026-09-15T01:33:40.906Z",
+  "root": "C:\\Users\\Administrator\\Documents\\Codex\\2026-08-13\\new-chat\\tmp\\pdfs\\afm-blind-s41598-017-04576-x",
+  "selection": "top textual AFM signal, SHA-256 deduplicated",
+  "summary": {
+    "uniqueReadablePdfs": 1,
+    "afmSignalPositivePdfs": 1,
+    "evaluated": 1,
+    "detectedPdfs": 1,
+    "rejectedOrFailedPdfs": 0,
+    "candidateCurves": 7,
+    "autoCalibratedPdfs": 1,
+    "relativeOnlyPdfs": 0,
+    "nonBlueCandidates": 6
+  },
+  "records": [
+    {
+      "relativePath": "insight-edl-ionic-liquid-graphene.pdf",
+      "title": "1SCIENTIFIC RepoRts | 7: 4225 | DOI:10.1038/s41598-017-04576-x",
+      "doi": "10.1038/s41598-017-04576-x",
+      "pageCount": 12,
+      "textualAfmSignal": 73,
+      "signalPages": [
+        2,
+        5,
+        3,
+        9,
+        4,
+        10,
+        8,
+        11,
+        6,
+        1,
+        7
+      ],
+      "httpStatus": 200,
+      "detected": true,
+      "error": null,
+      "matchedPaper": {
+        "doi": "10.1038/s41598-017-04576-x",
+        "curveIds": []
+      },
+      "axisCalibration": {
+        "status": "auto-calibrated",
+        "axes": {
+          "xMin": -1.34375,
+          "xMax": 6.09375,
+          "yMin": -1.131707,
+          "yMax": 2.156098,
+          "xUnit": "nm",
+          "yUnit": "nN"
+        },
+        "confidence": 0.88,
+        "method": "figure-axis-ocr",
+        "evidence": [
+          "Positioned OCR resolved 7 horizontal and 7 vertical tick label(s).",
+          "Axis labels identify Separation (nm) and Force (nN)."
+        ]
+      },
+      "experimentalMetadata": {
+        "ionicLiquids": [
+          {
+            "value": "[EMIM][TFSI]",
+            "unit": null,
+            "status": "extracted",
+            "confidence": 0.97,
+            "evidence": "this work, we have scrutinized the electrical double layer of 1-ethyl-3-methylimidazolium bis(trifluoromethylsulfonyl)imide (abbreviated as [EMIM][TFSI]) at the graphene plane, for single- and few-layer graphene by probing normal surface forces by atomic force microscopy under applied positive and negative potentials."
+          }
+        ],
+        "substrates": [
+          {
+            "value": "bilayer graphene",
+            "unit": null,
+            "status": "extracted",
+            "confidence": 0.92,
+            "evidence": "Figure 1(A-C) shows bivariate histograms of force-separation curves in [EMIM][TFSI] collected on silica-supported single-layer and bilayer graphene sheets, as well as on the underlying silica support, all measured with a silicon tip;"
+          },
+          {
+            "value": "few-layer graphene",
+            "unit": null,
+            "status": "extracted",
+            "confidence": 0.92,
+            "evidence": "layer of 1-ethyl-3-methylimidazolium bis(trifluoromethylsulfonyl)imide (abbreviated as [EMIM][TFSI]) at the graphene plane, for single- and few-layer graphene by probing normal surface forces by atomic force microscopy under applied positive and negative potentials."
+          },
+          {
+            "value": "multi-layer graphene",
+            "unit": null,
+            "status": "extracted",
+            "confidence": 0.92,
+            "evidence": "multi-layer graphene"
+          },
+          {
+            "value": "gold",
+            "unit": null,
+            "status": "extracted",
+            "confidence": 0.92,
+            "evidence": "Results A 90 nm thick silicon dioxide layer -that we refer as silica substrate- and a working electrode composed of a 9 nm thick gold layer thermally evaporated on the silica substrate were chosen as substrates for mechanically exfoli- ated graphene."
+          },
+          {
+            "value": "SiO2",
+            "unit": null,
+            "status": "extracted",
+            "confidence": 0.92,
+            "evidence": "Results A 90 nm thick silicon dioxide layer -that we refer as silica substrate- and a working electrode composed of a 9 nm thick gold layer thermally evaporated on the silica substrate were chosen as substrates for mechanically exfoli- ated graphene."
+          },
+          {
+            "value": "HOPG",
+            "unit": null,
+            "status": "extracted",
+            "confidence": 0.92,
+            "evidence": "We note that the attractive surface forces between the tip and graphene are consistent with reported measurements on HOPG for the same IL21."
+          }
+        ],
+        "probe": {
+          "material": {
+            "value": "silicon",
+            "unit": null,
+            "status": "extracted",
+            "confidence": 0.96,
+            "evidence": "es in [EMIM][TFSI] collected on silica-supported single-layer and bilayer graphene sheets, as well as on the underlying silica support, all measured with a silicon tip;"
+          },
+          "tipRadius": {
+            "value": 35,
+            "unit": "nm",
+            "status": "extracted",
+            "confidence": 0.94,
+            "evidence": "tip with radius = 35 nm"
+          },
+          "cantileverSpringConstant": {
+            "value": 0.3507,
+            "unit": "N/m",
+            "status": "extracted",
+            "confidence": 0.94,
+            "evidence": "Spring constant of cantilever = 0.3507 N/m"
+          }
+        },
+        "acquisition": {
+          "approachSpeed": {
+            "value": 10,
+            "unit": "nm/s",
+            "status": "extracted",
+            "confidence": 0.94,
+            "evidence": "constant approach speed of 10 nm/s"
+          },
+          "technique": {
+            "value": "atomic force microscopy",
+            "unit": null,
+            "status": "extracted",
+            "confidence": 0.99,
+            "evidence": "hylimidazolium bis(trifluoromethylsulfonyl)imide (abbreviated as [EMIM][TFSI]) at the graphene plane, for single- and few-layer graphene by probing normal surface forces by atomic force microscopy under applied positive and negative potentials."
+          }
+        },
+        "externalFactors": {
+          "temperature": {
+            "value": null,
+            "unit": null,
+            "status": "not-reported",
+            "confidence": 0,
+            "evidence": "Measurement temperature was not reported explicitly."
+          },
+          "atmosphere": {
+            "value": "air",
+            "unit": null,
+            "status": "extracted",
+            "confidence": 0.86,
+            "evidence": "Following imaging in air, the AFM tip was changed to a contact mode tip, and graphene samples and tip were immersed in vacuum-dry [EMIM][TFSI] and the IL was allowed to equilibrate for 40 minutes prior to force me"
+          },
+          "waterContent": {
+            "value": null,
+            "unit": null,
+            "status": "not-reported",
+            "confidence": 0,
+            "evidence": "Water content was not reported explicitly."
+          }
+        }
+      },
+      "candidates": [
+        {
+          "id": "page-2-grid-1x3-1-3",
+          "page": 2,
+          "pageLabel": "PDF page 2 · detected panel C",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.6763880391616662,
+            "right": 0.9317317731606852,
+            "top": 0.059435168630378246,
+            "bottom": 0.23106926205516115
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "C",
+            "row": 0,
+            "column": 2,
+            "rows": 1,
+            "columns": 3,
+            "suggestedLabel": "[EMIM][TFSI] · SiO2",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[EMIM][TFSI]",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.94,
+                "evidence": "The article identifies [EMIM][TFSI] as the liquid used for Figure 1."
+              },
+              "substrate": {
+                "value": "SiO2",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.93,
+                "evidence": "Figure 1 caption maps panel C to SiO2."
+              },
+              "electrodePotential": {
+                "value": null,
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0,
+                "evidence": "No applied potential was assigned to this panel; do not infer zero volts from absence."
+              }
+            }
+          },
+          "pointCount": 408,
+          "segmentCount": 3,
+          "traceColor": "#faca7e",
+          "confidence": 0.9838,
+          "axisConfidence": 0.9905,
+          "traceConfidence": 0.9789,
+          "coverage": 0.7875,
+          "quality": "high",
+          "warnings": [
+            "A bivariate density plot was identified; the exported centreline follows the caption-defined high-density ridge, not the low-density envelope."
+          ],
+          "traceMode": "density-ridge",
+          "axisCalibration": {
+            "status": "auto-calibrated",
+            "axes": {
+              "xMin": -1.34375,
+              "xMax": 6.09375,
+              "yMin": -1.131707,
+              "yMax": 2.156098,
+              "xUnit": "nm",
+              "yUnit": "nN"
+            },
+            "confidence": 0.88,
+            "method": "figure-axis-ocr",
+            "evidence": [
+              "Positioned OCR resolved 7 horizontal and 7 vertical tick label(s).",
+              "Axis labels identify Separation (nm) and Force (nN)."
+            ]
+          }
+        },
+        {
+          "id": "page-2-grid-1x3-1-2",
+          "page": 2,
+          "pageLabel": "PDF page 2 · detected panel B",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.42104430516264724,
+            "right": 0.6763880391616662,
+            "top": 0.059435168630378246,
+            "bottom": 0.23106926205516115
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "B",
+            "row": 0,
+            "column": 1,
+            "rows": 1,
+            "columns": 3,
+            "suggestedLabel": "[EMIM][TFSI] · bilayer graphene",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[EMIM][TFSI]",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.94,
+                "evidence": "The article identifies [EMIM][TFSI] as the liquid used for Figure 1."
+              },
+              "substrate": {
+                "value": "bilayer graphene",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.93,
+                "evidence": "Figure 1 caption maps panel B to bilayer graphene."
+              },
+              "electrodePotential": {
+                "value": null,
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0,
+                "evidence": "No applied potential was assigned to this panel; do not infer zero volts from absence."
+              }
+            }
+          },
+          "pointCount": 327,
+          "segmentCount": 5,
+          "traceColor": "#fac578",
+          "confidence": 0.9623,
+          "axisConfidence": 0.9939,
+          "traceConfidence": 0.9393,
+          "coverage": 0.55,
+          "quality": "high",
+          "warnings": [
+            "A bivariate density plot was identified; the exported centreline follows the caption-defined high-density ridge, not the low-density envelope."
+          ],
+          "traceMode": "density-ridge",
+          "axisCalibration": {
+            "status": "auto-calibrated",
+            "axes": {
+              "xMin": -1.34375,
+              "xMax": 6.09375,
+              "yMin": -1.131707,
+              "yMax": 2.156098,
+              "xUnit": "nm",
+              "yUnit": "nN"
+            },
+            "confidence": 0.84,
+            "method": "figure-axis-ocr",
+            "evidence": [
+              "Positioned OCR resolved 7 horizontal and 7 vertical tick label(s).",
+              "Axis labels identify Separation (nm) and Force (nN).",
+              "Inherited across an explicitly shared single-row panel axis."
+            ]
+          }
+        },
+        {
+          "id": "page-2-grid-1x3-1-1",
+          "page": 2,
+          "pageLabel": "PDF page 2 · detected panel A",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.16570057116362832,
+            "right": 0.42104430516264724,
+            "top": 0.059435168630378246,
+            "bottom": 0.23106926205516115
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "A",
+            "row": 0,
+            "column": 0,
+            "rows": 1,
+            "columns": 3,
+            "suggestedLabel": "[EMIM][TFSI] · single-layer graphene on SiO2",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[EMIM][TFSI]",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.94,
+                "evidence": "The article identifies [EMIM][TFSI] as the liquid used for Figure 1."
+              },
+              "substrate": {
+                "value": "single-layer graphene on SiO2",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.93,
+                "evidence": "Figure 1 caption maps panel A to single-layer graphene on SiO2."
+              },
+              "electrodePotential": {
+                "value": null,
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0,
+                "evidence": "No applied potential was assigned to this panel; do not infer zero volts from absence."
+              }
+            }
+          },
+          "pointCount": 344,
+          "segmentCount": 5,
+          "traceColor": "#fac478",
+          "confidence": 0.9588,
+          "axisConfidence": 1,
+          "traceConfidence": 0.9289,
+          "coverage": 0.5333,
+          "quality": "high",
+          "warnings": [
+            "A bivariate density plot was identified; the exported centreline follows the caption-defined high-density ridge, not the low-density envelope."
+          ],
+          "traceMode": "density-ridge",
+          "axisCalibration": {
+            "status": "auto-calibrated",
+            "axes": {
+              "xMin": -1.34375,
+              "xMax": 6.09375,
+              "yMin": -1.131707,
+              "yMax": 2.156098,
+              "xUnit": "nm",
+              "yUnit": "nN"
+            },
+            "confidence": 0.84,
+            "method": "figure-axis-ocr",
+            "evidence": [
+              "Positioned OCR resolved 7 horizontal and 7 vertical tick label(s).",
+              "Axis labels identify Separation (nm) and Force (nN).",
+              "Inherited across an explicitly shared single-row panel axis."
+            ]
+          }
+        },
+        {
+          "id": "page-3-grid-2x2-1-2",
+          "page": 3,
+          "pageLabel": "PDF page 3 · detected panel B",
+          "figureLabel": "2",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.5940740027315061,
+            "right": 0.9266928140895989,
+            "top": 0.059435168630378246,
+            "bottom": 0.30216167924822523
+          },
+          "panel": {
+            "figureLabel": "2",
+            "label": "B",
+            "row": 0,
+            "column": 1,
+            "rows": 2,
+            "columns": 2,
+            "suggestedLabel": "[EMIM][TFSI] · gold-supported bilayer graphene · positive potential",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[EMIM][TFSI]",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.94,
+                "evidence": "The article identifies [EMIM][TFSI] as the liquid used for Figure 2."
+              },
+              "substrate": {
+                "value": "gold-supported bilayer graphene",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.93,
+                "evidence": "Figure 2 caption maps panel B to gold-supported bilayer graphene."
+              },
+              "electrodePotential": {
+                "value": null,
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.62,
+                "evidence": "Figure 2 assigns panel B to a positive potential, but the numeric voltage is not stated in the caption."
+              }
+            }
+          },
+          "pointCount": 306,
+          "segmentCount": 3,
+          "traceColor": "#5582bf",
+          "confidence": 0.9119,
+          "axisConfidence": 0.953,
+          "traceConfidence": 0.8821,
+          "coverage": 0.9,
+          "quality": "high",
+          "warnings": [
+            "Coloured labels or arrows may be mixed with the extracted trace.",
+            "Physical axis values and units are resolved from the paper before export; unresolved axes keep the result out of the dataset."
+          ],
+          "traceMode": "line-centreline",
+          "axisCalibration": {
+            "status": "relative-only",
+            "axes": null,
+            "confidence": 0,
+            "method": "relative-pixel-fallback",
+            "evidence": [
+              "OCR did not resolve vertical tick endpoints."
+            ]
+          }
+        },
+        {
+          "id": "page-3-grid-2x2-2-2",
+          "page": 3,
+          "pageLabel": "PDF page 3 · detected panel D",
+          "figureLabel": "2",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.5940740027315061,
+            "right": 0.9266928140895989,
+            "top": 0.30216167924822523,
+            "bottom": 0.5448881898660722
+          },
+          "panel": {
+            "figureLabel": "2",
+            "label": "D",
+            "row": 1,
+            "column": 1,
+            "rows": 2,
+            "columns": 2,
+            "suggestedLabel": "[EMIM][TFSI] · gold · positive potential",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[EMIM][TFSI]",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.94,
+                "evidence": "The article identifies [EMIM][TFSI] as the liquid used for Figure 2."
+              },
+              "substrate": {
+                "value": "gold",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.93,
+                "evidence": "Figure 2 caption maps panel D to gold."
+              },
+              "electrodePotential": {
+                "value": null,
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.62,
+                "evidence": "Figure 2 assigns panel D to a positive potential, but the numeric voltage is not stated in the caption."
+              }
+            }
+          },
+          "pointCount": 380,
+          "segmentCount": 3,
+          "traceColor": "#e24941",
+          "confidence": 0.7405,
+          "axisConfidence": 0.6342,
+          "traceConfidence": 0.8175,
+          "coverage": 0.9,
+          "quality": "medium",
+          "warnings": [],
+          "traceMode": "line-centreline",
+          "axisCalibration": {
+            "status": "auto-calibrated",
+            "axes": {
+              "xMin": -0.343533,
+              "xMax": 5.827538,
+              "yMin": -0.505573,
+              "yMax": 4.800159,
+              "xUnit": "nm",
+              "yUnit": "nN"
+            },
+            "confidence": 0.795,
+            "method": "figure-axis-ocr",
+            "evidence": [
+              "Positioned OCR resolved 3 horizontal and 2 vertical tick label(s).",
+              "Axis labels identify Separation (nm) and Force (nN)."
+            ]
+          }
+        },
+        {
+          "id": "page-3-grid-2x2-1-1",
+          "page": 3,
+          "pageLabel": "PDF page 3 · detected panel A",
+          "figureLabel": "2",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.2614551913734134,
+            "right": 0.5940740027315061,
+            "top": 0.059435168630378246,
+            "bottom": 0.30216167924822523
+          },
+          "panel": {
+            "figureLabel": "2",
+            "label": "A",
+            "row": 0,
+            "column": 0,
+            "rows": 2,
+            "columns": 2,
+            "suggestedLabel": "[EMIM][TFSI] · gold-supported bilayer graphene · negative potential",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[EMIM][TFSI]",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.94,
+                "evidence": "The article identifies [EMIM][TFSI] as the liquid used for Figure 2."
+              },
+              "substrate": {
+                "value": "gold-supported bilayer graphene",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.93,
+                "evidence": "Figure 2 caption maps panel A to gold-supported bilayer graphene."
+              },
+              "electrodePotential": {
+                "value": null,
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.62,
+                "evidence": "Figure 2 assigns panel A to a negative potential, but the numeric voltage is not stated in the caption."
+              }
+            }
+          },
+          "pointCount": 221,
+          "segmentCount": 8,
+          "traceColor": "#38932a",
+          "confidence": 0.8862,
+          "axisConfidence": 0.964,
+          "traceConfidence": 0.8299,
+          "coverage": 0.5375,
+          "quality": "high",
+          "warnings": [
+            "Physical axis values and units are resolved from the paper before export; unresolved axes keep the result out of the dataset."
+          ],
+          "traceMode": "line-centreline",
+          "axisCalibration": {
+            "status": "relative-only",
+            "axes": null,
+            "confidence": 0,
+            "method": "relative-pixel-fallback",
+            "evidence": [
+              "OCR did not resolve horizontal tick endpoints."
+            ]
+          }
+        },
+        {
+          "id": "page-3-grid-2x2-2-1",
+          "page": 3,
+          "pageLabel": "PDF page 3 · detected panel C",
+          "figureLabel": "2",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.2614551913734134,
+            "right": 0.5940740027315061,
+            "top": 0.30216167924822523,
+            "bottom": 0.5448881898660722
+          },
+          "panel": {
+            "figureLabel": "2",
+            "label": "C",
+            "row": 1,
+            "column": 0,
+            "rows": 2,
+            "columns": 2,
+            "suggestedLabel": "[EMIM][TFSI] · gold · negative potential",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[EMIM][TFSI]",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.94,
+                "evidence": "The article identifies [EMIM][TFSI] as the liquid used for Figure 2."
+              },
+              "substrate": {
+                "value": "gold",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.93,
+                "evidence": "Figure 2 caption maps panel C to gold."
+              },
+              "electrodePotential": {
+                "value": null,
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.62,
+                "evidence": "Figure 2 assigns panel C to a negative potential, but the numeric voltage is not stated in the caption."
+              }
+            }
+          },
+          "pointCount": 254,
+          "segmentCount": 6,
+          "traceColor": "#37862b",
+          "confidence": 0.8094,
+          "axisConfidence": 0.6409,
+          "traceConfidence": 0.9313,
+          "coverage": 0.775,
+          "quality": "high",
+          "warnings": [
+            "Physical axis values and units are resolved from the paper before export; unresolved axes keep the result out of the dataset."
+          ],
+          "traceMode": "line-centreline",
+          "axisCalibration": {
+            "status": "relative-only",
+            "axes": null,
+            "confidence": 0,
+            "method": "relative-pixel-fallback",
+            "evidence": [
+              "OCR did not resolve vertical tick endpoints."
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

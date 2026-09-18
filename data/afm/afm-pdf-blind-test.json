@@ -1,0 +1,1799 @@
+{
+  "generatedAt": "2026-09-14T14:26:27.711Z",
+  "root": "D:\\ionic data\\文献来源",
+  "selection": "top textual AFM signal, SHA-256 deduplicated",
+  "summary": {
+    "uniqueReadablePdfs": 43,
+    "afmSignalPositivePdfs": 43,
+    "evaluated": 10,
+    "detectedPdfs": 8,
+    "rejectedOrFailedPdfs": 2,
+    "candidateCurves": 32,
+    "autoCalibratedPdfs": 2,
+    "relativeOnlyPdfs": 6,
+    "nonBlueCandidates": 7
+  },
+  "records": [
+    {
+      "relativePath": "26-07-27\\11.pdf",
+      "title": "Cite this: Nanoscale, 2022, 14, 11098",
+      "doi": "10.1039/d2nr02812c",
+      "pageCount": 31,
+      "textualAfmSignal": 164,
+      "signalPages": [
+        4,
+        26,
+        6,
+        3,
+        5,
+        2,
+        8,
+        10,
+        1,
+        19,
+        16,
+        18,
+        23,
+        25,
+        9,
+        17,
+        12,
+        13,
+        14,
+        20,
+        22,
+        15,
+        21,
+        7,
+        24,
+        31
+      ],
+      "httpStatus": 422,
+      "detected": false,
+      "error": "No credible AFM force-distance curve was detected. Pages containing only text, tables, annotations, or unrelated graphics are excluded automatically.",
+      "matchedPaper": null,
+      "axisCalibration": null,
+      "candidates": []
+    },
+    {
+      "relativePath": "26-07-27\\4.pdf",
+      "title": "Atomic Force Spectroscopy on Ionic Liquids",
+      "doi": "10.3390/app9112207",
+      "pageCount": 28,
+      "textualAfmSignal": 128,
+      "signalPages": [
+        20,
+        18,
+        26,
+        25,
+        6,
+        8,
+        15,
+        2,
+        7,
+        27,
+        10,
+        14,
+        23,
+        28,
+        3,
+        11,
+        16,
+        21,
+        1,
+        9,
+        12,
+        17,
+        22
+      ],
+      "httpStatus": 200,
+      "detected": true,
+      "error": null,
+      "matchedPaper": {
+        "doi": "10.3390/app9112207",
+        "curveIds": []
+      },
+      "axisCalibration": {
+        "status": "relative-only",
+        "axes": null,
+        "confidence": 0,
+        "method": "relative-pixel-fallback",
+        "evidence": [
+          "The curve centreline was extracted automatically, but no trustworthy physical-axis endpoints were resolved."
+        ]
+      },
+      "candidates": [
+        {
+          "id": "page-11",
+          "page": 11,
+          "pageLabel": "PDF page 11 · figure crop",
+          "figureLabel": "10",
+          "sourceKind": "pdf-figure-crop",
+          "crop": {
+            "left": 0.23948363448215618,
+            "top": 0.10518181710199666,
+            "right": 0.760255847707618,
+            "bottom": 0.211246029766359
+          },
+          "panel": null,
+          "pointCount": 154,
+          "segmentCount": 5,
+          "traceColor": "#dcc035",
+          "confidence": 0.6655,
+          "axisConfidence": 0.6586,
+          "traceConfidence": 0.6705,
+          "coverage": 0.85,
+          "quality": "medium",
+          "warnings": [
+            "Physical axis values and units are resolved from the paper before export; unresolved axes keep the result out of the dataset."
+          ]
+        },
+        {
+          "id": "page-10",
+          "page": 10,
+          "pageLabel": "PDF page 10 · figure crop",
+          "figureLabel": "9",
+          "sourceKind": "pdf-figure-crop",
+          "crop": {
+            "left": 0.16453376249000465,
+            "top": 0.42310634405920006,
+            "right": 0.8321904461123916,
+            "bottom": 0.5756203304469705
+          },
+          "panel": null,
+          "pointCount": 424,
+          "segmentCount": 8,
+          "traceColor": "#66b0bf",
+          "confidence": 0.6055,
+          "axisConfidence": 0.6174,
+          "traceConfidence": 0.5968,
+          "coverage": 0.8,
+          "quality": "medium",
+          "warnings": [
+            "Coloured labels or arrows may be mixed with the extracted trace.",
+            "Physical axis values and units are resolved from the paper before export; unresolved axes keep the result out of the dataset."
+          ]
+        }
+      ]
+    },
+    {
+      "relativePath": "26-07-27\\8.pdf",
+      "title": "30504 | Phys. Chem. Chem. Phys., 2017, 19, 30504--30512 This journal is © the Owner Societies 2017Cite this: Phys. Chem. Chem. Phys.,",
+      "doi": "10.1039/c7cp06948k",
+      "pageCount": 9,
+      "textualAfmSignal": 118,
+      "signalPages": [
+        1,
+        2,
+        5,
+        6,
+        4,
+        8,
+        9,
+        3,
+        7
+      ],
+      "httpStatus": 200,
+      "detected": true,
+      "error": null,
+      "matchedPaper": {
+        "doi": "10.1039/c7cp06948k",
+        "curveIds": []
+      },
+      "axisCalibration": {
+        "status": "auto-calibrated",
+        "axes": {
+          "xMin": 0,
+          "xMax": 5,
+          "yMin": -10,
+          "yMax": 30,
+          "xUnit": "nm",
+          "yUnit": "pN"
+        },
+        "confidence": 0.99,
+        "method": "verified-source-profile",
+        "evidence": [
+          "DOI 10.1039/c7cp06948k",
+          "Figure 1 reports distance from 0 to 5 nm and force from -10 to 30 pN for BMIM-TFSI on rubrene (001)."
+        ]
+      },
+      "candidates": [
+        {
+          "id": "page-2",
+          "page": 2,
+          "pageLabel": "PDF page 2 · figure crop",
+          "figureLabel": "1",
+          "sourceKind": "pdf-figure-crop",
+          "crop": {
+            "left": 0.1378100242576553,
+            "top": 0.06392842848492938,
+            "right": 0.4244249726177437,
+            "bottom": 0.23105520263544096
+          },
+          "panel": null,
+          "pointCount": 310,
+          "segmentCount": 1,
+          "traceColor": "#2d2d2d",
+          "confidence": 0.4809,
+          "axisConfidence": 0.18,
+          "traceConfidence": 0.6988,
+          "coverage": 0.8019,
+          "quality": "low",
+          "warnings": [
+            "Plot axes were estimated. Confirm the crop before using the coordinates.",
+            "A black/grey trace fallback was used; labels and arrows require close overlay review."
+          ]
+        }
+      ]
+    },
+    {
+      "relativePath": "26-07-28\\20.pdf",
+      "title": "1SCI EN T I F I C RepoRts | 6:32389 | DOI: 10.1038/srep32389",
+      "doi": "10.1038/srep32389",
+      "pageCount": 12,
+      "textualAfmSignal": 111,
+      "signalPages": [
+        2,
+        3,
+        1,
+        5,
+        6,
+        11,
+        10,
+        9,
+        7,
+        12,
+        4
+      ],
+      "httpStatus": 200,
+      "detected": true,
+      "error": null,
+      "matchedPaper": {
+        "doi": "10.1038/srep32389",
+        "curveIds": []
+      },
+      "axisCalibration": {
+        "status": "relative-only",
+        "axes": null,
+        "confidence": 0,
+        "method": "relative-pixel-fallback",
+        "evidence": [
+          "The curve centreline was extracted automatically, but no trustworthy physical-axis endpoints were resolved."
+        ]
+      },
+      "candidates": [
+        {
+          "id": "page-6",
+          "page": 6,
+          "pageLabel": "PDF page 6 · figure crop",
+          "figureLabel": "4",
+          "sourceKind": "pdf-figure-crop",
+          "crop": {
+            "left": 0.26145514008627935,
+            "top": 0.05943516861759643,
+            "right": 0.9266927777535128,
+            "bottom": 0.6493411060353136
+          },
+          "panel": null,
+          "pointCount": 725,
+          "segmentCount": 13,
+          "traceColor": "#4b8bd4",
+          "confidence": 0.6737,
+          "axisConfidence": 0.7068,
+          "traceConfidence": 0.6497,
+          "coverage": 0.9833,
+          "quality": "medium",
+          "warnings": [
+            "Coloured labels or arrows may be mixed with the extracted trace.",
+            "Physical axis values and units are resolved from the paper before export; unresolved axes keep the result out of the dataset."
+          ]
+        },
+        {
+          "id": "page-7",
+          "page": 7,
+          "pageLabel": "PDF page 7 · figure crop",
+          "figureLabel": null,
+          "sourceKind": "pdf-figure-crop",
+          "crop": {
+            "left": 0.2614551913398155,
+            "top": 0.059435129607521814,
+            "right": 0.9266928290070489,
+            "bottom": 0.7337010314918159
+          },
+          "panel": null,
+          "pointCount": 140,
+          "segmentCount": 10,
+          "traceColor": "#dcc933",
+          "confidence": 0.6532,
+          "axisConfidence": 0.6515,
+          "traceConfidence": 0.6544,
+          "coverage": 0.6,
+          "quality": "medium",
+          "warnings": [
+            "Physical axis values and units are resolved from the paper before export; unresolved axes keep the result out of the dataset."
+          ]
+        }
+      ]
+    },
+    {
+      "relativePath": "26-07-28\\18.pdf",
+      "title": "Cite this: DOI: 10.1039/c5nr07805a",
+      "doi": "10.1039/c5nr07805a",
+      "pageCount": 13,
+      "textualAfmSignal": 70,
+      "signalPages": [
+        6,
+        3,
+        1,
+        5,
+        11,
+        2,
+        8,
+        4,
+        9,
+        10,
+        12
+      ],
+      "httpStatus": 200,
+      "detected": true,
+      "error": null,
+      "matchedPaper": {
+        "doi": "10.1039/c5nr07805a",
+        "curveIds": []
+      },
+      "axisCalibration": {
+        "status": "relative-only",
+        "axes": null,
+        "confidence": 0,
+        "method": "relative-pixel-fallback",
+        "evidence": [
+          "The curve centreline was extracted automatically, but no trustworthy physical-axis endpoints were resolved."
+        ]
+      },
+      "candidates": [
+        {
+          "id": "page-4-grid-2x2-2-1",
+          "page": 4,
+          "pageLabel": "PDF page 4 · detected panel B",
+          "figureLabel": "2",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.5476182476699883,
+            "right": 0.7179224426988489,
+            "top": 0.1929821635656449,
+            "bottom": 0.32101861639351
+          },
+          "panel": null,
+          "pointCount": 432,
+          "segmentCount": 8,
+          "traceColor": "#70a95c",
+          "confidence": 0.7818,
+          "axisConfidence": 0.957,
+          "traceConfidence": 0.6548,
+          "coverage": 0.95,
+          "quality": "high",
+          "warnings": [
+            "Physical axis values and units are resolved from the paper before export; unresolved axes keep the result out of the dataset."
+          ]
+        },
+        {
+          "id": "page-4-grid-2x2-1-1",
+          "page": 4,
+          "pageLabel": "PDF page 4 · detected panel A",
+          "figureLabel": "2",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.5476182476699883,
+            "right": 0.8882266377277095,
+            "top": 0.06494571073777983,
+            "bottom": 0.1929821635656449
+          },
+          "panel": null,
+          "pointCount": 545,
+          "segmentCount": 11,
+          "traceColor": "#4572b8",
+          "confidence": 0.7062,
+          "axisConfidence": 0.7217,
+          "traceConfidence": 0.6949,
+          "coverage": 0.8167,
+          "quality": "medium",
+          "warnings": [
+            "Coloured labels or arrows may be mixed with the extracted trace.",
+            "Physical axis values and units are resolved from the paper before export; unresolved axes keep the result out of the dataset."
+          ]
+        },
+        {
+          "id": "page-4-grid-2x2-2-2",
+          "page": 4,
+          "pageLabel": "PDF page 4 · detected panel C",
+          "figureLabel": "2",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.7179224426988489,
+            "right": 0.8882266377277095,
+            "top": 0.1929821635656449,
+            "bottom": 0.32101861639351
+          },
+          "panel": null,
+          "pointCount": 657,
+          "segmentCount": 2,
+          "traceColor": "#b94c48",
+          "confidence": 0.7988,
+          "axisConfidence": 0.9524,
+          "traceConfidence": 0.6875,
+          "coverage": 0.9625,
+          "quality": "high",
+          "warnings": [
+            "Coloured labels or arrows may be mixed with the extracted trace.",
+            "Physical axis values and units are resolved from the paper before export; unresolved axes keep the result out of the dataset."
+          ]
+        }
+      ]
+    },
+    {
+      "relativePath": "26-07-28\\3.pdf",
+      "title": "2202110 (1 of 14) © 2023 The Authors. Advanced Materials Interfaces published by Wiley-VCH GmbHwww.advmatinterfaces.de",
+      "doi": "10.1002/admi.202202110",
+      "pageCount": 14,
+      "textualAfmSignal": 69,
+      "signalPages": [
+        2,
+        10,
+        3,
+        5,
+        4,
+        9,
+        11,
+        1,
+        6,
+        7,
+        13
+      ],
+      "httpStatus": 200,
+      "detected": true,
+      "error": null,
+      "matchedPaper": {
+        "doi": "10.1002/admi.202202110",
+        "curveIds": [
+          "AFM-26-07-28-03-C001"
+        ]
+      },
+      "axisCalibration": {
+        "status": "relative-only",
+        "axes": null,
+        "confidence": 0,
+        "method": "relative-pixel-fallback",
+        "evidence": [
+          "The curve centreline was extracted automatically, but no trustworthy physical-axis endpoints were resolved."
+        ]
+      },
+      "candidates": [
+        {
+          "id": "page-2",
+          "page": 2,
+          "pageLabel": "PDF page 2 · figure crop",
+          "figureLabel": "1B",
+          "sourceKind": "pdf-figure-crop",
+          "crop": {
+            "left": 0.495,
+            "top": 0.252512957428914,
+            "right": 0.955,
+            "bottom": 0.473312957428914
+          },
+          "panel": null,
+          "pointCount": 411,
+          "segmentCount": 1,
+          "traceColor": "#2d2d2d",
+          "confidence": 0.4812,
+          "axisConfidence": 0.18,
+          "traceConfidence": 0.6993,
+          "coverage": 0.9605,
+          "quality": "low",
+          "warnings": [
+            "Plot axes were estimated. Confirm the crop before using the coordinates.",
+            "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+            "Physical axis values and units are resolved from the paper before export; unresolved axes keep the result out of the dataset."
+          ]
+        }
+      ]
+    },
+    {
+      "relativePath": "26-07-27\\20\\c4cp06041e.pdf",
+      "title": "6794 | Phys. Chem. Chem. Phys., 2015, 17, 6794--6800 This journal is © the Owner Societies 2015Cite this: Phys. Chem. Chem. Phys.,",
+      "doi": "10.1039/c4cp06041e",
+      "pageCount": 7,
+      "textualAfmSignal": 68,
+      "signalPages": [
+        5,
+        2,
+        4,
+        3,
+        1,
+        6,
+        7
+      ],
+      "httpStatus": 200,
+      "detected": true,
+      "error": null,
+      "matchedPaper": {
+        "doi": "10.1039/c4cp06041e",
+        "curveIds": []
+      },
+      "axisCalibration": {
+        "status": "relative-only",
+        "axes": null,
+        "confidence": 0,
+        "method": "relative-pixel-fallback",
+        "evidence": [
+          "The curve centreline was extracted automatically, but no trustworthy physical-axis endpoints were resolved."
+        ]
+      },
+      "candidates": [
+        {
+          "id": "page-5",
+          "page": 5,
+          "pageLabel": "PDF page 5 · figure crop",
+          "figureLabel": "5",
+          "sourceKind": "pdf-figure-crop",
+          "crop": {
+            "left": 0.495,
+            "top": 0.35267721670036234,
+            "right": 0.955,
+            "bottom": 0.5734772167003623
+          },
+          "panel": null,
+          "pointCount": 404,
+          "segmentCount": 1,
+          "traceColor": "#2d2d2d",
+          "confidence": 0.4812,
+          "axisConfidence": 0.18,
+          "traceConfidence": 0.6993,
+          "coverage": 0.9737,
+          "quality": "low",
+          "warnings": [
+            "Plot axes were estimated. Confirm the crop before using the coordinates.",
+            "A black/grey trace fallback was used; labels and arrows require close overlay review.",
+            "Physical axis values and units are resolved from the paper before export; unresolved axes keep the result out of the dataset."
+          ]
+        }
+      ]
+    },
+    {
+      "relativePath": "26-07-27\\12.pdf",
+      "title": "Force microscopy of layering and friction in an",
+      "doi": "10.1088/0953-8984/26/28/284110",
+      "pageCount": 10,
+      "textualAfmSignal": 66,
+      "signalPages": [
+        8,
+        9,
+        2,
+        6,
+        7,
+        3,
+        1,
+        4,
+        5,
+        10
+      ],
+      "httpStatus": 200,
+      "detected": true,
+      "error": null,
+      "matchedPaper": {
+        "doi": "10.1088/0953-8984/26/28/284110",
+        "curveIds": [
+          "AFM-26-07-27-012-C001"
+        ]
+      },
+      "axisCalibration": {
+        "status": "relative-only",
+        "axes": null,
+        "confidence": 0,
+        "method": "relative-pixel-fallback",
+        "evidence": [
+          "The curve centreline was extracted automatically, but no trustworthy physical-axis endpoints were resolved."
+        ]
+      },
+      "candidates": [
+        {
+          "id": "page-7",
+          "page": 7,
+          "pageLabel": "PDF page 7 · figure crop",
+          "figureLabel": null,
+          "sourceKind": "pdf-figure-crop",
+          "crop": {
+            "left": 0.07773862863612846,
+            "top": 0.07685118210217479,
+            "right": 0.48091295449505783,
+            "bottom": 0.26539621363836124
+          },
+          "panel": null,
+          "pointCount": 225,
+          "segmentCount": 2,
+          "traceColor": "#4a6ab0",
+          "confidence": 0.9764,
+          "axisConfidence": 0.9539,
+          "traceConfidence": 0.9928,
+          "coverage": 0.85,
+          "quality": "high",
+          "warnings": [
+            "Physical axis values and units are resolved from the paper before export; unresolved axes keep the result out of the dataset."
+          ]
+        },
+        {
+          "id": "page-8",
+          "page": 8,
+          "pageLabel": "PDF page 8 · figure crop",
+          "figureLabel": null,
+          "sourceKind": "pdf-figure-crop",
+          "crop": {
+            "left": 0.5190869445433716,
+            "top": 0.0768511821021749,
+            "right": 0.9222612446999376,
+            "bottom": 0.26924825642304817
+          },
+          "panel": null,
+          "pointCount": 335,
+          "segmentCount": 4,
+          "traceColor": "#4667b0",
+          "confidence": 0.9768,
+          "axisConfidence": 0.9574,
+          "traceConfidence": 0.9908,
+          "coverage": 0.875,
+          "quality": "high",
+          "warnings": [
+            "Physical axis values and units are resolved from the paper before export; unresolved axes keep the result out of the dataset."
+          ]
+        }
+      ]
+    },
+    {
+      "relativePath": "26-07-28\\15.pdf",
+      "title": "This journal is © the Owner Societies 2014 Phys. Chem. Chem. Phys.",
+      "doi": "10.1039/c4cp04522j",
+      "pageCount": 9,
+      "textualAfmSignal": 62,
+      "signalPages": [
+        3,
+        2,
+        7,
+        5,
+        6,
+        4,
+        1,
+        9
+      ],
+      "httpStatus": 200,
+      "detected": true,
+      "error": null,
+      "matchedPaper": {
+        "doi": "10.1039/c4cp04522j",
+        "curveIds": []
+      },
+      "axisCalibration": {
+        "status": "auto-calibrated",
+        "axes": {
+          "xMin": -1,
+          "xMax": 3,
+          "yMin": -2,
+          "yMax": 12,
+          "xUnit": "nm",
+          "yUnit": "nN"
+        },
+        "confidence": 0.99,
+        "method": "verified-source-profile",
+        "evidence": [
+          "DOI 10.1039/c4cp04522j",
+          "Figure 1 uses shared apparent-separation (-1 to 3 nm) and normal-force (-2 to 12 nN) axes across panels A-T."
+        ]
+      },
+      "candidates": [
+        {
+          "id": "page-4-panel-A",
+          "page": 4,
+          "pageLabel": "Figure 1 · panel A",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.1650763078718009,
+            "top": 0.20204290099972122,
+            "right": 0.3370196008659742,
+            "bottom": 0.30383079208655617
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "A",
+            "row": 0,
+            "column": 0,
+            "rows": 5,
+            "columns": 4,
+            "suggestedLabel": "[Li(G4)]TFSI · HOPG · +1 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Li(G4)]TFSI",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.96,
+                "evidence": "Figure 1 caption and panel range A-E."
+              },
+              "substrate": {
+                "value": "HOPG",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.97,
+                "evidence": "Figure 1 caption assigns panels A-E to HOPG."
+              },
+              "electrodePotential": {
+                "value": 1,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.82,
+                "evidence": "Signed potentials were extracted from the article text and assigned by the top-to-bottom figure row order; confirm against the row label."
+              }
+            }
+          },
+          "pointCount": 266,
+          "segmentCount": 4,
+          "traceColor": "#3f91c3",
+          "confidence": 0.7228,
+          "axisConfidence": 0.36,
+          "traceConfidence": 0.9855,
+          "coverage": 0.7833,
+          "quality": "medium",
+          "warnings": []
+        },
+        {
+          "id": "page-4-panel-B",
+          "page": 4,
+          "pageLabel": "Figure 1 · panel B",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.1650763078718009,
+            "top": 0.30340311187190555,
+            "right": 0.3370196008659742,
+            "bottom": 0.39920347995363253
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "B",
+            "row": 1,
+            "column": 0,
+            "rows": 5,
+            "columns": 4,
+            "suggestedLabel": "[Li(G4)]TFSI · HOPG · +0.5 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Li(G4)]TFSI",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.96,
+                "evidence": "Figure 1 caption and panel range A-E."
+              },
+              "substrate": {
+                "value": "HOPG",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.97,
+                "evidence": "Figure 1 caption assigns panels A-E to HOPG."
+              },
+              "electrodePotential": {
+                "value": 0.5,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.82,
+                "evidence": "Signed potentials were extracted from the article text and assigned by the top-to-bottom figure row order; confirm against the row label."
+              }
+            }
+          },
+          "pointCount": 272,
+          "segmentCount": 4,
+          "traceColor": "#4292c2",
+          "confidence": 0.7238,
+          "axisConfidence": 0.36,
+          "traceConfidence": 0.9873,
+          "coverage": 0.8333,
+          "quality": "medium",
+          "warnings": []
+        },
+        {
+          "id": "page-4-panel-C",
+          "page": 4,
+          "pageLabel": "Figure 1 · panel C",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.1650763078718009,
+            "top": 0.3983481195243314,
+            "right": 0.3370196008659742,
+            "bottom": 0.4873056041716493
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "C",
+            "row": 2,
+            "column": 0,
+            "rows": 5,
+            "columns": 4,
+            "suggestedLabel": "[Li(G4)]TFSI · HOPG · 0 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Li(G4)]TFSI",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.96,
+                "evidence": "Figure 1 caption and panel range A-E."
+              },
+              "substrate": {
+                "value": "HOPG",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.97,
+                "evidence": "Figure 1 caption assigns panels A-E to HOPG."
+              },
+              "electrodePotential": {
+                "value": 0,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.82,
+                "evidence": "Signed potentials were extracted from the article text and assigned by the top-to-bottom figure row order; confirm against the row label."
+              }
+            }
+          },
+          "pointCount": 250,
+          "segmentCount": 1,
+          "traceColor": "#3e93c6",
+          "confidence": 0.7222,
+          "axisConfidence": 0.36,
+          "traceConfidence": 0.9844,
+          "coverage": 0.7,
+          "quality": "medium",
+          "warnings": []
+        },
+        {
+          "id": "page-4-panel-D",
+          "page": 4,
+          "pageLabel": "Figure 1 · panel D",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.1650763078718009,
+            "top": 0.4868779239569987,
+            "right": 0.3370196008659742,
+            "bottom": 0.5809675711801233
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "D",
+            "row": 3,
+            "column": 0,
+            "rows": 5,
+            "columns": 4,
+            "suggestedLabel": "[Li(G4)]TFSI · HOPG · -0.5 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Li(G4)]TFSI",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.96,
+                "evidence": "Figure 1 caption and panel range A-E."
+              },
+              "substrate": {
+                "value": "HOPG",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.97,
+                "evidence": "Figure 1 caption assigns panels A-E to HOPG."
+              },
+              "electrodePotential": {
+                "value": -0.5,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.82,
+                "evidence": "Signed potentials were extracted from the article text and assigned by the top-to-bottom figure row order; confirm against the row label."
+              }
+            }
+          },
+          "pointCount": 220,
+          "segmentCount": 4,
+          "traceColor": "#3e92c5",
+          "confidence": 0.7226,
+          "axisConfidence": 0.36,
+          "traceConfidence": 0.9851,
+          "coverage": 0.7667,
+          "quality": "medium",
+          "warnings": []
+        },
+        {
+          "id": "page-4-panel-E",
+          "page": 4,
+          "pageLabel": "Figure 1 · panel E",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.1650763078718009,
+            "top": 0.5805398909654728,
+            "right": 0.3370196008659742,
+            "bottom": 0.7114100366485462
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "E",
+            "row": 4,
+            "column": 0,
+            "rows": 5,
+            "columns": 4,
+            "suggestedLabel": "[Li(G4)]TFSI · HOPG · -1 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Li(G4)]TFSI",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.96,
+                "evidence": "Figure 1 caption and panel range A-E."
+              },
+              "substrate": {
+                "value": "HOPG",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.97,
+                "evidence": "Figure 1 caption assigns panels A-E to HOPG."
+              },
+              "electrodePotential": {
+                "value": -1,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.82,
+                "evidence": "Signed potentials were extracted from the article text and assigned by the top-to-bottom figure row order; confirm against the row label."
+              }
+            }
+          },
+          "pointCount": 283,
+          "segmentCount": 3,
+          "traceColor": "#3d91c4",
+          "confidence": 0.8985,
+          "axisConfidence": 0.78,
+          "traceConfidence": 0.9843,
+          "coverage": 0.8667,
+          "quality": "high",
+          "warnings": []
+        },
+        {
+          "id": "page-4-panel-F",
+          "page": 4,
+          "pageLabel": "Figure 1 · panel F",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.3358994491200838,
+            "top": 0.20204290099972122,
+            "right": 0.5084028179872023,
+            "bottom": 0.30383079208655617
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "F",
+            "row": 0,
+            "column": 1,
+            "rows": 5,
+            "columns": 4,
+            "suggestedLabel": "[Li(G4)]TFSI · Au(111) · +1 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Li(G4)]TFSI",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.96,
+                "evidence": "Figure 1 caption and panel range F-J."
+              },
+              "substrate": {
+                "value": "Au(111)",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.97,
+                "evidence": "Figure 1 caption assigns panels F-J to Au(111)."
+              },
+              "electrodePotential": {
+                "value": 1,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.82,
+                "evidence": "Signed potentials were extracted from the article text and assigned by the top-to-bottom figure row order; confirm against the row label."
+              }
+            }
+          },
+          "pointCount": 237,
+          "segmentCount": 3,
+          "traceColor": "#3d8dbd",
+          "confidence": 0.6015,
+          "axisConfidence": 0.18,
+          "traceConfidence": 0.9067,
+          "coverage": 0.6375,
+          "quality": "medium",
+          "warnings": [
+            "Coloured labels or arrows may be mixed with the extracted trace."
+          ]
+        },
+        {
+          "id": "page-4-panel-G",
+          "page": 4,
+          "pageLabel": "Figure 1 · panel G",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.3358994491200838,
+            "top": 0.30340311187190555,
+            "right": 0.5084028179872023,
+            "bottom": 0.39920347995363253
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "G",
+            "row": 1,
+            "column": 1,
+            "rows": 5,
+            "columns": 4,
+            "suggestedLabel": "[Li(G4)]TFSI · Au(111) · +0.5 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Li(G4)]TFSI",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.96,
+                "evidence": "Figure 1 caption and panel range F-J."
+              },
+              "substrate": {
+                "value": "Au(111)",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.97,
+                "evidence": "Figure 1 caption assigns panels F-J to Au(111)."
+              },
+              "electrodePotential": {
+                "value": 0.5,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.82,
+                "evidence": "Signed potentials were extracted from the article text and assigned by the top-to-bottom figure row order; confirm against the row label."
+              }
+            }
+          },
+          "pointCount": 251,
+          "segmentCount": 1,
+          "traceColor": "#3e8bba",
+          "confidence": 0.6491,
+          "axisConfidence": 0.18,
+          "traceConfidence": 0.9889,
+          "coverage": 0.65,
+          "quality": "medium",
+          "warnings": []
+        },
+        {
+          "id": "page-4-panel-H",
+          "page": 4,
+          "pageLabel": "Figure 1 · panel H",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.3358994491200838,
+            "top": 0.3983481195243314,
+            "right": 0.5084028179872023,
+            "bottom": 0.4873056041716493
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "H",
+            "row": 2,
+            "column": 1,
+            "rows": 5,
+            "columns": 4,
+            "suggestedLabel": "[Li(G4)]TFSI · Au(111) · 0 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Li(G4)]TFSI",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.96,
+                "evidence": "Figure 1 caption and panel range F-J."
+              },
+              "substrate": {
+                "value": "Au(111)",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.97,
+                "evidence": "Figure 1 caption assigns panels F-J to Au(111)."
+              },
+              "electrodePotential": {
+                "value": 0,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.82,
+                "evidence": "Signed potentials were extracted from the article text and assigned by the top-to-bottom figure row order; confirm against the row label."
+              }
+            }
+          },
+          "pointCount": 271,
+          "segmentCount": 2,
+          "traceColor": "#3e8ebe",
+          "confidence": 0.6475,
+          "axisConfidence": 0.18,
+          "traceConfidence": 0.986,
+          "coverage": 0.7,
+          "quality": "medium",
+          "warnings": []
+        },
+        {
+          "id": "page-4-panel-I",
+          "page": 4,
+          "pageLabel": "Figure 1 · panel I",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.3358994491200838,
+            "top": 0.4868779239569987,
+            "right": 0.5084028179872023,
+            "bottom": 0.5809675711801233
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "I",
+            "row": 3,
+            "column": 1,
+            "rows": 5,
+            "columns": 4,
+            "suggestedLabel": "[Li(G4)]TFSI · Au(111) · -0.5 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Li(G4)]TFSI",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.96,
+                "evidence": "Figure 1 caption and panel range F-J."
+              },
+              "substrate": {
+                "value": "Au(111)",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.97,
+                "evidence": "Figure 1 caption assigns panels F-J to Au(111)."
+              },
+              "electrodePotential": {
+                "value": -0.5,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.82,
+                "evidence": "Signed potentials were extracted from the article text and assigned by the top-to-bottom figure row order; confirm against the row label."
+              }
+            }
+          },
+          "pointCount": 304,
+          "segmentCount": 1,
+          "traceColor": "#3e90c2",
+          "confidence": 0.6472,
+          "axisConfidence": 0.18,
+          "traceConfidence": 0.9854,
+          "coverage": 0.8,
+          "quality": "medium",
+          "warnings": []
+        },
+        {
+          "id": "page-4-panel-J",
+          "page": 4,
+          "pageLabel": "Figure 1 · panel J",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.3358994491200838,
+            "top": 0.5805398909654728,
+            "right": 0.5084028179872023,
+            "bottom": 0.7114100366485462
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "J",
+            "row": 4,
+            "column": 1,
+            "rows": 5,
+            "columns": 4,
+            "suggestedLabel": "[Li(G4)]TFSI · Au(111) · -1 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Li(G4)]TFSI",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.96,
+                "evidence": "Figure 1 caption and panel range F-J."
+              },
+              "substrate": {
+                "value": "Au(111)",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.97,
+                "evidence": "Figure 1 caption assigns panels F-J to Au(111)."
+              },
+              "electrodePotential": {
+                "value": -1,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.82,
+                "evidence": "Signed potentials were extracted from the article text and assigned by the top-to-bottom figure row order; confirm against the row label."
+              }
+            }
+          },
+          "pointCount": 281,
+          "segmentCount": 2,
+          "traceColor": "#3f92c3",
+          "confidence": 0.747,
+          "axisConfidence": 0.42,
+          "traceConfidence": 0.9838,
+          "coverage": 0.7333,
+          "quality": "medium",
+          "warnings": []
+        },
+        {
+          "id": "page-4-panel-K",
+          "page": 4,
+          "pageLabel": "Figure 1 · panel K",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.5072826662413119,
+            "top": 0.20204290099972122,
+            "right": 0.6803461109813757,
+            "bottom": 0.30383079208655617
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "K",
+            "row": 0,
+            "column": 2,
+            "rows": 5,
+            "columns": 4,
+            "suggestedLabel": "[Li(G4)]NO3 · HOPG · +1 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Li(G4)]NO3",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.96,
+                "evidence": "Figure 1 caption and panel range K-O."
+              },
+              "substrate": {
+                "value": "HOPG",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.97,
+                "evidence": "Figure 1 caption assigns panels K-O to HOPG."
+              },
+              "electrodePotential": {
+                "value": 1,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.82,
+                "evidence": "Signed potentials were extracted from the article text and assigned by the top-to-bottom figure row order; confirm against the row label."
+              }
+            }
+          },
+          "pointCount": 273,
+          "segmentCount": 4,
+          "traceColor": "#3d8ebe",
+          "confidence": 0.7239,
+          "axisConfidence": 0.36,
+          "traceConfidence": 0.9874,
+          "coverage": 0.6667,
+          "quality": "medium",
+          "warnings": []
+        },
+        {
+          "id": "page-4-panel-L",
+          "page": 4,
+          "pageLabel": "Figure 1 · panel L",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.5072826662413119,
+            "top": 0.30340311187190555,
+            "right": 0.6803461109813757,
+            "bottom": 0.39920347995363253
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "L",
+            "row": 1,
+            "column": 2,
+            "rows": 5,
+            "columns": 4,
+            "suggestedLabel": "[Li(G4)]NO3 · HOPG · +0.5 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Li(G4)]NO3",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.96,
+                "evidence": "Figure 1 caption and panel range K-O."
+              },
+              "substrate": {
+                "value": "HOPG",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.97,
+                "evidence": "Figure 1 caption assigns panels K-O to HOPG."
+              },
+              "electrodePotential": {
+                "value": 0.5,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.82,
+                "evidence": "Signed potentials were extracted from the article text and assigned by the top-to-bottom figure row order; confirm against the row label."
+              }
+            }
+          },
+          "pointCount": 334,
+          "segmentCount": 1,
+          "traceColor": "#398abc",
+          "confidence": 0.7436,
+          "axisConfidence": 0.4162,
+          "traceConfidence": 0.9806,
+          "coverage": 0.85,
+          "quality": "medium",
+          "warnings": []
+        },
+        {
+          "id": "page-4-panel-M",
+          "page": 4,
+          "pageLabel": "Figure 1 · panel M",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.5072826662413119,
+            "top": 0.3983481195243314,
+            "right": 0.6803461109813757,
+            "bottom": 0.4873056041716493
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "M",
+            "row": 2,
+            "column": 2,
+            "rows": 5,
+            "columns": 4,
+            "suggestedLabel": "[Li(G4)]NO3 · HOPG · 0 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Li(G4)]NO3",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.96,
+                "evidence": "Figure 1 caption and panel range K-O."
+              },
+              "substrate": {
+                "value": "HOPG",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.97,
+                "evidence": "Figure 1 caption assigns panels K-O to HOPG."
+              },
+              "electrodePotential": {
+                "value": 0,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.82,
+                "evidence": "Signed potentials were extracted from the article text and assigned by the top-to-bottom figure row order; confirm against the row label."
+              }
+            }
+          },
+          "pointCount": 255,
+          "segmentCount": 2,
+          "traceColor": "#3d91c3",
+          "confidence": 0.6747,
+          "axisConfidence": 0.36,
+          "traceConfidence": 0.9025,
+          "coverage": 0.7333,
+          "quality": "medium",
+          "warnings": [
+            "Coloured labels or arrows may be mixed with the extracted trace."
+          ]
+        },
+        {
+          "id": "page-4-panel-N",
+          "page": 4,
+          "pageLabel": "Figure 1 · panel N",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.5072826662413119,
+            "top": 0.4868779239569987,
+            "right": 0.6803461109813757,
+            "bottom": 0.5809675711801233
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "N",
+            "row": 3,
+            "column": 2,
+            "rows": 5,
+            "columns": 4,
+            "suggestedLabel": "[Li(G4)]NO3 · HOPG · -0.5 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Li(G4)]NO3",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.96,
+                "evidence": "Figure 1 caption and panel range K-O."
+              },
+              "substrate": {
+                "value": "HOPG",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.97,
+                "evidence": "Figure 1 caption assigns panels K-O to HOPG."
+              },
+              "electrodePotential": {
+                "value": -0.5,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.82,
+                "evidence": "Signed potentials were extracted from the article text and assigned by the top-to-bottom figure row order; confirm against the row label."
+              }
+            }
+          },
+          "pointCount": 264,
+          "segmentCount": 2,
+          "traceColor": "#3d90c2",
+          "confidence": 0.6456,
+          "axisConfidence": 0.18,
+          "traceConfidence": 0.9827,
+          "coverage": 0.7,
+          "quality": "medium",
+          "warnings": []
+        },
+        {
+          "id": "page-4-panel-O",
+          "page": 4,
+          "pageLabel": "Figure 1 · panel O",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.5072826662413119,
+            "top": 0.5805398909654728,
+            "right": 0.6803461109813757,
+            "bottom": 0.7114100366485462
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "O",
+            "row": 4,
+            "column": 2,
+            "rows": 5,
+            "columns": 4,
+            "suggestedLabel": "[Li(G4)]NO3 · HOPG · -1 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Li(G4)]NO3",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.96,
+                "evidence": "Figure 1 caption and panel range K-O."
+              },
+              "substrate": {
+                "value": "HOPG",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.97,
+                "evidence": "Figure 1 caption assigns panels K-O to HOPG."
+              },
+              "electrodePotential": {
+                "value": -1,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.82,
+                "evidence": "Signed potentials were extracted from the article text and assigned by the top-to-bottom figure row order; confirm against the row label."
+              }
+            }
+          },
+          "pointCount": 292,
+          "segmentCount": 1,
+          "traceColor": "#3b8fc2",
+          "confidence": 0.897,
+          "axisConfidence": 0.78,
+          "traceConfidence": 0.9818,
+          "coverage": 0.7833,
+          "quality": "high",
+          "warnings": []
+        },
+        {
+          "id": "page-4-panel-P",
+          "page": 4,
+          "pageLabel": "Figure 1 · panel P",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.6792259592354852,
+            "top": 0.20204290099972122,
+            "right": 0.8444483417543163,
+            "bottom": 0.30383079208655617
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "P",
+            "row": 0,
+            "column": 3,
+            "rows": 5,
+            "columns": 4,
+            "suggestedLabel": "[Li(G4)]NO3 · Au(111) · +1 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Li(G4)]NO3",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.96,
+                "evidence": "Figure 1 caption and panel range P-T."
+              },
+              "substrate": {
+                "value": "Au(111)",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.97,
+                "evidence": "Figure 1 caption assigns panels P-T to Au(111)."
+              },
+              "electrodePotential": {
+                "value": 1,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.82,
+                "evidence": "Signed potentials were extracted from the article text and assigned by the top-to-bottom figure row order; confirm against the row label."
+              }
+            }
+          },
+          "pointCount": 326,
+          "segmentCount": 1,
+          "traceColor": "#3e90c1",
+          "confidence": 0.6469,
+          "axisConfidence": 0.18,
+          "traceConfidence": 0.985,
+          "coverage": 0.8,
+          "quality": "medium",
+          "warnings": []
+        },
+        {
+          "id": "page-4-panel-Q",
+          "page": 4,
+          "pageLabel": "Figure 1 · panel Q",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.6792259592354852,
+            "top": 0.30340311187190555,
+            "right": 0.8444483417543163,
+            "bottom": 0.39920347995363253
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "Q",
+            "row": 1,
+            "column": 3,
+            "rows": 5,
+            "columns": 4,
+            "suggestedLabel": "[Li(G4)]NO3 · Au(111) · +0.5 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Li(G4)]NO3",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.96,
+                "evidence": "Figure 1 caption and panel range P-T."
+              },
+              "substrate": {
+                "value": "Au(111)",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.97,
+                "evidence": "Figure 1 caption assigns panels P-T to Au(111)."
+              },
+              "electrodePotential": {
+                "value": 0.5,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.82,
+                "evidence": "Signed potentials were extracted from the article text and assigned by the top-to-bottom figure row order; confirm against the row label."
+              }
+            }
+          },
+          "pointCount": 276,
+          "segmentCount": 2,
+          "traceColor": "#4090c1",
+          "confidence": 0.6479,
+          "axisConfidence": 0.18,
+          "traceConfidence": 0.9867,
+          "coverage": 0.65,
+          "quality": "medium",
+          "warnings": []
+        },
+        {
+          "id": "page-4-panel-R",
+          "page": 4,
+          "pageLabel": "Figure 1 · panel R",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.6792259592354852,
+            "top": 0.3983481195243314,
+            "right": 0.8444483417543163,
+            "bottom": 0.4873056041716493
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "R",
+            "row": 2,
+            "column": 3,
+            "rows": 5,
+            "columns": 4,
+            "suggestedLabel": "[Li(G4)]NO3 · Au(111) · 0 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Li(G4)]NO3",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.96,
+                "evidence": "Figure 1 caption and panel range P-T."
+              },
+              "substrate": {
+                "value": "Au(111)",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.97,
+                "evidence": "Figure 1 caption assigns panels P-T to Au(111)."
+              },
+              "electrodePotential": {
+                "value": 0,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.82,
+                "evidence": "Signed potentials were extracted from the article text and assigned by the top-to-bottom figure row order; confirm against the row label."
+              }
+            }
+          },
+          "pointCount": 252,
+          "segmentCount": 1,
+          "traceColor": "#3c8ebf",
+          "confidence": 0.646,
+          "axisConfidence": 0.18,
+          "traceConfidence": 0.9834,
+          "coverage": 0.675,
+          "quality": "medium",
+          "warnings": []
+        },
+        {
+          "id": "page-4-panel-S",
+          "page": 4,
+          "pageLabel": "Figure 1 · panel S",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.6792259592354852,
+            "top": 0.4868779239569987,
+            "right": 0.8444483417543163,
+            "bottom": 0.5809675711801233
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "S",
+            "row": 3,
+            "column": 3,
+            "rows": 5,
+            "columns": 4,
+            "suggestedLabel": "[Li(G4)]NO3 · Au(111) · -0.5 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Li(G4)]NO3",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.96,
+                "evidence": "Figure 1 caption and panel range P-T."
+              },
+              "substrate": {
+                "value": "Au(111)",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.97,
+                "evidence": "Figure 1 caption assigns panels P-T to Au(111)."
+              },
+              "electrodePotential": {
+                "value": -0.5,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.82,
+                "evidence": "Signed potentials were extracted from the article text and assigned by the top-to-bottom figure row order; confirm against the row label."
+              }
+            }
+          },
+          "pointCount": 256,
+          "segmentCount": 2,
+          "traceColor": "#3b8cbc",
+          "confidence": 0.6476,
+          "axisConfidence": 0.18,
+          "traceConfidence": 0.9861,
+          "coverage": 0.6625,
+          "quality": "medium",
+          "warnings": []
+        },
+        {
+          "id": "page-4-panel-T",
+          "page": 4,
+          "pageLabel": "Figure 1 · panel T",
+          "figureLabel": "1",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.6792259592354852,
+            "top": 0.5805398909654728,
+            "right": 0.8444483417543163,
+            "bottom": 0.7114100366485462
+          },
+          "panel": {
+            "figureLabel": "1",
+            "label": "T",
+            "row": 4,
+            "column": 3,
+            "rows": 5,
+            "columns": 4,
+            "suggestedLabel": "[Li(G4)]NO3 · Au(111) · -1 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Li(G4)]NO3",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.96,
+                "evidence": "Figure 1 caption and panel range P-T."
+              },
+              "substrate": {
+                "value": "Au(111)",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.97,
+                "evidence": "Figure 1 caption assigns panels P-T to Au(111)."
+              },
+              "electrodePotential": {
+                "value": -1,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.82,
+                "evidence": "Signed potentials were extracted from the article text and assigned by the top-to-bottom figure row order; confirm against the row label."
+              }
+            }
+          },
+          "pointCount": 320,
+          "segmentCount": 4,
+          "traceColor": "#3d91c3",
+          "confidence": 0.7462,
+          "axisConfidence": 0.42,
+          "traceConfidence": 0.9823,
+          "coverage": 0.8667,
+          "quality": "medium",
+          "warnings": []
+        }
+      ]
+    },
+    {
+      "relativePath": "26-07-27\\2.pdf",
+      "title": "In-situ STM and AFM Studies on Electrochemical Interfaces in",
+      "doi": "10.1016/j.electacta.2019.04.066",
+      "pageCount": 7,
+      "textualAfmSignal": 59,
+      "signalPages": [
+        4,
+        1,
+        2,
+        5,
+        6,
+        7
+      ],
+      "httpStatus": 422,
+      "detected": false,
+      "error": "No credible AFM force-distance curve was detected. Pages containing only text, tables, annotations, or unrelated graphics are excluded automatically.",
+      "matchedPaper": null,
+      "axisCalibration": null,
+      "candidates": []
+    }
+  ]
+}

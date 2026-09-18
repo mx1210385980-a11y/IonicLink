@@ -65,7 +65,7 @@ export default function KetcherStructureEditor({
       if (initialSmiles.trim()) await ketcher.setMolecule(initialSmiles.trim());
       await readSmiles(ketcher);
     } catch {
-      setError("已有结构载入失败，请清除后重新绘制。");
+      setError("The existing structure could not be loaded. Clear it and draw again.");
     }
   }, [initialSmiles, onChange, onReady, readSmiles]);
 
@@ -86,7 +86,7 @@ export default function KetcherStructureEditor({
         structServiceProvider={structServiceProvider}
         disableMacromoleculesEditor
         onInit={handleInit}
-        errorHandler={(message) => setError(message || "结构编辑器发生错误。")}
+        errorHandler={(message) => setError(message || "The structure editor encountered an error.")}
       />
       {error ? (
         <div role="alert" className="absolute inset-x-3 bottom-3 z-20 rounded-[8px] border border-rose-200 bg-white px-3 py-2 text-xs text-rose-700 shadow-card">

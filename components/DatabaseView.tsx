@@ -677,16 +677,16 @@ export function DatabaseView({ domain }: { domain: Domain }) {
               : "border-ink-200 bg-white text-ink-700 hover:border-brand-300 hover:text-brand-700"
           }`}
         >
-          <StructureIcon /> 化学结构搜索
+          <StructureIcon /> Chemical structure search
         </button>
         {structureSearch ? (
           <button
             type="button"
             onClick={clearStructureSearch}
-            title="清除结构筛选"
+            title="Clear structure filter"
             className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-[11px] font-semibold text-brand-700"
           >
-            {structureTargetLabel(structureSearch.target)} · 精确匹配 <span aria-hidden>×</span>
+            {structureTargetLabel(structureSearch.target)} · exact match <span aria-hidden>×</span>
           </button>
         ) : null}
         {refreshing && !loading && (
@@ -900,6 +900,7 @@ export function DatabaseView({ domain }: { domain: Domain }) {
                     <Card
                       key={rec.id}
                       record={rec}
+                      comparisonRecords={domain === "conductivity" ? group.records : undefined}
                       domain={domain}
                       units={recordUnits}
                       selected={queryReady && selected.has(rec.id)}

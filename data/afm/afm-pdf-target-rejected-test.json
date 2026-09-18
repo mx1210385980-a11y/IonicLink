@@ -1,0 +1,181 @@
+{
+  "generatedAt": "2026-09-14T14:14:03.754Z",
+  "root": "C:\\Users\\Administrator\\Documents\\Codex\\2026-08-13\\new-chat\\tmp\\afm-target-rejected",
+  "selection": "top textual AFM signal, SHA-256 deduplicated",
+  "summary": {
+    "uniqueReadablePdfs": 2,
+    "afmSignalPositivePdfs": 2,
+    "evaluated": 2,
+    "detectedPdfs": 1,
+    "rejectedOrFailedPdfs": 1,
+    "candidateCurves": 3,
+    "autoCalibratedPdfs": 1,
+    "relativeOnlyPdfs": 0,
+    "nonBlueCandidates": 3
+  },
+  "records": [
+    {
+      "relativePath": "11.pdf",
+      "title": "Cite this: Nanoscale, 2022, 14, 11098",
+      "doi": "10.1039/d2nr02812c",
+      "pageCount": 31,
+      "textualAfmSignal": 164,
+      "signalPages": [
+        4,
+        26,
+        6,
+        3,
+        5,
+        2,
+        8,
+        10,
+        1,
+        19,
+        16,
+        18,
+        23,
+        25,
+        9,
+        17,
+        12,
+        13,
+        14,
+        20,
+        22,
+        15,
+        21,
+        7,
+        24,
+        31
+      ],
+      "httpStatus": 422,
+      "detected": false,
+      "error": "No credible AFM force-distance curve was detected. Pages containing only text, tables, annotations, or unrelated graphics are excluded automatically.",
+      "matchedPaper": null,
+      "axisCalibration": null,
+      "candidates": []
+    },
+    {
+      "relativePath": "8.pdf",
+      "title": "30504 | Phys. Chem. Chem. Phys., 2017, 19, 30504--30512 This journal is © the Owner Societies 2017Cite this: Phys. Chem. Chem. Phys.,",
+      "doi": "10.1039/c7cp06948k",
+      "pageCount": 9,
+      "textualAfmSignal": 118,
+      "signalPages": [
+        1,
+        2,
+        5,
+        6,
+        4,
+        8,
+        9,
+        3,
+        7
+      ],
+      "httpStatus": 200,
+      "detected": true,
+      "error": null,
+      "matchedPaper": {
+        "doi": "10.1039/c7cp06948k",
+        "curveIds": []
+      },
+      "axisCalibration": {
+        "status": "auto-calibrated",
+        "axes": {
+          "xMin": 0,
+          "xMax": 5,
+          "yMin": -10,
+          "yMax": 30,
+          "xUnit": "nm",
+          "yUnit": "pN"
+        },
+        "confidence": 0.99,
+        "method": "verified-source-profile",
+        "evidence": [
+          "DOI 10.1039/c7cp06948k",
+          "Figure 1 reports distance from 0 to 5 nm and force from -10 to 30 pN for BMIM-TFSI on rubrene (001)."
+        ]
+      },
+      "candidates": [
+        {
+          "id": "page-2",
+          "page": 2,
+          "pageLabel": "PDF page 2 · figure crop",
+          "figureLabel": "1",
+          "sourceKind": "pdf-figure-crop",
+          "crop": {
+            "left": 0.1378100242576553,
+            "top": 0.06392842848492938,
+            "right": 0.4244249726177437,
+            "bottom": 0.23105520263544096
+          },
+          "panel": null,
+          "pointCount": 310,
+          "segmentCount": 1,
+          "traceColor": "#2d2d2d",
+          "confidence": 0.4809,
+          "axisConfidence": 0.18,
+          "traceConfidence": 0.6988,
+          "coverage": 0.8019,
+          "quality": "low",
+          "warnings": [
+            "Plot axes were estimated. Confirm the crop before using the coordinates.",
+            "A black/grey trace fallback was used; labels and arrows require close overlay review."
+          ]
+        },
+        {
+          "id": "page-4",
+          "page": 4,
+          "pageLabel": "PDF page 4 · figure crop",
+          "figureLabel": null,
+          "sourceKind": "pdf-figure-crop",
+          "crop": {
+            "left": 0.495,
+            "top": 0.21464371465810086,
+            "right": 0.955,
+            "bottom": 0.43544371465810083
+          },
+          "panel": null,
+          "pointCount": 451,
+          "segmentCount": 1,
+          "traceColor": "#2d2d2d",
+          "confidence": 0.4811,
+          "axisConfidence": 0.18,
+          "traceConfidence": 0.6992,
+          "coverage": 0.9781,
+          "quality": "low",
+          "warnings": [
+            "Plot axes were estimated. Confirm the crop before using the coordinates.",
+            "A black/grey trace fallback was used; labels and arrows require close overlay review."
+          ]
+        },
+        {
+          "id": "page-5",
+          "page": 5,
+          "pageLabel": "PDF page 5 · figure crop",
+          "figureLabel": "4",
+          "sourceKind": "pdf-figure-crop",
+          "crop": {
+            "left": 0.045,
+            "top": 0.025,
+            "right": 0.505,
+            "bottom": 0.12868005874067373
+          },
+          "panel": null,
+          "pointCount": 369,
+          "segmentCount": 1,
+          "traceColor": "#2d2d2d",
+          "confidence": 0.4808,
+          "axisConfidence": 0.18,
+          "traceConfidence": 0.6986,
+          "coverage": 0.8816,
+          "quality": "low",
+          "warnings": [
+            "Plot axes were estimated. Confirm the crop before using the coordinates.",
+            "A black/grey trace fallback was used; labels and arrows require close overlay review."
+          ]
+        }
+      ]
+    }
+  ]
+}

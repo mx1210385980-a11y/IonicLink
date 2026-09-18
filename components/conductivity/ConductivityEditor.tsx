@@ -10,6 +10,7 @@ import {
   type ConductivityExtractedFields,
   type ConductivityRecord,
 } from "@/lib/conductivity/schema";
+import { buildConductivityCellModel } from "@/lib/conductivity/electrodes";
 import { Field, Group, Layer, ProvenanceRows, SelectField, provRowsFromRecord, provRowsToFields, type ProvRow } from "../editorParts";
 
 /**
@@ -30,6 +31,7 @@ export function ConductivityEditor({
   domain?: Domain;
 }) {
   const e = record.extended;
+  const initialCell = buildConductivityCellModel(record);
 
   const [title, setTitle] = useState(record.paper.title);
   const [cation, setCation] = useState(record.core.ionicLiquid.cation);
@@ -43,6 +45,13 @@ export function ConductivityEditor({
   const [electrochemicalWindow, setElectrochemicalWindow] = useState(record.core.electrochemicalWindow?.raw ?? "");
   const [chargeTransferResistance, setChargeTransferResistance] = useState(record.core.chargeTransferResistance?.raw ?? "");
   const [potentialReference, setPotentialReference] = useState(e.potentialReference ?? "");
+  const [cellConfiguration, setCellConfiguration] = useState(e.cellConfiguration ?? (initialCell.configuration === "unknown" ? "" : initialCell.configuration));
+  const [cellSetup, setCellSetup] = useState(e.cellSetup ?? initialCell.setupLabel ?? "");
+  const [workingElectrode, setWorkingElectrode] = useState(e.workingElectrode ?? initialCell.workingElectrode ?? "");
+  const [counterElectrode, setCounterElectrode] = useState(e.counterElectrode ?? initialCell.counterElectrode ?? "");
+  const [referenceElectrode, setReferenceElectrode] = useState(e.referenceElectrode ?? initialCell.referenceElectrode ?? "");
+  const [positiveElectrode, setPositiveElectrode] = useState(e.positiveElectrode ?? initialCell.positiveElectrode ?? "");
+  const [negativeElectrode, setNegativeElectrode] = useState(e.negativeElectrode ?? initialCell.negativeElectrode ?? "");
   const [pressure, setPressure] = useState(e.pressure?.raw ?? "");
 
   const [method, setMethod] = useState(e.method ?? "");
@@ -103,6 +112,13 @@ export function ConductivityEditor({
       electrochemicalWindow,
       chargeTransferResistance,
       potentialReference,
+      cellConfiguration,
+      cellSetup,
+      workingElectrode,
+      counterElectrode,
+      referenceElectrode,
+      positiveElectrode,
+      negativeElectrode,
       pressure,
       method,
       viscosity,
@@ -110,6 +126,10 @@ export function ConductivityEditor({
       concentration,
       density,
       cellConstant,
+      // The curve evidence is source-linked metadata, not an ordinary text
+      // field. Preserve it while a curator edits the surrounding record.
+      performanceFigure: e.performanceFigure,
+      propertyDependencies: e.propertyDependencies,
       flexible: flexible.filter((f) => f.key.trim() && f.value.trim()),
       provenance: provRowsToFields(provRows),
       confidence: record.confidence,
@@ -181,6 +201,29 @@ export function ConductivityEditor({
           std={stdLabel(electrochemicalWindowQ)} mono />
         <Field label="Charge-transfer resistance" value={chargeTransferResistance} onChange={setChargeTransferResistance} placeholder="255.5 Ω cm²"
           std={stdLabel(chargeTransferResistanceQ)} mono />
+      </Layer>
+
+      <Layer tone="slate" name="Electrochemical cell · optional">
+        <SelectField
+          label="Cell configuration"
+          value={cellConfiguration}
+          onChange={setCellConfiguration}
+          options={["", "two-electrode", "three-electrode"]}
+        />
+        <Field label="Reported cell setup" value={cellSetup} onChange={setCellSetup} placeholder="three-electrode Swagelok cell" />
+        {cellConfiguration !== "two-electrode" && (
+          <>
+            <Field label="Working electrode (WE)" value={workingElectrode} onChange={setWorkingElectrode} placeholder="glassy carbon / Pt" />
+            <Field label="Counter electrode (CE)" value={counterElectrode} onChange={setCounterElectrode} placeholder="carbon rod / Pt wire" />
+            <Field label="Reference electrode (RE)" value={referenceElectrode} onChange={setReferenceElectrode} placeholder="SCE / Ag/AgCl" />
+          </>
+        )}
+        {cellConfiguration !== "three-electrode" && (
+          <>
+            <Field label="Positive electrode (+)" value={positiveElectrode} onChange={setPositiveElectrode} placeholder="positive-electrode material" />
+            <Field label="Negative electrode (−)" value={negativeElectrode} onChange={setNegativeElectrode} placeholder="negative-electrode material" />
+          </>
+        )}
       </Layer>
 
       {/* MIDDLE LAYER */}

@@ -1,5 +1,6 @@
 import type { AfmCurveRecord } from "./afmCurves";
 import type { CuratedField } from "./interfacialExperiment";
+import type { AfmCurveDependency } from "./curveDependencies";
 
 export type AfmExportFormat = "csv" | "json" | "png";
 
@@ -12,12 +13,13 @@ export function afmCurveFileStem(curve: AfmCurveRecord) {
     .slice(0, 120);
 }
 
-export function buildAfmCurveCsv(curve: AfmCurveRecord) {
+export function buildAfmCurveCsv(curve: AfmCurveRecord, dependencies: AfmCurveDependency[] = []) {
   const metadata = exportMetadata(curve);
   const rows = [
     ["# IonicLink AFM force-curve export"],
     ["# curve_id", curve.id],
     ...metadata.map(([key, value]) => [`# ${key}`, value]),
+    ...(dependencies.length ? [["# property_dependencies_json", JSON.stringify(dependencies)]] : []),
     [],
     [`separation_${curve.xUnit || "unknown"}`, `force_${curve.yUnit || "unknown"}`],
     ...curve.points.map(([x, y]) => [x, y]),
@@ -25,7 +27,7 @@ export function buildAfmCurveCsv(curve: AfmCurveRecord) {
   return `\uFEFF${rows.map((row) => row.map(csvCell).join(",")).join("\r\n")}\r\n`;
 }
 
-export function buildAfmCurveJson(curve: AfmCurveRecord) {
+export function buildAfmCurveJson(curve: AfmCurveRecord, dependencies: AfmCurveDependency[] = []) {
   return JSON.stringify(
     {
       schema: "ioniclink.afm-force-curve",
@@ -80,6 +82,7 @@ export function buildAfmCurveJson(curve: AfmCurveRecord) {
       review: curve.review,
       source: curve.source,
       notes: curve.notes,
+      propertyDependencies: dependencies,
       points: curve.points.map(([separation, force]) => ({ separation, force })),
     },
     null,

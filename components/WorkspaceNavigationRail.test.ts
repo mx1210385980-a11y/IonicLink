@@ -32,7 +32,7 @@ assert.match(topNavSource, /<header className="[^"]*lg:hidden"/, "the horizontal
 assert.match(topNavSource, /<AuthControls \/>/, "mobile navigation retains the existing auth controls");
 assert.match(topNavSource, /href="\/afm"/, "AFM is a fourth top-level workspace in the mobile navigation");
 assert.match(topNavSource, /r\.seg === "design" \? "\/tribology\/design"/, "mobile Design uses the same reachable Tribology preview route");
-assert.match(topNavSource, /aria-label="教学实验"/, "the compact mobile teaching shortcut keeps an accessible name");
+assert.match(topNavSource, /aria-label="Teaching laboratory"/, "the compact mobile teaching shortcut keeps an accessible name");
 assert.match(topNavSource, /hidden text-base[^"]*sm:inline/, "the wordmark yields space to mobile workspace controls");
 
 console.log("Workspace navigation rail tests passed");

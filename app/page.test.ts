@@ -29,7 +29,7 @@ assert.match(html, /AFM workspace/);
 assert.match(html, /Open AFM workspace/);
 assert.match(html, /href="\/afm"/);
 assert.match(html, /158 Curves/);
-assert.match(html, /14 Verified/);
+assert.match(html, /102 Verified/);
 assert.match(html, /13 Model ready/);
 
 assert.doesNotMatch(html, />Upload PDF papers</);

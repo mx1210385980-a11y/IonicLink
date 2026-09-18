@@ -15,6 +15,8 @@ export function MoleculeView({
   label,
   width = 160,
   height = 80,
+  embedded = false,
+  showName = true,
 }: {
   smiles?: string;
   ionLabel?: string;
@@ -22,6 +24,9 @@ export function MoleculeView({
   label: string;
   width?: number;
   height?: number;
+  /** Remove the outer frame when the molecule is part of a larger identity card. */
+  embedded?: boolean;
+  showName?: boolean;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [ok, setOk] = useState(false);
@@ -118,21 +123,27 @@ export function MoleculeView({
       data-smiles={resolvedSmiles ?? ""}
       data-ion-source={source}
       style={{ "--molecule-view-height": `${drawHeight}px` } as CSSProperties}
-      className={`relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border px-2 py-1.5 ${
-        isCation
-          ? "border-cyan-100 bg-gradient-to-b from-cyan-50/70 to-white"
-          : "border-emerald-100 bg-gradient-to-b from-emerald-50/70 to-white"
+      className={`relative flex min-w-0 flex-1 flex-col overflow-hidden ${
+        embedded
+          ? "px-2 pb-1.5"
+          : `rounded-lg border px-2 py-1.5 ${
+              isCation
+                ? "border-cyan-100 bg-gradient-to-b from-cyan-50/70 to-white"
+                : "border-emerald-100 bg-gradient-to-b from-emerald-50/70 to-white"
+            }`
       }`}
       title={inferred ? `${label}: ${inferred.name}` : `${label}: ${ionLabel ?? "unknown ion"}`}
     >
-      <div className="relative z-10 min-h-8 min-w-0">
-        <span
-          data-testid={`molecule-name-${viewKind}`}
-          className={`block break-words text-[10px] font-semibold leading-snug ${isCation ? "text-cyan-800" : "text-emerald-800"}`}
-        >
-          {displayName}
-        </span>
-      </div>
+      {showName && (
+        <div className="relative z-10 min-h-8 min-w-0">
+          <span
+            data-testid={`molecule-name-${viewKind}`}
+            className={`block break-words text-[10px] font-semibold leading-snug ${isCation ? "text-cyan-800" : "text-emerald-800"}`}
+          >
+            {displayName}
+          </span>
+        </div>
+      )}
       <div className={`molecule-field molecule-field-${viewKind}`}>
         <div data-testid={`molecule-spin-stage-${viewKind}`} className="molecule-spin-stage">
           <div className={`molecule-spin molecule-spin-${viewKind}`}>

@@ -1,5 +1,9 @@
 import snapshot from "@/data/afm/afm-curves.json";
 import curationConfig from "@/data/afm/afm-curation.json";
+import figureLinks from "@/data/afm/afm-figure-links.json";
+import redigitizedSeries from "@/data/afm/afm-redigitized-series.json";
+import autoImportedSeries from "@/data/afm/afm-auto-imported-series.json";
+import legacySourceAudit from "@/data/afm/legacy-afm-source-audit.json";
 import paperCandidates from "@/data/afm/afm-paper-candidates.json";
 import {
   curatedField,
@@ -48,6 +52,17 @@ export interface AfmCurveSource {
   pdfFile: string | null;
   pdfPath: string | null;
   doi: string | null;
+  rawRowNumbers?: number[];
+  rawReplicateCount?: number;
+  figure?: {
+    label: string;
+    pdfPage: number;
+    mappingStatus: "verified" | "inferred";
+  } | null;
+  /** Fractional crop selecting this curve's individual panel in a shared source figure. */
+  imageCrop?: { left: number; top: number; right: number; bottom: number } | null;
+  /** Browser-local preview retained for pending digitization drafts only. */
+  previewImageDataUrl?: string | null;
 }
 
 interface AfmCurveSnapshotRecord {
@@ -64,6 +79,8 @@ interface AfmCurveSnapshotRecord {
   yUnit: string;
   pointCount: number;
   points: [number, number][];
+  /** Optional zero-based indices where disconnected digitized segments begin. */
+  segmentStarts?: number[];
   source: AfmCurveSource;
   notes: string;
 }
@@ -74,7 +91,7 @@ export interface AfmAcquisitionContext {
   instrument: CuratedField<string>;
   scanRate: CuratedField<number | string>;
   scanSize: CuratedField<number | string>;
-  springConstant: CuratedField<number>;
+  springConstant: CuratedField<number | string>;
   separationUnit: CuratedField<string>;
   forceUnit: CuratedField<string>;
 }
@@ -162,7 +179,7 @@ type VerifiedProfile = {
   instrument: string;
   scanRateHz: number | string | null;
   scanSizeNm: number | string;
-  springConstantNPerM: number;
+  springConstantNPerM: number | string;
   separationUnit: string;
   forceUnit: string;
   curveBranch: string;
@@ -176,7 +193,8 @@ type CurveOverride = {
   ionicLiquid: string;
   cation: string;
   anion: string;
-  temperatureK: number;
+  /** Null means the source paper was checked and did not report a temperature. */
+  temperatureK: number | null;
   figure: string;
   potentialV?: number;
   potentialReference?: string;
@@ -199,6 +217,27 @@ type CurveOverride = {
   }>;
 };
 
+type VerifiedFigureSystem = {
+  ionicLiquid: string;
+  cation: string;
+  anion: string;
+  substrate: string;
+  evidence: string;
+};
+
+type VerifiedCurveSystem = {
+  curveIds: string[];
+  ionicLiquid: string;
+  cation: string;
+  anion: string;
+  substrate: string;
+  pdfFile: string;
+  pdfPath: string;
+  doi: string;
+  figureLocator: string;
+  note: string;
+};
+
 type CurationConfig = {
   schemaVersion: number;
   requiredReviewFields: string[];
@@ -207,6 +246,8 @@ type CurationConfig = {
     anions: Record<string, string>;
     warning: string;
   };
+  verifiedFigureSystems: Record<string, VerifiedFigureSystem>;
+  verifiedCurveSystems: VerifiedCurveSystem[];
   verifiedPaperProfiles: Record<string, VerifiedProfile>;
   sourceOverrides: Record<string, Pick<AfmCurveSource, "pdfFile" | "pdfPath" | "doi">>;
   curveOverrides: Record<string, CurveOverride>;
@@ -216,25 +257,116 @@ type PaperCandidateDataset = {
   records: Array<AfmPaperCandidate & { curveIds: string[]; curveCount: number }>;
 };
 
+type AfmFigureLink = {
+  curveId: string;
+  imageFile: string;
+  imagePath: string;
+  pdfFile: string;
+  pdfPath: string;
+  doi: string;
+  pdfPage: number;
+  figureLabel: string;
+  displayLabel: string;
+  potentialV: number | null;
+  potentialReference: string;
+  xUnit: string;
+  yUnit: string;
+  imageCrop?: { left: number; top: number; right: number; bottom: number };
+  status: "verified";
+};
+
+type AfmFigureLinkDataset = {
+  schemaVersion: number;
+  records: AfmFigureLink[];
+};
+
+type AfmRedigitizedSeriesDataset = {
+  records: Array<{
+    curveId: string;
+    sourceCrop: { left: number; top: number; right: number; bottom: number };
+    points: [number, number][];
+    segmentStarts: number[];
+  }>;
+};
+
+type LegacySourceAuditRecord = {
+  curveId: string;
+  sourceCsv: {
+    file: string;
+    path: string;
+    rows: number[];
+    replicateCount: number;
+  };
+  rawCurves: {
+    pointCounts: number[];
+    allCoordinateLengthsMatch: boolean;
+  };
+  legacySmiles: {
+    cationCandidates: string[];
+    anionCandidates: string[];
+    status: "legacy-unverified";
+    warning: string;
+  };
+};
+
+type LegacySourceAuditDataset = {
+  records: LegacySourceAuditRecord[];
+};
+
+type AutoImportedAfmDataset = {
+  schemaVersion: number;
+  generatedAt: string;
+  records: Array<{
+    curve: AfmCurveSnapshotRecord;
+    profile: VerifiedProfile;
+    system: VerifiedCurveSystem;
+    override: CurveOverride;
+    figureLink: AfmFigureLink;
+  }>;
+};
+
 const rawDataset = snapshot as SnapshotDataset;
 const config = curationConfig as CurationConfig;
+const autoImportedDataset = autoImportedSeries as unknown as AutoImportedAfmDataset;
+const autoImportedByCurveId = new Map(autoImportedDataset.records.map((record) => [record.curve.id, record] as const));
 const candidateDataset = paperCandidates as PaperCandidateDataset;
+const figureLinkDataset = figureLinks as AfmFigureLinkDataset;
+const figureLinkByCurveId = new Map([
+  ...figureLinkDataset.records.map((record) => [record.curveId, record] as const),
+  ...autoImportedDataset.records.map((record) => [record.curve.id, record.figureLink] as const),
+]);
+const redigitizedByCurveId = new Map(
+  (redigitizedSeries as unknown as AfmRedigitizedSeriesDataset).records.map((record) => [record.curveId, record] as const),
+);
+const legacyAuditDataset = legacySourceAudit as LegacySourceAuditDataset;
+const legacyAuditByCurveId = new Map(legacyAuditDataset.records.map((record) => [record.curveId, record] as const));
+const verifiedSystemByCurveId = new Map(
+  [
+    ...config.verifiedCurveSystems,
+    ...autoImportedDataset.records.map((record) => record.system),
+  ].flatMap((system) => system.curveIds.map((curveId) => [curveId, system] as const)),
+);
 const candidateByCurveId = new Map(
   candidateDataset.records.flatMap((record) => record.curveIds.map((curveId) => [curveId, record] as const)),
 );
-const curves = rawDataset.curves.map(enrichCurve);
+const curves = [...rawDataset.curves, ...autoImportedDataset.records.map((record) => record.curve)].map(enrichCurve);
 
 export const AFM_CURVE_DATASET: AfmCurveDataset = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   curationSchemaVersion: config.schemaVersion,
   generatedAt: rawDataset.generatedAt,
   scope: rawDataset.scope,
   summary: {
     ...rawDataset.summary,
+    totalCurves: curves.length,
+    qualifiedNewCurves: curves.filter((curve) => curve.collection === "qualified-new").length,
+    legacyCleanedCurves: curves.filter((curve) => curve.collection === "legacy-cleaned").length,
     sourceVerifiedCurves: curves.filter((curve) => curve.status === "source-verified").length,
     paperLinkedCurves: curves.filter((curve) => Boolean(curve.source.doi)).length,
     paperSuggestedCurves: curves.filter((curve) => curve.paperCandidate?.status.includes("suggested")).length,
-    paperSuggestedFolderGroups: candidateDataset.records.filter((record) => record.status.includes("suggested")).length,
+    paperSuggestedFolderGroups: new Set(
+      curves.filter((curve) => curve.paperCandidate?.status.includes("suggested")).map((curve) => curve.paperCandidate!.folderKey),
+    ).size,
     paperUnmatchedCurves: curves.filter((curve) => curve.paperCandidate?.status === "unmatched").length,
     metadataCompleteCurves: curves.filter((curve) => curve.review.state === "verified").length,
     modelEligibleCurves: curves.filter((curve) => curve.digitization.modelEligible).length,
@@ -261,23 +393,107 @@ export const AFM_CURVE_DATASET: AfmCurveDataset = {
 };
 
 function enrichCurve(raw: AfmCurveSnapshotRecord): AfmCurveRecord {
-  const source = { ...raw.source, ...(config.sourceOverrides[raw.id] ?? {}) };
-  const doi = source.doi?.toLowerCase() ?? "";
-  const profile = config.verifiedPaperProfiles[doi];
-  const paperCandidate = candidateByCurveId.get(raw.id) ?? null;
-  const override = config.curveOverrides[raw.id];
+  const autoImported = autoImportedByCurveId.get(raw.id) ?? null;
+  const figureLink = figureLinkByCurveId.get(raw.id) ?? null;
+  const redigitized = redigitizedByCurveId.get(raw.id) ?? null;
   const legacy = raw.collection === "legacy-cleaned";
-  const legacyEvidence = evidence("legacy-dataset", raw.source.workbookFile, raw.source.range, "Imported from the old prediction platform and not checked against its source paper.");
+  const legacyAudit = legacyAuditByCurveId.get(raw.id) ?? null;
+  const verifiedSystem = verifiedSystemByCurveId.get(raw.id);
+  const source = {
+    ...raw.source,
+    ...(legacyAudit ? {
+      workbookFile: legacyAudit.sourceCsv.file,
+      workbookPath: legacyAudit.sourceCsv.path,
+      sheet: "CSV",
+      range: `rows ${legacyAudit.sourceCsv.rows.join(", ")}`,
+      rawRowNumbers: legacyAudit.sourceCsv.rows,
+      rawReplicateCount: legacyAudit.sourceCsv.replicateCount,
+    } : {}),
+    ...(config.sourceOverrides[raw.id] ?? {}),
+    ...(verifiedSystem ? {
+      pdfFile: verifiedSystem.pdfFile,
+      pdfPath: verifiedSystem.pdfPath,
+      doi: verifiedSystem.doi,
+    } : {}),
+    ...(figureLink ? {
+      imageFile: figureLink.imageFile,
+      imagePath: figureLink.imagePath,
+      pdfFile: figureLink.pdfFile,
+      pdfPath: figureLink.pdfPath,
+      doi: figureLink.doi,
+      figure: { label: figureLink.figureLabel, pdfPage: figureLink.pdfPage, mappingStatus: figureLink.status },
+      imageCrop: figureLink.imageCrop ?? redigitized?.sourceCrop ?? null,
+    } : { figure: raw.source.figure ?? null }),
+  };
+  const doi = source.doi?.toLowerCase() ?? "";
+  const profile = autoImported?.profile ?? config.verifiedPaperProfiles[doi];
+  const figureSystem = figureLink ? config.verifiedFigureSystems[doi] : undefined;
+  const mappedCandidate = candidateByCurveId.get(raw.id) ?? null;
+  const paperCandidate: AfmPaperCandidate | null = figureLink
+    ? {
+        folderKey: mappedCandidate?.folderKey ?? `${source.date}/${source.folder}`,
+        status: "verified",
+        requiresReview: false,
+        confidence: 1,
+        mappingRule: "human-confirmed-pdf-figure-workbook-order",
+        titleTokenOverlap: mappedCandidate?.titleTokenOverlap ?? 0,
+        reasons: ["The source PDF, cropped figures and workbook curve order were confirmed together."],
+        candidate: {
+          pdfFile: figureLink.pdfFile,
+          pdfPath: figureLink.pdfPath,
+          title: mappedCandidate?.candidate?.title ?? null,
+          doi: figureLink.doi,
+          pageCount: mappedCandidate?.candidate?.pageCount ?? null,
+          metadataStatus: "verified",
+          metadataError: null,
+        },
+      }
+    : verifiedSystem
+      ? {
+          folderKey: mappedCandidate?.folderKey ?? `${source.date}/${source.folder}`,
+          status: "verified",
+          requiresReview: false,
+          confidence: 1,
+          mappingRule: "human-reviewed-pdf-figure-and-curve-folder",
+          titleTokenOverlap: mappedCandidate?.titleTokenOverlap ?? 0,
+          reasons: [verifiedSystem.note],
+          candidate: {
+            pdfFile: verifiedSystem.pdfFile,
+            pdfPath: verifiedSystem.pdfPath,
+            title: mappedCandidate?.candidate?.title ?? null,
+            doi: verifiedSystem.doi,
+            pageCount: mappedCandidate?.candidate?.pageCount ?? null,
+            metadataStatus: "verified",
+            metadataError: null,
+          },
+        }
+      : mappedCandidate;
+  const override = autoImported?.override ?? config.curveOverrides[raw.id];
+  const legacyEvidence = evidence(
+    "legacy-dataset",
+    source.workbookFile,
+    source.range,
+    legacyAudit
+      ? `Mapped to ${legacyAudit.sourceCsv.replicateCount} raw curve row(s) in the original prediction-platform CSV; paper metadata remains unverified.`
+      : "Imported from the old prediction platform and not checked against its source paper.",
+  );
   const paperEvidence = profile
     ? evidence("paper", profile.paperFile, profile.methodLocator, "Directly reported in the paper's experimental methods.")
     : null;
-  const figureEvidence = profile && override
-    ? evidence("figure", source.imageFile ?? profile.paperFile, override.figure, "Read from the verified figure/image mapping.")
+  const figureEvidence = figureLink || verifiedSystem || (profile && override)
+    ? evidence(
+        "figure",
+        source.imageFile ?? profile?.paperFile ?? source.pdfFile,
+        figureLink?.figureLabel ?? verifiedSystem?.figureLocator ?? override?.figure ?? null,
+        verifiedSystem?.note ?? "Read from the verified figure/image mapping.",
+      )
     : null;
   const layerEvidence = override?.layerPositionsNm
     ? [
         ...(figureEvidence ? [figureEvidence] : []),
-        evidence("workbook", source.workbookFile, override.layerRange ?? null, "Layer positions copied from the dedicated annotation column beside this X/Y curve group."),
+        ...(override.layerRange
+          ? [evidence("workbook", source.workbookFile, override.layerRange, "Layer positions copied from the dedicated annotation column beside this X/Y curve group.")]
+          : []),
       ]
     : [];
   const relatedMeasurements: RelatedElectrochemicalMeasurement[] = (override?.relatedElectrochemistry ?? []).map((measurement) => ({
@@ -293,12 +509,12 @@ function enrichCurve(raw: AfmCurveSnapshotRecord): AfmCurveRecord {
     evidence: [evidence("figure", profile?.paperFile ?? source.pdfFile, measurement.figure, "Approximate value digitized from the paper; this is a related measurement, not a simultaneous AFM condition.")],
   }));
 
-  const identityStatus = override ? "verified" : legacy && raw.ionicLiquid ? "legacy-import" : "unreviewed";
-  const identityConfidence = override ? 1 : legacy && raw.ionicLiquid ? 0.6 : null;
-  const identityEvidence = override && figureEvidence ? [figureEvidence] : legacy ? [legacyEvidence] : [];
-  const ionicLiquid = override?.ionicLiquid ?? raw.ionicLiquid;
-  const cation = override?.cation ?? raw.cation;
-  const anion = override?.anion ?? raw.anion;
+  const identityStatus = override || figureSystem || verifiedSystem ? "verified" : legacy && raw.ionicLiquid ? "legacy-import" : "unreviewed";
+  const identityConfidence = override || figureSystem || verifiedSystem ? 1 : legacy && raw.ionicLiquid ? 0.6 : null;
+  const identityEvidence = (override || figureSystem || verifiedSystem) && figureEvidence ? [figureEvidence] : legacy ? [legacyEvidence] : [];
+  const ionicLiquid = override?.ionicLiquid ?? figureSystem?.ionicLiquid ?? verifiedSystem?.ionicLiquid ?? raw.ionicLiquid;
+  const cation = override?.cation ?? figureSystem?.cation ?? verifiedSystem?.cation ?? raw.cation;
+  const anion = override?.anion ?? figureSystem?.anion ?? verifiedSystem?.anion ?? raw.anion;
   const cationSmiles = legacy && raw.cation ? config.legacySmiles.cations[raw.cation] ?? null : null;
   const anionSmiles = legacy && raw.anion ? config.legacySmiles.anions[raw.anion] ?? null : null;
 
@@ -319,10 +535,10 @@ function enrichCurve(raw: AfmCurveSnapshotRecord): AfmCurveRecord {
       }),
     },
     interface: {
-      substrate: curatedField(profile?.substrate ?? null, {
-        status: profile ? "verified" : "unreviewed",
-        confidence: profile ? 1 : null,
-        evidence: paperEvidence ? [paperEvidence] : [],
+      substrate: curatedField(verifiedSystem?.substrate ?? figureSystem?.substrate ?? profile?.substrate ?? null, {
+        status: profile || figureSystem || verifiedSystem ? "verified" : "unreviewed",
+        confidence: profile || figureSystem || verifiedSystem ? 1 : null,
+        evidence: paperEvidence ? [paperEvidence] : (figureSystem || verifiedSystem) && figureEvidence ? [figureEvidence] : [],
       }),
       probeMaterial: curatedField(profile?.probeMaterial ?? null, {
         status: profile ? "verified" : "unreviewed",
@@ -336,11 +552,21 @@ function enrichCurve(raw: AfmCurveSnapshotRecord): AfmCurveRecord {
       }),
     },
     thermodynamics: {
-      temperature: curatedField(override?.temperatureK ?? raw.temperatureK, {
+      temperature: curatedField(override ? override.temperatureK : raw.temperatureK, {
         unit: "K",
-        status: override ? "verified" : legacy && raw.temperatureK !== null ? "legacy-import" : "unreviewed",
+        status: override
+          ? override.temperatureK === null
+            ? "not-reported"
+            : "verified"
+          : legacy && raw.temperatureK !== null
+            ? "legacy-import"
+            : "unreviewed",
         confidence: override ? 1 : legacy && raw.temperatureK !== null ? 0.6 : null,
-        evidence: override && figureEvidence ? [figureEvidence] : legacy && raw.temperatureK !== null ? [legacyEvidence] : [],
+        evidence: override
+          ? [override.temperatureK === null ? paperEvidence : figureEvidence].filter((item): item is FieldEvidence => Boolean(item))
+          : legacy && raw.temperatureK !== null
+            ? [legacyEvidence]
+            : [],
       }),
       pressure: curatedField<number>(null, { unit: "Pa" }),
       atmosphere: curatedField(profile?.atmosphere ?? null, {
@@ -355,16 +581,16 @@ function enrichCurve(raw: AfmCurveSnapshotRecord): AfmCurveRecord {
       }),
     },
     electrochemistry: {
-      electrodePotential: curatedField(override?.potentialV ?? raw.potentialV, {
+      electrodePotential: curatedField(override?.potentialV ?? figureLink?.potentialV ?? raw.potentialV, {
         unit: "V",
-        status: override?.potentialV !== undefined ? "verified" : legacy && raw.potentialV !== null ? "legacy-import" : profile ? "not-reported" : "unreviewed",
-        confidence: override?.potentialV !== undefined ? 1 : legacy && raw.potentialV !== null ? 0.6 : profile ? 1 : null,
-        evidence: override?.potentialV !== undefined && figureEvidence ? [figureEvidence] : legacy && raw.potentialV !== null ? [legacyEvidence] : paperEvidence ? [paperEvidence] : [],
+        status: override?.potentialV !== undefined ? "verified" : figureLink ? (figureLink.potentialV === null ? "reported" : "verified") : legacy && raw.potentialV !== null ? "legacy-import" : profile ? "not-reported" : "unreviewed",
+        confidence: override?.potentialV !== undefined || figureLink ? 1 : legacy && raw.potentialV !== null ? 0.6 : profile ? 1 : null,
+        evidence: (override?.potentialV !== undefined || figureLink) && figureEvidence ? [figureEvidence] : legacy && raw.potentialV !== null ? [legacyEvidence] : paperEvidence ? [paperEvidence] : [],
       }),
-      potentialReference: curatedField(override?.potentialReference ?? null, {
-        status: override?.potentialReference ? "verified" : profile ? "not-reported" : "unreviewed",
-        confidence: profile ? 1 : null,
-        evidence: override?.potentialReference && figureEvidence ? [figureEvidence] : paperEvidence ? [paperEvidence] : [],
+      potentialReference: curatedField(override?.potentialReference ?? figureLink?.potentialReference ?? null, {
+        status: override?.potentialReference || figureLink?.potentialReference ? "verified" : profile ? "not-reported" : "unreviewed",
+        confidence: override?.potentialReference || figureLink?.potentialReference ? 1 : profile ? 1 : null,
+        evidence: (override?.potentialReference || figureLink?.potentialReference) && figureEvidence ? [figureEvidence] : paperEvidence ? [paperEvidence] : [],
       }),
       capacitance: curatedField<number>(null, {
         unit: "F",
@@ -417,14 +643,14 @@ function enrichCurve(raw: AfmCurveSnapshotRecord): AfmCurveRecord {
       confidence: profile ? 1 : null,
       evidence: paperEvidence ? [paperEvidence] : [],
     }),
-    separationUnit: curatedField(profile?.separationUnit ?? (legacy ? "nm" : null), {
-      status: profile ? "verified" : legacy ? "legacy-import" : "unreviewed",
-      confidence: profile ? 1 : legacy ? 0.4 : null,
+    separationUnit: curatedField(profile?.separationUnit ?? figureLink?.xUnit ?? (legacy ? "nm" : null), {
+      status: profile || figureLink ? "verified" : legacy ? "legacy-import" : "unreviewed",
+      confidence: profile || figureLink ? 1 : legacy ? 0.4 : null,
       evidence: figureEvidence ? [figureEvidence] : legacy ? [legacyEvidence] : [],
     }),
-    forceUnit: curatedField(profile?.forceUnit ?? null, {
-      status: profile ? "verified" : "unreviewed",
-      confidence: profile ? 1 : null,
+    forceUnit: curatedField(profile?.forceUnit ?? figureLink?.yUnit ?? null, {
+      status: profile || figureLink ? "verified" : "unreviewed",
+      confidence: profile || figureLink ? 1 : null,
       evidence: figureEvidence ? [figureEvidence] : [],
     }),
   };
@@ -444,20 +670,32 @@ function enrichCurve(raw: AfmCurveSnapshotRecord): AfmCurveRecord {
     }),
   };
 
-  const reviewedRaw = { ...raw, source };
+  const reviewedRaw = {
+    ...raw,
+    source,
+    ...(redigitized ? {
+      points: redigitized.points,
+      pointCount: redigitized.points.length,
+      segmentStarts: redigitized.segmentStarts,
+    } : {}),
+  };
   const digitizationQuality: AfmDigitizationQuality = override?.digitizationQuality ?? (profile && override ? "complete" : legacy ? "legacy-resampled" : "unreviewed");
-  const review = buildReview(reviewedRaw, context, acquisition, paperCandidate, digitizationQuality, Boolean(profile), Boolean(cationSmiles || anionSmiles));
+  const paperIdentityVerified = Boolean(source.doi && (profile || paperCandidate?.status === "verified"));
+  const review = buildReview(reviewedRaw, context, acquisition, paperCandidate, digitizationQuality, paperIdentityVerified, Boolean(cationSmiles || anionSmiles));
   const digitization: AfmDigitizationReview = {
     quality: digitizationQuality,
     modelEligible: digitizationQuality === "complete" && review.state === "verified",
     note: override?.digitizationNote ?? (legacy ? "Legacy representative curve was resampled to 50 points and must not be treated as raw digitization." : "Digitization fidelity has not yet been checked against the source figure."),
   };
-  const temperatureC = override ? Math.round((override.temperatureK - 273.15) * 100) / 100 : null;
-  const label = override?.displayLabel ?? (override && /^-?\d+(?:\.\d+)?$/.test(raw.label.trim()) ? `${override.ionicLiquid} · ${formatTemperatureC(temperatureC)}` : raw.label);
+  const temperatureC = override?.temperatureK != null ? Math.round((override.temperatureK - 273.15) * 100) / 100 : null;
+  const label = override?.displayLabel ?? figureLink?.displayLabel ?? (override && /^-?\d+(?:\.\d+)?$/.test(raw.label.trim()) ? `${override.ionicLiquid} · ${formatTemperatureC(temperatureC)}` : raw.label);
+  const legacyAuditNote = legacyAudit
+    ? ` Original CSV provenance: ${legacyAudit.sourceCsv.file} rows ${legacyAudit.sourceCsv.rows.join(", ")} (${legacyAudit.sourceCsv.replicateCount} raw replicate${legacyAudit.sourceCsv.replicateCount === 1 ? "" : "s"}; ${legacyAudit.rawCurves.pointCounts.join("/")} points). Legacy SMILES remain chemically unverified.`
+    : "";
 
   return {
-    ...raw,
-    status: profile && source.doi ? "source-verified" : raw.status,
+    ...reviewedRaw,
+    status: paperIdentityVerified ? "source-verified" : raw.status,
     source,
     label,
     ionicLiquid,
@@ -473,7 +711,9 @@ function enrichCurve(raw: AfmCurveSnapshotRecord): AfmCurveRecord {
     digitization,
     paperCandidate,
     review,
-    notes: override?.digitizationNote ? `${raw.notes} ${override.digitizationNote}` : raw.notes,
+    notes: redigitized
+      ? `${override?.digitizationNote ?? "Source figure re-digitized."}${legacyAuditNote}`
+      : `${override?.digitizationNote ? `${raw.notes} ${override.digitizationNote}` : raw.notes}${legacyAuditNote}`,
   };
 }
 
@@ -502,16 +742,23 @@ function buildReview(
     }),
   };
   const required = config.requiredReviewFields;
-  const missingFields = required.filter((key) => !isFieldPresent(fields[key]));
-  const unverifiedFields = required.filter((key) => isFieldPresent(fields[key]) && !isFieldVerified(fields[key]));
+  // A source-confirmed absence (for example, measurement temperature was not
+  // reported) is a completed review outcome, not an unresolved missing field.
+  // This keeps the verification percentage honest without fabricating a value.
+  const isResolved = (field: CuratedField<unknown>) => isFieldPresent(field) || field.status === "not-reported";
+  const missingFields = required.filter((key) => !isResolved(fields[key]));
+  const unverifiedFields = required.filter((key) => isResolved(fields[key]) && !isFieldVerified(fields[key]));
   const presentFieldCount = required.length - missingFields.length;
-  const verifiedFieldCount = required.filter((key) => isFieldPresent(fields[key]) && isFieldVerified(fields[key])).length;
+  const verifiedFieldCount = required.filter((key) => isResolved(fields[key]) && isFieldVerified(fields[key])).length;
   const qualityFlags: string[] = [];
   if (!raw.source.doi) qualityFlags.push("source-paper-not-linked");
   if (paperCandidate?.requiresReview && paperCandidate.candidate) qualityFlags.push("paper-candidate-awaiting-review");
   if (!isFieldPresent(acquisition.separationUnit) || !isFieldPresent(acquisition.forceUnit)) qualityFlags.push("axis-units-need-review");
   if (!isFieldPresent(acquisition.curveBranch)) qualityFlags.push("curve-branch-need-review");
-  if (raw.collection === "legacy-cleaned") qualityFlags.push("legacy-endpoint-extrapolation", "legacy-source-provenance-missing");
+  if (raw.collection === "legacy-cleaned" && digitizationQuality !== "complete") {
+    qualityFlags.push("legacy-endpoint-extrapolation");
+    if (!raw.source.range) qualityFlags.push("legacy-source-provenance-missing");
+  }
   if (digitizationQuality === "partial") qualityFlags.push("digitization-incomplete", "exclude-from-modeling");
   if (digitizationQuality === "unreviewed") qualityFlags.push("digitization-fidelity-unreviewed");
   if (hasLegacySmiles) qualityFlags.push("legacy-smiles-need-chemical-validation");
