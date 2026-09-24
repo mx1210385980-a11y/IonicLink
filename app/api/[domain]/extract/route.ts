@@ -3,6 +3,8 @@ import { requireAppApiSession } from "@/lib/auth.server";
 import { extractRecords, isLiveExtractionEnabled } from "@/lib/extract";
 import { isDomain } from "@/lib/domain";
 import { createSourceFromPdf } from "@/lib/sources";
+import { enrichConductivityDraftsWithFigureAnalysis } from "@/lib/conductivity/figureVision.server";
+import type { ConductivityDraft } from "@/lib/conductivity/schema";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -46,8 +48,13 @@ export async function POST(req: NextRequest, { params }: { params: { domain: str
     }
 
     const result = await extractRecords(domain, text, sourceId);
+    const figureAnalysis = domain === "conductivity" && sourceId
+      ? await enrichConductivityDraftsWithFigureAnalysis(result.records as ConductivityDraft[], sourceId)
+      : null;
+    if (figureAnalysis) result.records = figureAnalysis.records;
     return NextResponse.json({
       ...result,
+      ...(figureAnalysis ? { figureAnalysis: figureAnalysis.summary } : {}),
       sourceName,
       live: isLiveExtractionEnabled(),
       chars: text.length,

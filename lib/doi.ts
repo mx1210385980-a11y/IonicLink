@@ -32,6 +32,14 @@ export function normalizeDoi(raw: string): string {
       doi = doi.slice(0, -1);
       continue;
     }
+    if (doi.endsWith("]") && (doi.match(/\[/g)?.length ?? 0) < (doi.match(/\]/g)?.length ?? 0)) {
+      doi = doi.slice(0, -1);
+      continue;
+    }
+    if (doi.endsWith("}") && (doi.match(/\{/g)?.length ?? 0) < (doi.match(/\}/g)?.length ?? 0)) {
+      doi = doi.slice(0, -1);
+      continue;
+    }
     break;
   }
   return doi.startsWith("10.") ? doi.toLowerCase() : "";

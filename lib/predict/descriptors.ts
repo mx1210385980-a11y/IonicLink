@@ -12,6 +12,7 @@ import {
   hBondAcceptors,
   hBondDonors,
   logPApprox,
+  molecularFormula,
   molecularWeight,
   parseSmiles,
   quaternaryAmmoniumCount,
@@ -57,6 +58,8 @@ export interface IonDescriptor {
   /* ---- literature feature set (computed from the molecular graph) ---- */
   /** Molecular weight including implicit hydrogens (g/mol). */
   mw: number;
+  /** Hill-system molecular formula including the net ionic charge. */
+  formula: string;
   /** Rotatable bond count N_rot. */
   nRot: number;
   /** Lipinski H-bond donor count. */
@@ -147,6 +150,7 @@ function emptyDescriptor(raw: string, kind: IonKind): IonDescriptor {
     hasRing: false,
     chainLength: 0,
     mw: 0,
+    formula: "",
     nRot: 0,
     hbd: 0,
     hba: 0,
@@ -193,6 +197,7 @@ function fromStructure(ion: IonStructure, kind: IonKind): IonDescriptor {
     hasRing: hasRingClosure(ion.smiles),
     chainLength: chainLengthOf(ion),
     mw: molecularWeight(graph),
+    formula: molecularFormula(graph),
     nRot: rotatableBonds(graph),
     hbd: hBondDonors(graph),
     hba: hBondAcceptors(graph),

@@ -1,0 +1,1591 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-27T04:04:53.965Z",
+  "mode": "applied",
+  "policy": {
+    "threeElectrode": "WE/CE/RE roles are stored without assigning fixed positive/negative polarity.",
+    "twoElectrode": "Positive/negative signs are stored only when the paper explicitly assigns polarity.",
+    "bulkProperties": "Bulk conductivity, viscosity, MD, and simulation records are not forced into a 2E/3E electrochemical-cell model.",
+    "provenance": "Every automated electrode value must match an exact text span in its stored source PDF; inferred fields are labelled inferred."
+  },
+  "summary": {
+    "officialRecords": 146,
+    "ruleMatchedRecords": 76,
+    "evidenceBackfilledRecords": 76,
+    "recordsNeedingUpdate": 0,
+    "updatedRecordsThisRun": 0,
+    "syncedAuditFiles": 2,
+    "syncedAuditRecords": 76,
+    "missingEvidence": 0,
+    "notApplicableRecords": 65,
+    "manualReviewRecords": 5,
+    "configurationCounts": {
+      "two-electrode": 0,
+      "three-electrode": 76,
+      "unknown": 70,
+      "electrochemical": 76,
+      "not-applicable": 65,
+      "unverified": 5
+    },
+    "backup": "D:\\ionic data\\ionic\\IonicLink\\data\\backups\\conductivity-2026-08-27T03-42-37-675Z-3246d0ad.db"
+  },
+  "evidenceBackfill": [
+    {
+      "id": "#001",
+      "title": "Physicochemical and electrochemical properties of Pyr13TFSI/NaTFSI electrolytes",
+      "source": "1-s2.0-S001346862200295X-main.pdf",
+      "rule": "pyr13-na-swage",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode Swagelok-type cell",
+        "workingElectrode": "carbon-coated aluminum",
+        "counterElectrode": "Na metal",
+        "referenceElectrode": "Na metal"
+      }
+    },
+    {
+      "id": "#002",
+      "title": "ILBMB/rGO-Au nanoparticle electrochemical sensor",
+      "source": "1-s2.0-S0925400522012357-main.pdf",
+      "rule": "ilbmb-sensor",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode system",
+        "workingElectrode": "CPO-ILBMB/rGO/GCE",
+        "counterElectrode": "carbon rod",
+        "referenceElectrode": "saturated calomel electrode (SCE)"
+      }
+    },
+    {
+      "id": "#003",
+      "title": "ILBMB/rGO-Au nanoparticle electrochemical sensor",
+      "source": "1-s2.0-S0925400522012357-main.pdf",
+      "rule": "ilbmb-sensor",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode system",
+        "workingElectrode": "CPO-ILBMB/rGO-Au NPs/GCE",
+        "counterElectrode": "carbon rod",
+        "referenceElectrode": "saturated calomel electrode (SCE)"
+      }
+    },
+    {
+      "id": "#004",
+      "title": "NIBA ionic-liquid/MWCNT electrochemical interface",
+      "source": "1-s2.0-S0927776520308973-main.pdf",
+      "rule": "niba-sensor",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "conventional three-electrode system",
+        "workingElectrode": "NIBA-IL/MWCNT/GCE",
+        "counterElectrode": "platinum wire",
+        "referenceElectrode": "Ag|AgCl"
+      }
+    },
+    {
+      "id": "#005",
+      "title": "NIBA ionic-liquid/MWCNT electrochemical interface",
+      "source": "1-s2.0-S0927776520308973-main.pdf",
+      "rule": "niba-sensor",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "conventional three-electrode system",
+        "workingElectrode": "Hb/NIBA-IL/GCE",
+        "counterElectrode": "platinum wire",
+        "referenceElectrode": "Ag|AgCl"
+      }
+    },
+    {
+      "id": "#006",
+      "title": "NIBA ionic-liquid/MWCNT electrochemical interface",
+      "source": "1-s2.0-S0927776520308973-main.pdf",
+      "rule": "niba-sensor",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "conventional three-electrode system",
+        "workingElectrode": "Hb/NIBA-IL/MWCNT/GCE",
+        "counterElectrode": "platinum wire",
+        "referenceElectrode": "Ag|AgCl"
+      }
+    },
+    {
+      "id": "#007",
+      "title": "Lanthanide electrodeposition from [BMP][DCA] on Pt(111)",
+      "source": "1-s2.0-S1572665722007603-main.pdf",
+      "rule": "lanthanide-pt111",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "workingElectrode": "Pt(111)",
+        "counterElectrode": "Pt foil",
+        "referenceElectrode": "leakless Ag/AgCl (Edaq)"
+      }
+    },
+    {
+      "id": "#008",
+      "title": "Ambipolar electrochemistry of pre-intercalated Ti3C2Tx MXene in ionic liquid",
+      "source": "Batteries   Supercaps - 2023 - Valurouthu - Ambipolar Electrochemistry of Pre‐Intercalated Ti3C2Tx MXene in Ionic Liquid.pdf",
+      "rule": "mxene-ambipolar",
+      "page": 8,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "3-electrode measurement",
+        "workingElectrode": "pre-intercalated Ti3C2Tx",
+        "counterElectrode": "over-capacitive activated-carbon film",
+        "referenceElectrode": "Ag wire"
+      }
+    },
+    {
+      "id": "#009",
+      "title": "Ambipolar electrochemistry of pre-intercalated Ti3C2Tx MXene in ionic liquid",
+      "source": "Batteries   Supercaps - 2023 - Valurouthu - Ambipolar Electrochemistry of Pre‐Intercalated Ti3C2Tx MXene in Ionic Liquid.pdf",
+      "rule": "mxene-ambipolar",
+      "page": 8,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "3-electrode measurement",
+        "workingElectrode": "pre-intercalated Ti3C2Tx",
+        "counterElectrode": "over-capacitive activated-carbon film",
+        "referenceElectrode": "Ag wire"
+      }
+    },
+    {
+      "id": "#010",
+      "title": "Ambipolar electrochemistry of pre-intercalated Ti3C2Tx MXene in ionic liquid",
+      "source": "Batteries   Supercaps - 2023 - Valurouthu - Ambipolar Electrochemistry of Pre‐Intercalated Ti3C2Tx MXene in Ionic Liquid.pdf",
+      "rule": "mxene-ambipolar",
+      "page": 8,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "3-electrode measurement",
+        "workingElectrode": "pre-intercalated Ti3C2Tx",
+        "counterElectrode": "over-capacitive activated-carbon film",
+        "referenceElectrode": "Ag wire"
+      }
+    },
+    {
+      "id": "#011",
+      "title": "Ambipolar electrochemistry of pre-intercalated Ti3C2Tx MXene in ionic liquid",
+      "source": "Batteries   Supercaps - 2023 - Valurouthu - Ambipolar Electrochemistry of Pre‐Intercalated Ti3C2Tx MXene in Ionic Liquid.pdf",
+      "rule": "mxene-ambipolar",
+      "page": 8,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "3-electrode measurement",
+        "workingElectrode": "pre-intercalated Ti3C2Tx",
+        "counterElectrode": "over-capacitive activated-carbon film",
+        "referenceElectrode": "Ag wire"
+      }
+    },
+    {
+      "id": "#012",
+      "title": "Ambipolar electrochemistry of pre-intercalated Ti3C2Tx MXene in ionic liquid",
+      "source": "Batteries   Supercaps - 2023 - Valurouthu - Ambipolar Electrochemistry of Pre‐Intercalated Ti3C2Tx MXene in Ionic Liquid.pdf",
+      "rule": "mxene-ambipolar",
+      "page": 8,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "3-electrode measurement",
+        "workingElectrode": "pre-intercalated Ti3C2Tx",
+        "counterElectrode": "over-capacitive activated-carbon film",
+        "referenceElectrode": "Ag wire"
+      }
+    },
+    {
+      "id": "#028",
+      "title": "ILEMB/Au@MoS2 electrochemical sensor",
+      "source": "s10800-022-01689-8.pdf",
+      "rule": "ilemb-sensor",
+      "page": 3,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode system",
+        "workingElectrode": "CPO-ILEMB/MoS2/GC",
+        "counterElectrode": "platinum electrode",
+        "referenceElectrode": "saturated calomel electrode (SCE)"
+      }
+    },
+    {
+      "id": "#029",
+      "title": "ILEMB/Au@MoS2 electrochemical sensor",
+      "source": "s10800-022-01689-8.pdf",
+      "rule": "ilemb-sensor",
+      "page": 3,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode system",
+        "workingElectrode": "CPO-ILEMB/Au@MoS2/GC",
+        "counterElectrode": "platinum electrode",
+        "referenceElectrode": "saturated calomel electrode (SCE)"
+      }
+    },
+    {
+      "id": "#038",
+      "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+      "source": "1-s2.0-S0013468610008790-main.pdf",
+      "rule": "multi-methoxy-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "standard three-electrode cell",
+        "workingElectrode": "glassy carbon electrode",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "I3−/I− reference electrode"
+      }
+    },
+    {
+      "id": "#039",
+      "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+      "source": "1-s2.0-S0013468610008790-main.pdf",
+      "rule": "multi-methoxy-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "standard three-electrode cell",
+        "workingElectrode": "glassy carbon electrode",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "I3−/I− reference electrode"
+      }
+    },
+    {
+      "id": "#040",
+      "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+      "source": "1-s2.0-S0013468610008790-main.pdf",
+      "rule": "multi-methoxy-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "standard three-electrode cell",
+        "workingElectrode": "glassy carbon electrode",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "I3−/I− reference electrode"
+      }
+    },
+    {
+      "id": "#041",
+      "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+      "source": "1-s2.0-S0013468610008790-main.pdf",
+      "rule": "multi-methoxy-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "standard three-electrode cell",
+        "workingElectrode": "glassy carbon electrode",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "I3−/I− reference electrode"
+      }
+    },
+    {
+      "id": "#042",
+      "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+      "source": "1-s2.0-S0013468610008790-main.pdf",
+      "rule": "multi-methoxy-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "standard three-electrode cell",
+        "workingElectrode": "glassy carbon electrode",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "I3−/I− reference electrode"
+      }
+    },
+    {
+      "id": "#043",
+      "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+      "source": "1-s2.0-S0013468610008790-main.pdf",
+      "rule": "multi-methoxy-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "standard three-electrode cell",
+        "workingElectrode": "glassy carbon electrode",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "I3−/I− reference electrode"
+      }
+    },
+    {
+      "id": "#044",
+      "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+      "source": "1-s2.0-S0013468610008790-main.pdf",
+      "rule": "multi-methoxy-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "standard three-electrode cell",
+        "workingElectrode": "glassy carbon electrode",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "I3−/I− reference electrode"
+      }
+    },
+    {
+      "id": "#045",
+      "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+      "source": "1-s2.0-S0013468610008790-main.pdf",
+      "rule": "multi-methoxy-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "standard three-electrode cell",
+        "workingElectrode": "glassy carbon electrode",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "I3−/I− reference electrode"
+      }
+    },
+    {
+      "id": "#052",
+      "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+      "source": "1-s2.0-S0167732218325492-main.pdf",
+      "rule": "mild-steel-corrosion",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode system",
+        "workingElectrode": "mild steel",
+        "counterElectrode": "graphite rod",
+        "referenceElectrode": "Ag/AgCl"
+      }
+    },
+    {
+      "id": "#053",
+      "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+      "source": "1-s2.0-S0167732218325492-main.pdf",
+      "rule": "mild-steel-corrosion",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode system",
+        "workingElectrode": "mild steel",
+        "counterElectrode": "graphite rod",
+        "referenceElectrode": "Ag/AgCl"
+      }
+    },
+    {
+      "id": "#054",
+      "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+      "source": "1-s2.0-S0167732218325492-main.pdf",
+      "rule": "mild-steel-corrosion",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode system",
+        "workingElectrode": "mild steel",
+        "counterElectrode": "graphite rod",
+        "referenceElectrode": "Ag/AgCl"
+      }
+    },
+    {
+      "id": "#055",
+      "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+      "source": "1-s2.0-S0167732218325492-main.pdf",
+      "rule": "mild-steel-corrosion",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode system",
+        "workingElectrode": "mild steel",
+        "counterElectrode": "graphite rod",
+        "referenceElectrode": "Ag/AgCl"
+      }
+    },
+    {
+      "id": "#056",
+      "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+      "source": "1-s2.0-S0167732218325492-main.pdf",
+      "rule": "mild-steel-corrosion",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode system",
+        "workingElectrode": "mild steel",
+        "counterElectrode": "graphite rod",
+        "referenceElectrode": "Ag/AgCl"
+      }
+    },
+    {
+      "id": "#057",
+      "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+      "source": "1-s2.0-S0167732218325492-main.pdf",
+      "rule": "mild-steel-corrosion",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode system",
+        "workingElectrode": "mild steel",
+        "counterElectrode": "graphite rod",
+        "referenceElectrode": "Ag/AgCl"
+      }
+    },
+    {
+      "id": "#058",
+      "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+      "source": "1-s2.0-S0167732218325492-main.pdf",
+      "rule": "mild-steel-corrosion",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode system",
+        "workingElectrode": "mild steel",
+        "counterElectrode": "graphite rod",
+        "referenceElectrode": "Ag/AgCl"
+      }
+    },
+    {
+      "id": "#059",
+      "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+      "source": "1-s2.0-S0167732218325492-main.pdf",
+      "rule": "mild-steel-corrosion",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode system",
+        "workingElectrode": "mild steel",
+        "counterElectrode": "graphite rod",
+        "referenceElectrode": "Ag/AgCl"
+      }
+    },
+    {
+      "id": "#060",
+      "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+      "source": "1-s2.0-S0167732218325492-main.pdf",
+      "rule": "mild-steel-corrosion",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode system",
+        "workingElectrode": "mild steel",
+        "counterElectrode": "graphite rod",
+        "referenceElectrode": "Ag/AgCl"
+      }
+    },
+    {
+      "id": "#061",
+      "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+      "source": "1-s2.0-S0167732218325492-main.pdf",
+      "rule": "mild-steel-corrosion",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode system",
+        "workingElectrode": "mild steel",
+        "counterElectrode": "graphite rod",
+        "referenceElectrode": "Ag/AgCl"
+      }
+    },
+    {
+      "id": "#062",
+      "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+      "source": "1-s2.0-S0167732218325492-main.pdf",
+      "rule": "mild-steel-corrosion",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode system",
+        "workingElectrode": "mild steel",
+        "counterElectrode": "graphite rod",
+        "referenceElectrode": "Ag/AgCl"
+      }
+    },
+    {
+      "id": "#063",
+      "title": "Experimental, density functional theory and molecular dynamics supported adsorption behavior of environmental benign imidazolium based ionic liquids on mild steel surface in acidic medium",
+      "source": "1-s2.0-S0167732218325492-main.pdf",
+      "rule": "mild-steel-corrosion",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode system",
+        "workingElectrode": "mild steel",
+        "counterElectrode": "graphite rod",
+        "referenceElectrode": "Ag/AgCl"
+      }
+    },
+    {
+      "id": "#064",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(111)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#065",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(100)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#066",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(110)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#067",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(111)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#068",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(100)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#069",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(110)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#070",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(111)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#071",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(100)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#072",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(110)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#073",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(111)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#074",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(100)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#075",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(110)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#076",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(111)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#077",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(100)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#078",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(110)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#079",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(111)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#080",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(100)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#081",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(110)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#082",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(111)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#083",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(100)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#084",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(110)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#085",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(111)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#086",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(100)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#087",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(110)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#088",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(111)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#089",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(100)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#090",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(110)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#091",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(111)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#092",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(100)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#093",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(110)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#094",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(111)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#095",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(100)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#096",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(110)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#097",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(111)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#098",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(100)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#099",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(110)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#100",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(111)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#101",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(100)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#102",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(110)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#103",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(111)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#104",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(100)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    },
+    {
+      "id": "#105",
+      "title": "Dataset of the electrochemical potential windows for the Au(hkl)|ionic liquid interfaces defined by the cut-off current densities",
+      "source": "1-s2.0-S235234092100860X-main.pdf",
+      "rule": "au-hkl-lsv",
+      "page": 2,
+      "changedFields": [],
+      "values": {
+        "cellConfiguration": "three-electrode",
+        "cellSetup": "three-electrode cell",
+        "workingElectrode": "Au(110)",
+        "counterElectrode": "Pt wire",
+        "referenceElectrode": "Pt wire quasi-reference"
+      }
+    }
+  ],
+  "missingEvidence": [],
+  "notApplicable": [
+    {
+      "id": "#013",
+      "title": "Electric-field-dependent structure of functional ionic liquids at Pt(111)",
+      "method": "MD",
+      "surface": "Pt(111)"
+    },
+    {
+      "id": "#014",
+      "title": "Electric-field-dependent structure of functional ionic liquids at Pt(111)",
+      "method": "MD",
+      "surface": "Pt(111)"
+    },
+    {
+      "id": "#015",
+      "title": "Electric-field-dependent structure of functional ionic liquids at Pt(111)",
+      "method": "MD",
+      "surface": "Pt(111)"
+    },
+    {
+      "id": "#016",
+      "title": "Electric-field-dependent structure of functional ionic liquids at Pt(111)",
+      "method": "MD",
+      "surface": "Pt(111)"
+    },
+    {
+      "id": "#017",
+      "title": "Electric-field-dependent structure of functional ionic liquids at Pt(111)",
+      "method": "MD",
+      "surface": "Pt(111)"
+    },
+    {
+      "id": "#018",
+      "title": "Electric-field-dependent structure of functional ionic liquids at Pt(111)",
+      "method": "MD",
+      "surface": "Pt(111)"
+    },
+    {
+      "id": "#019",
+      "title": "Electric-field-dependent structure of functional ionic liquids at Pt(111)",
+      "method": "MD",
+      "surface": "Pt(111)"
+    },
+    {
+      "id": "#025",
+      "title": "Electropolymerization of pyrrole-based ionic liquids on wireless bipolar electrodes",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#026",
+      "title": "Electropolymerization of pyrrole-based ionic liquids on wireless bipolar electrodes",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#027",
+      "title": "Electropolymerization of pyrrole-based ionic liquids on wireless bipolar electrodes",
+      "method": "finite-element simulation",
+      "surface": "wireless bipolar electrode tips"
+    },
+    {
+      "id": "#030",
+      "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+      "method": "viscometer; conductivity cell",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#031",
+      "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+      "method": "viscometer; conductivity cell",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#032",
+      "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+      "method": "viscometer; conductivity cell",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#033",
+      "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+      "method": "viscometer; conductivity cell",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#034",
+      "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+      "method": "viscometer; conductivity cell",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#035",
+      "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+      "method": "viscometer; conductivity cell",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#036",
+      "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+      "method": "viscometer; conductivity cell",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#037",
+      "title": "Ionic liquid electrolytes based on multi-methoxyethyl substituted ammoniums and perfluorinated sulfonimides: Preparation, characterization, and properties",
+      "method": "viscometer; conductivity cell",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#046",
+      "title": "New ionic liquids based on a super-delocalized perfluorinated sulfonimide anion: physical and electrochemical properties",
+      "method": "viscometer; conductivity cell",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#047",
+      "title": "New ionic liquids based on a super-delocalized perfluorinated sulfonimide anion: physical and electrochemical properties",
+      "method": "viscometer; conductivity cell",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#048",
+      "title": "New ionic liquids based on a super-delocalized perfluorinated sulfonimide anion: physical and electrochemical properties",
+      "method": "viscometer; conductivity cell",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#049",
+      "title": "New ionic liquids based on a super-delocalized perfluorinated sulfonimide anion: physical and electrochemical properties",
+      "method": "viscometer; conductivity cell",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#050",
+      "title": "New ionic liquids based on a super-delocalized perfluorinated sulfonimide anion: physical and electrochemical properties",
+      "method": "viscometer; conductivity cell",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#051",
+      "title": "New ionic liquids based on a super-delocalized perfluorinated sulfonimide anion: physical and electrochemical properties",
+      "method": "viscometer; conductivity cell",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#106",
+      "title": "Physicochemical Study of Ionic Liquids' Structure and Influence of the Lithium Salt Associated",
+      "method": "viscometer; impedance spectroscopy",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#107",
+      "title": "Physicochemical Study of Ionic Liquids' Structure and Influence of the Lithium Salt Associated",
+      "method": "viscometer; impedance spectroscopy",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#108",
+      "title": "Physicochemical Study of Ionic Liquids' Structure and Influence of the Lithium Salt Associated",
+      "method": "viscometer; impedance spectroscopy",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#109",
+      "title": "Physicochemical Study of Ionic Liquids' Structure and Influence of the Lithium Salt Associated",
+      "method": "viscometer; impedance spectroscopy",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#110",
+      "title": "Physicochemical Study of Ionic Liquids' Structure and Influence of the Lithium Salt Associated",
+      "method": "viscometer; impedance spectroscopy",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#111",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#112",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#113",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#114",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#115",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#116",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#117",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#118",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#119",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#120",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#121",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#122",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#123",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#124",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#125",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#126",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#127",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#128",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#129",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#130",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#131",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#132",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#133",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#134",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#135",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#136",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#137",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#138",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#139",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#140",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#141",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#142",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#143",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#144",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#145",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    },
+    {
+      "id": "#146",
+      "title": "Benefits of the Mixtures of Ionic Liquid and Organic Electrolytes for Sodium-ion Batteries",
+      "method": "conductivity cell; viscometer",
+      "surface": "bulk liquid"
+    }
+  ],
+  "manualReview": [
+    {
+      "id": "#020",
+      "title": "Poly(1-acetamide-3-vinylimidazolium bromide) as a corrosion inhibitor",
+      "reason": "Electrochemical measurement is present, but the extracted source text does not unambiguously report the complete electrode configuration and materials."
+    },
+    {
+      "id": "#021",
+      "title": "Poly(1-acetamide-3-vinylimidazolium bromide) as a corrosion inhibitor",
+      "reason": "Electrochemical measurement is present, but the extracted source text does not unambiguously report the complete electrode configuration and materials."
+    },
+    {
+      "id": "#022",
+      "title": "Poly(1-acetamide-3-vinylimidazolium bromide) as a corrosion inhibitor",
+      "reason": "Electrochemical measurement is present, but the extracted source text does not unambiguously report the complete electrode configuration and materials."
+    },
+    {
+      "id": "#023",
+      "title": "Poly(1-acetamide-3-vinylimidazolium bromide) as a corrosion inhibitor",
+      "reason": "Electrochemical measurement is present, but the extracted source text does not unambiguously report the complete electrode configuration and materials."
+    },
+    {
+      "id": "#024",
+      "title": "Poly(1-acetamide-3-vinylimidazolium bromide) as a corrosion inhibitor",
+      "reason": "Electrochemical measurement is present, but the extracted source text does not unambiguously report the complete electrode configuration and materials."
+    }
+  ]
+}

@@ -1,0 +1,513 @@
+{
+  "generatedAt": "2026-09-15T07:50:15.381Z",
+  "root": "C:\\Users\\Administrator\\Documents\\Codex\\2026-08-13\\new-chat\\tmp\\pdfs\\afm-blind-ijms222312653",
+  "selection": "top textual AFM signal, SHA-256 deduplicated",
+  "summary": {
+    "uniqueReadablePdfs": 1,
+    "afmSignalPositivePdfs": 1,
+    "evaluated": 1,
+    "detectedPdfs": 1,
+    "rejectedOrFailedPdfs": 0,
+    "candidateCurves": 5,
+    "autoCalibratedPdfs": 1,
+    "relativeOnlyPdfs": 0,
+    "nonBlueCandidates": 5
+  },
+  "records": [
+    {
+      "relativePath": "dema-tfo-afs.pdf",
+      "title": "International Journal of",
+      "doi": "10.3390/ijms222312653",
+      "pageCount": 12,
+      "textualAfmSignal": 9,
+      "signalPages": [
+        11,
+        3,
+        6,
+        7,
+        9
+      ],
+      "httpStatus": 200,
+      "detected": true,
+      "error": null,
+      "matchedPaper": {
+        "doi": "10.3390/ijms222312653",
+        "curveIds": []
+      },
+      "axisCalibration": {
+        "status": "auto-calibrated",
+        "axes": {
+          "xMin": 4.233577,
+          "xMax": -0.881752,
+          "yMin": -6.636771,
+          "yMax": 25.022422,
+          "xUnit": "nm",
+          "yUnit": "nN"
+        },
+        "confidence": 0.7799999999999999,
+        "method": "figure-axis-ocr",
+        "evidence": [
+          "Horizontal and vertical OCR components were merged across a shared-axis small-multiple row.",
+          "OCR did not resolve vertical tick endpoints, vertical unit.",
+          "OCR did not resolve horizontal tick endpoints.",
+          "Inherited across an explicitly shared horizontal small-multiple axis."
+        ]
+      },
+      "experimentalMetadata": {
+        "ionicLiquids": [
+          {
+            "value": "[Dema][TfO]",
+            "unit": null,
+            "status": "extracted",
+            "confidence": 0.97,
+            "evidence": "International Journal of Molecular SciencesArticle The Structure of the Electric Double Layer of the Protic Ionic Liquid [Dema][TfO] Analyzed by Atomic Force Spectroscopy Christian Rodenbücher 1,* , Yingzhen Chen 1, Klaus Wippermann 1, Piotr M."
+          }
+        ],
+        "substrates": [
+          {
+            "value": "Pt(100)",
+            "unit": null,
+            "status": "extracted",
+            "confidence": 0.92,
+            "evidence": "Pt(100)"
+          }
+        ],
+        "probe": {
+          "material": {
+            "value": "gold-coated silicon",
+            "unit": null,
+            "status": "extracted",
+            "confidence": 0.96,
+            "evidence": "Au-coated Si tips (Tap150GD-G, Budget Sensors, Sofia, Bulgaria) were used to perform force spectroscopy while approach- ing the surface."
+          },
+          "tipRadius": {
+            "value": null,
+            "unit": null,
+            "status": "not-reported",
+            "confidence": 0,
+            "evidence": "Tip radius was not reported."
+          },
+          "cantileverSpringConstant": {
+            "value": 5,
+            "unit": "N/m",
+            "status": "extracted",
+            "confidence": 0.94,
+            "evidence": "typical force constant was in the range of 5 N/m"
+          }
+        },
+        "acquisition": {
+          "approachSpeed": {
+            "value": 30,
+            "unit": "nm/s",
+            "status": "extracted",
+            "confidence": 0.94,
+            "evidence": "approach speed of 30 nm/s"
+          },
+          "technique": {
+            "value": "atomic force spectroscopy",
+            "unit": null,
+            "status": "extracted",
+            "confidence": 0.99,
+            "evidence": "Atomic force spectroscopy was performed using a Cypher atomic force microscope (Asylum, Santa Barbara, CA, USA) equipped with a droplet cell."
+          }
+        },
+        "externalFactors": {
+          "temperature": {
+            "value": null,
+            "unit": null,
+            "status": "not-reported",
+            "confidence": 0,
+            "evidence": "Measurement temperature was not reported explicitly."
+          },
+          "atmosphere": {
+            "value": null,
+            "unit": null,
+            "status": "not-reported",
+            "confidence": 0,
+            "evidence": "Measurement atmosphere was not reported explicitly."
+          },
+          "waterContent": {
+            "value": "0.2 to 0.25 wt%",
+            "unit": null,
+            "status": "extracted",
+            "confidence": 0.9,
+            "evidence": "The initial water content of “neat” ionic liquid was in the range of 0.2 to 0.25 wt%, as determined by Karl Fischer titration."
+          }
+        }
+      },
+      "candidates": [
+        {
+          "id": "page-7-grid-2x3-1-3",
+          "page": 7,
+          "pageLabel": "PDF page 7 · detected panel C",
+          "figureLabel": "6",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.6313773778885761,
+            "right": 0.8941798426276215,
+            "top": 0.16771620995616998,
+            "bottom": 0.41359156184299606
+          },
+          "panel": {
+            "figureLabel": "6",
+            "label": "C",
+            "row": 0,
+            "column": 2,
+            "rows": 2,
+            "columns": 3,
+            "suggestedLabel": "[Dema][TfO] · -1.5 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Dema][TfO]",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.94,
+                "evidence": "The article identifies [Dema][TfO] as the liquid used for Figure 6."
+              },
+              "substrate": {
+                "value": null,
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0,
+                "evidence": "Figure 6 caption does not unambiguously map panel C to a substrate."
+              },
+              "electrodePotential": {
+                "value": -1.5,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.9,
+                "evidence": "Figure 6 assigns panel C to -1.5 V."
+              }
+            }
+          },
+          "pointCount": 500,
+          "segmentCount": 5,
+          "traceColor": "#79af67",
+          "confidence": 0.9289,
+          "axisConfidence": 0.9027,
+          "traceConfidence": 0.9479,
+          "coverage": 0.6375,
+          "quality": "high",
+          "warnings": [
+            "A bivariate density plot was identified; the exported centreline follows the caption-defined high-density ridge, not the low-density envelope."
+          ],
+          "traceMode": "density-ridge",
+          "axisCalibration": {
+            "status": "auto-calibrated",
+            "axes": {
+              "xMin": 4.233577,
+              "xMax": -0.881752,
+              "yMin": -6.636771,
+              "yMax": 25.022422,
+              "xUnit": "nm",
+              "yUnit": "nN"
+            },
+            "confidence": 0.7799999999999999,
+            "method": "figure-axis-ocr",
+            "evidence": [
+              "Horizontal and vertical OCR components were merged across a shared-axis small-multiple row.",
+              "OCR did not resolve vertical tick endpoints, vertical unit.",
+              "OCR did not resolve horizontal tick endpoints.",
+              "Inherited across an explicitly shared horizontal small-multiple axis."
+            ]
+          }
+        },
+        {
+          "id": "page-7-grid-2x3-1-1",
+          "page": 7,
+          "pageLabel": "PDF page 7 · detected panel A",
+          "figureLabel": "6",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.10577244841048522,
+            "right": 0.36857491314953067,
+            "top": 0.16771620995616998,
+            "bottom": 0.41359156184299606
+          },
+          "panel": {
+            "figureLabel": "6",
+            "label": "A",
+            "row": 0,
+            "column": 0,
+            "rows": 2,
+            "columns": 3,
+            "suggestedLabel": "[Dema][TfO] · -1.5 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Dema][TfO]",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.94,
+                "evidence": "The article identifies [Dema][TfO] as the liquid used for Figure 6."
+              },
+              "substrate": {
+                "value": null,
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0,
+                "evidence": "Figure 6 caption does not unambiguously map panel A to a substrate."
+              },
+              "electrodePotential": {
+                "value": -1.5,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.9,
+                "evidence": "Figure 6 assigns panel A to -1.5 V."
+              }
+            }
+          },
+          "pointCount": 488,
+          "segmentCount": 7,
+          "traceColor": "#78ab66",
+          "confidence": 0.9478,
+          "axisConfidence": 0.9521,
+          "traceConfidence": 0.9446,
+          "coverage": 0.825,
+          "quality": "high",
+          "warnings": [
+            "A bivariate density plot was identified; the exported centreline follows the caption-defined high-density ridge, not the low-density envelope."
+          ],
+          "traceMode": "density-ridge",
+          "axisCalibration": {
+            "status": "auto-calibrated",
+            "axes": {
+              "xMin": 4.233577,
+              "xMax": -0.881752,
+              "yMin": -6.636771,
+              "yMax": 25.022422,
+              "xUnit": "nm",
+              "yUnit": "nN"
+            },
+            "confidence": 0.7799999999999999,
+            "method": "figure-axis-ocr",
+            "evidence": [
+              "Horizontal and vertical OCR components were merged across a shared-axis small-multiple row.",
+              "OCR did not resolve vertical tick endpoints, vertical unit.",
+              "OCR did not resolve horizontal tick endpoints.",
+              "Inherited across an explicitly shared horizontal small-multiple axis."
+            ]
+          }
+        },
+        {
+          "id": "page-7-grid-2x3-1-2",
+          "page": 7,
+          "pageLabel": "PDF page 7 · detected panel B",
+          "figureLabel": "6",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.36857491314953067,
+            "right": 0.6313773778885761,
+            "top": 0.16771620995616998,
+            "bottom": 0.41359156184299606
+          },
+          "panel": {
+            "figureLabel": "6",
+            "label": "B",
+            "row": 0,
+            "column": 1,
+            "rows": 2,
+            "columns": 3,
+            "suggestedLabel": "[Dema][TfO] · +0.5 V",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Dema][TfO]",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.94,
+                "evidence": "The article identifies [Dema][TfO] as the liquid used for Figure 6."
+              },
+              "substrate": {
+                "value": null,
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0,
+                "evidence": "Figure 6 caption does not unambiguously map panel B to a substrate."
+              },
+              "electrodePotential": {
+                "value": 0.5,
+                "unit": "V",
+                "status": "inferred",
+                "confidence": 0.9,
+                "evidence": "Figure 6 assigns panel B to +0.5 V."
+              }
+            }
+          },
+          "pointCount": 415,
+          "segmentCount": 5,
+          "traceColor": "#728d68",
+          "confidence": 0.9373,
+          "axisConfidence": 0.9066,
+          "traceConfidence": 0.9596,
+          "coverage": 0.8625,
+          "quality": "high",
+          "warnings": [
+            "A bivariate density plot was identified; the exported centreline follows the caption-defined high-density ridge, not the low-density envelope."
+          ],
+          "traceMode": "density-ridge",
+          "axisCalibration": {
+            "status": "auto-calibrated",
+            "axes": {
+              "xMin": 4.233577,
+              "xMax": -0.881752,
+              "yMin": -6.636771,
+              "yMax": 25.022422,
+              "xUnit": "nm",
+              "yUnit": "nN"
+            },
+            "confidence": 0.7799999999999999,
+            "method": "figure-axis-ocr",
+            "evidence": [
+              "Horizontal and vertical OCR components were merged across a shared-axis small-multiple row.",
+              "OCR did not resolve vertical tick endpoints, vertical unit.",
+              "OCR did not resolve horizontal tick endpoints.",
+              "Inherited across an explicitly shared horizontal small-multiple axis."
+            ]
+          }
+        },
+        {
+          "id": "page-4-grid-2x2-1-1",
+          "page": 4,
+          "pageLabel": "PDF page 4 · detected panel A",
+          "figureLabel": "3",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.11040707167767565,
+            "right": 0.4916655131401233,
+            "top": 0.10486058748767657,
+            "bottom": 0.30867937616553237
+          },
+          "panel": {
+            "figureLabel": "3",
+            "label": "A",
+            "row": 0,
+            "column": 0,
+            "rows": 2,
+            "columns": 2,
+            "suggestedLabel": "[Dema][TfO]",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Dema][TfO]",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.94,
+                "evidence": "The article identifies [Dema][TfO] as the liquid used for Figure 3."
+              },
+              "substrate": {
+                "value": null,
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0,
+                "evidence": "Figure 3 caption does not unambiguously map panel A to a substrate."
+              },
+              "electrodePotential": {
+                "value": null,
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0,
+                "evidence": "No applied potential was assigned to this panel; do not infer zero volts from absence."
+              }
+            }
+          },
+          "pointCount": 273,
+          "segmentCount": 7,
+          "traceColor": "#8cbd77",
+          "confidence": 0.9658,
+          "axisConfidence": 0.9602,
+          "traceConfidence": 0.9698,
+          "coverage": 0.7167,
+          "quality": "high",
+          "warnings": [
+            "A bivariate density plot was identified; the exported centreline follows the caption-defined high-density ridge, not the low-density envelope.",
+            "Physical axis values and units are resolved from the paper before export; unresolved axes keep the result out of the dataset."
+          ],
+          "traceMode": "density-ridge",
+          "axisCalibration": {
+            "status": "relative-only",
+            "axes": null,
+            "partialAxes": {
+              "yMin": -10.268116,
+              "yMax": 187.601449,
+              "xUnit": "nm",
+              "yUnit": "nN"
+            },
+            "confidence": 0,
+            "method": "relative-pixel-fallback",
+            "evidence": [
+              "OCR did not resolve horizontal tick endpoints."
+            ]
+          }
+        },
+        {
+          "id": "page-4-grid-2x2-1-2",
+          "page": 4,
+          "pageLabel": "PDF page 4 · detected panel B",
+          "figureLabel": "3",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.4916655131401233,
+            "right": 0.8729239546025709,
+            "top": 0.10486058748767657,
+            "bottom": 0.30867937616553237
+          },
+          "panel": {
+            "figureLabel": "3",
+            "label": "B",
+            "row": 0,
+            "column": 1,
+            "rows": 2,
+            "columns": 2,
+            "suggestedLabel": "[Dema][TfO]",
+            "conditions": {
+              "ionicLiquid": {
+                "value": "[Dema][TfO]",
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0.94,
+                "evidence": "The article identifies [Dema][TfO] as the liquid used for Figure 3."
+              },
+              "substrate": {
+                "value": null,
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0,
+                "evidence": "Figure 3 caption does not unambiguously map panel B to a substrate."
+              },
+              "electrodePotential": {
+                "value": null,
+                "unit": null,
+                "status": "inferred",
+                "confidence": 0,
+                "evidence": "No applied potential was assigned to this panel; do not infer zero volts from absence."
+              }
+            }
+          },
+          "pointCount": 133,
+          "segmentCount": 9,
+          "traceColor": "#90be94",
+          "confidence": 0.9545,
+          "axisConfidence": 0.9705,
+          "traceConfidence": 0.943,
+          "coverage": 0.5625,
+          "quality": "high",
+          "warnings": [
+            "A bivariate density plot was identified; the exported centreline follows the caption-defined high-density ridge, not the low-density envelope.",
+            "Physical axis values and units are resolved from the paper before export; unresolved axes keep the result out of the dataset."
+          ],
+          "traceMode": "density-ridge",
+          "axisCalibration": {
+            "status": "relative-only",
+            "axes": null,
+            "partialAxes": {
+              "xUnit": "nm"
+            },
+            "confidence": 0,
+            "method": "relative-pixel-fallback",
+            "evidence": [
+              "OCR did not resolve horizontal tick endpoints, vertical tick endpoints, vertical unit."
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

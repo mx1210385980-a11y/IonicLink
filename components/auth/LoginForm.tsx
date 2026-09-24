@@ -40,10 +40,10 @@ export function LoginForm({ allowSignUp, nextPath }: { allowSignUp: boolean; nex
       if (result.error) {
         setError(
           result.error.status === 429
-            ? "尝试次数过多，请稍后再试。"
+            ? "Too many attempts. Try again later."
             : mode === "sign-in"
-              ? "邮箱或密码错误。"
-              : "账号创建失败，请检查填写内容后重试。"
+              ? "Incorrect email or password."
+              : "Account creation failed. Check the entered details and try again."
         );
         return;
       }
@@ -53,7 +53,7 @@ export function LoginForm({ allowSignUp, nextPath }: { allowSignUp: boolean; nex
         router.refresh();
       });
     } catch {
-      setError("登录服务暂时不可用，请稍后再试。");
+      setError("The sign-in service is temporarily unavailable. Try again later.");
     } finally {
       setSubmitting(false);
     }
@@ -67,23 +67,23 @@ export function LoginForm({ allowSignUp, nextPath }: { allowSignUp: boolean; nex
   return (
     <form className="panel w-full max-w-md p-6 sm:p-8" onSubmit={submit}>
       <h1 className="text-3xl font-semibold tracking-tight text-ink-950">
-        {mode === "sign-in" ? "登录 IonicLink" : "创建 IonicLink 账号"}
+        {mode === "sign-in" ? "Sign in to IonicLink" : "Create an IonicLink account"}
       </h1>
       <p className="mt-3 text-sm leading-6 text-ink-600">
         {mode === "sign-in"
-          ? "登录后继续管理论文、提取任务和标准化数据。"
-          : "使用工作邮箱创建账号，密码至少 8 个字符。"}
+          ? "Sign in to manage papers, extraction jobs, and standardized data."
+          : "Create an account with your work email and a password of at least eight characters."}
       </p>
 
       <div className="mt-7 space-y-5">
         {mode === "sign-up" ? (
           <label className="block">
-            <span className="text-sm font-semibold text-ink-800">姓名</span>
+            <span className="text-sm font-semibold text-ink-800">Name</span>
             <input
               autoComplete="name"
               className="mt-2 min-h-11 w-full rounded-[8px] border border-ink-200 bg-white px-3.5 text-sm text-ink-950 outline-none transition placeholder:text-ink-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
               name="name"
-              placeholder="你的姓名"
+              placeholder="Your name"
               required
               type="text"
             />
@@ -91,7 +91,7 @@ export function LoginForm({ allowSignUp, nextPath }: { allowSignUp: boolean; nex
         ) : null}
 
         <label className="block">
-          <span className="text-sm font-semibold text-ink-800">邮箱</span>
+          <span className="text-sm font-semibold text-ink-800">Email</span>
           <input
             autoCapitalize="none"
             autoComplete="email"
@@ -106,7 +106,7 @@ export function LoginForm({ allowSignUp, nextPath }: { allowSignUp: boolean; nex
         </label>
 
         <label className="block">
-          <span className="text-sm font-semibold text-ink-800">密码</span>
+          <span className="text-sm font-semibold text-ink-800">Password</span>
           <span className="relative mt-2 block">
             <input
               autoComplete={mode === "sign-in" ? "current-password" : "new-password"}
@@ -114,7 +114,7 @@ export function LoginForm({ allowSignUp, nextPath }: { allowSignUp: boolean; nex
               maxLength={128}
               minLength={8}
               name="password"
-              placeholder="至少 8 个字符"
+              placeholder="At least 8 characters"
               required
               type={showPassword ? "text" : "password"}
             />
@@ -124,7 +124,7 @@ export function LoginForm({ allowSignUp, nextPath }: { allowSignUp: boolean; nex
               onClick={() => setShowPassword((visible) => !visible)}
               type="button"
             >
-              {showPassword ? "隐藏" : "显示"}
+              {showPassword ? "Hide" : "Show"}
             </button>
           </span>
         </label>
@@ -133,7 +133,7 @@ export function LoginForm({ allowSignUp, nextPath }: { allowSignUp: boolean; nex
       {mode === "sign-in" ? (
         <label className="mt-5 flex w-fit items-center gap-2 text-sm text-ink-700">
           <input className="h-4 w-4 rounded border-ink-300 accent-brand-700" name="rememberMe" type="checkbox" />
-          保持登录
+          Keep me signed in
         </label>
       ) : null}
 
@@ -144,18 +144,18 @@ export function LoginForm({ allowSignUp, nextPath }: { allowSignUp: boolean; nex
       ) : null}
 
       <button className="btn-primary mt-6 w-full justify-center" disabled={busy} type="submit">
-        {busy ? "正在处理…" : mode === "sign-in" ? "登录" : "创建账号"}
+        {busy ? "Working…" : mode === "sign-in" ? "Sign in" : "Create account"}
       </button>
 
       {allowSignUp ? (
         <p className="mt-6 text-center text-sm text-ink-600">
-          {mode === "sign-in" ? "还没有账号？" : "已经有账号？"}{" "}
+          {mode === "sign-in" ? "No account yet?" : "Already have an account?"}{" "}
           <button
             className="font-semibold text-brand-700 underline-offset-4 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-200"
             onClick={() => switchMode(mode === "sign-in" ? "sign-up" : "sign-in")}
             type="button"
           >
-            {mode === "sign-in" ? "创建账号" : "返回登录"}
+            {mode === "sign-in" ? "Create account" : "Return to sign in"}
           </button>
         </p>
       ) : null}

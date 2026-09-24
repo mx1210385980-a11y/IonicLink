@@ -14,6 +14,7 @@ assert.equal(
   "balanced parens are part of the DOI"
 );
 assert.equal(normalizeDoi("10.1000/abc123)"), "10.1000/abc123", "unbalanced trailing paren stripped");
+assert.equal(normalizeDoi("10.5796/electrochemistry.23-69151]"), "10.5796/electrochemistry.23-69151", "unbalanced citation bracket stripped");
 assert.equal(normalizeDoi("not a doi"), "", "non-DOI input normalizes to empty");
 
 console.log("DOI normalization tests passed");

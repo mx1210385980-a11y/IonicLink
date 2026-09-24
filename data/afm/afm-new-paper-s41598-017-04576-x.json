@@ -1,0 +1,81 @@
+{
+  "generatedAt": "2026-09-14T15:08:37.406Z",
+  "root": "C:\\Users\\Administrator\\Documents\\Codex\\2026-08-13\\new-chat\\tmp\\afm-blind-s41598-017-04576-x\\input",
+  "selection": "top textual AFM signal, SHA-256 deduplicated",
+  "summary": {
+    "uniqueReadablePdfs": 1,
+    "afmSignalPositivePdfs": 1,
+    "evaluated": 1,
+    "detectedPdfs": 1,
+    "rejectedOrFailedPdfs": 0,
+    "candidateCurves": 1,
+    "autoCalibratedPdfs": 0,
+    "relativeOnlyPdfs": 1,
+    "nonBlueCandidates": 1
+  },
+  "records": [
+    {
+      "relativePath": "insight-edl-ionic-liquid-graphene.pdf",
+      "title": "1SCIENTIFIC RepoRts | 7: 4225 | DOI:10.1038/s41598-017-04576-x",
+      "doi": "10.1038/s41598-017-04576-x",
+      "pageCount": 12,
+      "textualAfmSignal": 73,
+      "signalPages": [
+        2,
+        5,
+        3,
+        9,
+        4,
+        10,
+        8,
+        11,
+        6,
+        1,
+        7
+      ],
+      "httpStatus": 200,
+      "detected": true,
+      "error": null,
+      "matchedPaper": {
+        "doi": "10.1038/s41598-017-04576-x",
+        "curveIds": []
+      },
+      "axisCalibration": {
+        "status": "relative-only",
+        "axes": null,
+        "confidence": 0,
+        "method": "relative-pixel-fallback",
+        "evidence": [
+          "The curve centreline was extracted automatically, but no trustworthy physical-axis endpoints were resolved."
+        ]
+      },
+      "candidates": [
+        {
+          "id": "page-2",
+          "page": 2,
+          "pageLabel": "PDF page 2 · figure crop",
+          "figureLabel": null,
+          "sourceKind": "pdf-figure-crop",
+          "crop": {
+            "left": 0.16570057116362832,
+            "top": 0.059435168630378246,
+            "right": 0.9317317731606852,
+            "bottom": 0.23106926205516115
+          },
+          "panel": null,
+          "pointCount": 272,
+          "segmentCount": 1,
+          "traceColor": "#de5250",
+          "confidence": 0.83,
+          "axisConfidence": 0.6589,
+          "traceConfidence": 0.9539,
+          "coverage": 0.8125,
+          "quality": "high",
+          "warnings": [
+            "Physical axis values and units are resolved from the paper before export; unresolved axes keep the result out of the dataset."
+          ]
+        }
+      ]
+    }
+  ]
+}

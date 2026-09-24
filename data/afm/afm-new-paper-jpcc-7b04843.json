@@ -1,0 +1,37 @@
+{
+  "generatedAt": "2026-09-14T15:02:59.186Z",
+  "root": "C:\\Users\\Administrator\\Documents\\Codex\\2026-08-13\\new-chat\\tmp\\afm-blind-jpcc-7b04843\\input",
+  "selection": "top textual AFM signal, SHA-256 deduplicated",
+  "summary": {
+    "uniqueReadablePdfs": 1,
+    "afmSignalPositivePdfs": 1,
+    "evaluated": 1,
+    "detectedPdfs": 0,
+    "rejectedOrFailedPdfs": 1,
+    "candidateCurves": 0,
+    "autoCalibratedPdfs": 0,
+    "relativeOnlyPdfs": 0,
+    "nonBlueCandidates": 0
+  },
+  "records": [
+    {
+      "relativePath": "near-wall-molecular-ordering-dilute-ionic-liquids.pdf",
+      "title": "Near-Wall Molecular Ordering of Dilute Ionic Liquids",
+      "doi": "10.1021/acs.jpcc.7b04843",
+      "pageCount": 5,
+      "textualAfmSignal": 14,
+      "signalPages": [
+        4,
+        1,
+        2,
+        5
+      ],
+      "httpStatus": 422,
+      "detected": false,
+      "error": "No credible AFM force-distance curve was detected. Pages containing only text, tables, annotations, or unrelated graphics are excluded automatically.",
+      "matchedPaper": null,
+      "axisCalibration": null,
+      "candidates": []
+    }
+  ]
+}

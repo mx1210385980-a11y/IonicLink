@@ -68,31 +68,42 @@ export function IonPill({
   label,
   value,
   units = "raw",
+  chargePosition = "start",
+  embedded = false,
 }: {
   kind: "cation" | "anion";
   label: string;
   value: string;
   units?: UnitMode;
+  chargePosition?: "start" | "end";
+  embedded?: boolean;
 }) {
   const isCation = kind === "cation";
   const displayValue = ionDisplayLabel(value, kind, units);
   const displayFormula = ionDisplayFormula(value, kind, units);
   const title = units === "std" && displayValue !== value ? `${label}: ${displayValue} · as reported: ${value}` : `${label}: ${value}`;
+  const charge = (
+    <span
+      data-testid={`ion-charge-${kind}`}
+      className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border text-xs font-black leading-none ${
+        isCation ? "border-cyan-200 bg-white text-cyan-600" : "border-emerald-200 bg-white text-emerald-600"
+      }`}
+      aria-label={isCation ? "positive ion" : "negative ion"}
+    >
+      {isCation ? "+" : "−"}
+    </span>
+  );
   return (
     <div
       data-testid={`ion-pill-${kind}`}
-      className={`flex min-w-0 items-center gap-1.5 rounded-lg border px-2 py-1.5 ${
-        isCation ? "border-cyan-100 bg-cyan-50/55" : "border-emerald-100 bg-emerald-50/55"
+      className={`flex min-w-0 items-center gap-1.5 ${
+        embedded
+          ? "px-2 pt-2"
+          : `rounded-lg border px-2 py-1.5 ${isCation ? "border-cyan-100 bg-cyan-50/55" : "border-emerald-100 bg-emerald-50/55"}`
       }`}
       title={title}
     >
-      <span
-        className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border text-xs font-black leading-none ${
-          isCation ? "border-cyan-200 bg-white text-cyan-600" : "border-emerald-200 bg-white text-emerald-600"
-        }`}
-      >
-        {isCation ? "+" : "−"}
-      </span>
+      {chargePosition === "start" && charge}
       <span className="min-w-0">
         <span className={`block text-[9px] font-bold uppercase tracking-eyebrow ${isCation ? "text-cyan-600" : "text-emerald-600"}`}>
           {label}
@@ -101,6 +112,7 @@ export function IonPill({
           <IonFormula value={displayFormula} subscript={units === "std"} />
         </span>
       </span>
+      {chargePosition === "end" && charge}
     </div>
   );
 }

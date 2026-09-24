@@ -164,7 +164,7 @@ function rowToRecord(domain: Domain, row: { payload: string }, db?: Database.Dat
 }
 
 function normalizeLegacyRecord(domain: Domain, rec: AnyRecord, db?: Database.Database): AnyRecord {
-  let next = normalizeLegacyTemperature(rec);
+  let next = normalizeLegacyTemperature(domain, rec);
   next = normalizeLegacyQuantities(domain, next);
   next = normalizeLegacySubstrate(domain, next);
   next = normalizeLegacySurface(domain, next);
@@ -189,6 +189,12 @@ const LEGACY_QUANTITY_PATHS: Record<Domain, QuantityPath[]> = {
   conductivity: [
     { section: "core", key: "temperature", dim: "temperature" },
     { section: "core", key: "conductivity", dim: "conductivity" },
+    { section: "core", key: "capacitance", dim: "capacitance" },
+    { section: "core", key: "electricField", dim: "electricField" },
+    { section: "core", key: "electrodePotential", dim: "potential" },
+    { section: "core", key: "electrochemicalWindow", dim: "potential" },
+    { section: "core", key: "chargeTransferResistance", dim: "resistance" },
+    { section: "extended", key: "pressure", dim: "pressure" },
     { section: "extended", key: "viscosity", dim: "viscosity" },
   ],
   diffusion: [
@@ -240,9 +246,19 @@ function normalizeLegacySurface(domain: Domain, rec: AnyRecord): AnyRecord {
   return domain === "tribology" ? applySurfaceDescriptorsToRecord(rec) : rec;
 }
 
-function normalizeLegacyTemperature(rec: AnyRecord): AnyRecord {
+function normalizeLegacyTemperature(domain: Domain, rec: AnyRecord): AnyRecord {
   const temp = rec.core?.temperature;
-  const rawUsed = temp?.raw?.trim() || ROOM_TEMPERATURE_RAW;
+  const raw = temp?.raw?.trim() || "";
+  if (domain === "conductivity" && (!raw || /^(?:not\s+(?:stated|reported|specified)|unknown|n\/?a)$/i.test(raw))) {
+    return {
+      ...rec,
+      core: {
+        ...rec.core,
+        temperature: null,
+      },
+    };
+  }
+  const rawUsed = raw || ROOM_TEMPERATURE_RAW;
   const normalized = parseQuantity(rawUsed, "temperature");
   if (!normalized || normalized.value == null) return rec;
 

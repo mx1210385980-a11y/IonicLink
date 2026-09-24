@@ -1,0 +1,105 @@
+{
+  "generatedAt": "2026-09-14T07:59:18.837Z",
+  "root": "C:\\Users\\Administrator\\Documents\\Codex\\2026-08-13\\new-chat\\tmp\\afm-target-paper-18",
+  "selection": "top textual AFM signal, SHA-256 deduplicated",
+  "summary": {
+    "uniqueReadablePdfs": 1,
+    "afmSignalPositivePdfs": 1,
+    "evaluated": 1,
+    "detectedPdfs": 1,
+    "rejectedOrFailedPdfs": 0,
+    "candidateCurves": 2,
+    "autoCalibratedPdfs": 0,
+    "relativeOnlyPdfs": 1,
+    "nonBlueCandidates": 1
+  },
+  "records": [
+    {
+      "relativePath": "18.pdf",
+      "title": "Cite this: DOI: 10.1039/c5nr07805a",
+      "doi": "10.1039/c5nr07805a",
+      "pageCount": 13,
+      "textualAfmSignal": 70,
+      "signalPages": [
+        6,
+        3,
+        1,
+        5,
+        11,
+        2,
+        8,
+        4,
+        9,
+        10,
+        12
+      ],
+      "httpStatus": 200,
+      "detected": true,
+      "error": null,
+      "matchedPaper": {
+        "doi": "10.1039/c5nr07805a",
+        "curveIds": []
+      },
+      "axisCalibration": {
+        "status": "relative-only",
+        "axes": null,
+        "confidence": 0,
+        "method": "relative-pixel-fallback",
+        "evidence": [
+          "The curve centreline was extracted automatically, but no trustworthy physical-axis endpoints were resolved."
+        ]
+      },
+      "candidates": [
+        {
+          "id": "page-4-grid-2x2-2-1",
+          "page": 4,
+          "pageLabel": "PDF page 4 · detected panel B",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.5476182476699883,
+            "right": 0.7179224426988489,
+            "top": 0.1929821635656449,
+            "bottom": 0.32101861639351
+          },
+          "panel": null,
+          "pointCount": 432,
+          "segmentCount": 8,
+          "traceColor": "#70a95c",
+          "confidence": 0.7818,
+          "axisConfidence": 0.957,
+          "traceConfidence": 0.6548,
+          "coverage": 0.95,
+          "quality": "high",
+          "warnings": [
+            "Physical axis values and units are resolved from the paper before export; unresolved axes keep the result out of the dataset."
+          ]
+        },
+        {
+          "id": "page-4-grid-2x2-1-1",
+          "page": 4,
+          "pageLabel": "PDF page 4 · detected panel A",
+          "sourceKind": "pdf-panel-crop",
+          "crop": {
+            "left": 0.5476182476699883,
+            "right": 0.8882266377277095,
+            "top": 0.06494571073777983,
+            "bottom": 0.1929821635656449
+          },
+          "panel": null,
+          "pointCount": 545,
+          "segmentCount": 11,
+          "traceColor": "#4572b8",
+          "confidence": 0.7062,
+          "axisConfidence": 0.7217,
+          "traceConfidence": 0.6949,
+          "coverage": 0.8167,
+          "quality": "medium",
+          "warnings": [
+            "Coloured labels or arrows may be mixed with the extracted trace.",
+            "Physical axis values and units are resolved from the paper before export; unresolved axes keep the result out of the dataset."
+          ]
+        }
+      ]
+    }
+  ]
+}

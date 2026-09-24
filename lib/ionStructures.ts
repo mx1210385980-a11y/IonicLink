@@ -154,7 +154,7 @@ function buildAliasMap(ions: CuratedIon[]): Map<string, IonStructure> {
   const map = new Map<string, IonStructure>();
   for (const ion of ions) {
     const structure: IonStructure = { ...ion, source: "curated" };
-    for (const alias of ion.aliases) {
+    for (const alias of [ion.label, ion.name, ...ion.aliases]) {
       map.set(normalizeIonKey(alias), structure);
     }
   }

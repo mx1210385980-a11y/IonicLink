@@ -36,6 +36,10 @@ import {
   assert.equal(bmim.nHetero, 2);
   assert.equal(bmim.hasRing, true);
   assert.equal(bmim.chainLength, 4);
+  assert.equal(bmim.formula, "C8H15N2+");
+
+  const bromide = describeIon("[Br]", "anion");
+  assert.equal(bromide.formula, "Br−");
 
   const fap = describeIon("[FAP]", "anion");
   assert.equal(fap.nF, 18);

@@ -35,6 +35,7 @@ export function WorkspaceNavigationRail() {
   const parts = pathname.split("/");
   const first = parts[1];
   const onDomainPage = isDomain(first);
+  const onAfmPage = first === "afm";
   const domain: Domain = onDomainPage ? first : DEFAULT_DOMAIN;
   const section = parts[2] ?? "";
   const onTeachingPage = first === "teaching";
@@ -82,9 +83,12 @@ export function WorkspaceNavigationRail() {
             </RailLink>
           );
         })}
+        <RailLink href="/afm" label="AFM workspace" active={onAfmPage} tone="workspace">
+          <span className="font-mono text-[13px] font-semibold leading-none tracking-tight" aria-hidden>AFM</span>
+        </RailLink>
       </nav>
 
-      <nav
+      {onDomainPage ? <nav
         aria-label={`${DOMAIN_LABELS[domain]} sections`}
         data-testid="section-dock"
         className="mt-4 flex flex-col items-center gap-1 rounded-[18px] border border-[#e1e7f1] bg-white p-1.5 shadow-[0_14px_30px_-24px_rgba(36,57,105,0.55)]"
@@ -103,7 +107,7 @@ export function WorkspaceNavigationRail() {
             </RailLink>
           );
         })}
-      </nav>
+      </nav> : null}
 
       <div
         data-testid="utility-dock"

@@ -249,7 +249,7 @@ type AppApiAccess =
 function crossOriginResponse(request: Request): NextResponse | null {
   if (["GET", "HEAD", "OPTIONS"].includes(request.method.toUpperCase())) return null;
   if (request.headers.get("sec-fetch-site") === "cross-site") {
-    return NextResponse.json({ error: "请求来源校验失败。" }, { status: 403 });
+    return NextResponse.json({ error: "Request-origin validation failed." }, { status: 403 });
   }
 
   const origin = request.headers.get("origin");
@@ -269,7 +269,7 @@ function crossOriginResponse(request: Request): NextResponse | null {
   } catch {
     // Invalid origins are rejected below.
   }
-  return NextResponse.json({ error: "请求来源校验失败。" }, { status: 403 });
+  return NextResponse.json({ error: "Request-origin validation failed." }, { status: 403 });
 }
 
 export async function requireAppApiSession(request: Request): Promise<AppApiAccess> {
@@ -283,7 +283,7 @@ export async function requireAppApiSession(request: Request): Promise<AppApiAcce
       return {
         ok: false,
         response: NextResponse.json(
-          { error: "登录已失效，请重新登录。" },
+          { error: "Your session has expired. Sign in again." },
           { status: 401, headers: { "Cache-Control": "no-store" } }
         ),
       };
@@ -294,7 +294,7 @@ export async function requireAppApiSession(request: Request): Promise<AppApiAcce
     return {
       ok: false,
       response: NextResponse.json(
-        { error: "登录服务暂时不可用。" },
+        { error: "The sign-in service is temporarily unavailable." },
         { status: 503, headers: { "Cache-Control": "no-store" } }
       ),
     };

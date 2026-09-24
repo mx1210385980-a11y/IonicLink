@@ -1,6 +1,6 @@
 import { auth, ensureAuthReady } from "./auth.server";
 
-const TEST_EMAIL = `route-test-${process.pid}@ioniclink.test`;
+const TEST_EMAIL = `route-test-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@ioniclink.test`;
 const TEST_PASSWORD = "Test2026";
 
 type TestSession = {
@@ -29,7 +29,10 @@ export function createTestAppSession(): Promise<TestSession> {
         },
         asResponse: true,
       });
-      if (!response.ok) throw new Error(`Could not create the test account (HTTP ${response.status}).`);
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        throw new Error(`Could not create the test account (HTTP ${response.status})${detail ? `: ${detail}` : "."}`);
+      }
       const setCookies = responseCookies(response);
       const cookie = setCookies.map((value) => value.split(";", 1)[0]).join("; ");
       if (!cookie) throw new Error("The test login did not return a session cookie.");

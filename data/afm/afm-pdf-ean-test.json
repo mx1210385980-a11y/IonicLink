@@ -1,0 +1,92 @@
+{
+  "generatedAt": "2026-09-14T14:29:14.587Z",
+  "root": "C:\\Users\\Administrator\\Documents\\Codex\\2026-08-13\\new-chat\\tmp\\afm-target-ean",
+  "selection": "top textual AFM signal, SHA-256 deduplicated",
+  "summary": {
+    "uniqueReadablePdfs": 1,
+    "afmSignalPositivePdfs": 1,
+    "evaluated": 1,
+    "detectedPdfs": 1,
+    "rejectedOrFailedPdfs": 0,
+    "candidateCurves": 1,
+    "autoCalibratedPdfs": 1,
+    "relativeOnlyPdfs": 0,
+    "nonBlueCandidates": 1
+  },
+  "records": [
+    {
+      "relativePath": "3.pdf",
+      "title": "2202110 (1 of 14) © 2023 The Authors. Advanced Materials Interfaces published by Wiley-VCH GmbHwww.advmatinterfaces.de",
+      "doi": "10.1002/admi.202202110",
+      "pageCount": 14,
+      "textualAfmSignal": 69,
+      "signalPages": [
+        2,
+        10,
+        3,
+        5,
+        4,
+        9,
+        11,
+        1,
+        6,
+        7,
+        13
+      ],
+      "httpStatus": 200,
+      "detected": true,
+      "error": null,
+      "matchedPaper": {
+        "doi": "10.1002/admi.202202110",
+        "curveIds": [
+          "AFM-26-07-28-03-C001"
+        ]
+      },
+      "axisCalibration": {
+        "status": "auto-calibrated",
+        "axes": {
+          "xMin": 3.5,
+          "xMax": -0.5,
+          "yMin": -2,
+          "yMax": 14,
+          "xUnit": "nm",
+          "yUnit": "nN"
+        },
+        "confidence": 0.99,
+        "method": "verified-source-profile",
+        "evidence": [
+          "DOI 10.1002/admi.202202110",
+          "Figure 1B plots force from -2 to 14 nN against separation from 3.5 nm at the left to -0.5 nm at the right."
+        ]
+      },
+      "candidates": [
+        {
+          "id": "page-2",
+          "page": 2,
+          "pageLabel": "PDF page 2 · figure crop",
+          "figureLabel": "1B",
+          "sourceKind": "pdf-figure-crop",
+          "crop": {
+            "left": 0.495,
+            "top": 0.252512957428914,
+            "right": 0.955,
+            "bottom": 0.473312957428914
+          },
+          "panel": null,
+          "pointCount": 411,
+          "segmentCount": 1,
+          "traceColor": "#2d2d2d",
+          "confidence": 0.4812,
+          "axisConfidence": 0.18,
+          "traceConfidence": 0.6993,
+          "coverage": 0.9605,
+          "quality": "low",
+          "warnings": [
+            "Plot axes were estimated. Confirm the crop before using the coordinates.",
+            "A black/grey trace fallback was used; labels and arrows require close overlay review."
+          ]
+        }
+      ]
+    }
+  ]
+}

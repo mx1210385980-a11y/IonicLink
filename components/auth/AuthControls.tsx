@@ -14,7 +14,7 @@ export function AuthControls() {
   const user = session?.user ?? null;
 
   if (isPending) {
-    return <span aria-label="正在读取登录状态" className="h-9 w-16 shrink-0 animate-pulse rounded-[8px] bg-ink-100" />;
+    return <span aria-label="Loading sign-in status" className="h-9 w-16 shrink-0 animate-pulse rounded-[8px] bg-ink-100" />;
   }
 
   if (!user) {
@@ -23,7 +23,7 @@ export function AuthControls() {
         className="min-h-9 shrink-0 rounded-[8px] border border-ink-200 bg-white px-3 py-2 text-xs font-semibold text-ink-700 transition hover:border-brand-300 hover:text-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-200"
         href="/login"
       >
-        登录
+        Sign in
       </Link>
     );
   }
@@ -57,10 +57,10 @@ export function AuthControls() {
         className="min-h-9 rounded-[8px] border border-ink-200 bg-white px-3 py-2 text-xs font-semibold text-ink-700 transition hover:border-brand-300 hover:text-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:cursor-not-allowed disabled:opacity-50"
         disabled={busy}
         onClick={signOut}
-        title={signOutError ? "退出失败，请重试" : undefined}
+        title={signOutError ? "Sign-out failed. Try again." : undefined}
         type="button"
       >
-        {busy ? "退出中…" : signOutError ? "重试退出" : "退出"}
+        {busy ? "Signing out…" : signOutError ? "Retry sign-out" : "Sign out"}
       </button>
     </div>
   );
