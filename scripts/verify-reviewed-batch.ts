@@ -39,8 +39,8 @@ for (const c of candidates) {
   if (!f.cation || !f.anion) problems.push('missing ion');
   if (!f.substrate) problems.push('missing substrate');
   if (!(typeof f.cof === 'number' && Number.isFinite(f.cof) && f.cof >= 0 && f.cof <= 2)) problems.push(`bad cof ${f.cof}`);
-  const prov = Array.isArray(f.provenance) ? f.provenance : [];
-  const byField = new Map(prov.map((p: any) => [p.field, p]));
+  const prov: any[] = Array.isArray(f.provenance) ? f.provenance : [];
+  const byField = new Map<string, any>(prov.map((p: any) => [p.field, p]));
   for (const field of SIX) {
     const p = byField.get(field);
     if (!p) { problems.push(`no provenance for ${field}`); continue; }

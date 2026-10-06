@@ -111,7 +111,7 @@ for (const d of ilDrafts) {
   try {
     const draft = ingest(fields as any);
     if (!coreCompleteness(draft).complete) continue;
-    if (!Number.isFinite(draft.core.cof) || draft.core.cof < 0) continue;
+    if (!Number.isFinite(draft.core.cof ?? NaN) || (draft.core.cof as number) < 0) continue;
     if (tribologyModule.acceptDraft && !tribologyModule.acceptDraft(draft)) continue;
 
     // Check all required fields have provenance basis after ingest

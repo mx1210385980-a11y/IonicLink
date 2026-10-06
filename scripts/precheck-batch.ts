@@ -63,7 +63,8 @@ for (const c of candidates) {
     if (!comp.complete) { errors[key] = `incomplete: ${comp.missing}`; continue; }
 
     // COF valid
-    if (!Number.isFinite(draft.core.cof) || draft.core.cof < 0) { errors[key] = 'invalid COF'; continue; }
+    const cof = draft.core.cof;
+    if (cof === null || !Number.isFinite(cof) || cof < 0) { errors[key] = 'invalid COF'; continue; }
 
     // Module admission
     if (tribologyModule.acceptDraft && !tribologyModule.acceptDraft(draft)) { errors[key] = 'not admitted by module'; continue; }

@@ -15,7 +15,7 @@ async function main(){
  }
  const before=db.prepare('SELECT id,status,payload FROM records ORDER BY id').all() as any[];
  const corrections=JSON.parse(readFileSync(correctionFile,'utf8'));
- const changes=[];
+ const changes: any[]=[];
  for(const row of before){
   const r=JSON.parse(row.payload), key=r.flexible?.find((f:any)=>f.key==='curation_key')?.value;
   const c=corrections.find((x:any)=>x.key===key); if(!c)continue;

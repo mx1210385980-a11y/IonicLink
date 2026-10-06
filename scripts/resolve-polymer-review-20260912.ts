@@ -35,7 +35,7 @@ const archived = review.map((r) => {
 });
 
 if (!apply) {
-  console.log(JSON.stringify({ plan: true, review: review.map((r) => r.id), officialBefore: db.prepare("SELECT COUNT(*) c FROM records WHERE status='official'").get().c }));
+  console.log(JSON.stringify({ plan: true, review: review.map((r) => r.id), officialBefore: (db.prepare("SELECT COUNT(*) c FROM records WHERE status='official'").get() as { c: number }).c }));
 } else {
   const backupPath = `data/backups/tribology-polymer-review-resolution-${Date.now()}.db`;
   await db.backup(backupPath);
@@ -43,7 +43,7 @@ if (!apply) {
   assert.equal(backup.pragma("integrity_check", { simple: true }), "ok");
   backup.close();
   const receiptPath = "data/literature-expansion-20260912/goal-root-review/polymer-review-decisions.json";
-  const officialBefore = db.prepare("SELECT COUNT(*) c FROM records WHERE status='official'").get().c as number;
+  const officialBefore = (db.prepare("SELECT COUNT(*) c FROM records WHERE status='official'").get() as { c: number }).c;
   db.transaction(() => {
     for (const r of review) {
       assert.equal(db.prepare("DELETE FROM records WHERE id=? AND status='review' AND payload=?").run(r.id, r.payload).changes, 1);
@@ -58,7 +58,7 @@ if (!apply) {
     evidence: "data/literature-expansion-20260912/batch-03-polymers-review/cross-material-duplicate-evidence.json",
     reviewReport: "data/literature-expansion-20260912/batch-03-polymers-review/review-report.md",
     officialBefore,
-    officialAfter: db.prepare("SELECT COUNT(*) c FROM records WHERE status='official'").get().c as number,
+    officialAfter: (db.prepare("SELECT COUNT(*) c FROM records WHERE status='official'").get() as { c: number }).c,
     deleted: archived.map(({ id, curationKey, reason }) => ({ id, curationKey, reason })),
   };
   writeFileSync(path.resolve(receiptPath), JSON.stringify(receipt, null, 2));

@@ -86,7 +86,7 @@ for (let i = 0; i < toProcess.length; i++) {
       const tsxCmd = process.platform === 'win32' ? 'node_modules\\.bin\\tsx.cmd' : 'node_modules/.bin/tsx';
       const cmd = `"${tsxCmd}" scripts/curation-harness.ts "${pdfPath}" "${outDir}" --url "${url}" --max-visual 4`;
       console.log(`  Running extraction...`);
-      const output = execSync(cmd, { cwd: root, encoding: 'utf-8', timeout: 180000, stdio: ['pipe', 'pipe', 'pipe'], shell: true });
+      const output = execSync(cmd, { cwd: root, encoding: 'utf-8', timeout: 180000 });
       console.log(`  ${output.trim().split('\n').pop()}`);
     } catch (e: any) {
       console.log(`  ERROR: ${e.message?.substring(0, 150) || e}`);
