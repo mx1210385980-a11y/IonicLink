@@ -43,19 +43,73 @@ assert.equal(hopgFromEvidence.core.substrate, "HOPG", "HOPG evidence takes prior
 const genericGraphite = ingest({ ...base, substrate: "graphite" });
 assert.equal(genericGraphite.core.substrate, "graphite", "generic graphite stays graphite when HOPG is not evidenced");
 
+const airComparisonWithoutAdditives = ingest({
+  ...base,
+  additives: "none (ambient laboratory air comparison)",
+  flexible: [{ key: "medium", value: "air" }],
+});
+assert.equal(
+  airComparisonWithoutAdditives.extended.additives,
+  undefined,
+  "an explicit absence of additives is not stored as an additive value",
+);
+assert.deepEqual(airComparisonWithoutAdditives.flexible, [{ key: "medium", value: "air", unit: undefined, note: undefined }]);
+
+const reportedWaterAdditive = ingest({ ...base, additives: "water trace" });
+assert.equal(reportedWaterAdditive.extended.additives, "water trace", "reported additives remain available");
+
+const silicaRadiusFromTable = ingest({
+  ...base,
+  probe: "silica",
+  probeType: "Colloid · Ø 8.8 µm",
+  provenance: [
+    {
+      field: "probe",
+      page: 4,
+      table: "Table 1",
+      quote: "Probe radius (μm) 4.4 ± 0.4 3.3 ± 0.2 N/A N/A",
+      basis: "direct",
+    },
+  ],
+});
+assert.equal(
+  silicaRadiusFromTable.extended.probeType,
+  "Colloid · radius 4.4 ± 0.4 μm",
+  "a model-derived diameter is restored to the directly reported radius with uncertainty",
+);
+
+const aluminaRadiusFromTable = ingest({
+  ...base,
+  probe: "alumina",
+  probeType: "Colloid · Ø 6.6 µm",
+  provenance: [
+    {
+      field: "probe",
+      page: 4,
+      table: "Table 1",
+      quote: "Probe radius (μm) 4.4 ± 0.4 3.3 ± 0.2 N/A N/A",
+      basis: "direct",
+    },
+  ],
+});
+assert.equal(aluminaRadiusFromTable.extended.probeType, "Colloid · radius 3.3 ± 0.2 μm");
+
 const auSurface = ingest({
   ...base,
   substrate: "Au(1 1 1)",
   contactAngle: "62°",
   surfaceEnergy: "0.072 J/m2",
-  provenance: [{ field: "contactAngle", page: 3, quote: "The contact angle was 62° on Au(111)." }],
+  provenance: [
+    { field: "contactAngle", page: 3, quote: "The contact angle was 62° on Au(111).", basis: "direct" },
+    { field: "surfaceEnergy", page: 3, quote: "The surface energy was 0.072 J/m2 on Au(111).", basis: "direct" },
+  ],
 });
 assert.equal(auSurface.extended.surface?.plane, "(111)");
 assert.equal(auSurface.extended.surface?.materialClass, "metal");
 assert.equal(auSurface.extended.surface?.contactAngle?.raw, "62°");
 assert.equal(auSurface.extended.surface?.surfaceEnergy?.std, 72);
 assert.equal(auSurface.provenance?.contactAngle?.page, 3);
-assert.equal(auSurface.provenance?.surfaceChargeDensity?.basis, "assumed");
+assert.equal(auSurface.provenance?.surfaceChargeDensity, undefined);
 
 const afmMicroVelocity = ingest({
   ...base,

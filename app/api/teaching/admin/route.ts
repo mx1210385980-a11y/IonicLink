@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
     return internalTeachingErrorResponse(
       "load default teaching dashboard",
       error,
-      { status: 503, message: "教学实验看板暂不可用，请稍后重试。" }
+      { status: 503, message: "The lab dashboard is temporarily unavailable. Try again later." }
     );
   }
 }
@@ -59,11 +59,11 @@ export async function POST(request: NextRequest) {
     return teachingRequestErrorResponse(error) ?? internalTeachingErrorResponse(
       "read teaching admin request",
       error,
-      { message: "读取教师操作请求失败，请稍后重试。" }
+      { message: "Could not read the instructor request. Try again later." }
     );
   }
   if (body?.action !== "review") {
-    return NextResponse.json({ error: "未知操作。" }, { status: 400 });
+    return NextResponse.json({ error: "Unknown action." }, { status: 400 });
   }
   if (
     typeof body.submissionId !== "string" ||
@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
     (body.humanScores !== undefined && !isTeachingScores(body.humanScores)) ||
     (body.aiScores !== undefined && !isTeachingScores(body.aiScores))
   ) {
-    return NextResponse.json({ error: "审核数据无效。" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid review data." }, { status: 400 });
   }
   try {
     reviewTeachingSubmission(
@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
     return internalTeachingErrorResponse(
       "review teaching submission",
       error,
-      { message: "教师操作失败，请稍后重试。" }
+      { message: "Instructor action failed. Try again later." }
     );
   }
 }

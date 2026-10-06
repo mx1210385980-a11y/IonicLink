@@ -1,15 +1,27 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Domain } from "@/lib/domain";
 import type { RecordStatus } from "@/lib/schema";
 import { type UnitMode } from "@/components/RecordCard";
 import { openRecordEvidence, type ConditionItem } from "@/components/recordCardParts";
-import { getClientModule } from "@/components/registry.client";
+import type { ClientModule } from "@/components/registry.client";
 import { FilterBar } from "@/components/FilterBar";
 import { applyRecordFilters, EMPTY_FILTERS, hasActiveFilters, type RecordFilters } from "@/components/recordFilters";
 import { StructureSearchDialog } from "@/components/StructureSearchDialog";
+import { ReviewWorkbench } from "@/components/database/ReviewWorkbench";
+import type { DatabaseInitialData, DatabasePayload } from "@/lib/databasePayload";
+import { AnalysisToolbar } from "@/components/database/AnalysisToolbar";
+import { AnalysisFilters } from "@/components/database/AnalysisFilters";
+import { DatabaseTable } from "@/components/database/DatabaseTable";
+import RecordComparison from "@/components/database/RecordComparison";
+import DatabaseQuality from "@/components/database/DatabaseQuality";
+import { RecordDetailPanel } from "@/components/database/RecordDetailPanel";
+import { getAnalysisFields, sortAnalysisRecords } from "@/components/database/analysisFields";
+import { applyAnalysisFilters, buildAnalysisUrl, defaultAnalysisState, downloadAnalysisSnapshot, hasAnalysisFilters, readDatabaseLocation, type AnalysisState } from "@/components/database/analysisState";
+import type { AnalysisRecord } from "@/components/database/analysisTypes";
 import {
   STRUCTURE_MODE_PARAM,
   STRUCTURE_SMILES_PARAM,
@@ -19,11 +31,10 @@ import {
 } from "@/lib/structureSearch";
 
 type AnyRecord = any;
-type DatabasePayload = {
-  records: AnyRecord[];
-  counts: { official: number; review: number };
-  papers?: { title: string; n: number }[];
-};
+
+const DatabaseScatterPlot = dynamic(() => import("@/components/database/DatabaseScatterPlot").then((module) => module.DatabaseScatterPlot), {
+  loading: () => <div role="status" className="p-8 text-sm text-ink-500">Loading plot…</div>,
+});
 
 export const SEARCH_DEBOUNCE_MS = 300;
 export const VISIBLE_BATCH_SIZE = 50;
@@ -102,102 +113,12 @@ export function shouldShowUnitModeControl(status: RecordStatus): boolean {
   return status === "review";
 }
 
+export function defaultUnitModeForDomain(domain: Domain): UnitMode {
+  return domain === "conductivity" ? "std" : "raw";
+}
+
 export function isMockExtractionRecord(record: { extraction?: { source?: string } }): boolean {
   return record.extraction?.source === "mock";
-}
-
-export type ReviewReadinessFilter = "all" | "ready" | "incomplete" | "mock";
-export type ReviewReadinessSummary = Record<ReviewReadinessFilter, number>;
-
-type CoreCompletenessCheck<T> = (record: T) => { complete: boolean };
-
-function reviewReadinessBucket<T extends { extraction?: { source?: string } }>(
-  record: T,
-  coreCompleteness: CoreCompletenessCheck<T>
-): Exclude<ReviewReadinessFilter, "all"> {
-  if (isMockExtractionRecord(record)) return "mock";
-  return coreCompleteness(record).complete ? "ready" : "incomplete";
-}
-
-/** Snapshot counts over the loaded Review response, before variable filters. */
-export function summarizeReviewReadiness<T extends { extraction?: { source?: string } }>(
-  records: T[],
-  coreCompleteness: CoreCompletenessCheck<T>
-): ReviewReadinessSummary {
-  const summary: ReviewReadinessSummary = { all: records.length, ready: 0, incomplete: 0, mock: 0 };
-  for (const record of records) summary[reviewReadinessBucket(record, coreCompleteness)] += 1;
-  return summary;
-}
-
-/** Apply one mutually exclusive readiness bucket; Mock always wins over completeness. */
-export function filterRecordsByReadiness<T extends { extraction?: { source?: string } }>(
-  records: T[],
-  filter: ReviewReadinessFilter,
-  coreCompleteness: CoreCompletenessCheck<T>
-): T[] {
-  if (filter === "all") return records;
-  return records.filter((record) => reviewReadinessBucket(record, coreCompleteness) === filter);
-}
-
-const READINESS_OPTIONS: {
-  value: ReviewReadinessFilter;
-  label: string;
-  activeClass: string;
-}[] = [
-  { value: "all", label: "All", activeClass: "border-ink-700 bg-ink-800 text-white" },
-  { value: "ready", label: "Ready to approve", activeClass: "border-brand-600 bg-brand-600 text-white" },
-  { value: "incomplete", label: "Needs core fields", activeClass: "border-amber-500 bg-amber-500 text-white" },
-  { value: "mock", label: "Mock locked", activeClass: "border-rose-500 bg-rose-500 text-white" },
-];
-
-export function ReviewReadinessStrip({
-  summary,
-  active,
-  onChange,
-}: {
-  summary: ReviewReadinessSummary;
-  active: ReviewReadinessFilter;
-  onChange: (filter: ReviewReadinessFilter) => void;
-}) {
-  return (
-    <section
-      data-testid="review-readiness-strip"
-      aria-label="Review readiness"
-      className="border-b border-brand-200 bg-gradient-to-r from-brand-50/90 via-white to-amber-50/70 px-4 py-3"
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="label-eyebrow mr-1 text-ink-700">Review readiness</span>
-        {READINESS_OPTIONS.map((option) => {
-          const count = summary[option.value];
-          const pressed = active === option.value;
-          return (
-            <button
-              key={option.value}
-              type="button"
-              aria-pressed={pressed}
-              aria-label={`${option.label}: ${count}`}
-              disabled={count === 0}
-              title={count === 0 ? `No records are ${option.label.toLowerCase()}` : undefined}
-              onClick={() => onChange(option.value)}
-              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-45 ${
-                pressed
-                  ? option.activeClass
-                  : "border-ink-200 bg-white text-ink-700 hover:border-brand-300 hover:text-brand-700"
-              }`}
-            >
-              <span>{option.label}</span>
-              <span className={`rounded-full px-1.5 py-0.5 font-mono text-[10px] tnum ${pressed ? "bg-white/20" : "bg-ink-100"}`}>
-                {count}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-      <p className="mt-2 text-[11px] leading-relaxed text-ink-700">
-        <strong>Next:</strong> Ready → approve; Needs core fields → edit missing fields; Mock locked → re-extract with a live model or enter manually.
-      </p>
-    </section>
-  );
 }
 
 /** Token AND-match over source titles: every word of the query must appear. */
@@ -236,38 +157,52 @@ export async function parseDatabaseResponse(res: Response): Promise<DatabasePayl
  * domain-specific behaviour (which card/editor renders, the facet options, the
  * at-a-glance stats, the approval gate) comes from the client module registry.
  */
-export function DatabaseView({ domain }: { domain: Domain }) {
-  const mod = getClientModule(domain);
+export function DatabaseView({
+  domain,
+  clientModule: mod,
+  initialData,
+}: {
+  domain: Domain;
+  clientModule: ClientModule;
+  initialData?: DatabaseInitialData;
+}) {
   const Card = mod.Card;
   const Editor = mod.Editor;
+  const analysisFields = useMemo(() => getAnalysisFields(domain), [domain]);
+  const [analysis, setAnalysis] = useState<AnalysisState>(() => defaultAnalysisState(domain));
+  const [locationReady, setLocationReady] = useState(false);
+  const [comparisonRecords, setComparisonRecords] = useState<AnalysisRecord[]>([]);
+  const [detailRecord, setDetailRecord] = useState<AnalysisRecord | null>(null);
+  const compareIds = useMemo(() => new Set(comparisonRecords.map((record) => record.id)), [comparisonRecords]);
+  const plotIds = useMemo(() => new Set(analysis.plotIds ?? []), [analysis.plotIds]);
 
-  const [status, setStatus] = useState<RecordStatus>("official");
+  const [status, setStatus] = useState<RecordStatus>(initialData?.status ?? "official");
   const [facet, setFacet] = useState<string>("all");
   const [paper, setPaper] = useState<string>("all");
-  const [papers, setPapers] = useState<{ title: string; n: number }[]>([]);
+  const [papers, setPapers] = useState<{ title: string; n: number }[]>(initialData?.papers ?? []);
   const [search, setSearch] = useState("");
   const [committedSearch, setCommittedSearch] = useState("");
   const [structureSearch, setStructureSearch] = useState<StructureSearchValue | null>(null);
   const [structureDialogOpen, setStructureDialogOpen] = useState(false);
   const [groupByPaper, setGroupByPaper] = useState(true);
-  const [units, setUnits] = useState<UnitMode>("raw");
-  const [records, setRecords] = useState<AnyRecord[]>([]);
+  const [showConditionsOverview, setShowConditionsOverview] = useState(false);
+  const [units, setUnits] = useState<UnitMode>(() => defaultUnitModeForDomain(domain));
+  const [records, setRecords] = useState<AnyRecord[]>(initialData?.records ?? []);
   const [filters, setFilters] = useState<RecordFilters>(EMPTY_FILTERS);
-  const [readinessFilter, setReadinessFilter] = useState<ReviewReadinessFilter>("all");
-  const [counts, setCounts] = useState({ official: 0, review: 0 });
+  const [counts, setCounts] = useState(initialData?.counts ?? { official: 0, review: 0 });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialData);
   const [refreshing, setRefreshing] = useState(false);
   const [mutationBusy, setMutationBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [visibleLimit, setVisibleLimit] = useState(VISIBLE_BATCH_SIZE);
-  const [statusReady, setStatusReady] = useState(false);
-  const [loadedQuery, setLoadedQuery] = useState<string | null>(null);
+  const [statusReady, setStatusReady] = useState(Boolean(initialData));
+  const [loadedQuery, setLoadedQuery] = useState<string | null>(initialData?.queryKey ?? null);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const requestRef = useRef<AbortController | null>(null);
-  const hasLoadedRef = useRef(false);
+  const hasLoadedRef = useRef(Boolean(initialData));
   const searchTimeoutRef = useRef<number | null>(null);
 
   const query = useMemo(
@@ -275,13 +210,12 @@ export function DatabaseView({ domain }: { domain: Domain }) {
     [status, facet, paper, committedSearch, structureSearch]
   );
   const queryKey = `${domain}?${query}`;
-  const queryReady = statusReady && isLoadedQueryReady(loadedQuery, queryKey, search, committedSearch);
+  const queryReady = locationReady && statusReady && isLoadedQueryReady(loadedQuery, queryKey, search, committedSearch);
 
   const load = useCallback(async () => {
     requestRef.current?.abort();
     const controller = new AbortController();
     requestRef.current = controller;
-    setLoadedQuery(null);
     if (!hasLoadedRef.current) setLoading(true);
     setRefreshing(true);
     try {
@@ -312,15 +246,41 @@ export function DatabaseView({ domain }: { domain: Domain }) {
   }, [domain, query, queryKey, paper]);
 
   useEffect(() => {
-    if (!statusReady) return;
+    if (!locationReady || !statusReady || loadedQuery === queryKey) return;
     load();
-  }, [load, refreshVersion, statusReady]);
+  }, [load, loadedQuery, queryKey, refreshVersion, statusReady, locationReady]);
+
+  const restoreLocation = useCallback((searchParams: string) => {
+    const restored = readDatabaseLocation(searchParams, domain);
+    if (searchTimeoutRef.current != null) window.clearTimeout(searchTimeoutRef.current);
+    searchTimeoutRef.current = null;
+    setStatus(restored.status);
+    setFacet(mod.facet.options.some((option) => option.value === restored.facet) ? restored.facet : "all");
+    setPaper(restored.paper); setSearch(restored.search); setCommittedSearch(restored.search);
+    setStructureSearch(restored.structure); setFilters(restored.filters); setAnalysis(restored.analysis);
+    setGroupByPaper(restored.analysis.groupByPaper); setShowConditionsOverview(restored.analysis.conditionsOverview);
+    setSelected(new Set()); setEditingId(null); setDetailRecord(null); setVisibleLimit(VISIBLE_BATCH_SIZE);
+    setStatusReady(true);
+    setLocationReady(true);
+  }, [domain, mod.facet.options]);
 
   useEffect(() => {
-    const statusParam = new URLSearchParams(window.location.search).get("status");
-    if (statusParam === "official" || statusParam === "review") setStatus(statusParam);
-    setStatusReady(true);
-  }, []);
+    const restore = () => restoreLocation(window.location.search);
+    restore();
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, [restoreLocation]);
+
+  const locationState = useMemo(() => ({
+    status, facet, paper, search: committedSearch, structure: structureSearch, filters,
+    analysis: { ...analysis, groupByPaper, conditionsOverview: showConditionsOverview },
+  }), [status, facet, paper, committedSearch, structureSearch, filters, analysis, groupByPaper, showConditionsOverview]);
+  const viewUrl = useMemo(() => buildAnalysisUrl(`http://localhost/${domain}/database`, locationState), [domain, locationState]);
+  useEffect(() => {
+    if (!locationReady) return;
+    const next = buildAnalysisUrl(window.location.href, locationState);
+    if (`${window.location.pathname}${window.location.search}${window.location.hash}` !== next) window.history.replaceState(window.history.state, "", next);
+  }, [locationReady, locationState]);
 
   useEffect(() => {
     if (searchTimeoutRef.current != null) window.clearTimeout(searchTimeoutRef.current);
@@ -345,12 +305,13 @@ export function DatabaseView({ domain }: { domain: Domain }) {
   const invalidateQueryInteractions = useCallback(() => {
     setSelected((previous) => previous.size === 0 ? previous : new Set());
     setEditingId(null);
+    setDetailRecord(null);
+    setAnalysis((previous) => previous.plotIds === null ? previous : { ...previous, plotIds: null });
   }, []);
 
   const changeStatus = useCallback((next: RecordStatus) => {
     invalidateQueryInteractions();
     commitPendingSearch();
-    setReadinessFilter("all");
     window.history.replaceState(window.history.state, "", databaseStatusUrl(window.location.href, next));
     setStatus(next);
   }, [commitPendingSearch, invalidateQueryInteractions]);
@@ -384,13 +345,6 @@ export function DatabaseView({ domain }: { domain: Domain }) {
     commitPendingSearch();
     setStructureSearch(null);
   }, [commitPendingSearch, invalidateQueryInteractions]);
-
-  const changeReadinessFilter = useCallback((next: ReviewReadinessFilter) => {
-    setReadinessFilter(next);
-    setVisibleLimit(VISIBLE_BATCH_SIZE);
-    setSelected((previous) => previous.size === 0 ? previous : new Set());
-    setEditingId(null);
-  }, []);
 
   const toggle = (id: string) => {
     if (!queryReady) return;
@@ -429,6 +383,9 @@ export function DatabaseView({ domain }: { domain: Domain }) {
         body: JSON.stringify({ ids }),
       });
       await requireOk(response, "Could not delete the selected records.");
+      const deletedIds = new Set(ids);
+      setComparisonRecords((previous) => previous.filter((record) => !deletedIds.has(record.id)));
+      setDetailRecord((previous) => previous && deletedIds.has(previous.id) ? null : previous);
       setNotice(`${status === "review" ? "Rejected" : "Deleted"} ${ids.length} record${ids.length === 1 ? "" : "s"}.`);
       refreshCurrentQuery();
     } catch (error) {
@@ -458,6 +415,28 @@ export function DatabaseView({ domain }: { domain: Domain }) {
     }
   };
 
+  const quickEdit = async (id: string, field: string, value: string): Promise<boolean> => {
+    if (!queryReady || mutationBusy) return false;
+    setMutationBusy(true);
+    setNotice(null);
+    try {
+      const response = await fetch(`/api/${domain}/records/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ setField: { field, value } }),
+      });
+      await requireOk(response, "Could not save this field.");
+      setNotice(`${field} updated.`);
+      refreshCurrentQuery();
+      return true;
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not save this field.");
+      return false;
+    } finally {
+      setMutationBusy(false);
+    }
+  };
+
   const reject = async (id: string) => {
     if (!queryReady || mutationBusy) return;
     setMutationBusy(true);
@@ -465,6 +444,7 @@ export function DatabaseView({ domain }: { domain: Domain }) {
     try {
       const response = await fetch(`/api/${domain}/records/${encodeURIComponent(id)}`, { method: "DELETE" });
       await requireOk(response, "Could not reject this record.");
+      setComparisonRecords((previous) => previous.filter((record) => record.id !== id));
       setNotice("Record rejected.");
       refreshCurrentQuery();
     } catch (error) {
@@ -503,25 +483,32 @@ export function DatabaseView({ domain }: { domain: Domain }) {
     }
   };
 
-  const readinessSummary = useMemo(
-    () => summarizeReviewReadiness(records, mod.coreCompleteness),
-    [records, mod]
+  const variableFiltered = hasActiveFilters(filters) || (status === "official" && hasAnalysisFilters(analysis));
+  const propertyFiltered = useMemo(
+    () => applyRecordFilters(domain, records, filters),
+    [domain, records, filters]
   );
-  const readinessRecords = useMemo(
-    () => status === "review"
-      ? filterRecordsByReadiness(records, readinessFilter, mod.coreCompleteness)
-      : records,
-    [records, readinessFilter, status, mod]
+  const qualityRecords = useMemo(() => applyAnalysisFilters(propertyFiltered, analysisFields, { ...analysis, evidence: "all" }), [propertyFiltered, analysisFields, analysis]);
+  const analysisRecords = useMemo(() => status === "official" ? applyAnalysisFilters(propertyFiltered, analysisFields, analysis) : propertyFiltered, [propertyFiltered, analysisFields, analysis, status]);
+  const visible = useMemo(() => {
+    if (status === "review") return propertyFiltered;
+    const selectedRecords = analysis.plotIds === null ? analysisRecords : analysisRecords.filter((record) => plotIds.has(record.id));
+    return sortAnalysisRecords(selectedRecords, analysisFields, analysis.sort);
+  }, [status, propertyFiltered, analysisRecords, analysis.plotIds, analysis.sort, analysisFields, plotIds]);
+  const anyFilters = variableFiltered || paper !== "all" || facet !== "all" || Boolean(search.trim()) || Boolean(structureSearch);
+  const clearAllFilters = () => {
+    invalidateQueryInteractions();
+    if (searchTimeoutRef.current != null) window.clearTimeout(searchTimeoutRef.current);
+    searchTimeoutRef.current = null;
+    setSearch(""); setCommittedSearch(""); setPaper("all"); setFacet("all");
+    setStructureSearch(null); setFilters(EMPTY_FILTERS); setVisibleLimit(VISIBLE_BATCH_SIZE);
+    setAnalysis((previous) => ({ ...previous, constraints: [], evidence: "all", method: "", context: "", plotIds: null }));
+  };
+  const filtered = variableFiltered;
+  const displayedRecords = useMemo(
+    () => status === "review" ? visible : takeVisibleRecords(visible, visibleLimit),
+    [status, visible, visibleLimit]
   );
-  const readinessFiltered = status === "review" && readinessFilter !== "all";
-  const variableFiltered = hasActiveFilters(filters);
-  // Readiness filters first; variable filters then apply instantly over that loaded subset.
-  const visible = useMemo(
-    () => applyRecordFilters(domain, readinessRecords, filters),
-    [domain, readinessRecords, filters]
-  );
-  const filtered = readinessFiltered || variableFiltered;
-  const displayedRecords = useMemo(() => takeVisibleRecords(visible, visibleLimit), [visible, visibleLimit]);
   const groups = useMemo(() => groupRecords(displayedRecords, groupByPaper), [displayedRecords, groupByPaper]);
   const stats = useMemo(() => mod.listStats(visible), [mod, visible]);
   const sourceCount = useMemo(() => new Set(visible.map((r) => r.paper?.title)).size, [visible]);
@@ -545,7 +532,49 @@ export function DatabaseView({ domain }: { domain: Domain }) {
   const changeFilters = useCallback((next: RecordFilters) => {
     setFilters(next);
     setVisibleLimit(VISIBLE_BATCH_SIZE);
+    setAnalysis((previous) => ({ ...previous, plotIds: null }));
   }, []);
+
+  const changeAnalysis = useCallback((next: AnalysisState) => {
+    setAnalysis(next); setVisibleLimit(VISIBLE_BATCH_SIZE);
+  }, []);
+  const toggleCompare = useCallback((record: AnalysisRecord) => {
+    if (!queryReady) return;
+    if (!compareIds.has(record.id) && comparisonRecords.length >= 6) {
+      setNotice("Compare up to 6 records. Remove one to add another."); return;
+    }
+    setComparisonRecords((previous) => previous.some((item) => item.id === record.id) ? previous.filter((item) => item.id !== record.id) : [...previous, record]);
+  }, [queryReady, compareIds, comparisonRecords.length]);
+  const closeDetail = useCallback(() => { setDetailRecord(null); setEditingId(null); }, []);
+  const refreshAnalysisRecord = useCallback(async (id: string) => {
+    try {
+      const response = await fetch(`/api/${domain}/records/${encodeURIComponent(id)}`);
+      if (response.status === 404) {
+        setComparisonRecords((previous) => previous.filter((record) => record.id !== id));
+        setDetailRecord((previous) => previous?.id === id ? null : previous);
+        return;
+      }
+      await requireOk(response, "Could not refresh this record.");
+      const data = await response.json() as { record: AnalysisRecord };
+      setComparisonRecords((previous) => previous.map((record) => record.id === id ? data.record : record));
+      setDetailRecord((previous) => previous?.id === id ? data.record : previous);
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Could not refresh this record."); }
+  }, [domain]);
+  const openDetail = useCallback((record: AnalysisRecord) => {
+    if (!queryReady) return;
+    setDetailRecord(record); setEditingId(null);
+  }, [queryReady]);
+  // Retain the comparison basket across filters, refreshing records whenever
+  // their current query supplies newer data. It is separate from bulk actions.
+  useEffect(() => {
+    if (!queryReady) return;
+    const byId = new Map(records.map((record) => [record.id, record]));
+    setComparisonRecords((previous) => {
+      const next = previous.map((record) => byId.get(record.id) ?? record);
+      return next.every((record, index) => record === previous[index]) ? previous : next;
+    });
+    setDetailRecord((previous) => previous && byId.has(previous.id) ? byId.get(previous.id)! : previous);
+  }, [records, queryReady]);
 
   const exportVisible = async () => {
     if (!queryReady || visible.length === 0 || exporting) return;
@@ -586,42 +615,47 @@ export function DatabaseView({ domain }: { domain: Domain }) {
     });
     if (!queryReady) setEditingId(null);
   }, [displayedRecords, queryReady]);
-  const recordUnits = recordListUnitsForStatus(status, units);
-  const conditionItemsOf = useCallback((r: AnyRecord) => mod.conditionItems(r, recordUnits), [mod, recordUnits]);
-  const systemFacetsOf = useCallback((r: AnyRecord) => mod.systemFacets(r, recordUnits), [mod, recordUnits]);
+  const recordUnits = status === "official" ? analysis.units : recordListUnitsForStatus(status, units);
+  const conditionItemsOf = useCallback((r: AnyRecord) => {
+    const items = [...mod.systemFacets(r, recordUnits), ...mod.conditionItems(r, recordUnits)];
+    return items.filter((item, index) => items.findIndex((other) => other.label === item.label) === index);
+  }, [mod, recordUnits]);
 
   return (
     <div
       data-testid="database-workbench-shell"
       aria-busy={refreshing}
-      className="panel overflow-hidden rounded-[8px] shadow-sm"
+      className="panel overflow-hidden"
     >
       {/* ── header ── */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink-200/70 px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-ink-200 px-5 py-4">
         <div className="flex items-center gap-3">
           <DbIcon />
           <div className="leading-tight">
-            <h1 className="text-lg font-semibold tracking-tight text-ink-900">Database</h1>
-            <span className="font-mono text-[11px] text-ink-700">{mod.tagline}</span>
+            <h1 className="text-2xl font-semibold tracking-tight text-ink-950">Database</h1>
+
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Link href={`/${domain}/library`} className="btn" title="Manage source documents and all linked records">
-            Manage documents
+        <div className="grid w-full grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2.25rem] items-center gap-2 sm:flex sm:w-auto">
+          <Link href={`/${domain}/library`} className="btn min-w-0 justify-center whitespace-nowrap px-2 sm:px-3" title="Manage source documents and all linked records">
+            <span className="sm:hidden">Documents</span>
+            <span className="hidden sm:inline">Manage documents</span>
           </Link>
           <button
             type="button"
             onClick={exportVisible}
             disabled={!queryReady || visible.length === 0 || exporting}
             title={!queryReady ? "Wait for the current database query to finish loading" : undefined}
-            className="btn disabled:cursor-not-allowed disabled:opacity-40"
+            className="btn min-w-0 justify-center whitespace-nowrap px-2 disabled:cursor-not-allowed disabled:opacity-40 sm:px-3"
           >
-            <DownloadIcon /> {exporting ? "Exporting…" : `Export visible (${visible.length})`}
+            <DownloadIcon />
+            <span className="sm:hidden">{exporting ? "Exporting…" : `Export ${visible.length}`}</span>
+            <span className="hidden sm:inline">{exporting ? "Exporting…" : `Export visible (${visible.length})`}</span>
           </button>
           <Link
             href={`/${domain}`}
             aria-label="Close database"
-            className="grid h-9 w-9 place-items-center rounded-[8px] border border-ink-200 text-ink-400 transition hover:border-ink-300 hover:text-ink-700"
+            className="grid h-11 w-11 place-items-center rounded-[2px] border border-ink-300 text-lg text-ink-600 transition hover:border-ink-950 hover:text-ink-950"
           >
             ✕
           </Link>
@@ -629,8 +663,8 @@ export function DatabaseView({ domain }: { domain: Domain }) {
       </div>
 
       {/* ── tabs + at-a-glance stats ── */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink-200/70 bg-ink-50/40 px-4 py-2.5">
-        <div className="flex rounded-[8px] border border-ink-200 bg-white p-0.5 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink-200 bg-ink-50 px-5 py-3">
+        <div className="flex border border-ink-300 bg-white text-sm">
           <Tab active={status === "official"} onClick={() => changeStatus("official")}>
             Checked Database <Badge active={status === "official"}>{counts.official}</Badge>
           </Tab>
@@ -638,70 +672,82 @@ export function DatabaseView({ domain }: { domain: Domain }) {
             Review Queue <Badge active={status === "review"} tone="amber">{counts.review}</Badge>
           </Tab>
         </div>
-        <div className="flex flex-wrap items-center gap-2.5">
-          {stats.map((s) => (
+        <div className="flex flex-wrap items-stretch gap-0 border border-ink-200 bg-white">
+          {stats.slice(0, 2).map((s) => (
             <Stat key={s.label} label={s.label} value={s.value} />
           ))}
+          {stats.length > 2 && <details className="relative px-3 py-2"><summary className="cursor-pointer text-sm font-semibold text-ink-800">Statistics</summary><div className="absolute right-0 top-full z-30 flex border border-ink-200 bg-white p-2 shadow-lg">{stats.slice(2).map((s) => <Stat key={s.label} label={s.label} value={s.value} />)}</div></details>}
         </div>
       </div>
 
-      {status === "review" && queryReady && (
-        <ReviewReadinessStrip
-          summary={readinessSummary}
-          active={readinessFilter}
-          onChange={changeReadinessFilter}
-        />
-      )}
-
       {/* ── toolbar ── */}
-      <div data-testid="database-command-bar" className="flex flex-wrap items-center gap-2 border-b border-ink-200/70 px-4 py-2.5">
+      <div data-testid="database-command-bar" className="flex flex-wrap items-center gap-2.5 border-b border-ink-200 bg-white px-5 py-3">
         <div className="relative w-full sm:w-auto">
           <SearchIcon />
           <input
             value={search}
             onChange={(e) => changeSearch(e.target.value)}
             placeholder="Search paper, cation, anion…"
-            className="w-full min-w-0 rounded-[8px] border border-ink-200 bg-white py-1.5 pl-9 pr-3 text-xs outline-none transition focus:border-brand-300 focus:ring-2 focus:ring-brand-100 sm:w-64"
+            className="min-h-11 w-full min-w-0 rounded-[2px] border border-ink-300 bg-white py-2.5 pl-10 pr-3 text-base outline-none transition placeholder:text-ink-400 focus:border-brand-700 focus:ring-2 focus:ring-brand-100 sm:w-80"
           />
         </div>
         <button
           type="button"
           onClick={() => setStructureDialogOpen(true)}
-          className={`inline-flex items-center gap-1.5 rounded-[8px] border px-2.5 py-1.5 text-xs font-semibold transition ${
+          className={`inline-flex min-h-11 items-center gap-2 rounded-[2px] border px-4 py-2.5 text-sm font-semibold transition ${
             structureSearch
               ? "border-brand-300 bg-brand-50 text-brand-700"
               : "border-ink-200 bg-white text-ink-700 hover:border-brand-300 hover:text-brand-700"
           }`}
         >
-          <StructureIcon /> 化学结构搜索
+          <StructureIcon /> Chemical Structure Search
         </button>
         {structureSearch ? (
           <button
             type="button"
             onClick={clearStructureSearch}
-            title="清除结构筛选"
-            className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-[11px] font-semibold text-brand-700"
+            title="Clear structure filter"
+            className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-[13px] font-semibold text-brand-700"
           >
-            {structureTargetLabel(structureSearch.target)} · 精确匹配 <span aria-hidden>×</span>
+            {structureTargetLabel(structureSearch.target)} · Exact match <span aria-hidden>×</span>
           </button>
         ) : null}
         {refreshing && !loading && (
-          <span aria-live="polite" className="font-mono text-[10px] text-ink-400">
+          <span aria-live="polite" className="font-mono text-xs text-ink-400">
             Refreshing…
           </span>
         )}
-        <SourceFilter paper={paper} papers={papers} onChange={changePaper} />
+        {status === "official" && <SourceFilter paper={paper} papers={papers} onChange={changePaper} />}
         <Segmented value={facet} onChange={changeFacet} options={mod.facet.options} />
-        <button
-          onClick={() => setGroupByPaper((g) => !g)}
-          className={`inline-flex items-center gap-1.5 rounded-[8px] border px-2.5 py-1.5 text-xs font-semibold tracking-wide transition-all ${
-            groupByPaper
-              ? "border-brand-200 bg-brand-50/60 text-brand-700"
-              : "border-ink-200 bg-white text-ink-700 hover:bg-ink-50 hover:text-brand-700"
-          }`}
-        >
-          <BookIcon /> Group by paper
-        </button>
+        {status === "official" && analysis.view === "cards" && (
+          <button
+            onClick={() => {
+              if (groupByPaper) setShowConditionsOverview(false);
+              setGroupByPaper((g) => !g);
+            }}
+            className={`inline-flex items-center gap-1.5 rounded-[8px] border px-3 py-2 text-sm font-semibold tracking-wide transition-all ${
+              groupByPaper
+                ? "border-brand-200 bg-brand-50/60 text-brand-700"
+                : "border-ink-200 bg-white text-ink-700 hover:bg-ink-50 hover:text-brand-700"
+            }`}
+          >
+            <BookIcon /> Group by paper
+          </button>
+        )}
+        {status === "official" && analysis.view === "cards" && (
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm font-semibold text-ink-800">
+            <input
+              type="checkbox"
+              checked={showConditionsOverview}
+              onChange={(event) => {
+                setShowConditionsOverview(event.target.checked);
+                if (event.target.checked) setGroupByPaper(true);
+              }}
+              className="h-4 w-4 rounded border-ink-300 text-brand-600 focus:ring-brand-500"
+            />
+            Conditions overview
+          </label>
+        )}
         {shouldShowUnitModeControl(status) && (
           <Segmented
             value={units}
@@ -726,7 +772,7 @@ export function DatabaseView({ domain }: { domain: Domain }) {
                       : "None of the selected records have complete core fields"
                     : "Approve every selected non-mock record whose core fields are complete"
                 }
-                className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-[2px] bg-brand-700 px-4 py-2.5 font-semibold text-white transition hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <CheckIcon /> Approve ready ({readySelected.length})
               </button>
@@ -734,7 +780,7 @@ export function DatabaseView({ domain }: { domain: Domain }) {
             <button
               onClick={deleteSelected}
               disabled={mutationBusy}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-2 font-medium text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-[2px] border border-rose-300 bg-white px-4 py-2.5 font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <TrashIcon /> {status === "review" ? "Reject" : "Delete"}
             </button>
@@ -742,23 +788,23 @@ export function DatabaseView({ domain }: { domain: Domain }) {
         )}
       </div>
 
-      {/* ── variable filters ── */}
-      {!loading && readinessRecords.length > 0 && (
-        <FilterBar domain={domain} records={readinessRecords} filters={filters} shown={visible.length} onChange={changeFilters} />
-      )}
+      {status === "official" && <>
+        <AnalysisToolbar domain={domain} state={analysis} onChange={changeAnalysis} viewUrl={viewUrl}
+          onRestore={(url) => restoreLocation(new URL(url, window.location.origin).search)}
+          onSnapshot={() => { downloadAnalysisSnapshot(domain, visible, locationState); setNotice(`Saved ${visible.length} records with conditions, provenance and view settings.`); }}
+          disabled={!queryReady} />
+      </>}
 
-      {/* ── context caption ── */}
-      <p className="border-b border-ink-100 px-4 py-2 text-xs leading-relaxed text-ink-700">
-        {status === "official"
-          ? "Approved library records only — review candidates are kept separate until vetted."
-          : "AI-extracted candidates awaiting approval. A record needs all base-layer (core) fields before it can be approved into the database."}
-        {paper !== "all" && (
-          <>
-            {" "}
-            Showing one source: <span className="font-medium text-ink-600">{paper}</span>.
-          </>
-        )}
-      </p>
+      {/* ── variable filters ── */}
+      {!loading && records.length > 0 && (
+        <FilterBar showSummary={false} domain={domain} records={records} filters={filters} shown={visible.length} onChange={changeFilters} />
+      )}
+      {status === "official" && <AnalysisFilters records={records} fields={analysisFields} state={analysis} onChange={changeAnalysis} />}
+
+      {anyFilters && <div className="flex items-center justify-between gap-3 border-b border-ink-100 px-5 py-2 text-sm">
+        <span aria-live="polite">{queryReady ? `${visible.length} of ${counts[status]} records` : "Updating results…"}</span>
+        <button type="button" onClick={clearAllFilters} className="rounded px-2 py-1 font-semibold text-brand-800 hover:bg-brand-50">Clear filters</button>
+      </div>}
 
       {notice && (
         <div
@@ -771,8 +817,26 @@ export function DatabaseView({ domain }: { domain: Domain }) {
         </div>
       )}
 
+      {status === "official" && !loading && <div className="space-y-3 border-b border-ink-100 p-4">
+        <DatabaseQuality domain={domain} records={qualityRecords} fields={analysisFields} evidenceFilter={analysis.evidence}
+          onEvidenceFilterChange={(evidence) => changeAnalysis({ ...analysis, evidence, plotIds: null })} />
+        {comparisonRecords.length > 0 && <RecordComparison domain={domain} records={comparisonRecords} fields={analysisFields} units={analysis.units}
+          onRemove={(id) => setComparisonRecords((previous) => previous.filter((record) => record.id !== id))}
+          onClear={() => setComparisonRecords([])} onOpenRecord={openDetail} />}
+      </div>}
+
+      {status === "official" && !loading && analysis.view === "plot" && <div className="border-b border-ink-200 p-4">
+        <DatabaseScatterPlot records={analysisRecords} fields={analysisFields} config={analysis.plot}
+          onConfigChange={(plot) => changeAnalysis({ ...analysis, plot, plotIds: null })}
+          selectedIds={plotIds} onSelectRecords={(ids) => changeAnalysis({ ...analysis, plotIds: ids })}
+          onOpenRecord={openDetail} onToggleCompare={toggleCompare} compareIds={compareIds} disabled={!queryReady} />
+      </div>}
+      {status === "official" && !loading && analysis.plotIds !== null && <p role="status" className="border-b border-ink-200 px-4 py-3 text-sm text-brand-800">Plot selection: {visible.length} matching records. The table and exports use this selection.
+          <button type="button" onClick={() => changeAnalysis({ ...analysis, plotIds: null })} className="ml-3 underline">Clear plot selection</button>
+      </p>}
+
       {/* ── records ── */}
-      <div className="space-y-5 p-4">
+      <div className={status === "review" && !loading && visible.length > 0 ? "" : "space-y-5 p-4"}>
         {loading ? (
           <div className="space-y-3">
             <SkeletonRow />
@@ -781,21 +845,11 @@ export function DatabaseView({ domain }: { domain: Domain }) {
           </div>
         ) : visible.length === 0 ? (
           <Empty>
-            {readinessFiltered && readinessRecords.length === 0 ? (
-              <span className="inline-flex flex-col items-center gap-2">
-                <span>No records are in this readiness bucket.</span>
-                <button
-                  onClick={() => changeReadinessFilter("all")}
-                  className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-medium text-ink-700 transition hover:border-brand-300 hover:text-brand-700"
-                >
-                  Show all review records
-                </button>
-              </span>
-            ) : readinessRecords.length > 0 && variableFiltered ? (
+            {records.length > 0 && variableFiltered ? (
               <span className="inline-flex flex-col items-center gap-2">
                 <span>No records match the variable filters.</span>
                 <button
-                  onClick={() => changeFilters(EMPTY_FILTERS)}
+                  onClick={clearAllFilters}
                   className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-medium text-ink-700 transition hover:border-brand-300 hover:text-brand-700"
                 >
                   Reset filters
@@ -809,6 +863,47 @@ export function DatabaseView({ domain }: { domain: Domain }) {
               "No checked records yet. Approve candidates from the Review Queue."
             )}
           </Empty>
+        ) : status === "review" ? (
+          <ReviewWorkbench
+            domain={domain}
+            records={displayedRecords}
+            units={recordUnits}
+            clientModule={mod}
+            queryReady={queryReady}
+            mutationBusy={mutationBusy}
+            selected={selected}
+            editingId={editingId}
+            onToggle={toggle}
+            onEdit={setEditingId}
+            onQuickEdit={quickEdit}
+            onApprove={approve}
+            onReject={reject}
+            editor={editingId ? (() => {
+              const record = displayedRecords.find((candidate) => candidate.id === editingId);
+              return record ? (
+                <Editor
+                  record={record}
+                  domain={domain}
+                  onSaved={() => {
+                    setEditingId(null);
+                    refreshCurrentQuery();
+                  }}
+                  onCancel={() => setEditingId(null)}
+                />
+              ) : null;
+            })() : null}
+          />
+        ) : analysis.view !== "cards" ? (
+          <>
+            <DatabaseTable domain={domain} records={displayedRecords} fields={analysisFields} columns={analysis.columns}
+              onColumnsChange={(columns) => changeAnalysis({ ...analysis, columns })} sort={analysis.sort}
+              onSortChange={(sort) => changeAnalysis({ ...analysis, sort })} units={analysis.units} density={analysis.density}
+              compareIds={compareIds} onToggleCompare={toggleCompare} onOpenRecord={openDetail} disabled={!queryReady} />
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-ink-500">
+              <span>{displayedRecords.length} shown · {visible.length} matching records</span>
+              {displayedRecords.length < visible.length && <button type="button" className="btn" onClick={() => setVisibleLimit((limit) => limit + VISIBLE_BATCH_SIZE)}>Load more ({visible.length - displayedRecords.length} remaining)</button>}
+            </div>
+          </>
         ) : (
           <>
             {groups.map((group, gi) => (
@@ -831,7 +926,7 @@ export function DatabaseView({ domain }: { domain: Domain }) {
                       />
                     )}
                     <BookIcon className="shrink-0 translate-y-0.5 text-brand-600" />
-                    <h2 className="min-w-0 truncate font-serif text-[16px] font-semibold leading-snug text-ink-900" title={group.title}>{group.title}</h2>
+                    <PaperTitle title={group.title} />
                     {group.meta && (
                       <span
                         className="hidden min-w-0 max-w-[22rem] shrink truncate rounded bg-ink-100 px-1.5 py-0.5 font-mono text-[10px] text-ink-500 sm:inline"
@@ -841,46 +936,19 @@ export function DatabaseView({ domain }: { domain: Domain }) {
                       </span>
                     )}
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    {paper === "all" && (
-                      <button
-                        onClick={() => changePaper(group.key)}
-                        title="Show only this source's records"
-                        className="inline-flex items-center gap-1 rounded-md border border-ink-200 bg-white px-2 py-1 text-[10px] font-semibold tracking-wide text-ink-700 transition hover:border-brand-300 hover:text-brand-700"
-                      >
-                        <FunnelIcon /> Focus
-                      </button>
-                    )}
-                    <span className="font-mono text-[11px] text-ink-400">
-                      {group.records.length} displayed
-                    </span>
-                  </div>
+
                 </div>
               )}
-              {(groupByPaper
-                ? splitBySystem(group.records, systemFacetsOf)
-                : [{ key: "all", facets: [], records: group.records } as SystemSubgroup]
-              ).map((subgroup) => (
-                <div key={subgroup.key} className="mb-5 last:mb-0">
-                  {subgroup.facets.length > 0 && (
-                    <SystemSubgroupHeader
-                      subgroup={subgroup}
-                      selected={selected}
-                      onToggle={toggleGroup}
-                      domain={domain}
-                      selectable={queryReady}
-                    />
-                  )}
-                  {groupByPaper && subgroup.records.length > 1 && (
+              <div className="mb-5 last:mb-0">
+                  {groupByPaper && showConditionsOverview && group.records.length > 1 && (
                     <GroupConditionsStrip
-                      records={subgroup.records}
+                      records={group.records}
                       itemsOf={conditionItemsOf}
                       domain={domain}
-                      omitLabels={subgroup.facets.length > 0 ? new Set(subgroup.facets.map((f) => f.item.label)) : undefined}
                     />
                   )}
                   <div className="space-y-3">
-                    {subgroup.records.map((rec) =>
+                    {group.records.map((rec) =>
                   queryReady && editingId === rec.id ? (
                     <Editor
                       key={rec.id}
@@ -888,20 +956,24 @@ export function DatabaseView({ domain }: { domain: Domain }) {
                       domain={domain}
                       onSaved={() => {
                         setEditingId(null);
+                        void refreshAnalysisRecord(rec.id);
                         refreshCurrentQuery();
                       }}
                       onCancel={() => setEditingId(null)}
                     />
                   ) : (
                     <Card
+                      compact
                       key={rec.id}
                       record={rec}
+                      comparisonRecords={domain === "conductivity" ? group.records : undefined}
                       domain={domain}
                       units={recordUnits}
                       selected={queryReady && selected.has(rec.id)}
                       onToggle={queryReady ? toggle : undefined}
                       actions={
                         queryReady ? <>
+                          <button type="button" onClick={() => toggleCompare(rec)} aria-pressed={compareIds.has(rec.id)} className="rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-medium text-brand-800">{compareIds.has(rec.id) ? "In comparison" : "Compare"}</button>
                           <button
                             onClick={() => setEditingId(rec.id)}
                             disabled={mutationBusy}
@@ -909,39 +981,6 @@ export function DatabaseView({ domain }: { domain: Domain }) {
                           >
                             Edit
                           </button>
-                          {status === "review" && (
-                            <>
-                              {isMockExtractionRecord(rec) && (
-                                <span
-                                  className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800"
-                                  title="This candidate came from the offline mock extractor and is kept for review only."
-                                >
-                                  Mock · review only
-                                </span>
-                              )}
-                              <button
-                                onClick={() => approve(rec.id)}
-                                disabled={mutationBusy || isMockExtractionRecord(rec) || !mod.coreCompleteness(rec).complete}
-                                title={
-                                  isMockExtractionRecord(rec)
-                                    ? "Mock demo records cannot be published as Checked records"
-                                    : mod.coreCompleteness(rec).complete
-                                      ? "Approve into the checked database"
-                                      : `Complete core fields first: ${mod.coreCompleteness(rec).missing.join(", ")}`
-                                }
-                                className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-40"
-                              >
-                                Approve
-                              </button>
-                              <button
-                                onClick={() => reject(rec.id)}
-                                disabled={mutationBusy}
-                                className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-medium text-ink-700 transition hover:border-rose-200 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
-                              >
-                                Reject
-                              </button>
-                            </>
-                          )}
                         </> : undefined
                       }
                     />
@@ -949,7 +988,6 @@ export function DatabaseView({ domain }: { domain: Domain }) {
                 )}
                   </div>
                 </div>
-              ))}
             </section>
             ))}
             {displayedRecords.length < visible.length && (
@@ -968,7 +1006,7 @@ export function DatabaseView({ domain }: { domain: Domain }) {
       </div>
 
       {/* ── footer ── */}
-      <div className="flex items-center justify-between border-t border-ink-200/70 bg-ink-50/30 px-5 py-3 font-mono text-[11px] text-ink-400">
+      <div className="flex items-center justify-between border-t border-ink-200 bg-ink-50 px-5 py-3 font-mono text-sm text-ink-600">
         <span>
           {displayedRecords.length === 0 ? "0" : `1–${displayedRecords.length}`} of {visible.length} record
           {visible.length === 1 ? "" : "s"}
@@ -985,6 +1023,13 @@ export function DatabaseView({ domain }: { domain: Domain }) {
         onApply={applyStructureSearch}
         onClose={() => setStructureDialogOpen(false)}
       />
+      {detailRecord && status === "official" && <RecordDetailPanel recordId={detailRecord.id} onClose={closeDetail}>
+        {editingId === detailRecord.id ? <Editor record={detailRecord} domain={domain} onSaved={() => { setEditingId(null); void refreshAnalysisRecord(detailRecord.id); refreshCurrentQuery(); }} onCancel={() => setEditingId(null)} /> :
+          <Card record={detailRecord} domain={domain} units={analysis.units} actions={<>
+            <button type="button" className="btn" onClick={() => toggleCompare(detailRecord)} disabled={!queryReady}>{compareIds.has(detailRecord.id) ? "Remove from comparison" : "Add to comparison"}</button>
+            <button type="button" className="btn" onClick={() => setEditingId(detailRecord.id)} disabled={!queryReady || mutationBusy}>Edit</button>
+          </>} />}
+      </RecordDetailPanel>}
     </div>
   );
 }
@@ -1132,116 +1177,8 @@ export function splitBySystem(records: AnyRecord[], facetsOf: (record: AnyRecord
   }));
 }
 
-function EvidenceInline({
-  label,
-  value,
-  title,
-  prov,
-  sourceId,
-  recordId,
-  field,
-  domain,
-  after,
-  labelClassName = "text-ink-600",
-  valueClassName = "font-semibold text-ink-800",
-}: {
-  label: string;
-  value: string;
-  title?: string;
-  prov?: ConditionItem["prov"];
-  sourceId?: string;
-  recordId?: string;
-  field: string;
-  domain: Domain;
-  after?: React.ReactNode;
-  labelClassName?: string;
-  valueClassName?: string;
-}) {
-  const content = (
-    <>
-      <span className={`text-[9px] font-semibold uppercase tracking-eyebrow ${labelClassName}`}>{label}</span>
-      <span className={`inline-block max-w-[18rem] truncate align-baseline font-mono text-xs ${valueClassName}`}>{value}</span>
-      {after}
-    </>
-  );
-  if (!prov) {
-    return (
-      <span className="inline-flex items-baseline gap-1.5" title={title ?? value}>
-        {content}
-      </span>
-    );
-  }
-  return (
-    <button
-      type="button"
-      data-testid="evidence-click-target"
-      className="inline-flex items-baseline gap-1.5 rounded-md px-1 py-0.5 text-left transition hover:bg-white/70 hover:ring-1 hover:ring-brand-100 focus:outline-none focus:ring-2 focus:ring-brand-200"
-      title={`${title ?? value} · evidence available`}
-      aria-label={`Open evidence for ${field}`}
-      onClick={() => openRecordEvidence({ sourceId, recordId, field, value, prov, domain })}
-    >
-      {content}
-    </button>
-  );
-}
-
-/** Header for one system sub-group: the distinguishing facets, each with its evidence link. */
-function SystemSubgroupHeader({
-  subgroup,
-  selected,
-  onToggle,
-  domain,
-  selectable,
-}: {
-  subgroup: SystemSubgroup;
-  selected: Set<string>;
-  onToggle: (records: AnyRecord[]) => void;
-  domain: Domain;
-  selectable: boolean;
-}) {
-  const facetSummary = subgroup.facets.map((f) => f.item.value).join(" · ");
-  return (
-    <div
-      data-testid="system-subgroup"
-      className="mb-2.5 flex flex-wrap items-center gap-x-3.5 gap-y-1 rounded-lg border-l-2 border-brand-400 bg-brand-50/50 px-3 py-1.5"
-    >
-      {selectable && (
-        <input
-          type="checkbox"
-          checked={subgroup.records.every((r) => selected.has(r.id))}
-          onChange={() => onToggle(subgroup.records)}
-          className="h-3.5 w-3.5 cursor-pointer rounded border-ink-300 text-brand-600 focus:ring-brand-500"
-          aria-label={`Select displayed ${facetSummary} records`}
-          title="Select the currently displayed records of this system"
-        />
-      )}
-      <span className="label-eyebrow shrink-0 text-[9px] leading-5 text-brand-700">Variable</span>
-      {subgroup.facets.map((f) => (
-        <EvidenceInline
-          key={f.item.label}
-          label={f.item.label}
-          value={f.item.value}
-          title={f.item.title}
-          prov={f.item.prov}
-          sourceId={f.sourceId}
-          recordId={f.recordId}
-          field={f.item.field ?? f.item.label}
-          domain={domain}
-          labelClassName="text-brand-700/70"
-          valueClassName="font-bold text-ink-900"
-        />
-      ))}
-      <span className="ml-auto font-mono text-[10px] text-ink-400">
-        {subgroup.records.length} displayed
-      </span>
-    </div>
-  );
-}
-
-/** How many distinct values of a sweep axis are listed before collapsing to a count. */
-const VARYING_VALUES_SHOWN = 4;
-
-function GroupConditionsStrip({
+/** Shared context and a record-aligned comparison of changing conditions. */
+export function GroupConditionsStrip({
   records,
   itemsOf,
   domain,
@@ -1250,59 +1187,74 @@ function GroupConditionsStrip({
   records: AnyRecord[];
   itemsOf: (record: AnyRecord) => ConditionItem[];
   domain: Domain;
-  /** Labels already shown in the sub-group header — no need to repeat them. */
   omitLabels?: Set<string>;
 }) {
   const analyzed = useMemo(() => analyzeGroupConditions(records, itemsOf), [records, itemsOf]);
-  const shared = omitLabels ? analyzed.shared.filter((s) => !omitLabels.has(s.item.label)) : analyzed.shared;
-  const varying = omitLabels ? analyzed.varying.filter((v) => !omitLabels.has(v.label)) : analyzed.varying;
+  const shared = analyzed.shared.filter((s) => !omitLabels?.has(s.item.label));
+  const varying = analyzed.varying.filter((v) => !omitLabels?.has(v.label));
+  const sideBySide = varying.length > 0 && varying.length <= 2 && shared.length > 0;
   if (shared.length === 0 && varying.length === 0) return null;
+
+  const valueOf = (item: ConditionItem, recordId?: string, sourceId?: string) => {
+    const prov = item.prov;
+    const value = <span className="whitespace-pre-wrap break-words">{item.value.replaceAll(" · ", ", ")}</span>;
+    return prov ? (
+      <button
+        type="button"
+        data-testid="evidence-click-target"
+        className="rounded text-left underline decoration-brand-300 underline-offset-4 hover:decoration-brand-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600"
+        aria-label={`Open evidence for ${item.field ?? item.label} in ${recordId}`}
+        title={item.title ?? "View source evidence"}
+        onClick={() => openRecordEvidence({ sourceId, recordId, field: item.field ?? item.label, value: item.value, prov, domain })}
+      >{value}</button>
+    ) : <span title={item.title}>{value}</span>;
+  };
+
   return (
-    <div data-testid="group-conditions" className="mb-3 rounded-xl border border-ink-200/60 bg-ink-50/40 px-3.5 py-2">
-      {shared.length > 0 && (
-        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-          <span className="label-eyebrow shrink-0 text-[9px] leading-5 text-ink-600">Shared conditions</span>
-          {shared.map((s) => (
-            <EvidenceInline
-              key={s.item.label}
-              label={s.item.label}
-              value={s.item.value}
-              title={s.item.title}
-              prov={s.item.prov}
-              sourceId={s.sourceId}
-              recordId={s.recordId}
-              field={s.item.field ?? s.item.label}
-              domain={domain}
-              after={
-                s.coverage < s.total ? (
-                  <span
-                    className="font-mono text-[9px] font-semibold text-amber-600"
-                    title={`Stated on ${s.coverage} of the group's ${s.total} records`}
-                  >
-                    {s.coverage}/{s.total}
-                  </span>
-                ) : null
-              }
-            />
-          ))}
-        </div>
-      )}
+    <div data-testid="group-conditions" className={`mb-5 overflow-hidden rounded-xl border border-ink-200 bg-white ${sideBySide ? "xl:grid xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]" : ""}`}>
       {varying.length > 0 && (
-        <div
-          className={`flex flex-wrap items-baseline gap-x-4 gap-y-1 ${
-            shared.length > 0 ? "mt-1.5 border-t border-ink-100 pt-1.5" : ""
-          }`}
-        >
-          <span className="label-eyebrow shrink-0 text-[9px] leading-5 text-violet-700">Variable</span>
-          {varying.map((v) => (
-            <span key={v.label} className="inline-flex items-baseline gap-1.5">
-              <span className="text-[9px] font-semibold uppercase tracking-eyebrow text-violet-700">{v.label}</span>
-              <span className="font-mono text-xs text-ink-700" title={v.values.join(" · ")}>
-                {v.values.length <= VARYING_VALUES_SHOWN ? v.values.join(" · ") : `${v.values.length} values`}
-              </span>
-            </span>
-          ))}
-        </div>
+        <section aria-label="Conditions that vary by record" className="p-4 sm:p-5">
+          <h3 className="mb-3 text-lg font-bold text-ink-950">Varies by record</h3>
+          <div className="max-h-72 overflow-auto rounded-lg border border-ink-200" tabIndex={0} role="region" aria-label="Variable conditions comparison">
+            <table className="w-full border-collapse text-left">
+              <caption className="sr-only">Changing operating conditions for each record</caption>
+              <thead className="sticky top-0 z-10 bg-violet-50">
+                <tr>
+                  <th scope="col" className="px-4 py-3">Record</th>
+                  {varying.map((v) => <th scope="col" key={v.label} className="px-4 py-3"><span className="font-bold text-violet-800">{v.label}</span></th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {records.map((record) => {
+                  const items = itemsOf(record);
+                  return (
+                    <tr key={record.id} className="border-t border-ink-100 hover:bg-violet-50/40">
+                      <th scope="row" className="whitespace-nowrap px-4 py-3 font-mono text-sm font-semibold text-ink-800">{record.id}</th>
+                      {varying.map((v) => {
+                        const item = items.find((candidate) => candidate.label === v.label);
+                        return <td key={v.label} className="min-w-36 px-4 py-3 font-mono text-lg font-bold text-violet-900">{item ? valueOf(item, record.id, record.sourceId) : <span className="font-sans text-sm font-medium text-ink-700">Not reported</span>}</td>;
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+      {shared.length > 0 && (
+        <section aria-label="Shared conditions" className={`p-4 sm:p-5 ${varying.length ? "border-t border-ink-200" : ""} ${sideBySide ? "xl:border-l xl:border-t-0" : ""}`}>
+          <h3 className="mb-4 text-lg font-bold text-ink-950">Shared conditions</h3>
+          <dl className={`grid grid-cols-2 gap-x-6 gap-y-4 md:grid-cols-3 ${sideBySide ? "" : "xl:grid-cols-4"}`}>
+            {shared.map((s) => (
+              <div key={s.item.label} className="min-w-0">
+                <dt className="mb-1 text-sm font-medium text-ink-700">{s.item.label}</dt>
+                <dd className="font-mono text-base font-semibold text-ink-950">{valueOf(s.item, s.recordId, s.sourceId)}</dd>
+                {s.coverage < s.total && <dd className="mt-1 text-sm font-medium text-amber-800">Reported in {s.coverage} of {s.total} records</dd>}
+              </div>
+            ))}
+          </dl>
+        </section>
       )}
     </div>
   );
@@ -1320,6 +1272,11 @@ function groupRecords(records: AnyRecord[], byPaper: boolean): Group[] {
     map.get(key)!.records.push(r);
   }
   return [...map.values()];
+}
+
+export function PaperTitle({ title }: { title: string }) {
+  const [expanded, setExpanded] = useState(false);
+  return <h2 className="min-w-0 font-serif text-base font-semibold leading-snug text-ink-900"><button type="button" aria-expanded={expanded} aria-label={`${expanded ? "Collapse" : "Expand"} paper title: ${title}`} onClick={() => setExpanded(!expanded)} className={`rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${expanded ? "break-words" : "line-clamp-2"}`}>{title}</button></h2>;
 }
 
 /* ---------- small presentational helpers ---------- */
@@ -1393,7 +1350,7 @@ function SourceFilter({
   return (
     <div ref={rootRef} data-testid="source-filter" className="relative">
       <div
-        className={`flex items-center gap-1.5 rounded-lg border bg-white py-1 pl-2.5 pr-1.5 text-xs shadow-sm transition ${
+        className={`flex items-center gap-1.5 rounded-lg border bg-white py-2 pl-3 pr-2 text-sm shadow-sm transition ${
           active ? "border-brand-300 ring-2 ring-brand-100" : "border-ink-200"
         }`}
       >
@@ -1408,7 +1365,7 @@ function SourceFilter({
         >
           <BookIcon className={`shrink-0 ${active ? "text-brand-600" : "text-ink-400"}`} />
           <span className="max-w-[11rem] truncate">{active ? paper : "All sources"}</span>
-          <span className="shrink-0 rounded-full border border-ink-100 bg-ink-50 px-1.5 py-0.5 font-mono text-[10px] font-semibold leading-none text-ink-500">
+          <span className="shrink-0 rounded-full border border-ink-100 bg-ink-50 px-1.5 py-0.5 font-mono text-xs font-semibold leading-none text-ink-500">
             {selectedCount ?? 0}
           </span>
           <ChevronIcon open={open} />
@@ -1442,7 +1399,7 @@ function SourceFilter({
                 onKeyDown={onKeyDown}
                 placeholder="Filter sources…"
                 aria-label="Filter source list"
-                className="w-full rounded-lg border border-ink-200 bg-ink-50/50 py-1.5 pl-9 pr-3 text-xs outline-none transition focus:border-brand-300 focus:bg-white focus:ring-2 focus:ring-brand-100"
+                className="w-full rounded-lg border border-ink-200 bg-ink-50/50 py-2 pl-9 pr-3 text-sm outline-none transition focus:border-brand-300 focus:bg-white focus:ring-2 focus:ring-brand-100"
               />
             </div>
           )}
@@ -1459,13 +1416,13 @@ function SourceFilter({
                     onClick={() => choose(item.title)}
                     onMouseEnter={() => setHighlight(i)}
                     title={item.label}
-                    className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition ${
+                    className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition ${
                       i === highlight ? "bg-brand-50/70" : ""
                     } ${isSelected ? "font-semibold text-brand-700" : "font-medium text-ink-700"}`}
                   >
                     <span className="grid w-3.5 shrink-0 place-items-center text-brand-600">{isSelected && <CheckIcon />}</span>
                     <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                    <span className="shrink-0 rounded-full border border-ink-100 bg-ink-50 px-1.5 py-0.5 font-mono text-[10px] font-semibold leading-none text-ink-500">
+                    <span className="shrink-0 rounded-full border border-ink-100 bg-ink-50 px-1.5 py-0.5 font-mono text-xs font-semibold leading-none text-ink-500">
                       {item.n}
                     </span>
                   </button>
@@ -1473,10 +1430,10 @@ function SourceFilter({
               );
             })}
             {matches.length === 0 && (
-              <li className="px-3 py-6 text-center text-xs text-ink-400">No source matches “{query}”</li>
+              <li className="px-3 py-6 text-center text-sm text-ink-400">No source matches “{query}”</li>
             )}
           </ul>
-          <div className="border-t border-ink-100 bg-ink-50/40 px-3 py-1.5 font-mono text-[10px] font-medium text-ink-400">
+          <div className="border-t border-ink-100 bg-ink-50/40 px-3 py-2 font-mono text-xs font-medium text-ink-400">
             {query ? `${matches.length} of ${papers.length} sources` : `${papers.length} sources`}
           </div>
         </div>
@@ -1487,10 +1444,10 @@ function SourceFilter({
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center gap-2 rounded-[8px] border border-ink-200/60 bg-white px-2.5 py-1.5 transition hover:border-ink-300">
+    <div className="flex min-w-24 items-center gap-2 border-l border-ink-200 bg-white px-3 py-2 first:border-l-0">
       <div>
-        <div className="label-eyebrow text-[9px] leading-none text-ink-400">{label}</div>
-        <div className="mt-1 font-mono text-[13px] font-bold tabular-nums text-ink-900 leading-none">{value}</div>
+        <div className="text-xs font-semibold uppercase leading-none tracking-[0.08em] text-ink-600">{label}</div>
+        <div className="mt-2 font-mono text-base font-bold leading-none tabular-nums text-ink-950">{value}</div>
       </div>
     </div>
   );
@@ -1500,8 +1457,8 @@ function Tab({ active, onClick, children }: { active: boolean; onClick: () => vo
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-2 rounded-[7px] px-3 py-1.5 text-xs font-semibold tracking-wide transition-all ${
-        active ? "bg-ink-900 text-white shadow-sm" : "text-ink-700 hover:bg-ink-100 hover:text-brand-700"
+      className={`flex min-h-11 items-center gap-2 border-r border-ink-300 px-4 py-2.5 text-sm font-semibold transition last:border-r-0 ${
+        active ? "bg-ink-950 text-white" : "text-ink-800 hover:bg-ink-100 hover:text-brand-800"
       }`}
     >
       {children}
@@ -1515,7 +1472,7 @@ function Badge({ children, tone = "brand", active }: { children: React.ReactNode
     : tone === "amber"
       ? "bg-amber-100 text-amber-700"
       : "bg-brand-100 text-brand-700";
-  return <span className={`rounded-full px-1.5 py-0.5 font-mono text-[9px] font-black tabular-nums leading-none ${cls}`}>{children}</span>;
+  return <span className={`rounded-[2px] px-2 py-0.5 font-mono text-xs font-bold leading-none tabular-nums ${cls}`}>{children}</span>;
 }
 
 function Segmented({
@@ -1528,13 +1485,13 @@ function Segmented({
   options: { value: string; label: string; dot?: string }[];
 }) {
   return (
-    <div className="flex rounded-lg border border-ink-200 bg-white p-1 text-xs shadow-sm">
+    <div className="flex rounded-[2px] border border-ink-300 bg-white p-0.5 text-sm">
       {options.map((o) => (
         <button
           key={o.value}
           onClick={() => onChange(o.value)}
-          className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 font-semibold transition-all ${
-            value === o.value ? "bg-ink-900 text-white shadow-sm" : "text-ink-700 hover:bg-ink-50 hover:text-brand-700"
+          className={`inline-flex min-h-10 items-center gap-1.5 rounded-[1px] px-3.5 py-2 font-semibold transition ${
+            value === o.value ? "bg-ink-950 text-white" : "text-ink-800 hover:bg-ink-100 hover:text-brand-800"
           }`}
         >
           {o.dot && <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: o.dot }} />}
@@ -1583,7 +1540,7 @@ function SkeletonRow() {
 
 function DbIcon() {
   return (
-    <span className="grid h-9 w-9 place-items-center rounded-lg bg-gradient-to-br from-brand-400 to-brand-600 text-white shadow-sm">
+    <span className="grid h-11 w-11 place-items-center rounded-[2px] bg-brand-700 text-white">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
         <ellipse cx="12" cy="6" rx="7" ry="3" stroke="currentColor" strokeWidth="1.6" />
         <path d="M5 6v12c0 1.66 3.13 3 7 3s7-1.34 7-3V6" stroke="currentColor" strokeWidth="1.6" />

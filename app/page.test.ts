@@ -8,9 +8,11 @@ import { HomePageContent } from "../components/HomePageContent";
 
 const html = renderToStaticMarkup(createElement(HomePageContent));
 
-assert.match(html, /IONICLINK EXTRACT/);
-assert.match(html, /Add papers\. Get data\./);
-assert.match(html, /Choose the property you are extracting/);
+assert.match(html, /Data overview/);
+assert.equal((html.match(/<h1 /g) ?? []).length, 1);
+assert.match(html, /aria-label="All workspace totals"/);
+assert.match(html, /href="\/teaching#prediction"/);
+assert.match(html, /Prediction of μ/);
 
 for (const [domain, label] of [
   ["tribology", "Tribology"],
@@ -18,7 +20,7 @@ for (const [domain, label] of [
   ["diffusion", "Diffusion"],
 ] as const) {
   assert.match(html, new RegExp(`${label} workspace`));
-  assert.match(html, new RegExp(`Upload ${label} papers`));
+  assert.match(html, new RegExp(`Extract ${label} papers`));
   assert.match(html, new RegExp(`href="/${domain}/extract"`));
   assert.match(html, new RegExp(`href="/${domain}/database"`));
   assert.match(html, new RegExp(`href="/${domain}/database\\?status=review"`));
@@ -32,4 +34,4 @@ assert.match(html, /Checked/);
 assert.doesNotMatch(html, />Official</);
 assert.match(html, /Papers/);
 
-console.log("Global landing requires an explicit property workspace");
+console.log("Data overview exposes each property workspace and its scoped actions");

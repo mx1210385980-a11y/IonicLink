@@ -4,10 +4,15 @@ import { applySurfaceDescriptorsToRecord, buildSurfaceDescriptors, surfaceDescri
 const hopg = surfaceDescriptorDefaults("HOPG");
 assert.equal(hopg?.materialClass, "carbon");
 assert.equal(hopg?.plane, "(0001)");
-assert.equal(hopg?.surfaceEnergy?.std, 50);
-assert.equal(hopg?.contactAngle?.std, 85);
-assert.equal(hopg?.surfaceChargeDensity?.std, -0.0002);
-assert.equal(hopg?.roughness?.std, 0.89e-9);
+assert.equal(hopg?.surfaceEnergy, undefined);
+assert.equal(hopg?.contactAngle, undefined);
+assert.equal(hopg?.surfaceChargeDensity, undefined);
+assert.equal(hopg?.roughness, undefined);
+
+const ptfe = surfaceDescriptorDefaults("PTFE");
+assert.equal(ptfe?.materialClass, "polymer");
+assert.equal(ptfe?.plane, "amorphous");
+assert.equal(ptfe?.conductor, false);
 
 const au = buildSurfaceDescriptors({
   substrate: "Au(1 1 1)",
@@ -15,25 +20,39 @@ const au = buildSurfaceDescriptors({
     contactAngle: "62°",
     surfaceEnergy: "0.072 J/m2",
   },
+  provenance: {
+    contactAngle: { basis: "direct", page: 3, quote: "water contact angle was 62°" },
+    surfaceEnergy: { basis: "direct", page: 3, quote: "surface energy was 0.072 J/m2" },
+  },
 });
 assert.equal(au.descriptors.plane, "(111)");
 assert.equal(au.descriptors.materialClass, "metal");
 assert.equal(au.descriptors.contactAngle?.raw, "62°");
 assert.equal(au.descriptors.contactAngle?.std, 62);
-assert.equal(au.provenance.contactAngle?.basis, undefined);
+assert.equal(au.provenance.contactAngle?.basis, "direct");
 assert.equal(au.descriptors.surfaceEnergy?.std, 72);
-assert.equal(au.descriptors.surfaceChargeDensity?.std, -0.02);
-assert.equal(au.descriptors.roughness?.raw, "0.835 nm");
-assert.equal(au.provenance.surfaceChargeDensity?.basis, "assumed");
-assert.match(au.provenance.surfaceChargeDensity?.basisNote ?? "", /WFF-calibrated model prior/);
-assert.match(au.provenance.surfaceChargeDensity?.basisNote ?? "", /not a reported material property/);
+assert.equal(au.descriptors.surfaceChargeDensity, undefined);
+assert.equal(au.descriptors.roughness, undefined);
+assert.equal(au.provenance.surfaceChargeDensity, undefined);
+
+const unverified = buildSurfaceDescriptors({
+  substrate: "silica",
+  reported: {
+    surfaceEnergy: "200 mJ/m2",
+    surfaceChargeDensity: "-0.07 C/m2",
+    contactAngle: "20.7°",
+  },
+});
+assert.equal(unverified.descriptors.surfaceEnergy, undefined);
+assert.equal(unverified.descriptors.surfaceChargeDensity, undefined);
+assert.equal(unverified.descriptors.contactAngle, undefined);
 
 const unknown = buildSurfaceDescriptors({ substrate: "polyether ether ketone" });
 assert.equal(unknown.descriptors.materialClass, "polymer");
 assert.equal(unknown.descriptors.surfaceEnergy, undefined);
 assert.equal(unknown.provenance.surfaceEnergy, undefined);
 
-const recalibrated = applySurfaceDescriptorsToRecord({
+const cleanedAssumption = applySurfaceDescriptorsToRecord({
   core: { substrate: "Au(1 1 1)" },
   extended: {
     surface: {
@@ -44,7 +63,8 @@ const recalibrated = applySurfaceDescriptorsToRecord({
     surfaceEnergy: { basis: "assumed", basisNote: "old default" },
   },
 });
-assert.equal(recalibrated.extended?.surface?.surfaceEnergy?.raw, "700 mJ/m2");
+assert.equal(cleanedAssumption.extended?.surface?.surfaceEnergy, undefined);
+assert.equal(cleanedAssumption.provenance?.surfaceEnergy, undefined);
 
 const preservedDirect = applySurfaceDescriptorsToRecord({
   core: { substrate: "Au(1 1 1)" },

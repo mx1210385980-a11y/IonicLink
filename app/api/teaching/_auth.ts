@@ -19,11 +19,11 @@ export function requireTeachingRole(
     return internalTeachingErrorResponse(
       "read teaching session",
       error,
-      { message: "教学实验认证暂不可用，请稍后重试。" }
+      { message: "Lab authentication is temporarily unavailable. Try again later." }
     );
   }
-  if (!session) return NextResponse.json({ error: "请先登录教学实验。" }, { status: 401 });
-  if (session.role !== role) return NextResponse.json({ error: "当前账号没有此操作权限。" }, { status: 403 });
+  if (!session) return NextResponse.json({ error: "Sign in to the teaching lab first." }, { status: 401 });
+  if (session.role !== role) return NextResponse.json({ error: "Your account does not have permission for this action." }, { status: 403 });
   return session;
 }
 
@@ -41,7 +41,7 @@ export function rejectCrossOriginMutation(request: NextRequest): NextResponse | 
   } catch {
     // Invalid origins are rejected below.
   }
-  return NextResponse.json({ error: "请求来源校验失败。" }, { status: 403 });
+  return NextResponse.json({ error: "Request origin validation failed." }, { status: 403 });
 }
 
 function secureCookieFor(request: NextRequest): boolean {

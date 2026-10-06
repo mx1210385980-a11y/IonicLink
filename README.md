@@ -8,12 +8,11 @@ scientific papers. Three **isolated modules** share one workflow:
 - **Diffusion** — *ionic liquid → species → conditions → D* (self-diffusion; one record per diffusing ion).
 
 Each module has its own database file (`data/<domain>.db`), extraction prompt, schema, and
-review queue, so the datasets can never cross-contaminate. The app routes are
-`/<domain>/{extract,database,library,design}` with a domain switcher in the nav. The
-**Design Studio** (`/<domain>/design`) predicts the domain's property for unmeasured
-cation×anion pairs and ranks new candidate materials — every estimate is a weighted
-combination of the curated records, cited down to the verbatim quote, and the whole
-instrument honestly gates itself while a domain's dataset is still small.
+review queue. The data-workspace routes are `/<domain>/{extract,database,library}`
+with a domain switcher in the nav. **Model preview** (`/tribology/design`) is a
+classroom simulation: its generated points and displayed metrics illustrate how
+model settings affect a trend. They are not model-validation results from the
+curated databases. The preview is currently available for tribology only.
 
 ## The flow
 
@@ -24,9 +23,10 @@ PDF / text   ─▶    Review Queue   ─▶   Checked Database   ─▶  CSV
 (AI extract)       (approve/edit)      (clean records)        (export)
 ```
 
-1. **Extract** — drop a PDF or paste text. Claude-compatible tool use
-   standardizes every friction result into candidate records. No key? A deterministic
-   mock extractor keeps the whole flow working offline.
+1. **Extract** — upload PDF or TXT papers for structured AI extraction, or import
+   XLSX, CSV, or TSV datasets. Paper files and structured datasets use separate upload
+   flows. Paper extraction requires a configured live provider; unconfigured extraction
+   requests return a service-unavailable response.
 2. **Review** — candidates land in the Review Queue. Approve the accurate ones into the
    Checked Database; reject the rest. Nothing is published blindly.
 3. **Export** — filter by scale (nano/AFM vs macro/tribometer) or search, then download CSV.
@@ -72,75 +72,53 @@ npm run seed:conductivity -- --reset
 npm run seed:diffusion -- --reset
 ```
 
-For live AI extraction, copy `.env.local.example` → `.env.local` and set `OPENAI_BASE_URL` plus `OPENAI_API_KEY`.
-Without it, the Extract page runs in mock mode. The teaching experiment uses checked-in,
-frozen AI suggestions and does not require a live AI key.
+For live AI extraction, copy `.env.local.example` → `.env.local` and configure one of its
+supported providers. The default teaching AI group also requires a live extraction provider;
+its extraction endpoint returns 503 when none is configured.
 
-### Zero-configuration teaching experiment
+### Paper extraction teaching lab
 
-Open `/teaching`. Students enter only a pseudonymous ID (a student number or initials; no
-real name, invite code, group code, or paper selection) and complete two automatically
-assigned rounds. Reusing the same ID restores the current round and draft. For a 30-student
-class, balanced assignment produces 15 students in each sequence:
+Open `/teaching`. The current workflow compares AI-assisted and manual extraction of one
+tribology paper. See [the teaching guide](docs/teaching-lab.md) for details.
 
-| Sequence | Round 1 | Round 2 |
-| --- | --- | --- |
-| Manual → AI | Paper A, blank manual form | Paper B, frozen AI suggestions to verify or edit |
-| AI → Manual | Paper A, frozen AI suggestions to verify or edit | Paper B, blank manual form |
+1. The teacher opens **Instructor dashboard** → **New experiment**, selects an uploaded PDF,
+   and verifies the answer key. Checked records provide a draft, or the teacher can upload
+   a CSV, TSV, or XLSX answer table. Each experiment has up to 100 records and a fixed answer key.
+2. Students choose **AI Extraction** or **Manual extraction**. The server assigns a student
+   ID and enters the most recently created experiment. Valid cookies in the same browser
+   restore each mode's saved progress while that experiment remains current.
+3. The AI group starts live extraction, checks the candidate records against the source,
+   edits as needed, and submits. **Save draft** persists edits for later restoration.
+4. The manual group downloads a template, uploads the completed table, checks the saved
+   preview, and submits with its self-recorded time in minutes.
+5. The teacher dashboard refreshes every 15 seconds while visible, compares group results,
+   and supports per-field review. Instructor decisions update final accuracy while preserving
+   the original automatic score.
 
-All six values are required before a round can be submitted. Page and evidence fields remain
-optional, but missing or incorrect citations reduce the evidence metrics. Drafts save
-automatically. The client sends activity heartbeats every 15 seconds only while the page is
-visible and the student has been active within the previous 120 seconds; no keystroke,
-clipboard, or paper text is recorded.
+The six scored fields are `cation`, `anion`, `substrate`, `temperature`, `load`, and `cof`.
+Records are matched one-to-one to maximize matching fields. Accuracy is
+`matched fields / (max(answer-key records, student records) × 6)`, so missing or extra
+records count in the denominator. Enter `NR` for unreported values; blanks are unmatched.
+Temperature and load support unit conversion. The teacher can review equivalent terms or
+other cases that the automatic comparison does not recognize.
 
-The server bootstraps the versioned experiment from
-`config/teaching/default-experiment.v1.json` on the first student join or teacher-dashboard
-load. Teaching schema migrations are automatic; `npm run migrate` and the domain seed/reset
-commands do not operate on teaching data. Runtime state is stored in
-`${IONICLINK_DATA_DIR:-<repository>/data}/teaching.db` and is ignored by Git. For a fresh local
-trial, point `IONICLINK_DATA_DIR` at a new empty directory instead of deleting or reusing a
-real class database.
+AI time runs from the first extraction start to review submission, including model waits,
+retries, time away from the page, and review. Manual time is self-reported. Group means use
+submitted results only; the speed ratio is `manual mean time / AI mean time`. These are
+descriptive classroom comparisons with different timing sources, not controlled causal results.
 
-Set a long, unique `TEACHING_TEACHER_PASSWORD` before the teacher needs access. The teacher
-uses the same `/teaching` entry and is redirected to `/teaching/admin`, which opens the
-current experiment directly, refreshes while visible, and provides paired results,
-paper/sequence/timing diagnostics, participant drill-down, and CSV exports. Teachers do not
-create a project, configure papers, assign groups, or grade fields for the default workflow.
+The current instructor entry is open: `/api/teaching/lab/enter` creates a teacher session
+without a password. General application login and `TEACHING_TEACHER_PASSWORD` do not protect
+this entry. Deployments requiring restricted teaching access need a separate access-control
+configuration. The password setting remains used by the retained teaching-session login API.
 
-The primary analysis includes only students who completed both rounds, were not excluded,
-have current automatic scores, have positive active time in both modes, and have `valid`
-timing in both modes. Accuracy is `correct fields / 6`; coverage is `non-empty fields / 6`.
-Within-student time and accuracy differences are `AI - manual`, so a negative time difference
-means AI was faster. The saved-time headline is
-`(manual median - AI median) / manual median`. The dashboard reports paired median
-differences, seeded bootstrap 95% confidence intervals, and a two-sided Wilcoxon signed-rank
-approximation (shown as unavailable with fewer than five non-zero differences). It also shows
-evidence coverage/accuracy, AI adoption/modification, AI error correction/error adoption, and
-the strict count that was both faster and more accurate with AI.
-
-The normal CSV contains the entered student IDs; the anonymized export replaces them with
-stable `S001`, `S002`, … labels. Both exports contain one row per participant with the two
-rounds' aggregate metrics and an exclusion flag. Neither export contains final answer or
-evidence text, frozen AI text, gold answers, scoring rules, participant IDs, or free-text
-exclusion reasons. CSV output includes a UTF-8 BOM and spreadsheet-formula escaping.
-
-The student UI and API never send gold rules, future-round answers, or AI suggestions during
-a manual round. The gold rules are nevertheless part of the server source configuration; do
-not give students repository/config access before a blind classroom run.
-
-### Group crossover experiment (optional second experiment type)
-
-Alongside the default experiment, teachers can create **group crossover** experiments from the
-admin page: the class is split into an even number of groups, adjacent groups pair into
-super-groups, and the two groups in a super-group swap papers and flip extraction mode between
-rounds (odd group: AI-assisted first, even group: manual first). The teacher picks one checked
-tribology record per group as the paper pool (one record = one operating-condition point),
-imports a roster mapping student names/IDs to groups, and shares the experiment invite code.
-Students join with their rostered name plus the code; auto-scoring uses the checked record as
-the gold standard and teachers can override per-field verdicts, which then win in all
-analytics and exports. See `docs/teaching-group-crossover.md` for the full teacher workflow
-(Chinese).
+Teaching tables initialize automatically in `${IONICLINK_DATA_DIR:-<repository>/data}/teaching.db`.
+The teacher creates each experiment; source copies live under `teaching-papers/<sourceId>/`.
+Student answers stay separate from the formal literature databases. Existing teaching tables,
+crossover code, and valid unfinished sessions remain supported; `/teaching` and its instructor
+dashboard use the workflow above. The retained crossover design is described in
+[its reference guide](docs/teaching-group-crossover.md). Domain seed/reset commands do not
+operate on teaching data. Use a new `IONICLINK_DATA_DIR` for an isolated local trial.
 
 ## Data model
 
@@ -159,20 +137,19 @@ filtering — schema can evolve without migrations.
 |------|------|
 | `app/` | Next.js App Router pages and API routes |
 | `app/page.tsx` | Global landing — chooser between the modules |
-| `app/[domain]/` | Per-domain `page` (hero) + `extract` / `database` / `library` / `design` |
+| `app/[domain]/` | Per-domain extraction, database, and document library; tribology model preview; domain roots redirect home |
 | `app/api/[domain]/` | `extract`, `batch`, `records` (CRUD + bulk delete), `export`, `source` |
-| `app/teaching/`, `app/api/teaching/` | Zero-configuration student/teacher pages and role-protected teaching APIs |
-| `components/` | React UI components for extraction, records, navigation, and Design Studio |
-| `components/teaching/` | Student gateway/workspace and the live paired teacher dashboard |
+| `app/teaching/`, `app/api/teaching/` | Current paper-extraction lab and retained teaching-session APIs |
+| `components/` | React UI components for extraction, records, navigation, and model preview |
+| `components/teaching/` | Student gateway, manual/AI workspaces, and instructor review dashboard |
 | `lib/domain.ts` | `Domain`, the generic `DomainRecord`, the per-domain DB-file boundary |
 | `lib/modules/` | The `Module` contract + `tribology` / `conductivity` / `diffusion` implementations + registry |
 | `lib/conductivity/`, `lib/diffusion/` | Per-domain schema, ingest, and extractor |
-| `lib/predict/` | The Design Studio engine — ion descriptors, kernel regression, Arrhenius fits, LOO calibration, candidate atlas |
+| `components/design/ModelPreview.tsx`, `lib/modelPreview.ts` | Interactive classroom model preview, simulation settings, and generated data |
 | `lib/` | shared `db`, `extract`, `units`, `pdf`, `csv`, `ionStructures`, and teaching facade |
-| `lib/teaching/` | Versioned bootstrap, migrations, assignment, scoring, activity, and paired analytics |
-| `config/teaching/` | Immutable default paper pair, frozen AI suggestions, and deterministic gold rules |
-| `scripts/` | seed, migration, WFF reproduction, cache prewarm, and evaluation utilities |
-| `data/wff/` | small WFF model/evaluation fixture CSV files used by tests and local reproduction |
+| `lib/teaching/` | Current lab storage, scoring, paper copies, and table import; retained crossover migrations and analytics |
+| `config/teaching/` | Versioned paper pair, frozen AI suggestions, and gold rules for retained crossover sessions |
+| `scripts/` | Seed, migration, data maintenance, and extraction-evaluation utilities |
 | `data/tribology/gold-standard/` | small extraction-evaluation fixture JSON |
 
 ## Repository hygiene

@@ -16,10 +16,9 @@ import {
 } from "./recordFilters";
 
 /**
- * Compact filter strip for the Database view: ion (cation/anion) and
- * substrate multi-select pills plus load/temperature range pills, all as
- * small popovers in the established SourceFilter idiom. Filters apply
- * instantly client-side; an active pill glows brand and carries its count.
+ * Compact filter strip for the Database view: ion multi-selects, direct
+ * substrate search, and load/temperature range pills. Filters apply instantly
+ * client-side; active controls glow brand and carry a live result count.
  */
 
 function usePopover(open: boolean, close: () => void) {
@@ -66,8 +65,8 @@ function PillShell({
   return (
     <div ref={rootRef} className="relative">
       <div
-        className={`flex items-center gap-1 rounded-lg border bg-white py-1 pl-2.5 pr-1.5 text-xs shadow-sm transition ${
-          active ? "border-brand-300 ring-2 ring-brand-100" : "border-ink-200"
+        className={`flex min-h-11 items-center gap-1 rounded-[2px] border bg-white py-2.5 pl-3 pr-2 text-sm transition ${
+          active ? "border-brand-600 ring-2 ring-brand-100" : "border-ink-300"
         }`}
       >
         <button
@@ -96,7 +95,7 @@ function PillShell({
         )}
       </div>
       {open && (
-        <div className="absolute left-0 top-full z-30 mt-1.5 w-64 max-w-[88vw] overflow-hidden rounded-xl border border-ink-200 bg-white shadow-[0_16px_40px_rgba(15,23,42,0.16)] animate-[home-rise_180ms_ease-out_both]">
+        <div className="absolute left-0 top-full z-30 mt-1.5 w-64 max-w-[88vw] overflow-hidden rounded-[2px] border border-ink-300 bg-white shadow-[0_12px_28px_rgba(22,22,22,0.14)] animate-[home-rise_180ms_ease-out_both]">
           {children}
         </div>
       )}
@@ -149,12 +148,12 @@ function MultiPill({
                 role="option"
                 aria-selected={isSelected}
                 onClick={() => toggle(o.key)}
-                className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition hover:bg-brand-50/70 ${
+                className={`flex w-full items-center gap-2 rounded-[1px] px-3 py-2.5 text-left text-sm transition hover:bg-brand-50 ${
                   isSelected ? "font-semibold text-brand-700" : "font-medium text-ink-700"
                 }`}
               >
                 <span
-                  className={`grid h-3.5 w-3.5 shrink-0 place-items-center rounded border text-[9px] leading-none transition ${
+                  className={`grid h-4 w-4 shrink-0 place-items-center rounded-[1px] border text-xs leading-none transition ${
                     isSelected ? "border-brand-500 bg-brand-600 text-white" : "border-ink-300 bg-white text-transparent"
                   }`}
                   aria-hidden
@@ -162,23 +161,67 @@ function MultiPill({
                   ✓
                 </span>
                 <span className="min-w-0 flex-1 truncate font-mono">{o.label}</span>
-                <span className="shrink-0 rounded-full border border-ink-100 bg-ink-50 px-1.5 py-0.5 font-mono text-[10px] font-semibold leading-none text-ink-500">
+                <span className="shrink-0 rounded-[2px] border border-ink-200 bg-ink-50 px-2 py-0.5 font-mono text-xs font-semibold leading-none text-ink-600">
                   {o.count}
                 </span>
               </button>
             </li>
           );
         })}
-        {options.length === 0 && <li className="px-3 py-4 text-center text-xs text-ink-400">No values on file</li>}
+        {options.length === 0 && <li className="px-3 py-4 text-center text-sm text-ink-400">No values on file</li>}
       </ul>
       {active && (
         <div className="border-t border-ink-100 bg-ink-50/40 px-2 py-1.5">
-          <button onClick={() => onChange([])} className="rounded px-1.5 py-0.5 text-[11px] font-medium text-ink-500 transition hover:text-brand-700">
+          <button onClick={() => onChange([])} className="rounded px-1.5 py-0.5 text-[13px] font-medium text-ink-500 transition hover:text-brand-700">
             Clear {label.toLowerCase()}
           </button>
         </div>
       )}
     </PillShell>
+  );
+}
+
+function TextSearchFilter({
+  label,
+  value,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  onChange: (value: string) => void;
+}) {
+  const active = value.trim().length > 0;
+  return (
+    <div
+      data-testid="substrate-search-filter"
+      className={`flex min-h-11 items-center gap-1.5 rounded-[2px] border bg-white py-2.5 pl-3 pr-2 text-sm transition ${
+        active ? "border-brand-600 ring-2 ring-brand-100" : "border-ink-300"
+      }`}
+    >
+      <span className="shrink-0 font-semibold text-ink-500">{label}</span>
+      <input
+        type="search"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        aria-label={placeholder}
+        autoComplete="off"
+        spellCheck={false}
+        className="w-28 min-w-0 bg-transparent py-0.5 font-mono text-sm text-ink-900 outline-none placeholder:text-ink-500 sm:w-40"
+      />
+      {active && (
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          aria-label={`Clear ${label.toLowerCase()} search`}
+          className="grid h-5 w-5 shrink-0 place-items-center rounded text-ink-400 transition hover:bg-ink-100 hover:text-ink-700"
+        >
+          ✕
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -236,7 +279,7 @@ function RangePill({
         placeholder={unitHint}
         spellCheck={false}
         aria-label={`${label} ${side}imum`}
-        className="w-full rounded-lg border border-ink-200 bg-white px-2 py-1.5 font-mono text-xs tnum shadow-sm outline-none transition focus:border-brand-300 focus:ring-2 focus:ring-brand-100"
+        className="w-full rounded-lg border border-ink-200 bg-white px-2.5 py-2 font-mono text-sm tnum shadow-sm outline-none transition focus:border-brand-300 focus:ring-2 focus:ring-brand-100"
       />
     </label>
   );
@@ -260,7 +303,7 @@ function RangePill({
           {bound("min", minText, setMinText)}
           {bound("max", maxText, setMaxText)}
         </div>
-        <p className="text-[10px] leading-relaxed text-ink-400">
+        <p className="text-xs leading-relaxed text-ink-400">
           {extent ? (
             <>
               data spans <span className="font-mono text-ink-600 tnum">{extentLabel(extent[0])}</span> –{" "}
@@ -278,7 +321,7 @@ function RangePill({
               setMaxText("");
               onChange(null, null);
             }}
-            className="rounded px-1 py-0.5 text-[11px] font-medium text-ink-500 transition hover:text-brand-700"
+            className="rounded px-1 py-0.5 text-[13px] font-medium text-ink-500 transition hover:text-brand-700"
           >
             Clear {label.toLowerCase()}
           </button>
@@ -293,6 +336,7 @@ export function FilterBar({
   records,
   filters,
   shown,
+  showSummary = true,
   onChange,
 }: {
   domain: Domain;
@@ -300,6 +344,7 @@ export function FilterBar({
   filters: RecordFilters;
   /** Visible record count after filtering (for the live tally). */
   shown: number;
+  showSummary?: boolean;
   onChange: (next: RecordFilters) => void;
 }) {
   const cationOpts = useMemo(() => ionOptions(records, "cation"), [records]);
@@ -311,7 +356,7 @@ export function FilterBar({
   const activeCount = countActiveFilters(filters);
 
   return (
-    <div className="flex flex-wrap items-center gap-2 border-b border-ink-200/70 bg-ink-50/30 px-5 py-2.5">
+    <div className="flex flex-wrap items-center gap-2.5 border-b border-ink-200 bg-ink-50 px-5 py-3">
       <span className="label-eyebrow mr-0.5">Filter</span>
       <MultiPill
         label="Cation"
@@ -327,14 +372,21 @@ export function FilterBar({
         selected={filters.anions}
         onChange={(anions) => onChange({ ...filters, anions })}
       />
-      {surfaceOpts.length > 0 && (
+      {domain === "tribology" ? (
+        <TextSearchFilter
+          label="Substrate"
+          value={filters.surfaceQuery}
+          placeholder="Search substrate"
+          onChange={(surfaceQuery) => onChange({ ...filters, surfaceQuery })}
+        />
+      ) : surfaceOpts.length > 0 ? (
         <MultiPill
-          label={domain === "conductivity" ? "Surface" : "Substrate"}
+          label="Surface"
           options={surfaceOpts}
           selected={filters.surfaces}
           onChange={(surfaces) => onChange({ ...filters, surfaces })}
         />
-      )}
+      ) : null}
       {domain === "diffusion" && (
         <MultiPill
           label="Confined system"
@@ -356,7 +408,7 @@ export function FilterBar({
         />
       )}
       <RangePill
-        label="Temp"
+        label="T"
         dim="temperature"
         unitHint="298 K"
         extent={tempExtent}
@@ -365,17 +417,17 @@ export function FilterBar({
         max={filters.tempMaxK}
         onChange={(tempMinK, tempMaxK) => onChange({ ...filters, tempMinK, tempMaxK })}
       />
-      {activeCount > 0 && (
+      {showSummary && activeCount > 0 && (
         <>
           <button
             onClick={() =>
-              onChange({ cations: [], anions: [], surfaces: [], confinedSystems: [], loadMinN: null, loadMaxN: null, tempMinK: null, tempMaxK: null })
+              onChange({ cations: [], anions: [], surfaceQuery: "", surfaces: [], confinedSystems: [], loadMinN: null, loadMaxN: null, tempMinK: null, tempMaxK: null })
             }
-            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-ink-500 transition hover:bg-ink-100 hover:text-ink-900"
+            className="inline-flex min-h-10 items-center gap-1 rounded-[2px] px-3 py-2 text-sm font-semibold text-ink-600 transition hover:bg-ink-200 hover:text-ink-950"
           >
             ✕ Reset ({activeCount})
           </button>
-          <span className="ml-auto font-mono text-[11px] text-ink-400 tnum">
+          <span className="ml-auto font-mono text-sm text-ink-600 tnum">
             {shown} of {records.length} shown
           </span>
         </>

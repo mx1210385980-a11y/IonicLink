@@ -68,39 +68,53 @@ export function IonPill({
   label,
   value,
   units = "raw",
+  connected = false,
+  chargePosition = "start",
+  embedded = false,
 }: {
   kind: "cation" | "anion";
   label: string;
   value: string;
   units?: UnitMode;
+  connected?: boolean;
+  chargePosition?: "start" | "end";
+  embedded?: boolean;
 }) {
   const isCation = kind === "cation";
   const displayValue = ionDisplayLabel(value, kind, units);
   const displayFormula = ionDisplayFormula(value, kind, units);
   const title = units === "std" && displayValue !== value ? `${label}: ${displayValue} · as reported: ${value}` : `${label}: ${value}`;
+  const charge = (
+    <span
+      data-testid={`ion-charge-${kind}`}
+      className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border text-xs font-black leading-none ${
+        isCation ? "border-cyan-200 bg-white text-cyan-600" : "border-emerald-200 bg-white text-emerald-600"
+      }`}
+      aria-label={isCation ? "positive ion" : "negative ion"}
+    >
+      {isCation ? "+" : "−"}
+    </span>
+  );
   return (
     <div
       data-testid={`ion-pill-${kind}`}
-      className={`flex min-w-0 items-center gap-1.5 rounded-lg border px-2 py-1.5 ${
-        isCation ? "border-cyan-100 bg-cyan-50/55" : "border-emerald-100 bg-emerald-50/55"
+      className={`flex min-w-0 shrink-0 items-center gap-1.5 ${
+        embedded ? "px-2 pt-2" : connected
+          ? `px-2 py-1.5 rounded-none border-0 border-b ${isCation ? "border-cyan-100 bg-cyan-50/55" : "border-emerald-100 bg-emerald-50/55"}`
+          : `px-2 py-1.5 rounded-lg border ${isCation ? "border-cyan-100 bg-cyan-50/55" : "border-emerald-100 bg-emerald-50/55"}`
       }`}
       title={title}
     >
-      <span
-        className={`grid h-5 w-5 shrink-0 place-items-center rounded-full border text-xs font-black leading-none ${
-          isCation ? "border-cyan-200 bg-white text-cyan-600" : "border-emerald-200 bg-white text-emerald-600"
-        }`}
-      >
-        {isCation ? "+" : "−"}
-      </span>
+      {chargePosition === "start" && charge}
       <span className="min-w-0">
         <span className={`block text-[9px] font-bold uppercase tracking-eyebrow ${isCation ? "text-cyan-600" : "text-emerald-600"}`}>
           {label}
         </span>
-        <span className="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-sans text-[13px] font-bold leading-tight tracking-normal text-ink-900">
+        <span className="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-sans text-[15px] font-bold leading-tight tracking-normal text-ink-900">
           <IonFormula value={displayFormula} subscript={units === "std"} />
         </span>
       </span>
+      {chargePosition === "end" && charge}
     </div>
   );
 }
@@ -174,7 +188,7 @@ export function ConditionChip({
   const content = (
     <>
       <span className="flex items-center justify-between gap-1">
-        <span className="min-w-0 break-words text-[9px] font-semibold uppercase tracking-eyebrow opacity-60">{item.label}</span>
+        <span className="min-w-0 break-words text-[9px] font-semibold uppercase tracking-eyebrow">{item.label}</span>
       </span>
       {item.variant === "range" && item.range ? (
         <span
@@ -182,20 +196,20 @@ export function ConditionChip({
           aria-label={item.value}
           className="mt-1 flex min-w-0 items-center gap-1.5 rounded-md border border-cyan-200/80 bg-white/80 px-1.5 py-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]"
         >
-          <span className="font-mono text-[11px] font-black leading-none tnum text-cyan-950">{item.range.min}</span>
+          <span className="font-mono text-[13px] font-black leading-none tnum text-cyan-950">{item.range.min}</span>
           <span className="relative h-1 min-w-4 flex-1 overflow-hidden rounded-full bg-cyan-100">
             <span className="absolute inset-y-0 left-0 right-0 rounded-full bg-gradient-to-r from-cyan-400 via-teal-300 to-cyan-500" />
             <span className="absolute inset-0 grid place-items-center font-mono text-[9px] font-black leading-none text-cyan-900/70">-</span>
             <span className="absolute left-0 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full border border-white bg-cyan-500 shadow-sm" />
             <span className="absolute right-0 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full border border-white bg-cyan-600 shadow-sm" />
           </span>
-          <span className="font-mono text-[11px] font-black leading-none tnum text-cyan-950">{item.range.max}</span>
-          <span className="rounded-full bg-cyan-100 px-1.5 py-0.5 font-mono text-[9px] font-bold leading-none text-cyan-700">
+          <span className="font-mono text-[13px] font-black leading-none tnum text-cyan-950">{item.range.max}</span>
+          <span className="rounded-full bg-cyan-100 px-1.5 py-0.5 font-mono text-[10px] font-bold leading-none text-cyan-700">
             {item.range.unit}
           </span>
         </span>
       ) : (
-        <span className="block truncate font-mono text-xs font-semibold tnum">{item.value}</span>
+        <span className="block truncate font-mono text-sm font-semibold tnum">{item.value}</span>
       )}
     </>
   );

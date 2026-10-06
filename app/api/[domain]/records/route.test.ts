@@ -65,7 +65,7 @@ async function main() {
   invalidUrl.searchParams.set("structureSmiles", "CCO.CN");
   const invalid = await GET(new NextRequest(invalidUrl, { headers: { cookie } }), { params: { domain: "tribology" } });
   assert.equal(invalid.status, 400);
-  assert.match(((await invalid.json()) as { error: string }).error, /一个完整离子/);
+  assert.match(((await invalid.json()) as { error: string }).error, /one complete ion/i);
 
   console.log("Records API structure-filter and official mock gate tests passed");
 }

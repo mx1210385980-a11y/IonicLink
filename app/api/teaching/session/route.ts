@@ -42,26 +42,26 @@ export async function POST(request: NextRequest) {
     return teachingRequestErrorResponse(error) ?? internalTeachingErrorResponse(
       "read teaching session request",
       error,
-      { message: "读取登录请求失败，请稍后重试。" }
+      { message: "Could not read the sign-in request. Try again later." }
     );
   }
   if (body?.role !== "student" && body?.role !== "teacher") {
-    return NextResponse.json({ error: "请选择学生或教师入口。" }, { status: 400 });
+    return NextResponse.json({ error: "Choose the student or instructor entry." }, { status: 400 });
   }
 
   if (body.role === "teacher") {
     if (typeof body.password !== "string") {
-      return NextResponse.json({ error: "请输入教师密码。" }, { status: 400 });
+      return NextResponse.json({ error: "Enter the instructor password." }, { status: 400 });
     }
     try {
       if (!teacherLoginConfigured()) {
         return NextResponse.json(
-          { error: "服务器尚未配置 TEACHING_TEACHER_PASSWORD。" },
+          { error: "TEACHING_TEACHER_PASSWORD is not configured on the server." },
           { status: 503 }
         );
       }
       if (!verifyTeacherPassword(body.password)) {
-        return NextResponse.json({ error: "教师密码错误。" }, { status: 401 });
+        return NextResponse.json({ error: "Incorrect instructor password." }, { status: 401 });
       }
       const token = createTeachingSession({ role: "teacher", projectId: null, participantId: null });
       return withTeachingCookie(NextResponse.json({ redirect: "/teaching/admin" }), token, request);
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
       return internalTeachingErrorResponse(
         "create teacher session",
         error,
-        { message: "教师登录失败，请稍后重试。" }
+        { message: "Instructor sign-in failed. Try again later." }
       );
     }
   }
@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
     );
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "学生标识无效。" },
+      { error: error instanceof Error ? error.message : "Invalid student ID." },
       { status: 400 }
     );
   }
@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
     return internalTeachingErrorResponse(
       "join teaching experiment",
       error,
-      { status: 503, message: "教学实验暂不可用，请稍后重试。" }
+      { status: 503, message: "The teaching lab is temporarily unavailable. Try again later." }
     );
   }
 }
@@ -119,7 +119,7 @@ export async function DELETE(request: NextRequest) {
     return internalTeachingErrorResponse(
       "delete teaching session",
       error,
-      { message: "退出教学实验失败，请稍后重试。" }
+      { message: "Could not sign out of the teaching lab. Try again later." }
     );
   }
 }

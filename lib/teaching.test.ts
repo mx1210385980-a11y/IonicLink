@@ -100,7 +100,7 @@ assert.throws(
       paperNo: "03",
       sourceUrl: "https://doi.org/10.0000/fixture",
     }),
-  /文献编号 03 已经使用，请换一个编号/,
+  /Paper ID 03 is already in use. Choose another/,
   "reusing a paper number for a different source should have a friendly error"
 );
 const joined = joinTeachingProject({
@@ -139,7 +139,7 @@ assert.equal(dashboard.rows[0].status, "reviewed");
 
 const csv = teachingRowsToCsv(dashboard.rows);
 assert.ok(csv.startsWith("\uFEFF"));
-assert.match(csv, /人工覆盖率/);
+assert.match(csv, /Manual coverage/);
 assert.match(csv, /100\.0%/);
 
 for (const domain of ["tribology", "conductivity", "diffusion"]) {

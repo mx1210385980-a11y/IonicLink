@@ -46,7 +46,6 @@ export const getDataDir = () => DATA_DIR;
 const dbPath = (domain: Domain) => path.join(DATA_DIR, `${domain}.db`);
 
 const _dbs = new Map<Domain, Database.Database>();
-const _counters = new Map<Domain, number>();
 
 /** Columns present for every domain. The rest come from `module.promotedColumns`. */
 const SHARED_COLUMNS = [
@@ -164,7 +163,7 @@ function rowToRecord(domain: Domain, row: { payload: string }, db?: Database.Dat
 }
 
 function normalizeLegacyRecord(domain: Domain, rec: AnyRecord, db?: Database.Database): AnyRecord {
-  let next = normalizeLegacyTemperature(rec);
+  let next = normalizeLegacyTemperature(domain, rec);
   next = normalizeLegacyQuantities(domain, next);
   next = normalizeLegacySubstrate(domain, next);
   next = normalizeLegacySurface(domain, next);
@@ -189,6 +188,12 @@ const LEGACY_QUANTITY_PATHS: Record<Domain, QuantityPath[]> = {
   conductivity: [
     { section: "core", key: "temperature", dim: "temperature" },
     { section: "core", key: "conductivity", dim: "conductivity" },
+    { section: "core", key: "capacitance", dim: "capacitance" },
+    { section: "core", key: "electricField", dim: "electricField" },
+    { section: "core", key: "electrodePotential", dim: "potential" },
+    { section: "core", key: "electrochemicalWindow", dim: "potential" },
+    { section: "core", key: "chargeTransferResistance", dim: "resistance" },
+    { section: "extended", key: "pressure", dim: "pressure" },
     { section: "extended", key: "viscosity", dim: "viscosity" },
   ],
   diffusion: [
@@ -240,9 +245,19 @@ function normalizeLegacySurface(domain: Domain, rec: AnyRecord): AnyRecord {
   return domain === "tribology" ? applySurfaceDescriptorsToRecord(rec) : rec;
 }
 
-function normalizeLegacyTemperature(rec: AnyRecord): AnyRecord {
+function normalizeLegacyTemperature(domain: Domain, rec: AnyRecord): AnyRecord {
   const temp = rec.core?.temperature;
-  const rawUsed = temp?.raw?.trim() || ROOM_TEMPERATURE_RAW;
+  const raw = temp?.raw?.trim() || "";
+  if (domain === "conductivity" && (!raw || /^(?:not\s+(?:stated|reported|specified)|unknown|n\/?a)$/i.test(raw))) {
+    return {
+      ...rec,
+      core: {
+        ...rec.core,
+        temperature: null,
+      },
+    };
+  }
+  const rawUsed = raw || ROOM_TEMPERATURE_RAW;
   const normalized = parseQuantity(rawUsed, "temperature");
   if (!normalized || normalized.value == null) return rec;
 
@@ -339,17 +354,13 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function nextId(domain: Domain, db: Database.Database): string {
-  let counter = _counters.get(domain);
-  if (counter == null) {
-    const row = db.prepare("SELECT id FROM records ORDER BY id DESC LIMIT 1").get() as
-      | { id: string }
-      | undefined;
-    counter = row ? parseInt(row.id.replace(/\D/g, ""), 10) || 0 : 0;
-  }
-  counter += 1;
-  _counters.set(domain, counter);
-  return "#" + String(counter).padStart(3, "0");
+function nextId(db: Database.Database): string {
+  // Call inside an immediate write transaction: numeric ordering survives #999,
+  // and reading the database avoids stale counters in other server/CLI processes.
+  const row = db.prepare("SELECT COALESCE(MAX(CAST(SUBSTR(id, 2) AS INTEGER)), 0) AS maximum FROM records").get() as {
+    maximum: number;
+  };
+  return "#" + String(row.maximum + 1).padStart(3, "0");
 }
 
 export interface ListOptions {
@@ -467,8 +478,9 @@ export function createRecords(
 ): AnyRecord[] {
   const db = getDb(domain);
   const mod = getModule(domain);
+  const admittedDrafts = mod.acceptDraft ? drafts.filter((draft) => mod.acceptDraft!(draft)) : drafts;
   if (status === "official") {
-    const mockIndices = drafts
+    const mockIndices = admittedDrafts
       .map((draft, i) => (draft.extraction?.source === "mock" ? i : -1))
       .filter((i) => i >= 0);
     if (mockIndices.length) {
@@ -478,7 +490,7 @@ export function createRecords(
           .join(", ")}. Re-extract with a live model or enter the records manually.`
       );
     }
-    const bad = drafts
+    const bad = admittedDrafts
       .map((draft, i) => ({ i, missing: mod.coreCompleteness(draft).missing }))
       .filter((row) => row.missing.length);
     if (bad.length) {
@@ -488,13 +500,13 @@ export function createRecords(
   }
   const made: AnyRecord[] = [];
   const tx = db.transaction(() => {
-    for (const d of drafts) {
-      const rec: AnyRecord = { ...d, id: nextId(domain, db), status, createdAt };
+    for (const d of admittedDrafts) {
+      const rec: AnyRecord = { ...d, id: nextId(db), status, createdAt };
       write(db, domain, rec);
       made.push(rec);
     }
   });
-  tx();
+  tx.immediate();
   return made;
 }
 
@@ -519,25 +531,37 @@ export function commitDatasetImport(
   }
 ): DatasetImportCommitResult {
   const db = getDb(domain);
+  const mod = getModule(domain);
   const tx = db.transaction(() => {
     const existing = db
       .prepare("SELECT record_count, payload FROM dataset_imports WHERE fingerprint = ?")
       .get(input.fingerprint) as { record_count: number; payload: string } | undefined;
     if (existing) {
       const payload = JSON.parse(existing.payload) as { recordIds?: string[] };
-      return {
-        alreadyCommitted: true,
-        recordIds: payload.recordIds ?? [],
-        recordCount: existing.record_count,
-      };
+      const recordIds = payload.recordIds ?? [];
+      // A receipt whose records were all deleted afterwards (e.g. the review
+      // queue was cleared) must not block re-importing the same file.
+      const probe = db.prepare("SELECT 1 FROM records WHERE id = ?");
+      const surviving = recordIds.some((id) => probe.get(id));
+      if (surviving) {
+        return {
+          alreadyCommitted: true,
+          recordIds,
+          recordCount: existing.record_count,
+        };
+      }
+      db.prepare("DELETE FROM dataset_imports WHERE fingerprint = ?").run(input.fingerprint);
     }
 
     const createdAt = new Date().toISOString();
     const records: AnyRecord[] = [];
-    for (const draft of input.drafts) {
+    const admittedDrafts = mod.acceptDraft
+      ? input.drafts.filter((draft) => mod.acceptDraft!(draft))
+      : input.drafts;
+    for (const draft of admittedDrafts) {
       const record: AnyRecord = {
         ...draft,
-        id: nextId(domain, db),
+        id: nextId(db),
         status: "review",
         createdAt,
       };
@@ -559,7 +583,7 @@ export function commitDatasetImport(
     });
     return { alreadyCommitted: false, recordIds, recordCount: records.length };
   });
-  return tx();
+  return tx.immediate();
 }
 
 export interface UpdateResult {
@@ -567,6 +591,12 @@ export interface UpdateResult {
   error?: string;
   status?: number;
 }
+
+const QUICK_EDIT_FIELDS: Record<Domain, ReadonlySet<string>> = {
+  tribology: new Set(["cation", "anion", "substrate", "temperature", "load", "velocity", "potential", "cof"]),
+  conductivity: new Set(["cation", "anion", "surface", "temperature", "method", "conductivity", "capacitance", "electricField", "viscosity", "electrochemicalWindow", "chargeTransferResistance", "electrodePotential", "pressure", "potentialReference", "cellConfiguration", "workingElectrode", "counterElectrode", "referenceElectrode", "positiveElectrode", "negativeElectrode"]),
+  diffusion: new Set(["cation", "anion", "species", "systemName", "poreSize", "temperature", "method", "diffusion"]),
+};
 
 /**
  * Update a record. `fields` re-ingests the content (re-standardizing units via
@@ -580,6 +610,7 @@ export function updateRecord(
     fields?: any;
     status?: RecordStatus;
     setProvenance?: { field: string; prov: FieldProvenancePatch };
+    setField?: { field: string; value: string };
   }
 ): UpdateResult {
   const db = getDb(domain);
@@ -599,6 +630,33 @@ export function updateRecord(
       extraction: current.extraction, // preserve extractor provenance across curator edits
     };
   }
+  if (patch.setField) {
+    const { field, value } = patch.setField;
+    if (!QUICK_EDIT_FIELDS[domain].has(field)) {
+      return { error: `Field ${field} is not available for quick editing.`, status: 400 };
+    }
+    const fields = mod.toFields(next) as Record<string, unknown>;
+    if (field === "cof") {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric) || numeric < 0) {
+        return { error: "COF must be a non-negative number.", status: 422 };
+      }
+      fields.cof = numeric;
+    } else {
+      fields[field] = value;
+    }
+    if (field === "cation") delete fields.cationSmiles;
+    if (field === "anion") delete fields.anionSmiles;
+    const draft = mod.ingest(fields as any);
+    next = {
+      ...draft,
+      id: current.id,
+      status: current.status,
+      createdAt: current.createdAt,
+      sourceId: current.sourceId,
+      extraction: current.extraction,
+    };
+  }
   if (patch.setProvenance) {
     const { field, prov } = patch.setProvenance;
     const { figureBox, ...rest } = prov;
@@ -606,6 +664,13 @@ export function updateRecord(
     if (figureBox === null) delete nextFieldProvenance.figureBox;
     else if (figureBox !== undefined) nextFieldProvenance.figureBox = figureBox;
     next = { ...next, provenance: { ...next.provenance, [field]: nextFieldProvenance } };
+  }
+  if (mod.acceptDraft && !mod.acceptDraft(next)) {
+    const missing = mod.coreCompleteness(next).missing;
+    return {
+      error: `Cannot save record${missing.length ? ` — missing required value: ${missing.join(", ")}` : ""}.`,
+      status: 422,
+    };
   }
   if (patch.status && patch.status !== next.status) {
     if (patch.status === "official") {
@@ -638,11 +703,10 @@ export function deleteRecords(domain: Domain, ids: string[]): number {
   return tx(ids);
 }
 
-/** Test/seed helper — wipe one domain's records and reset its id counter. */
+/** Test/seed helper — wipe one domain's records and import receipts. */
 export function resetAll(domain: Domain): void {
   const db = getDb(domain);
   db.exec("DELETE FROM records; DELETE FROM dataset_imports;");
-  _counters.delete(domain);
 }
 
 /** Create a consistent SQLite snapshot before an intentional destructive reset. */
@@ -783,7 +847,24 @@ export function listJobs(domain: Domain): BatchJob[] {
   const rows = db
     .prepare("SELECT payload FROM jobs ORDER BY created_at DESC, id DESC")
     .all() as { payload: string }[];
-  return rows.map((r) => JSON.parse(r.payload) as BatchJob);
+  const jobs = rows.map((r) => JSON.parse(r.payload) as BatchJob);
+  if (!jobs.some((job) => job.status === "committed")) return jobs;
+  const records = db.prepare("SELECT id, status, json_extract(payload, '$.sourceId') AS sourceId FROM records")
+    .all() as { id: string; status: RecordStatus; sourceId: string | null }[];
+  const byId = new Map(records.map((record) => [record.id, record.status]));
+  const bySource = new Map<string, RecordStatus[]>();
+  for (const record of records) {
+    if (!record.sourceId) continue;
+    const statuses = bySource.get(record.sourceId) ?? [];
+    statuses.push(record.status);
+    bySource.set(record.sourceId, statuses);
+  }
+  return jobs.map((job) => {
+    const statuses = job.sourceId
+      ? bySource.get(job.sourceId) ?? []
+      : (job.recordIds ?? []).flatMap((id) => byId.has(id) ? [byId.get(id)!] : []);
+    return { ...job, checked: job.status === "committed" && statuses.length > 0 && statuses.every((status) => status === "official") };
+  });
 }
 
 export function getJob(domain: Domain, id: string): BatchJob | null {
@@ -903,20 +984,23 @@ export function commitJob(
   id: string,
   indices?: number[]
 ): { created: number; job: BatchJob } | { error: string } {
-  const job = getJob(domain, id);
-  if (!job) return { error: "Job not found" };
-  if (job.status !== "done") return { error: `Job is "${job.status}", not ready to commit` };
-  const selected =
-    indices && indices.length ? job.candidates.filter((_, i) => indices.includes(i)) : job.candidates;
-  const extraction = job.source
-    ? { source: job.source, ...(job.model ? { model: job.model } : {}) }
-    : undefined;
-  const chosen = extraction
-    ? selected.map((candidate) => ({ ...candidate, extraction }))
-    : selected;
-  const created = createRecords(domain, chosen, "review");
-  const updated = updateJob(domain, id, { status: "committed", recordCount: created.length })!;
-  return { created: created.length, job: updated };
+  return getDb(domain).transaction((): { created: number; job: BatchJob } | { error: string } => {
+    const job = getJob(domain, id);
+    if (!job) return { error: "Job not found" };
+    if (job.status === "committed") return { created: 0, job };
+    if (job.status !== "done") return { error: `Job is "${job.status}", not ready to commit` };
+    const selected =
+      indices && indices.length ? job.candidates.filter((_, i) => indices.includes(i)) : job.candidates;
+    const extraction = job.source
+      ? { source: job.source, ...(job.model ? { model: job.model } : {}) }
+      : undefined;
+    const chosen = extraction
+      ? selected.map((candidate) => ({ ...candidate, extraction }))
+      : selected;
+    const created = createRecords(domain, chosen, "review");
+    const updated = updateJob(domain, id, { status: "committed", recordCount: created.length, recordIds: created.map((record) => record.id), error: null })!;
+    return { created: created.length, job: updated };
+  }).immediate();
 }
 
 /* ------------------------------------------------------------------ */

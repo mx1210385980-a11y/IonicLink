@@ -1,5 +1,5 @@
 import type { Domain } from "./domain";
-import { claimNextJob, countQueuedJobs, updateJob } from "./db";
+import { claimNextJob, commitJob, countQueuedJobs, getJob, listJobs, updateJob } from "./db";
 import { extractRecords } from "./extract";
 
 /**
@@ -8,7 +8,7 @@ import { extractRecords } from "./extract";
  * Uploads land as `queued` job rows (with their extracted text) in the domain's
  * database. Up to EXTRACT_CONCURRENCY worker loops run in parallel PER DOMAIN,
  * each atomically claiming the next queued job (queued → extracting →
- * done/error) from that domain and extracting it with that domain's extractor.
+ * done → committed/error) with that domain's extractor and review queue.
  * Because `claimNextJob` is a synchronous SQLite transaction, concurrent workers
  * never grab the same job. The client polls job status.
  *
@@ -50,6 +50,26 @@ export function isDraining(domain: Domain): boolean {
   return (activeWorkers.get(domain) ?? 0) > 0;
 }
 
+/** Send persisted candidates without re-running extraction. Failed sends remain retryable. */
+export function sendJobToReview(domain: Domain, id: string, indices?: number[]) {
+  try {
+    const result = commitJob(domain, id, indices);
+    if ("error" in result) throw new Error(result.error);
+    return result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not send results to review";
+    if (getJob(domain, id)?.status === "done") updateJob(domain, id, { error: message });
+    return { error: message };
+  }
+}
+
+/** Resume successful extractions left between extraction and review, including legacy jobs. */
+export function sendCompletedJobsToReview(domain: Domain): void {
+  for (const job of listJobs(domain)) {
+    if (job.status === "done" && !job.error) sendJobToReview(domain, job.id);
+  }
+}
+
 async function worker(domain: Domain): Promise<void> {
   for (;;) {
     const claimed = claimNextJob(domain);
@@ -57,6 +77,11 @@ async function worker(domain: Domain): Promise<void> {
     const { job, text } = claimed;
     try {
       const result = await extractRecords(domain, text, job.sourceId);
+      if (domain === "conductivity" && job.sourceId) {
+        const { enrichConductivityDraftsWithFigureAnalysis } = await import("./conductivity/figureVision.server");
+        const enhanced = await enrichConductivityDraftsWithFigureAnalysis(result.records, job.sourceId);
+        result.records = enhanced.records;
+      }
       updateJob(domain, job.id, {
         status: "done",
         candidates: result.records,
@@ -65,6 +90,7 @@ async function worker(domain: Domain): Promise<void> {
         model: result.model,
         error: null,
       });
+      sendJobToReview(domain, job.id);
     } catch (err) {
       updateJob(domain, job.id, {
         status: "error",

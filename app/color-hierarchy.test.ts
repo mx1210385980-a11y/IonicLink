@@ -4,7 +4,6 @@ import * as React from "react";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { HomePageContent } from "../components/HomePageContent";
-import DomainHome from "./[domain]/page";
 
 (globalThis as typeof globalThis & { React: typeof React }).React = React;
 
@@ -16,28 +15,15 @@ assert.match(globals, /\.status-mini-muted[\s\S]*text-ink-500/, "muted status la
 assert.match(globals, /\.btn[\s\S]*text-ink-800/, "secondary buttons should be readable before hover");
 
 const homeSource = file("components/HomePageContent.tsx");
-assert.match(homeSource, /leading-8 text-ink-700/, "global landing supporting copy should be stronger than gray");
-assert.match(homeSource, /text-sm font-semibold text-ink-700/, "workspace secondary links should be readable before hover");
-assert.match(homeSource, /label="Review" tone="amber"/, "landing review metric should be amber");
-assert.match(homeSource, /label="Checked" tone="brand"/, "landing checked metric should use the established metric tone");
-assert.match(homeSource, /tone\?: "brand" \| "amber" \| "ink"/, "landing metrics should expose semantic tones");
-assert.match(homeSource, /tone === "amber" \? "text-amber-700"/, "landing review count should use amber");
-assert.match(homeSource, /Review queue[\s\S]*hover:text-amber-700|hover:text-amber-700[\s\S]*Review queue/, "review links should keep amber semantics");
-
-const domainSource = file("app/[domain]/page.tsx");
-assert.match(domainSource, /text-\[#536786\]/, "domain home supporting copy should remain readable");
-assert.match(domainSource, /text-\[#2456d6\]/, "domain home extraction actions should use the established blue accent");
-assert.match(domainSource, /text-violet-700/, "domain home should retain violet semantics for the model preview");
+assert.match(homeSource, /leading-5 text-ink-700/, "overview supporting copy stays readable");
+assert.match(homeSource, /text-\[#00888a\]/, "database actions use the reference teal accent");
+assert.match(homeSource, /tone=\{counts.review > 0 \? "amber" : "ink"\}/, "non-empty review queues receive amber emphasis");
+assert.match(homeSource, /tone === "amber" \? "text-\[#d98700\]"/, "review numbers retain semantic amber");
+assert.match(homeSource, /focus-visible:ring-2/, "overview links have visible keyboard focus");
 
 const navSource = file("components/TopNav.tsx");
 assert.doesNotMatch(navSource, /text-ink-500 hover:bg-ink-50 hover:text-ink-900/, "domain nav inactive text should no longer be washed out");
 assert.doesNotMatch(navSource, /text-ink-500 hover:bg-white\/80 hover:text-ink-900/, "section nav inactive text should no longer be washed out");
-
-const designSource = file("components/design/DesignStudio.tsx") + file("components/design/PredictBench.tsx");
-assert.match(designSource, /text-ink-700/, "Design Studio should promote important explanatory copy");
-assert.match(designSource, /text-violet-700/, "Design Studio should retain model/result semantic violet");
-assert.match(designSource, /text-brand-700/, "Design Studio should retain measured/official semantic teal");
-assert.match(designSource, /Friction depends on the full operating point[\s\S]*text-ink-700|text-ink-700[\s\S]*Friction depends on the full operating point/, "Design operating-condition note should be readable");
 
 const dbSource = file("components/DatabaseView.tsx");
 assert.match(dbSource, /text-ink-700/, "Database decision copy should include stronger ink");
@@ -47,7 +33,7 @@ assert.match(dbSource, /function Empty[\s\S]*text-ink-700/, "Database actionable
 const extractorSource = file("components/Extractor.tsx");
 assert.match(extractorSource, /text-ink-700/, "Extractor instructions and queue context should be readable");
 assert.match(extractorSource, /text-amber-700/, "Extractor active/warning states should keep amber semantics");
-assert.match(extractorSource, /queued: "border-amber-200 bg-amber-50 text-amber-700"/, "Extractor queued status should use amber semantics");
+assert.match(extractorSource, /extracting: "text-amber-700"/, "active extraction retains amber semantics");
 assert.match(extractorSource, /— \{s\.reason\}<\/span>[\s\S]*text-ink-700|text-ink-700[\s\S]*— \{s\.reason\}<\/span>/, "Extractor skip reasons should stay readable");
 
 const librarySource = file("app/[domain]/library/page.tsx");
@@ -57,9 +43,6 @@ assert.match(librarySource, /grid min-w-0 gap-3/, "Unlinked literature groups sh
 assert.match(librarySource, /panel flex w-full min-w-0 flex-wrap/, "Unlinked literature rows should not expand beyond the mobile viewport");
 
 const homeHtml = renderToStaticMarkup(createElement(HomePageContent));
-const domainHtml = renderToStaticMarkup(createElement(DomainHome, { params: { domain: "tribology" } }));
-assert.match(homeHtml, /Add papers\. Get data\./);
-assert.match(domainHtml, /IonicLink · Extraction Tool/);
-assert.match(domainHtml, /Model Training Preview/);
+assert.match(homeHtml, /Data overview/);
 
 console.log("Global color hierarchy tests passed");

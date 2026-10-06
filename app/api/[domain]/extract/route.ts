@@ -1,11 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAppApiSession } from "@/lib/auth.server";
-import { extractRecords, isLiveExtractionEnabled } from "@/lib/extract";
+import {
+  extractRecords,
+  isLiveExtractionEnabled,
+  LIVE_EXTRACTION_REQUIRED_MESSAGE,
+} from "@/lib/extract";
 import { isDomain } from "@/lib/domain";
 import { createSourceFromPdf } from "@/lib/sources";
+import { enrichConductivityDraftsWithFigureAnalysis } from "@/lib/conductivity/figureVision.server";
+import type { ConductivityDraft } from "@/lib/conductivity/schema";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 /**
  * Accepts either a PDF upload (multipart, field "file") or raw text
@@ -15,6 +21,9 @@ export async function POST(req: NextRequest, { params }: { params: { domain: str
   const access = await requireAppApiSession(req);
   if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
+  if (!isLiveExtractionEnabled()) {
+    return NextResponse.json({ error: LIVE_EXTRACTION_REQUIRED_MESSAGE }, { status: 503 });
+  }
   const domain = params.domain;
   try {
     const contentType = req.headers.get("content-type") || "";
@@ -46,8 +55,13 @@ export async function POST(req: NextRequest, { params }: { params: { domain: str
     }
 
     const result = await extractRecords(domain, text, sourceId);
+    const figureAnalysis = domain === "conductivity" && sourceId
+      ? await enrichConductivityDraftsWithFigureAnalysis(result.records as ConductivityDraft[], sourceId)
+      : null;
+    if (figureAnalysis) result.records = figureAnalysis.records;
     return NextResponse.json({
       ...result,
+      ...(figureAnalysis ? { figureAnalysis: figureAnalysis.summary } : {}),
       sourceName,
       live: isLiveExtractionEnabled(),
       chars: text.length,

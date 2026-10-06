@@ -15,17 +15,14 @@
     "seed:diffusion": "tsx scripts/seed.diffusion.ts",
     "migrate": "tsx scripts/migrate-domains.ts",
     "migrate:structures": "tsx scripts/backfill-structure-keys.ts",
+    "audit:conductivity-electrodes": "tsx scripts/backfill-conductivity-electrodes.ts",
+    "audit:conductivity-performance-figures": "tsx scripts/backfill-conductivity-performance-figures.ts",
+    "audit:conductivity-performance-metadata": "tsx scripts/enrich-conductivity-performance-metadata.ts",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/run-tests.mjs",
     "test:file": "node scripts/run-tests.mjs",
     "check:fast": "npm run lint && npm run typecheck",
-    "check": "npm run check:fast && npm test && npm run build",
-    "test:wff-repro": "python3 scripts/wff_paper_reproduction_test.py",
-    "wff:reproduce": "python3 scripts/wff_paper_reproduction.py",
-    "wff:hybrid-search": "python3 scripts/wff_paper_reproduction.py --mode hybrid-search --search-preset meta-targeted",
-    "wff:prewarm": "tsx scripts/prewarm-wff-strategy-cache.ts",
-    "wff:prewarm:student-grid": "tsx scripts/prewarm-wff-strategy-cache.ts --student-grid",
-    "wff:prewarm:server": "node scripts/prewarm-wff-strategy-cache.mjs --student-grid --server-url=http://127.0.0.1:3000"
+    "check": "npm run check:fast && npm test && npm run build"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",

@@ -21,6 +21,7 @@ import {
   TeacherParticipantDetail,
   teachingDialogTabTarget,
 } from "./TeacherDashboard";
+import { TeachingAdminConsole } from "./TeachingAdminConsole";
 
 (globalThis as typeof globalThis & { React: typeof React }).React = React;
 
@@ -179,7 +180,7 @@ const papers = [
 const dashboard: TeachingExperimentDashboard = {
   experiment: {
     id: "teaching-v1",
-    name: "人工提取与 AI 辅助提取对比实验",
+    name: "Manual extraction与 AI assisted提取对比实验",
     version: "2026.1",
     scoringVersion: "score-v1",
     papers,
@@ -218,59 +219,59 @@ const excludedParticipant: TeachingDashboardParticipant = {
 const html = renderToStaticMarkup(createElement(TeacherDashboard, { initial: dashboard }));
 assert.match(html, /^<section\b/);
 assert.doesNotMatch(html, /<main\b/);
-assert.match(html, /人工提取与 AI 辅助提取对比实验/);
-assert.match(html, /2026\.1/);
-assert.match(html, /自动刷新|实时/);
-assert.match(html, /上次更新/);
+assert.match(html, /Manual extraction与 AI assisted提取对比实验/);
+assert.match(html, /Auto-refresh|实时/);
+assert.match(html, /Last updated/);
 assert.match(html, /href="\/api\/teaching\/admin\/export"/);
 assert.match(html, /href="\/api\/teaching\/admin\/export\?anonymize=1"/);
-assert.match(html, />退出</);
-assert.doesNotMatch(html, /新建项目|配置文献|邀请码|保存审核/);
+assert.doesNotMatch(html, />Sign out</);
+assert.doesNotMatch(html, /新建项目|配置Paper|邀请码|保存审核/);
+assert.match(html, /Student progress/);
+assert.match(html, /More filters/);
+assert.match(html, /Advanced statistical analysis/);
 
 assert.match(html, /30[\s\S]*30/);
-assert.match(html, /配对样本|主分析/);
+assert.match(html, /Primary analysis pairs|Primary analysis/);
 assert.match(html, /n=30|n = 30/);
 assert.match(html, /4\/6/);
 assert.match(html, /5\/6/);
 assert.match(html, /50\.0%/);
-assert.match(html, /证据准确率|证据覆盖率/);
-assert.match(html, /更快且更准确/);
-assert.match(html, /30 \/ 30[\s\S]*100\.0%/);
+assert.match(html, /Evidence accuracy|Evidence coverage/);
 
 assert.match(html, /role="img"/);
-assert.match(html, /aria-label="[^"]*AI[^"]*有效时间[^"]*准确率[^"]*"/);
-assert.match(html, /有效时间（秒）/);
-assert.match(html, /值准确率/);
-assert.match(html, /人工模式/);
-assert.match(html, /AI 辅助/);
+assert.match(html, /aria-label="[^"]*AI[^"]*active time[^"]*accuracy[^"]*"/);
+assert.match(html, /Active time \(seconds\)/);
+assert.match(html, /Value accuracy/);
+assert.match(html, /Manual mode/);
+assert.match(html, /AI assisted/);
 assert.match(html, /95% CI/);
 assert.match(html, /Wilcoxon/);
-assert.match(html, /<caption[^>]*>模式对比精确数值/);
+assert.match(html, /<caption[^>]*>Mode comparison details/);
 
-for (const label of ["建议数", "采纳数", "修改数", "初始错误", "已纠正", "错误照抄"]) {
+for (const label of ["Suggestions", "Adopted", "Modified", "Initially incorrect", "Corrected", "Incorrectly adopted"]) {
   assert.match(html, new RegExp(label));
 }
-assert.match(html, /文献 A/);
-assert.match(html, /文献 B/);
-assert.match(html, /人工→AI/);
-assert.match(html, /AI→人工/);
-assert.match(html, /人工 \/ AI 准确率/);
-assert.match(html, /计时质量/);
+assert.match(html, /Paper A/);
+assert.match(html, /Paper B/);
+assert.match(html, /Manual→AI/);
+assert.match(html, /AI→Manual/);
+assert.match(html, /Manual \/ AI Accuracy/);
+assert.match(html, /Timing quality/);
 
-for (const label of ["学生搜索", "文献聚焦", "实验序列", "完成状态", "计时质量"]) {
+for (const label of ["Search students", "Paper and mode", "Experiment sequence", "Completion status", "Timing quality"]) {
   assert.match(html, new RegExp(`<label[^>]*>[\\s\\S]*?${label}|${label}`));
 }
-for (const option of ["A · 人工", "A · AI", "B · 人工", "B · AI"]) {
+for (const option of ["A · Manual", "A · AI", "B · Manual", "B · AI"]) {
   assert.match(html, new RegExp(option.replace("·", "[\\s·]*")));
 }
-assert.match(html, /<caption[^>]*>参与者结果/);
+assert.match(html, /<caption[^>]*>Participant results/);
 assert.match(html, /scope="col"/);
-assert.match(html, /aria-label="查看学生 S001 的结果"/);
-assert.match(html, /主分析状态/);
-assert.equal((html.match(/>AI 有效时间</g) ?? []).length, 1);
+assert.match(html, /aria-label="View student S001  results"/);
+assert.match(html, /Manual results/);
+assert.match(html, /AI Results/);
 assert.match(
   html,
-  /<th scope="row"[^>]*>有效<\/th><td[^>]*>30<\/td><\/tr>/,
+  /<th scope="row"[^>]*>Valid<\/th><td[^>]*>30<\/td><\/tr>/,
   "timing quality rows must contain one label cell and one count cell"
 );
 
@@ -290,22 +291,22 @@ for (const field of TEACHING_FIELDS) {
   assert.match(detailHtml, new RegExp(`${field.label} 证据摘录`));
   assert.match(detailHtml, new RegExp(`${field.label} AI 初始建议`));
 }
-assert.match(detailHtml, /页码/);
-assert.match(detailHtml, /值判定/);
-assert.match(detailHtml, /证据判定/);
+assert.match(detailHtml, /Page/);
+assert.match(detailHtml, /Value assessment/);
+assert.match(detailHtml, /Evidence assessment/);
 assert.match(detailHtml, /alias_match/);
 assert.match(detailHtml, /page_mismatch/);
-assert.match(detailHtml, /历史教师判定/);
-assert.match(detailHtml, /最终值 正确/);
-assert.match(detailHtml, /AI 初始值 不正确/);
+assert.match(detailHtml, /Previous instructor review/);
+assert.match(detailHtml, /final value Correct/);
+assert.match(detailHtml, /AI Initial value Incorrect/);
 assert.match(detailHtml, /08\/10/);
-assert.match(detailHtml, /完成状态[\s\S]*已完成/);
-assert.match(detailHtml, /计时质量[\s\S]*空闲过多/);
-assert.match(detailHtml, /排除状态[\s\S]*已排除/);
-assert.match(detailHtml, /主分析配对[\s\S]*未纳入/);
+assert.match(detailHtml, /Completion status[\s\S]*Completed/);
+assert.match(detailHtml, /Timing quality[\s\S]*Excessive idle time/);
+assert.match(detailHtml, /Exclusion status[\s\S]*Excluded/);
+assert.match(detailHtml, /Primary analysis pairing[\s\S]*Not included/);
 assert.match(detailHtml, /教师排除备注：重复提交 EXCLUSION_UI_SECRET/);
-assert.match(detailHtml, /有效时间[\s\S]*100 s/);
-assert.match(detailHtml, /墙钟时间[\s\S]*1,200 s/);
+assert.match(detailHtml, /Active time[\s\S]*100 s/);
+assert.match(detailHtml, /Elapsed time[\s\S]*1,200 s/);
 assert.doesNotMatch(detailHtml, /<input\b|<select\b|<textarea\b|保存审核|>保存</);
 
 const excludedDashboardHtml = renderToStaticMarkup(
@@ -313,7 +314,7 @@ const excludedDashboardHtml = renderToStaticMarkup(
     initial: { ...dashboard, participants: [excludedParticipant] },
   })
 );
-assert.match(excludedDashboardHtml, /S999[\s\S]*已排除/);
+assert.match(excludedDashboardHtml, /S999[\s\S]*Excluded/);
 
 const emptyDashboard: TeachingExperimentDashboard = {
   ...dashboard,
@@ -324,10 +325,9 @@ const emptyDashboard: TeachingExperimentDashboard = {
 const emptyHtml = renderToStaticMarkup(
   createElement(TeacherDashboard, { initial: emptyDashboard })
 );
-assert.match(emptyHtml, /样本不足/);
+assert.match(emptyHtml, /Insufficient data/);
 assert.match(emptyHtml, />—</);
 assert.doesNotMatch(emptyHtml, />0\.0%</);
-assert.match(emptyHtml, /更快且更准确[\s\S]*>—<[\s\S]*样本不足/);
 
 assert.equal(teachingDialogTabTarget(0, 2, true), 1);
 assert.equal(teachingDialogTabTarget(1, 2, false), 0);
@@ -359,11 +359,25 @@ assert.match(source, /removeAttribute\(["']inert["']\)/);
 assert.match(source, /overflow-x-auto/);
 assert.match(source, /min-h-(?:11|\[44px\])/);
 assert.doesNotMatch(source, /w-screen|min-w-screen/);
-assert.equal((source.match(/["']AI 有效时间["']/g) ?? []).length, 1);
-assert.match(source, /colSpan=\{14\}/);
+assert.match(source, /colSpan=\{7\}/);
 
 const pageSource = readFileSync("app/teaching/admin/page.tsx", "utf8");
-assert.match(pageSource, /getDefaultTeachingDashboard/);
+assert.match(pageSource, /getSimpleDashboard/);
+assert.match(pageSource, /SimpleTeacherDashboard/);
 assert.doesNotMatch(pageSource, /getTeachingAdminDashboard/);
+
+const consoleHtml = renderToStaticMarkup(
+  createElement(TeachingAdminConsole, { initial: dashboard })
+);
+assert.match(consoleHtml, /Teaching lab/);
+assert.match(consoleHtml, /Group experiment/);
+assert.match(consoleHtml, /Open experiment/);
+assert.match(consoleHtml, /Students join with a code/);
+assert.match(consoleHtml, /Students join with an alias/);
+assert.match(consoleHtml, /Create experiment → Import roster → Students join → View results/);
+assert.match(consoleHtml, /aria-pressed="true"/);
+assert.match(consoleHtml, />Sign out</);
+assert.doesNotMatch(consoleHtml, /默认实验/);
+assert.doesNotMatch(consoleHtml, /Manual extraction与 AI assisted提取对比实验/);
 
 console.log("Teaching zero-operation teacher dashboard component tests passed");

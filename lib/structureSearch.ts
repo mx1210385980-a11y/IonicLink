@@ -27,15 +27,15 @@ export interface StructureSearchInputIssue {
 /** Cheap client/server checks before the canonical graph parser runs. */
 export function structureSearchInputIssue(smiles: string): StructureSearchInputIssue | null {
   const source = smiles.trim();
-  if (!source) return { message: "请先绘制一个离子结构。", status: 400 };
+  if (!source) return { message: "Draw an ion structure first.", status: 400 };
   if (source.length > MAX_STRUCTURE_SMILES_LENGTH) {
-    return { message: "结构式过长，请缩小到一个完整离子。", status: 413 };
+    return { message: "The structure is too long. Limit it to one complete ion.", status: 413 };
   }
   if (source.includes(".") || source.includes(">")) {
-    return { message: "首版结构搜索一次只接受一个完整离子，不支持盐对或反应式。", status: 400 };
+    return { message: "Search one complete ion at a time. Salt pairs and reactions are not supported.", status: 400 };
   }
   if (/[~*?]/.test(source)) {
-    return { message: "精确结构搜索不支持通配原子或查询键。", status: 400 };
+    return { message: "Exact structure search does not support wildcard atoms or query bonds.", status: 400 };
   }
   return null;
 }
@@ -45,7 +45,7 @@ export function isStructureSearchTarget(value: unknown): value is StructureSearc
 }
 
 export function structureTargetLabel(target: StructureSearchTarget): string {
-  if (target === "cation") return "阳离子";
-  if (target === "anion") return "阴离子";
-  return "任意离子";
+  if (target === "cation") return "Cation";
+  if (target === "anion") return "Anion";
+  return "Any ion";
 }

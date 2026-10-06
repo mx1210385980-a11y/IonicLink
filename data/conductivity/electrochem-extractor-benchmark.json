@@ -1,0 +1,2339 @@
+{
+  "schemaVersion": 3,
+  "generatedAt": "2026-08-21T03:17:44.766Z",
+  "sourceCorpus": "上传文献中包含离子液体电化学参数的论文",
+  "mode": "imported",
+  "scope": "Compared deterministic Conductivity extraction against a manual paper audit. Figure-only values are excluded from text-extractor recall.",
+  "summary": {
+    "auditedPapers": 23,
+    "uniqueAvailablePapers": 22,
+    "auditedAvailablePapers": 22,
+    "unavailableAuditedPapers": 1,
+    "textValuePapers": 9,
+    "textValuePapersDetected": 9,
+    "textValuePapersMissed": 0,
+    "nonTextPapers": 13,
+    "nonTextPapersCorrectlyEmpty": 13,
+    "nonTextFalsePositive": 0,
+    "figureOnlyPapers": 4,
+    "extractedCandidates": 29,
+    "manuallyCuratedRecords": 29,
+    "expectedPropertyValues": 34,
+    "matchedPropertyValues": 34,
+    "missedPropertyValues": 0,
+    "extraExtractedValues": 0,
+    "propertyValueRecall": 1,
+    "propertyValuePrecision": 1,
+    "expectedReportedConditions": 176,
+    "matchedReportedConditions": 176,
+    "missedReportedConditions": 0,
+    "extraExtractedConditions": 0,
+    "reportedConditionRecall": 1,
+    "reportedConditionPrecision": 1,
+    "sourcesUploaded": 0,
+    "sourcesReused": 22,
+    "manualRecordsCreated": 0,
+    "manualRecordsUpdated": 29,
+    "inaccurateMockRecordsRemoved": 40,
+    "jobs": {
+      "committed": 22
+    }
+  },
+  "unavailable": [
+    "1-s2.0-S2405829722006572-main.pdf"
+  ],
+  "papers": [
+    {
+      "file": "1-s2.0-S001346862200295X-main.pdf",
+      "classification": "text-values",
+      "expectedManualRecords": 1,
+      "extractedCandidateCount": 1,
+      "extractedProperties": [
+        "electrochemicalWindow"
+      ],
+      "valueComparison": {
+        "expected": [
+          {
+            "field": "electrochemicalWindow",
+            "raw": ">4.2 V",
+            "std": 4.2,
+            "stdUnit": "V"
+          }
+        ],
+        "matched": [
+          {
+            "field": "electrochemicalWindow",
+            "raw": ">4.2 V",
+            "std": 4.2,
+            "stdUnit": "V"
+          }
+        ],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [
+          {
+            "field": "cation",
+            "value": "[Pyr13]"
+          },
+          {
+            "field": "anion",
+            "value": "[TFSI]"
+          },
+          {
+            "field": "surface",
+            "value": "carbon-coated aluminum"
+          },
+          {
+            "field": "potentialReference",
+            "value": "Na+/Na"
+          },
+          {
+            "field": "waterContent",
+            "value": "<5 ppm"
+          },
+          {
+            "field": "concentration",
+            "value": "Na002, Na005 and Na01"
+          },
+          {
+            "field": "method",
+            "value": "CV"
+          },
+          {
+            "field": "flexible:Scan rate",
+            "value": "1 mV/s"
+          },
+          {
+            "field": "flexible:CV test range",
+            "value": "0.1–5.0 V"
+          },
+          {
+            "field": "flexible:Cell setup",
+            "value": "three-electrode Swagelok cell; Na counter/reference"
+          }
+        ],
+        "matched": [
+          {
+            "field": "cation",
+            "value": "[Pyr13]"
+          },
+          {
+            "field": "anion",
+            "value": "[TFSI]"
+          },
+          {
+            "field": "surface",
+            "value": "carbon-coated aluminum"
+          },
+          {
+            "field": "potentialReference",
+            "value": "Na+/Na"
+          },
+          {
+            "field": "waterContent",
+            "value": "<5 ppm"
+          },
+          {
+            "field": "concentration",
+            "value": "Na002, Na005 and Na01"
+          },
+          {
+            "field": "method",
+            "value": "CV"
+          },
+          {
+            "field": "flexible:Scan rate",
+            "value": "1 mV/s"
+          },
+          {
+            "field": "flexible:CV test range",
+            "value": "0.1–5.0 V"
+          },
+          {
+            "field": "flexible:Cell setup",
+            "value": "three-electrode Swagelok cell; Na counter/reference"
+          }
+        ],
+        "missing": [],
+        "extra": []
+      }
+    },
+    {
+      "file": "1-s2.0-S0039914024010671-main.pdf",
+      "classification": "no-in-scope-value",
+      "expectedManualRecords": 0,
+      "extractedCandidateCount": 0,
+      "extractedProperties": [],
+      "valueComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      }
+    },
+    {
+      "file": "1-s2.0-S0167732222006134-main.pdf",
+      "classification": "no-in-scope-value",
+      "expectedManualRecords": 0,
+      "extractedCandidateCount": 0,
+      "extractedProperties": [],
+      "valueComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      }
+    },
+    {
+      "file": "1-s2.0-S0925400522012357-main.pdf",
+      "classification": "text-values",
+      "expectedManualRecords": 2,
+      "extractedCandidateCount": 2,
+      "extractedProperties": [
+        "chargeTransferResistance"
+      ],
+      "valueComparison": {
+        "expected": [
+          {
+            "field": "chargeTransferResistance",
+            "raw": "370.5 Ω",
+            "std": 370.5,
+            "stdUnit": "Ω"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "260.8 Ω",
+            "std": 260.8,
+            "stdUnit": "Ω"
+          }
+        ],
+        "matched": [
+          {
+            "field": "chargeTransferResistance",
+            "raw": "370.5 Ω",
+            "std": 370.5,
+            "stdUnit": "Ω"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "260.8 Ω",
+            "std": 260.8,
+            "stdUnit": "Ω"
+          }
+        ],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [
+          {
+            "field": "cation",
+            "value": "[BMIM]"
+          },
+          {
+            "field": "anion",
+            "value": "[Br]"
+          },
+          {
+            "field": "surface",
+            "value": "CPO-ILBMB/rGO/GCE"
+          },
+          {
+            "field": "potentialReference",
+            "value": "SCE"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "flexible:Cell setup",
+            "value": "three-electrode system"
+          },
+          {
+            "field": "flexible:Counter electrode",
+            "value": "carbon rod"
+          },
+          {
+            "field": "cation",
+            "value": "[BMIM]"
+          },
+          {
+            "field": "anion",
+            "value": "[Br]"
+          },
+          {
+            "field": "surface",
+            "value": "CPO-ILBMB/rGO-Au NPs/GCE"
+          },
+          {
+            "field": "potentialReference",
+            "value": "SCE"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "flexible:Cell setup",
+            "value": "three-electrode system"
+          },
+          {
+            "field": "flexible:Counter electrode",
+            "value": "carbon rod"
+          }
+        ],
+        "matched": [
+          {
+            "field": "cation",
+            "value": "[BMIM]"
+          },
+          {
+            "field": "anion",
+            "value": "[Br]"
+          },
+          {
+            "field": "surface",
+            "value": "CPO-ILBMB/rGO/GCE"
+          },
+          {
+            "field": "potentialReference",
+            "value": "SCE"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "flexible:Cell setup",
+            "value": "three-electrode system"
+          },
+          {
+            "field": "flexible:Counter electrode",
+            "value": "carbon rod"
+          },
+          {
+            "field": "cation",
+            "value": "[BMIM]"
+          },
+          {
+            "field": "anion",
+            "value": "[Br]"
+          },
+          {
+            "field": "surface",
+            "value": "CPO-ILBMB/rGO-Au NPs/GCE"
+          },
+          {
+            "field": "potentialReference",
+            "value": "SCE"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "flexible:Cell setup",
+            "value": "three-electrode system"
+          },
+          {
+            "field": "flexible:Counter electrode",
+            "value": "carbon rod"
+          }
+        ],
+        "missing": [],
+        "extra": []
+      }
+    },
+    {
+      "file": "1-s2.0-S0927775723019593-main.pdf",
+      "classification": "figure-only",
+      "expectedManualRecords": 0,
+      "extractedCandidateCount": 0,
+      "extractedProperties": [],
+      "valueComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      }
+    },
+    {
+      "file": "1-s2.0-S0927775725019363-main.pdf",
+      "classification": "no-in-scope-value",
+      "expectedManualRecords": 0,
+      "extractedCandidateCount": 0,
+      "extractedProperties": [],
+      "valueComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      }
+    },
+    {
+      "file": "1-s2.0-S0927776520308973-main.pdf",
+      "classification": "text-values",
+      "expectedManualRecords": 3,
+      "extractedCandidateCount": 3,
+      "extractedProperties": [
+        "chargeTransferResistance"
+      ],
+      "valueComparison": {
+        "expected": [
+          {
+            "field": "chargeTransferResistance",
+            "raw": "144 Ω",
+            "std": 144,
+            "stdUnit": "Ω"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "733 Ω",
+            "std": 733,
+            "stdUnit": "Ω"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "603 Ω",
+            "std": 603,
+            "stdUnit": "Ω"
+          }
+        ],
+        "matched": [
+          {
+            "field": "chargeTransferResistance",
+            "raw": "144 Ω",
+            "std": 144,
+            "stdUnit": "Ω"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "733 Ω",
+            "std": 733,
+            "stdUnit": "Ω"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "603 Ω",
+            "std": 603,
+            "stdUnit": "Ω"
+          }
+        ],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [
+          {
+            "field": "cation",
+            "value": "[NIBA]"
+          },
+          {
+            "field": "anion",
+            "value": "[TFSI]"
+          },
+          {
+            "field": "surface",
+            "value": "NIBA-IL/MWCNT/GCE"
+          },
+          {
+            "field": "electrodePotential",
+            "value": "0.21 V"
+          },
+          {
+            "field": "concentration",
+            "value": "0.1 M KCl + 5 mM Fe(CN)6^3−/4−"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "flexible:Frequency range",
+            "value": "1×10^6–0.1 Hz"
+          },
+          {
+            "field": "flexible:AC amplitude",
+            "value": "0.01 V"
+          },
+          {
+            "field": "cation",
+            "value": "[NIBA]"
+          },
+          {
+            "field": "anion",
+            "value": "[TFSI]"
+          },
+          {
+            "field": "surface",
+            "value": "Hb/NIBA-IL/GCE"
+          },
+          {
+            "field": "electrodePotential",
+            "value": "0.21 V"
+          },
+          {
+            "field": "concentration",
+            "value": "0.1 M KCl + 5 mM Fe(CN)6^3−/4−"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "flexible:Frequency range",
+            "value": "1×10^6–0.1 Hz"
+          },
+          {
+            "field": "flexible:AC amplitude",
+            "value": "0.01 V"
+          },
+          {
+            "field": "cation",
+            "value": "[NIBA]"
+          },
+          {
+            "field": "anion",
+            "value": "[TFSI]"
+          },
+          {
+            "field": "surface",
+            "value": "Hb/NIBA-IL/MWCNT/GCE"
+          },
+          {
+            "field": "electrodePotential",
+            "value": "0.21 V"
+          },
+          {
+            "field": "concentration",
+            "value": "0.1 M KCl + 5 mM Fe(CN)6^3−/4−"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "flexible:Frequency range",
+            "value": "1×10^6–0.1 Hz"
+          },
+          {
+            "field": "flexible:AC amplitude",
+            "value": "0.01 V"
+          }
+        ],
+        "matched": [
+          {
+            "field": "cation",
+            "value": "[NIBA]"
+          },
+          {
+            "field": "anion",
+            "value": "[TFSI]"
+          },
+          {
+            "field": "surface",
+            "value": "NIBA-IL/MWCNT/GCE"
+          },
+          {
+            "field": "electrodePotential",
+            "value": "0.21 V"
+          },
+          {
+            "field": "concentration",
+            "value": "0.1 M KCl + 5 mM Fe(CN)6^3−/4−"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "flexible:Frequency range",
+            "value": "1×10^6–0.1 Hz"
+          },
+          {
+            "field": "flexible:AC amplitude",
+            "value": "0.01 V"
+          },
+          {
+            "field": "cation",
+            "value": "[NIBA]"
+          },
+          {
+            "field": "anion",
+            "value": "[TFSI]"
+          },
+          {
+            "field": "surface",
+            "value": "Hb/NIBA-IL/GCE"
+          },
+          {
+            "field": "electrodePotential",
+            "value": "0.21 V"
+          },
+          {
+            "field": "concentration",
+            "value": "0.1 M KCl + 5 mM Fe(CN)6^3−/4−"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "flexible:Frequency range",
+            "value": "1×10^6–0.1 Hz"
+          },
+          {
+            "field": "flexible:AC amplitude",
+            "value": "0.01 V"
+          },
+          {
+            "field": "cation",
+            "value": "[NIBA]"
+          },
+          {
+            "field": "anion",
+            "value": "[TFSI]"
+          },
+          {
+            "field": "surface",
+            "value": "Hb/NIBA-IL/MWCNT/GCE"
+          },
+          {
+            "field": "electrodePotential",
+            "value": "0.21 V"
+          },
+          {
+            "field": "concentration",
+            "value": "0.1 M KCl + 5 mM Fe(CN)6^3−/4−"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "flexible:Frequency range",
+            "value": "1×10^6–0.1 Hz"
+          },
+          {
+            "field": "flexible:AC amplitude",
+            "value": "0.01 V"
+          }
+        ],
+        "missing": [],
+        "extra": []
+      }
+    },
+    {
+      "file": "1-s2.0-S1572665722007603-main.pdf",
+      "classification": "text-values",
+      "expectedManualRecords": 1,
+      "extractedCandidateCount": 1,
+      "extractedProperties": [
+        "electrochemicalWindow"
+      ],
+      "valueComparison": {
+        "expected": [
+          {
+            "field": "electrochemicalWindow",
+            "raw": "approximately 3.4 V",
+            "std": 3.4,
+            "stdUnit": "V"
+          }
+        ],
+        "matched": [
+          {
+            "field": "electrochemicalWindow",
+            "raw": "approximately 3.4 V",
+            "std": 3.4,
+            "stdUnit": "V"
+          }
+        ],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [
+          {
+            "field": "cation",
+            "value": "[BMP]"
+          },
+          {
+            "field": "anion",
+            "value": "[DCA]"
+          },
+          {
+            "field": "surface",
+            "value": "Pt(111)"
+          },
+          {
+            "field": "temperature",
+            "value": "296.15 K"
+          },
+          {
+            "field": "waterContent",
+            "value": "0.012 M residual water"
+          },
+          {
+            "field": "method",
+            "value": "CV"
+          }
+        ],
+        "matched": [
+          {
+            "field": "cation",
+            "value": "[BMP]"
+          },
+          {
+            "field": "anion",
+            "value": "[DCA]"
+          },
+          {
+            "field": "surface",
+            "value": "Pt(111)"
+          },
+          {
+            "field": "temperature",
+            "value": "296.15 K"
+          },
+          {
+            "field": "waterContent",
+            "value": "0.012 M residual water"
+          },
+          {
+            "field": "method",
+            "value": "CV"
+          }
+        ],
+        "missing": [],
+        "extra": []
+      }
+    },
+    {
+      "file": "1-s2.0-S1876107015000607-main.pdf",
+      "classification": "figure-only",
+      "expectedManualRecords": 0,
+      "extractedCandidateCount": 0,
+      "extractedProperties": [],
+      "valueComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      }
+    },
+    {
+      "file": "Angew Chem Int Ed - 2022 - Yang - Modifying the Electrocatalytic Selectivity of Oxidation Reactions with Ionic Liquids.pdf",
+      "classification": "no-in-scope-value",
+      "expectedManualRecords": 0,
+      "extractedCandidateCount": 0,
+      "extractedProperties": [],
+      "valueComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      }
+    },
+    {
+      "file": "Batteries   Supercaps - 2023 - Valurouthu - Ambipolar Electrochemistry of Pre‐Intercalated Ti3C2Tx MXene in Ionic Liquid.pdf",
+      "classification": "text-values",
+      "expectedManualRecords": 5,
+      "extractedCandidateCount": 5,
+      "extractedProperties": [
+        "capacitance",
+        "chargeTransferResistance",
+        "electrochemicalWindow"
+      ],
+      "valueComparison": {
+        "expected": [
+          {
+            "field": "capacitance",
+            "raw": "140 F/cm3",
+            "std": 140000000,
+            "stdUnit": "F/m³"
+          },
+          {
+            "field": "capacitance",
+            "raw": "64 F/g",
+            "std": 64000,
+            "stdUnit": "F/kg"
+          },
+          {
+            "field": "electrochemicalWindow",
+            "raw": "about 2.7 V",
+            "std": 2.7,
+            "stdUnit": "V"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "2.75 Ω cm2",
+            "std": 0.000275,
+            "stdUnit": "Ω·m²"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "3 Ω cm2",
+            "std": 0.0003,
+            "stdUnit": "Ω·m²"
+          }
+        ],
+        "matched": [
+          {
+            "field": "capacitance",
+            "raw": "140 F/cm3",
+            "std": 140000000,
+            "stdUnit": "F/m³"
+          },
+          {
+            "field": "capacitance",
+            "raw": "64 F/g",
+            "std": 64000,
+            "stdUnit": "F/kg"
+          },
+          {
+            "field": "electrochemicalWindow",
+            "raw": "about 2.7 V",
+            "std": 2.7,
+            "stdUnit": "V"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "2.75 Ω cm2",
+            "std": 0.000275,
+            "stdUnit": "Ω·m²"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "3 Ω cm2",
+            "std": 0.0003,
+            "stdUnit": "Ω·m²"
+          }
+        ],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [
+          {
+            "field": "cation",
+            "value": "[EMIM]"
+          },
+          {
+            "field": "anion",
+            "value": "[TFSI]"
+          },
+          {
+            "field": "surface",
+            "value": "pre-intercalated Ti3C2Tx"
+          },
+          {
+            "field": "method",
+            "value": "CV"
+          },
+          {
+            "field": "flexible:scan rate",
+            "value": "5 mV/s"
+          },
+          {
+            "field": "cation",
+            "value": "[EMIM]"
+          },
+          {
+            "field": "anion",
+            "value": "[TFSI]"
+          },
+          {
+            "field": "surface",
+            "value": "pre-intercalated Ti3C2Tx"
+          },
+          {
+            "field": "method",
+            "value": "CV"
+          },
+          {
+            "field": "cation",
+            "value": "[EMIM]"
+          },
+          {
+            "field": "anion",
+            "value": "[TFSI]"
+          },
+          {
+            "field": "surface",
+            "value": "pre-intercalated Ti3C2Tx"
+          },
+          {
+            "field": "potentialReference",
+            "value": "Ag wire"
+          },
+          {
+            "field": "method",
+            "value": "CV"
+          },
+          {
+            "field": "cation",
+            "value": "[EMIM]"
+          },
+          {
+            "field": "anion",
+            "value": "[TFSI]"
+          },
+          {
+            "field": "surface",
+            "value": "pre-intercalated Ti3C2Tx"
+          },
+          {
+            "field": "electrodePotential",
+            "value": "0 V"
+          },
+          {
+            "field": "potentialReference",
+            "value": "Ag wire"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "cation",
+            "value": "[EMIM]"
+          },
+          {
+            "field": "anion",
+            "value": "[TFSI]"
+          },
+          {
+            "field": "surface",
+            "value": "pre-intercalated Ti3C2Tx"
+          },
+          {
+            "field": "electrodePotential",
+            "value": "1 V"
+          },
+          {
+            "field": "potentialReference",
+            "value": "Ag wire"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          }
+        ],
+        "matched": [
+          {
+            "field": "cation",
+            "value": "[EMIM]"
+          },
+          {
+            "field": "anion",
+            "value": "[TFSI]"
+          },
+          {
+            "field": "surface",
+            "value": "pre-intercalated Ti3C2Tx"
+          },
+          {
+            "field": "method",
+            "value": "CV"
+          },
+          {
+            "field": "flexible:scan rate",
+            "value": "5 mV/s"
+          },
+          {
+            "field": "cation",
+            "value": "[EMIM]"
+          },
+          {
+            "field": "anion",
+            "value": "[TFSI]"
+          },
+          {
+            "field": "surface",
+            "value": "pre-intercalated Ti3C2Tx"
+          },
+          {
+            "field": "method",
+            "value": "CV"
+          },
+          {
+            "field": "cation",
+            "value": "[EMIM]"
+          },
+          {
+            "field": "anion",
+            "value": "[TFSI]"
+          },
+          {
+            "field": "surface",
+            "value": "pre-intercalated Ti3C2Tx"
+          },
+          {
+            "field": "potentialReference",
+            "value": "Ag wire"
+          },
+          {
+            "field": "method",
+            "value": "CV"
+          },
+          {
+            "field": "cation",
+            "value": "[EMIM]"
+          },
+          {
+            "field": "anion",
+            "value": "[TFSI]"
+          },
+          {
+            "field": "surface",
+            "value": "pre-intercalated Ti3C2Tx"
+          },
+          {
+            "field": "electrodePotential",
+            "value": "0 V"
+          },
+          {
+            "field": "potentialReference",
+            "value": "Ag wire"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "cation",
+            "value": "[EMIM]"
+          },
+          {
+            "field": "anion",
+            "value": "[TFSI]"
+          },
+          {
+            "field": "surface",
+            "value": "pre-intercalated Ti3C2Tx"
+          },
+          {
+            "field": "electrodePotential",
+            "value": "1 V"
+          },
+          {
+            "field": "potentialReference",
+            "value": "Ag wire"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          }
+        ],
+        "missing": [],
+        "extra": []
+      }
+    },
+    {
+      "file": "ChemElectroChem - 2021 - Qin - Understanding Electric Field‐Dependent Structure Variation of Functional Ionic Liquids at.pdf",
+      "classification": "text-values",
+      "expectedManualRecords": 7,
+      "extractedCandidateCount": 7,
+      "extractedProperties": [
+        "electricField"
+      ],
+      "valueComparison": {
+        "expected": [
+          {
+            "field": "electricField",
+            "raw": "<0.05 V/Å",
+            "std": 500000000,
+            "stdUnit": "V/m"
+          },
+          {
+            "field": "electricField",
+            "raw": "0 V/Å",
+            "std": 0,
+            "stdUnit": "V/m"
+          },
+          {
+            "field": "electricField",
+            "raw": "0.2 V/Å",
+            "std": 2000000000,
+            "stdUnit": "V/m"
+          },
+          {
+            "field": "electricField",
+            "raw": "0.3 V/Å",
+            "std": 3000000000,
+            "stdUnit": "V/m"
+          },
+          {
+            "field": "electricField",
+            "raw": "0.3 V/Å",
+            "std": 3000000000,
+            "stdUnit": "V/m"
+          },
+          {
+            "field": "electricField",
+            "raw": "0.2 V/Å",
+            "std": 2000000000,
+            "stdUnit": "V/m"
+          },
+          {
+            "field": "electricField",
+            "raw": "<0.4 V/Å",
+            "std": 4000000000,
+            "stdUnit": "V/m"
+          }
+        ],
+        "matched": [
+          {
+            "field": "electricField",
+            "raw": "<0.05 V/Å",
+            "std": 500000000,
+            "stdUnit": "V/m"
+          },
+          {
+            "field": "electricField",
+            "raw": "0 V/Å",
+            "std": 0,
+            "stdUnit": "V/m"
+          },
+          {
+            "field": "electricField",
+            "raw": "0.2 V/Å",
+            "std": 2000000000,
+            "stdUnit": "V/m"
+          },
+          {
+            "field": "electricField",
+            "raw": "0.3 V/Å",
+            "std": 3000000000,
+            "stdUnit": "V/m"
+          },
+          {
+            "field": "electricField",
+            "raw": "0.3 V/Å",
+            "std": 3000000000,
+            "stdUnit": "V/m"
+          },
+          {
+            "field": "electricField",
+            "raw": "0.2 V/Å",
+            "std": 2000000000,
+            "stdUnit": "V/m"
+          },
+          {
+            "field": "electricField",
+            "raw": "<0.4 V/Å",
+            "std": 4000000000,
+            "stdUnit": "V/m"
+          }
+        ],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [
+          {
+            "field": "cation",
+            "value": "[C2mim]"
+          },
+          {
+            "field": "anion",
+            "value": "[OTf]"
+          },
+          {
+            "field": "surface",
+            "value": "Pt(111)"
+          },
+          {
+            "field": "temperature",
+            "value": "300 K"
+          },
+          {
+            "field": "method",
+            "value": "MD"
+          },
+          {
+            "field": "cation",
+            "value": "[CNmim]"
+          },
+          {
+            "field": "anion",
+            "value": "[OTf]"
+          },
+          {
+            "field": "surface",
+            "value": "Pt(111)"
+          },
+          {
+            "field": "temperature",
+            "value": "300 K"
+          },
+          {
+            "field": "method",
+            "value": "MD"
+          },
+          {
+            "field": "cation",
+            "value": "[C4mim]"
+          },
+          {
+            "field": "anion",
+            "value": "[OTf]"
+          },
+          {
+            "field": "surface",
+            "value": "Pt(111)"
+          },
+          {
+            "field": "temperature",
+            "value": "300 K"
+          },
+          {
+            "field": "method",
+            "value": "MD"
+          },
+          {
+            "field": "cation",
+            "value": "[C4mim]"
+          },
+          {
+            "field": "anion",
+            "value": "[OTf]"
+          },
+          {
+            "field": "surface",
+            "value": "Pt(111)"
+          },
+          {
+            "field": "temperature",
+            "value": "300 K"
+          },
+          {
+            "field": "method",
+            "value": "MD"
+          },
+          {
+            "field": "cation",
+            "value": "[C2mim]"
+          },
+          {
+            "field": "anion",
+            "value": "[OTf]"
+          },
+          {
+            "field": "surface",
+            "value": "Pt(111)"
+          },
+          {
+            "field": "temperature",
+            "value": "300 K"
+          },
+          {
+            "field": "method",
+            "value": "MD"
+          },
+          {
+            "field": "cation",
+            "value": "[CNSO3mim]"
+          },
+          {
+            "field": "anion",
+            "value": "[OTf]"
+          },
+          {
+            "field": "surface",
+            "value": "Pt(111)"
+          },
+          {
+            "field": "temperature",
+            "value": "300 K"
+          },
+          {
+            "field": "method",
+            "value": "MD"
+          },
+          {
+            "field": "cation",
+            "value": "imidazolium IL series"
+          },
+          {
+            "field": "anion",
+            "value": "[OTf]"
+          },
+          {
+            "field": "surface",
+            "value": "Pt(111)"
+          },
+          {
+            "field": "temperature",
+            "value": "300 K"
+          },
+          {
+            "field": "method",
+            "value": "MD"
+          }
+        ],
+        "matched": [
+          {
+            "field": "cation",
+            "value": "[C2mim]"
+          },
+          {
+            "field": "anion",
+            "value": "[OTf]"
+          },
+          {
+            "field": "surface",
+            "value": "Pt(111)"
+          },
+          {
+            "field": "temperature",
+            "value": "300 K"
+          },
+          {
+            "field": "method",
+            "value": "MD"
+          },
+          {
+            "field": "cation",
+            "value": "[CNmim]"
+          },
+          {
+            "field": "anion",
+            "value": "[OTf]"
+          },
+          {
+            "field": "surface",
+            "value": "Pt(111)"
+          },
+          {
+            "field": "temperature",
+            "value": "300 K"
+          },
+          {
+            "field": "method",
+            "value": "MD"
+          },
+          {
+            "field": "cation",
+            "value": "[C4mim]"
+          },
+          {
+            "field": "anion",
+            "value": "[OTf]"
+          },
+          {
+            "field": "surface",
+            "value": "Pt(111)"
+          },
+          {
+            "field": "temperature",
+            "value": "300 K"
+          },
+          {
+            "field": "method",
+            "value": "MD"
+          },
+          {
+            "field": "cation",
+            "value": "[C4mim]"
+          },
+          {
+            "field": "anion",
+            "value": "[OTf]"
+          },
+          {
+            "field": "surface",
+            "value": "Pt(111)"
+          },
+          {
+            "field": "temperature",
+            "value": "300 K"
+          },
+          {
+            "field": "method",
+            "value": "MD"
+          },
+          {
+            "field": "cation",
+            "value": "[C2mim]"
+          },
+          {
+            "field": "anion",
+            "value": "[OTf]"
+          },
+          {
+            "field": "surface",
+            "value": "Pt(111)"
+          },
+          {
+            "field": "temperature",
+            "value": "300 K"
+          },
+          {
+            "field": "method",
+            "value": "MD"
+          },
+          {
+            "field": "cation",
+            "value": "[CNSO3mim]"
+          },
+          {
+            "field": "anion",
+            "value": "[OTf]"
+          },
+          {
+            "field": "surface",
+            "value": "Pt(111)"
+          },
+          {
+            "field": "temperature",
+            "value": "300 K"
+          },
+          {
+            "field": "method",
+            "value": "MD"
+          },
+          {
+            "field": "cation",
+            "value": "imidazolium IL series"
+          },
+          {
+            "field": "anion",
+            "value": "[OTf]"
+          },
+          {
+            "field": "surface",
+            "value": "Pt(111)"
+          },
+          {
+            "field": "temperature",
+            "value": "300 K"
+          },
+          {
+            "field": "method",
+            "value": "MD"
+          }
+        ],
+        "missing": [],
+        "extra": []
+      }
+    },
+    {
+      "file": "ChemistrySelect - 2020 - Eavani - Electrochemical  Surface Morphological and Spectral Studies of A Polyoxometalate‐Ionic.pdf",
+      "classification": "figure-only",
+      "expectedManualRecords": 0,
+      "extractedCandidateCount": 0,
+      "extractedProperties": [],
+      "valueComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      }
+    },
+    {
+      "file": "ChemistrySelect - 2021 - Kong - Experimental Study of Poly 1‐Acetamide‐3‐vinylimidazolium Bromide  as a Corrosion Inhibitor.pdf",
+      "classification": "text-values",
+      "expectedManualRecords": 5,
+      "extractedCandidateCount": 5,
+      "extractedProperties": [
+        "capacitance",
+        "chargeTransferResistance"
+      ],
+      "valueComparison": {
+        "expected": [
+          {
+            "field": "capacitance",
+            "raw": "149.3 ± 8.2 µF/cm2",
+            "std": 1.493,
+            "stdUnit": "F/m²"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "95.64 ± 6.29 Ω cm2",
+            "std": 0.009564,
+            "stdUnit": "Ω·m²"
+          },
+          {
+            "field": "capacitance",
+            "raw": "115.4 ± 8.1 µF/cm2",
+            "std": 1.154,
+            "stdUnit": "F/m²"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "149.57 ± 4.03 Ω cm2",
+            "std": 0.014957,
+            "stdUnit": "Ω·m²"
+          },
+          {
+            "field": "capacitance",
+            "raw": "102.7 ± 4.3 µF/cm2",
+            "std": 1.027,
+            "stdUnit": "F/m²"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "172.63 ± 3.67 Ω cm2",
+            "std": 0.017263,
+            "stdUnit": "Ω·m²"
+          },
+          {
+            "field": "capacitance",
+            "raw": "83.2 ± 0.9 µF/cm2",
+            "std": 0.832,
+            "stdUnit": "F/m²"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "217.03 ± 6.34 Ω cm2",
+            "std": 0.021703,
+            "stdUnit": "Ω·m²"
+          },
+          {
+            "field": "capacitance",
+            "raw": "82.9 ± 2.0 µF/cm2",
+            "std": 0.829,
+            "stdUnit": "F/m²"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "255.50 ± 5.90 Ω cm2",
+            "std": 0.02555,
+            "stdUnit": "Ω·m²"
+          }
+        ],
+        "matched": [
+          {
+            "field": "capacitance",
+            "raw": "149.3 ± 8.2 µF/cm2",
+            "std": 1.493,
+            "stdUnit": "F/m²"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "95.64 ± 6.29 Ω cm2",
+            "std": 0.009564,
+            "stdUnit": "Ω·m²"
+          },
+          {
+            "field": "capacitance",
+            "raw": "115.4 ± 8.1 µF/cm2",
+            "std": 1.154,
+            "stdUnit": "F/m²"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "149.57 ± 4.03 Ω cm2",
+            "std": 0.014957,
+            "stdUnit": "Ω·m²"
+          },
+          {
+            "field": "capacitance",
+            "raw": "102.7 ± 4.3 µF/cm2",
+            "std": 1.027,
+            "stdUnit": "F/m²"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "172.63 ± 3.67 Ω cm2",
+            "std": 0.017263,
+            "stdUnit": "Ω·m²"
+          },
+          {
+            "field": "capacitance",
+            "raw": "83.2 ± 0.9 µF/cm2",
+            "std": 0.832,
+            "stdUnit": "F/m²"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "217.03 ± 6.34 Ω cm2",
+            "std": 0.021703,
+            "stdUnit": "Ω·m²"
+          },
+          {
+            "field": "capacitance",
+            "raw": "82.9 ± 2.0 µF/cm2",
+            "std": 0.829,
+            "stdUnit": "F/m²"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "255.50 ± 5.90 Ω cm2",
+            "std": 0.02555,
+            "stdUnit": "Ω·m²"
+          }
+        ],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [
+          {
+            "field": "cation",
+            "value": "[PCVIm]"
+          },
+          {
+            "field": "anion",
+            "value": "[Br]"
+          },
+          {
+            "field": "surface",
+            "value": "N80-CS"
+          },
+          {
+            "field": "temperature",
+            "value": "298.15 K"
+          },
+          {
+            "field": "concentration",
+            "value": "5 ppm PCVIB in 1.0 mol/L HCl"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "cation",
+            "value": "[PCVIm]"
+          },
+          {
+            "field": "anion",
+            "value": "[Br]"
+          },
+          {
+            "field": "surface",
+            "value": "N80-CS"
+          },
+          {
+            "field": "temperature",
+            "value": "298.15 K"
+          },
+          {
+            "field": "concentration",
+            "value": "10 ppm PCVIB in 1.0 mol/L HCl"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "cation",
+            "value": "[PCVIm]"
+          },
+          {
+            "field": "anion",
+            "value": "[Br]"
+          },
+          {
+            "field": "surface",
+            "value": "N80-CS"
+          },
+          {
+            "field": "temperature",
+            "value": "298.15 K"
+          },
+          {
+            "field": "concentration",
+            "value": "50 ppm PCVIB in 1.0 mol/L HCl"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "cation",
+            "value": "[PCVIm]"
+          },
+          {
+            "field": "anion",
+            "value": "[Br]"
+          },
+          {
+            "field": "surface",
+            "value": "N80-CS"
+          },
+          {
+            "field": "temperature",
+            "value": "298.15 K"
+          },
+          {
+            "field": "concentration",
+            "value": "100 ppm PCVIB in 1.0 mol/L HCl"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "cation",
+            "value": "[PCVIm]"
+          },
+          {
+            "field": "anion",
+            "value": "[Br]"
+          },
+          {
+            "field": "surface",
+            "value": "N80-CS"
+          },
+          {
+            "field": "temperature",
+            "value": "298.15 K"
+          },
+          {
+            "field": "concentration",
+            "value": "300 ppm PCVIB in 1.0 mol/L HCl"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          }
+        ],
+        "matched": [
+          {
+            "field": "cation",
+            "value": "[PCVIm]"
+          },
+          {
+            "field": "anion",
+            "value": "[Br]"
+          },
+          {
+            "field": "surface",
+            "value": "N80-CS"
+          },
+          {
+            "field": "temperature",
+            "value": "298.15 K"
+          },
+          {
+            "field": "concentration",
+            "value": "5 ppm PCVIB in 1.0 mol/L HCl"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "cation",
+            "value": "[PCVIm]"
+          },
+          {
+            "field": "anion",
+            "value": "[Br]"
+          },
+          {
+            "field": "surface",
+            "value": "N80-CS"
+          },
+          {
+            "field": "temperature",
+            "value": "298.15 K"
+          },
+          {
+            "field": "concentration",
+            "value": "10 ppm PCVIB in 1.0 mol/L HCl"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "cation",
+            "value": "[PCVIm]"
+          },
+          {
+            "field": "anion",
+            "value": "[Br]"
+          },
+          {
+            "field": "surface",
+            "value": "N80-CS"
+          },
+          {
+            "field": "temperature",
+            "value": "298.15 K"
+          },
+          {
+            "field": "concentration",
+            "value": "50 ppm PCVIB in 1.0 mol/L HCl"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "cation",
+            "value": "[PCVIm]"
+          },
+          {
+            "field": "anion",
+            "value": "[Br]"
+          },
+          {
+            "field": "surface",
+            "value": "N80-CS"
+          },
+          {
+            "field": "temperature",
+            "value": "298.15 K"
+          },
+          {
+            "field": "concentration",
+            "value": "100 ppm PCVIB in 1.0 mol/L HCl"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "cation",
+            "value": "[PCVIm]"
+          },
+          {
+            "field": "anion",
+            "value": "[Br]"
+          },
+          {
+            "field": "surface",
+            "value": "N80-CS"
+          },
+          {
+            "field": "temperature",
+            "value": "298.15 K"
+          },
+          {
+            "field": "concentration",
+            "value": "300 ppm PCVIB in 1.0 mol/L HCl"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          }
+        ],
+        "missing": [],
+        "extra": []
+      }
+    },
+    {
+      "file": "electropolymerization-of-pyrrole-based-ionic-liquids-on-selected-wireless-bipolar-electrodes.pdf",
+      "classification": "text-values",
+      "expectedManualRecords": 3,
+      "extractedCandidateCount": 3,
+      "extractedProperties": [
+        "electricField",
+        "viscosity"
+      ],
+      "valueComparison": {
+        "expected": [
+          {
+            "field": "viscosity",
+            "raw": "682 cP",
+            "std": 0.682,
+            "stdUnit": "Pa·s"
+          },
+          {
+            "field": "viscosity",
+            "raw": "363 cP",
+            "std": 0.363,
+            "stdUnit": "Pa·s"
+          },
+          {
+            "field": "electricField",
+            "raw": "13.8 kV/m",
+            "std": 13800,
+            "stdUnit": "V/m"
+          }
+        ],
+        "matched": [
+          {
+            "field": "viscosity",
+            "raw": "682 cP",
+            "std": 0.682,
+            "stdUnit": "Pa·s"
+          },
+          {
+            "field": "viscosity",
+            "raw": "363 cP",
+            "std": 0.363,
+            "stdUnit": "Pa·s"
+          },
+          {
+            "field": "electricField",
+            "raw": "13.8 kV/m",
+            "std": 13800,
+            "stdUnit": "V/m"
+          }
+        ],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [
+          {
+            "field": "cation",
+            "value": "[pyrrole-C6MIm]"
+          },
+          {
+            "field": "anion",
+            "value": "[PF6]"
+          },
+          {
+            "field": "surface",
+            "value": "bulk liquid"
+          },
+          {
+            "field": "temperature",
+            "value": "293.15 K"
+          },
+          {
+            "field": "cation",
+            "value": "[pyrrole-C6MIm]"
+          },
+          {
+            "field": "anion",
+            "value": "[NTf2]"
+          },
+          {
+            "field": "surface",
+            "value": "bulk liquid"
+          },
+          {
+            "field": "temperature",
+            "value": "293.15 K"
+          },
+          {
+            "field": "cation",
+            "value": "CPIL1/CPIL2"
+          },
+          {
+            "field": "anion",
+            "value": "[PF6]/[NTf2]"
+          },
+          {
+            "field": "surface",
+            "value": "wireless bipolar electrode tips"
+          },
+          {
+            "field": "method",
+            "value": "finite-element simulation"
+          },
+          {
+            "field": "flexible:Software",
+            "value": "COMSOL Multiphysics 5.6"
+          },
+          {
+            "field": "flexible:Simulation geometry",
+            "value": "parallel-channel BPE design"
+          },
+          {
+            "field": "flexible:Field location",
+            "value": "BPE tips"
+          }
+        ],
+        "matched": [
+          {
+            "field": "cation",
+            "value": "[pyrrole-C6MIm]"
+          },
+          {
+            "field": "anion",
+            "value": "[PF6]"
+          },
+          {
+            "field": "surface",
+            "value": "bulk liquid"
+          },
+          {
+            "field": "temperature",
+            "value": "293.15 K"
+          },
+          {
+            "field": "cation",
+            "value": "[pyrrole-C6MIm]"
+          },
+          {
+            "field": "anion",
+            "value": "[NTf2]"
+          },
+          {
+            "field": "surface",
+            "value": "bulk liquid"
+          },
+          {
+            "field": "temperature",
+            "value": "293.15 K"
+          },
+          {
+            "field": "cation",
+            "value": "CPIL1/CPIL2"
+          },
+          {
+            "field": "anion",
+            "value": "[PF6]/[NTf2]"
+          },
+          {
+            "field": "surface",
+            "value": "wireless bipolar electrode tips"
+          },
+          {
+            "field": "method",
+            "value": "finite-element simulation"
+          },
+          {
+            "field": "flexible:Software",
+            "value": "COMSOL Multiphysics 5.6"
+          },
+          {
+            "field": "flexible:Simulation geometry",
+            "value": "parallel-channel BPE design"
+          },
+          {
+            "field": "flexible:Field location",
+            "value": "BPE tips"
+          }
+        ],
+        "missing": [],
+        "extra": []
+      }
+    },
+    {
+      "file": "s10800-022-01689-8.pdf",
+      "classification": "text-values",
+      "expectedManualRecords": 2,
+      "extractedCandidateCount": 2,
+      "extractedProperties": [
+        "chargeTransferResistance"
+      ],
+      "valueComparison": {
+        "expected": [
+          {
+            "field": "chargeTransferResistance",
+            "raw": "1374 Ω",
+            "std": 1374,
+            "stdUnit": "Ω"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "1020 Ω",
+            "std": 1020,
+            "stdUnit": "Ω"
+          }
+        ],
+        "matched": [
+          {
+            "field": "chargeTransferResistance",
+            "raw": "1374 Ω",
+            "std": 1374,
+            "stdUnit": "Ω"
+          },
+          {
+            "field": "chargeTransferResistance",
+            "raw": "1020 Ω",
+            "std": 1020,
+            "stdUnit": "Ω"
+          }
+        ],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [
+          {
+            "field": "cation",
+            "value": "[EMIM]"
+          },
+          {
+            "field": "anion",
+            "value": "[Br]"
+          },
+          {
+            "field": "surface",
+            "value": "CPO-ILEMB/MoS2/GC"
+          },
+          {
+            "field": "potentialReference",
+            "value": "SCE"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "flexible:Cell setup",
+            "value": "three-electrode system"
+          },
+          {
+            "field": "flexible:Counter electrode",
+            "value": "platinum"
+          },
+          {
+            "field": "flexible:Atmosphere",
+            "value": "N2 / deoxygenated"
+          },
+          {
+            "field": "cation",
+            "value": "[EMIM]"
+          },
+          {
+            "field": "anion",
+            "value": "[Br]"
+          },
+          {
+            "field": "surface",
+            "value": "CPO-ILEMB/Au@MoS2/GC"
+          },
+          {
+            "field": "potentialReference",
+            "value": "SCE"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "flexible:Cell setup",
+            "value": "three-electrode system"
+          },
+          {
+            "field": "flexible:Counter electrode",
+            "value": "platinum"
+          },
+          {
+            "field": "flexible:Atmosphere",
+            "value": "N2 / deoxygenated"
+          }
+        ],
+        "matched": [
+          {
+            "field": "cation",
+            "value": "[EMIM]"
+          },
+          {
+            "field": "anion",
+            "value": "[Br]"
+          },
+          {
+            "field": "surface",
+            "value": "CPO-ILEMB/MoS2/GC"
+          },
+          {
+            "field": "potentialReference",
+            "value": "SCE"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "flexible:Cell setup",
+            "value": "three-electrode system"
+          },
+          {
+            "field": "flexible:Counter electrode",
+            "value": "platinum"
+          },
+          {
+            "field": "flexible:Atmosphere",
+            "value": "N2 / deoxygenated"
+          },
+          {
+            "field": "cation",
+            "value": "[EMIM]"
+          },
+          {
+            "field": "anion",
+            "value": "[Br]"
+          },
+          {
+            "field": "surface",
+            "value": "CPO-ILEMB/Au@MoS2/GC"
+          },
+          {
+            "field": "potentialReference",
+            "value": "SCE"
+          },
+          {
+            "field": "method",
+            "value": "EIS"
+          },
+          {
+            "field": "flexible:Cell setup",
+            "value": "three-electrode system"
+          },
+          {
+            "field": "flexible:Counter electrode",
+            "value": "platinum"
+          },
+          {
+            "field": "flexible:Atmosphere",
+            "value": "N2 / deoxygenated"
+          }
+        ],
+        "missing": [],
+        "extra": []
+      }
+    },
+    {
+      "file": "s11696-021-01716-6.pdf",
+      "classification": "figure-only",
+      "expectedManualRecords": 0,
+      "extractedCandidateCount": 0,
+      "extractedProperties": [],
+      "valueComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      }
+    },
+    {
+      "file": "Small - 2024 - Krushinski - Single Liquid Aerosol Microparticle Electrochemistry on a Suspended Ionic Liquid Film.pdf",
+      "classification": "no-in-scope-value",
+      "expectedManualRecords": 0,
+      "extractedCandidateCount": 0,
+      "extractedProperties": [],
+      "valueComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      }
+    },
+    {
+      "file": "The Chemical Record - 2021 - Sagara - Redox of Viologen for Powering and Coloring (1).pdf",
+      "classification": "no-in-scope-value",
+      "expectedManualRecords": 0,
+      "extractedCandidateCount": 0,
+      "extractedProperties": [],
+      "valueComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      }
+    },
+    {
+      "file": "1-s2.0-S0278691522002733-main.pdf",
+      "classification": "no-in-scope-value",
+      "expectedManualRecords": 0,
+      "extractedCandidateCount": 0,
+      "extractedProperties": [],
+      "valueComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      }
+    },
+    {
+      "file": "s10967-022-08543-3.pdf",
+      "classification": "no-in-scope-value",
+      "expectedManualRecords": 0,
+      "extractedCandidateCount": 0,
+      "extractedProperties": [],
+      "valueComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      }
+    },
+    {
+      "file": "s13738-020-02088-6.pdf",
+      "classification": "no-in-scope-value",
+      "expectedManualRecords": 0,
+      "extractedCandidateCount": 0,
+      "extractedProperties": [],
+      "valueComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      },
+      "conditionComparison": {
+        "expected": [],
+        "matched": [],
+        "missing": [],
+        "extra": []
+      }
+    }
+  ]
+}

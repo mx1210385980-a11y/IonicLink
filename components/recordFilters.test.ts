@@ -101,14 +101,15 @@ const RECORDS = [
   assert.equal(applyRecordFilters("tribology", RECORDS, f3).length, 2);
 }
 
-/* ---- substrate filter ---- */
+/* ---- substrate text search ---- */
 {
-  const surfaces = surfaceOptions("tribology", RECORDS);
-  const mica = surfaces.find((o) => o.label === "mica")!;
-  const f: RecordFilters = { ...EMPTY_FILTERS, surfaces: [mica.key] };
-  const out = applyRecordFilters("tribology", RECORDS, f);
-  assert.equal(out.length, 2);
-  assert.ok(out.every((r) => r.core.substrate === "mica"));
+  const mica = applyRecordFilters("tribology", RECORDS, { ...EMPTY_FILTERS, surfaceQuery: "MICA" });
+  assert.equal(mica.length, 2, "substrate search is case-insensitive");
+  assert.ok(mica.every((record) => record.core.substrate === "mica"));
+
+  const gold = applyRecordFilters("tribology", RECORDS, { ...EMPTY_FILTERS, surfaceQuery: "au 111" });
+  assert.deepEqual(gold.map((record) => record.core.substrate), ["Au(1 1 1)"], "terms match raw and standardized substrate text");
+  assert.equal(countActiveFilters({ ...EMPTY_FILTERS, surfaceQuery: "mica" }), 1);
 }
 
 /* ---- load window: SI bounds, missing values excluded while a window is set ---- */

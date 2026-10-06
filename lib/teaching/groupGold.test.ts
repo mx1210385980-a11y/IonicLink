@@ -201,7 +201,7 @@ assert.equal(options[0].cof, 0.12);
 
 const loaded = loadCheckedRecord("rec-official");
 assert.equal(loaded.paper?.title, "Ionic lubrication study");
-assert.throws(() => loadCheckedRecord("rec-review"), /没有找到/);
-assert.throws(() => loadCheckedRecord("missing"), /没有找到/);
+assert.throws(() => loadCheckedRecord("rec-review"), /not found/);
+assert.throws(() => loadCheckedRecord("missing"), /not found/);
 
 console.log("Group-crossover gold generation tests passed");

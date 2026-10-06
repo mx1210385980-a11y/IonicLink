@@ -7,9 +7,75 @@ import type {
 } from "./schema";
 import { parseQuantity, ROOM_TEMPERATURE_RAW } from "./units";
 import { deriveExtendedVelocity, isVoltageLoad } from "./afm";
-import { resolveIonSmiles } from "./ionStructures";
+import { normalizeExtractedIonLabel, resolveIonSmiles } from "./ionStructures";
 import { standardizeSubstrate } from "./substrates";
 import { buildSurfaceDescriptors } from "./surfaceDescriptors";
+
+const PROBE_UNIT_PATTERN = "(?:nm|µm|μm|um|mm)";
+const PROBE_DIAMETER_RE = new RegExp(
+  `(?:diameter|dia\\.?|[Øø⌀])\\s*[:=]?\\s*([~≈]?)\\s*(\\d+(?:\\.\\d+)?)\\s*(?:±\\s*(\\d+(?:\\.\\d+)?)\\s*)?(${PROBE_UNIT_PATTERN})`,
+  "i",
+);
+
+type ReportedRadius = {
+  qualifier: string;
+  value: string;
+  uncertainty?: string;
+  unit: string;
+};
+
+function normalizedProbeUnit(unit: string): string {
+  return unit.toLowerCase().replace(/[µμ]/g, "u");
+}
+
+function normalizedAdditives(additives: string | undefined): string | undefined {
+  const value = additives?.trim();
+  if (!value) return undefined;
+  const explicitlyEmpty = /^(?:none|no additives?|without(?: any)? additives?|not applicable|n\/?a)(?:\s*\([^)]*\))?\.?$/i;
+  return explicitlyEmpty.test(value) ? undefined : value;
+}
+
+function reportedRadii(quote: string): ReportedRadius[] {
+  const radii: ReportedRadius[] = [];
+  const inline = new RegExp(
+    `(?:probe\\s+)?radius\\s*[:=]?\\s*([~≈]?)\\s*(\\d+(?:\\.\\d+)?)\\s*(?:±\\s*(\\d+(?:\\.\\d+)?)\\s*)?(${PROBE_UNIT_PATTERN})`,
+    "gi",
+  );
+  for (const match of quote.matchAll(inline)) {
+    radii.push({ qualifier: match[1] || "", value: match[2], uncertainty: match[3], unit: match[4] });
+  }
+
+  const table = quote.match(new RegExp(`probe\\s+radius\\s*\\(\\s*(${PROBE_UNIT_PATTERN})\\s*\\)([\\s\\S]*)`, "i"));
+  if (table) {
+    const values = /(\d+(?:\.\d+)?)\s*(?:±\s*(\d+(?:\.\d+)?))?/g;
+    for (const match of table[2].matchAll(values)) {
+      radii.push({ qualifier: "", value: match[1], uncertainty: match[2], unit: table[1] });
+    }
+  }
+  return radii;
+}
+
+/** Restore a directly reported radius when the model unnecessarily converted it to diameter. */
+function probeTypeAsReported(probeType: string | undefined, evidenceQuote: string | undefined): string | undefined {
+  const raw = probeType?.trim();
+  if (!raw || !evidenceQuote) return raw || undefined;
+
+  const diameter = raw.match(PROBE_DIAMETER_RE);
+  if (!diameter) return raw;
+  const diameterValue = Number(diameter[2]);
+  const diameterUnit = normalizedProbeUnit(diameter[4]);
+  const reported = reportedRadii(evidenceQuote).find(
+    (candidate) =>
+      normalizedProbeUnit(candidate.unit) === diameterUnit &&
+      Math.abs(Number(candidate.value) * 2 - diameterValue) <= Math.max(1, diameterValue) * 1e-9,
+  );
+  if (!reported) return raw;
+
+  const shape = raw.replace(diameter[0], "").replace(/^[\s·|,;:=-]+|[\s·|,;:=-]+$/g, "").trim();
+  const uncertainty = reported.uncertainty ? ` ± ${reported.uncertainty}` : "";
+  const measurement = `radius ${reported.qualifier}${reported.value}${uncertainty} ${reported.unit}`;
+  return shape ? `${shape} · ${measurement}` : measurement;
+}
 
 /**
  * Ingestion = turn raw extracted fields into a standardized, three-layer record:
@@ -22,8 +88,8 @@ import { buildSurfaceDescriptors } from "./surfaceDescriptors";
  * every record in the database is standardized the same way.
  */
 export function ingest(f: ExtractedFields): RecordDraft {
-  const cation = (f.cation ?? "").trim();
-  const anion = (f.anion ?? "").trim();
+  const cation = normalizeExtractedIonLabel(f.cation, "cation");
+  const anion = normalizeExtractedIonLabel(f.anion, "anion");
 
   const flexible: FlexibleField[] = (f.flexible ?? [])
     .filter((x) => x && x.key && x.value)
@@ -58,9 +124,12 @@ export function ingest(f: ExtractedFields): RecordDraft {
   let filmThickness;
   let filmLayers;
   if (filmRaw) {
-    const layerMatch = /layer/i.test(filmRaw) ? filmRaw.match(/[\d.]+/) : null;
-    if (layerMatch) filmLayers = Number(layerMatch[0]);
-    else filmThickness = parseQuantity(filmRaw, "length") ?? undefined;
+    const layerMatch = filmRaw.match(/(?<![\d.])(\d+)\s*(?:ion\s+)?layers?\b/i);
+    if (layerMatch) filmLayers = Number(layerMatch[1]);
+    else if (/\b(?:a\s+)?single\s+(?:ion\s+)?layer\b/i.test(filmRaw)) filmLayers = 1;
+    const lengthMatch = filmRaw.match(/(?:[~≈]?\s*\d+(?:\.\d+)?\s*(?:±\s*\d+(?:\.\d+)?\s*)?)(?:nm|µm|μm|um|mm|pm|Å|m)\b/i);
+    if (lengthMatch) filmThickness = parseQuantity(lengthMatch[0], "length") ?? undefined;
+    else if (filmLayers == null) filmThickness = parseQuantity(filmRaw, "length") ?? undefined;
   }
 
   // Per-field provenance: array → map, keeping only entries with content.
@@ -112,10 +181,10 @@ export function ingest(f: ExtractedFields): RecordDraft {
     scale: f.scale,
     method: f.method?.trim() || undefined,
     probe: f.probe?.trim() || undefined,
-    probeType: f.probeType?.trim() || undefined,
+    probeType: probeTypeAsReported(f.probeType, provenance.probe?.quote),
     potential: parseQuantity(f.potential, "potential") ?? undefined,
     roughness: parseQuantity(f.roughness, "length") ?? surface.descriptors.roughness,
-    additives: f.additives?.trim() || undefined,
+    additives: normalizedAdditives(f.additives),
     cofMethod: f.cofMethod?.trim() || undefined,
     velocity: parseQuantity(f.velocity, "velocity") ?? undefined,
     surface: Object.keys(surface.descriptors).length ? surface.descriptors : undefined,
@@ -201,7 +270,9 @@ export function toFields(r: RecordDraft): ExtractedFields {
     crystalPlane: r.extended.surface?.plane,
     materialClass: r.extended.surface?.materialClass,
     additives: r.extended.additives,
-    filmThickness: r.extended.filmThickness?.raw ?? (r.extended.filmLayers != null ? `${r.extended.filmLayers} layers` : undefined),
+    filmThickness: r.extended.filmThickness
+      ? `${r.extended.filmThickness.raw}${r.extended.filmLayers != null ? ` (${r.extended.filmLayers} layers)` : ""}`
+      : r.extended.filmLayers != null ? `${r.extended.filmLayers} layers` : undefined,
     waterContent: r.extended.waterContent,
     concentration: r.extended.concentration,
     afm: r.extended.afm,

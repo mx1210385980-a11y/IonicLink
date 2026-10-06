@@ -9,7 +9,8 @@ import {
 } from "@/lib/db";
 import { isDomain } from "@/lib/domain";
 import { extractDoiFromPages } from "@/lib/doi";
-import { extractionConcurrency, isDraining, kickDrain } from "@/lib/jobs";
+import { isLiveExtractionEnabled, LIVE_EXTRACTION_REQUIRED_MESSAGE } from "@/lib/extract";
+import { extractionConcurrency, isDraining, kickDrain, sendCompletedJobsToReview } from "@/lib/jobs";
 import { pdfToPages } from "@/lib/pdf";
 import { createSourceFromPdf } from "@/lib/sources";
 
@@ -22,6 +23,9 @@ export async function POST(req: NextRequest, { params }: { params: { domain: str
   const access = await requireAppApiSession(req);
   if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
+  if (!isLiveExtractionEnabled()) {
+    return NextResponse.json({ error: LIVE_EXTRACTION_REQUIRED_MESSAGE }, { status: 503 });
+  }
   const domain = params.domain;
   const form = await req.formData();
   const files = form.getAll("files").filter((f): f is File => f instanceof File);
@@ -91,6 +95,7 @@ export async function GET(_req: NextRequest, { params }: { params: { domain: str
   const access = await requireAppApiSession(_req);
   if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
+  sendCompletedJobsToReview(params.domain);
   return NextResponse.json({
     jobs: listJobs(params.domain),
     draining: isDraining(params.domain),

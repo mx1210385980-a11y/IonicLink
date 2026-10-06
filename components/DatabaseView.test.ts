@@ -4,10 +4,11 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   analyzeGroupConditions,
+  GroupConditionsStrip,
   buildDatabaseQuery,
   databaseStatusUrl,
+  defaultUnitModeForDomain,
   DatabaseView,
-  filterRecordsByReadiness,
   filterSources,
   isMockExtractionRecord,
   isLoadedQueryReady,
@@ -15,15 +16,14 @@ import {
   pruneSelectionToDisplayed,
   recordListUnitsForStatus,
   requireOk,
-  ReviewReadinessStrip,
   SEARCH_DEBOUNCE_MS,
   selectedDisplayedRecords,
   shouldShowUnitModeControl,
   splitBySystem,
-  summarizeReviewReadiness,
   takeVisibleRecords,
   VISIBLE_BATCH_SIZE,
 } from "./DatabaseView";
+import { tribologyClientModule } from "./database/TribologyDatabaseView";
 import { buildGroupConditionItems } from "./RecordCard";
 import { parseQuantity } from "../lib/units";
 import type { ConditionItem } from "./recordCardParts";
@@ -37,66 +37,12 @@ assert.equal(recordListUnitsForStatus("review", "raw"), "raw");
 assert.equal(recordListUnitsForStatus("review", "std"), "std");
 assert.equal(shouldShowUnitModeControl("official"), false);
 assert.equal(shouldShowUnitModeControl("review"), true);
+assert.equal(defaultUnitModeForDomain("conductivity"), "std");
+assert.equal(defaultUnitModeForDomain("diffusion"), "raw");
+assert.equal(defaultUnitModeForDomain("tribology"), "raw");
 assert.equal(isMockExtractionRecord({ extraction: { source: "mock" } }), true);
 assert.equal(isMockExtractionRecord({ extraction: { source: "openai-compatible" } }), false);
 assert.equal(isMockExtractionRecord({}), false, "legacy records without extractor metadata remain publishable");
-
-type ReadinessFixture = { id: string; complete: boolean; extraction?: { source?: string } };
-const readinessFixtures: ReadinessFixture[] = [
-  { id: "ready", complete: true, extraction: { source: "openai-compatible" } },
-  { id: "incomplete", complete: false, extraction: { source: "anthropic" } },
-  { id: "mock-complete", complete: true, extraction: { source: "mock" } },
-  { id: "mock-incomplete", complete: false, extraction: { source: "mock" } },
-];
-const checkCompleteness = (record: ReadinessFixture) => ({ complete: record.complete });
-assert.deepEqual(summarizeReviewReadiness(readinessFixtures, checkCompleteness), {
-  all: 4,
-  ready: 1,
-  incomplete: 1,
-  mock: 2,
-});
-assert.deepEqual(
-  filterRecordsByReadiness(readinessFixtures, "ready", checkCompleteness).map((record) => record.id),
-  ["ready"]
-);
-assert.deepEqual(
-  filterRecordsByReadiness(readinessFixtures, "incomplete", checkCompleteness).map((record) => record.id),
-  ["incomplete"],
-  "Mock records never leak into the incomplete bucket"
-);
-assert.deepEqual(
-  filterRecordsByReadiness(readinessFixtures, "mock", checkCompleteness).map((record) => record.id),
-  ["mock-complete", "mock-incomplete"],
-  "Mock wins regardless of core completeness"
-);
-assert.equal(filterRecordsByReadiness(readinessFixtures, "all", checkCompleteness), readinessFixtures);
-
-const readinessStripHtml = renderToStaticMarkup(
-  createElement(ReviewReadinessStrip, {
-    summary: { all: 4, ready: 1, incomplete: 1, mock: 2 },
-    active: "ready",
-    onChange: () => {},
-  })
-);
-assert.match(readinessStripHtml, /data-testid="review-readiness-strip"/);
-assert.match(readinessStripHtml, /aria-label="Review readiness"/);
-assert.match(readinessStripHtml, /aria-label="Ready to approve: 1"[^>]*aria-pressed="true"|aria-pressed="true"[^>]*aria-label="Ready to approve: 1"/);
-assert.match(readinessStripHtml, /Needs core fields/);
-assert.match(readinessStripHtml, /Mock locked/);
-assert.match(readinessStripHtml, /Ready → approve/);
-assert.match(readinessStripHtml, /edit missing fields/);
-assert.match(readinessStripHtml, /re-extract with a live model or enter manually/);
-
-const zeroReadinessHtml = renderToStaticMarkup(
-  createElement(ReviewReadinessStrip, {
-    summary: { all: 2, ready: 2, incomplete: 0, mock: 0 },
-    active: "all",
-    onChange: () => {},
-  })
-);
-assert.match(zeroReadinessHtml, /aria-label="Needs core fields: 0"/);
-assert.match(zeroReadinessHtml, /aria-label="Mock locked: 0"/);
-assert.equal(zeroReadinessHtml.match(/disabled=""/g)?.length, 2, "zero-count readiness shortcuts stay visible but disabled");
 
 assert.equal(SEARCH_DEBOUNCE_MS, 300);
 assert.equal(VISIBLE_BATCH_SIZE, 50);
@@ -154,18 +100,72 @@ assert.equal(
   "/tribology/database?source=paper&status=review#records"
 );
 
-const officialHtml = renderToStaticMarkup(createElement(DatabaseView, { domain: "tribology" }));
+const officialHtml = renderToStaticMarkup(
+  createElement(DatabaseView, { domain: "tribology", clientModule: tribologyClientModule })
+);
 
 assert.match(officialHtml, /Checked Database/);
 assert.doesNotMatch(officialHtml, />Official</);
 assert.match(officialHtml, /data-testid="database-workbench-shell"/);
 assert.match(officialHtml, /data-testid="database-command-bar"/);
-assert.match(officialHtml, /rounded-\[8px\]/);
+assert.match(officialHtml, /data-testid="analysis-toolbar"/);
+assert.match(officialHtml, /aria-label="Database view"/);
 assert.match(officialHtml, /Export visible \(0\)/);
 assert.match(officialHtml, /disabled=""/, "empty visible sets cannot be exported");
-assert.doesNotMatch(officialHtml, /data-testid="review-readiness-strip"/, "readiness is Review-only");
-assert.doesNotMatch(officialHtml, /As reported/);
-assert.doesNotMatch(officialHtml, /Standardized/);
+assert.doesNotMatch(officialHtml, /data-testid="review-readiness-strip"/);
+assert.doesNotMatch(officialHtml, /Approved library records only/);
+assert.doesNotMatch(officialHtml, /AI-extracted candidates awaiting approval/);
+assert.match(officialHtml, /aria-label="Analysis units"/);
+assert.match(officialHtml, /Snapshot JSON/);
+
+const reviewHtml = renderToStaticMarkup(
+  createElement(DatabaseView, {
+    domain: "tribology",
+    clientModule: tribologyClientModule,
+    initialData: {
+      queryKey: "tribology?status=review",
+      status: "review",
+      records: [],
+      counts: { official: 0, review: 0 },
+      papers: [],
+    },
+  })
+);
+assert.match(reviewHtml, /Review Queue/);
+assert.match(reviewHtml, /data-testid="database-command-bar"/);
+assert.doesNotMatch(reviewHtml, /Review readiness/i);
+assert.doesNotMatch(reviewHtml, /Ready to approve/);
+
+const hydratedOfficialHtml = renderToStaticMarkup(
+  createElement(DatabaseView, {
+    domain: "tribology",
+    clientModule: tribologyClientModule,
+    initialData: {
+      queryKey: "tribology?status=official",
+      status: "official",
+      records: [{
+        id: "prefetched-record",
+        status: "official",
+        createdAt: "2026-08-26T00:00:00.000Z",
+        paper: { title: "Prefetched paper" },
+        core: {
+          ionicLiquid: { cation: "[BMIM]", anion: "[PF6]" },
+          substrate: "mica",
+          temperature: { raw: "298 K", value: 298, unit: "K", std: 298, stdUnit: "K" },
+          load: { raw: "5 nN", value: 5, unit: "nN", std: 5e-9, stdUnit: "N" },
+          cof: 0.08,
+        },
+        extended: { scale: "nano" },
+        flexible: [],
+      }],
+      counts: { official: 1, review: 2 },
+      papers: [{ title: "Prefetched paper", n: 1 }],
+    },
+  })
+);
+assert.match(hydratedOfficialHtml, /Export visible \(1\)/, "server-prefetched records render in the first HTML response");
+assert.match(hydratedOfficialHtml, /Checked Database[^]*1/, "server-prefetched queue counts avoid the zero-state flash");
+assert.doesNotMatch(hydratedOfficialHtml, /Loading database records/, "prefetched HTML does not fall back to the loading shell");
 
 /* ---- source filter: searchable combobox replaces the flat <select> ---- */
 
@@ -393,3 +393,27 @@ const ions = (rest: ConditionItem[]): ConditionItem[] => [
 }
 
 console.log("DatabaseView system sub-grouping tests passed");
+
+assert.doesNotMatch(hydratedOfficialHtml, /curated readings|>checked</);
+assert.match(hydratedOfficialHtml, /<details[^>]*>[\s\S]*Statistics/);
+assert.match(hydratedOfficialHtml, /aria-label="Database table"/);
+assert.match(hydratedOfficialHtml, /Prefetched paper/);
+assert.doesNotMatch(hydratedOfficialHtml, /Clear filters/);
+
+// Compare values against their own record, and never imply missing conditions are shared.
+{
+  const rows = [
+    { id: "#a", items: [{ label: "Potential", value: "0.5 V" }, { label: "Load", value: "5 nN" }] },
+    { id: "#b", items: [{ label: "Potential", value: "-0.5 V" }, { label: "Load", value: "5 nN" }] },
+    { id: "#c", items: [] },
+  ];
+  const html = renderToStaticMarkup(createElement(GroupConditionsStrip, {
+    records: rows, itemsOf: (record) => record.items, domain: "tribology",
+  }));
+  assert.match(html, /Varies by record/);
+  assert.match(html, /#a<[^]*?0\.5 V/);
+  assert.match(html, /#b<[^]*?-0\.5 V/);
+  assert.match(html, /Not reported/);
+  assert.match(html, /Reported in 2 of 3 records/);
+  assert.doesNotMatch(html, /0\.5 V · -0\.5 V/);
+}

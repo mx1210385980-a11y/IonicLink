@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAppApiSession } from "@/lib/auth.server";
-import { countByStatus, createRecords, listPapers, listRecords, type ListOptions } from "@/lib/db";
+import { createRecords, type ListOptions } from "@/lib/db";
+import { getDatabasePayload } from "@/lib/database.server";
 import { isDomain } from "@/lib/domain";
 import type { RecordDraft } from "@/lib/schema";
 import { parseExactStructureSearch, StructureSearchInputError } from "@/lib/structureSearch.server";
@@ -33,13 +34,7 @@ export async function GET(req: NextRequest, { params }: { params: { domain: stri
     throw error;
   }
 
-  return NextResponse.json({
-    records: listRecords(domain, opts),
-    counts: countByStatus(domain),
-    // All sources in the current queue (unaffected by the paper filter itself),
-    // so the client's source picker always lists every switch target.
-    papers: listPapers(domain, opts.status),
-  });
+  return NextResponse.json(getDatabasePayload(domain, opts));
 }
 
 export async function POST(req: NextRequest, { params }: { params: { domain: string } }) {

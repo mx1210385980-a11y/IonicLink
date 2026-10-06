@@ -4,7 +4,6 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { BatchJob, JobHistorySummary, JobStatus } from "../lib/schema";
 import {
-  commitAllIssueMessage,
   CommittedJobsNotice,
   filterExtractionJobs,
   formatDuration,
@@ -15,6 +14,7 @@ import {
   QueueProgress,
   queueRefreshIsCurrent,
   SkipNotice,
+  StatusPill,
   summarizeQueue,
   type SkippedFile,
 } from "./Extractor";
@@ -22,6 +22,9 @@ import {
 (globalThis as typeof globalThis & { React: typeof React }).React = React;
 
 const noop = () => {};
+assert.match(renderToStaticMarkup(createElement(StatusPill, { status: "committed", checked: true })), />Checked</);
+assert.match(renderToStaticMarkup(createElement(StatusPill, { status: "committed", checked: false })), /Awaiting review/);
+assert.doesNotMatch(renderToStaticMarkup(createElement(StatusPill, { status: "error", checked: true })), />Checked</);
 const one: SkippedFile[] = [
   { filename: "renamed-reupload.pdf", reason: 'already uploaded as "original.pdf" on 2026-06-09 (DOI 10.1021/x)' },
 ];
@@ -48,7 +51,7 @@ assert.doesNotMatch(manyHtml, /paper-4\.pdf/, "long lists are capped");
 assert.match(manyHtml, /\+2 more/, "overflow is summarized");
 
 const committedHtml = renderToStaticMarkup(createElement(CommittedJobsNotice, { domain: "tribology" }));
-assert.match(committedHtml, /Review Queue/);
+assert.match(committedHtml, /Open review queue/);
 assert.match(
   committedHtml,
   /href="\/tribology\/database\?status=review"/,
@@ -65,18 +68,6 @@ assert.match(refreshFailure, /text was added to the queue/);
 assert.match(refreshFailure, /write already succeeded/);
 assert.match(refreshFailure, /do not repeat it/);
 assert.doesNotMatch(refreshFailure, /Could not add the text/);
-
-const partialAndStale = commitAllIssueMessage({
-  committed: 2,
-  failed: 1,
-  failureDetail: "paper-c.pdf was rejected",
-  refreshError: new Error("offline"),
-});
-assert.match(partialAndStale ?? "", /2 committed; 1 failed/);
-assert.match(partialAndStale ?? "", /paper-c\.pdf was rejected/);
-assert.match(partialAndStale ?? "", /2 successful commits are already complete/);
-assert.match(partialAndStale ?? "", /Do not repeat successful commits/);
-assert.equal(commitAllIssueMessage({ committed: 3, failed: 0 }), null);
 
 function job(status: JobStatus, id: string = status): BatchJob {
   return {
@@ -109,12 +100,15 @@ assert.deepEqual(queueSummary, { queued: 1, extracting: 1, done: 1, error: 2, co
 
 assert.equal(jobMatchesFileFilter("queued", "analyzing"), true);
 assert.equal(jobMatchesFileFilter("extracting", "analyzing"), true);
-assert.equal(jobMatchesFileFilter("done", "finished"), true);
+assert.equal(jobMatchesFileFilter("done", "finished"), false);
+assert.equal(jobMatchesFileFilter("done", "analyzing"), true);
+assert.equal(jobMatchesFileFilter("done", "error", true), true);
+assert.equal(jobMatchesFileFilter("done", "analyzing", true), false);
 assert.equal(jobMatchesFileFilter("committed", "finished"), true);
 assert.equal(jobMatchesFileFilter("error", "error"), true);
 assert.equal(jobMatchesFileFilter("error", "finished"), false);
 const searchableJobs = [
-  { ...job("done", "alpha-paper"), filename: "Alpha friction.pdf", model: "model-one" },
+  { ...job("committed", "alpha-paper"), filename: "Alpha friction.pdf", model: "model-one" },
   { ...job("error", "beta-paper"), filename: "Beta conductivity.pdf", error: "provider timeout" },
 ];
 assert.deepEqual(filterExtractionJobs(searchableJobs, "all", "friction").map((item) => item.id), ["alpha-paper"]);
@@ -125,7 +119,7 @@ const emptyQueueHtml = renderToStaticMarkup(
   createElement(QueueProgress, { jobs: [], draining: false, concurrency: 2 })
 );
 assert.match(emptyQueueHtml, /data-testid="queue-progress"/);
-for (const label of ["Queued", "Extracting", "Ready to review", "Errors", "Committed"]) {
+for (const label of ["Queued", "Extracting", "Sending to review", "Errors", "Awaiting review"]) {
   assert.match(emptyQueueHtml, new RegExp(`aria-label="${label}: 0"`), `${label} remains visible at zero`);
 }
 assert.match(emptyQueueHtml, /Queue is clear/);

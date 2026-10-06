@@ -3,14 +3,15 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DatasetImporter } from "./DatasetImporter";
 
-const diffusion = renderToStaticMarkup(<DatasetImporter domain="diffusion" />);
-assert.match(diffusion, /Upload a paper dataset/);
-assert.match(diffusion, /Diffusion adapter v1/);
-assert.match(diffusion, /accept="\.xlsx,\.csv,\.tsv"/);
+const file = { name: "fixture.xlsx" } as File;
+const noop = () => {};
+const diffusion = renderToStaticMarkup(<DatasetImporter domain="diffusion" file={file} onClose={noop} />);
+assert.match(diffusion, /Import structured data/);
+assert.match(diffusion, /fixture\.xlsx/);
 assert.match(diffusion, /Preview mapping/);
+assert.doesNotMatch(diffusion, /type="file"/);
 
-const tribology = renderToStaticMarkup(<DatasetImporter domain="tribology" />);
-assert.match(tribology, /Adapter pending/);
-assert.match(tribology, /first tabular adapter is available in the Diffusion workspace/);
+const tribology = renderToStaticMarkup(<DatasetImporter domain="tribology" file={file} onClose={noop} />);
+assert.match(tribology, /No tabular adapter is configured for tribology yet/);
 
 console.log("DatasetImporter render tests passed");

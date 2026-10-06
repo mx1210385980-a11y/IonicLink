@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAppApiSession } from "@/lib/auth.server";
 import { getSourcePageText } from "@/lib/db";
 import { isDomain } from "@/lib/domain";
-import { findEvidenceOnPage, renderSourcePage } from "@/lib/sources";
+import { findEvidenceOnPage, renderSourceFigure, renderSourcePage } from "@/lib/sources";
+import type { BBox } from "@/lib/schema";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -41,6 +42,38 @@ export async function GET(req: NextRequest, { params }: { params: { domain: stri
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Lookup failed";
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
+  }
+
+  if (req.nextUrl.searchParams.get("format") === "figure") {
+    const figure = req.nextUrl.searchParams.get("figure")?.trim() ?? "";
+    const rawBox = req.nextUrl.searchParams.get("box");
+    let box: BBox | undefined;
+    if (rawBox) {
+      const values = rawBox.split(",").map(Number);
+      if (values.length === 4 && values.every(Number.isFinite)) {
+        box = { x: values[0], y: values[1], w: values[2], h: values[3] };
+      }
+    }
+    if (!figure && !box) {
+      return NextResponse.json({ error: "A figure label or crop box is required" }, { status: 400 });
+    }
+    try {
+      const result = await renderSourceFigure(domain, id, page, figure, box);
+      if (!result) {
+        return NextResponse.json({ error: "Figure could not be located on this source page" }, { status: 404 });
+      }
+      return new Response(result.png as BodyInit, {
+        headers: {
+          "Content-Type": "image/png",
+          "Cache-Control": "public, max-age=86400",
+          "X-IonicLink-Figure-Crop": result.inferred ? "inferred" : "exact",
+          "X-IonicLink-Figure-Box": [result.box.x, result.box.y, result.box.w, result.box.h].join(","),
+        },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Figure render failed";
       return NextResponse.json({ error: message }, { status: 500 });
     }
   }

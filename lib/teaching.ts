@@ -243,7 +243,7 @@ export function deleteTeachingSession(token: string | undefined): void {
 export function createTeachingProject(input: { name: string; inviteCode: string }): string {
   const name = clean(input.name, 160);
   const inviteCode = clean(input.inviteCode, 40).toUpperCase().replace(/\s+/g, "");
-  if (!name || inviteCode.length < 4) throw new Error("项目名称和至少 4 位邀请码为必填项。");
+  if (!name || inviteCode.length < 4) throw new Error("Enter a project name and an invite code of at least 4 characters.");
   const id = randomUUID();
   db()
     .prepare(
@@ -328,8 +328,8 @@ export function addTeachingPaper(input: {
   const projectId = clean(input.projectId, 80);
   const recordId = clean(input.recordId, 80);
   const paperNo = clean(input.paperNo, 40);
-  if (!paperNo) throw new Error("请填写文献编号。");
-  if (!recordId) throw new Error("请选择一篇文献。");
+  if (!paperNo) throw new Error("Enter a paper ID.");
+  if (!recordId) throw new Error("Select a paper.");
 
   const store = db();
   const projectKind = store
@@ -343,7 +343,7 @@ export function addTeachingPaper(input: {
     projectKind?.experimentKind === "crossover" ||
     projectKind?.isDefault === 1
   ) {
-    throw new Error("默认交叉实验的冻结文献不能通过普通教学项目修改。");
+    throw new Error("Frozen crossover papers cannot be edited through a regular teaching project.");
   }
   const existing = store
     .prepare(
@@ -353,11 +353,11 @@ export function addTeachingPaper(input: {
     .get(projectId, paperNo) as { id: string; sourceRecordId: string } | undefined;
   if (existing) {
     if (existing.sourceRecordId === recordId) return existing.id;
-    throw new Error(`文献编号 ${paperNo} 已经使用，请换一个编号。`);
+    throw new Error(`Paper ID ${paperNo} is already in use. Choose another.`);
   }
 
   const sourcePath = path.join(DATA_DIR, "tribology.db");
-  if (!existsSync(sourcePath)) throw new Error("正式摩擦数据库尚不存在。");
+  if (!existsSync(sourcePath)) throw new Error("The checked tribology database does not exist yet.");
   const source = new Database(sourcePath, { readonly: true, fileMustExist: true });
   let record: OfficialRecordRow | null = null;
   try {
@@ -368,7 +368,7 @@ export function addTeachingPaper(input: {
   } finally {
     source.close();
   }
-  if (!record) throw new Error("没有找到这篇文献，请重新选择。");
+  if (!record) throw new Error("Paper not found. Select another paper.");
 
   const id = randomUUID();
   const inserted = store
@@ -400,8 +400,8 @@ export function addTeachingPaper(input: {
       )
       .get(projectId, paperNo) as { id: string; sourceRecordId: string } | undefined;
     if (concurrent?.sourceRecordId === recordId) return concurrent.id;
-    if (concurrent) throw new Error(`文献编号 ${paperNo} 已经使用，请换一个编号。`);
-    throw new Error("文献添加失败，请重新操作。");
+    if (concurrent) throw new Error(`Paper ID ${paperNo} is already in use. Choose another.`);
+    throw new Error("Could not add the paper. Try again.");
   }
   return id;
 }
@@ -419,10 +419,10 @@ export function joinTeachingProject(input: {
          AND experiment_kind = 'legacy' AND is_default = 0`
     )
     .get(clean(input.inviteCode, 40).toUpperCase().replace(/\s+/g, "")) as { id: string } | undefined;
-  if (!project) throw new Error("邀请码不存在或项目尚未开放。");
+  if (!project) throw new Error("The invite code is invalid or the project is not open.");
   const groupCode = clean(input.groupCode, 80);
   const studentAlias = clean(input.studentAlias, 80);
-  if (!groupCode || !studentAlias) throw new Error("组别和学号/姓名缩写为必填项。");
+  if (!groupCode || !studentAlias) throw new Error("Group and student ID or initials are required.");
 
   const existing = store
     .prepare(
@@ -443,7 +443,7 @@ export function joinTeachingProject(input: {
        LIMIT 1`
     )
     .get(project.id) as { id: string } | undefined;
-  if (!paper) throw new Error("老师尚未为该项目添加文献。");
+  if (!paper) throw new Error("The instructor has not added a paper to this project yet.");
 
   const participantId = randomUUID();
   const submissionId = randomUUID();
@@ -551,8 +551,8 @@ export function saveStudentDraft(
     const locked = store
       .prepare("SELECT submitted_at FROM teaching_submissions WHERE participant_id = ?")
       .get(participantId) as { submitted_at: string | null } | undefined;
-    if (locked?.submitted_at) throw new TeachingConflictError("结果已提交，答案已锁定。", "locked");
-    throw new TeachingConflictError("草稿已有更新，请刷新后继续。", "version");
+    if (locked?.submitted_at) throw new TeachingConflictError("Results submitted. Answers are locked.", "locked");
+    throw new TeachingConflictError("The draft has changed. Refresh before continuing.", "version");
   }
   return { version: expectedVersion + 1, updatedAt: timestamp };
 }
@@ -569,12 +569,12 @@ export function submitStudentWork(participantId: string): { submittedAt: string 
     .get(participantId) as
     | { submitted_at: string | null; answers_json: string; fields_json: string }
     | undefined;
-  if (!row) throw new Error("未找到学生提交记录。");
+  if (!row) throw new Error("Student submission not found.");
   if (row.submitted_at) return { submittedAt: row.submitted_at };
   const answers = parseJson<TeachingAnswers>(row.answers_json, {});
   const fields = parseJson<Array<{ key: string }>>(row.fields_json, []);
   const missing = fields.filter((field) => !nonEmpty(answers[field.key as TeachingFieldKey]?.value));
-  if (missing.length) throw new Error(`请先完成全部 ${fields.length} 个必填字段。`);
+  if (missing.length) throw new Error(`Complete all ${fields.length} required fields first.`);
   const submittedAt = now();
   store
     .prepare(
@@ -1096,7 +1096,7 @@ export function reviewTeachingSubmission(
     .prepare("SELECT submitted_at FROM teaching_submissions WHERE id = ?")
     .get(submissionId) as { submitted_at: string | null } | undefined;
   if (!submission?.submitted_at) {
-    throw new TeachingReviewValidationError("学生尚未提交，暂时不能审核。");
+    throw new TeachingReviewValidationError("Review is available after the student submits.");
   }
   store
     .prepare(

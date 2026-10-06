@@ -24,7 +24,7 @@ export default async function LoginPage({
         className="mt-5 rounded-[8px] px-3 py-2 text-sm font-semibold text-ink-600 transition hover:bg-white/70 hover:text-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-200"
         href="/teaching"
       >
-        前往独立教学实验入口
+        Open the teaching lab
       </Link>
     </div>
   );

@@ -26,7 +26,7 @@ const CURATED_CATIONS: CuratedIon[] = [
   pyrrolidinium(2, "1-ethyl-1-methylpyrrolidinium", ["[PYR12]", "[Pyr1,2]", "[Py1,2]"]),
   pyrrolidinium(3, "1-propyl-1-methylpyrrolidinium", ["[PYR13]", "[Pyr1,3]", "[Py1,3]"]),
   pyrrolidinium(4, "1-butyl-1-methylpyrrolidinium", ["[BMPyr]", "[PYR14]", "[Pyr1,4]", "[Py1,4]"]),
-  cation("CC[NH3+]", "ethylammonium", "ammonium", ["[EA]"]),
+  cation("CC[NH3+]", "ethylammonium", "ammonium", ["[EA]", "[EtNH3]", "EtNH3+", "ethylammonium"]),
   cation("CCC[NH3+]", "propylammonium", "ammonium", ["[PA]", "[PAN]"]),
   cation("OCC[NH3+]", "ethanolammonium", "hydroxyalkyl ammonium", ["[EtA]"]),
   cation("[NH+](C)(C)CC", "dimethylethylammonium", "ammonium", ["[DMEA]"]),
@@ -100,6 +100,11 @@ export function resolveIonSmiles(label: string | null | undefined, kind?: IonKin
   return resolveIonStructure(label, kind)?.smiles;
 }
 
+/** True when a SMILES string represents one charged atom, such as [Cl-] or [Li+]. */
+export function isMonatomicIonSmiles(smiles: string | null | undefined): boolean {
+  return /^\[(?:\d+)?[A-Z][a-z]?[+-]\]$/.test(smiles?.trim() ?? "");
+}
+
 /**
  * The curated catalog as plain structures (aliases dropped) — the enumerable
  * half of the design space for the prediction module. Pattern ions (CnMIM,
@@ -111,24 +116,30 @@ export function listCuratedIons(kind: IonKind): IonStructure[] {
 }
 
 export function resolveIonStructure(label: string | null | undefined, kind?: IonKind): IonStructure | null {
-  const key = normalizeIonKey(label);
-  if (!key) return null;
+  for (const key of ionKeyCandidates(label)) {
+    if (!kind || kind === "cation") {
+      const exact = CATION_ALIASES.get(key);
+      if (exact) return exact;
+      const patterned = resolvePatternCation(key);
+      if (patterned) return patterned;
+    }
 
-  if (!kind || kind === "cation") {
-    const exact = CATION_ALIASES.get(key);
-    if (exact) return exact;
-    const patterned = resolvePatternCation(key);
-    if (patterned) return patterned;
-  }
-
-  if (!kind || kind === "anion") {
-    const exact = ANION_ALIASES.get(key);
-    if (exact) return exact;
-    const patterned = resolvePatternAnion(key);
-    if (patterned) return patterned;
+    if (!kind || kind === "anion") {
+      const exact = ANION_ALIASES.get(key);
+      if (exact) return exact;
+      const patterned = resolvePatternAnion(key);
+      if (patterned) return patterned;
+    }
   }
 
   return null;
+}
+
+/** Remove a trailing whole-salt acronym only when the remaining text is a known ion. */
+export function normalizeExtractedIonLabel(label: string | null | undefined, kind: IonKind): string {
+  const raw = label?.trim() ?? "";
+  const annotated = raw.match(/^(.*?)\s+\([^()]+\)\s*$/)?.[1]?.trim();
+  return annotated && resolveIonStructure(annotated, kind) ? annotated : raw;
 }
 
 export function standardizeIonLabel(label: string | null | undefined, kind?: IonKind): string {
@@ -146,6 +157,13 @@ export function normalizeIonKey(label: string | null | undefined): string {
   return stripOuterIonSyntax(label).replace(/[^a-z0-9]/g, "");
 }
 
+function ionKeyCandidates(label: string | null | undefined): string[] {
+  const raw = label?.trim() ?? "";
+  if (!raw) return [];
+  const annotated = raw.match(/^(.*?)\s+\([^()]+\)\s*$/)?.[1]?.trim();
+  return [...new Set([normalizeIonKey(raw), annotated ? normalizeIonKey(annotated) : ""].filter(Boolean))];
+}
+
 function subscriptDigits(label: string): string {
   return label.replace(/iC/g, "ⁱC").replace(/\d/g, (digit) => SUBSCRIPT_DIGITS[Number(digit)] ?? digit);
 }
@@ -154,7 +172,7 @@ function buildAliasMap(ions: CuratedIon[]): Map<string, IonStructure> {
   const map = new Map<string, IonStructure>();
   for (const ion of ions) {
     const structure: IonStructure = { ...ion, source: "curated" };
-    for (const alias of ion.aliases) {
+    for (const alias of [ion.label, ion.name, ...ion.aliases]) {
       map.set(normalizeIonKey(alias), structure);
     }
   }

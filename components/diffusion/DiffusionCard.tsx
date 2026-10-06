@@ -24,6 +24,15 @@ import {
   type UnitMode,
 } from "../recordCardParts";
 
+/** Dataset-import lineage keys are bookkeeping, not user data — hide them from the card. */
+const INTERNAL_FLEXIBLE_KEYS = new Set([
+  "dataset_filename",
+  "dataset_sheet",
+  "dataset_row",
+  "dataset_fingerprint",
+  "dataset_source",
+]);
+
 /** System-identity facets (see buildSystemFacets in RecordCard): the IL and the diffusing species. */
 export function buildDiffusionSystemFacets(record: DiffusionRecord, units: UnitMode): ConditionItem[] {
   const { core, extended: e } = record;
@@ -61,18 +70,6 @@ function buildDiffusionConditions(record: DiffusionRecord, units: UnitMode): Con
   const prov = record.provenance ?? {};
   const items: ConditionItem[] = [];
 
-  // Show species in the right-side conditions (with cation/anion indicator)
-  if (core.species) {
-    const isCation = /cation|\+$/i.test(core.species);
-    const isAnion = /anion|-$/i.test(core.species);
-    const kind = isCation ? "Cation" : isAnion ? "Anion" : undefined;
-    // Show only the ion kind label (Cation / Anion) in the condition chips
-    if (kind) items.push({ label: "Species", value: kind, prov: prov.species, field: "species" });
-    else items.push({ label: "Species", value: core.species, prov: prov.species, field: "species" });
-  }
-  if (e.nucleus) {
-    items.push({ label: "Nucleus", value: e.nucleus, prov: prov.nucleus, field: "nucleus" });
-  }
   if (core.temperature) {
     items.push({
       label: "Temp",
@@ -175,17 +172,38 @@ export function DiffusionCard({
   const svgId = useId().replace(/:/g, "");
   const methodValue = formatMethod(e.method);
   const conditions = buildDiffusionConditions(record, units);
+  const flexibleFields = (record.flexible ?? []).filter(
+    (field) => field.key.trim() && field.value.trim() && !INTERNAL_FLEXIBLE_KEYS.has(field.key)
+  );
+  // Unmapped dataset columns (flexible layer) are reported conditions too —
+  // render them as chips in the same grid instead of a separate panel.
+  const allConditions: ConditionItem[] = [
+    ...conditions,
+    ...flexibleFields.map((field) => ({
+      label: field.key,
+      value: field.unit ? `${field.value} ${field.unit}` : field.value,
+      title: field.note ? `${field.key}: ${field.value} · ${field.note}` : undefined,
+    })),
+  ];
   const showConfidence = record.status === "review" && typeof record.confidence === "number";
   const confidencePct = showConfidence ? Math.round((record.confidence as number) * 100) : null;
   const dValue = core.diffusion ? quantityLabel(core.diffusion, units) : formatD(core.diffusion);
   const standardizedDValue = record.status === "review" && core.diffusion?.std != null ? formatStd(core.diffusion.std, "m²/s") : null;
   const isCationSpecies = /cation|\+$/i.test(core.species);
   const isAnionSpecies = /anion|-$/i.test(core.species);
+  const isOverallSpecies = /overall|all/i.test(core.species);
+  const diffusionTitle = isOverallSpecies
+    ? "Diffusion coefficient of all species"
+    : isCationSpecies
+      ? "Diffusion coefficient of cation"
+      : isAnionSpecies
+        ? "Diffusion coefficient of anion"
+        : "Diffusion coefficient";
   const mode = getDiffusionMode(e.geometry);
   const diffusionReadoutContent = (
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
-        <div className="label-eyebrow text-black">Diffusion coefficient</div>
+        <div className="label-eyebrow text-black">{diffusionTitle}</div>
         <div className="mt-1 font-mono text-[1.8rem] font-semibold leading-none tnum text-black [overflow-wrap:anywhere]">{dValue}</div>
         {standardizedDValue && <div className="mt-2 text-[10px] font-medium text-black">standardized · {standardizedDValue}</div>}
       </div>
@@ -302,7 +320,7 @@ export function DiffusionCard({
             <span className="label-eyebrow">{units === "std" ? "Standardized Conditions" : "Reported Conditions"}</span>
           </div>
           <div className="grid grid-cols-2 gap-1.5 lg:grid-cols-3">
-            {conditions.map((item) => (
+            {allConditions.map((item) => (
               <ConditionChip key={`${item.label}-${item.value}`} item={item} sourceId={record.sourceId} recordId={record.id} domain={domain} />
             ))}
             {!core.temperature && <MissingChip label="Temp" />}

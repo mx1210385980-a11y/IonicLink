@@ -56,10 +56,9 @@ export interface Module<
   /* ---- ingest / completeness ---- */
   ingest: (fields: Fields) => DomainDraft<any, any>;
   /**
-   * Optional hard gate applied to freshly extracted drafts (LLM or mock)
-   * before they enter the review queue. Return false to drop the draft —
-   * e.g. diffusion drops records that carry no D value at all. NOT applied
-   * to curator edits, which go through ingest directly.
+   * Optional database-admission gate. A rejected draft is excluded from every
+   * persistence path, and edits that would make a stored record inadmissible
+   * are rejected. Extraction applies the same gate before presenting results.
    */
   acceptDraft?: (draft: DomainDraft<any, any>) => boolean;
   /** Reverse of ingest — flatten a record back to editable raw fields. */

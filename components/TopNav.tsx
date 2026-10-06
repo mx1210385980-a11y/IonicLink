@@ -9,7 +9,6 @@ const SUBROUTES = [
   { seg: "", label: "Home" },
   { seg: "extract", label: "Extract" },
   { seg: "database", label: "Database" },
-  { seg: "design", label: "Design" },
   { seg: "library", label: "Documents" },
 ];
 
@@ -25,6 +24,8 @@ export function TopNav() {
   const first = parts[1];
   const onDomainPage = isDomain(first);
   const onTeachingPage = first === "teaching";
+  const onMonitorPage = first === "monitor";
+  const onHomePage = pathname === "/";
   const domain: Domain = onDomainPage ? (first as Domain) : DEFAULT_DOMAIN;
   const sub = parts[2] ?? "";
 
@@ -39,11 +40,12 @@ export function TopNav() {
             </span>
           </Link>
 
-          {!onTeachingPage ? (
+          {onMonitorPage && <span className="text-sm font-semibold text-brand-800">Usage monitor</span>}
+          {!onTeachingPage && !onMonitorPage ? (
             <div aria-label="Property workspace" className="flex shrink-0 rounded-[9px] border border-ink-200/90 bg-white/90 p-0.5 text-xs shadow-sm">
               {DOMAINS.map((d) => {
                 const active = onDomainPage && d === domain;
-                const href = sub === "design" && d !== "tribology" ? `/${d}` : `/${d}${sub ? "/" + sub : ""}`;
+                const href = sub === "design" && d !== "tribology" ? `/${d}/database` : `/${d}/${sub || "database"}`;
                 return (
                   <Link
                     key={d}
@@ -60,28 +62,28 @@ export function TopNav() {
           ) : null}
           <Link
             href="/teaching"
-            aria-label="教学实验"
-            title="教学实验"
+            aria-label="AI experiment"
+            title="AI experiment"
             className={`inline-flex min-h-8 shrink-0 items-center justify-center rounded-[8px] px-2 py-1.5 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-brand-200 sm:px-2.5 ${
               onTeachingPage
                 ? "bg-brand-50 text-brand-800 ring-1 ring-brand-100"
                 : "text-ink-700 hover:bg-white/80 hover:text-brand-700"
             }`}
           >
-            <span className="sm:hidden" aria-hidden><TeachingGlyph /></span>
-            <span className="hidden sm:inline">教学实验</span>
+            <span className={onTeachingPage ? "hidden" : "sm:hidden"} aria-hidden><TeachingGlyph /></span>
+            <span className={onTeachingPage ? "" : "hidden sm:inline"}>AI experiment</span>
           </Link>
         </div>
 
         <div className="flex w-full min-w-0 items-center justify-end gap-2">
-          {onDomainPage && (
+          {(onDomainPage || onHomePage) && (
             <nav
               aria-label={`${DOMAIN_LABELS[domain]} sections`}
               className="flex min-w-0 flex-1 items-center justify-start gap-0.5 overflow-x-auto rounded-[9px] sm:gap-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             >
               {SUBROUTES.map((r) => {
-                const href = r.seg === "design" ? "/tribology/design" : r.seg ? `/${domain}/${r.seg}` : `/${domain}`;
-                const active = r.seg ? sub === r.seg : sub === "";
+                const href = r.seg ? `/${domain}/${r.seg}` : "/";
+                const active = r.seg ? onDomainPage && sub === r.seg : onHomePage;
                 return (
                   <Link
                     key={r.seg || "home"}
@@ -96,6 +98,15 @@ export function TopNav() {
               })}
             </nav>
           )}
+          {onTeachingPage && <nav aria-label="AI experiment sections" className="flex min-w-0 flex-1 gap-1 overflow-x-auto">
+            <Link href="/teaching#data-extraction" className="shrink-0 rounded-md px-2 py-2 text-xs font-medium text-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">Data extraction</Link>
+            <Link href="/teaching#prediction" className="shrink-0 rounded-md px-2 py-2 text-xs font-medium text-indigo-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Prediction of μ</Link>
+          </nav>}
+          {onMonitorPage && <nav aria-label="Usage monitor sections" className="flex min-w-0 flex-1 gap-1 overflow-x-auto">
+            <Link href="/monitor#overview" className="shrink-0 rounded-md px-2 py-2 text-xs font-medium text-brand-800 focus-visible:ring-2 focus-visible:ring-brand-500">使用概览</Link>
+            <Link href="/monitor#feedback" className="shrink-0 rounded-md px-2 py-2 text-xs font-medium text-brand-800 focus-visible:ring-2 focus-visible:ring-brand-500">用户反馈</Link>
+          </nav>}
+          <Link href="/monitor" aria-label="Usage monitor" title="Usage monitor" aria-current={onMonitorPage ? "page" : undefined} className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${onMonitorPage ? "bg-brand-50 text-brand-800" : "text-ink-700 hover:bg-white"}`}><svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M4 20V10m6 10V4m6 16v-7m5 7H3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg></Link>
           <AuthControls />
         </div>
       </div>

@@ -29,6 +29,46 @@ try {
 }
 
 import type { TextSpan } from "./evidence";
+import type { BBox } from "./schema";
+
+/** Actual embedded-image placement, including the page rotation and PDF transforms. */
+export async function pdfPageImageBoxes(data: Uint8Array, pageNumber: number): Promise<BBox[]> {
+  const { getDocumentProxy, getResolvedPDFJS } = await import("unpdf");
+  const { OPS } = await getResolvedPDFJS();
+  const pdf = await getDocumentProxy(own(data));
+  try {
+    const page = await pdf.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: 1 });
+    const ops = await page.getOperatorList();
+    const multiply = (a: number[], b: number[]) => [
+      a[0]*b[0]+a[2]*b[1], a[1]*b[0]+a[3]*b[1], a[0]*b[2]+a[2]*b[3],
+      a[1]*b[2]+a[3]*b[3], a[0]*b[4]+a[2]*b[5]+a[4], a[1]*b[4]+a[3]*b[5]+a[5],
+    ];
+    let transform = [1, 0, 0, 1, 0, 0];
+    const stack: number[][] = [];
+    const boxes: BBox[] = [];
+    for (let index = 0; index < ops.fnArray.length; index++) {
+      const op = ops.fnArray[index];
+      if (op === OPS.save) stack.push([...transform]);
+      else if (op === OPS.restore) transform = stack.pop() ?? transform;
+      else if (op === OPS.transform) transform = multiply(transform, ops.argsArray[index]);
+      else if (op === OPS.paintImageXObject || op === OPS.paintInlineImageXObject) {
+        const t = multiply(viewport.transform, transform);
+        const xs = [t[4], t[0]+t[4], t[2]+t[4], t[0]+t[2]+t[4]];
+        const ys = [t[5], t[1]+t[5], t[3]+t[5], t[1]+t[3]+t[5]];
+        const x = Math.max(0, Math.min(...xs)/viewport.width);
+        const y = Math.max(0, Math.min(...ys)/viewport.height);
+        const w = Math.min(1-x, (Math.max(...xs)-Math.min(...xs))/viewport.width);
+        const h = Math.min(1-y, (Math.max(...ys)-Math.min(...ys))/viewport.height);
+        // Logos, inline equations and whole-page scans are not figure crops.
+        if (w > 0.12 && h > 0.07 && !(w > 0.94 && h > 0.9)) boxes.push({ x, y, w, h });
+      }
+    }
+    return boxes;
+  } finally {
+    await pdf.cleanup();
+  }
+}
 
 /**
  * pdf.js takes OWNERSHIP of the bytes it is given (the ArrayBuffer is

@@ -15,9 +15,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <WorkspaceNavigationRail />
-        <div className="min-h-dvh lg:pl-20">
+        <div className="min-h-dvh lg:pl-[190px]">
           <TopNav />
-          <main className="mx-auto w-full max-w-7xl px-4 pb-16 pt-6 sm:px-6">{children}</main>
+          <main className="mx-auto w-full max-w-none px-2 pb-6 pt-3 sm:px-4 lg:px-0 lg:pb-0 lg:pt-0">{children}</main>
         </div>
         <SourceViewer />
       </body>

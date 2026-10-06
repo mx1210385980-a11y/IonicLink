@@ -1,0 +1,20 @@
+import assert from "node:assert/strict";
+import React, { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { TeachingExperimentWorkspace } from "./TeachingExperimentWorkspace";
+
+(globalThis as typeof globalThis & { React: typeof React }).React = React;
+const html = renderToStaticMarkup(createElement(TeachingExperimentWorkspace));
+assert.equal((html.match(/<h1/g) ?? []).length, 1);
+assert.match(html, /id="ai-experiment-title"[^>]*>AI experiment</);
+assert.match(html, /id="data-extraction-title"[^>]*>Data extraction</);
+assert.match(html, /id="prediction-title"[^>]*>Prediction of μ</);
+assert.ok(html.indexOf('id="data-extraction"') < html.indexOf('id="prediction"'));
+for (const group of [1, 2, 3, 4]) assert.match(html, new RegExp(`Group ${group}`));
+assert.match(html, /Round 1/);
+assert.match(html, /Round 2/);
+assert.match(html, /True vs Predicted/);
+assert.match(html, /Literature validation/);
+assert.match(html, /type="checkbox"/);
+assert.match(html, /href="\/teaching\/admin"/);
+console.log("AI experiment combines extraction groups and interactive prediction");

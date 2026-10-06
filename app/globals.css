@@ -1,10 +1,35 @@
+@config "../tailwind.config.ts";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
   color-scheme: light;
-  --grid-line: rgba(15, 23, 42, 0.024);
+}
+
+/* Prediction controls follow their teaching column's width. */
+@container teaching-prediction (max-width: 860px) {
+  .model-preview-model-groups {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .model-preview-reference-models {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .model-preview-regions {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@container teaching-prediction (max-width: 620px) {
+  .model-preview-charts {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .model-preview-regions {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
 }
 
 /* Ketcher is mounted lazily inside the structure-search dialog. */
@@ -24,18 +49,63 @@
   .structure-ketcher-shell {
     min-height: 0;
   }
+
+  [data-testid="review-workbench"] > div:last-child {
+    height: max(32rem, calc(100dvh - 25.25rem));
+  }
+
+  [aria-label="Paper review queue"],
+  [aria-label="Records"] {
+    display: flex;
+    height: 100%;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  [aria-label="Paper review queue"] > div:last-child,
+  [data-testid="review-matrix-scroller"] {
+    max-height: none;
+    min-height: 0;
+    flex: 1 1 0%;
+    overflow-y: auto;
+  }
 }
 
 body {
   @apply text-ink-900 antialiased;
+  font-size: 1.0625rem;
+  line-height: 1.625rem;
   min-height: 100vh;
-  background-color: #f6f8f8;
-  background-image:
-    radial-gradient(95% 62% at 50% -12%, rgba(13, 148, 136, 0.075), transparent 62%),
-    linear-gradient(var(--grid-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
-  background-size: 100% 100%, 32px 32px, 32px 32px;
-  background-attachment: fixed;
+  background-color: #f4f4f4;
+}
+
+/* Keep compact application labels legible, including legacy fixed pixel sizes. */
+[class~="text-[8px]"],
+[class~="text-[8.5px]"],
+[class~="text-[9px]"],
+[class~="text-[10px]"],
+[class~="text-[11px]"],
+[class~="text-[12px]"],
+[class~="text-[13px]"],
+[class~="sm:text-[13px]"] {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+thead th[class],
+thead th,
+thead th button {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.5rem;
+  color: #172b4d;
+}
+
+.label-eyebrow {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #172b4d;
 }
 
 /* Calm, slim scrollbar that matches the scientific console aesthetic. */
@@ -116,28 +186,28 @@ body {
 
 @layer components {
   .chip {
-    @apply inline-flex items-center gap-1.5 rounded-[7px] border border-ink-200 bg-white px-2.5 py-1 text-xs font-medium text-ink-800;
+    @apply inline-flex items-center gap-1.5 rounded-[2px] border border-ink-200 bg-white px-3 py-1.5 text-sm font-medium text-ink-800;
   }
   .chip-accent {
-    @apply inline-flex items-center gap-1.5 rounded-[7px] border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700;
+    @apply inline-flex items-center gap-1.5 rounded-[2px] border border-brand-300 bg-brand-50 px-3 py-1.5 text-sm font-medium text-brand-800;
   }
   .label-eyebrow {
-    @apply font-sans text-[10px] font-semibold uppercase tracking-eyebrow text-ink-500;
+    @apply font-sans text-xs font-semibold uppercase tracking-[0.08em] text-ink-600;
   }
   .panel {
-    @apply rounded-[10px] border border-ink-200/80 bg-white/90 shadow-card backdrop-blur;
+    @apply rounded-[2px] border border-ink-200 bg-white shadow-none;
   }
   .btn {
-    @apply inline-flex min-h-10 items-center gap-2 rounded-[8px] border border-ink-200 bg-white px-3.5 py-2 text-sm font-medium text-ink-800 transition hover:border-brand-300 hover:text-brand-700 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex min-h-11 items-center gap-2 rounded-[2px] border border-ink-300 bg-white px-4 py-2.5 text-sm font-semibold text-ink-900 transition hover:border-brand-600 hover:text-brand-800 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-primary {
-    @apply inline-flex min-h-10 items-center gap-2 rounded-[8px] bg-brand-700 px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-800 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:cursor-not-allowed disabled:opacity-50;
+    @apply inline-flex min-h-11 items-center gap-2 rounded-[2px] bg-brand-700 px-4 py-2.5 text-sm font-semibold text-white shadow-none transition hover:bg-brand-800 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:cursor-not-allowed disabled:opacity-50;
   }
   .filter-select {
-    @apply min-h-9 rounded-[7px] border border-ink-200 bg-white px-2.5 text-xs font-semibold text-ink-700 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-100;
+    @apply min-h-11 rounded-[2px] border border-ink-300 bg-white px-3 text-sm font-semibold text-ink-800 outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-100;
   }
   .status-mini {
-    @apply inline-flex w-fit items-center rounded-md border px-1.5 py-0.5 font-sans text-[9px] font-bold uppercase tracking-eyebrow;
+    @apply inline-flex w-fit items-center rounded-[2px] border px-2 py-1 font-sans text-xs font-semibold uppercase tracking-[0.06em];
   }
   .status-mini-review {
     @apply border-amber-200 bg-amber-50 text-amber-700;
@@ -158,6 +228,17 @@ body {
   .diffusion-readout,
   .diffusion-readout :where(*) {
     color: white !important;
+  }
+  .conductivity-performance-readout,
+  .conductivity-performance-readout :where(*) {
+    color: white !important;
+  }
+  .conductivity-performance-readout [data-testid="prov-badge"] {
+    color: #0e7490 !important;
+  }
+  .conductivity-performance-readout [data-testid="prov-badge-preview"],
+  .conductivity-performance-readout [data-testid="prov-badge-preview"] :where(*) {
+    color: #0f172a !important;
   }
   .molecule-field {
     @apply relative grid flex-1 place-items-center overflow-hidden rounded-md bg-white/70;
@@ -237,29 +318,11 @@ body {
   .molecule-placeholder {
     filter: contrast(1.18) saturate(1.12) drop-shadow(0 8px 10px var(--molecule-shadow));
   }
-  /* The numeric tabular figure treatment for measured values. */
+  /* Use regular UI numerals for measured values; avoid slashed-zero monospace glyphs. */
   .tnum {
-    font-variant-numeric: tabular-nums;
-  }
-  .wff-range {
-    @apply h-2 w-full cursor-grab appearance-none rounded-full border border-white/70 bg-ink-200/80 shadow-inner accent-brand-600 active:cursor-grabbing;
-  }
-  .wff-range::-webkit-slider-thumb {
-    appearance: none;
-    width: 18px;
-    height: 18px;
-    border-radius: 9999px;
-    border: 3px solid #ffffff;
-    background: linear-gradient(135deg, #14b8a6, #0f766e);
-    box-shadow: 0 8px 18px -8px rgba(15, 118, 110, 0.9), 0 0 0 1px rgba(15, 118, 110, 0.18);
-  }
-  .wff-range::-moz-range-thumb {
-    width: 18px;
-    height: 18px;
-    border-radius: 9999px;
-    border: 3px solid #ffffff;
-    background: linear-gradient(135deg, #14b8a6, #0f766e);
-    box-shadow: 0 8px 18px -8px rgba(15, 118, 110, 0.9), 0 0 0 1px rgba(15, 118, 110, 0.18);
+    font-family: "Segoe UI", Arial, sans-serif !important;
+    font-variant-numeric: tabular-nums lining-nums;
+    font-feature-settings: normal;
   }
 }
 

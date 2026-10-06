@@ -39,23 +39,23 @@ export function canonicalStructureKey(smiles: string): string {
     // distinguish @/@@ configurations in the resulting canonical IDCode.
     const molecule = Molecule.fromSmiles(source);
     const atomCount = molecule.getAllAtoms();
-    if (atomCount === 0) throw new StructureSearchInputError("请先绘制一个离子结构。");
+    if (atomCount === 0) throw new StructureSearchInputError("Draw an ion structure first.");
     if (atomCount > MAX_STRUCTURE_ATOMS) {
-      throw new StructureSearchInputError(`结构超过 ${MAX_STRUCTURE_ATOMS} 个原子，请缩小查询范围。`, 413);
+      throw new StructureSearchInputError(`The structure exceeds ${MAX_STRUCTURE_ATOMS} atoms. Use a smaller query.`, 413);
     }
 
     for (let atom = 0; atom < atomCount; atom += 1) {
       if (molecule.getAtomicNo(atom) <= 0 || molecule.getAtomCustomLabel(atom)) {
-        throw new StructureSearchInputError("精确结构搜索不支持 R 基、伪原子或自定义原子标签。");
+        throw new StructureSearchInputError("Exact structure search does not support R-groups, pseudoatoms, or custom atom labels.");
       }
     }
 
     const idCode = CanonizerUtil.getIDCode(molecule, CanonizerUtil.NORMAL);
-    if (!idCode) throw new StructureSearchInputError("未能读取该结构，请检查原子、键和电荷。");
+    if (!idCode) throw new StructureSearchInputError("Could not read the structure. Check its atoms, bonds, and charges.");
     return `${STRUCTURE_KEY_VERSION}:${idCode}`;
   } catch (error) {
     if (error instanceof StructureSearchInputError) throw error;
-    throw new StructureSearchInputError("结构式无效，请检查原子、键和形式电荷。");
+    throw new StructureSearchInputError("Invalid structure. Check its atoms, bonds, and formal charges.");
   }
 }
 
@@ -72,13 +72,13 @@ export function parseExactStructureSearch(searchParams: URLSearchParams): ExactS
   const mode = searchParams.get(STRUCTURE_MODE_PARAM);
   const hasAnyStructureParam = smiles !== null || targetParam !== null || mode !== null;
   if (!hasAnyStructureParam) return undefined;
-  if (!smiles?.trim()) throw new StructureSearchInputError("structureSmiles 不能为空。");
+  if (!smiles?.trim()) throw new StructureSearchInputError("structureSmiles must not be empty.");
   if (mode !== null && mode !== "exact") {
-    throw new StructureSearchInputError("structureMode 当前仅支持 exact。");
+    throw new StructureSearchInputError("structureMode currently supports exact only.");
   }
   const target = targetParam ?? "any";
   if (!isStructureSearchTarget(target)) {
-    throw new StructureSearchInputError("structureTarget 必须是 any、cation 或 anion。");
+    throw new StructureSearchInputError("structureTarget must be any, cation, or anion.");
   }
   return createExactStructureFilter(smiles, target);
 }

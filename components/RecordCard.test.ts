@@ -2,11 +2,70 @@ import assert from "node:assert/strict";
 import * as React from "react";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { buildConditionItems, RecordCard, type UnitMode } from "./RecordCard";
+import {
+  afmProbeDisplay,
+  buildConditionItems,
+  RecordCard,
+  tribopairMaterialDisplay,
+  tribopairRoughnessDisplay,
+  type UnitMode,
+} from "./RecordCard";
 import { parseQuantity } from "../lib/units";
 import type { IonicRecord } from "../lib/schema";
 
 (globalThis as typeof globalThis & { React: typeof React }).React = React;
+
+assert.deepEqual(afmProbeDisplay("silicon nitride", "Tip · 2 nm"), {
+  material: "silicon nitride",
+  shape: "Tip",
+  radius: "2 nm",
+});
+assert.deepEqual(afmProbeDisplay("silica", "Colloid · Ø 5 µm"), {
+  material: "silica",
+  shape: "Colloid",
+  radius: "≈2.5 µm (from Ø 5 µm)",
+});
+assert.deepEqual(afmProbeDisplay("silica", "Colloid · radius 4.4 ± 0.4 µm"), {
+  material: "silica",
+  shape: "Colloid",
+  radius: "4.4 ± 0.4 µm",
+});
+assert.deepEqual(afmProbeDisplay("silica", "Colloid · Ø 8.8 ± 0.8 µm"), {
+  material: "silica",
+  shape: "Colloid",
+  radius: "≈4.4 ± 0.4 µm (from Ø 8.8 ± 0.8 µm)",
+});
+assert.deepEqual(afmProbeDisplay("silicon (NSC36, Micromasch)", "sharp AFM tip"), {
+  material: "silicon",
+  shape: "sharp AFM tip",
+  radius: "—",
+});
+
+assert.deepEqual(tribopairMaterialDisplay("silica (SiO2)"), {
+  formula: "SiO₂",
+  family: "Silica",
+  tone: "cyan",
+});
+assert.deepEqual(tribopairMaterialDisplay("alumina (Al2O3)"), {
+  formula: "Al₂O₃",
+  family: "Oxide ceramic",
+  tone: "amber",
+});
+assert.deepEqual(tribopairMaterialDisplay("PTFE surface"), {
+  formula: "PTFE",
+  family: "Fluoropolymer",
+  tone: "violet",
+});
+
+const pairedRoughness = parseQuantity("7 ± 1 nm (surface); 17 ± 3 nm (probe)", "length") ?? undefined;
+assert.deepEqual(tribopairRoughnessDisplay(pairedRoughness, "raw"), {
+  probe: "17 ± 3 nm",
+  substrate: "7 ± 1 nm",
+});
+const surfaceOnlyRoughness = parseQuantity("0.60 ± 0.04 nm", "length") ?? undefined;
+assert.deepEqual(tribopairRoughnessDisplay(surfaceOnlyRoughness, "raw"), {
+  substrate: "0.60 ± 0.04 nm",
+});
 
 function makeRecord(): IonicRecord {
   return {
@@ -52,8 +111,9 @@ function makeRecord(): IonicRecord {
     flexible: [],
     provenance: {
       surfaceEnergy: {
-        basis: "assumed",
-        basisNote: "surfaceEnergy filled as a WFF-calibrated model prior, not a reported material property for graphite",
+        basis: "direct",
+        page: 4,
+        quote: "The surface energy was 55 mJ/m2.",
       },
     },
   };
@@ -80,6 +140,34 @@ assert.deepEqual(labelsFor("std"), [
 ]);
 
 console.log("RecordCard condition mapping tests passed");
+
+const visualFigureRecord = makeRecord();
+visualFigureRecord.flexible = [
+  { key: "medium", value: "EAN", note: "Legend series in Fig. 3b." },
+  { key: "cof_uncertainty", value: "±0.02", note: "Estimated from the plotted error bar." },
+];
+const visualFigureConditions = buildConditionItems(visualFigureRecord, "raw");
+assert.ok(
+  visualFigureConditions.some((item) => item.label === "Environment" && item.value === "EAN"),
+  "the data-list condition chips expose the figure legend environment",
+);
+const visualFigureHtml = renderToStaticMarkup(createElement(RecordCard, { record: visualFigureRecord }));
+assert.match(
+  visualFigureHtml,
+  /data-ui="cof-summary"[\s\S]*?0\.0830[\s\S]*?±0\.02/,
+  "the data-list COF summary keeps the extracted uncertainty beside the value",
+);
+
+console.log("RecordCard visual environment and COF uncertainty tests passed");
+
+const materialContrastRecord = makeRecord();
+materialContrastRecord.extended.probe = "silica";
+materialContrastRecord.extended.probeType = "Colloid · radius 4.4 ± 0.4 µm";
+materialContrastRecord.core.substrate = "PTFE surface";
+const materialContrastHtml = renderToStaticMarkup(createElement(RecordCard, { record: materialContrastRecord }));
+assert.doesNotMatch(materialContrastHtml, /data-testid="material-signature"/);
+
+console.log("RecordCard tribopair material contrast tests passed");
 
 const rangeLoadRecord = makeRecord();
 rangeLoadRecord.core.load = parseQuantity("15-30n N", "force");
@@ -169,8 +257,14 @@ assert.match(compactHtml, /data-testid="ionic-liquid-panel"/);
 assert.match(compactHtml, /data-testid="ion-row"/);
 assert.match(compactHtml, /data-testid="ion-pill-cation"/);
 assert.match(compactHtml, /data-testid="ion-pill-anion"/);
+assert.match(compactHtml, /data-testid="ion-stack-cation"[^>]*border-cyan-100/);
+assert.match(compactHtml, /data-testid="ion-stack-anion"[^>]*border-emerald-100/);
+assert.match(compactHtml, /data-testid="ion-pill-cation"[^>]*rounded-none/);
+assert.match(compactHtml, /data-testid="ion-pill-anion"[^>]*rounded-none/);
 assert.match(compactHtml, /data-testid="molecule-view-cation"/);
 assert.match(compactHtml, /data-testid="molecule-view-anion"/);
+assert.match(compactHtml, /data-testid="molecule-view-cation"[^>]*rounded-none/);
+assert.match(compactHtml, /data-testid="molecule-view-anion"[^>]*rounded-none/);
 assert.match(compactHtml, /data-testid="molecule-name-cation"[^>]*>1-butyl-3-methylimidazolium</);
 assert.match(compactHtml, /data-testid="molecule-name-anion"[^>]*>hexafluorophosphate</);
 assert.doesNotMatch(compactHtml, /label-eyebrow[^>]*>Cation<\/span>/);
@@ -198,7 +292,7 @@ assert.match(compactHtml, /Reported Conditions/);
 assert.doesNotMatch(compactHtml, /sm:grid-cols-\[minmax\(0,1fr\)_auto_minmax\(0,1fr\)\]/);
 assert.doesNotMatch(compactHtml, /sm:grid-cols-3/);
 assert.doesNotMatch(compactHtml, /data-testid="contact-fingerprint"/);
-assert.equal((compactHtml.match(/data-testid="tribopair-inline-spec"/g) ?? []).length, 3);
+assert.equal((compactHtml.match(/data-testid="tribopair-inline-spec"/g) ?? []).length, 2);
 assert.doesNotMatch(compactHtml, /data-testid="tribopair-primary-pair"/);
 assert.doesNotMatch(compactHtml, /data-testid="tribopair-spec-item"/);
 assert.doesNotMatch(compactHtml, /data-testid="prov-badge"/);
@@ -206,10 +300,21 @@ assert.doesNotMatch(compactHtml, /<span class="grid h-5 w-5[^"]*">1<\/span>/);
 assert.doesNotMatch(compactHtml, /<span class="grid h-5 w-5[^"]*">2<\/span>/);
 assert.doesNotMatch(compactHtml, /<span class="grid h-5 w-5[^"]*">3<\/span>/);
 assert.match(compactHtml, />AFM</);
+assert.equal((compactHtml.match(/data-testid="afm-probe-row"/g) ?? []).length, 1);
+assert.equal((compactHtml.match(/data-testid="afm-probe-subfield"/g) ?? []).length, 3);
 assert.match(compactHtml, />Probe</);
+assert.match(compactHtml, />Material</);
+assert.match(compactHtml, />Shape</);
+assert.match(compactHtml, />Radius</);
+assert.match(compactHtml, />silicon nitride</);
+assert.match(compactHtml, />Tip</);
+assert.match(compactHtml, />2 nm</);
 assert.match(compactHtml, />Substrate</);
-assert.match(compactHtml, /Root Mean Square Roughness \(Rq\)/);
-assert.doesNotMatch(compactHtml, /truncate[^"]*">Root Mean Square Roughness \(Rq\)<\/span>/);
+assert.match(compactHtml, /data-testid="linked-rq-substrate"/);
+assert.match(compactHtml, /Substrate Root Mean Square Roughness \(Rq\): ~0\.1 nm/);
+assert.match(compactHtml, />Roughness \(Rq\)</);
+assert.doesNotMatch(compactHtml, /data-testid="linked-rq-probe"/);
+assert.doesNotMatch(compactHtml, />Rq roughness</);
 assert.doesNotMatch(compactHtml, /data-testid="tribopair-panel"[^>]*items-stretch/);
 assert.match(compactHtml, /0\.1 nm/);
 assert.doesNotMatch(compactHtml, />Method</);
@@ -227,7 +332,6 @@ assert.doesNotMatch(compactHtml, /γ_s/);
 assert.doesNotMatch(compactHtml, /σ_s/);
 assert.doesNotMatch(compactHtml, /θ_s/);
 assert.doesNotMatch(compactHtml, /\(0001\)/);
-assert.doesNotMatch(compactHtml, /model prior/);
 assert.doesNotMatch(compactHtml, /data-testid="afm-params"/);
 assert.doesNotMatch(compactHtml, /AFM params/);
 assert.doesNotMatch(compactHtml, /ḟ/);
@@ -240,6 +344,21 @@ assert.match(compactHtml, /h-16 w-10/);
 assert.match(compactHtml, /M29 44H57L43 88Z/);
 
 console.log("RecordCard compact layout visual tests passed");
+
+const pairedRoughnessRecord = makeRecord();
+pairedRoughnessRecord.extended.roughness = pairedRoughness;
+pairedRoughnessRecord.provenance = {
+  ...pairedRoughnessRecord.provenance,
+  roughness: { page: 4, quote: "7 ± 1 nm (surface); 17 ± 3 nm (probe)" },
+};
+const pairedRoughnessHtml = renderToStaticMarkup(createElement(RecordCard, { record: pairedRoughnessRecord }));
+assert.match(pairedRoughnessHtml, /data-testid="linked-rq-probe"[^>]*>[\s\S]*?17 ± 3 nm/);
+assert.match(pairedRoughnessHtml, /data-testid="linked-rq-substrate"[^>]*>[\s\S]*?7 ± 1 nm/);
+assert.equal((pairedRoughnessHtml.match(/>Roughness \(Rq\)</g) ?? []).length, 2);
+assert.equal((pairedRoughnessHtml.match(/text-\[13px\]/g) ?? []).length, 2);
+assert.doesNotMatch(pairedRoughnessHtml, />Rq roughness</);
+
+console.log("RecordCard linked probe\/substrate roughness tests passed");
 
 const fullTribopairHtml = renderToStaticMarkup(
   createElement(RecordCard, {
@@ -255,13 +374,39 @@ const fullTribopairHtml = renderToStaticMarkup(
     },
   }),
 );
-assert.match(fullTribopairHtml, /silicon nitride \(SNL, Bruker\) · Tip · 2 nm/);
+assert.match(fullTribopairHtml, />Material</);
+assert.match(fullTribopairHtml, />silicon nitride</);
+assert.doesNotMatch(fullTribopairHtml, />silicon nitride \(SNL, Bruker\)</);
+assert.doesNotMatch(fullTribopairHtml, /role="tooltip"/);
+assert.match(fullTribopairHtml, />Shape</);
+assert.match(fullTribopairHtml, />Tip</);
+assert.match(fullTribopairHtml, />Radius</);
+assert.match(fullTribopairHtml, />2 nm</);
 assert.match(fullTribopairHtml, /highly oriented pyrolytic graphite/);
 assert.doesNotMatch(fullTribopairHtml, /AFM friction force measurements in contact mode/);
 assert.doesNotMatch(fullTribopairHtml, /data-testid="tribopair-contact-value"[^>]*truncate/);
 assert.doesNotMatch(fullTribopairHtml, /data-testid="tribopair-inline-spec"[^>]*truncate/);
 
 console.log("RecordCard full tribopair field display tests passed");
+
+const sfaRecord = makeRecord();
+sfaRecord.core.substrate = "mica";
+sfaRecord.extended = {
+  ...sfaRecord.extended,
+  scale: "nano",
+  method: "Surface Force Balance (SFB)",
+  probe: "mica",
+  probeType: "SFA surface",
+  afm: undefined,
+};
+const sfaHtml = renderToStaticMarkup(createElement(RecordCard, { record: sfaRecord }));
+assert.match(sfaHtml, /data-testid="sfa-illustration"/);
+assert.match(sfaHtml, />SFA</);
+assert.match(sfaHtml, />Surface 1</);
+assert.match(sfaHtml, />Surface 2</);
+assert.doesNotMatch(sfaHtml, /data-testid="afm-probe-illustration"/);
+
+console.log("RecordCard SFA instrument display tests passed");
 
 const macroTribometerRecord = makeRecord();
 macroTribometerRecord.core.substrate = "stainless steel disc";
@@ -362,6 +507,17 @@ assert.match(inferredHtml, /data-smiles="\[P-\]\(F\)\(F\)\(F\)\(F\)\(F\)F"/);
 
 console.log("RecordCard inferred ion structure tests passed");
 
+const ethylammoniumStructureRecord = makeRecord();
+ethylammoniumStructureRecord.core.ionicLiquid = {
+  cation: "[EtNH3]",
+  anion: "[NO3]",
+};
+const ethylammoniumHtml = renderToStaticMarkup(createElement(RecordCard, { record: ethylammoniumStructureRecord }));
+assert.match(ethylammoniumHtml, /data-smiles="CC\[NH3\+\]"/);
+assert.match(ethylammoniumHtml, /data-smiles="\[O-\]\[N\+\]\(=O\)\[O-\]"/);
+
+console.log("RecordCard ethylammonium nitrate structure tests passed");
+
 const unmappedAnionRecord = makeRecord();
 unmappedAnionRecord.core.ionicLiquid = {
   cation: "[BMIM]",
@@ -387,3 +543,13 @@ for (const anion of ["[AOT]", "[A4BMB]", "[A8BMB]", "[A12BMB]"]) {
 }
 
 console.log("RecordCard curated long-chain anion structure tests passed");
+
+const compactRecord = makeRecord();
+compactRecord.status = "official";
+const browseCompactHtml = renderToStaticMarkup(createElement(RecordCard, { record: compactRecord, compact: true, units: "std" }));
+assert.doesNotMatch(browseCompactHtml, />checked</);
+assert.match(browseCompactHtml, /Standardized Conditions/);
+for (const item of buildConditionItems(compactRecord, "std")) assert.ok(browseCompactHtml.includes(item.label), `condition remains visible: ${item.label}`);
+assert.match(browseCompactHtml, /Coefficient of friction/i);
+const ungroupedHtml = renderToStaticMarkup(createElement(RecordCard, { record: compactRecord, compact: true, units: "std" }));
+assert.match(ungroupedHtml, /Standardized Conditions/);

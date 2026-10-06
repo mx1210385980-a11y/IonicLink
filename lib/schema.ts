@@ -292,6 +292,10 @@ export interface BatchJob {
   completedAt?: string;
   /** First time extracted candidates were committed (new jobs only; legacy jobs stay unknown). */
   committedAt?: string;
+  /** Record IDs created by this job, including text uploads without a source document. */
+  recordIds?: string[];
+  /** Derived from current record statuses when listing jobs; never an extraction stage. */
+  checked?: boolean;
   sourceId?: string;
   source?: ExtractionSource;
   model?: string;
@@ -356,8 +360,14 @@ export const EXTRACTION_TOOL_SCHEMA = {
             required: ["title"],
           },
           // base layer
-          cation: { type: "string", description: "Cation shorthand, e.g. [BMIM]. REQUIRED." },
-          anion: { type: "string", description: "Anion shorthand, e.g. [I]. REQUIRED." },
+          cation: {
+            type: "string",
+            description: "Cation species only, e.g. [BMIM] or ethylammonium. Never include a whole-salt acronym such as '(EAN)'. REQUIRED.",
+          },
+          anion: {
+            type: "string",
+            description: "Anion species only, e.g. [I] or nitrate. Never include a whole-salt acronym. REQUIRED.",
+          },
           cationSmiles: { type: "string" },
           anionSmiles: { type: "string" },
           substrate: { type: "string", description: "Counter-surface, e.g. Au(111). REQUIRED." },
@@ -380,7 +390,7 @@ export const EXTRACTION_TOOL_SCHEMA = {
           probeType: {
             type: "string",
             description:
-              'Probe geometry + size as stated, e.g. "Tip · 2 nm" (tip radius), "Colloid · Ø 5 μm" (sphere diameter), "SFA surface". Omit the size when the paper does not state one — never guess.',
+              'Probe geometry + size exactly as stated, including ± uncertainty, e.g. "Tip · radius 2 nm", "Colloid · radius 4.4 ± 0.4 μm", "Colloid · Ø 5 ± 0.2 μm" (only when diameter is reported), "SFA surface". Never convert radius to diameter or diameter to radius. Omit the size when the paper does not state one — never guess.',
           },
           velocity: {
             type: "string",

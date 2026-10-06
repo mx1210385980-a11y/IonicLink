@@ -15,9 +15,12 @@ assert.doesNotMatch(moleculeView, /drawWidth \* pixelRatio/);
 assert.doesNotMatch(moleculeView, /bondThickness: bondThickness \* pixelRatio/);
 assert.match(moleculeView, /SmilesDrawer\.SvgDrawer/);
 assert.match(moleculeView, /fontSizeLarge: atomFontSize/);
+assert.match(moleculeView, /const MONATOMIC_CANVAS_SIZE = 56/);
+assert.match(moleculeView, /data-monatomic-ion=\{isMonatomicIon \? "true" : undefined\}/);
 assert.match(css, /\.molecule-canvas\s+\.element\s*{[^}]*font-weight:\s*700/s);
-assert.ok(
-  recordCard.includes('<MoleculeView smiles={il.anionSmiles} ionLabel={anionLabel} kind="anion" label="Anion" width={320} height={116} />')
+assert.match(
+  recordCard,
+  /<MoleculeView\s+smiles=\{il\.anionSmiles\}\s+ionLabel=\{anionLabel\}\s+kind="anion"\s+label="Anion"\s+width=\{320\}\s+height=\{116\}\s+connected\s+\/>/
 );
 
 console.log("Molecule anion motion scale tests passed");

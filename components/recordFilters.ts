@@ -14,6 +14,8 @@ export interface RecordFilters {
   /** Canonical cation keys (normalizeIonKey of the resolved label). Empty = any. */
   cations: string[];
   anions: string[];
+  /** Free-text substrate query. Whitespace-separated terms are AND-matched. */
+  surfaceQuery: string;
   /** Normalized substrate/surface keys. Empty = any. */
   surfaces: string[];
   /** Confined-system geometry modes. Empty = any. Only used by diffusion. */
@@ -29,6 +31,7 @@ export interface RecordFilters {
 export const EMPTY_FILTERS: RecordFilters = {
   cations: [],
   anions: [],
+  surfaceQuery: "",
   surfaces: [],
   confinedSystems: [],
   loadMinN: null,
@@ -46,6 +49,7 @@ export function countActiveFilters(f: RecordFilters): number {
   let n = 0;
   if (f.cations.length) n++;
   if (f.anions.length) n++;
+  if (f.surfaceQuery.trim()) n++;
   if (f.surfaces.length) n++;
   if (f.confinedSystems.length) n++;
   if (f.loadMinN != null || f.loadMaxN != null) n++;
@@ -164,6 +168,14 @@ export function applyRecordFilters(domain: Domain, records: any[], f: RecordFilt
   return records.filter((r) => {
     if (f.cations.length && !f.cations.includes(ionKeyOf(r.core?.ionicLiquid?.cation, "cation"))) return false;
     if (f.anions.length && !f.anions.includes(ionKeyOf(r.core?.ionicLiquid?.anion, "anion"))) return false;
+    if (f.surfaceQuery.trim()) {
+      const surface = surfaceOf(domain, r);
+      if (!surface) return false;
+      const searchable = `${surface} ${standardizeSubstrate(surface)}`.toLowerCase();
+      const compactSearchable = searchable.replace(/[\s()[\]{},._-]+/g, "");
+      const terms = f.surfaceQuery.toLowerCase().trim().split(/\s+/).filter(Boolean);
+      if (!terms.every((term) => searchable.includes(term) || compactSearchable.includes(term.replace(/[^a-z0-9]+/g, "")))) return false;
+    }
     if (f.surfaces.length) {
       const s = surfaceOf(domain, r);
       if (!s || !f.surfaces.includes(surfaceKeyOf(s))) return false;
