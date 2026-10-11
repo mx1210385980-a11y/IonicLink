@@ -57,7 +57,7 @@ export function AuthControls() {
         className="min-h-9 rounded-[8px] border border-ink-200 bg-white px-3 py-2 text-xs font-semibold text-ink-700 transition hover:border-brand-300 hover:text-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-200 disabled:cursor-not-allowed disabled:opacity-50"
         disabled={busy}
         onClick={signOut}
-        title={signOutError ? "Sign-out failed. Try again." : undefined}
+        title={signOutError ? "Sign-out failed. Please try again." : undefined}
         type="button"
       >
         {busy ? "Signing out…" : signOutError ? "Retry sign-out" : "Sign out"}

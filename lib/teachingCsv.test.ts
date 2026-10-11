@@ -229,9 +229,9 @@ const experimentCsv = teachingExperimentToCsv(experimentDashboard);
 assert.ok(experimentCsv.startsWith("\uFEFF"));
 assert.ok(experimentCsv.endsWith("\r\n"));
 assert.equal(experimentCsv.replace(/\r\n/g, "").includes("\n"), false);
-assert.match(experimentCsv, /"实验版本","评分版本","学生标识"/);
-assert.match(experimentCsv, /"人工活跃时间\(s\)"/);
-assert.match(experimentCsv, /"AI墙钟时间\(s\)"/);
+assert.match(experimentCsv, /"Experiment version","Scoring version","Student ID"/);
+assert.match(experimentCsv, /"Manual active time\(s\)"/);
+assert.match(experimentCsv, /"AI elapsed time\(s\)"/);
 assert.ok(
   experimentCsv.includes(`"'${dangerousAlias.replace(/"/g, '""')}"`),
   "experiment aliases with whitespace before a formula must be neutralized"

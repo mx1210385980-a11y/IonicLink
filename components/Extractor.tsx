@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { DatasetImporter } from "@/components/DatasetImporter";
+import { DatasetImporter, isSupportedDataset } from "@/components/DatasetImporter";
 import { ExtractionWorkspaceView } from "@/components/ExtractionWorkspaceView";
 import {
-  enabledPendingPaperFiles,
   isSupportedPaper,
   mergePendingPaperUploads,
+  paperUploadId,
   PaperUploadDialog,
   type PendingPaperUpload,
 } from "@/components/PaperUploadDialog";
@@ -187,9 +187,9 @@ const QUEUE_PROGRESS_STAGES: readonly {
 }[] = [
   { status: "queued", label: "Queued", tone: "border-slate-200 bg-slate-50 text-ink-700" },
   { status: "extracting", label: "Extracting", tone: "border-amber-200 bg-amber-50 text-amber-800" },
-  { status: "done", label: "Ready to review", tone: "border-brand-200 bg-brand-50 text-brand-800" },
+  { status: "done", label: "Sending to review", tone: "border-brand-200 bg-brand-50 text-brand-800" },
   { status: "error", label: "Errors", tone: "border-rose-200 bg-rose-50 text-rose-800" },
-  { status: "committed", label: "Committed", tone: "border-violet-200 bg-violet-50 text-violet-800" },
+  { status: "committed", label: "Awaiting review", tone: "border-violet-200 bg-violet-50 text-violet-800" },
 ];
 
 export function QueueProgress({
@@ -254,40 +254,12 @@ export function mutationRefreshFailureMessage(successDescription: string, error:
   return `${successDescription}, but the queue could not be refreshed. The write already succeeded; do not repeat it. ${detail}`;
 }
 
-export function commitAllIssueMessage({
-  committed,
-  failed,
-  failureDetail,
-  refreshError,
-}: {
-  committed: number;
-  failed: number;
-  failureDetail?: string;
-  refreshError?: unknown;
-}): string | null {
-  const parts: string[] = [];
-  if (failed > 0) {
-    parts.push(
-      `${committed} committed; ${failed} failed.${failureDetail ? ` ${failureDetail}` : ""}`
-    );
-  }
-  if (refreshError) {
-    const detail = requestErrorMessage(refreshError, "Could not refresh the extraction queue.");
-    parts.push(
-      committed > 0
-        ? `${committed} successful commit${committed === 1 ? " is" : "s are"} already complete, but the queue could not be refreshed. Do not repeat successful commits. ${detail}`
-        : `The queue also could not be refreshed. ${detail}`
-    );
-  }
-  return parts.length ? parts.join(" ") : null;
-}
-
 export type ExtractionFileFilter = "all" | "analyzing" | "finished" | "error";
 
-export function jobMatchesFileFilter(status: JobStatus, filter: ExtractionFileFilter): boolean {
-  if (filter === "analyzing") return status === "queued" || status === "extracting";
-  if (filter === "finished") return status === "done" || status === "committed";
-  if (filter === "error") return status === "error";
+export function jobMatchesFileFilter(status: JobStatus, filter: ExtractionFileFilter, hasError = false): boolean {
+  if (filter === "analyzing") return status === "queued" || status === "extracting" || (status === "done" && !hasError);
+  if (filter === "finished") return status === "committed";
+  if (filter === "error") return status === "error" || (status === "done" && hasError);
   return true;
 }
 
@@ -298,7 +270,7 @@ export function filterExtractionJobs(
 ): BatchJob[] {
   const needle = query.trim().toLocaleLowerCase();
   return jobs.filter((job) => {
-    if (!jobMatchesFileFilter(job.status, filter)) return false;
+    if (!jobMatchesFileFilter(job.status, filter, Boolean(job.error))) return false;
     if (!needle) return true;
     return [job.filename, job.model, job.source, job.error]
       .filter((value): value is string => typeof value === "string")
@@ -309,9 +281,9 @@ export function filterExtractionJobs(
 const STATUS_LABELS: Record<JobStatus, string> = {
   queued: "Waiting",
   extracting: "Extracting",
-  done: "Ready for review",
+  done: "Sending to review",
   error: "Extraction failed",
-  committed: "Sent to review",
+  committed: "Awaiting review",
 };
 
 const STATUS_DOTS: Record<JobStatus, string> = {
@@ -319,40 +291,24 @@ const STATUS_DOTS: Record<JobStatus, string> = {
   extracting: "bg-blue-500",
   done: "bg-emerald-500",
   error: "bg-rose-500",
-  committed: "bg-violet-500",
+  committed: "bg-emerald-600",
 };
 
-/**
- * Unified extraction surface. Drop one or many PDFs (or paste text) — every
- * input becomes a background job in one queue. When a job finishes, its
- * candidates are individually reviewable: deselect any you don't want, then
- * commit just the selected ones to the Review Queue.
- */
-export function Extractor({
-  domain = DEFAULT_DOMAIN,
-  live = null,
-}: {
-  domain?: Domain;
-  live?: boolean | null;
-}) {
+/** Unified upload queue. Successful extractions are sent to review by the server. */
+export function Extractor({ domain = DEFAULT_DOMAIN }: { domain?: Domain }) {
   const [jobs, setJobs] = useState<BatchJob[]>([]);
-  const [history, setHistory] = useState<JobHistorySummary>(EMPTY_JOB_HISTORY);
-  const [draining, setDraining] = useState(false);
-  const [concurrency, setConcurrency] = useState(1);
   const [busy, setBusy] = useState(false);
   const [processing, setProcessing] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [over, setOver] = useState(false);
-  const [text, setText] = useState("");
   const [skipped, setSkipped] = useState<SkippedFile[] | null>(null);
   const [fileFilter, setFileFilter] = useState<ExtractionFileFilter>("all");
   const [query, setQuery] = useState("");
-  const [inputMode, setInputMode] = useState<"text" | "dataset" | null>(null);
-  const [showInsights, setShowInsights] = useState(false);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  const [pageSize, setPageSize] = useState(5);
   const [pendingUploads, setPendingUploads] = useState<PendingPaperUpload[]>([]);
+  const [pendingDatasetFiles, setPendingDatasetFiles] = useState<File[]>([]);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshGenerationRef = useRef(0);
@@ -384,9 +340,6 @@ export function Extractor({
         )
       ) return null;
       setJobs(data.jobs);
-      setHistory(jobHistoryFromPayload(data.history));
-      setDraining(data.draining);
-      if (data.concurrency) setConcurrency(data.concurrency);
       return data;
     } catch (requestError) {
       if (
@@ -409,14 +362,11 @@ export function Extractor({
     refreshRequestRef.current?.abort();
     refreshRequestRef.current = null;
     setJobs([]);
-    setHistory(EMPTY_JOB_HISTORY);
-    setDraining(false);
     setFileFilter("all");
     setQuery("");
-    setInputMode(null);
-    setShowInsights(false);
     setPage(1);
     setPendingUploads([]);
+    setPendingDatasetFiles([]);
     setUploadDialogOpen(false);
     setError(null);
     return () => {
@@ -455,8 +405,37 @@ export function Extractor({
     setUploadDialogOpen(true);
   };
 
+  const stageExtractionFiles = (files: FileList | File[]) => {
+    const list = Array.from(files);
+    if (list.length === 0 || busy || processing) return;
+    const papers = list.filter(isSupportedPaper);
+    const datasets = list.filter(isSupportedDataset);
+    if (papers.length > 0 && datasets.length > 0) {
+      setError("Upload paper files and structured datasets separately so each can follow its own extraction flow.");
+      return;
+    }
+    if (papers.length > 0) {
+      stagePaperFiles(papers);
+      return;
+    }
+    if (datasets.length > 0) {
+      setError(null);
+      setPendingDatasetFiles((current) => {
+        const known = new Set(current.map((file) => paperUploadId(file)));
+        return [...current, ...datasets.filter((file) => {
+          const id = paperUploadId(file);
+          if (known.has(id)) return false;
+          known.add(id);
+          return true;
+        })];
+      });
+      return;
+    }
+    setError("Choose a PDF, TXT, XLSX, CSV, or TSV file.");
+  };
+
   const analyzePendingFiles = async () => {
-    const list = enabledPendingPaperFiles(pendingUploads);
+    const list = pendingUploads.map((item) => item.file);
     if (list.length === 0 || busy || processing) return;
     setBusy(true);
     setError(null);
@@ -491,32 +470,6 @@ export function Extractor({
     setError(null);
   }, [busy]);
 
-  const submitText = async () => {
-    if (!text.trim() || busy || processing) return;
-    setBusy(true);
-    setError(null);
-    setSkipped(null);
-    try {
-      const form = new FormData();
-      form.append("text", text);
-      await requestJson(
-        `/api/${domain}/batch`,
-        { method: "POST", body: form },
-        "Could not add the text to the queue"
-      );
-      setText("");
-      try {
-        await refresh();
-      } catch (refreshError) {
-        setError(mutationRefreshFailureMessage("The text was added to the queue", refreshError));
-      }
-    } catch (requestError) {
-      setError(requestErrorMessage(requestError, "Could not add the text to the queue. Please try again."));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const runQueueAction = async (
     key: string,
     fallback: string,
@@ -545,46 +498,19 @@ export function Extractor({
     }
   };
 
-  const commitAll = async () => {
-    const done = jobs.filter((j) => j.status === "done");
-    if (done.length === 0 || processing || busy) return;
-    setProcessing("commit-all");
-    setError(null);
-    try {
-      const results = await Promise.allSettled(
-        done.map((job) =>
-          requestJson(
-            `/api/${domain}/batch/${encodeURIComponent(job.id)}`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ action: "commit" }),
-            },
-            `Could not commit ${job.filename}`
-          )
-        )
-      );
-      const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
-      const committed = results.length - failures.length;
-      let refreshError: unknown;
-      try {
-        await refresh();
-      } catch (error) {
-        refreshError = error;
+  const retry = async (job: BatchJob) => {
+    await runQueueAction(
+      `retry:${job.id}`,
+      "Could not retry this job. Please try again.",
+      "The retry was accepted",
+      async () => {
+        await requestJson(
+          `/api/${domain}/batch/${encodeURIComponent(job.id)}`,
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "retry" }) },
+          "Could not retry this job"
+        );
       }
-      setError(
-        commitAllIssueMessage({
-          committed,
-          failed: failures.length,
-          failureDetail: failures.length
-            ? requestErrorMessage(failures[0].reason, "One or more jobs failed.")
-            : undefined,
-          refreshError,
-        })
-      );
-    } finally {
-      setProcessing(null);
-    }
+    );
   };
 
   const remove = async (job: BatchJob) => {
@@ -631,17 +557,6 @@ export function Extractor({
       }
     );
   };
-  const clearFinished = async () => {
-    await runQueueAction(
-      "clear",
-      "Could not clear finished jobs. Please try again.",
-      "Finished jobs were cleared",
-      async () => {
-        await requestJson(`/api/${domain}/batch`, { method: "DELETE" }, "Could not clear finished jobs");
-      }
-    );
-  };
-
   const manualRefresh = async () => {
     if (processing || busy) return;
     setProcessing("refresh");
@@ -656,12 +571,11 @@ export function Extractor({
   };
 
   const counts = summarizeQueue(jobs);
-  const clearableCount = counts.done + counts.error + counts.committed;
   const filterCounts: Record<ExtractionFileFilter, number> = {
     all: jobs.length,
-    analyzing: counts.queued + counts.extracting,
-    finished: counts.done + counts.committed,
-    error: counts.error,
+    analyzing: jobs.filter((job) => jobMatchesFileFilter(job.status, "analyzing", Boolean(job.error))).length,
+    finished: counts.committed,
+    error: jobs.filter((job) => jobMatchesFileFilter(job.status, "error", Boolean(job.error))).length,
   };
   const filteredJobs = useMemo(() => {
     const matches = filterExtractionJobs(jobs, fileFilter, query);
@@ -682,12 +596,9 @@ export function Extractor({
     <>
       <ExtractionWorkspaceView
         domain={domain}
-        live={live}
         jobs={jobs}
         pageJobs={pageJobs}
         filteredCount={filteredJobs.length}
-        counts={counts}
-        clearableCount={clearableCount}
         filterCounts={filterCounts}
         fileFilter={fileFilter}
         onFilterChange={(filter) => {
@@ -699,28 +610,13 @@ export function Extractor({
           setQuery(value);
           setPage(1);
         }}
-        inputMode={inputMode}
-        onInputModeChange={setInputMode}
-        showInsights={showInsights}
-        onToggleInsights={() => setShowInsights((current) => !current)}
         busy={busy}
         processing={processing}
         over={over}
         onDragStateChange={setOver}
-        onUploadFiles={stagePaperFiles}
-        onCommitAll={commitAll}
-        onClearFinished={clearFinished}
+        onUploadFiles={stageExtractionFiles}
+        onRetry={retry}
         onRefresh={manualRefresh}
-        text={text}
-        onTextChange={setText}
-        onSubmitText={submitText}
-        datasetPanel={<DatasetImporter domain={domain} />}
-        insightsPanel={
-          <>
-            <QueueProgress jobs={jobs} draining={draining} concurrency={concurrency} />
-            <HistoryProgress history={history} />
-          </>
-        }
         notices={
           error || skipped ? (
             <>
@@ -733,7 +629,7 @@ export function Extractor({
         sortDirection={sortDirection}
         onToggleSort={() => setSortDirection((current) => current === "asc" ? "desc" : "asc")}
         onRemove={remove}
-        renderStatus={(status) => <StatusPill status={status} />}
+        renderStatus={(status, error, checked) => <StatusPill status={status} error={error} checked={checked} />}
         renderFileIcon={() => <FileIcon />}
         currentPage={currentPage}
         totalPages={totalPages}
@@ -750,53 +646,49 @@ export function Extractor({
         busy={busy}
         error={uploadDialogOpen ? error : null}
         onAddFiles={stagePaperFiles}
-        onToggle={(id) => {
-          setPendingUploads((current) => current.map((item) => (
-            item.id === id ? { ...item, enabled: !item.enabled } : item
-          )));
-        }}
         onRemove={(id) => {
           setPendingUploads((current) => current.filter((item) => item.id !== id));
         }}
         onCancel={cancelPendingUploads}
         onAnalyze={analyzePendingFiles}
       />
+      {pendingDatasetFiles[0] && <DatasetImporter domain={domain} file={pendingDatasetFiles[0]} onClose={() => setPendingDatasetFiles((current) => current.slice(1))} />}
     </>
   );
 }
 
 export function CommittedJobsNotice({ domain }: { domain: Domain }) {
   return (
-    <div className="border-t border-slate-100 px-5 py-3 text-xs text-ink-700">
-      Committed candidates are in the{" "}
-      <Link href={`/${domain}/database?status=review`} className="font-semibold text-brand-600 underline">
-        Review Queue
+    <div className="text-xs text-ink-600">
+      <Link href={`/${domain}/database?status=review`} className="inline-flex items-center gap-2 rounded font-medium text-brand-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
+        Open review queue
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M5 12h14m-5-5 5 5-5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </Link>
-      .
     </div>
   );
 }
 
-function StatusPill({ status }: { status: JobStatus }) {
+export function StatusPill({ status, error, checked }: { status: JobStatus; error?: string | null; checked?: boolean }) {
+  const isChecked = status === "committed" && checked;
   const map: Record<JobStatus, string> = {
-    queued: "border-amber-200 bg-amber-50 text-amber-700",
-    extracting: "border-amber-200 bg-amber-50 text-amber-700 animate-pulse",
-    done: "border-brand-200 bg-brand-50 text-brand-700",
-    error: "border-rose-200 bg-rose-50 text-rose-700",
-    committed: "border-violet-200 bg-violet-50 text-violet-700",
+    queued: "text-ink-600",
+    extracting: "text-amber-700",
+    done: "text-brand-700",
+    error: "text-rose-700",
+    committed: "text-yellow-700",
   };
   return (
-    <span className={`inline-flex min-w-[8.75rem] items-center gap-2 rounded-full border px-3 py-2 text-xs font-semibold ${map[status]}`}>
-      <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${STATUS_DOTS[status]}`} />
-      <span className="truncate">{STATUS_LABELS[status]}</span>
+    <span className={`inline-flex max-w-full items-center gap-1.5 text-xs font-medium ${isChecked ? "text-emerald-700" : status === "done" && error ? "text-rose-700" : map[status]}`}>
+      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${status === "committed" && !isChecked ? "bg-yellow-500" : status === "done" && error ? "bg-rose-500" : STATUS_DOTS[status]} ${status === "extracting" ? "motion-safe:animate-pulse" : ""}`} />
+      <span className="truncate">{isChecked ? "Checked" : status === "done" && error ? "Review transfer failed" : STATUS_LABELS[status]}</span>
     </span>
   );
 }
 
 function FileIcon() {
   return (
-    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#edf3ff] text-[#4b77dc]">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+    <span className="grid h-8 w-7 shrink-0 place-items-center text-ink-500">
+      <svg width="21" height="21" viewBox="0 0 24 24" fill="none" aria-hidden>
         <path d="M7 3h7l5 5v13H7a2 2 0 01-2-2V5a2 2 0 012-2z" stroke="currentColor" strokeWidth="1.6" />
         <path d="M14 3v5h5" stroke="currentColor" strokeWidth="1.6" />
       </svg>

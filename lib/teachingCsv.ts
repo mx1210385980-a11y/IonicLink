@@ -7,22 +7,22 @@ import {
 } from "./teachingShared";
 
 const HEADERS = [
-  "组别",
-  "学生标识",
-  "文献编号",
-  "DOI/链接",
-  "来源/期刊",
-  "应填字段数",
-  "人工耗时(min)",
-  "人工已填字段数",
-  "人工正确字段数",
-  "人工覆盖率",
-  "人工准确率",
-  "AI已填字段数",
-  "AI正确字段数",
-  "AI覆盖率",
-  "AI准确率",
-  "状态",
+  "Group",
+  "Student ID",
+  "Paper ID",
+  "DOI / URL",
+  "Source / Journal",
+  "Required fields",
+  "Manual time(min)",
+  "Manual completed fields",
+  "Manual correct fields",
+  "Manual coverage",
+  "Manual accuracy",
+  "AI completed fields",
+  "AI correct fields",
+  "AI coverage",
+  "AI accuracy",
+  "Status",
 ] as const;
 
 interface TrustedCsvCell {
@@ -61,9 +61,9 @@ function percentage(value: number | null): string {
 }
 
 function status(row: TeachingDashboardRow): string {
-  if (row.status === "reviewed") return "已完成";
-  if (row.status === "pending") return "待审核";
-  return "填写中";
+  if (row.status === "reviewed") return "Completed";
+  if (row.status === "pending") return "Awaiting review";
+  return "In progress";
 }
 
 export function teachingRowsToCsv(rows: TeachingDashboardRow[]): string {
@@ -97,45 +97,45 @@ export function teachingRowsToCsv(rows: TeachingDashboardRow[]): string {
 }
 
 const EXPERIMENT_HEADERS = [
-  "实验ID",
-  "实验名称",
-  "实验版本",
-  "评分版本",
-  "学生标识",
-  "序列",
-  "完成状态",
-  "主分析配对状态",
-  "排除原因",
-  "人工文献代码",
-  "人工活跃时间(s)",
-  "人工墙钟时间(s)",
-  "人工计时质量",
-  "人工正确数/6",
-  "人工值准确率",
-  "人工值覆盖率",
-  "人工证据准确率",
-  "人工证据覆盖率",
-  "AI文献代码",
-  "AI活跃时间(s)",
-  "AI墙钟时间(s)",
-  "AI计时质量",
-  "AI正确数/6",
-  "AI值准确率",
-  "AI值覆盖率",
-  "AI证据准确率",
-  "AI证据覆盖率",
-  "AI建议数",
-  "AI采纳数",
-  "AI修改数",
-  "AI初始错误数",
-  "AI纠正数",
-  "AI错误照抄数",
-  "AI采纳率",
-  "AI修改率",
-  "AI纠错率",
-  "AI错误照抄率",
-  "AI-人工活跃时间差(s)",
-  "AI-人工准确率差",
+  "Experiment ID",
+  "Experiment name",
+  "Experiment version",
+  "Scoring version",
+  "Student ID",
+  "Sequence",
+  "Completion status",
+  "Primary analysis pairing",
+  "Exclusion reason",
+  "Manual paper code",
+  "Manual active time(s)",
+  "Manual elapsed time(s)",
+  "Manual timing quality",
+  "Manual correct answers/6",
+  "Manual value accuracy",
+  "Manual value coverage",
+  "Manual evidence accuracy",
+  "Manual evidence coverage",
+  "AI paper code",
+  "AI active time(s)",
+  "AI elapsed time(s)",
+  "AI timing quality",
+  "AI correct answers/6",
+  "AI value accuracy",
+  "AI value coverage",
+  "AI evidence accuracy",
+  "AI evidence coverage",
+  "AI suggestions",
+  "AI adopted",
+  "AI modified",
+  "AI initially incorrect",
+  "AI corrected",
+  "AI incorrectly adopted",
+  "AI adoption rate",
+  "AI modification rate",
+  "AI correction rate",
+  "AI incorrect adoption rate",
+  "AI-Manual active time difference(s)",
+  "AI-Manual accuracy difference",
 ] as const;
 
 function roundCells(round: TeachingRoundAnalysis | null): unknown[] {

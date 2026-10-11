@@ -209,7 +209,7 @@ async function main(): Promise<void> {
     ),
     {
       status: 503,
-      message: "教学实验暂不可用，请稍后重试。",
+      message: "The teaching lab is temporarily unavailable. Try again later.",
       secret: "route-internal-join-secret",
     }
   );
@@ -338,7 +338,7 @@ async function main(): Promise<void> {
     ),
     {
       status: 500,
-      message: "记录有效时间失败，请稍后重试。",
+      message: "Could not save active time. Try again later.",
       secret: "route-internal-heartbeat-secret",
     }
   );
@@ -429,7 +429,7 @@ async function main(): Promise<void> {
     ),
     {
       status: 500,
-      message: "保存草稿失败，请稍后重试。",
+      message: "Could not save the draft. Try again later.",
       secret: "route-internal-patch-secret",
     }
   );
@@ -488,7 +488,7 @@ async function main(): Promise<void> {
     ),
     {
       status: 500,
-      message: "提交失败，请稍后重试。",
+      message: "Submission failed. Try again later.",
       secret: "checksum drift detected",
     }
   );
@@ -803,7 +803,7 @@ async function main(): Promise<void> {
     ),
     {
       status: 500,
-      message: "教师操作失败，请稍后重试。",
+      message: "Instructor action failed. Try again later.",
       secret: "route-internal-review-secret",
     }
   );
@@ -840,7 +840,7 @@ async function main(): Promise<void> {
   const exportBytes = new Uint8Array(await exportResponse.arrayBuffer());
   assert.deepEqual([...exportBytes.slice(0, 3)], [0xef, 0xbb, 0xbf]);
   const exportCsv = new TextDecoder().decode(exportBytes);
-  assert.match(exportCsv, /"\u5b9e\u9a8c\u7248\u672c","\u8bc4\u5206\u7248\u672c","\u5b66\u751f\u6807\u8bc6"/);
+  assert.match(exportCsv, /"Experiment version","Scoring version","Student ID"/);
   assert.match(exportCsv, /Route S001/);
   assert.match(exportCsv, /Route S002/);
   assert.equal(

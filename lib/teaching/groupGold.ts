@@ -1,3 +1,4 @@
+import { TeachingInputError } from "./inputError";
 import Database from "better-sqlite3";
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -106,16 +107,16 @@ export function checkedRecordUsability(record: CheckedTribologyRecord): {
 
 export function loadCheckedRecord(recordId: string): CheckedTribologyRecord {
   const id = clean(recordId, 80);
-  if (!id) throw new Error("缺少记录编号。");
+  if (!id) throw new TeachingInputError("Record ID is required.");
   const sourcePath = tribologyDbPath();
-  if (!existsSync(sourcePath)) throw new Error("正式摩擦数据库尚不存在。");
+  if (!existsSync(sourcePath)) throw new TeachingInputError("The checked tribology database does not exist yet.");
   const source = new Database(sourcePath, { readonly: true, fileMustExist: true });
   try {
     const row = source
       .prepare("SELECT payload FROM records WHERE id = ? AND status = 'official'")
       .get(id) as { payload: string } | undefined;
     const record = row ? parseJson<CheckedTribologyRecord | null>(row.payload, null) : null;
-    if (!record) throw new Error("没有找到这条已审核记录,请重新选择。");
+    if (!record) throw new TeachingInputError("Reviewed record not found. Select another record.");
     return { ...record, id };
   } finally {
     source.close();

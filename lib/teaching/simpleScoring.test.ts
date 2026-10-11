@@ -1,0 +1,22 @@
+import assert from "node:assert/strict";
+import { scoreSimpleRows, simpleCellMatches } from "./simpleScoring";
+import type { SimpleRow } from "./simpleShared";
+const a: SimpleRow = { cation: "EMIM", anion: "BF4", substrate: "steel", temperature: "25 °C", load: "1 N", cof: "0.1" };
+const b: SimpleRow = { ...a, cation: "BMIM", cof: "0.2" };
+assert.equal(scoreSimpleRows([a, b], [b, a]).accuracy, 1);
+assert.equal(scoreSimpleRows([a], [a, a]).accuracy, 0.5);
+assert.equal(scoreSimpleRows([a, b], [a]).accuracy, 0.5);
+assert.equal(simpleCellMatches("temperature", "25 °C", "298.15 K"), true);
+assert.equal(simpleCellMatches("load", "1 N", "1000 mN"), true);
+assert.equal(simpleCellMatches("load", "1 mN", "1 MN"), false);
+assert.equal(simpleCellMatches("cof", "0.1", "0.11"), false);
+assert.equal(simpleCellMatches("anion", "", ""), false);
+assert.equal(simpleCellMatches("anion", "NR", "未报告"), true);
+const initial = scoreSimpleRows([a], [{ ...a, cof: "0.2" }]);
+const overridden = scoreSimpleRows([a], [{ ...a, cof: "0.2" }], { [initial.cells.find(cell => cell.field === "cof")!.key]: true });
+assert.equal(overridden.machineAccuracy, 5 / 6);
+assert.equal(overridden.accuracy, 1);
+// Crossed similarities require global assignment rather than greedy row matching.
+const c = { ...a, anion: "Cl", substrate: "glass", temperature: "30" };
+assert.equal(scoreSimpleRows([a, c], [{ ...a, anion: "Cl" }, a]).correct, 10);
+console.log("simple scoring tests passed");

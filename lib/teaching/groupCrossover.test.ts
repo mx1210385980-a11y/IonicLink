@@ -73,7 +73,7 @@ assert.throws(
       groupCount: 3,
       recordIds: ["rec-1", "rec-2", "rec-3"],
     }),
-  /偶数/
+  /even/
 );
 assert.throws(
   () =>
@@ -83,7 +83,7 @@ assert.throws(
       groupCount: 4,
       recordIds: ["rec-1", "rec-2"],
     }),
-  /恰好 4 条/
+  /exactly 4/
 );
 assert.throws(
   () =>
@@ -93,7 +93,7 @@ assert.throws(
       groupCount: 2,
       recordIds: ["rec-1", "rec-1"],
     }),
-  /重复/
+  /[Dd]uplicate/
 );
 assert.throws(
   () =>
@@ -103,7 +103,7 @@ assert.throws(
       groupCount: 2,
       recordIds: ["rec-1", "rec-review"],
     }),
-  /没有找到/
+  /not found/
 );
 assert.throws(
   () =>
@@ -113,7 +113,7 @@ assert.throws(
       groupCount: 2,
       recordIds: ["rec-1", "rec-incomplete"],
     }),
-  /缺少必需字段/
+  /missing required fields/
 );
 
 const { projectId } = createGroupCrossoverExperiment({
@@ -130,7 +130,7 @@ assert.throws(
       groupCount: 2,
       recordIds: ["rec-1", "rec-2"],
     }),
-  /已被使用/
+  /already in use/
 );
 
 const store = getTeachingDb();
@@ -201,9 +201,9 @@ const importResult = importGroupRoster(projectId, [
 ]);
 assert.equal(importResult.added, 4);
 assert.equal(importResult.rejected.length, 3);
-assert.match(importResult.rejected[0].reason, /组号/);
-assert.match(importResult.rejected[1].reason, /重复/);
-assert.match(importResult.rejected[2].reason, /2-80/);
+assert.match(importResult.rejected[0].reason, /Group number/);
+assert.match(importResult.rejected[1].reason, /[Dd]uplicate/);
+assert.match(importResult.rejected[2].reason, /2–80/);
 
 const rosterBeforeJoin = listGroupRoster(projectId);
 assert.equal(rosterBeforeJoin.length, 4);
@@ -223,11 +223,11 @@ assert.equal(listGroupRoster(projectId).length, 3);
 
 assert.throws(
   () => joinGroupCrossoverExperiment("GROUP-2026-A", "不在名单"),
-  (error) => error instanceof TeachingRosterError && /不在本次实验名单/.test(error.message)
+  (error) => error instanceof TeachingRosterError && /not on the roster/.test(error.message)
 );
 assert.throws(
   () => joinGroupCrossoverExperiment("NO-SUCH-CODE", "张三"),
-  (error) => error instanceof TeachingRosterError && /实验代码/.test(error.message)
+  (error) => error instanceof TeachingRosterError && /experiment code/.test(error.message)
 );
 assert.equal(
   store.prepare("SELECT COUNT(*) FROM teaching_participants WHERE project_id = ?").pluck().get(projectId),
@@ -305,14 +305,14 @@ assert.equal(resumed.participantId, joinOdd.participantId, "rejoin resumes the s
 
 const claimedImport = importGroupRoster(projectId, [{ studentName: "张三", groupNo: 3 }]);
 assert.equal(claimedImport.rejected.length, 1);
-assert.match(claimedImport.rejected[0].reason, /已加入实验/);
+assert.match(claimedImport.rejected[0].reason, /has joined/);
 assert.throws(
   () =>
     deleteGroupRosterEntry(
       projectId,
       listGroupRoster(projectId).find((entry) => entry.studentName === "张三")!.id
     ),
-  /不可删除/
+  /cannot be deleted/
 );
 assert.equal(listGroupRoster(projectId).filter((entry) => entry.claimed).length, 2);
 

@@ -1,15 +1,24 @@
 import assert from "node:assert/strict";
 import { ingest } from "./ingest";
-import { resolveIonStructure, standardizeIonFormula, standardizeIonLabel } from "./ionStructures";
+import { isMonatomicIonSmiles, resolveIonStructure, standardizeIonFormula, standardizeIonLabel } from "./ionStructures";
 import type { ExtractedFields } from "./schema";
 
 assert.equal(resolveIonStructure("[BMIM]", "cation")?.smiles, "CCCCn1cc[n+](C)c1");
+assert.equal(isMonatomicIonSmiles("[I-]"), true);
+assert.equal(isMonatomicIonSmiles("[Cl-]"), true);
+assert.equal(isMonatomicIonSmiles("[Li+]"), true);
+assert.equal(isMonatomicIonSmiles("[BF4-]"), false);
+assert.equal(isMonatomicIonSmiles("[O-][N+](=O)[O-]"), false);
 assert.equal(resolveIonStructure("[C12MIM]", "cation")?.smiles, "CCCCCCCCCCCCn1cc[n+](C)c1");
 assert.equal(resolveIonStructure("[C2C1Im]", "cation")?.smiles, "CCn1cc[n+](C)c1");
 assert.equal(resolveIonStructure("[C4C1Im]", "cation")?.smiles, "CCCCn1cc[n+](C)c1");
 assert.equal(resolveIonStructure("[C6 C1 im]", "cation")?.smiles, "CCCCCCn1cc[n+](C)c1");
 assert.equal(resolveIonStructure("[Py1,4]", "cation")?.label, "[Pyr1,4]");
 assert.equal(resolveIonStructure("[EA]", "cation")?.smiles, "CC[NH3+]");
+assert.equal(resolveIonStructure("[EtNH3]", "cation")?.smiles, "CC[NH3+]");
+assert.equal(resolveIonStructure("EtNH₃⁺", "cation")?.smiles, "CC[NH3+]");
+assert.equal(resolveIonStructure("ethylammonium", "cation")?.smiles, "CC[NH3+]");
+assert.equal(standardizeIonFormula("[EtNH3]", "cation"), "[EA]");
 assert.equal(resolveIonStructure("[Li(G4)]", "cation")?.smiles, "[Li+]OCCOCCOCCOCCOC");
 assert.equal(resolveIonStructure("[HOC4Py]", "cation")?.family, "hydroxyalkyl pyridinium");
 assert.equal(resolveIonStructure("[HOC3MPip]", "cation")?.family, "hydroxyalkyl piperidinium");
@@ -78,5 +87,30 @@ const draft: ExtractedFields = {
 const record = ingest(draft);
 assert.equal(record.core.ionicLiquid.cationSmiles, "CCn1cc[n+](C)c1");
 assert.equal(record.core.ionicLiquid.anionSmiles, "[P-](F)(F)(F)(F)(F)F");
+
+const ethylammoniumRecord = ingest({
+  ...draft,
+  cation: "[EtNH3]",
+  anion: "[NO3]",
+});
+assert.equal(ethylammoniumRecord.core.ionicLiquid.cationSmiles, "CC[NH3+]");
+assert.equal(ethylammoniumRecord.core.ionicLiquid.anionSmiles, "[O-][N+](=O)[O-]");
+
+for (const [cation, expectedName, expectedSmiles] of [
+  ["ethylammonium (EAF)", "ethylammonium", "CC[NH3+]"],
+  ["ethylammonium (EAN)", "ethylammonium", "CC[NH3+]"],
+  ["propylammonium (PAF)", "propylammonium", "CCC[NH3+]"],
+  ["propylammonium (PAN)", "propylammonium", "CCC[NH3+]"],
+  ["ethanolammonium (EtAN)", "ethanolammonium", "OCC[NH3+]"],
+  ["dimethylethylammonium (DMEAF)", "dimethylethylammonium", "[NH+](C)(C)CC"],
+] as const) {
+  const proticRecord = ingest({
+    ...draft,
+    cation,
+    anion: cation.endsWith("F)") ? "formate" : "nitrate",
+  });
+  assert.equal(proticRecord.core.ionicLiquid.cation, expectedName, `${cation} stores only the cation species`);
+  assert.equal(proticRecord.core.ionicLiquid.cationSmiles, expectedSmiles, `${cation} resolves its cation structure`);
+}
 
 console.log("Ion structure resolver tests passed");

@@ -66,28 +66,34 @@ exposed in transit. The reverse proxy must preserve `Host` and send `X-Forwarded
 
 When login is enabled, application pages and data APIs require a general application account. In
 public compatibility mode they retain the previous open-workspace behavior while cross-origin writes
-remain rejected. The `/teaching` experiment remains independent: students use pseudonymous IDs and
-the teacher dashboard continues to use `TEACHING_TEACHER_PASSWORD`.
+remain rejected. The `/teaching` lab remains independent. Students choose AI or manual
+extraction and receive an automatically generated ID for the most recently created experiment.
+The current instructor entry creates a teacher session without checking a password. Neither
+application login nor `TEACHING_TEACHER_PASSWORD` protects this entry; restricted teaching
+deployments need separate access control. `TEACHING_TEACHER_PASSWORD` is still used by the
+retained teaching-session login API.
 
-The server-owned `/opt/ioniclink-v2/.env.production` must define a long, unique
-`TEACHING_TEACHER_PASSWORD` before a teacher can open the results dashboard. Students do not use
-this password and need only a pseudonymous ID. The teaching experiment uses versioned, frozen AI
-suggestions, so it does not require a live OpenAI or Anthropic key; those keys remain optional for
-the separate live extraction workflow.
+Before students join, the teacher creates an experiment from an uploaded tribology PDF and
+confirms a fixed answer key in `/teaching/admin`. The AI group uses the same live extraction
+provider and model configuration as the research workspace. Configure that provider in the
+server-owned `.env.production`; AI teaching extraction returns 503 when it is unavailable.
+The manual group uploads a completed table and self-recorded time. AI edits are persisted with
+**Save draft** or final submission. See [the teaching guide](teaching-lab.md) for scoring,
+timing, and saved-progress behavior.
 
 The deploy entrypoint exports the host data directory and mounts it at `/app/data`. Do not put a
 host-only path inside the container environment. The login store therefore persists as
 `/opt/ioniclink-v2/data/auth.db` on the host and `/app/data/auth.db` in the container; the teaching
 store persists as `/opt/ioniclink-v2/data/teaching.db` on the host and `/app/data/teaching.db` in the container.
 Authentication schema migrations run automatically before the first auth request, including the
-deployment health check. Teaching schema migrations run automatically, and the default experiment
-is initialized on the first student join or authenticated teacher-dashboard load. No seed or manual
-migration command is required.
+deployment health check. Teaching schema migrations and the current lab's tables initialize
+automatically. Experiment creation also stores a source copy under `/app/data/teaching-papers/`.
+Preserve this directory together with `teaching.db` when transferring classroom data.
 
-Once participation has begun, the default experiment's config checksum is immutable. Publish a
-new experiment ID and version for a new class or changed answer key; do not edit the existing
-snapshot in place or delete the production database to restart it. Internal configuration detail
-is logged server-side, while public teaching routes return a generic unavailable response.
+Each experiment's answer key is fixed when the teacher creates it. Create a new experiment for
+a changed paper or answer key; the student entry then selects that newest experiment. Existing
+teaching tables and valid unfinished crossover sessions remain supported. No domain seed or
+manual migration command is required for teaching data.
 
 ## Manual deployment
 

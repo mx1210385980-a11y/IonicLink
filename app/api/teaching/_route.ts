@@ -20,14 +20,14 @@ export async function readTeachingJson(
   if (contentLength !== null) {
     const declaredBytes = Number(contentLength);
     if (!Number.isSafeInteger(declaredBytes) || declaredBytes < 0) {
-      throw new TeachingRequestError("请求长度无效。", 400);
+      throw new TeachingRequestError("Invalid request length.", 400);
     }
     if (declaredBytes > maxBytes) {
-      throw new TeachingRequestError("请求内容过大。", 413);
+      throw new TeachingRequestError("Request is too large.", 413);
     }
   }
 
-  if (!request.body) throw new TeachingRequestError("请求体必须是 JSON。", 400);
+  if (!request.body) throw new TeachingRequestError("Request body must be JSON.", 400);
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
   let totalBytes = 0;
@@ -38,7 +38,7 @@ export async function readTeachingJson(
       totalBytes += value.byteLength;
       if (totalBytes > maxBytes) {
         await reader.cancel().catch(() => undefined);
-        throw new TeachingRequestError("请求内容过大。", 413);
+        throw new TeachingRequestError("Request is too large.", 413);
       }
       chunks.push(value);
     }
@@ -56,7 +56,7 @@ export async function readTeachingJson(
     const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     return JSON.parse(text) as unknown;
   } catch {
-    throw new TeachingRequestError("请求体必须是有效 JSON。", 400);
+    throw new TeachingRequestError("Request body must be valid JSON.", 400);
   }
 }
 

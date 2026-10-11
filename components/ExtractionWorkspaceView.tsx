@@ -1,72 +1,41 @@
 "use client";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Domain } from "@/lib/domain";
 import type { BatchJob, JobStatus } from "@/lib/schema";
 
 type WorkspaceFilter = "all" | "analyzing" | "finished" | "error";
-type InputMode = "text" | "dataset" | null;
-
 const FILTERS: readonly { key: WorkspaceFilter; label: string }[] = [
   { key: "all", label: "All files" },
   { key: "analyzing", label: "Analyzing" },
-  { key: "finished", label: "Finished" },
-  { key: "error", label: "Needs attention" },
+  { key: "finished", label: "Output" },
+  { key: "error", label: "Failed" },
 ];
-
-const STATUS_LABELS: Record<JobStatus, string> = {
-  queued: "Waiting",
-  extracting: "Extracting",
-  done: "Ready for review",
-  error: "Extraction failed",
-  committed: "Sent to review",
-};
-
-const STATUS_DOTS: Record<JobStatus, string> = {
-  queued: "bg-slate-400",
-  extracting: "bg-blue-500",
-  done: "bg-emerald-500",
-  error: "bg-rose-500",
-  committed: "bg-violet-500",
-};
 
 export interface ExtractionWorkspaceViewProps {
   domain: Domain;
-  live: boolean | null;
   jobs: BatchJob[];
   pageJobs: BatchJob[];
   filteredCount: number;
-  counts: Record<JobStatus, number>;
-  clearableCount: number;
   filterCounts: Record<WorkspaceFilter, number>;
   fileFilter: WorkspaceFilter;
   onFilterChange: (filter: WorkspaceFilter) => void;
   query: string;
   onQueryChange: (query: string) => void;
-  inputMode: InputMode;
-  onInputModeChange: (mode: InputMode) => void;
-  showInsights: boolean;
-  onToggleInsights: () => void;
   busy: boolean;
   processing: string | null;
   over: boolean;
   onDragStateChange: (over: boolean) => void;
   onUploadFiles: (files: FileList | File[]) => void;
-  onCommitAll: () => void;
-  onClearFinished: () => void;
+  onRetry: (job: BatchJob) => void;
   onRefresh: () => void;
-  text: string;
-  onTextChange: (value: string) => void;
-  onSubmitText: () => void;
-  datasetPanel: ReactNode;
-  insightsPanel: ReactNode;
   notices: ReactNode;
   committedNotice: ReactNode;
   sortDirection: "asc" | "desc";
   onToggleSort: () => void;
   onRemove: (job: BatchJob) => void;
-  renderStatus: (status: JobStatus) => ReactNode;
+  renderStatus: (status: JobStatus, error?: string | null, checked?: boolean) => ReactNode;
   renderFileIcon: () => ReactNode;
   currentPage: number;
   totalPages: number;
@@ -77,34 +46,21 @@ export interface ExtractionWorkspaceViewProps {
 
 export function ExtractionWorkspaceView({
   domain,
-  live,
   jobs,
   pageJobs,
   filteredCount,
-  counts,
-  clearableCount,
   filterCounts,
   fileFilter,
   onFilterChange,
   query,
   onQueryChange,
-  inputMode,
-  onInputModeChange,
-  showInsights,
-  onToggleInsights,
   busy,
   processing,
   over,
   onDragStateChange,
   onUploadFiles,
-  onCommitAll,
-  onClearFinished,
+  onRetry,
   onRefresh,
-  text,
-  onTextChange,
-  onSubmitText,
-  datasetPanel,
-  insightsPanel,
   notices,
   committedNotice,
   sortDirection,
@@ -119,307 +75,170 @@ export function ExtractionWorkspaceView({
   onPageSizeChange,
 }: ExtractionWorkspaceViewProps) {
   const controlsDisabled = busy || processing !== null;
+  const fileInput = useRef<HTMLInputElement>(null);
+  const openFilePicker = () => fileInput.current?.click();
 
   return (
-    <section
-      aria-label="Extraction file workspace"
-      data-testid="extract-workspace"
-      className="grid min-h-[calc(100dvh-4.25rem)] overflow-hidden border-y border-[#e9edf5] bg-white font-sans lg:h-dvh lg:min-h-[44rem] lg:grid-cols-[270px_minmax(0,1fr)]"
-    >
-      <aside className="flex min-h-0 flex-col border-b border-[#e9edf5] bg-white lg:border-b-0 lg:border-r">
-        <div className="px-5 pb-3 pt-4 lg:pb-4 lg:pt-6">
-          <div className="flex items-center gap-3 text-[#082453]">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#edf3ff] text-[#2456d6]"><FolderIcon /></span>
-            <div>
-              <h2 className="text-lg font-semibold tracking-tight">Extraction files</h2>
-              <p className="mt-0.5 text-[11px] capitalize text-[#8a94ae]">{domain} workspace</p>
-            </div>
-          </div>
-        </div>
-
-        <nav aria-label="Extraction file filters" className="grid grid-cols-2 gap-1 px-3 lg:grid-cols-1">
-          {FILTERS.map((item) => {
-            const active = fileFilter === item.key;
-            return (
-              <button
-                key={item.key}
-                type="button"
-                aria-pressed={active}
-                onClick={() => onFilterChange(item.key)}
-                className={`flex min-h-10 items-center justify-between rounded-xl px-4 text-left text-sm transition focus:outline-none focus:ring-2 focus:ring-[#b9cbff] ${
-                  active
-                    ? "bg-[#f1f5fd] font-semibold text-[#2456d6]"
-                    : "font-medium text-[#7d89aa] hover:bg-[#f8faff] hover:text-[#25406f]"
-                }`}
-              >
-                <span>{item.label}</span>
-                <span className={`font-mono text-[11px] ${active ? "text-[#2456d6]" : "text-[#a2abc1]"}`}>{filterCounts[item.key]}</span>
-              </button>
-            );
-          })}
-        </nav>
-
-        <div className="mx-5 my-3 border-t border-[#edf0f6] lg:my-5" />
-
-        <div className="px-3">
-          <p className="px-4 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#9aa4bb]">Input methods</p>
-          <div className="mt-2 grid grid-cols-3 gap-1 lg:grid-cols-1">
-            <SidebarAction
-              active={inputMode === "text"}
-              icon={<TextInputIcon />}
-              label="Paste paper text"
-              onClick={() => onInputModeChange(inputMode === "text" ? null : "text")}
-            />
-            <SidebarAction
-              active={inputMode === "dataset"}
-              icon={<DatasetIcon />}
-              label="Structured dataset"
-              onClick={() => onInputModeChange(inputMode === "dataset" ? null : "dataset")}
-            />
-            <SidebarAction active={showInsights} icon={<ActivityIcon />} label="Queue analytics" onClick={onToggleInsights} />
-          </div>
-        </div>
-
-        <div className="mt-auto p-3 lg:p-4">
-          <div className="rounded-2xl border border-[#edf0f6] bg-white p-2 shadow-[0_8px_28px_rgba(18,52,112,0.08)] lg:p-3">
-            <label
-              onDragOver={(event) => {
-                event.preventDefault();
-                onDragStateChange(true);
-              }}
-              onDragLeave={() => onDragStateChange(false)}
-              onDrop={(event) => {
-                event.preventDefault();
-                onDragStateChange(false);
-                onUploadFiles(event.dataTransfer.files);
-              }}
-              className={`flex min-h-20 cursor-pointer flex-row items-center justify-center gap-3 rounded-2xl border border-dashed px-3 py-3 text-left transition lg:min-h-44 lg:flex-col lg:gap-0 lg:px-5 lg:py-6 lg:text-center ${
-                over
-                  ? "border-[#2456d6] bg-[#edf3ff]"
-                  : "border-[#c9d5f3] bg-[#f6f8fe] hover:border-[#8fa9ed] hover:bg-[#f2f6ff]"
-              }`}
-            >
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white text-[#173b78] shadow-sm lg:h-12 lg:w-12"><UploadCloudIcon /></span>
-              <span className="text-xs font-semibold leading-5 text-[#0a2b62] lg:mt-4 lg:text-sm">{busy ? "Uploading…" : "Click or drag files here to upload"}</span>
-              <span className="hidden text-[11px] text-[#93a0bd] lg:mt-3 lg:block">PDF or TXT · multiple files</span>
-              <input
-                type="file"
-                accept=".pdf,.txt"
-                multiple
-                className="hidden"
-                disabled={controlsDisabled}
-                onChange={(event) => event.target.files && onUploadFiles(event.target.files)}
-              />
-            </label>
-          </div>
-        </div>
-      </aside>
-
-      <div className="flex min-h-0 min-w-0 flex-col bg-white">
-        <header className="flex flex-wrap items-center justify-between gap-4 border-b border-[#edf0f6] px-5 py-4 lg:min-h-[82px] lg:px-7">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-2xl font-semibold tracking-tight text-[#082453]">All files</h1>
-              {live !== null && (
-                <span
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
-                    live ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-800"
-                  }`}
-                  title={live ? "Records can be reviewed and published after extraction." : "Offline demo candidates can be reviewed, but cannot be published as Checked records."}
-                >
-                  <span className={`h-1.5 w-1.5 rounded-full ${live ? "bg-emerald-500" : "bg-amber-400"}`} />
-                  {live ? "Live extraction" : "Demo mode"}
-                </span>
-              )}
-            </div>
-            <p className="mt-1 text-xs text-[#8b96af]">{filteredCount} shown · {jobs.length} total</p>
-          </div>
-
-          <div className="flex w-full flex-wrap items-center justify-end gap-2 md:w-auto">
-            {jobs.length > 0 && (
-              <>
-                <button
-                  type="button"
-                  onClick={onCommitAll}
-                  disabled={counts.done === 0 || controlsDisabled}
-                  className="inline-flex min-h-10 items-center rounded-xl bg-[#2456d6] px-3.5 text-xs font-semibold text-white transition hover:bg-[#1847c2] focus:outline-none focus:ring-2 focus:ring-[#b9cbff] disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Commit ready
-                </button>
-                <button
-                  type="button"
-                  onClick={onClearFinished}
-                  disabled={clearableCount === 0 || controlsDisabled}
-                  className="inline-flex min-h-10 items-center rounded-xl border border-[#dde3ee] bg-white px-3 text-xs font-semibold text-[#52617f] transition hover:border-[#b9c8e6] hover:text-[#2456d6] focus:outline-none focus:ring-2 focus:ring-[#b9cbff] disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Clear finished
-                </button>
-              </>
-            )}
-            <label className="relative min-w-0 flex-1 md:w-64 md:flex-none">
-              <span className="sr-only">Search extraction files</span>
-              <SearchIcon />
-              <input
-                type="search"
-                value={query}
-                onChange={(event) => onQueryChange(event.target.value)}
-                placeholder="Search files"
-                className="min-h-11 w-full rounded-2xl border border-[#dfe4ee] bg-white pl-10 pr-4 text-sm text-[#273653] outline-none transition placeholder:text-[#a1a9ba] focus:border-[#8ba7ef] focus:ring-2 focus:ring-[#dce6ff]"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={onRefresh}
-              disabled={controlsDisabled}
-              className="inline-flex min-h-11 items-center gap-2 rounded-2xl border border-[#dfe4ee] bg-white px-4 text-sm font-semibold text-[#243451] transition hover:border-[#b9c8e6] hover:text-[#2456d6] focus:outline-none focus:ring-2 focus:ring-[#dce6ff] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <RefreshIcon spinning={processing === "refresh"} />
-              Refresh
-            </button>
+    <section aria-label="Extraction file workspace" data-testid="extract-workspace" className="min-h-dvh bg-[#fafafa] px-4 py-6 font-sans text-ink-900 sm:px-8 lg:px-10 lg:py-8">
+      <div className="mx-auto w-full max-w-[1240px]">
+        <header>
+          <div>
+            <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.035em]">Extraction files</h1>
+            <p className="mt-1.5 text-[13px] capitalize text-ink-600">{domain} workspace</p>
           </div>
         </header>
 
-        {inputMode === "text" && (
-          <section aria-labelledby="paste-paper-title" className="border-b border-[#e9edf5] bg-[#fbfcff] px-5 py-4 lg:px-7">
-            <div className="flex flex-wrap items-end gap-3">
-              <label className="min-w-[16rem] flex-1">
-                <span id="paste-paper-title" className="text-xs font-semibold text-[#304363]">Paste paper text</span>
-                <textarea
-                  value={text}
-                  onChange={(event) => onTextChange(event.target.value)}
-                  placeholder="Paste an abstract, results section, or full paper text…"
-                  className="mt-2 h-24 w-full resize-none rounded-xl border border-[#dfe4ee] bg-white px-3 py-2.5 text-sm text-[#273653] outline-none transition placeholder:text-[#a1a9ba] focus:border-[#8ba7ef] focus:ring-2 focus:ring-[#dce6ff]"
-                />
-              </label>
-              <div className="flex gap-2">
-                <button type="button" onClick={() => onInputModeChange(null)} className="inline-flex min-h-10 items-center rounded-xl border border-[#dfe4ee] bg-white px-4 text-xs font-semibold text-[#66738e] hover:text-[#2456d6]">Cancel</button>
-                <button
-                  type="button"
-                  onClick={onSubmitText}
-                  disabled={controlsDisabled || !text.trim()}
-                  className="inline-flex min-h-10 items-center rounded-xl bg-[#2456d6] px-4 text-xs font-semibold text-white hover:bg-[#1847c2] disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Add to queue
-                </button>
-              </div>
-            </div>
-          </section>
-        )}
+        <input ref={fileInput} aria-label="Upload extraction files" type="file" accept=".pdf,.txt,.xlsx,.csv,.tsv" multiple className="hidden" disabled={controlsDisabled} onChange={(event) => {
+          if (event.target.files?.length) onUploadFiles(event.target.files);
+          event.target.value = "";
+        }} />
+        <button type="button" aria-label="Upload files to extract" disabled={controlsDisabled} onClick={openFilePicker}
+          onDragOver={(event) => { event.preventDefault(); if (!controlsDisabled) onDragStateChange(true); }}
+          onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onDragStateChange(false); }}
+          onDrop={(event) => { event.preventDefault(); onDragStateChange(false); if (!controlsDisabled) onUploadFiles(event.dataTransfer.files); }}
+          className={`group mt-5 flex min-h-[176px] w-full flex-col items-center justify-center gap-5 rounded-xl border-2 border-dashed px-6 py-6 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 disabled:cursor-wait disabled:opacity-50 sm:flex-row sm:justify-start sm:text-left ${over ? "border-brand-600 bg-brand-100" : "border-brand-600/60 bg-brand-50 hover:border-brand-700 hover:bg-brand-100/60"}`}>
+          <span className="grid h-14 w-14 shrink-0 place-items-center rounded-xl bg-white text-brand-700 ring-1 ring-brand-200"><UploadCloudIcon /></span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-xl font-semibold tracking-tight text-brand-900">Extract records</span>
+            <span className="mt-1.5 block text-sm text-brand-800">{busy ? "Uploading…" : over ? "Drop to add files" : "Drop files here to extract"}</span>
+            <span className="mt-2 block text-xs text-[#526a67]">PDF, TXT, XLSX, CSV or TSV · multiple files</span>
+          </span>
+          <span className={`${PRIMARY_BUTTON} shrink-0 group-hover:bg-brand-800`}><PlusIcon />{busy ? "Uploading…" : "Upload files"}</span>
+        </button>
+        {notices && <div role="status" className="mt-4 space-y-2">{notices}</div>}
 
-        {inputMode === "dataset" && <div className="max-h-[26rem] overflow-auto border-b border-[#e9edf5] bg-[#fbfcff] p-4 lg:px-7">{datasetPanel}</div>}
-        {showInsights && <div className="max-h-[25rem] overflow-auto border-b border-[#e9edf5]">{insightsPanel}</div>}
-        {notices && <div className="space-y-2 border-b border-[#e9edf5] px-5 py-3 lg:px-7">{notices}</div>}
-
-        <div className="min-h-[28rem] flex-1 overflow-auto">
-          <table className="w-full min-w-[1100px] table-fixed border-separate border-spacing-0 text-left">
-            <colgroup>
-              <col className="w-[305px]" /><col className="w-[185px]" /><col className="w-[105px]" />
-              <col className="w-[190px]" /><col className="w-[170px]" /><col className="w-[170px]" /><col className="w-[165px]" />
-            </colgroup>
-            <thead className="sticky top-0 z-10 bg-[#f5f7fd] text-[#818baa]">
-              <tr>
-                <th scope="col" className="h-14 border-b border-[#e9edf5] px-3 text-xs font-medium">File name</th>
-                <th scope="col" className="h-14 border-b border-[#e9edf5] px-3 text-xs font-medium">Extraction status</th>
-                <th scope="col" className="h-14 border-b border-[#e9edf5] px-3 text-center text-xs font-medium">Records</th>
-                <th scope="col" className="h-14 border-b border-[#e9edf5] px-3 text-xs font-medium">Source / model</th>
-                <th scope="col" aria-sort={sortDirection === "asc" ? "ascending" : "descending"} className="h-14 border-b border-[#e9edf5] px-3 text-xs font-medium">
-                  <button type="button" onClick={onToggleSort} className="inline-flex items-center gap-1.5 rounded-md focus:outline-none focus:ring-2 focus:ring-[#b9cbff]">
-                    Created <SortIcon direction={sortDirection} />
-                  </button>
-                </th>
-                <th scope="col" className="h-14 border-b border-[#e9edf5] px-3 text-xs font-medium">Finished</th>
-                <th scope="col" className="h-14 border-b border-[#e9edf5] px-3 text-right text-xs font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="bg-white">
-              {pageJobs.map((job) => (
-                    <tr key={job.id} className="group h-24 transition hover:bg-[#fbfcff]">
-                      <td className="border-b border-[#edf0f6] px-3">
-                        <div className="flex min-w-0 items-center gap-3">
-                          {renderFileIcon()}
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-[#2c3650]" title={job.filename}>{job.filename}</p>
-                            <p className="mt-1 text-[11px] text-[#98a2b8]">{fileKind(job.filename)}</p>
-                            {job.status === "error" && job.error && <p className="mt-1 truncate text-[11px] text-rose-600" title={job.error}>{job.error}</p>}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="border-b border-[#edf0f6] px-3">{renderStatus(job.status)}</td>
-                      <td className="border-b border-[#edf0f6] px-3 text-center font-mono text-sm text-[#3e4961] tnum">{job.recordCount || "—"}</td>
-                      <td className="border-b border-[#edf0f6] px-3"><span className="block truncate text-xs text-[#56627c]" title={jobSourceLabel(job)}>{jobSourceLabel(job)}</span></td>
-                      <td className="border-b border-[#edf0f6] px-3 font-mono text-[11px] text-[#4a566e] tnum">{formatJobTime(job.createdAt)}</td>
-                      <td className="border-b border-[#edf0f6] px-3 font-mono text-[11px] text-[#4a566e] tnum">{formatJobTime(job.completedAt ?? job.committedAt)}</td>
-                      <td className="border-b border-[#edf0f6] px-3">
-                        <div className="flex items-center justify-end gap-2">
-                          {job.status === "committed" && <Link href={`/${domain}/database?status=review`} className="min-h-9 rounded-xl border border-[#dbe3f2] bg-white px-3 py-2 text-[11px] font-semibold text-[#2456d6] transition hover:border-[#9eb4eb] hover:bg-[#f4f7ff]">Open review</Link>}
-                          <button
-                            type="button"
-                            onClick={() => onRemove(job)}
-                            disabled={controlsDisabled}
-                            className="grid h-9 w-9 place-items-center rounded-xl border border-[#e1e6ef] text-[#9aa5ba] transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
-                            aria-label={job.sourceId
-                              ? `Delete document and all extracted data: ${job.filename}`
-                              : `Remove extraction job: ${job.filename}`}
-                            title={job.sourceId
-                              ? "Delete document and all extracted data"
-                              : "Remove extraction job"}
-                          >
-                            <TrashIcon />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-              ))}
-
-              {pageJobs.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="h-[28rem] border-b border-[#edf0f6] px-6 text-center">
-                    <div className="mx-auto flex max-w-sm flex-col items-center">
-                      <span className="grid h-14 w-14 place-items-center rounded-2xl bg-[#f2f5fb] text-[#8ea0c1]"><EmptyFilesIcon /></span>
-                      <h2 className="mt-4 text-base font-semibold text-[#263653]">{jobs.length === 0 ? "No extraction files yet" : "No files in this view"}</h2>
-                      <p className="mt-2 text-sm leading-6 text-[#8a95ad]">
-                        {jobs.length === 0 ? "Upload a PDF or TXT file from the left panel to begin extracting candidate records." : "Try another status filter or clear the current search."}
-                      </p>
-                    </div>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        <div className="mt-7 flex items-baseline gap-2.5">
+          <h2 className="text-sm font-semibold">File history</h2>
+          <span className="text-xs text-[#617080]">{jobs.length} {jobs.length === 1 ? "file" : "files"}</span>
+        </div>
+        <div className="mb-3 mt-2 flex flex-wrap items-center justify-between gap-x-5 gap-y-3">
+          <nav aria-label="Extraction file filters" className="flex max-w-full gap-1 overflow-x-auto">
+            {FILTERS.map((item) => <button key={item.key} type="button" aria-pressed={fileFilter === item.key} onClick={() => onFilterChange(item.key)} className={`flex min-h-10 shrink-0 items-center gap-1.5 border-b-2 px-2.5 text-xs transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500 sm:gap-2 sm:px-3 sm:text-[13px] ${fileFilter === item.key ? "border-brand-700 font-medium text-ink-950" : "border-transparent text-ink-600 hover:text-ink-950"}`}>
+              <span>{item.label}</span><span className="rounded bg-ink-100 px-1 text-[11px] tabular-nums text-ink-600">{filterCounts[item.key]}</span>
+            </button>)}
+          </nav>
+          <div className="flex w-full items-center gap-2 sm:w-auto">
+            <label className="relative min-w-0 flex-1 sm:w-56">
+              <span className="sr-only">Search extraction files</span><SearchIcon />
+              <input type="search" value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="Search files" className="h-9 w-full rounded-lg border border-ink-200 bg-white pl-9 pr-3 text-xs outline-none placeholder:text-ink-600 focus:border-brand-600 focus:ring-2 focus:ring-brand-100" />
+            </label>
+            <button type="button" aria-label="Refresh" title="Refresh" onClick={onRefresh} disabled={controlsDisabled} className={`${SECONDARY_BUTTON} !w-9 !px-0`}><RefreshIcon spinning={processing === "refresh"} /></button>
+          </div>
         </div>
 
-        {committedNotice}
-
-        <footer className="flex min-h-16 flex-wrap items-center justify-between gap-4 border-t border-[#e9edf5] bg-white px-5 py-3 lg:px-7">
-          <div aria-label="Extraction status legend" className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            {(Object.keys(STATUS_LABELS) as JobStatus[]).map((status) => (
-              <span key={status} className="inline-flex items-center gap-1.5 whitespace-nowrap text-[11px] font-medium text-[#66738e]">
-                <span className={`h-2.5 w-2.5 rounded-full ${STATUS_DOTS[status]}`} />{STATUS_LABELS[status]}
-              </span>
-            ))}
-          </div>
-          <div className="flex items-center gap-3 text-xs text-[#52617f]">
-            <span className="whitespace-nowrap">Total {filteredCount}</span>
-            <button type="button" onClick={() => onPageChange(Math.max(1, currentPage - 1))} disabled={currentPage <= 1} aria-label="Previous page" className="grid h-9 w-9 place-items-center rounded-full border border-transparent text-[#8590aa] hover:border-[#dfe4ee] hover:text-[#2456d6] disabled:opacity-30"><PaginationIcon direction="previous" /></button>
-            <span className="grid h-9 min-w-9 place-items-center rounded-full bg-[#2456d6] px-2 font-semibold text-white">{currentPage}</span>
-            <button type="button" onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))} disabled={currentPage >= totalPages} aria-label="Next page" className="grid h-9 w-9 place-items-center rounded-full border border-transparent text-[#8590aa] hover:border-[#dfe4ee] hover:text-[#2456d6] disabled:opacity-30"><PaginationIcon direction="next" /></button>
-            <label>
-              <span className="sr-only">Rows per page</span>
-              <select value={pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))} className="min-h-10 rounded-xl border border-[#dfe4ee] bg-white px-3 text-xs font-medium text-[#52617f] outline-none focus:border-[#8ba7ef] focus:ring-2 focus:ring-[#dce6ff]">
-                {[10, 25, 50].map((size) => <option key={size} value={size}>{size}/page</option>)}
-              </select>
-            </label>
-          </div>
-        </footer>
+        <div className="rounded-xl border border-ink-200/80 bg-white">
+          <table aria-label="Extraction files" className="w-full table-fixed border-separate border-spacing-0 text-left">
+            <colgroup><col /><col className="hidden w-[20%] md:table-column" /><col className="hidden w-[8%] md:table-column" /><col className="hidden w-[14%] md:table-column" /><col className="w-14 md:w-32" /></colgroup>
+            <thead className="text-[11px] text-ink-600">
+              <tr>
+                <th scope="col" className="h-9 rounded-tl-xl border-b border-ink-200/70 bg-ink-50/60 px-4 !text-xs !font-medium !text-[#617080]">File name</th>
+                <th scope="col" className="hidden h-9 border-b border-ink-200/70 bg-ink-50/60 px-3 !text-xs !font-medium !text-[#617080] md:table-cell">Status</th>
+                <th scope="col" className="hidden h-9 border-b border-ink-200/70 bg-ink-50/60 px-3 text-center !text-xs !font-medium !text-[#617080] md:table-cell">Records</th>
+                <th scope="col" aria-sort={sortDirection === "asc" ? "ascending" : "descending"} className="hidden h-9 border-b border-ink-200/70 bg-ink-50/60 px-3 !text-xs !font-medium !text-[#617080] md:table-cell">
+                  <button type="button" onClick={onToggleSort} className="inline-flex items-center gap-1.5 rounded !text-xs !font-medium !text-[#617080] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">Created <SortIcon direction={sortDirection} /></button>
+                </th>
+                <th scope="col" className="rounded-tr-xl border-b border-ink-200/70 bg-ink-50/60 px-3 text-right !text-xs !font-medium !text-[#617080]"><span className="hidden md:inline">Actions</span><span className="sr-only md:hidden">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {pageJobs.map((job, index) => <tr key={job.id} className="group md:h-[52px] hover:bg-ink-50/70">
+                <td className="border-b border-ink-100 px-4 py-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="hidden shrink-0 sm:block">{renderFileIcon()}</span>
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <p className="truncate text-xs font-medium leading-5 text-ink-900" title={job.filename}>{job.filename}</p>
+                        <span className="hidden shrink-0 rounded bg-ink-100 px-1.5 py-0.5 text-[0.6875rem] leading-4 text-[#617080] md:inline">{fileKind(job.filename)}</span>
+                      </div>
+                      <p className="mt-0.5 truncate text-xs text-[#617080] md:hidden">{fileKind(job.filename)}</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 md:hidden">{renderStatus(job.status, job.error, job.checked)}<span className="text-[11px] text-ink-600">{job.recordCount} records</span></div>
+                      {job.error && <p className="mt-1 truncate text-xs text-rose-700" title={job.error}>{job.error}</p>}
+                    </div>
+                  </div>
+                </td>
+                <td className="hidden border-b border-ink-100 px-3 md:table-cell">{renderStatus(job.status, job.error, job.checked)}</td>
+                <td className="hidden border-b border-ink-100 px-3 text-center text-xs tabular-nums text-ink-700 md:table-cell">{job.recordCount}</td>
+                <td className="hidden border-b border-ink-100 px-3 text-xs tabular-nums text-ink-600 md:table-cell"><time dateTime={job.createdAt} title={formatJobTime(job.createdAt)}>{formatJobDate(job.createdAt)}</time></td>
+                <td className="border-b border-ink-100 px-2 md:px-3">
+                  <div className="flex flex-col items-center justify-end gap-1 md:flex-row md:gap-2">
+                    {(job.status === "error" || (job.status === "done" && job.error)) && <button type="button" onClick={() => onRetry(job)} disabled={controlsDisabled} aria-label={`Retry ${job.status === "done" ? "review transfer" : "extraction"}: ${job.filename}`} className="rounded px-1 py-2 text-xs font-medium text-brand-700 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:opacity-40">Retry</button>}
+                    {job.status === "committed" && <Link aria-label={`${job.checked ? "View checked records" : "Open review"}: ${job.filename}`} href={`/${domain}/database?status=${job.checked ? "official" : "review"}`} className="hidden rounded px-1 py-2 text-xs font-medium text-brand-700 hover:text-brand-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 md:inline-flex">{job.checked ? "View" : "Review"}</Link>}
+                    <WorkspaceMenu label={`File actions: ${job.filename}`} trigger={<MoreIcon />} compact upward={pageJobs.length >= 5 && index >= pageJobs.length - 2}>
+                      <div className="border-b border-ink-100 px-3 pb-3 pt-2">
+                        <p className="break-words text-xs font-medium leading-5 text-ink-900">{job.filename}</p>
+                        <p className="mt-2 text-[11px] leading-5 text-ink-600">Created · {formatJobTime(job.createdAt)}<br />Finished · {formatJobTime(job.completedAt ?? job.committedAt)}</p>
+                      </div>
+                      {job.status === "committed" && <Link href={`/${domain}/database?status=${job.checked ? "official" : "review"}`} className="mt-1 flex rounded-md px-3 py-2 text-xs font-medium text-brand-700 hover:bg-brand-50">{job.checked ? "View checked records" : "Open review"}</Link>}
+                      <button type="button" onClick={() => onRemove(job)} disabled={controlsDisabled} aria-label={job.sourceId ? `Delete document and all extracted data: ${job.filename}` : `Remove extraction job: ${job.filename}`} className="mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-rose-700 hover:bg-rose-50 disabled:opacity-40"><TrashIcon />{job.sourceId ? "Delete document and data" : "Remove extraction job"}</button>
+                    </WorkspaceMenu>
+                  </div>
+                </td>
+              </tr>)}
+              {pageJobs.length === 0 && <tr><td colSpan={5} className="h-36 px-6 text-center">
+                <div className="mx-auto flex max-w-sm flex-col items-center"><span className="text-ink-400"><EmptyFilesIcon /></span>
+                  <h2 className="mt-4 text-sm font-medium">{jobs.length === 0 ? "No extraction files yet" : "No files in this view"}</h2>
+                  <p className="mt-2 text-xs leading-5 text-ink-600">{jobs.length === 0 ? "Upload a paper or structured data file to start extracting records." : "Try another status filter or clear the current search."}</p>
+                </div>
+              </td></tr>}
+            </tbody>
+          </table>
+          <footer className="flex min-h-12 flex-wrap items-center justify-between gap-3 px-4 py-2 text-xs text-[#617080]">
+            <span aria-live="polite">{filteredCount === 0 ? "0 files" : `${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, filteredCount)} of ${filteredCount} files`}</span>
+            <div className="flex items-center gap-1.5 sm:gap-3">
+              <button type="button" onClick={() => onPageChange(Math.max(1, currentPage - 1))} disabled={currentPage <= 1} aria-label="Previous page" className={ICON_BUTTON}><PaginationIcon direction="previous" /></button>
+              <span className="tabular-nums">{currentPage} / {totalPages}</span>
+              <button type="button" onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))} disabled={currentPage >= totalPages} aria-label="Next page" className={ICON_BUTTON}><PaginationIcon direction="next" /></button>
+              <label><span className="sr-only">Rows per page</span><select value={pageSize} onChange={(event) => onPageSizeChange(Number(event.target.value))} className="h-8 rounded-md border border-ink-200 bg-white px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-brand-500">{[5, 10, 25, 50].map((size) => <option key={size} value={size}>{size} / page</option>)}</select></label>
+            </div>
+          </footer>
+        </div>
+        {committedNotice && <div className="mt-5 flex justify-end">{committedNotice}</div>}
       </div>
     </section>
   );
 }
 
+const PRIMARY_BUTTON = "inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-brand-700 px-5 text-sm font-semibold text-white transition";
+const SECONDARY_BUTTON = "inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-ink-200 bg-white px-3 text-xs font-medium text-ink-800 transition hover:bg-ink-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-40";
+const ICON_BUTTON = "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-ink-600 hover:bg-ink-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:opacity-30";
+
+function WorkspaceMenu({ label, trigger, compact = false, upward = false, children }: { label: string; trigger: ReactNode; compact?: boolean; upward?: boolean; children: ReactNode }) {
+  const ref = useRef<HTMLDetailsElement>(null);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: PointerEvent) => { if (ref.current && !ref.current.contains(event.target as Node)) ref.current.open = false; };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [open]);
+  return <details ref={ref} className="relative" onToggle={(event) => setOpen(event.currentTarget.open)} onKeyDown={(event) => {
+    if (event.key === "Escape" && ref.current) { ref.current.open = false; ref.current.querySelector("summary")?.focus(); }
+  }} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) event.currentTarget.open = false; }}>
+    <summary aria-label={label} className={`list-none cursor-pointer [&::-webkit-details-marker]:hidden ${compact ? ICON_BUTTON : SECONDARY_BUTTON}`}>{trigger}</summary>
+    <div className={`absolute z-20 w-64 max-w-[calc(100vw-3rem)] rounded-xl border border-ink-200 bg-white p-1.5 shadow-lg ${compact ? "right-0" : "left-1/2 -translate-x-1/2 sm:left-auto sm:right-0 sm:translate-x-0"} ${upward ? "bottom-full mb-2" : "top-full mt-2"}`} onClick={(event) => {
+      if ((event.target as Element).closest("button, a") && ref.current) { ref.current.open = false; ref.current.querySelector("summary")?.focus(); }
+    }}>{children}</div>
+  </details>;
+}
+
+function formatJobDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
+function PlusIcon() {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>;
+}
+
+function MoreIcon() {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden><circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" /></svg>;
+}
+
 function fileKind(filename: string): string {
   if (filename === "Pasted text") return "Text input";
-  if (filename.toLocaleLowerCase().endsWith(".txt")) return "TXT file";
-  return "PDF document";
+  if (filename.toLocaleLowerCase().endsWith(".txt")) return "TXT";
+  return "PDF";
 }
 
 function formatJobTime(value?: string): string {
@@ -428,39 +247,8 @@ function formatJobTime(value?: string): string {
   return `${date} ${time.slice(0, 8)}`.trim();
 }
 
-function jobSourceLabel(job: BatchJob): string {
-  if (job.model) return job.model;
-  if (job.source === "mock") return "Demo extractor";
-  if (job.source) return job.source;
-  return job.filename === "Pasted text" ? "Pasted text" : "PDF / text";
-}
-
-function SidebarAction({ active, icon, label, onClick }: { active: boolean; icon: ReactNode; label: string; onClick: () => void }) {
-  return (
-    <button type="button" aria-pressed={active} onClick={onClick} className={`flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl px-2 text-center text-[11px] font-medium transition focus:outline-none focus:ring-2 focus:ring-[#b9cbff] lg:min-h-10 lg:flex-row lg:justify-start lg:gap-3 lg:px-4 lg:text-left lg:text-sm ${active ? "bg-[#edf3ff] text-[#2456d6]" : "text-[#53617d] hover:bg-[#f8faff] hover:text-[#2456d6]"}`}>
-      <span className="grid h-6 w-6 place-items-center text-current">{icon}</span><span>{label}</span>
-    </button>
-  );
-}
-
-function FolderIcon() {
-  return <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M3.5 6.75A1.75 1.75 0 015.25 5h4l2 2h7.5a1.75 1.75 0 011.75 1.75v8.5A1.75 1.75 0 0118.75 19H5.25a1.75 1.75 0 01-1.75-1.75V6.75z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" /></svg>;
-}
-
 function UploadCloudIcon() {
   return <svg width="25" height="25" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M7.5 18.5H6a4 4 0 01-.65-7.95A6.5 6.5 0 0117.9 9.1 4.75 4.75 0 0118.25 18.5H16.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /><path d="M12 19V11m0 0l-3 3m3-3l3 3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-}
-
-function TextInputIcon() {
-  return <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M5 5h14M5 10h14M5 15h8M5 19h5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>;
-}
-
-function DatasetIcon() {
-  return <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden><ellipse cx="12" cy="5.5" rx="7" ry="3" stroke="currentColor" strokeWidth="1.7" /><path d="M5 5.5v6c0 1.66 3.13 3 7 3s7-1.34 7-3v-6M5 11.5v6c0 1.66 3.13 3 7 3s7-1.34 7-3v-6" stroke="currentColor" strokeWidth="1.7" /></svg>;
-}
-
-function ActivityIcon() {
-  return <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M4 17l4.25-4.25 3 3L19.5 7.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /><path d="M15 7.5h4.5V12" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>;
 }
 
 function SearchIcon() {

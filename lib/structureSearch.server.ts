@@ -39,19 +39,19 @@ export function canonicalStructureKey(smiles: string): string {
     // distinguish @/@@ configurations in the resulting canonical IDCode.
     const molecule = Molecule.fromSmiles(source);
     const atomCount = molecule.getAllAtoms();
-    if (atomCount === 0) throw new StructureSearchInputError("Draw one complete ion structure first.");
+    if (atomCount === 0) throw new StructureSearchInputError("Draw an ion structure first.");
     if (atomCount > MAX_STRUCTURE_ATOMS) {
-      throw new StructureSearchInputError(`The structure exceeds ${MAX_STRUCTURE_ATOMS} atoms. Reduce the query scope.`, 413);
+      throw new StructureSearchInputError(`The structure exceeds ${MAX_STRUCTURE_ATOMS} atoms. Use a smaller query.`, 413);
     }
 
     for (let atom = 0; atom < atomCount; atom += 1) {
       if (molecule.getAtomicNo(atom) <= 0 || molecule.getAtomCustomLabel(atom)) {
-        throw new StructureSearchInputError("Exact structure search does not support R groups, pseudo-atoms, or custom atom labels.");
+        throw new StructureSearchInputError("Exact structure search does not support R-groups, pseudoatoms, or custom atom labels.");
       }
     }
 
     const idCode = CanonizerUtil.getIDCode(molecule, CanonizerUtil.NORMAL);
-    if (!idCode) throw new StructureSearchInputError("The structure could not be read. Check its atoms, bonds, and charges.");
+    if (!idCode) throw new StructureSearchInputError("Could not read the structure. Check its atoms, bonds, and charges.");
     return `${STRUCTURE_KEY_VERSION}:${idCode}`;
   } catch (error) {
     if (error instanceof StructureSearchInputError) throw error;

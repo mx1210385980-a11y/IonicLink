@@ -39,7 +39,7 @@ const activeBase = {
   status: "active" as const,
   project: {
     id: "teaching-v1",
-    name: "人工提取与 AI 辅助提取交叉教学实验",
+    name: "Manual extraction与 AI Assisted extraction交叉Teaching lab",
     fields: TEACHING_FIELDS,
   },
   participant: { studentAlias: "S001" },
@@ -102,53 +102,53 @@ const equivalentAiHtml = renderToStaticMarkup(
 );
 const completeHtml = renderToStaticMarkup(createElement(StudentWorkspace, { initial: complete }));
 
-assert.match(manualHtml, /第 1 \/ 2 轮/);
-assert.match(manualHtml, /纯人工提取/);
-assert.match(manualHtml, /论文 A/);
+assert.match(manualHtml, /No. 1 \/ 2 round/);
+assert.match(manualHtml, /Manual extraction/);
+assert.match(manualHtml, /Paper A/);
 assert.match(manualHtml, /只提取 Figure 3 中指定体系的数据/);
 assert.match(manualHtml, /Paper A: Ionic liquid friction/);
 assert.match(manualHtml, /10\.0000\/example-a/);
 assert.match(manualHtml, /Journal of Tribology/);
-assert.match(manualHtml, /打开论文.*PDF|论文来源.*PDF/s);
-assert.match(manualHtml, /DOI 备用链接/);
+assert.match(manualHtml, /Open source paper.*PDF|Paper来源.*PDF/s);
+assert.match(manualHtml, /DOI Alternative link/);
 assert.equal((manualHtml.match(/name="value-/g) ?? []).length, 6);
 assert.equal((manualHtml.match(/name="page-/g) ?? []).length, 6);
 assert.equal((manualHtml.match(/name="evidence-/g) ?? []).length, 6);
-assert.equal((manualHtml.match(/required/g) ?? []).length, 6);
+assert.equal((manualHtml.match(/required=""/g) ?? []).length, 6);
 assert.match(manualHtml, /maxLength="500"/);
 assert.match(manualHtml, /maxLength="40"/);
 assert.match(manualHtml, /maxLength="2000"/);
-assert.match(manualHtml, /页码.*证据.*证据覆盖率|证据覆盖率.*页码.*证据/s);
+assert.match(manualHtml, /page number.*source evidence.*evidence coverage/s);
 assert.match(manualHtml, /role="progressbar"/);
-assert.match(manualHtml, /实验轮次进度[^>]+aria-valuenow="1"/);
-assert.match(manualHtml, /有效用时/);
+assert.match(manualHtml, /Round progress:[^>]+aria-valuenow="1"/);
+assert.match(manualHtml, /Active time/);
 assert.match(manualHtml, /00:00:30/);
 assert.doesNotMatch(
   manualHtml,
-  /AI|aiInitial|初始建议|建议采纳|未修改|已编辑|已核对全部字段|gold|标准答案|评分/
+  /AI|aiInitial|初始建议|建议采纳|Unchanged|Edited|All fields checked|gold|Answer key|评分/
 );
 assert.doesNotMatch(manualHtml, /CONFIDENTIAL_/);
 assert.doesNotMatch(manualHtml, /<main[ >]/);
 
-assert.match(aiHtml, /第 2 \/ 2 轮/);
-assert.match(aiHtml, /AI 辅助提取/);
-assert.match(aiHtml, /逐项核对 AI 初始建议/);
-assert.match(aiHtml, /未修改/);
-assert.match(aiHtml, /已编辑/);
-assert.match(aiHtml, /已核对全部字段/);
+assert.match(aiHtml, /No. 2 \/ 2 round/);
+assert.match(aiHtml, /AI Assisted extraction/);
+assert.match(aiHtml, /Review each AI suggestion/);
+assert.match(aiHtml, /Unchanged/);
+assert.match(aiHtml, /Edited/);
+assert.match(aiHtml, /All fields checked/);
 assert.match(aiHtml, /type="checkbox"/);
-assert.match(aiHtml, /<button[^>]+disabled=""[^>]*>提交第 2 轮<\/button>/);
-assert.doesNotMatch(aiHtml, /gold|标准答案|评分规则|scoring/i);
+assert.match(aiHtml, /<button[^>]+disabled=""[^>]*>Submit round 2 round<\/button>/);
+assert.doesNotMatch(aiHtml, /gold|Answer key|评分规则|scoring/i);
 assert.doesNotMatch(aiHtml, /CONFIDENTIAL_/);
-assert.match(aiHtml, /实验轮次进度[^>]+aria-valuenow="2"/);
-assert.doesNotMatch(equivalentAiHtml, /已编辑/);
-assert.equal((equivalentAiHtml.match(/未修改/g) ?? []).length, 6);
+assert.match(aiHtml, /Round progress:[^>]+aria-valuenow="2"/);
+assert.doesNotMatch(equivalentAiHtml, /Edited/);
+assert.equal((equivalentAiHtml.match(/Unchanged/g) ?? []).length, 6);
 
-assert.match(completeHtml, /两轮实验已完成/);
+assert.match(completeHtml, /Both rounds completed/);
 assert.match(completeHtml, /S001/);
-assert.match(completeHtml, /完成时间/);
-assert.match(completeHtml, /2026\/8\/9 09:00:00/);
-assert.doesNotMatch(completeHtml, /gold|标准答案|正确率|得分|AI 初始建议|scoring/i);
+assert.match(completeHtml, /Completion time/);
+assert.match(completeHtml, /8\/9\/2026, 09:00:00/);
+assert.doesNotMatch(completeHtml, /gold|Answer key|正确率|得分|AI 初始建议|scoring/i);
 assert.doesNotMatch(completeHtml, /<main[ >]/);
 
 assert.equal(normalizeTeachingDraftText("  ＥＭＩＭ\n salt  "), "emim salt");
@@ -314,7 +314,7 @@ const workspaceSource = readFileSync("components/teaching/StudentWorkspace.tsx",
 assert.match(workspaceSource, /\["pointerdown", "keydown", "input", "scroll", "touchstart"\]/);
 assert.match(workspaceSource, /passive: true/);
 assert.match(workspaceSource, /15_000/);
-assert.match(workspaceSource, /闲置，计时已暂停/);
+assert.match(workspaceSource, /Idle · Timer paused/);
 assert.match(workspaceSource, /setConfirmed\(false\)/);
 assert.match(workspaceSource, /submittingRef\.current/);
 assert.match(workspaceSource, /window\.location\.reload\(\)/);

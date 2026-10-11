@@ -1,0 +1,37 @@
+import assert from "node:assert/strict";
+import type { AnalysisField, AnalysisRecord, PlotConfig } from "./analysisTypes";
+import { axisDomain, axisPosition, buildScatterPoints, pointValue, scatterColor, scatterGroup, selectPointsInBox } from "./scatterPlot";
+
+const config: PlotConfig = { x: "load", y: "cof", logX: false, logY: false, groupBy: "method" };
+const field: AnalysisField = { key: "load", label: "Load", numeric: true, getValue: (r) => r.core.load?.std, getQuantity: (r) => r.core.load, format: () => "" };
+const cof: AnalysisField = { key: "cof", label: "COF", numeric: true, getValue: (r) => r.core.cof, format: () => "" };
+const record = (id: string, load: number, raw = `${load} N`): AnalysisRecord => ({ id, createdAt: "", status: "official", core: { load: { raw, value: load, unit: "N", std: load, stdUnit: "N" }, cof: 0.1 }, extended: { method: "AFM", scale: "nano" }, paper: { title: "Paper" }, flexible: [] });
+
+assert.deepEqual(axisDomain([]), [0, 1]);
+assert.deepEqual(axisDomain([0, 0]), [-1, 1]);
+assert.deepEqual(axisDomain([1e-9, 1e-9]), [9e-10, 1.1000000000000001e-9]);
+assert.deepEqual(axisDomain([1e-9], true), [-9.5, -8.5]);
+assert.equal(axisPosition(1e-9, [-10, -8], 0, 100, true), 50);
+assert.deepEqual(pointValue(record("zero", 0), field, true), { reason: "Non-positive on log axis" });
+assert.deepEqual(pointValue(record("negative", -2), field, true), { reason: "Non-positive on log axis" });
+for (const raw of [">5 N", "5–10 N", "5-10 N", "5 to 10 N", "≤5 N"]) assert.equal(pointValue(record(raw, 10, raw), field, false).reason, "Range or inequality");
+for (const raw of ["~5 N", "5 ± 1 N", "approximately 5 N"]) assert.equal(pointValue(record(raw, 5, raw), field, false).reason, "Approximate or uncertain");
+assert.equal(pointValue(record("scientific", 1e-9, "1e-9 N"), field, false).value, 1e-9);
+assert.equal(pointValue(record("nonfinite", Infinity), field, false).reason, "Missing or non-numeric");
+const assumed = record("assumed", 293.15, "not stated");
+assert.equal(pointValue(assumed, { ...field, key: "temperature" }, false).reason, "Assumed value");
+assumed.provenance = { load: { basis: "assumed" } };
+assert.equal(pointValue(assumed, field, false).reason, "Assumed value");
+const first = record("first", 1), second = record("second", 2), range = record("range", 4, "2–4 N");
+second.extended.method = "Tribometer"; second.extended.scale = "macro";
+const points = buildScatterPoints([first, second, range], field, cof, config);
+assert.equal(points.excludedCount, 1);
+assert.equal(points.excluded["Range or inequality"], 1);
+assert.deepEqual(points.points.map((p) => p.group), ["AFM · nano", "TRIBOMETER · macro"]);
+assert.equal(scatterGroup(first, "paper"), "Paper");
+assert.equal(scatterColor("AFM"), scatterColor("AFM"));
+const project = (point: { x: number; y: number }) => point;
+assert.deepEqual(selectPointsInBox(points.points, { x1: 0, x2: 1, y1: 0, y2: 1 }, project), ["first"]);
+assert.deepEqual(selectPointsInBox(points.points, { x1: 2, x2: 0, y1: 1, y2: 0 }, project), ["first", "second"]);
+assert.deepEqual(selectPointsInBox(points.points, { x1: 5, x2: 6, y1: 0, y2: 1 }, project), []);
+console.log("scatterPlot tests passed");

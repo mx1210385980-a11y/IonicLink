@@ -3,7 +3,6 @@ import * as React from "react";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
-  enabledPendingPaperFiles,
   formatPaperFileSize,
   isSupportedPaper,
   mergePendingPaperUploads,
@@ -28,7 +27,6 @@ const second = paper("paper-b.txt", 3072, 20);
 const merged = mergePendingPaperUploads([], [first, first, second, paper("cover.jpg", 400, 30)]);
 assert.equal(merged.length, 2, "duplicates and unsupported files are not staged");
 assert.deepEqual(merged.map((item) => item.file.name), ["paper-a.pdf", "paper-b.txt"]);
-assert.deepEqual(enabledPendingPaperFiles([{ ...merged[0], enabled: false }, merged[1]]), [second]);
 
 const items: PendingPaperUpload[] = [merged[0]];
 const noop = () => {};
@@ -38,7 +36,6 @@ const html = renderToStaticMarkup(
     items,
     busy: false,
     onAddFiles: noop,
-    onToggle: noop,
     onRemove: noop,
     onCancel: noop,
     onAnalyze: noop,
@@ -50,7 +47,8 @@ assert.match(html, /PDF upload/);
 assert.match(html, /Extraction starts only after you click Analyze/);
 assert.match(html, /paper-a\.pdf/);
 assert.match(html, /Ready/);
-assert.match(html, /role="switch" aria-checked="true"/);
+assert.match(html, /1 file ready/);
+assert.doesNotMatch(html, /Data extraction|Extract data|role="switch"/);
 assert.match(html, /aria-label="Preview paper-a\.pdf"/);
 assert.match(html, /aria-label="Remove paper-a\.pdf"/);
 assert.match(html, /data-testid="analyze-papers"/);
@@ -61,7 +59,6 @@ const closedHtml = renderToStaticMarkup(
     items,
     busy: false,
     onAddFiles: noop,
-    onToggle: noop,
     onRemove: noop,
     onCancel: noop,
     onAnalyze: noop,

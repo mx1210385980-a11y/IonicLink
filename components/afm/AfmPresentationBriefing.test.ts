@@ -15,10 +15,11 @@ const html = renderToStaticMarkup(createElement(AfmPresentationBriefing, {
 
 assert.match(html, /Presentation snapshot/);
 assert.match(html, /From paper figures to a model-ready interfacial dataset/);
-assert.match(html, /158/);
-assert.match(html, /14/);
-assert.match(html, /13/);
-assert.match(html, /23/);
+const afmSummary = AFM_CURVE_DATASET.summary;
+assert.match(html, new RegExp(`${afmSummary.totalCurves}`));
+assert.match(html, new RegExp(`${afmSummary.qualifiedNewCurves} new`));
+assert.match(html, new RegExp(`${afmSummary.modelEligibleCurves}`));
+assert.match(html, new RegExp(`${afmSummary.sourceVerifiedCurves}`));
 assert.match(html, /\[Py1,4\]\[FAP\] on Au\(111\)/);
 assert.match(html, /14\.9 µF\/cm²/);
 assert.match(html, new RegExp(`${benchmark.summary.textValuePapersDetected}/${benchmark.summary.textValuePapers}`));

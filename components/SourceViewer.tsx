@@ -330,7 +330,7 @@ export function SourceViewer() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
+    <div data-testid="source-viewer" className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-ink-900/30 backdrop-blur-sm" onClick={closeViewer} />
       <aside className="relative flex h-full w-full max-w-xl flex-col overflow-hidden bg-white shadow-2xl">
         <header className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4">

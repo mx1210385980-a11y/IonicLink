@@ -27,12 +27,12 @@ export interface StructureSearchInputIssue {
 /** Cheap client/server checks before the canonical graph parser runs. */
 export function structureSearchInputIssue(smiles: string): StructureSearchInputIssue | null {
   const source = smiles.trim();
-  if (!source) return { message: "Draw one complete ion structure first.", status: 400 };
+  if (!source) return { message: "Draw an ion structure first.", status: 400 };
   if (source.length > MAX_STRUCTURE_SMILES_LENGTH) {
-    return { message: "The structure is too large. Reduce it to one complete ion.", status: 413 };
+    return { message: "The structure is too long. Limit it to one complete ion.", status: 413 };
   }
   if (source.includes(".") || source.includes(">")) {
-    return { message: "Exact structure search accepts one complete ion at a time; salt pairs and reactions are not supported.", status: 400 };
+    return { message: "Search one complete ion at a time. Salt pairs and reactions are not supported.", status: 400 };
   }
   if (/[~*?]/.test(source)) {
     return { message: "Exact structure search does not support wildcard atoms or query bonds.", status: 400 };

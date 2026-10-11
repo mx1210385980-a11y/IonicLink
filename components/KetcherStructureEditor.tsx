@@ -65,7 +65,7 @@ export default function KetcherStructureEditor({
       if (initialSmiles.trim()) await ketcher.setMolecule(initialSmiles.trim());
       await readSmiles(ketcher);
     } catch {
-      setError("The existing structure could not be loaded. Clear it and draw again.");
+      setError("Failed to load the structure. Clear it and draw it again.");
     }
   }, [initialSmiles, onChange, onReady, readSmiles]);
 

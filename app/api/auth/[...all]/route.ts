@@ -10,7 +10,7 @@ const handlers = toNextJsHandler(auth);
 function unavailable(error: unknown): NextResponse {
   console.error("[auth] route initialization failed", error);
   return NextResponse.json(
-    { error: "The sign-in service is temporarily unavailable." },
+    { error: "Sign-in is temporarily unavailable." },
     { status: 503, headers: { "Cache-Control": "no-store" } }
   );
 }

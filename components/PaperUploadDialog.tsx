@@ -6,7 +6,6 @@ import { createPortal } from "react-dom";
 export interface PendingPaperUpload {
   id: string;
   file: File;
-  enabled: boolean;
 }
 
 const SUPPORTED_PAPER_EXTENSION = /\.(pdf|txt)$/i;
@@ -31,14 +30,10 @@ export function mergePendingPaperUploads(
     const id = paperUploadId(file);
     if (known.has(id)) continue;
     known.add(id);
-    next.push({ id, file, enabled: true });
+    next.push({ id, file });
   }
 
   return next;
-}
-
-export function enabledPendingPaperFiles(items: PendingPaperUpload[]) {
-  return items.filter((item) => item.enabled).map((item) => item.file);
 }
 
 export function formatPaperFileSize(bytes: number) {
@@ -98,7 +93,6 @@ export function PaperUploadDialog({
   busy,
   error = null,
   onAddFiles,
-  onToggle,
   onRemove,
   onCancel,
   onAnalyze,
@@ -108,14 +102,12 @@ export function PaperUploadDialog({
   busy: boolean;
   error?: string | null;
   onAddFiles: (files: FileList | File[]) => void;
-  onToggle: (id: string) => void;
   onRemove: (id: string) => void;
   onCancel: () => void;
   onAnalyze: () => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
-  const enabledCount = items.filter((item) => item.enabled).length;
 
   useEffect(() => {
     setPortalTarget(document.body);
@@ -189,7 +181,7 @@ export function PaperUploadDialog({
             <UploadIcon />
             Add files
           </button>
-          <p className="hidden text-xs font-medium text-[#8a98b5] sm:block">PDF or TXT · duplicate files are ignored</p>
+          <p className="hidden text-xs font-medium text-ink-700 sm:block">PDF or TXT · duplicate files are ignored</p>
           <input
             ref={fileInputRef}
             type="file"
@@ -206,11 +198,10 @@ export function PaperUploadDialog({
 
         <div className="min-h-0 flex-1 overflow-auto border-y border-[#e9eef6]">
           <div className="sm:min-w-[760px]">
-            <div className="hidden grid-cols-[minmax(280px,1.8fr)_120px_190px_170px_110px] bg-[#f2f5fc] px-8 py-3 text-[12px] font-semibold uppercase tracking-[0.08em] text-[#7a8db7] sm:grid">
+            <div className="hidden grid-cols-[minmax(280px,1.8fr)_120px_190px_110px] bg-[#f2f5fc] px-8 py-3 text-[12px] font-semibold uppercase tracking-[0.08em] text-[#7a8db7] sm:grid">
               <span>File name</span>
               <span>Size</span>
               <span>Upload status</span>
-              <span>Data extraction</span>
               <span className="text-right">Operation</span>
             </div>
 
@@ -219,7 +210,7 @@ export function PaperUploadDialog({
                 <div
                   key={item.id}
                   data-testid="pending-paper-row"
-                  className="grid grid-cols-2 items-center gap-x-4 gap-y-4 px-5 py-5 text-sm text-[#263958] sm:min-h-[84px] sm:grid-cols-[minmax(280px,1.8fr)_120px_190px_170px_110px] sm:gap-0 sm:px-8 sm:py-0"
+                  className="grid grid-cols-2 items-center gap-x-4 gap-y-4 px-5 py-5 text-sm text-[#263958] sm:min-h-[84px] sm:grid-cols-[minmax(280px,1.8fr)_120px_190px_110px] sm:gap-0 sm:px-8 sm:py-0"
                 >
                   <div className="col-span-2 flex min-w-0 items-center gap-3 sm:col-span-1 sm:pr-7">
                     <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#edf3ff] text-xs font-bold text-[#3166dd]">
@@ -231,21 +222,7 @@ export function PaperUploadDialog({
                   <span className="inline-flex items-center justify-self-end gap-2 font-medium text-emerald-600 sm:justify-self-auto">
                     <CheckIcon /> Ready
                   </span>
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-medium text-[#7182a6] sm:hidden">Extract data</span>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={item.enabled}
-                      aria-label={`Extract data from ${item.file.name}`}
-                      disabled={busy}
-                      onClick={() => onToggle(item.id)}
-                      className={`relative h-7 w-12 shrink-0 rounded-full transition focus:outline-none focus:ring-2 focus:ring-[#2456d6]/30 disabled:cursor-not-allowed disabled:opacity-50 ${item.enabled ? "bg-[#2456d6]" : "bg-[#d9e0ec]"}`}
-                    >
-                      <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${item.enabled ? "translate-x-5" : "translate-x-1"}`} />
-                    </button>
-                  </div>
-                  <div className="flex items-center justify-end gap-1">
+                  <div className="col-span-2 flex items-center justify-end gap-1 sm:col-span-1">
                     <button
                       type="button"
                       onClick={() => previewFile(item.file)}
@@ -283,7 +260,7 @@ export function PaperUploadDialog({
 
         <footer className="flex flex-col-reverse items-stretch justify-between gap-3 px-5 py-5 sm:flex-row sm:items-center sm:px-8 sm:py-6">
           <p className="text-center text-xs text-[#7f8da8] sm:text-left">
-            {enabledCount} of {items.length} {items.length === 1 ? "file" : "files"} selected
+            {items.length} {items.length === 1 ? "file" : "files"} ready
           </p>
           <div className="flex items-center justify-center gap-3 sm:justify-end">
             <button
@@ -298,10 +275,10 @@ export function PaperUploadDialog({
               type="button"
               data-testid="analyze-papers"
               onClick={onAnalyze}
-              disabled={busy || enabledCount === 0}
+              disabled={busy || items.length === 0}
               className="h-11 min-w-[190px] rounded-xl bg-[#2456d6] px-7 text-sm font-semibold text-white shadow-[0_10px_24px_-12px_rgba(36,86,214,0.8)] transition hover:bg-[#1849c5] focus:outline-none focus:ring-2 focus:ring-[#2456d6]/30 focus:ring-offset-2 disabled:cursor-not-allowed disabled:bg-[#aab8d7] disabled:shadow-none"
             >
-              {busy ? "Adding to queue…" : `Analyze ${enabledCount || ""}`.trim()}
+              {busy ? "Adding to queue…" : `Analyze ${items.length || ""}`.trim()}
             </button>
           </div>
         </footer>

@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
     return internalTeachingErrorResponse(
       "export default teaching dashboard",
       error,
-      { status: 503, message: "导出教学实验数据失败，请稍后重试。" }
+      { status: 503, message: "Could not export lab data. Try again later." }
     );
   }
 }

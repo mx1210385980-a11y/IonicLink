@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { resolveIonStructure, type IonKind } from "@/lib/ionStructures";
+import { isMonatomicIonSmiles, resolveIonStructure, type IonKind } from "@/lib/ionStructures";
+
+const MONATOMIC_CANVAS_SIZE = 56;
 
 /**
  * Renders a SMILES string as a 2D structure using smiles-drawer (canvas), with
@@ -15,6 +17,7 @@ export function MoleculeView({
   label,
   width = 160,
   height = 80,
+  connected = false,
   embedded = false,
   showName = true,
 }: {
@@ -24,6 +27,7 @@ export function MoleculeView({
   label: string;
   width?: number;
   height?: number;
+  connected?: boolean;
   /** Remove the outer frame when the molecule is part of a larger identity card. */
   embedded?: boolean;
   showName?: boolean;
@@ -36,14 +40,16 @@ export function MoleculeView({
   const resolvedSmiles = inferred?.smiles || smiles?.trim();
   const monatomic = parseMonatomicIon(resolvedSmiles);
   const monatomicAtom = monatomic?.atom;
-  const monatomicCharge = monatomic?.charge;
   const hasIonLabel = Boolean(ionLabel?.trim());
   const source = inferred?.source ?? (smiles?.trim() ? "record" : hasIonLabel ? "unresolved" : "missing");
   const displayName = inferred?.name ?? ionLabel?.trim() ?? "Unknown ion";
   const viewKind = kind ?? "cation";
   const isCation = viewKind === "cation";
+  const isMonatomicIon = isMonatomicIonSmiles(resolvedSmiles);
   const drawWidth = isCation ? width : Math.max(width, 320);
   const drawHeight = isCation ? height : Math.max(height, 116);
+  const structureWidth = isMonatomicIon ? MONATOMIC_CANVAS_SIZE : drawWidth;
+  const structureHeight = isMonatomicIon ? MONATOMIC_CANVAS_SIZE : drawHeight;
   const drawPadding = isCation ? 10 : 6;
   const bondThickness = isCation ? 1.7 : 2.2;
   const atomFontSize = isCation ? 11 : 14;
@@ -67,13 +73,13 @@ export function MoleculeView({
         const svg = svgRef.current;
         if (!svg) return;
         svg.innerHTML = "";
-        svg.setAttribute("width", `${drawWidth}`);
-        svg.setAttribute("height", `${drawHeight}`);
-        svg.style.width = `${drawWidth}px`;
-        svg.style.height = `${drawHeight}px`;
+        svg.setAttribute("width", `${structureWidth}`);
+        svg.setAttribute("height", `${structureHeight}`);
+        svg.style.width = `${structureWidth}px`;
+        svg.style.height = `${structureHeight}px`;
         const drawer = new SmilesDrawer.SvgDrawer({
-          width: drawWidth,
-          height: drawHeight,
+          width: structureWidth,
+          height: structureHeight,
           bondThickness,
           bondLength,
           fontSizeLarge: atomFontSize,
@@ -115,22 +121,21 @@ export function MoleculeView({
     return () => {
       cancelled = true;
     };
-  }, [atomFontSize, atomFontSizeSmall, bondLength, bondThickness, drawHeight, drawPadding, drawWidth, monatomicAtom, monatomicCharge, resolvedSmiles]);
+  }, [atomFontSize, atomFontSizeSmall, bondLength, bondThickness, drawPadding, monatomicAtom, resolvedSmiles, structureHeight, structureWidth]);
 
   return (
     <div
       data-testid={`molecule-view-${viewKind}`}
       data-smiles={resolvedSmiles ?? ""}
       data-ion-source={source}
+      data-monatomic-ion={isMonatomicIon ? "true" : undefined}
       style={{ "--molecule-view-height": `${drawHeight}px` } as CSSProperties}
-      className={`relative flex min-w-0 flex-1 flex-col overflow-hidden ${
-        embedded
-          ? "px-2 pb-1.5"
-          : `rounded-lg border px-2 py-1.5 ${
-              isCation
-                ? "border-cyan-100 bg-gradient-to-b from-cyan-50/70 to-white"
-                : "border-emerald-100 bg-gradient-to-b from-emerald-50/70 to-white"
-            }`
+      className={`relative flex min-w-0 flex-1 flex-col overflow-hidden px-2 py-1.5 ${
+        connected || embedded
+          ? "rounded-none border-0 bg-transparent"
+          : isCation
+            ? "rounded-lg border border-cyan-100 bg-gradient-to-b from-cyan-50/70 to-white"
+            : "rounded-lg border border-emerald-100 bg-gradient-to-b from-emerald-50/70 to-white"
       }`}
       title={inferred ? `${label}: ${inferred.name}` : `${label}: ${ionLabel ?? "unknown ion"}`}
     >
@@ -153,8 +158,8 @@ export function MoleculeView({
               <>
                 <svg
                   ref={svgRef}
-                  width={drawWidth}
-                  height={drawHeight}
+                  width={structureWidth}
+                  height={structureHeight}
                   aria-hidden="true"
                   className={ok ? "molecule-canvas relative z-10 block h-auto max-w-full" : "hidden"}
                 />

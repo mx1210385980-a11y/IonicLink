@@ -29,24 +29,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function teachingAnswersError(value: unknown): string | null {
-  if (!isRecord(value)) return "草稿答案格式无效。";
+  if (!isRecord(value)) return "Invalid draft answer format.";
   const allowedFields = new Set<string>(TEACHING_FIELDS.map((field) => field.key));
   for (const [key, answer] of Object.entries(value)) {
     if (!allowedFields.has(key) || !isRecord(answer) || typeof answer.value !== "string") {
-      return "草稿答案格式无效。";
+      return "Invalid draft answer format.";
     }
     if (answer.page !== undefined && typeof answer.page !== "string") {
-      return "草稿答案格式无效。";
+      return "Invalid draft answer format.";
     }
     if (answer.evidence !== undefined && typeof answer.evidence !== "string") {
-      return "草稿答案格式无效。";
+      return "Invalid draft answer format.";
     }
     if (
       answer.value.length > 500 ||
       (typeof answer.page === "string" && answer.page.length > 40) ||
       (typeof answer.evidence === "string" && answer.evidence.length > 2_000)
     ) {
-      return "单个答案超出允许长度。";
+      return "An answer exceeds the allowed length.";
     }
   }
   return null;
@@ -65,14 +65,14 @@ function stateConflict(
 ): NextResponse | null {
   const state = getCurrentTeachingRound(participantId);
   if (state?.status === "complete") {
-    return conflict("locked", "教学实验已完成，答案已锁定。");
+    return conflict("locked", "The experiment is complete. Answers are locked.");
   }
   if (!state) return null;
   if (expected.roundNo !== undefined && state.roundNo !== expected.roundNo) {
-    return conflict("stale_round", "该请求属于已结束的轮次。");
+    return conflict("stale_round", "This request belongs to a completed round.");
   }
   if (expected.version !== undefined && state.version !== expected.version) {
-    return conflict("version", "草稿已有更新，请刷新后继续。");
+    return conflict("version", "The draft has changed. Refresh before continuing.");
   }
   return null;
 }
@@ -95,13 +95,13 @@ export async function GET(request: NextRequest) {
   if (session instanceof NextResponse) return session;
   try {
     const state = session.participantId ? getCurrentTeachingRound(session.participantId) : null;
-    if (!state) return NextResponse.json({ error: "未找到分配的教学任务。" }, { status: 404 });
+    if (!state) return NextResponse.json({ error: "Assigned lab task not found." }, { status: 404 });
     return NextResponse.json(state);
   } catch (error) {
     return internalTeachingErrorResponse(
       "load current student round",
       error,
-      { message: "读取教学任务失败，请稍后重试。" }
+      { message: "Could not load the lab task. Try again later." }
     );
   }
 }
@@ -119,15 +119,15 @@ export async function PATCH(request: NextRequest) {
     return teachingRequestErrorResponse(error) ?? internalTeachingErrorResponse(
       "read student draft request",
       error,
-      { message: "读取草稿请求失败，请稍后重试。" }
+      { message: "Could not read the draft request. Try again later." }
     );
   }
   if (!session.participantId) {
-    return NextResponse.json({ error: "学生会话已失效。" }, { status: 401 });
+    return NextResponse.json({ error: "Your student session has expired." }, { status: 401 });
   }
   const answersError = teachingAnswersError(body?.answers);
   if (!body || !Number.isInteger(body.version) || Number(body.version) < 0) {
-    return NextResponse.json({ error: "草稿数据不完整。" }, { status: 400 });
+    return NextResponse.json({ error: "Draft data is incomplete." }, { status: 400 });
   }
   if (answersError) return NextResponse.json({ error: answersError }, { status: 400 });
   const expectedVersion = body.version as number;
@@ -149,13 +149,13 @@ export async function PATCH(request: NextRequest) {
       return internalTeachingErrorResponse(
         "reload student draft conflict state",
         stateError,
-        { message: "保存草稿失败，请稍后重试。" }
+        { message: "Could not save the draft. Try again later." }
       );
     }
     return internalTeachingErrorResponse(
       "save student draft",
       error,
-      { message: "保存草稿失败，请稍后重试。" }
+      { message: "Could not save the draft. Try again later." }
     );
   }
 }
@@ -165,7 +165,7 @@ export async function POST(request: NextRequest) {
   if (rejected) return rejected;
   const session = requireTeachingRole(request, "student");
   if (session instanceof NextResponse) return session;
-  if (!session.participantId) return NextResponse.json({ error: "学生会话已失效。" }, { status: 401 });
+  if (!session.participantId) return NextResponse.json({ error: "Your student session has expired." }, { status: 401 });
 
   let body: unknown;
   try {
@@ -174,11 +174,11 @@ export async function POST(request: NextRequest) {
     return teachingRequestErrorResponse(error) ?? internalTeachingErrorResponse(
       "read student action request",
       error,
-      { message: "读取学生操作请求失败，请稍后重试。" }
+      { message: "Could not read the student request. Try again later." }
     );
   }
   if (!isRecord(body) || (body.action !== "heartbeat" && body.action !== "submit")) {
-    return NextResponse.json({ error: "未知的学生操作。" }, { status: 400 });
+    return NextResponse.json({ error: "Unknown student action." }, { status: 400 });
   }
 
   if (body.action === "heartbeat") {
@@ -194,12 +194,12 @@ export async function POST(request: NextRequest) {
       validateTeachingHeartbeatInput(heartbeat);
     } catch (error) {
       if (error instanceof TeachingHeartbeatValidationError) {
-        return NextResponse.json({ error: "心跳数据无效。" }, { status: 400 });
+        return NextResponse.json({ error: "Invalid timing heartbeat." }, { status: 400 });
       }
       return internalTeachingErrorResponse(
         "validate student heartbeat",
         error,
-        { message: "校验心跳数据失败，请稍后重试。" }
+        { message: "Could not validate the timing heartbeat. Try again later." }
       );
     }
     const roundNo = heartbeat.roundNo;
@@ -217,13 +217,13 @@ export async function POST(request: NextRequest) {
         return internalTeachingErrorResponse(
           "reload student heartbeat conflict state",
           stateError,
-          { message: "记录有效时间失败，请稍后重试。" }
+          { message: "Could not save active time. Try again later." }
         );
       }
       return internalTeachingErrorResponse(
         "record student heartbeat",
         error,
-        { message: "记录有效时间失败，请稍后重试。" }
+        { message: "Could not save active time. Try again later." }
       );
     }
   }
@@ -234,7 +234,7 @@ export async function POST(request: NextRequest) {
     Number(body.version) < 0
   ) {
     return NextResponse.json(
-      { error: "提交必须绑定当前轮次和草稿版本。" },
+      { error: "Submission must reference the current round and draft version." },
       { status: 400 }
     );
   }
@@ -249,10 +249,10 @@ export async function POST(request: NextRequest) {
     return internalTeachingErrorResponse(
       "load round before student submit",
       error,
-      { message: "提交失败，请稍后重试。" }
+      { message: "Submission failed. Try again later." }
     );
   }
-  if (!before) return NextResponse.json({ error: "未找到当前教学轮次。" }, { status: 404 });
+  if (!before) return NextResponse.json({ error: "Current lab round not found." }, { status: 404 });
   if (before.status === "active") {
     try {
       const existingConflict = stateConflict(session.participantId, expected);
@@ -261,12 +261,12 @@ export async function POST(request: NextRequest) {
       return internalTeachingErrorResponse(
         "load student submit conflict state",
         error,
-        { message: "提交失败，请稍后重试。" }
+        { message: "Submission failed. Try again later." }
       );
     }
     if (TEACHING_FIELDS.some((field) => !before.answers[field.key]?.value?.trim())) {
       return NextResponse.json(
-        { error: "提交前请完成全部 6 个必填字段。" },
+        { error: "Complete all six required fields before submitting." },
         { status: 400 }
       );
     }
@@ -285,7 +285,7 @@ export async function POST(request: NextRequest) {
         return internalTeachingErrorResponse(
           "reload state after student submit",
           stateError,
-          { message: "提交失败，请稍后重试。" }
+          { message: "Submission failed. Try again later." }
         );
       }
       const transition = committedTransition(before, after);
@@ -294,7 +294,7 @@ export async function POST(request: NextRequest) {
     return internalTeachingErrorResponse(
       "submit student round",
       error,
-      { message: "提交失败，请稍后重试。" }
+      { message: "Submission failed. Try again later." }
     );
   }
 }

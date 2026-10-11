@@ -8,6 +8,8 @@ const providerKeys = [
   "OPENAI_BASE_URL",
   "openai_api_key",
   "openai_base_url",
+  "KIMI_API_KEY",
+  "MOONSHOT_API_KEY",
   "ANTHROPIC_API_KEY",
 ] as const;
 const saved = new Map(providerKeys.map((key) => [key, process.env[key]]));
@@ -27,14 +29,9 @@ async function main() {
       { params: { domain: "tribology" } }
     );
 
-    assert.equal(response.status, 200);
-    const payload = (await response.json()) as {
-      source?: string;
-      records?: Array<{ extraction?: { source?: string } }>;
-    };
-    assert.equal(payload.source, "mock");
-    assert.ok(payload.records?.length, "the endpoint returns a candidate");
-    assert.ok(payload.records?.every((record) => record.extraction?.source === "mock"));
+    assert.equal(response.status, 503);
+    const payload = (await response.json()) as { error?: string };
+    assert.match(payload.error ?? "", /Live extraction is not configured/);
   } finally {
     for (const key of providerKeys) {
       const value = saved.get(key);
@@ -43,7 +40,7 @@ async function main() {
     }
   }
 
-  console.log("Extract API metadata tests passed");
+  console.log("Extract API live-provider guard tests passed");
 }
 
 void main().catch((error) => {

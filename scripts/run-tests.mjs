@@ -56,7 +56,6 @@ try {
         IONICLINK_BOOTSTRAP_PASSWORD: "",
         IONICLINK_BOOTSTRAP_NAME: "",
         IONICLINK_DATA_DIR: dataDir,
-        WFF_STRATEGY_CACHE_DIR: path.join(dataDir, "wff-strategy-cache"),
       },
       stdio: "inherit",
     });

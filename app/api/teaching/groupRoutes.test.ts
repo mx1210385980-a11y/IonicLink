@@ -193,7 +193,7 @@ async function main(): Promise<void> {
       })
     );
     assert.equal(badCode.status, 403);
-    assert.match(String((await json(badCode)).error), /实验代码/);
+    assert.match(String((await json(badCode)).error), /experiment code/);
 
     const notInRoster = await sessionPost(
       request("/api/teaching/session", "POST", {
@@ -203,7 +203,7 @@ async function main(): Promise<void> {
       })
     );
     assert.equal(notInRoster.status, 403);
-    assert.match(String((await json(notInRoster)).error), /名单/);
+    assert.match(String((await json(notInRoster)).error), /roster/);
 
     const joined = await sessionPost(
       request("/api/teaching/session", "POST", {

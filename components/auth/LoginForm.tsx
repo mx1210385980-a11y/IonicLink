@@ -40,10 +40,10 @@ export function LoginForm({ allowSignUp, nextPath }: { allowSignUp: boolean; nex
       if (result.error) {
         setError(
           result.error.status === 429
-            ? "Too many attempts. Try again later."
+            ? "Too many attempts. Please try again later."
             : mode === "sign-in"
               ? "Incorrect email or password."
-              : "Account creation failed. Check the entered details and try again."
+              : "Could not create your account. Check your details and try again."
         );
         return;
       }
@@ -53,7 +53,7 @@ export function LoginForm({ allowSignUp, nextPath }: { allowSignUp: boolean; nex
         router.refresh();
       });
     } catch {
-      setError("The sign-in service is temporarily unavailable. Try again later.");
+      setError("Sign-in is temporarily unavailable. Please try again later.");
     } finally {
       setSubmitting(false);
     }
@@ -71,8 +71,8 @@ export function LoginForm({ allowSignUp, nextPath }: { allowSignUp: boolean; nex
       </h1>
       <p className="mt-3 text-sm leading-6 text-ink-600">
         {mode === "sign-in"
-          ? "Sign in to manage papers, extraction jobs, and standardized data."
-          : "Create an account with your work email and a password of at least eight characters."}
+          ? "Sign in to manage papers, extraction tasks, and standardized data."
+          : "Create an account with your work email and a password of at least 8 characters."}
       </p>
 
       <div className="mt-7 space-y-5">
@@ -144,18 +144,18 @@ export function LoginForm({ allowSignUp, nextPath }: { allowSignUp: boolean; nex
       ) : null}
 
       <button className="btn-primary mt-6 w-full justify-center" disabled={busy} type="submit">
-        {busy ? "Working…" : mode === "sign-in" ? "Sign in" : "Create account"}
+        {busy ? "Processing…" : mode === "sign-in" ? "Sign in" : "Create account"}
       </button>
 
       {allowSignUp ? (
         <p className="mt-6 text-center text-sm text-ink-600">
-          {mode === "sign-in" ? "No account yet?" : "Already have an account?"}{" "}
+          {mode === "sign-in" ? "New to IonicLink?" : "Already have an account?"}{" "}
           <button
             className="font-semibold text-brand-700 underline-offset-4 hover:underline focus:outline-none focus:ring-2 focus:ring-brand-200"
             onClick={() => switchMode(mode === "sign-in" ? "sign-up" : "sign-in")}
             type="button"
           >
-            {mode === "sign-in" ? "Create account" : "Return to sign in"}
+            {mode === "sign-in" ? "Create account" : "Back to sign in"}
           </button>
         </p>
       ) : null}

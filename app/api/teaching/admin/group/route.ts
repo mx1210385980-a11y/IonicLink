@@ -1,3 +1,4 @@
+import { TeachingInputError } from "@/lib/teaching/inputError";
 import { NextRequest, NextResponse } from "next/server";
 import {
   TEACHING_FIELDS,
@@ -53,20 +54,20 @@ export async function GET(request: NextRequest) {
     }
     if (action === "roster") {
       const projectId = request.nextUrl.searchParams.get("projectId") ?? "";
-      if (!projectId) return badRequest("缺少实验编号。");
+      if (!projectId) return badRequest("Experiment ID is required.");
       return NextResponse.json({ roster: listGroupRoster(projectId) });
     }
     if (action === "dashboard") {
       const projectId = request.nextUrl.searchParams.get("projectId") ?? "";
-      if (!projectId) return badRequest("缺少实验编号。");
+      if (!projectId) return badRequest("Experiment ID is required.");
       return NextResponse.json(getGroupCrossoverDashboard(projectId));
     }
-    return badRequest("未知查询。");
+    return badRequest("Unknown query.");
   } catch (error) {
     return internalTeachingErrorResponse(
       "load group crossover data",
       error,
-      { status: 503, message: "分组实验数据暂不可用,请稍后重试。" }
+      { status: 503, message: "Group experiment data is temporarily unavailable. Try again later." }
     );
   }
 }
@@ -84,10 +85,10 @@ export async function POST(request: NextRequest) {
     return teachingRequestErrorResponse(error) ?? internalTeachingErrorResponse(
       "read group crossover request",
       error,
-      { message: "读取教师操作请求失败,请稍后重试。" }
+      { message: "Could not read the instructor request. Try again later." }
     );
   }
-  if (!body) return badRequest("请求数据无效。");
+  if (!body) return badRequest("Invalid request data.");
   const action = typeof body.action === "string" ? body.action : "";
 
   try {
@@ -99,7 +100,7 @@ export async function POST(request: NextRequest) {
         !Array.isArray(body.recordIds) ||
         !body.recordIds.every((id) => typeof id === "string")
       ) {
-        return badRequest("创建实验的数据无效。");
+        return badRequest("Invalid experiment creation data.");
       }
       const created = createGroupCrossoverExperiment({
         name: body.name,
@@ -121,7 +122,7 @@ export async function POST(request: NextRequest) {
             Number.isFinite(entry.groupNo)
         )
       ) {
-        return badRequest("名单数据无效。");
+        return badRequest("Invalid roster data.");
       }
       const result = importGroupRoster(
         body.projectId,
@@ -135,7 +136,7 @@ export async function POST(request: NextRequest) {
 
     if (action === "deleteRosterEntry") {
       if (typeof body.projectId !== "string" || typeof body.rosterId !== "string") {
-        return badRequest("名单数据无效。");
+        return badRequest("Invalid roster data.");
       }
       deleteGroupRosterEntry(body.projectId, body.rosterId);
       return NextResponse.json({ ok: true });
@@ -149,7 +150,7 @@ export async function POST(request: NextRequest) {
         (body.humanScores !== undefined && !isTeachingScores(body.humanScores)) ||
         (body.aiScores !== undefined && !isTeachingScores(body.aiScores))
       ) {
-        return badRequest("审核数据无效。");
+        return badRequest("Invalid review data.");
       }
       reviewTeachingSubmission(
         body.submissionId,
@@ -159,20 +160,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    return badRequest("未知操作。");
+    return badRequest("Unknown action.");
   } catch (error) {
     if (error instanceof TeachingReviewValidationError) {
       return badRequest(error.message);
     }
-    // Module validation errors carry user-facing Chinese messages; anything
-    // else is internal and must not leak details to the client.
-    if (error instanceof Error && /[一-鿿]/u.test(error.message)) {
+    // Only known validation errors expose their messages to the client.
+    if (error instanceof TeachingInputError) {
       return badRequest(error.message);
     }
     return internalTeachingErrorResponse(
       "group crossover admin action",
       error,
-      { message: "教师操作失败,请稍后重试。" }
+      { message: "Instructor action failed. Try again later." }
     );
   }
 }

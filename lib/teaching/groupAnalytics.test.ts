@@ -213,6 +213,6 @@ assert.equal(
 );
 
 // unknown project
-assert.throws(() => getGroupCrossoverDashboard("no-such-project"), /没有找到/);
+assert.throws(() => getGroupCrossoverDashboard("no-such-project"), /Group crossover experiment not found/);
 
 console.log("Group-crossover dashboard and override tests passed");

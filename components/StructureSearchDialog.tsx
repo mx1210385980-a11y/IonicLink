@@ -25,9 +25,9 @@ const KetcherStructureEditor = dynamic(() => import("@/components/KetcherStructu
 });
 
 const TARGETS: { value: StructureSearchTarget; label: string; detail: string }[] = [
-  { value: "any", label: "Either ion", detail: "Match cation or anion" },
-  { value: "cation", label: "Cation", detail: "Match cation structure only" },
-  { value: "anion", label: "Anion", detail: "Match anion structure only" },
+  { value: "any", label: "Any ion", detail: "Match a cation or anion" },
+  { value: "cation", label: "Cation", detail: "Match cation structures only" },
+  { value: "anion", label: "Anion", detail: "Match anion structures only" },
 ];
 
 export function StructureSearchDialog({
@@ -140,7 +140,7 @@ export function StructureSearchDialog({
   const applySearch = useCallback(async () => {
     const api = editorApiRef.current;
     if (!api) {
-      setError("The structure editor is still loading.");
+      setError("The structure editor is still loading. Please wait.");
       return;
     }
     setApplying(true);
@@ -154,7 +154,7 @@ export function StructureSearchDialog({
       }
       onApply({ smiles, target, mode: "exact" });
     } catch {
-      setError("The structure is incomplete. Check atoms, bonds, and formal charges.");
+      setError("The structure is incomplete. Check its atoms, bonds, and formal charges.");
     } finally {
       setApplying(false);
     }
@@ -182,7 +182,7 @@ export function StructureSearchDialog({
       >
         <header className="flex shrink-0 items-center justify-between gap-4 border-b border-ink-200 px-4 py-3 sm:px-5">
           <div className="flex min-w-0 items-center gap-3">
-            <button type="button" onClick={onClose} className="grid h-9 w-9 shrink-0 place-items-center rounded-[8px] text-ink-700 transition hover:bg-ink-100" aria-label="Return to database">
+            <button type="button" onClick={onClose} className="grid h-9 w-9 shrink-0 place-items-center rounded-[8px] text-ink-700 transition hover:bg-ink-100" aria-label="Back to database">
               <BackIcon />
             </button>
             <span className="h-8 w-px bg-ink-200" aria-hidden />
@@ -198,7 +198,7 @@ export function StructureSearchDialog({
         <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto lg:grid-cols-[240px_minmax(0,1fr)] lg:overflow-hidden">
           <aside className="border-b border-ink-200 bg-ink-50/55 p-4 lg:overflow-y-auto lg:border-b-0 lg:border-r">
             <fieldset>
-              <legend className="text-xs font-semibold text-ink-900">Target ion</legend>
+              <legend className="text-xs font-semibold text-ink-900">Match target</legend>
               <div className="mt-2 space-y-1.5">
                 {TARGETS.map((option) => (
                   <label key={option.value} className={`flex cursor-pointer gap-2.5 rounded-[8px] border px-2.5 py-2 transition ${target === option.value ? "border-brand-200 bg-brand-50 text-brand-800" : "border-transparent text-ink-700 hover:bg-white"}`}>
@@ -213,18 +213,18 @@ export function StructureSearchDialog({
             </fieldset>
 
             <fieldset className="mt-5 border-t border-ink-200 pt-4">
-              <legend className="text-xs font-semibold text-ink-900">Match mode</legend>
+              <legend className="text-xs font-semibold text-ink-900">Match type</legend>
               <label className="mt-2 flex items-center gap-2 text-xs font-semibold text-brand-800">
                 <input type="radio" checked readOnly className="accent-brand-600" />
                 Exact structure
               </label>
               <label className="mt-2 flex items-center gap-2 text-xs text-ink-400" title="Available in a future release">
                 <input type="radio" disabled />
-                Substructure <span className="ml-auto text-[9px]">Later</span>
+                Substructure <span className="ml-auto text-[9px]">Coming soon</span>
               </label>
               <label className="mt-2 flex items-center gap-2 text-xs text-ink-400" title="Available in a future release">
                 <input type="radio" disabled />
-                Similarity <span className="ml-auto text-[9px]">Later</span>
+                Similar structure <span className="ml-auto text-[9px]">Coming soon</span>
               </label>
             </fieldset>
 
@@ -234,14 +234,14 @@ export function StructureSearchDialog({
                 {draftSmiles ? (
                   <MoleculeView smiles={draftSmiles} kind={previewKind} label={structureTargetLabel(target)} width={190} height={100} />
                 ) : (
-                  <div className="grid min-h-[106px] place-items-center px-3 text-center text-[11px] leading-relaxed text-ink-400">Draw one complete ion on the canvas</div>
+                  <div className="grid min-h-[106px] place-items-center px-3 text-center text-[11px] leading-relaxed text-ink-400">Draw a complete ion on the canvas to the right</div>
                 )}
               </div>
             </div>
 
             <div className="mt-4">
-              <label htmlFor="structure-smiles-preview" className="text-xs font-semibold text-ink-900">Structure string</label>
-              <textarea id="structure-smiles-preview" readOnly value={draftSmiles} placeholder="SMILES appears here" className="mt-2 h-24 w-full resize-none rounded-[8px] border border-ink-200 bg-white p-2 font-mono text-[10px] leading-relaxed text-ink-700 outline-none" />
+              <label htmlFor="structure-smiles-preview" className="text-xs font-semibold text-ink-900">Structure</label>
+              <textarea id="structure-smiles-preview" readOnly value={draftSmiles} placeholder="SMILES will appear here" className="mt-2 h-24 w-full resize-none rounded-[8px] border border-ink-200 bg-white p-2 font-mono text-[10px] leading-relaxed text-ink-700 outline-none" />
             </div>
           </aside>
 

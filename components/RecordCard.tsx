@@ -3,11 +3,11 @@
 import { useId } from "react";
 import { coreCompleteness, formatCof, type IonicRecord } from "@/lib/schema";
 import { DEFAULT_DOMAIN, type Domain } from "@/lib/domain";
+import { parseQuantity, type Quantity } from "@/lib/units";
 import { MoleculeView } from "./MoleculeView";
 import {
   ConditionChip,
   IonPill,
-  MissingChip,
   ionDisplayLabel,
   openRecordEvidence,
   quantityLabel,
@@ -18,6 +18,19 @@ import {
 } from "./recordCardParts";
 
 export type { UnitMode };
+
+function flexibleField(record: IonicRecord, ...keys: string[]) {
+  const wanted = new Set(keys.map((key) => key.trim().toLowerCase().replace(/[\s-]+/g, "_")));
+  return record.flexible?.find((field) => wanted.has(field.key.trim().toLowerCase().replace(/[\s-]+/g, "_")));
+}
+
+function cofUncertaintyLabel(record: IonicRecord): string {
+  const field = flexibleField(record, "cof_uncertainty", "cof uncertainty", "cof error", "cof_error");
+  if (!field?.value.trim()) return "";
+  const value = field.value.trim();
+  const label = /^(?:±|\+\/-)/.test(value) ? value : `±${value}`;
+  return field.unit?.trim() ? `${label} ${field.unit.trim()}` : label;
+}
 
 export function buildConditionItems(record: IonicRecord, units: UnitMode): ConditionItem[] {
   const { core, extended: e } = record;
@@ -69,6 +82,17 @@ export function buildConditionItems(record: IonicRecord, units: UnitMode): Condi
       field: "potential",
     });
   }
+  const environment = flexibleField(record, "medium", "environment");
+  if (environment?.value.trim()) {
+    items.push({
+      label: "Environment",
+      value: environment.value.trim(),
+      title: environment.note || "Experimental environment / medium",
+      tone: "violet",
+      prov: prov.medium ?? prov.environment,
+      field: environment.key,
+    });
+  }
   // Substrate roughness (Rq) is shown inline under the substrate in the
   // tribosystem zone — intentionally NOT duplicated as a condition chip here.
   if (e.additives) {
@@ -96,15 +120,6 @@ export function buildGroupConditionItems(record: IonicRecord, units: UnitMode): 
   if (probeLabel) items.push({ label: "Probe", value: probeLabel, prov: prov.probe, field: "probe" });
   if (e.method) items.push({ label: "Method", value: e.method });
   items.push(...buildConditionItems(record, units));
-  if (e.roughness) {
-    items.push({
-      label: "Roughness",
-      value: quantityLabel(e.roughness, units),
-      title: quantityTitle(e.roughness, units),
-      prov: prov.roughness,
-      field: "roughness",
-    });
-  }
   if (e.afm?.scanRate) items.push({ label: "Scan rate", value: e.afm.scanRate, prov: prov.scanRate, field: "scanRate" });
   if (e.afm?.scanSize) items.push({ label: "Scan size", value: e.afm.scanSize, prov: prov.scanSize, field: "scanSize" });
   return items;
@@ -128,13 +143,193 @@ export function buildSystemFacets(record: IonicRecord, units: UnitMode): Conditi
 }
 
 type TribopairDisplay = {
-  mode: "nano" | "macro" | "unknown";
-  pattern: "afm" | "ball-disk" | "pin-disk" | "three-ball-plate" | "ball-pins" | "block-ring" | "counterface-specimen";
+  mode: "nano" | "sfa" | "macro" | "unknown";
+  pattern: "afm" | "sfa" | "ball-disk" | "pin-disk" | "three-ball-plate" | "ball-pins" | "block-ring" | "counterface-specimen";
   primaryRole: string;
   secondaryRole: string;
   primaryLabel: string;
   primaryDetails: string;
 };
+
+export type AfmProbeDisplay = {
+  material: string;
+  shape: string;
+  radius: string;
+};
+
+export type TribopairRoughnessDisplay = {
+  probe?: string;
+  substrate?: string;
+};
+
+export type TribopairMaterialDisplay = {
+  formula: string;
+  family: string;
+  tone: "cyan" | "amber" | "violet" | "indigo" | "slate" | "orange" | "emerald";
+};
+
+/** A compact, chemistry-led visual identity for the two contacting materials. */
+export function tribopairMaterialDisplay(material?: string): TribopairMaterialDisplay {
+  const normalized = material?.trim().toLowerCase() || "";
+  if (/\b(?:ptfe|teflon|polytetrafluoroethylene)\b/.test(normalized)) {
+    return { formula: "PTFE", family: "Fluoropolymer", tone: "violet" };
+  }
+  if (/\b(?:alumina|al2o3|al₂o₃|sapphire)\b/.test(normalized)) {
+    return { formula: "Al₂O₃", family: "Oxide ceramic", tone: "amber" };
+  }
+  if (/\b(?:silicon nitride|si3n4|si₃n₄)\b/.test(normalized)) {
+    return { formula: "Si₃N₄", family: "Nitride ceramic", tone: "indigo" };
+  }
+  if (/\b(?:silica|sio2|sio₂|quartz|glass)\b/.test(normalized)) {
+    return { formula: "SiO₂", family: "Silica", tone: "cyan" };
+  }
+  if (/\bmica\b/.test(normalized)) return { formula: "MICA", family: "Layered silicate", tone: "emerald" };
+  if (/\b(?:graphite|hopg|glassy carbon|carbon|diamond|dlc)\b/.test(normalized)) {
+    return { formula: "C", family: "Carbon", tone: "slate" };
+  }
+  if (/\b(?:gold|au(?:\b|\()|steel|stainless|titanium|aluminum|aluminium|metal)\b/.test(normalized)) {
+    return { formula: /gold|au/.test(normalized) ? "Au" : "METAL", family: "Metal", tone: "orange" };
+  }
+  if (/\b(?:silicon|si(?:\b|\())\b/.test(normalized)) {
+    return { formula: "Si", family: "Semiconductor", tone: "indigo" };
+  }
+  if (/\b(?:polymer|polyethylene|polypropylene|peek|pmma)\b/.test(normalized)) {
+    return { formula: "POLY", family: "Polymer", tone: "violet" };
+  }
+  if (/\b(?:ceramic|oxide)\b/.test(normalized)) return { formula: "OX", family: "Ceramic", tone: "amber" };
+  return { formula: "MAT", family: "Material", tone: "slate" };
+}
+
+const MATERIAL_TONE_STYLES: Record<TribopairMaterialDisplay["tone"], {
+  panel: string;
+  label: string;
+  badge: string;
+  family: string;
+  divider: string;
+}> = {
+  cyan: {
+    panel: "border-l-cyan-400 bg-gradient-to-r from-cyan-50/85 via-white to-white",
+    label: "text-cyan-800",
+    badge: "border-cyan-200 bg-cyan-100/80 text-cyan-950",
+    family: "text-cyan-700",
+    divider: "divide-cyan-100",
+  },
+  amber: {
+    panel: "border-l-amber-400 bg-gradient-to-r from-amber-50/90 via-white to-white",
+    label: "text-amber-800",
+    badge: "border-amber-200 bg-amber-100/85 text-amber-950",
+    family: "text-amber-700",
+    divider: "divide-amber-100",
+  },
+  violet: {
+    panel: "border-l-violet-400 bg-gradient-to-r from-violet-50/90 via-white to-white",
+    label: "text-violet-800",
+    badge: "border-violet-200 bg-violet-100/85 text-violet-950",
+    family: "text-violet-700",
+    divider: "divide-violet-100",
+  },
+  indigo: {
+    panel: "border-l-indigo-400 bg-gradient-to-r from-indigo-50/85 via-white to-white",
+    label: "text-indigo-800",
+    badge: "border-indigo-200 bg-indigo-100/80 text-indigo-950",
+    family: "text-indigo-700",
+    divider: "divide-indigo-100",
+  },
+  slate: {
+    panel: "border-l-slate-400 bg-gradient-to-r from-slate-100/75 via-white to-white",
+    label: "text-slate-700",
+    badge: "border-slate-200 bg-slate-100 text-slate-900",
+    family: "text-slate-600",
+    divider: "divide-slate-200",
+  },
+  orange: {
+    panel: "border-l-orange-400 bg-gradient-to-r from-orange-50/85 via-white to-white",
+    label: "text-orange-800",
+    badge: "border-orange-200 bg-orange-100/80 text-orange-950",
+    family: "text-orange-700",
+    divider: "divide-orange-100",
+  },
+  emerald: {
+    panel: "border-l-emerald-400 bg-gradient-to-r from-emerald-50/85 via-white to-white",
+    label: "text-emerald-800",
+    badge: "border-emerald-200 bg-emerald-100/80 text-emerald-950",
+    family: "text-emerald-700",
+    divider: "divide-emerald-100",
+  },
+};
+
+const PROBE_LENGTH_UNIT = "(?:nm|µm|μm|um|mm)";
+const PROBE_LENGTH_VALUE = `([~≈]?)\\s*(\\d+(?:\\.\\d+)?)\\s*(?:±\\s*(\\d+(?:\\.\\d+)?)\\s*)?(${PROBE_LENGTH_UNIT})`;
+const EXPLICIT_RADIUS_RE = new RegExp(`(?:^|[·|,;\\s])(?:radius|r)\\s*[:=]?\\s*${PROBE_LENGTH_VALUE}`, "i");
+const DIAMETER_RE = new RegExp(`(?:^|[·|,;\\s])(?:diameter|dia\\.?|ø|⌀)\\s*[:=]?\\s*${PROBE_LENGTH_VALUE}`, "i");
+const TRAILING_TIP_RADIUS_RE = new RegExp(`(?:[·|,;]\\s*)${PROBE_LENGTH_VALUE}\\s*$`, "i");
+
+function halfProbeMeasurement(raw: string): string {
+  return Number((Number(raw) / 2).toPrecision(12)).toString();
+}
+
+/** Split the compact extracted probeType into display-only AFM probe facts. */
+export function afmProbeDisplay(probe?: string, probeType?: string): AfmProbeDisplay {
+  const rawMaterial = probe?.trim() || "";
+  const metadataMatch = rawMaterial.match(/\s*\(([^()]+)\)\s*$/);
+  const material = (metadataMatch ? rawMaterial.slice(0, metadataMatch.index).trim() : rawMaterial) || "—";
+  const rawType = probeType?.trim() || "";
+  let shape = rawType;
+  let radius = "—";
+
+  const explicitRadius = rawType.match(EXPLICIT_RADIUS_RE);
+  const diameter = rawType.match(DIAMETER_RE);
+  const trailingTipRadius = /tip/i.test(rawType) ? rawType.match(TRAILING_TIP_RADIUS_RE) : null;
+  const measurement = explicitRadius || diameter || trailingTipRadius;
+
+  if (measurement) {
+    shape = rawType.replace(measurement[0], "");
+    const qualifier = measurement[1] || "";
+    const numeric = measurement[2];
+    const uncertainty = measurement[3];
+    const unit = measurement[4];
+    if (diameter) {
+      const radiusUncertainty = uncertainty ? ` ± ${halfProbeMeasurement(uncertainty)}` : "";
+      const sourceUncertainty = uncertainty ? ` ± ${uncertainty}` : "";
+      radius = `${qualifier || "≈"}${halfProbeMeasurement(numeric)}${radiusUncertainty} ${unit} (from Ø ${qualifier}${numeric}${sourceUncertainty} ${unit})`;
+    } else {
+      radius = `${qualifier}${numeric}${uncertainty ? ` ± ${uncertainty}` : ""} ${unit}`;
+    }
+  }
+
+  shape = shape.replace(/^[\s·|,;:=-]+|[\s·|,;:=-]+$/g, "").trim();
+  return {
+    material,
+    shape: shape || "—",
+    radius,
+  };
+}
+
+function roughnessSegmentLabel(segment: string, units: UnitMode): string {
+  const value = segment
+    .replace(/\s*\((?:probe|surface|substrate|sample|specimen)\)\s*/gi, "")
+    .replace(/^\s*(?:Rq\s*[:=]?\s*)/i, "")
+    .trim();
+  const parsed = parseQuantity(value, "length");
+  return parsed ? quantityLabel(parsed, units) : value;
+}
+
+/** Assign one extracted roughness string to the contact body it describes. */
+export function tribopairRoughnessDisplay(roughness: Quantity | undefined, units: UnitMode): TribopairRoughnessDisplay {
+  if (!roughness) return {};
+  const raw = roughness.raw.trim();
+  const parts = raw.split(/[;\n]+/).map((part) => part.trim()).filter(Boolean);
+  const display: TribopairRoughnessDisplay = {};
+
+  for (const part of parts) {
+    const value = roughnessSegmentLabel(part, units);
+    if (/\(\s*probe\s*\)/i.test(part)) display.probe = value;
+    else if (/\(\s*(?:surface|substrate|sample|specimen)\s*\)/i.test(part)) display.substrate = value;
+    else if (!display.substrate) display.substrate = parts.length === 1 ? quantityLabel(roughness, units) : value;
+  }
+
+  return display;
+}
 
 function normalizedContactText(record: IonicRecord): string {
   const { core, extended: e } = record;
@@ -168,6 +363,20 @@ function macroRoles(pattern: TribopairDisplay["pattern"]): Pick<TribopairDisplay
 
 function tribopairDisplay(record: IonicRecord): TribopairDisplay {
   const { core, extended: e } = record;
+  const contactText = normalizedContactText(record);
+  const isSfa =
+    contactText.includes("surface_force") ||
+    /(^|_)(sfa|sfb)(_|$)/.test(contactText);
+  if (isSfa) {
+    return {
+      mode: "sfa",
+      pattern: "sfa",
+      primaryRole: "Surface 1",
+      secondaryRole: "Surface 2",
+      primaryLabel: [e.probe, e.probeType].filter(Boolean).join(" · ") || e.method || "—",
+      primaryDetails: e.method || "",
+    };
+  }
   if (e.scale === "macro") {
     const pattern = macroPattern(record);
     const roles = macroRoles(pattern);
@@ -193,6 +402,10 @@ function tribopairDisplay(record: IonicRecord): TribopairDisplay {
 function TribopairContactValue({
   label,
   value,
+  material,
+  roughness,
+  roughnessOwner,
+  roughnessProv,
   missing,
   prov,
   sourceId,
@@ -202,6 +415,10 @@ function TribopairContactValue({
 }: {
   label: string;
   value: string;
+  material?: string;
+  roughness?: string;
+  roughnessOwner?: "probe" | "substrate";
+  roughnessProv?: NonNullable<IonicRecord["provenance"]>[string];
   missing?: boolean;
   prov?: NonNullable<IonicRecord["provenance"]>[string];
   sourceId?: string;
@@ -209,18 +426,82 @@ function TribopairContactValue({
   field: string;
   domain: Domain;
 }) {
-  const className = `min-w-0 bg-white px-2.5 py-2 text-left ${
+  const materialProfile = tribopairMaterialDisplay(material || value);
+  const materialTone = MATERIAL_TONE_STYLES[materialProfile.tone];
+  const valueClassName = `block w-full min-w-0 text-left ${
     prov ? "cursor-pointer transition hover:bg-brand-50/45 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-200" : ""
   }`;
+  const valueContent = (
+    <span
+      className={`mt-0.5 block break-words text-[15px] font-semibold leading-snug ${
+        missing ? "text-amber-600" : "text-ink-900"
+      }`}
+    >
+      {value}
+    </span>
+  );
+  return (
+    <div
+      data-testid="tribopair-contact-value"
+      data-material-tone={materialProfile.tone}
+      className={`min-w-0 border-l-[3px] pt-2 ${materialTone.panel} ${roughness ? "" : "pb-2"}`}
+      title={value}
+    >
+      <div className="px-2.5">
+        <span className="block min-w-0">
+          <span className={`font-sans text-[9px] font-bold uppercase leading-relaxed tracking-eyebrow ${materialTone.label}`}>{label}</span>
+        </span>
+        {prov ? (
+          <button
+            type="button"
+            data-testid="evidence-click-target"
+            className={valueClassName}
+            title={`${value} · evidence available`}
+            aria-label={`Open evidence for ${field}`}
+            onClick={() => openRecordEvidence({ sourceId, recordId, field, value, prov, domain })}
+          >
+            {valueContent}
+          </button>
+        ) : (
+          valueContent
+        )}
+      </div>
+      {roughness && roughnessOwner ? (
+        <LinkedRq
+          owner={roughnessOwner}
+          value={roughness}
+          prov={roughnessProv}
+          sourceId={sourceId}
+          recordId={recordId}
+          domain={domain}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function LinkedRq({
+  owner,
+  value,
+  prov,
+  sourceId,
+  recordId,
+  domain,
+}: {
+  owner: "probe" | "substrate";
+  value: string;
+  prov?: NonNullable<IonicRecord["provenance"]>[string];
+  sourceId?: string;
+  recordId?: string;
+  domain: Domain;
+}) {
+  const className =
+    "mt-2 flex w-full min-w-0 items-center justify-between gap-2 border-t border-cyan-100 bg-cyan-50/55 px-2 py-1.5 text-left";
   const content = (
     <>
-      <span className="flex min-w-0 items-center gap-x-2">
-        <span className="font-sans text-[9px] font-bold uppercase leading-relaxed tracking-eyebrow text-cyan-700">{label}</span>
-      </span>
+      <span className="shrink-0 font-sans text-[9px] font-bold uppercase tracking-[0.08em] text-cyan-700">Roughness (Rq)</span>
       <span
-        className={`mt-0.5 block break-words text-[13px] font-semibold leading-snug ${
-          missing ? "text-amber-600" : "text-ink-900"
-        }`}
+        className="min-w-0 break-words text-right font-mono text-[13px] font-semibold leading-snug text-cyan-950"
       >
         {value}
       </span>
@@ -230,19 +511,97 @@ function TribopairContactValue({
     return (
       <button
         type="button"
-        data-testid="evidence-click-target"
-        className={className}
-        title={`${value} · evidence available`}
-        aria-label={`Open evidence for ${field}`}
-        onClick={() => openRecordEvidence({ sourceId, recordId, field, value, prov, domain })}
+        data-testid={`linked-rq-${owner}`}
+        className={`${className} transition hover:bg-cyan-100/70 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-cyan-200`}
+        title={`${owner === "probe" ? "Probe" : "Substrate"} Root Mean Square Roughness (Rq): ${value} · evidence available`}
+        aria-label={`Open evidence for ${owner} roughness`}
+        onClick={() => openRecordEvidence({ sourceId, recordId, field: "roughness", value, prov, domain })}
       >
         {content}
       </button>
     );
   }
   return (
-    <div data-testid="tribopair-contact-value" className={className} title={value}>
+    <span
+      data-testid={`linked-rq-${owner}`}
+      className={className}
+      title={`${owner === "probe" ? "Probe" : "Substrate"} Root Mean Square Roughness (Rq): ${value}`}
+    >
       {content}
+    </span>
+  );
+}
+
+function AfmProbeContactRow({
+  probe,
+  roughness,
+  roughnessProv,
+  prov,
+  sourceId,
+  recordId,
+  domain,
+}: {
+  probe: AfmProbeDisplay;
+  roughness?: string;
+  roughnessProv?: NonNullable<IonicRecord["provenance"]>[string];
+  prov?: NonNullable<IonicRecord["provenance"]>[string];
+  sourceId?: string;
+  recordId?: string;
+  domain: Domain;
+}) {
+  const materialProfile = tribopairMaterialDisplay(probe.material);
+  const materialTone = MATERIAL_TONE_STYLES[materialProfile.tone];
+  const facts = [
+    { label: "Material", value: probe.material },
+    { label: "Shape", value: probe.shape },
+    { label: "Radius", value: probe.radius },
+  ].filter((fact) => fact.value.trim() && fact.value !== "—");
+  const factsClassName = `grid w-full min-w-0 auto-cols-fr grid-flow-col divide-x text-left ${materialTone.divider} ${
+    prov ? "cursor-pointer transition hover:bg-brand-50/45 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-200" : ""
+  }`;
+  const factsContent = facts.map((fact) => (
+    <div key={fact.label} data-testid="afm-probe-subfield" data-field={fact.label.toLowerCase()} className="min-w-0 px-2.5 pb-2 pt-1">
+      <span className="block font-sans text-[8px] font-bold uppercase leading-relaxed tracking-eyebrow text-ink-400">
+        {fact.label}
+      </span>
+      <span className={`mt-0.5 block break-words text-[14px] font-semibold leading-snug ${fact.value === "—" ? "text-amber-600" : "text-ink-900"}`}>
+        {fact.value}
+      </span>
+    </div>
+  ));
+  return (
+    <div
+      data-testid="afm-probe-row"
+      data-material-tone={materialProfile.tone}
+      className={`min-w-0 border-l-[3px] ${materialTone.panel}`}
+    >
+      <div className="min-w-0 px-2.5 pt-2">
+        <span className={`font-sans text-[9px] font-bold uppercase leading-relaxed tracking-eyebrow ${materialTone.label}`}>Probe</span>
+      </div>
+      {prov ? (
+        <button
+          type="button"
+          data-testid="evidence-click-target"
+          className={factsClassName}
+          title="Probe evidence available"
+          aria-label="Open evidence for probe"
+          onClick={() => openRecordEvidence({ sourceId, recordId, field: "probe", value: [probe.material, probe.shape, probe.radius].join(" · "), prov, domain })}
+        >
+          {factsContent}
+        </button>
+      ) : (
+        <div className={factsClassName}>{factsContent}</div>
+      )}
+      {roughness ? (
+        <LinkedRq
+          owner="probe"
+          value={roughness}
+          prov={roughnessProv}
+          sourceId={sourceId}
+          recordId={recordId}
+          domain={domain}
+        />
+      ) : null}
     </div>
   );
 }
@@ -279,7 +638,7 @@ function TribopairInlineSpec({
           ? "text-amber-800"
           : "text-ink-800";
 
-  const className = `min-w-0 bg-white px-2.5 py-1.5 text-left ${
+  const className = `min-w-0 w-full bg-white px-2.5 py-1.5 text-left ${
     prov ? "cursor-pointer transition hover:bg-brand-50/45 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-200" : ""
   }`;
   const content = (
@@ -287,21 +646,23 @@ function TribopairInlineSpec({
       <span className="flex min-w-0 items-center gap-x-1.5">
         <span className="min-w-0 break-words font-sans text-[8.5px] font-bold uppercase leading-relaxed tracking-eyebrow text-ink-400">{label}</span>
       </span>
-      <span className={`mt-0.5 block break-words font-mono text-[12px] font-semibold leading-tight ${toneClass}`}>{value}</span>
+      <span className={`mt-0.5 block break-words font-mono text-[14px] font-semibold leading-tight ${toneClass}`}>{value}</span>
     </>
   );
   if (prov) {
     return (
-      <button
-        type="button"
-        data-testid="evidence-click-target"
-        className={className}
-        title={`${title ?? value} · evidence available`}
-        aria-label={`Open evidence for ${field}`}
-        onClick={() => openRecordEvidence({ sourceId, recordId, field, value, prov, domain })}
-      >
-        {content}
-      </button>
+      <div className="min-w-0 bg-white">
+        <button
+          type="button"
+          data-testid="evidence-click-target"
+          className={className}
+          title={`${title ?? value} · evidence available`}
+          aria-label={`Open evidence for ${field}`}
+          onClick={() => openRecordEvidence({ sourceId, recordId, field, value, prov, domain })}
+        >
+          {content}
+        </button>
+      </div>
     );
   }
   return (
@@ -318,8 +679,10 @@ export function RecordCard({
   actions,
   units = "raw",
   domain = DEFAULT_DOMAIN,
+  compact = false,
 }: {
   record: IonicRecord;
+  compact?: boolean;
   selected?: boolean;
   onToggle?: (id: string) => void;
   actions?: React.ReactNode;
@@ -332,22 +695,21 @@ export function RecordCard({
   const anionLabel = ionDisplayLabel(il.anion || "—", "anion", units);
   const { missing } = coreCompleteness(record);
   const svgId = useId().replace(/:/g, "");
-  const conditions = buildConditionItems(record, units);
+  const conditions = buildConditionItems(record, units).filter((item) => item.value.trim() && item.value !== "—");
   const tribopair = tribopairDisplay(record);
   const probeLabel = tribopair.mode === "macro" ? tribopair.primaryLabel : tribopair.primaryLabel;
+  const afmProbe = afmProbeDisplay(e.probe, e.probeType);
+  const linkedRoughness = tribopairRoughnessDisplay(e.roughness, units);
   const showConfidence = record.status === "review" && typeof record.confidence === "number";
   const confidencePct = showConfidence ? Math.round((record.confidence as number) * 100) : null;
-  const instrumentLabel = tribopair.mode === "macro" ? "TRIBO" : "AFM";
+  const instrumentLabel = tribopair.mode === "macro" ? "TRIBO" : tribopair.mode === "sfa" ? "SFA" : "AFM";
+  const instrumentTone =
+    tribopair.mode === "macro"
+      ? "border-orange-100 bg-orange-50/45 text-orange-700"
+      : tribopair.mode === "sfa"
+        ? "border-violet-100 bg-violet-50/55 text-violet-700"
+        : "border-cyan-100 bg-cyan-50/55 text-cyan-700";
   const tribopairSpecs = [
-    {
-      label: "Rq roughness",
-      value: e.roughness ? quantityLabel(e.roughness, units) : "—",
-      title: e.roughness ? `Root Mean Square Roughness (Rq): ${quantityTitle(e.roughness, units)}` : "Root Mean Square Roughness (Rq) not reported",
-      missing: !e.roughness,
-      tone: "cyan" as const,
-      prov: record.provenance?.roughness,
-      field: "roughness",
-    },
     {
       label: "γs · Surface energy",
       value: e.surface?.surfaceEnergy ? quantityLabel(e.surface.surfaceEnergy, units) : "—",
@@ -378,18 +740,21 @@ export function RecordCard({
       field: "contactAngle",
     },
   ];
+  const visibleTribopairSpecs = tribopairSpecs.filter((spec) => !spec.missing);
   const cofValue = formatCof(core.cof);
+  const cofUncertainty = cofUncertaintyLabel(record);
+  const cofDisplayValue = cofUncertainty ? `${cofValue} ${cofUncertainty}` : cofValue;
   const cofReadoutContent = (
     <>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="label-eyebrow text-ink-500">Coefficient of friction</div>
           <div
-            className={`mt-1 font-mono text-[1.8rem] font-semibold leading-none tnum ${
+            className={`mt-1 font-mono text-[2.1rem] font-semibold leading-none tnum ${
               core.cof == null ? "text-amber-600" : "text-ink-900"
             }`}
           >
-            {cofValue}
+            {cofDisplayValue}
           </div>
         </div>
         {showConfidence && (
@@ -422,23 +787,47 @@ export function RecordCard({
           />
         )}
         <span className="font-mono text-xs font-semibold tracking-tight text-ink-400">{record.id}</span>
-        <span
+        {(!compact || record.status !== "official") && <span
           className={`status-mini whitespace-nowrap ${record.status === "review" ? "status-mini-review" : "status-mini-official"}`}
         >
           {record.status === "official" ? "checked" : record.status}
-        </span>
+        </span>}
       </div>
 
       {/* ── ionic identity ── */}
       <section data-testid="ionic-liquid-panel" className="flex min-w-0 flex-col gap-2 border-b border-ink-100 px-3 py-3 xl:border-b-0 xl:border-l xl:border-ink-100">
         <span className="label-eyebrow">Ionic liquid</span>
-        <div data-testid="ion-row" className="grid min-w-0 grid-cols-2 gap-1.5">
-          <IonPill kind="cation" label="Cation" value={il.cation || "—"} units={units} />
-          <IonPill kind="anion" label="Anion" value={il.anion || "—"} units={units} />
-        </div>
-        <div className="grid min-w-0 grid-cols-1 gap-2 xl:grid-cols-2">
-          <MoleculeView smiles={il.cationSmiles} ionLabel={cationLabel} kind="cation" label="Cation" width={236} height={88} />
-          <MoleculeView smiles={il.anionSmiles} ionLabel={anionLabel} kind="anion" label="Anion" width={320} height={116} />
+        <div data-testid="ion-row" className="grid min-w-0 grid-cols-2 gap-1.5 xl:grid-cols-2">
+          <div
+            data-testid="ion-stack-cation"
+            className="flex min-w-0 flex-col overflow-hidden rounded-lg border border-cyan-100 bg-gradient-to-b from-cyan-50/70 to-white"
+          >
+            <IonPill kind="cation" label="Cation" value={il.cation || "—"} units={units} connected />
+            <MoleculeView
+              smiles={il.cationSmiles}
+              ionLabel={cationLabel}
+              kind="cation"
+              label="Cation"
+              width={236}
+              height={88}
+              connected
+            />
+          </div>
+          <div
+            data-testid="ion-stack-anion"
+            className="flex min-w-0 flex-col overflow-hidden rounded-lg border border-emerald-100 bg-gradient-to-b from-emerald-50/70 to-white"
+          >
+            <IonPill kind="anion" label="Anion" value={il.anion || "—"} units={units} connected />
+            <MoleculeView
+              smiles={il.anionSmiles}
+              ionLabel={anionLabel}
+              kind="anion"
+              label="Anion"
+              width={320}
+              height={116}
+              connected
+            />
+          </div>
         </div>
       </section>
 
@@ -448,18 +837,17 @@ export function RecordCard({
         className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] items-start gap-2.5 border-b border-ink-100 bg-white px-3 py-3 xl:border-b-0 xl:border-l xl:border-ink-100"
       >
         <div
-          className={`flex h-fit w-[3.85rem] shrink-0 flex-col items-center justify-center rounded-[8px] border px-1.5 py-2 ${
-            tribopair.mode === "macro"
-              ? "border-orange-100 bg-orange-50/45"
-              : "border-cyan-100 bg-cyan-50/55"
-          }`}
+          data-testid="tribopair-instrument"
+          className={`flex h-fit w-[3.85rem] shrink-0 flex-col items-center justify-center rounded-[8px] border px-1.5 py-2 ${instrumentTone}`}
         >
           {tribopair.mode === "macro" ? (
             <MacroTribometerIllustration idPrefix={svgId} pattern={tribopair.pattern} />
+          ) : tribopair.mode === "sfa" ? (
+            <SfaIllustration idPrefix={svgId} />
           ) : (
             <AfmProbeIllustration idPrefix={svgId} active={e.scale === "nano"} />
           )}
-          <div className="mt-1.5 w-full border-t border-ink-100/70 pt-1 text-center font-mono text-[10px] font-black uppercase tracking-[0.18em] text-cyan-700">
+          <div className="mt-1.5 w-full border-t border-ink-100/70 pt-1 text-center font-mono text-[10px] font-black uppercase tracking-[0.18em]">
             {instrumentLabel}
           </div>
         </div>
@@ -468,18 +856,38 @@ export function RecordCard({
             <span className="font-sans text-[8.5px] font-bold uppercase tracking-eyebrow text-ink-400">Tribopair</span>
           </div>
           <div data-testid="tribopair-contact-stack" className="grid min-w-0 grid-cols-1 divide-y divide-ink-100 bg-white">
+            {tribopair.mode === "nano" ? (
+              <AfmProbeContactRow
+                probe={afmProbe}
+                roughness={linkedRoughness.probe}
+                roughnessProv={record.provenance?.roughness}
+                prov={record.provenance?.probe}
+                sourceId={record.sourceId}
+                recordId={record.id}
+                domain={domain}
+              />
+            ) : (
+              <TribopairContactValue
+                label={tribopair.mode === "sfa" ? tribopair.primaryRole : "Probe"}
+                value={probeLabel}
+                material={e.probe}
+                roughness={linkedRoughness.probe}
+                roughnessOwner="probe"
+                roughnessProv={record.provenance?.roughness}
+                prov={record.provenance?.probe}
+                sourceId={record.sourceId}
+                recordId={record.id}
+                field="probe"
+                domain={domain}
+              />
+            )}
             <TribopairContactValue
-              label="Probe"
-              value={probeLabel}
-              prov={record.provenance?.probe}
-              sourceId={record.sourceId}
-              recordId={record.id}
-              field="probe"
-              domain={domain}
-            />
-            <TribopairContactValue
-              label="Substrate"
+              label={tribopair.mode === "sfa" ? tribopair.secondaryRole : "Substrate"}
               value={core.substrate || "substrate?"}
+              material={core.substrate}
+              roughness={linkedRoughness.substrate}
+              roughnessOwner="substrate"
+              roughnessProv={record.provenance?.roughness}
               missing={!core.substrate}
               prov={record.provenance?.substrate}
               sourceId={record.sourceId}
@@ -488,23 +896,24 @@ export function RecordCard({
               domain={domain}
             />
           </div>
-          <div className="grid min-w-0 grid-cols-1 gap-px border-t border-ink-100 bg-ink-100">
-            {tribopairSpecs.map((spec) => (
-              <TribopairInlineSpec
-                key={spec.label}
-                label={spec.label}
-                value={spec.value}
-                title={spec.title}
-                missing={spec.missing}
-                tone={spec.tone}
-                prov={spec.prov}
-                sourceId={record.sourceId}
-                recordId={record.id}
-                field={spec.field}
-                domain={domain}
-              />
-            ))}
-          </div>
+          {visibleTribopairSpecs.length > 0 ? (
+            <div className="grid min-w-0 grid-cols-1 gap-px border-t border-ink-100 bg-ink-100">
+              {visibleTribopairSpecs.map((spec) => (
+                <TribopairInlineSpec
+                  key={spec.label}
+                  label={spec.label}
+                  value={spec.value}
+                  title={spec.title}
+                  missing={spec.missing}
+                  tone={spec.tone}
+                  prov={spec.prov}
+                  sourceId={record.sourceId}
+                  recordId={record.id}
+                  field={spec.field}
+                  domain={domain}                />
+              ))}
+            </div>
+          ) : null}
         </div>
       </section>
 
@@ -515,11 +924,11 @@ export function RecordCard({
             type="button"
             data-testid="evidence-click-target"
             onClick={() =>
-              openRecordEvidence({ sourceId: record.sourceId, recordId: record.id, field: "cof", value: cofValue, prov: record.provenance!.cof!, domain })
+              openRecordEvidence({ sourceId: record.sourceId, recordId: record.id, field: "cof", value: cofDisplayValue, prov: record.provenance!.cof!, domain })
             }
             data-ui="cof-summary"
             className="rounded-[10px] border border-cyan-100 bg-gradient-to-br from-white to-cyan-50/45 px-3 py-2.5 text-left shadow-sm transition hover:border-brand-300 hover:bg-cyan-50/55 focus:outline-none focus:ring-2 focus:ring-brand-200"
-            title={`${cofValue} · evidence available`}
+            title={`${cofDisplayValue} · evidence available`}
             aria-label="Open evidence for cof"
           >
             {cofReadoutContent}
@@ -530,7 +939,7 @@ export function RecordCard({
           </div>
         )}
 
-        <div>
+        {conditions.length > 0 && <div>
           <div className="mb-1.5">
             <span className="label-eyebrow">{units === "std" ? "Standardized Conditions" : "Reported Conditions"}</span>
           </div>
@@ -540,13 +949,11 @@ export function RecordCard({
             {conditions.filter((c) => !c.fullWidth).map((item) => (
               <ConditionChip key={`${item.label}-${item.value}`} item={item} sourceId={record.sourceId} recordId={record.id} domain={domain} />
             ))}
-            {!core.load && <MissingChip label="Load" />}
-            {!core.temperature && <MissingChip label="Temp" />}
             {conditions.filter((c) => c.fullWidth).map((item) => (
               <ConditionChip key={`${item.label}-${item.value}`} item={item} sourceId={record.sourceId} recordId={record.id} domain={domain} />
             ))}
           </div>
-        </div>
+        </div>}
       </section>
 
       {/* ── actions footer ── */}
@@ -559,6 +966,39 @@ export function RecordCard({
         </div>
       )}
     </article>
+  );
+}
+
+function SfaIllustration({ idPrefix }: { idPrefix: string }) {
+  const upperId = `${idPrefix}-sfa-upper`;
+  const lowerId = `${idPrefix}-sfa-lower`;
+
+  return (
+    <svg
+      data-testid="sfa-illustration"
+      className="h-16 w-10 overflow-visible"
+      viewBox="0 0 86 146"
+      role="img"
+      aria-label="SFA crossed mica surfaces"
+    >
+      <defs>
+        <linearGradient id={upperId} x1="12" y1="43" x2="74" y2="68" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#6d5aa7" />
+          <stop offset="1" stopColor="#40326e" />
+        </linearGradient>
+        <linearGradient id={lowerId} x1="12" y1="103" x2="74" y2="82" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#40326e" />
+          <stop offset="1" stopColor="#6d5aa7" />
+        </linearGradient>
+      </defs>
+      <ellipse cx="43" cy="124" rx="34" ry="7" fill="#33275c" opacity=".12" />
+      <path d="M10 43 Q43 73 76 43 L76 55 Q43 83 10 55Z" fill={`url(#${upperId})`} />
+      <path d="M10 103 Q43 73 76 103 L76 115 Q43 87 10 115Z" fill={`url(#${lowerId})`} />
+      <path d="M19 64 Q43 82 67 64" fill="none" stroke="#c4b5fd" strokeWidth="2" opacity=".9" />
+      <path d="M19 94 Q43 76 67 94" fill="none" stroke="#c4b5fd" strokeWidth="2" opacity=".9" />
+      <path d="M24 72 Q43 84 62 72M24 86 Q43 74 62 86" fill="none" stroke="#8b7bd1" strokeWidth="1.5" opacity=".75" />
+      <path d="M43 58V70M39 66L43 70L47 66M43 100V88M39 92L43 88L47 92" fill="none" stroke="#7c3aed" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 

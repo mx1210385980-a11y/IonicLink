@@ -28,6 +28,7 @@ frontend/.vite/
 /.next/
 /.next-dev/
 /.next-dev-qa/
+/.next-preview/
 /.next-build-verified-*/
 /out/
 next-env.d.ts
@@ -46,9 +47,14 @@ backend/data/literature_monitor_pdfs/
 
 # Local tool worktrees
 .claude/
+.dsh-filess/
 .superpowers/
 .worktrees/
 skills/
+
+# Throwaway scratch dirs
+tmp-digit*/
+tmp-digitize/
 
 # Backend runtime data
 backend/data/.idea/
@@ -69,6 +75,9 @@ backend/temp_uploads/
 /data/sources/
 /data/*/sources/
 /data/backups/
+/data/audit-*/
+/data/literature-expansion-*/
+/data/archive/*.zip
 /Lubrication_sources/
 /reports/
 /outputs/

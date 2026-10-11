@@ -33,14 +33,14 @@ assert.match(source, /data-testid="structure-search-dialog"/);
 assert.match(source, /role="dialog"/);
 assert.match(source, /aria-modal="true"/);
 assert.match(source, /Search by structure/);
-assert.doesNotMatch(source, /绘制离子结构，应用后筛选当前数据库/);
+assert.doesNotMatch(source, /绘制离Substructure，应用后筛选当前数据库/);
 assert.doesNotMatch(source, /structure-search-description/);
-assert.match(source, /Either ion/);
+assert.match(source, /Any ion/);
 assert.match(source, /Cation/);
 assert.match(source, /Anion/);
 assert.match(source, /Exact structure/);
 assert.match(source, /Substructure/);
-assert.match(source, /Similarity/);
+assert.match(source, /Similar structure/);
 assert.match(source, /Apply structure search/);
 assert.match(source, /Loading structure editor/);
 

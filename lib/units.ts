@@ -311,6 +311,11 @@ export function parseQuantity(raw: string | null | undefined, dim: Dimension): Q
   if (dim === "temperature") return parseTemperature(raw);
 
   const norm = normalizeText(raw);
+  // F/R and F/(2πR) are force per length, not forces. Preserve the
+  // source string until a source-backed probe radius permits conversion.
+  if (dim === "force" && /[kcmµunp]?N\s*(?:\/\s*m\b|[·⋅]?\s*m\s*\^?\s*-\s*1\b)/.test(norm)) {
+    return { raw: raw.trim(), value: null, unit: "N/m", std: null, stdUnit: "N", approx: true };
+  }
   const normalizedUnit = detectNormalizedElectrochemicalUnit(norm, dim);
   if (normalizedUnit) {
     const { value, approx, range: rawRange } = extractValue(norm.replace(normalizedUnit.literal, " "));

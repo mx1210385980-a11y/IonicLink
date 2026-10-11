@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
   if (session instanceof NextResponse) return session;
   const projectId = request.nextUrl.searchParams.get("projectId") ?? "";
   if (!projectId) {
-    return NextResponse.json({ error: "缺少实验编号。" }, { status: 400 });
+    return NextResponse.json({ error: "Experiment ID is required." }, { status: 400 });
   }
   try {
     const dashboard = getGroupCrossoverDashboard(projectId);
@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
     return internalTeachingErrorResponse(
       "export group crossover dashboard",
       error,
-      { status: 503, message: "导出分组实验数据失败，请稍后重试。" }
+      { status: 503, message: "Could not export group experiment data. Try again later." }
     );
   }
 }

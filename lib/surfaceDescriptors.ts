@@ -30,10 +30,6 @@ export interface SurfaceDescriptorInput {
 
 interface SurfaceDefaults {
   name: string;
-  gammaMJm2: number | null;
-  thetaDeg: number | null;
-  sigmaCm2: number | null;
-  roughnessNm: number | null;
   conductor: boolean;
   layered: boolean;
   plane: string;
@@ -41,27 +37,18 @@ interface SurfaceDefaults {
 }
 
 const DEFAULTS: { match: RegExp; props: SurfaceDefaults }[] = [
-  // Calibrated from backend/data/wff/*0312.csv by surface-level medians.
-  // The WFF CSV columns are empirical features: `σ_s` carries the effective
-  // surface-energy scale (J/m² → mJ/m² here), while `γ_s` carries charge density
-  // (C/m²). The UI keeps the user's physical labels: γ_s = surface energy,
-  // σ_s = surface charge density. These are model priors, not reported facts.
   {
     match: /^mica|muscovite/,
-    props: { name: "mica", gammaMJm2: 1770, thetaDeg: 0, sigmaCm2: -0.16, roughnessNm: 0.0569, conductor: false, layered: true, plane: "(0001)", materialClass: "ceramic" },
+    props: { name: "mica", conductor: false, layered: true, plane: "(0001)", materialClass: "ceramic" },
   },
   {
     match: /^hopg|graphit|graphene/,
-    props: { name: "HOPG", gammaMJm2: 50, thetaDeg: 85, sigmaCm2: -0.0002, roughnessNm: 0.89, conductor: true, layered: true, plane: "(0001)", materialClass: "carbon" },
+    props: { name: "HOPG", conductor: true, layered: true, plane: "(0001)", materialClass: "carbon" },
   },
   {
     match: /^au|gold/,
     props: {
       name: "Au",
-      gammaMJm2: 700,
-      thetaDeg: 60,
-      sigmaCm2: -0.02,
-      roughnessNm: 0.835,
       conductor: true,
       layered: false,
       plane: "(111)",
@@ -69,13 +56,9 @@ const DEFAULTS: { match: RegExp; props: SurfaceDefaults }[] = [
     },
   },
   {
-    match: /^pt|platinum/,
+    match: /^(?:pt(?:\b|\()|platinum)/,
     props: {
       name: "Pt",
-      gammaMJm2: 72,
-      thetaDeg: 65,
-      sigmaCm2: null,
-      roughnessNm: null,
       conductor: true,
       layered: false,
       plane: "(111)",
@@ -84,35 +67,35 @@ const DEFAULTS: { match: RegExp; props: SurfaceDefaults }[] = [
   },
   {
     match: /silica|sio2|quartz|glass/,
-    props: { name: "silica", gammaMJm2: 200, thetaDeg: 20.7, sigmaCm2: -0.07, roughnessNm: 0.5, conductor: false, layered: false, plane: "amorphous", materialClass: "ceramic" },
+    props: { name: "silica", conductor: false, layered: false, plane: "amorphous", materialClass: "ceramic" },
   },
   {
     match: /alumina|al2o3|sapphire/,
-    props: { name: "alumina", gammaMJm2: 50, thetaDeg: 55, sigmaCm2: 0.01, roughnessNm: null, conductor: false, layered: false, plane: "(0001)", materialClass: "ceramic" },
+    props: { name: "alumina", conductor: false, layered: false, plane: "(0001)", materialClass: "ceramic" },
   },
   {
     match: /stainless|steel|iron/,
-    props: { name: "stainless steel", gammaMJm2: 70, thetaDeg: 72, sigmaCm2: 0.01, roughnessNm: 0.9, conductor: true, layered: false, plane: "polycrystalline", materialClass: "metal" },
+    props: { name: "stainless steel", conductor: true, layered: false, plane: "polycrystalline", materialClass: "metal" },
   },
   {
     match: /silicon|^si\b|^si\(/,
-    props: { name: "silicon (native oxide)", gammaMJm2: 55, thetaDeg: 40, sigmaCm2: -0.015, roughnessNm: null, conductor: false, layered: false, plane: "(100)", materialClass: "semiconductor" },
+    props: { name: "silicon (native oxide)", conductor: false, layered: false, plane: "(100)", materialClass: "semiconductor" },
   },
   {
     match: /glassy\s*carbon/,
-    props: { name: "glassy carbon", gammaMJm2: 50, thetaDeg: 70, sigmaCm2: 0, roughnessNm: null, conductor: true, layered: false, plane: "amorphous", materialClass: "carbon" },
+    props: { name: "glassy carbon", conductor: true, layered: false, plane: "amorphous", materialClass: "carbon" },
   },
   {
     match: /diamond|dlc/,
-    props: { name: "diamond/DLC", gammaMJm2: 45, thetaDeg: 80, sigmaCm2: 0, roughnessNm: null, conductor: false, layered: false, plane: "(111)", materialClass: "carbon" },
+    props: { name: "diamond/DLC", conductor: false, layered: false, plane: "(111)", materialClass: "carbon" },
   },
   {
     match: /ptfe|teflon/,
-    props: { name: "PTFE", gammaMJm2: 19, thetaDeg: 110, sigmaCm2: -0.00005, roughnessNm: 7, conductor: false, layered: false, plane: "amorphous", materialClass: "polymer" },
+    props: { name: "PTFE", conductor: false, layered: false, plane: "amorphous", materialClass: "polymer" },
   },
   {
     match: /titanium|\bti\b/,
-    props: { name: "titanium", gammaMJm2: 500, thetaDeg: 60, sigmaCm2: 0.005, roughnessNm: 61.15, conductor: true, layered: false, plane: "polycrystalline", materialClass: "metal" },
+    props: { name: "titanium", conductor: true, layered: false, plane: "polycrystalline", materialClass: "metal" },
   },
 ];
 
@@ -148,10 +131,6 @@ export function surfaceDescriptorDefaults(substrate: string | null | undefined):
   }
 
   return {
-    surfaceEnergy: props.gammaMJm2 == null ? undefined : parseQuantity(`${props.gammaMJm2} mJ/m2`, "surfaceEnergy") ?? undefined,
-    surfaceChargeDensity: props.sigmaCm2 == null ? undefined : parseQuantity(`${props.sigmaCm2} C/m2`, "surfaceChargeDensity") ?? undefined,
-    contactAngle: props.thetaDeg == null ? undefined : parseQuantity(`${props.thetaDeg}°`, "angle") ?? undefined,
-    roughness: props.roughnessNm == null ? undefined : parseQuantity(`${props.roughnessNm} nm`, "length") ?? undefined,
     materialClass: props.materialClass,
     plane: inferPlane(substrate) ?? props.plane,
     conductor: props.conductor,
@@ -168,17 +147,26 @@ export function buildSurfaceDescriptors(input: SurfaceDescriptorInput): {
   const reported = input.reported ?? {};
   const provenance = { ...(input.provenance ?? {}) } as Record<string, FieldProvenance>;
 
+  const verifiedSurfaceValue = (field: "surfaceEnergy" | "surfaceChargeDensity" | "contactAngle", raw?: string | null) => {
+    const value = raw?.trim();
+    const evidence = provenance[field];
+    if (!value || !hasCitableEvidence(evidence)) {
+      delete provenance[field];
+      return undefined;
+    }
+    return value;
+  };
+  const surfaceEnergy = verifiedSurfaceValue("surfaceEnergy", reported.surfaceEnergy);
+  const surfaceChargeDensity = verifiedSurfaceValue("surfaceChargeDensity", reported.surfaceChargeDensity);
+  const contactAngle = verifiedSurfaceValue("contactAngle", reported.contactAngle);
+
   const descriptors: SurfaceDescriptors = {
     ...defaults,
-    surfaceEnergy: reported.surfaceEnergy?.trim()
-      ? parseQuantity(reported.surfaceEnergy, "surfaceEnergy") ?? defaults.surfaceEnergy
-      : defaults.surfaceEnergy,
-    surfaceChargeDensity: reported.surfaceChargeDensity?.trim()
-      ? parseQuantity(reported.surfaceChargeDensity, "surfaceChargeDensity") ?? defaults.surfaceChargeDensity
-      : defaults.surfaceChargeDensity,
-    contactAngle: reported.contactAngle?.trim()
-      ? parseQuantity(reported.contactAngle, "angle") ?? defaults.contactAngle
-      : defaults.contactAngle,
+    surfaceEnergy: surfaceEnergy ? parseQuantity(surfaceEnergy, "surfaceEnergy") ?? undefined : undefined,
+    surfaceChargeDensity: surfaceChargeDensity
+      ? parseQuantity(surfaceChargeDensity, "surfaceChargeDensity") ?? undefined
+      : undefined,
+    contactAngle: contactAngle ? parseQuantity(contactAngle, "angle") ?? undefined : undefined,
     roughness: reported.roughness?.trim()
       ? parseQuantity(reported.roughness, "length") ?? defaults.roughness
       : defaults.roughness,
@@ -188,11 +176,8 @@ export function buildSurfaceDescriptors(input: SurfaceDescriptorInput): {
     layered: typeof reported.layered === "boolean" ? reported.layered : defaults.layered,
   };
 
-  assumeDefault("surfaceEnergy", descriptors.surfaceEnergy, !reported.surfaceEnergy?.trim(), input.substrate, provenance);
-  assumeDefault("contactAngle", descriptors.contactAngle, !reported.contactAngle?.trim(), input.substrate, provenance);
-  assumeDefault("roughness", descriptors.roughness, !reported.roughness?.trim(), input.substrate, provenance);
-  if (descriptors.surfaceChargeDensity) {
-    assumeDefault("surfaceChargeDensity", descriptors.surfaceChargeDensity, !reported.surfaceChargeDensity?.trim(), input.substrate, provenance);
+  for (const field of ["surfaceEnergy", "surfaceChargeDensity", "contactAngle"] as const) {
+    if (!descriptors[field]) delete provenance[field];
   }
   if (descriptors.plane && !reported.crystalPlane?.trim()) {
     provenance.crystalPlane ??= assumedProvenance(input.substrate, `crystal plane inferred as a model prior from the substrate label/default table`);
@@ -227,6 +212,13 @@ export function applySurfaceDescriptorsToRecord<T extends {
     provenance: record.provenance,
   });
   if (Object.keys(surface.descriptors).length === 0) return record;
+  const mergedProvenance = {
+    ...record.provenance,
+    ...surface.provenance,
+  };
+  for (const field of ["surfaceEnergy", "surfaceChargeDensity", "contactAngle"] as const) {
+    if (!surface.descriptors[field]) delete mergedProvenance[field];
+  }
 
   return {
     ...record,
@@ -235,24 +227,8 @@ export function applySurfaceDescriptorsToRecord<T extends {
       surface: surface.descriptors,
       roughness: record.extended?.roughness ?? surface.descriptors.roughness,
     },
-    provenance: {
-      ...record.provenance,
-      ...surface.provenance,
-    },
+    provenance: mergedProvenance,
   };
-}
-
-function assumeDefault(
-  field: string,
-  value: Quantity | undefined,
-  usingDefault: boolean,
-  substrate: string | null | undefined,
-  provenance: Record<string, FieldProvenance | undefined>
-): void {
-  if (!value || !usingDefault) return;
-  if (!provenance[field] || provenance[field]?.basis === "assumed") {
-    provenance[field] = assumedProvenance(substrate, `${field} filled as a WFF-calibrated model prior, not a reported material property`);
-  }
 }
 
 function assumedProvenance(substrate: string | null | undefined, basisNote: string): FieldProvenance {
@@ -260,6 +236,19 @@ function assumedProvenance(substrate: string | null | undefined, basisNote: stri
     basis: "assumed",
     basisNote: `${basisNote}${substrate ? ` for ${substrate}` : ""}`,
   };
+}
+
+function hasCitableEvidence(evidence: FieldProvenance | undefined): boolean {
+  if (!evidence || evidence.basis === "assumed") return false;
+  return Boolean(
+    evidence.page != null ||
+      evidence.figure ||
+      evidence.table ||
+      evidence.section ||
+      evidence.quote ||
+      evidence.context ||
+      evidence.figureBox
+  );
 }
 
 function inferPlane(substrate: string | null | undefined): string | undefined {

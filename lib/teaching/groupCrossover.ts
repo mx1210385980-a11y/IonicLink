@@ -1,3 +1,4 @@
+import { TeachingInputError } from "./inputError";
 import { createHash, randomUUID } from "node:crypto";
 import {
   GROUP_CROSSOVER_SCORING_VERSION,
@@ -61,7 +62,7 @@ export class TeachingRosterError extends Error {
 }
 
 const GROUP_TASK_PROMPT =
-  "请提取该文献摩擦学实验的六个关键字段:阳离子、阴离子、基底、温度、载荷、摩擦系数,并注明页码与原文依据。";
+  "Extract six fields from the tribology experiment: cation, anion, substrate, temperature, load, and coefficient of friction. Include page numbers and source evidence.";
 
 function now(): string {
   return new Date().toISOString();
@@ -108,30 +109,30 @@ export function createGroupCrossoverExperiment(input: {
   const groupCount = Math.floor(Number(input.groupCount));
   const recordIds = Array.isArray(input.recordIds) ? input.recordIds.map((id) => clean(id, 80)) : [];
 
-  if (!name) throw new Error("请填写实验名称。");
-  if (inviteCode.length < 4) throw new Error("实验代码至少需要 4 位。");
+  if (!name) throw new TeachingInputError("Enter an experiment name.");
+  if (inviteCode.length < 4) throw new TeachingInputError("The experiment code must contain at least 4 characters.");
   if (!Number.isFinite(groupCount) || groupCount < 2 || groupCount > 40 || groupCount % 2 !== 0) {
-    throw new Error("小组数量必须是 2 到 40 之间的偶数。");
+    throw new TeachingInputError("The group count must be even and between 2 and 40.");
   }
   if (recordIds.length !== groupCount) {
-    throw new Error(`文献池需要恰好 ${groupCount} 条已审核记录(当前 ${recordIds.length} 条)。`);
+    throw new TeachingInputError(`Select exactly ${groupCount} reviewed records (currently ${recordIds.length}).`);
   }
   if (new Set(recordIds).size !== recordIds.length) {
-    throw new Error("文献池中存在重复记录,请调整选择。");
+    throw new TeachingInputError("Duplicate records selected. Adjust your selection.");
   }
 
   const store = getTeachingDb();
   const inviteTaken = store
     .prepare("SELECT 1 FROM teaching_projects WHERE invite_code = ?")
     .get(inviteCode);
-  if (inviteTaken) throw new Error("这个实验代码已被使用,请换一个。");
+  if (inviteTaken) throw new TeachingInputError("This experiment code is already in use. Choose another.");
 
   const papers = recordIds.map((recordId, index) => {
     const record = loadCheckedRecord(recordId);
     const usability = checkedRecordUsability(record);
     if (!usability.usable) {
-      throw new Error(
-        `记录 ${recordId} 缺少必需字段(${usability.missing.join("、")}),不能作为实验文献。`
+      throw new TeachingInputError(
+        `Record ${recordId} is missing required fields (${usability.missing.join(", ")}) and is not eligible for the experiment.`
       );
     }
     return {
@@ -237,7 +238,7 @@ export function importGroupRoster(
 ): GroupRosterImportResult {
   const store = getTeachingDb();
   const project = loadGroupProject(projectId);
-  if (!project) throw new Error("没有找到这个分组交叉实验。");
+  if (!project) throw new TeachingInputError("Group crossover experiment not found.");
 
   const result: GroupRosterImportResult = { added: 0, updated: 0, rejected: [] };
   const seen = new Set<string>();
@@ -249,17 +250,17 @@ export function importGroupRoster(
       try {
         studentName = normalizeStudentAlias(entry.studentName ?? "");
       } catch {
-        result.rejected.push({ line, studentName: String(entry.studentName ?? ""), reason: "姓名需为 2-80 个字符" });
+        result.rejected.push({ line, studentName: String(entry.studentName ?? ""), reason: "Names must contain 2–80 characters" });
         return;
       }
       const groupNo = Math.floor(Number(entry.groupNo));
       if (!Number.isFinite(groupNo) || groupNo < 1 || groupNo > project.groupCount) {
-        result.rejected.push({ line, studentName, reason: `组号需在 1-${project.groupCount} 之间` });
+        result.rejected.push({ line, studentName, reason: `Group number must be between 1 and ${project.groupCount}` });
         return;
       }
       const identityKey = studentIdentityKey(studentName);
       if (seen.has(identityKey)) {
-        result.rejected.push({ line, studentName, reason: "本次导入中姓名重复" });
+        result.rejected.push({ line, studentName, reason: "Duplicate name in this import" });
         return;
       }
       seen.add(identityKey);
@@ -272,7 +273,7 @@ export function importGroupRoster(
         .get(projectId, identityKey) as { id: string; participantId: string | null } | undefined;
 
       if (existing?.participantId) {
-        result.rejected.push({ line, studentName, reason: "该学生已加入实验,名单不可再修改" });
+        result.rejected.push({ line, studentName, reason: "This student has joined; the roster entry is locked" });
         return;
       }
       if (existing) {
@@ -306,8 +307,8 @@ export function deleteGroupRosterEntry(projectId: string, rosterId: string): voi
        FROM teaching_roster WHERE id = ? AND project_id = ?`
     )
     .get(rosterId, projectId) as { participantId: string | null } | undefined;
-  if (!row) throw new Error("没有找到这条名单记录。");
-  if (row.participantId) throw new Error("该学生已加入实验,名单不可删除。");
+  if (!row) throw new TeachingInputError("Roster entry not found.");
+  if (row.participantId) throw new TeachingInputError("This student has joined; the roster entry cannot be deleted.");
   store.prepare("DELETE FROM teaching_roster WHERE id = ?").run(rosterId);
 }
 
@@ -343,7 +344,7 @@ export function joinGroupCrossoverExperiment(
     )
     .get(code) as { id: string; groupCount: number } | undefined;
   if (!project) {
-    throw new TeachingRosterError("没有找到这个分组实验,请核对实验代码。");
+    throw new TeachingRosterError("Group experiment not found. Check the experiment code.");
   }
 
   const rosterEntry = store
@@ -355,7 +356,7 @@ export function joinGroupCrossoverExperiment(
     | { id: string; groupNo: number; participantId: string | null }
     | undefined;
   if (!rosterEntry) {
-    throw new TeachingRosterError("你的姓名/学号不在本次实验名单中,请核对或联系老师。");
+    throw new TeachingRosterError("Your name or student ID is not on the roster. Check it or contact your instructor.");
   }
   if (rosterEntry.participantId) {
     return { projectId: project.id, participantId: rosterEntry.participantId };
@@ -377,7 +378,7 @@ export function joinGroupCrossoverExperiment(
     const ownPaper = paperRows.find((paper) => paper.groupNo === groupNo);
     const partnerPaper = paperRows.find((paper) => paper.groupNo === partnerGroupNo);
     if (!ownPaper || !partnerPaper) {
-      throw new Error("分组实验的文献分配不完整,请联系老师。");
+      throw new TeachingInputError("Paper assignments are incomplete. Contact your instructor.");
     }
 
     // Odd groups start AI-assisted on their own paper; even groups start
@@ -443,7 +444,7 @@ export function joinGroupCrossoverExperiment(
       )
       .run(participantId, rosterEntry.id);
     if (claimed.changes !== 1) {
-      throw new Error("名单认领失败,请重试。");
+      throw new TeachingInputError("Could not claim the roster entry. Try again.");
     }
 
     return { projectId: project.id, participantId };
@@ -714,7 +715,7 @@ export function getGroupCrossoverDashboard(projectId: string): GroupCrossoverDas
     .get(projectId) as
     | { id: string; name: string; inviteCode: string; groupCount: number }
     | undefined;
-  if (!project) throw new Error("没有找到这个分组交叉实验。");
+  if (!project) throw new TeachingInputError("Group crossover experiment not found.");
 
   const papers = store
     .prepare(
