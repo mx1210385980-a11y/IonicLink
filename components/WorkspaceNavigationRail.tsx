@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { authClient } from "@/lib/auth-client";
 import { DEFAULT_DOMAIN, DOMAINS, isDomain, type Domain } from "@/lib/domain";
 
 const DOMAIN_LABELS: Record<Domain, string> = {
@@ -34,9 +35,27 @@ export function WorkspaceNavigationRail({ authEnabled = false, viewerIsAdmin = f
   const onAfmPage = first === "afm";
   const onHomePage = pathname === "/";
   const onAccountPage = first === "account" || first === "admin";
+  // The root layout does not re-render on client-side navigation, so the
+  // server-passed props are only a first-frame snapshot. Subscribe to the
+  // client session and prefer it once loaded; this keeps the account entries
+  // in sync after sign-in/sign-out without a full page refresh. In public
+  // compatibility mode (auth disabled) the server snapshot always wins.
+  const { data: clientSession, isPending: sessionPending } = authClient.useSession();
+  const clientUser = clientSession?.user as
+    | { name?: string | null; displayUsername?: string | null; username?: string | null; email?: string | null; role?: string | null }
+    | null
+    | undefined;
+  const clientName = clientUser
+    ? clientUser.name || clientUser.displayUsername || clientUser.username || clientUser.email || null
+    : null;
+  const clientIsAdmin = Boolean(
+    clientUser?.role?.split(",").map((part) => part.trim()).includes("admin")
+  );
+  const effectiveName = authEnabled && !sessionPending ? clientName : viewerName;
+  const effectiveIsAdmin = authEnabled && !sessionPending ? clientIsAdmin : viewerIsAdmin;
   // The usage monitor is administrator-only once accounts are enabled; in
   // public compatibility mode (no auth) it stays visible to everyone.
-  const showMonitor = !authEnabled || viewerIsAdmin;
+  const showMonitor = !authEnabled || effectiveIsAdmin;
 
   return (
     <aside aria-label="IonicLink primary navigation" data-testid="workspace-navigation-rail" className="fixed inset-y-0 left-0 z-40 hidden h-dvh w-[190px] flex-col overflow-y-auto border-r border-[#41484e] bg-[#282f35] px-2 pb-7 pt-7 text-[#dce7ed] lg:flex">
@@ -76,18 +95,97 @@ export function WorkspaceNavigationRail({ authEnabled = false, viewerIsAdmin = f
         <RailLink href={`/${domain}/library`} label="Documents" active={onDomainPage && section === "library"}><LibraryIcon /></RailLink>
         <RailLink href="/teaching" label="AI experiment" active={onTeachingPage}><TeachingIcon /></RailLink>
         {showMonitor ? <RailLink href="/monitor" label="Usage monitor" active={onMonitorPage}><MonitorIcon /></RailLink> : null}
-        {viewerIsAdmin ? <RailLink href="/admin/users" label="Account management" displayLabel="Accounts" active={pathname.startsWith("/admin")}><UsersIcon /></RailLink> : null}
-        {authEnabled ? (
-          viewerName ? (
-            // The personal entry shows the signed-in user's name (truncated
-            // when long) so it is clearly distinct from admin "Accounts".
-            <RailLink href="/account" label="My account settings" displayLabel={viewerName} active={onAccountPage && first === "account"} truncate><UserIcon /></RailLink>
-          ) : (
-            <RailLink href="/login" label="Sign in" active={first === "login"}><UserIcon /></RailLink>
-          )
-        ) : null}
+        {effectiveIsAdmin ? <RailLink href="/admin/users" label="Account management" displayLabel="Accounts" active={pathname.startsWith("/admin")}><UsersIcon /></RailLink> : null}
       </div>
+      {authEnabled ? (
+        effectiveName ? (
+          <RailUserMenu name={effectiveName} isAdmin={effectiveIsAdmin} active={first === "account"} />
+        ) : (
+          <div className="mt-auto shrink-0 pt-4">
+            <RailLink href="/login" label="Sign in" active={first === "login"}><UserIcon /></RailLink>
+          </div>
+        )
+      ) : null}
     </aside>
+  );
+}
+
+/** Green avatar pinned to the bottom of the rail; opens a small account menu. */
+function RailUserMenu({ name, isAdmin, active }: { name: string; isAdmin: boolean; active: boolean }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => setOpen(false), [pathname]);
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(event: PointerEvent) {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  async function signOut() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await authClient.signOut();
+      router.replace("/login");
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div ref={rootRef} className="relative mt-auto flex shrink-0 flex-col items-center gap-1.5 self-center pb-1 pt-4">
+      {open ? (
+        <div role="menu" className="absolute bottom-full left-1/2 z-50 mb-2 w-44 -translate-x-1/2 rounded-lg border border-[#566169] bg-[#1f262b] p-1.5 shadow-xl">
+          <div className="border-b border-[#41484e] px-2.5 pb-2 pt-1">
+            <p className="truncate text-sm font-medium text-white" title={name}>{name}</p>
+            <p className="mt-0.5 text-[11px] font-semibold uppercase tracking-wide text-[#8fa3ad]">{isAdmin ? "Admin" : "Student"}</p>
+          </div>
+          <Link
+            href="/account"
+            role="menuitem"
+            onClick={() => setOpen(false)}
+            className="mt-1 block rounded-md px-2.5 py-2 text-sm text-[#dce7ed] transition-colors hover:bg-[#353e45] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300"
+          >
+            Account settings
+          </Link>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={busy}
+            onClick={() => void signOut()}
+            className="block w-full rounded-md px-2.5 py-2 text-left text-sm text-[#dce7ed] transition-colors hover:bg-[#353e45] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300 disabled:opacity-50"
+          >
+            {busy ? "Signing out…" : "Sign out"}
+          </button>
+        </div>
+      ) : null}
+      <button
+        type="button"
+        aria-label="Account menu"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => setOpen((value) => !value)}
+        className={`grid h-11 w-11 place-items-center rounded-full bg-emerald-500 text-white shadow-md transition hover:bg-emerald-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300 ${active ? "ring-2 ring-teal-300" : ""}`}
+      >
+        <UserIcon />
+      </button>
+      <span className="max-w-[130px] truncate text-[11px] leading-4 text-[#dce7ed]" title={name}>{name}</span>
+    </div>
   );
 }
 

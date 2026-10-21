@@ -51,14 +51,10 @@ export function LoginForm({ allowSignUp, nextPath }: { allowSignUp: boolean; nex
 
     try {
       // Single account field: an address containing "@" signs in by email
-      // (administrators), anything else signs in by username (student IDs).
+      // (legacy accounts), anything else signs in by username.
       const result =
         mode === "sign-up"
-          ? await authClient.signUp.email({
-              name: String(form.get("name") ?? "").trim(),
-              email: account,
-              password,
-            })
+          ? await signUp(account, String(form.get("name") ?? "").trim(), password)
           : account.includes("@")
             ? await authClient.signIn.email({ email: account, password, rememberMe })
             : await authClient.signIn.username({ username: account, password, rememberMe });
@@ -92,6 +88,23 @@ export function LoginForm({ allowSignUp, nextPath }: { allowSignUp: boolean; nex
     setError(null);
   }
 
+  /**
+   * Registration accepts username-style accounts (letters and digits), not just
+   * emails: a synthetic placeholder email is stored internally, the account
+   * itself becomes the username, and the display name defaults to the account.
+   */
+  async function signUp(account: string, name: string, password: string) {
+    if (account.includes("@")) {
+      return authClient.signUp.email({ name: name || account, email: account, password });
+    }
+    return authClient.signUp.email({
+      name: name || account,
+      email: `${account.toLowerCase()}@student.ioniclink.local`,
+      password,
+      username: account,
+    } as Parameters<typeof authClient.signUp.email>[0]);
+  }
+
   return (
     <form className="panel w-full max-w-md p-6 sm:p-8" onSubmit={submit}>
       <h1 className="text-3xl font-semibold tracking-tight text-ink-950">
@@ -99,41 +112,37 @@ export function LoginForm({ allowSignUp, nextPath }: { allowSignUp: boolean; nex
       </h1>
       <p className="mt-3 text-sm leading-6 text-ink-600">
         {mode === "sign-in"
-          ? "Sign in with your student ID or administrator email to manage papers, extraction tasks, and standardized data."
-          : "Create an account with your work email and a password of at least 8 characters."}
+          ? "Sign in with your account to manage papers, extraction tasks, and standardized data."
+          : "Create an account with letters and digits and a password of at least 8 characters."}
       </p>
 
       <div className="mt-7 space-y-5">
         {mode === "sign-up" ? (
           <label className="block">
-            <span className="text-sm font-semibold text-ink-800">Name</span>
+            <span className="text-sm font-semibold text-ink-800">Name (optional)</span>
             <input
               autoComplete="name"
               className="mt-2 min-h-11 w-full rounded-[8px] border border-ink-200 bg-white px-3.5 text-sm text-ink-950 outline-none transition placeholder:text-ink-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
               name="name"
-              placeholder="Your name"
-              required
+              placeholder="Defaults to your account"
               type="text"
             />
           </label>
         ) : null}
 
         <label className="block">
-          <span className="text-sm font-semibold text-ink-800">
-            {mode === "sign-in" ? "Student ID or email" : "Email"}
-          </span>
+          <span className="text-sm font-semibold text-ink-800">Account</span>
           <input
             autoCapitalize="none"
-            autoComplete={mode === "sign-in" ? "username" : "email"}
+            autoComplete="username"
             className="mt-2 min-h-11 w-full rounded-[8px] border border-ink-200 bg-white px-3.5 text-sm text-ink-950 outline-none transition placeholder:text-ink-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
             defaultValue={mode === "sign-in" ? lastAccount : undefined}
-            inputMode={mode === "sign-in" ? "text" : "email"}
             key={`${mode}:${lastAccount}`}
             name="account"
-            placeholder={mode === "sign-in" ? "Student ID or name@example.com" : "name@example.com"}
+            placeholder="Letters and digits, e.g. a student ID"
             required
             spellCheck={false}
-            type={mode === "sign-in" ? "text" : "email"}
+            type="text"
           />
         </label>
 

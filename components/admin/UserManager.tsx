@@ -62,8 +62,7 @@ export function UserManager() {
         body: JSON.stringify({
           mode: "single",
           role: "admin",
-          account: String(form.get("email") ?? "").trim(),
-          name: String(form.get("name") ?? "").trim(),
+          account: String(form.get("account") ?? "").trim(),
           password: String(form.get("password") ?? ""),
         }),
       });
@@ -73,7 +72,7 @@ export function UserManager() {
         return;
       }
       formEl.reset();
-      setAdminNotice(`Administrator account created for ${String(form.get("email") ?? "").trim()}.`);
+      setAdminNotice(`Administrator account created for ${String(form.get("account") ?? "").trim()}.`);
       await refresh();
     } finally {
       setAdminBusy(false);
@@ -147,24 +146,21 @@ export function UserManager() {
       <section className="panel p-6 sm:p-8">
         <h2 className="text-xl font-semibold tracking-tight text-ink-950">Create an administrator account</h2>
         <p className="mt-2 text-sm leading-6 text-ink-600">
-          Administrators sign in with their email and have full access, including account management, review approval, and the teaching dashboard. Create one account at a time.
+          Administrators sign in with their account (letters and digits) and have full access, including account management, review approval, and the teaching dashboard. The display name defaults to the account and can be changed after signing in. Create one account at a time.
         </p>
-        <form className="mt-5 grid gap-4 sm:grid-cols-3" onSubmit={createAdmin}>
+        <form className="mt-5 grid gap-4 sm:grid-cols-2" onSubmit={createAdmin}>
           <label className="block">
-            <span className="text-sm font-semibold text-ink-800">Email</span>
+            <span className="text-sm font-semibold text-ink-800">Account</span>
             <input
+              autoCapitalize="none"
               autoComplete="off"
               className={inputClass}
-              name="email"
-              placeholder="admin@example.edu.cn"
+              name="account"
+              placeholder="Numbers or letters"
               required
               spellCheck={false}
-              type="email"
+              type="text"
             />
-          </label>
-          <label className="block">
-            <span className="text-sm font-semibold text-ink-800">Name</span>
-            <input autoComplete="off" className={inputClass} name="name" placeholder="Administrator name" required type="text" />
           </label>
           <label className="block">
             <span className="text-sm font-semibold text-ink-800">Password</span>
@@ -179,7 +175,7 @@ export function UserManager() {
               type="text"
             />
           </label>
-          <div className="sm:col-span-3">
+          <div className="sm:col-span-2">
             <button className="btn-primary" disabled={adminBusy} type="submit">
               {adminBusy ? "Creating…" : "Create administrator"}
             </button>
@@ -201,7 +197,7 @@ export function UserManager() {
         <h2 className="text-xl font-semibold tracking-tight text-ink-950">Create student accounts in bulk</h2>
         <p className="mt-2 text-sm leading-6 text-ink-600">
           Enter student IDs (one per line, or separated by spaces/commas). Each account signs in with the student ID as
-          username and the default initial password <code className="rounded bg-ink-50 px-1 font-mono text-[13px]">studentId@Njust</code> —
+          username, the display name defaults to the student ID, and the default initial password is <code className="rounded bg-ink-50 px-1 font-mono text-[13px]">studentId@Njust</code> —
           e.g. <code className="rounded bg-ink-50 px-1 font-mono text-[13px]">2023001001@Njust</code>. Students can change it after signing in.
         </p>
         <form className="mt-5" onSubmit={createStudentBatch}>
@@ -263,7 +259,7 @@ export function UserManager() {
               <thead>
                 <tr className="border-b border-ink-100 text-xs font-semibold uppercase tracking-wide text-ink-500">
                   <th className="py-2 pr-4">Name</th>
-                  <th className="py-2 pr-4">Student ID / email</th>
+                  <th className="py-2 pr-4">Account</th>
                   <th className="py-2 pr-4">Role</th>
                   <th className="py-2 pr-4">Actions</th>
                 </tr>
@@ -321,3 +317,4 @@ export function UserManager() {
     </div>
   );
 }
+

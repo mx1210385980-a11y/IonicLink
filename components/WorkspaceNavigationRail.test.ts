@@ -19,9 +19,13 @@ assert.match(railSource, /section === item\.segment/, "each domain section recei
 assert.match(railSource, /href="\/teaching#prediction" label="Prediction of μ"/, "prediction belongs to the teaching navigation");
 assert.doesNotMatch(railSource, /segment: "design"/, "prediction is no longer a domain section");
 assert.match(railSource, /section === "design" && item !== "tribology"/, "switching away from Tribology Design falls back to a reachable database");
-assert.match(railSource, /href="\/account" label="My account settings"/, "account access remains available after moving the top navigation");
-assert.match(railSource, /displayLabel=\{viewerName\}/, "the personal rail entry shows the signed-in user's name");
-assert.match(railSource, /min-w-0 truncate/, "long user names are truncated in the rail");
+assert.match(railSource, /authClient\.useSession\(\)/, "the rail subscribes to the client session so account entries never disappear without a refresh");
+assert.match(railSource, /function RailUserMenu/, "the personal rail entry is a dedicated account menu component");
+assert.match(railSource, /rounded-full bg-emerald-500/, "the account entry is a green circular avatar");
+assert.match(railSource, /mt-auto flex shrink-0 flex-col items-center/, "the avatar is pinned to the very bottom of the rail");
+assert.match(railSource, /max-w-\[130px\] truncate/, "long user names are truncated below the avatar");
+assert.match(railSource, /href="\/account"[\s\S]{0,500}Account settings/, "the account menu links to the account settings page");
+assert.match(railSource, /authClient\.signOut\(\)/, "the account menu offers sign-out");
 assert.doesNotMatch(railSource, /function BrandMark|function DomainIcon/, "the rail no longer carries the old mixed icon families");
 assert.match(workspaceSource, /max-w-\[1240px\]/, "Extract shares the centered workspace content width");
 assert.match(railSource, /label="Home" active=\{onHomePage\}/, "Home is active on the canonical overview");

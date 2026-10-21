@@ -47,13 +47,15 @@ async function main() {
     [[idOne, true], [idTwo, true], ["bad id!!", false]]
   );
 
-  // The default password is "<studentId>@Njust" and the role is student-level.
+  // The default password is "<studentId>@Njust", the role is student-level,
+  // and the display name defaults to the account itself.
   const signIn = await signInUsername(idOne, `${idOne}@Njust`);
   assert.equal(signIn.status, 200, "batch-created students sign in with the default password");
   const setCookies = (signIn.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
   const cookie = setCookies.map((value) => value.split(";", 1)[0]).join("; ");
   const session = await getAppSession(new Headers({ cookie }));
   assert.equal(sessionHasAdminRole(session), false);
+  assert.equal(session?.user.name, idOne, "student display names default to the account");
 
   // Recreating the same ID fails per-row without failing the batch.
   const duplicate = await POST(request({ mode: "batch", studentIds: [idOne] }, admin.cookie));
@@ -61,31 +63,27 @@ async function main() {
   assert.equal(duplicatePayload.results[0].ok, false);
   assert.match(duplicatePayload.results[0].error ?? "", /already exists/i);
 
-  // Single administrator creation: email + password, role admin.
-  const adminEmail = `created-admin-${suffix}@ioniclink.test`;
+  // Single administrator creation: username-style account + password, role
+  // admin, display name defaulting to the account.
+  const adminAccount = `A${suffix}`;
   const created = await POST(
-    request({ mode: "single", role: "admin", account: adminEmail, name: "Created Admin", password: "Admin2026x" }, admin.cookie)
+    request({ mode: "single", role: "admin", account: adminAccount, password: "Admin2026x" }, admin.cookie)
   );
   assert.equal(created.status, 200);
-  const adminSignIn = await auth.handler(
-    new Request("http://localhost:3000/api/auth/sign-in/email", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Origin: "http://localhost:3000" },
-      body: JSON.stringify({ email: adminEmail, password: "Admin2026x" }),
-    })
-  );
-  assert.equal(adminSignIn.status, 200, "created administrators sign in by email");
+  const adminSignIn = await signInUsername(adminAccount, "Admin2026x");
+  assert.equal(adminSignIn.status, 200, "created administrators sign in with their account");
   const adminCookies = (adminSignIn.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
   const adminSession = await getAppSession(new Headers({ cookie: adminCookies.map((value) => value.split(";", 1)[0]).join("; ") }));
   assert.equal(sessionHasAdminRole(adminSession), true);
+  assert.equal(adminSession?.user.name, adminAccount, "administrator display names default to the account");
 
   // Validation failures.
   assert.equal(
-    (await POST(request({ mode: "single", role: "admin", account: "not-an-email", name: "X", password: "Admin2026x" }, admin.cookie))).status,
+    (await POST(request({ mode: "single", role: "admin", account: "bad account!!", password: "Admin2026x" }, admin.cookie))).status,
     400
   );
   assert.equal(
-    (await POST(request({ mode: "single", role: "student", account: "ab", name: "X", password: "Student2026x" }, admin.cookie))).status,
+    (await POST(request({ mode: "single", role: "student", account: "ab", password: "Student2026x" }, admin.cookie))).status,
     400
   );
 
