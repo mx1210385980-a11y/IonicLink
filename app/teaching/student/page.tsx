@@ -3,12 +3,15 @@ import { redirect } from "next/navigation";
 import { TEACHING_COOKIE } from "@/app/api/teaching/_auth";
 import { StudentWorkspace } from "@/components/teaching/StudentWorkspace";
 import { SimpleStudentWorkspace } from "@/components/teaching/SimpleStudentWorkspace";
+import { requireAppPageSession } from "@/lib/auth.server";
 import { getCurrentSimpleStudentId, getSimpleStudent, listSimpleExperiments } from "@/lib/teaching/simpleStore";
 import { getCurrentTeachingRound, getTeachingSession } from "@/lib/teaching";
 
 export const dynamic = "force-dynamic";
 
-export default function TeachingStudentPage() {
+export default async function TeachingStudentPage() {
+  // Students join experiments with their platform account; visitors must sign in first.
+  await requireAppPageSession("/teaching/student");
   const session = getTeachingSession(cookies().get(TEACHING_COOKIE)?.value);
   if (session?.role !== "student" || !session.participantId) redirect("/teaching");
   if (listSimpleExperiments().some((experiment) => experiment.id === session.projectId)) {

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getAppSession, isAppAuthEnabled, sessionHasAdminRole } from "@/lib/auth.server";
 import { getTeachingSession, type TeachingRole, type TeachingSession } from "@/lib/teaching";
 import { internalTeachingErrorResponse } from "./_route";
 
@@ -8,10 +9,31 @@ export function sessionFromRequest(request: NextRequest): TeachingSession | null
   return getTeachingSession(request.cookies.get(TEACHING_COOKIE)?.value);
 }
 
-export function requireTeachingRole(
+/** True when the caller is signed in to the platform (always true when app auth is disabled). */
+export async function platformSignedIn(request: NextRequest): Promise<boolean> {
+  if (!isAppAuthEnabled()) return true;
+  return Boolean(await getAppSession(request.headers));
+}
+
+/** True when the caller is a platform administrator (always true when app auth is disabled). */
+export async function platformSessionIsAdmin(request: NextRequest): Promise<boolean> {
+  if (!isAppAuthEnabled()) return true;
+  const session = await getAppSession(request.headers);
+  return sessionHasAdminRole(session);
+}
+
+/** Display name of the signed-in platform administrator, for review attribution. */
+export async function platformAdminLabel(request: NextRequest): Promise<string> {
+  if (!isAppAuthEnabled()) return "teacher";
+  const session = await getAppSession(request.headers);
+  const user = session?.user as { name?: string; username?: string | null; email?: string } | undefined;
+  return user?.name || user?.username || user?.email || "teacher";
+}
+
+export async function requireTeachingRole(
   request: NextRequest,
   role: TeachingRole
-): TeachingSession | NextResponse {
+): Promise<TeachingSession | NextResponse> {
   let session: TeachingSession | null;
   try {
     session = sessionFromRequest(request);
@@ -22,8 +44,16 @@ export function requireTeachingRole(
       { message: "Lab authentication is temporarily unavailable. Try again later." }
     );
   }
-  if (!session) return NextResponse.json({ error: "Sign in to the teaching lab first." }, { status: 401 });
-  if (session.role !== role) return NextResponse.json({ error: "Your account does not have permission for this action." }, { status: 403 });
+  if (!session) {
+    // A platform administrator is an instructor even without a teaching cookie.
+    if (role === "teacher" && (await platformSessionIsAdmin(request))) {
+      return { role: "teacher", projectId: null, participantId: null };
+    }
+    return NextResponse.json({ error: "Sign in to the teaching lab first." }, { status: 401 });
+  }
+  if (session.role !== role) {
+    return NextResponse.json({ error: "Your account does not have permission for this action." }, { status: 403 });
+  }
   return session;
 }
 

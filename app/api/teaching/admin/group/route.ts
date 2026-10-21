@@ -13,7 +13,7 @@ import {
   TeachingReviewValidationError,
   type TeachingScores,
 } from "@/lib/teaching";
-import { rejectCrossOriginMutation, requireTeachingRole } from "../../_auth";
+import { platformAdminLabel, rejectCrossOriginMutation, requireTeachingRole } from "../../_auth";
 import {
   internalTeachingErrorResponse,
   readTeachingJson,
@@ -42,7 +42,7 @@ function badRequest(message: string) {
 }
 
 export async function GET(request: NextRequest) {
-  const session = requireTeachingRole(request, "teacher");
+  const session = await requireTeachingRole(request, "teacher");
   if (session instanceof NextResponse) return session;
   const action = request.nextUrl.searchParams.get("action") ?? "list";
   try {
@@ -75,7 +75,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const rejected = rejectCrossOriginMutation(request);
   if (rejected) return rejected;
-  const session = requireTeachingRole(request, "teacher");
+  const session = await requireTeachingRole(request, "teacher");
   if (session instanceof NextResponse) return session;
   let body: Record<string, unknown> | null;
   try {
@@ -155,7 +155,8 @@ export async function POST(request: NextRequest) {
       reviewTeachingSubmission(
         body.submissionId,
         (body.humanScores ?? {}) as TeachingScores,
-        (body.aiScores ?? {}) as TeachingScores
+        (body.aiScores ?? {}) as TeachingScores,
+        await platformAdminLabel(request)
       );
       return NextResponse.json({ ok: true });
     }

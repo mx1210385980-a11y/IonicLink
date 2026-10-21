@@ -19,7 +19,9 @@ assert.match(railSource, /section === item\.segment/, "each domain section recei
 assert.match(railSource, /href="\/teaching#prediction" label="Prediction of μ"/, "prediction belongs to the teaching navigation");
 assert.doesNotMatch(railSource, /segment: "design"/, "prediction is no longer a domain section");
 assert.match(railSource, /section === "design" && item !== "tribology"/, "switching away from Tribology Design falls back to a reachable database");
-assert.match(railSource, /RailAuthControls/, "account access remains available after moving the top navigation");
+assert.match(railSource, /href="\/account" label="My account settings"/, "account access remains available after moving the top navigation");
+assert.match(railSource, /displayLabel=\{viewerName\}/, "the personal rail entry shows the signed-in user's name");
+assert.match(railSource, /min-w-0 truncate/, "long user names are truncated in the rail");
 assert.doesNotMatch(railSource, /function BrandMark|function DomainIcon/, "the rail no longer carries the old mixed icon families");
 assert.match(workspaceSource, /max-w-\[1240px\]/, "Extract shares the centered workspace content width");
 assert.match(railSource, /label="Home" active=\{onHomePage\}/, "Home is active on the canonical overview");
@@ -27,7 +29,7 @@ assert.match(railSource, /href="\/" label="Home"/, "desktop Home links to the ca
 assert.match(topNavSource, /: "\/";/, "mobile Home links to the same overview");
 assert.match(topNavSource, /onDomainPage \|\| onHomePage/, "mobile overview exposes navigation");
 assert.doesNotMatch(workspaceSource, /<WorkspaceNavigationRail/, "Extract does not render a duplicate navigation rail");
-assert.match(rootLayoutSource, /<WorkspaceNavigationRail \/>/, "the rail is mounted once at the application root");
+assert.match(rootLayoutSource, /<WorkspaceNavigationRail\s/, "the rail is mounted once at the application root");
 assert.match(rootLayoutSource, /lg:pl-\[190px\]/, "desktop content is offset by the labeled sidebar width");
 assert.match(topNavSource, /<header className="[^"]*lg:hidden"/, "the horizontal navigation is mobile-only on every page");
 assert.match(topNavSource, /<AuthControls \/>/, "mobile navigation retains the existing auth controls");

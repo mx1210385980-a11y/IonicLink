@@ -9,7 +9,7 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 export async function POST(request: NextRequest) {
   const rejected = rejectCrossOriginMutation(request); if (rejected) return rejected;
-  const session = requireTeachingRole(request, "student"); if (session instanceof NextResponse) return session;
+  const session = await requireTeachingRole(request, "student"); if (session instanceof NextResponse) return session;
   let runningId: string | null = null;
   let runningVersion: number | null = null;
   try {

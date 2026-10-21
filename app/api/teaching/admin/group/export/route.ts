@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const session = requireTeachingRole(request, "teacher");
+  const session = await requireTeachingRole(request, "teacher");
   if (session instanceof NextResponse) return session;
   const projectId = request.nextUrl.searchParams.get("projectId") ?? "";
   if (!projectId) {

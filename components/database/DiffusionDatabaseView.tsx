@@ -45,6 +45,6 @@ export const diffusionClientModule: ClientModule = {
   systemFacets: buildDiffusionSystemFacets,
 };
 
-export function DiffusionDatabaseView({ initialData }: { initialData: DatabaseInitialData }) {
-  return <DatabaseView domain="diffusion" clientModule={diffusionClientModule} initialData={initialData} />;
+export function DiffusionDatabaseView({ initialData, canModerate, viewerSignedIn }: { initialData: DatabaseInitialData; canModerate?: boolean; viewerSignedIn?: boolean }) {
+  return <DatabaseView domain="diffusion" clientModule={diffusionClientModule} initialData={initialData} canModerate={canModerate} viewerSignedIn={viewerSignedIn} />;
 }

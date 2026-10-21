@@ -143,6 +143,8 @@ interface ReviewWorkbenchProps {
   mutationBusy: boolean;
   selected: ReadonlySet<string>;
   editingId: string | null;
+  /** Administrators only: show Reject/Approve controls. Defaults to true. */
+  canModerate?: boolean;
   editor?: ReactNode;
   onToggle: (id: string) => void;
   onEdit: (id: string) => void;
@@ -157,7 +159,7 @@ const FILTER_OPTIONS: { key: ReviewIssueFilter; label: string }[] = [
 ];
 
 export function ReviewWorkbench(props: ReviewWorkbenchProps) {
-  const { domain, records, units, clientModule, queryReady, mutationBusy, selected, editingId, editor, onToggle, onEdit, onQuickEdit, onApprove, onReject } = props;
+  const { domain, records, units, clientModule, queryReady, mutationBusy, selected, editingId, canModerate = true, editor, onToggle, onEdit, onQuickEdit, onApprove, onReject } = props;
   const [issueFilter, setIssueFilter] = useState<ReviewIssueFilter>("all");
   const [activePaper, setActivePaper] = useState("");
   const [activeRecordId, setActiveRecordId] = useState("");
@@ -198,11 +200,11 @@ export function ReviewWorkbench(props: ReviewWorkbenchProps) {
       if (target?.closest("input, textarea, select, button, [contenteditable='true']")) return;
       if (event.key.toLowerCase() === "j") moveRecord(1); else if (event.key.toLowerCase() === "k") moveRecord(-1);
       else if (event.key.toLowerCase() === "e" && activeRecord) onEdit(activeRecord.id);
-      else if (event.key.toLowerCase() === "a" && activeRecord && clientModule.coreCompleteness(activeRecord).complete && activeRecord.extraction?.source !== "mock") void onApprove(activeRecord.id);
+      else if (event.key.toLowerCase() === "a" && canModerate && activeRecord && clientModule.coreCompleteness(activeRecord).complete && activeRecord.extraction?.source !== "mock") void onApprove(activeRecord.id);
       else if (event.key === "Enter" && activeRecord && activeCell?.provenance) openRecordEvidence({ sourceId: activeRecord.sourceId, recordId: activeRecord.id, field: activeCell.key, value: activeCell.value, prov: activeCell.provenance, domain });
     };
     window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey);
-  }, [activeCell, activeRecord, clientModule, domain, moveRecord, onApprove, onEdit]);
+  }, [activeCell, activeRecord, canModerate, clientModule, domain, moveRecord, onApprove, onEdit]);
   if (paperGroups.length === 0) return null;
 
   return <section data-testid="review-workbench" className="min-w-0 bg-white">
@@ -213,7 +215,7 @@ export function ReviewWorkbench(props: ReviewWorkbenchProps) {
     <div className="grid min-w-0 lg:grid-cols-[17rem_20rem_minmax(0,1fr)] xl:grid-cols-[19rem_22rem_minmax(0,1fr)] 2xl:grid-cols-[20rem_24rem_minmax(0,1fr)]">
       <aside className="min-w-0 border-b border-ink-200 bg-white lg:border-b-0 lg:border-r" aria-label="Paper review queue"><div className="border-b border-ink-200 px-4 py-4"><div className="text-base font-semibold text-ink-950">Papers</div></div><div className="flex gap-1 overflow-x-auto p-2 lg:block lg:max-h-[47rem] lg:overflow-y-auto">{paperGroups.map((group) => { const active = group.title === resolvedPaper; const issueTotal = group.records.filter((record) => reviewIssueBucket(record, domain, clientModule.coreCompleteness) !== "ready").length; return <button key={group.title} type="button" onClick={() => { setActivePaper(group.title); setActiveRecordId(group.records[0]?.id ?? ""); }} className={`min-w-[17rem] border-l-[3px] border-b border-b-ink-100 px-4 py-4 text-left transition lg:w-full lg:min-w-0 ${active ? "border-l-brand-600 bg-brand-50" : "border-l-transparent hover:bg-ink-50"}`}><span className="line-clamp-2 font-serif text-[17px] font-semibold leading-[1.4] text-ink-950">{group.title}</span><span className="mt-2.5 flex items-center justify-between font-mono text-sm text-ink-600"><span>{group.records.length} records</span>{issueTotal > 0 ? <span className="text-amber-700">{issueTotal} issues</span> : null}</span></button>; })}</div></aside>
       <section className="min-w-0 border-b border-ink-200 bg-white lg:border-b-0 lg:border-r" aria-label="Records"><div className="border-b border-ink-200 px-4 py-4"><div className="flex items-center justify-between gap-3"><span className="text-base font-semibold text-ink-950">Records</span><span className="font-mono text-sm text-ink-600">{activeRecords.length}</span></div></div><div data-testid="review-matrix-scroller" className="max-h-[47rem] overflow-y-auto"><div data-testid="review-mobile-record">{activeRecords.map((record) => { const cells = buildReviewMatrixCells(record, domain, units); const bucket = reviewIssueBucket(record, domain, clientModule.coreCompleteness); const rowActive = record.id === activeRecord?.id; return <div key={record.id} data-testid="review-matrix-row" aria-current={rowActive ? "true" : undefined} className={`border-b border-ink-200 px-4 py-4 transition ${rowActive ? "bg-brand-50" : "hover:bg-ink-50"}`} onClick={() => setActiveRecordId(record.id)}><div className="flex items-center gap-2.5"><input type="checkbox" checked={selected.has(record.id)} disabled={!queryReady} onClick={(event) => event.stopPropagation()} onChange={() => onToggle(record.id)} aria-label={`Select ${record.id}`} className="h-4 w-4 rounded-[1px] border-ink-400 text-brand-700" /><span className="font-mono text-base font-semibold text-ink-800">{record.id}</span><span className="ml-auto"><ReviewStateBadge bucket={bucket} lowConfidence={reviewRecordHasLowConfidence(record)} /></span></div><div className="mt-3 space-y-1">{matrixColumns.map((definition) => { const candidate = cells.find((item) => item.key === definition.key) ?? { ...definition, value: "—" }; const selectedCell = rowActive && candidate.key === activeCell?.key; return <button key={candidate.key} type="button" onClick={(event) => { event.stopPropagation(); setActiveRecordId(record.id); setActiveCellKey(candidate.key); }} className={`flex min-h-10 w-full items-baseline gap-2 border-l-2 px-2.5 py-2 text-left text-base ${selectedCell ? "border-brand-600 text-brand-900" : "border-transparent text-ink-800 hover:border-ink-400"}`}><span className="w-20 shrink-0 text-sm text-ink-600">{candidate.label}</span><span className="min-w-0 flex-1 truncate font-mono font-semibold">{candidate.value}</span><EvidenceLocationBadge provenance={candidate.provenance} /></button>; })}</div></div>; })}</div></div></section>
-      <EvidenceInspector record={activeRecord} cells={activeCells} cell={activeCell} title={resolvedPaper} sharedCells={inspectorSharedCells} domain={domain} mutationBusy={mutationBusy} completeness={activeRecord ? clientModule.coreCompleteness(activeRecord) : { complete: false, missing: [] }} editor={editingId ? editor : undefined} onSelectField={setActiveCellKey} onSelectShared={(recordId, field) => { setActiveRecordId(recordId); setActiveCellKey(field); }} onQuickEdit={onQuickEdit} onReject={() => activeRecord && onReject(activeRecord.id)} onEdit={() => activeRecord && onEdit(activeRecord.id)} onApprove={() => activeRecord && onApprove(activeRecord.id)} />
+      <EvidenceInspector record={activeRecord} cells={activeCells} cell={activeCell} title={resolvedPaper} sharedCells={inspectorSharedCells} domain={domain} mutationBusy={mutationBusy} canModerate={canModerate} completeness={activeRecord ? clientModule.coreCompleteness(activeRecord) : { complete: false, missing: [] }} editor={editingId ? editor : undefined} onSelectField={setActiveCellKey} onSelectShared={(recordId, field) => { setActiveRecordId(recordId); setActiveCellKey(field); }} onQuickEdit={onQuickEdit} onReject={() => activeRecord && onReject(activeRecord.id)} onEdit={() => activeRecord && onEdit(activeRecord.id)} onApprove={() => activeRecord && onApprove(activeRecord.id)} />
     </div>
   </section>;
 }
@@ -231,12 +233,12 @@ function ReviewStateBadge({ bucket, lowConfidence }: { bucket: Exclude<ReviewIss
 }
 
 interface EvidenceInspectorProps {
-  record: AnyRecord | null; cells: ReviewMatrixCell[]; cell: ReviewMatrixCell | null; title: string; sharedCells: SharedReviewCell[]; domain: Domain; mutationBusy: boolean; completeness: { complete: boolean; missing: string[] }; editor?: ReactNode;
+  record: AnyRecord | null; cells: ReviewMatrixCell[]; cell: ReviewMatrixCell | null; title: string; sharedCells: SharedReviewCell[]; domain: Domain; mutationBusy: boolean; canModerate: boolean; completeness: { complete: boolean; missing: string[] }; editor?: ReactNode;
   onSelectField: (field: string) => void; onSelectShared: (recordId: string, field: string) => void; onQuickEdit: (id: string, field: string, value: string) => Promise<boolean>; onReject: () => void | Promise<void>; onEdit: () => void; onApprove: () => void | Promise<void>;
 }
 
 function EvidenceInspector(props: EvidenceInspectorProps) {
-  const { record, cells, cell, title, sharedCells, domain, mutationBusy, completeness, editor, onSelectField, onSelectShared, onQuickEdit, onReject, onEdit, onApprove } = props;
+  const { record, cells, cell, title, sharedCells, domain, mutationBusy, canModerate, completeness, editor, onSelectField, onSelectShared, onQuickEdit, onReject, onEdit, onApprove } = props;
   const [editing, setEditing] = useState(false); const [draft, setDraft] = useState(""); const [saving, setSaving] = useState(false);
   useEffect(() => { setEditing(false); setDraft(cell?.editableValue ?? ""); }, [cell?.editableValue, cell?.key, record?.id]);
   if (!record || !cell) return <aside className="p-5 text-xs text-ink-400">Select a field to inspect its evidence.</aside>;
@@ -321,9 +323,13 @@ function EvidenceInspector(props: EvidenceInspectorProps) {
       {editor ? <div className="border-t border-brand-200 bg-brand-50/30 p-4">{editor}</div> : null}
       <footer className="sticky bottom-0 z-10 flex flex-wrap items-center gap-2 border-t border-ink-300 bg-white px-5 py-3">
         <div className="mr-auto"><div className="font-mono text-[13px] font-semibold text-ink-700">{record.id}</div><div className="text-xs text-ink-400">{completeness.complete ? "Core fields complete" : `Missing: ${completeness.missing.join(", ")}`}</div></div>
-        <button type="button" onClick={onReject} disabled={mutationBusy} className="min-h-11 rounded-[2px] border border-rose-300 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700">Reject</button>
+        {canModerate ? (
+          <button type="button" onClick={onReject} disabled={mutationBusy} className="min-h-11 rounded-[2px] border border-rose-300 bg-white px-4 py-2.5 text-sm font-semibold text-rose-700">Reject</button>
+        ) : null}
         <button type="button" onClick={onEdit} disabled={mutationBusy} className="min-h-11 rounded-[2px] border border-ink-300 bg-white px-4 py-2.5 text-sm font-semibold text-ink-900">Edit record</button>
-        <button type="button" onClick={onApprove} disabled={mutationBusy || record.extraction?.source === "mock" || !completeness.complete} className="min-h-11 rounded-[2px] bg-brand-700 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-40">Approve & next</button>
+        {canModerate ? (
+          <button type="button" onClick={onApprove} disabled={mutationBusy || record.extraction?.source === "mock" || !completeness.complete} className="min-h-11 rounded-[2px] bg-brand-700 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-40">Approve & next</button>
+        ) : null}
       </footer>
     </aside>
   );

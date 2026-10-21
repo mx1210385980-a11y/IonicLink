@@ -7,10 +7,15 @@ import { POST as extract } from "./extract/route";
 import { startSimpleExtraction, finishSimpleExtraction, getSimpleDashboard } from "@/lib/teaching/simpleStore";
 import { closeTeachingDatabaseForTests, getTeachingSession } from "@/lib/teaching";
 import type { SimpleStudentState } from "@/lib/teaching/simpleShared";
+import { createTestAppSession } from "@/lib/auth.test-helpers";
+
+// Lab entry requires a signed-in platform account; merged into every request.
+let appStudent = "";
 
 function request(cookie: string, body?: unknown, endpoint = "") {
+  const merged = [appStudent, cookie].filter(Boolean).join("; ");
   return new NextRequest(`http://localhost/api/teaching/lab${endpoint}`, { method: body === undefined ? "GET" : "POST",
-    headers: { cookie, origin: "http://localhost", ...(body === undefined ? {} : { "content-type": "application/json" }) },
+    headers: { cookie: merged, origin: "http://localhost", ...(body === undefined ? {} : { "content-type": "application/json" }) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 function paperRequest(cookie: string, state: SimpleStudentState, text: string, attemptId = state.id) {
@@ -24,10 +29,11 @@ function paperRequest(cookie: string, state: SimpleStudentState, text: string, a
   document += `xref\n0 6\n0000000000 65535 f \n${offsets.map(offset => `${String(offset).padStart(10, "0")} 00000 n \n`).join("")}trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${start}\n%%EOF`;
   const form = new FormData(); form.set("file", new File([document], "paper.pdf", { type: "application/pdf" }));
   form.set("version", String(state.version)); form.set("attemptId", attemptId);
-  return new NextRequest("http://localhost/api/teaching/lab/paper", { method: "POST", headers: { cookie, origin: "http://localhost" }, body: form });
+  return new NextRequest("http://localhost/api/teaching/lab/paper", { method: "POST", headers: { cookie: [appStudent, cookie].filter(Boolean).join("; "), origin: "http://localhost" }, body: form });
 }
 async function state(cookie: string): Promise<SimpleStudentState> { const response = await GET(request(cookie)); assert.equal(response.status, 200); return response.json(); }
 async function run() {
+  appStudent = (await createTestAppSession()).cookie;
   const cookies: string[] = []; const initial: SimpleStudentState[] = [];
   for (let groupNo = 1; groupNo <= 4; groupNo++) {
     const response = await enter(request("", { groupNo, mode: "manual", taskId: "forged" }, "/enter"));

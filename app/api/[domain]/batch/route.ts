@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAppApiSession } from "@/lib/auth.server";
+import { requireAppApiRole, requireAppApiSession } from "@/lib/auth.server";
 import {
   clearFinishedJobs,
   createJobs,
@@ -104,9 +104,9 @@ export async function GET(_req: NextRequest, { params }: { params: { domain: str
   });
 }
 
-/** Clear all finished/errored/committed jobs from the queue. */
+/** Clear all finished/errored/committed jobs from the queue. Administrator-only. */
 export async function DELETE(_req: NextRequest, { params }: { params: { domain: string } }) {
-  const access = await requireAppApiSession(_req);
+  const access = await requireAppApiRole(_req, "admin");
   if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
   return NextResponse.json({ cleared: clearFinishedJobs(params.domain) });

@@ -3,12 +3,13 @@ import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { NextRequest, NextResponse } from "next/server";
 import { AFM_CURVE_DATASET } from "@/lib/afm/afmCurves";
 import { afmSourceImageContentType, resolveAfmSourceImagePath } from "@/lib/afm/sourceImage.server";
-import { requireAppApiSession } from "@/lib/auth.server";
+import { getOptionalApiSession } from "@/lib/auth.server";
 
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
-  const access = await requireAppApiSession(request);
+  // Public read: provenance figures for official AFM records must be visible to anonymous visitors.
+  const access = await getOptionalApiSession(request);
   if (!access.ok) return access.response;
   const curveId = request.nextUrl.searchParams.get("curveId")?.trim();
   if (!curveId) return NextResponse.json({ error: "curveId is required" }, { status: 400 });

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { rejectCrossOriginMutation, sessionFromRequest } from "../_auth";
+import { platformSessionIsAdmin, rejectCrossOriginMutation, sessionFromRequest } from "../_auth";
 import { createSimpleExperiment, getSimpleDashboard, getSimpleStudent, listSimpleExperiments,
   reviewSimpleStudent, saveSimpleDraft, submitSimpleStudent, setSimpleStudentGold, setSimpleTaskGold, nextSimpleRound } from "@/lib/teaching/simpleStore";
 import type { SimpleRow } from "@/lib/teaching/simpleShared";
@@ -10,8 +10,10 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   try {
     const session = sessionFromRequest(request);
-    if (!session) return NextResponse.json({ error: "Sign in to the teaching lab first." }, { status: 401 });
-    if (session.role === "student") {
+    // A platform administrator counts as instructor when no teaching cookie is present.
+    const isTeacher = session?.role === "teacher" || (!session && (await platformSessionIsAdmin(request)));
+    if (!session && !isTeacher) return NextResponse.json({ error: "Sign in to the teaching lab first." }, { status: 401 });
+    if (session?.role === "student") {
       const state = session.participantId ? getSimpleStudent(labStudentId(session.participantId)) : null;
       return state ? NextResponse.json(state) : NextResponse.json({ error: "Rejoin using the group code provided by your instructor." }, { status: 404 });
     }
@@ -25,9 +27,10 @@ export async function POST(request: NextRequest) {
   const rejected = rejectCrossOriginMutation(request); if (rejected) return rejected;
   try {
     const session = sessionFromRequest(request);
-    if (!session) return NextResponse.json({ error: "Sign in to the teaching lab first." }, { status: 401 });
+    const isTeacher = session?.role === "teacher" || (!session && (await platformSessionIsAdmin(request)));
+    if (!session && !isTeacher) return NextResponse.json({ error: "Sign in to the teaching lab first." }, { status: 401 });
     const body = await labBody(request);
-    if (session.role === "teacher") {
+    if (isTeacher) {
       if (body.action === "create") {
         const experiment = createSimpleExperiment({ name: body.name as string, design: "crossover" });
         return NextResponse.json(getSimpleDashboard(experiment.id));
@@ -45,7 +48,7 @@ export async function POST(request: NextRequest) {
           overrides: body.overrides as Record<string, boolean>, note: body.note as string });
         return NextResponse.json({ ok: true });
       }
-    } else if (session.participantId) {
+    } else if (session?.participantId) {
       const id = labStudentId(session.participantId);
       checkLabAttempt(id, body.attemptId);
       if (body.action === "nextRound") return NextResponse.json(nextSimpleRound(id, body.version as number));

@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { authClient } from "@/lib/auth-client";
 import { DEFAULT_DOMAIN, DOMAINS, isDomain, type Domain } from "@/lib/domain";
 
 const DOMAIN_LABELS: Record<Domain, string> = {
@@ -23,7 +22,7 @@ const SECTION_LINKS = [
   { segment: "database", label: "Database", icon: <DatabaseIcon /> },
 ] as const;
 
-export function WorkspaceNavigationRail() {
+export function WorkspaceNavigationRail({ authEnabled = false, viewerIsAdmin = false, viewerName = null }: { authEnabled?: boolean; viewerIsAdmin?: boolean; viewerName?: string | null }) {
   const pathname = usePathname();
   const parts = pathname.split("/");
   const first = parts[1];
@@ -34,7 +33,10 @@ export function WorkspaceNavigationRail() {
   const onMonitorPage = first === "monitor";
   const onAfmPage = first === "afm";
   const onHomePage = pathname === "/";
-  const onAccountPage = first === "account";
+  const onAccountPage = first === "account" || first === "admin";
+  // The usage monitor is administrator-only once accounts are enabled; in
+  // public compatibility mode (no auth) it stays visible to everyone.
+  const showMonitor = !authEnabled || viewerIsAdmin;
 
   return (
     <aside aria-label="IonicLink primary navigation" data-testid="workspace-navigation-rail" className="fixed inset-y-0 left-0 z-40 hidden h-dvh w-[190px] flex-col overflow-y-auto border-r border-[#41484e] bg-[#282f35] px-2 pb-7 pt-7 text-[#dce7ed] lg:flex">
@@ -73,8 +75,17 @@ export function WorkspaceNavigationRail() {
       <div data-testid="utility-dock" className="flex shrink-0 flex-col gap-[17px]">
         <RailLink href={`/${domain}/library`} label="Documents" active={onDomainPage && section === "library"}><LibraryIcon /></RailLink>
         <RailLink href="/teaching" label="AI experiment" active={onTeachingPage}><TeachingIcon /></RailLink>
-        <RailLink href="/monitor" label="Usage monitor" active={onMonitorPage}><MonitorIcon /></RailLink>
-        <RailAuthControls active={onAccountPage} />
+        {showMonitor ? <RailLink href="/monitor" label="Usage monitor" active={onMonitorPage}><MonitorIcon /></RailLink> : null}
+        {viewerIsAdmin ? <RailLink href="/admin/users" label="Account management" displayLabel="Accounts" active={pathname.startsWith("/admin")}><UsersIcon /></RailLink> : null}
+        {authEnabled ? (
+          viewerName ? (
+            // The personal entry shows the signed-in user's name (truncated
+            // when long) so it is clearly distinct from admin "Accounts".
+            <RailLink href="/account" label="My account settings" displayLabel={viewerName} active={onAccountPage && first === "account"} truncate><UserIcon /></RailLink>
+          ) : (
+            <RailLink href="/login" label="Sign in" active={first === "login"}><UserIcon /></RailLink>
+          )
+        ) : null}
       </div>
     </aside>
   );
@@ -82,10 +93,10 @@ export function WorkspaceNavigationRail() {
 
 const RAIL_ITEM = "flex h-[46px] w-full shrink-0 items-center gap-3 rounded-md px-3.5 text-sm font-normal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300 focus-visible:ring-inset";
 
-function RailLink({ href, label, displayLabel, active = false, children }: { href: string; label: string; displayLabel?: string; active?: boolean; children: ReactNode }) {
-  return <Link href={href} aria-label={label} aria-current={active ? "page" : undefined} className={`${RAIL_ITEM} ${active ? "bg-[#3c454c] text-white" : "text-[#dce7ed] hover:bg-[#353e45] hover:text-white"}`}>
+function RailLink({ href, label, displayLabel, active = false, truncate = false, children }: { href: string; label: string; displayLabel?: string; active?: boolean; truncate?: boolean; children: ReactNode }) {
+  return <Link href={href} aria-label={label} aria-current={active ? "page" : undefined} title={truncate ? displayLabel ?? label : undefined} className={`${RAIL_ITEM} ${active ? "bg-[#3c454c] text-white" : "text-[#dce7ed] hover:bg-[#353e45] hover:text-white"}`}>
     <span className="grid h-6 w-6 shrink-0 place-items-center" aria-hidden>{children}</span>
-    <span className="whitespace-nowrap">{displayLabel ?? label}</span>
+    <span className={truncate ? "min-w-0 truncate" : "whitespace-nowrap"}>{displayLabel ?? label}</span>
   </Link>;
 }
 
@@ -94,10 +105,6 @@ function IonicLinkMark() {
     <circle cx="9" cy="6" r="5" fill="#19b6b8" />
     <path d="M9 20v15M25 6v23c0 5 2 6 7 6h12" stroke="#19b6b8" strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" />
   </svg>;
-}
-
-function RailAuthControls({ active }: { active: boolean }) {
-  return <RailLink href="/account" label="Account" active={active}><UserIcon /></RailLink>;
 }
 
 function HomeIcon() {
@@ -151,6 +158,16 @@ function UserIcon() {
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden>
       <circle cx="12" cy="8" r="3.5" stroke="currentColor" strokeWidth="1.8" />
       <path d="M5.5 20a6.5 6.5 0 0113 0" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function UsersIcon() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden>
+      <circle cx="9" cy="8" r="3" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M3.5 19a5.5 5.5 0 0111 0" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M16 5.5a3 3 0 010 5.8M17.5 14.2a5.5 5.5 0 013 4.8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
     </svg>
   );
 }

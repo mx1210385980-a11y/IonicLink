@@ -1,5 +1,4 @@
 import { notFound } from "next/navigation";
-import { requireAppPageSession } from "@/lib/auth.server";
 import { DOMAINS, isDomain } from "@/lib/domain";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +15,6 @@ export default async function DomainLayout({
   params: { domain: string };
 }) {
   if (!isDomain(params.domain)) notFound();
-  await requireAppPageSession(`/${params.domain}`);
+  // Domain pages are public by default; write pages (extract) guard themselves.
   return <>{children}</>;
 }

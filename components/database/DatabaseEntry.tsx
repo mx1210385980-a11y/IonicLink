@@ -5,7 +5,7 @@ import type { ComponentType } from "react";
 import type { DatabaseInitialData } from "@/lib/databasePayload";
 import type { Domain } from "@/lib/domain";
 
-type DomainDatabaseProps = { initialData: DatabaseInitialData };
+type DomainDatabaseProps = { initialData: DatabaseInitialData; canModerate?: boolean; viewerSignedIn?: boolean };
 
 function DatabaseModuleLoading() {
   return (
@@ -37,10 +37,14 @@ const DATABASE_VIEWS: Record<Domain, ComponentType<DomainDatabaseProps>> = {
 export function DatabaseEntry({
   domain,
   initialData,
+  canModerate,
+  viewerSignedIn,
 }: {
   domain: Domain;
   initialData: DatabaseInitialData;
+  canModerate?: boolean;
+  viewerSignedIn?: boolean;
 }) {
   const DomainDatabaseView = DATABASE_VIEWS[domain];
-  return <DomainDatabaseView initialData={initialData} />;
+  return <DomainDatabaseView initialData={initialData} canModerate={canModerate} viewerSignedIn={viewerSignedIn} />;
 }

@@ -3,12 +3,21 @@ import { NextRequest } from "next/server";
 import { POST } from "./route";
 import { getTeachingSession, closeTeachingDatabaseForTests } from "@/lib/teaching";
 import { createSimpleExperiment, getSimpleDashboard, getSimpleStudent, listSimpleExperiments, saveSimpleDraft } from "@/lib/teaching/simpleStore";
+import { createTestAdminSession, createTestAppSession } from "@/lib/auth.test-helpers";
 
-function request(mode: unknown, cookie = "", origin = "http://localhost") {
-  return new NextRequest("http://localhost/api/teaching/lab/enter", { method: "POST", headers: { "content-type": "application/json", cookie, origin }, body: JSON.stringify(typeof mode === "object" ? mode : { mode }) });
+let appStudent = "";
+let appAdmin = "";
+
+function request(mode: unknown, cookie = "", origin = "http://localhost", appCookie: string | null = appStudent) {
+  const merged = [appCookie, cookie].filter(Boolean).join("; ");
+  return new NextRequest("http://localhost/api/teaching/lab/enter", { method: "POST", headers: { "content-type": "application/json", cookie: merged, origin }, body: JSON.stringify(typeof mode === "object" ? mode : { mode }) });
 }
 async function run() {
+  // App auth is enabled in tests: lab entry requires a platform session.
+  appStudent = (await createTestAppSession()).cookie;
+  appAdmin = (await createTestAdminSession()).cookie;
   assert.equal(listSimpleExperiments().length, 0);
+  assert.equal((await POST(request({ groupNo: 1 }, "", "http://localhost", null))).status, 401, "lab entry requires a platform account");
   const automatic = await POST(request({ groupNo: 1 }));
   assert.equal(automatic.status, 200);
   const automaticSession = getTeachingSession(automatic.cookies.get("ioniclink_teaching_session")!.value)!;
@@ -22,7 +31,8 @@ async function run() {
   assert.equal(listSimpleExperiments().length, 1);
   assert.equal((await POST(request("invalid"))).status, 400);
   assert.equal((await POST(request("teacher", "", "https://other.example"))).status, 403);
-  const teacher = await POST(request("teacher"));
+  assert.equal((await POST(request("teacher"))).status, 403, "a platform student cannot take the instructor seat");
+  const teacher = await POST(request("teacher", "", "http://localhost", appAdmin));
   assert.equal(teacher.status, 200); assert.equal((await teacher.json()).redirect, "/teaching/admin");
   assert.equal(getTeachingSession(teacher.cookies.get("ioniclink_teaching_session")!.value)?.role, "teacher");
   const gold = [{ cation: "A", anion: "B", substrate: "mica", temperature: "25 C", load: "1 N", cof: "0.1" }];

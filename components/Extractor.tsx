@@ -295,7 +295,7 @@ const STATUS_DOTS: Record<JobStatus, string> = {
 };
 
 /** Unified upload queue. Successful extractions are sent to review by the server. */
-export function Extractor({ domain = DEFAULT_DOMAIN }: { domain?: Domain }) {
+export function Extractor({ domain = DEFAULT_DOMAIN, canModerate = true }: { domain?: Domain; canModerate?: boolean }) {
   const [jobs, setJobs] = useState<BatchJob[]>([]);
   const [busy, setBusy] = useState(false);
   const [processing, setProcessing] = useState<string | null>(null);
@@ -419,6 +419,11 @@ export function Extractor({ domain = DEFAULT_DOMAIN }: { domain?: Domain }) {
       return;
     }
     if (datasets.length > 0) {
+      // Dataset import is an administrator-only action; students extract papers.
+      if (!canModerate) {
+        setError("Dataset import is limited to administrator accounts. Upload paper files (PDF/TXT) for extraction instead.");
+        return;
+      }
       setError(null);
       setPendingDatasetFiles((current) => {
         const known = new Set(current.map((file) => paperUploadId(file)));
@@ -629,6 +634,7 @@ export function Extractor({ domain = DEFAULT_DOMAIN }: { domain?: Domain }) {
         sortDirection={sortDirection}
         onToggleSort={() => setSortDirection((current) => current === "asc" ? "desc" : "asc")}
         onRemove={remove}
+        canDelete={canModerate}
         renderStatus={(status, error, checked) => <StatusPill status={status} error={error} checked={checked} />}
         renderFileIcon={() => <FileIcon />}
         currentPage={currentPage}

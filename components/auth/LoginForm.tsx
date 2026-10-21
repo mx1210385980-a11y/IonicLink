@@ -1,11 +1,14 @@
 "use client";
 
-import { FormEvent, useState, useTransition } from "react";
+import { FormEvent, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { safeAuthRedirect } from "@/lib/auth-redirect";
 
 type Mode = "sign-in" | "sign-up";
+
+/** Same-device convenience: prefill the account used last time (never the password). */
+const LAST_ACCOUNT_KEY = "ioniclink:last-account";
 
 export function LoginForm({ allowSignUp, nextPath }: { allowSignUp: boolean; nextPath: string }) {
   const router = useRouter();
@@ -13,40 +16,65 @@ export function LoginForm({ allowSignUp, nextPath }: { allowSignUp: boolean; nex
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastAccount, setLastAccount] = useState("");
   const [isNavigating, startTransition] = useTransition();
 
+  useEffect(() => {
+    try {
+      setLastAccount(window.localStorage.getItem(LAST_ACCOUNT_KEY) ?? "");
+    } catch {
+      // Private browsing may block localStorage; the form simply stays empty.
+    }
+  }, []);
+
   const busy = submitting || isNavigating;
+
+  function rememberAccount(account: string, remember: boolean) {
+    try {
+      if (remember) window.localStorage.setItem(LAST_ACCOUNT_KEY, account);
+      else window.localStorage.removeItem(LAST_ACCOUNT_KEY);
+    } catch {
+      // Non-critical: remembering the account is best-effort.
+    }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
 
     const form = new FormData(event.currentTarget);
-    const email = String(form.get("email") ?? "").trim();
+    const account = String(form.get("account") ?? "").trim();
     const password = String(form.get("password") ?? "");
     const rememberMe = form.get("rememberMe") === "on";
     setSubmitting(true);
     setError(null);
 
     try {
-      const result = mode === "sign-up"
-        ? await authClient.signUp.email({
-            name: String(form.get("name") ?? "").trim(),
-            email,
-            password,
-          })
-        : await authClient.signIn.email({ email, password, rememberMe });
+      // Single account field: an address containing "@" signs in by email
+      // (administrators), anything else signs in by username (student IDs).
+      const result =
+        mode === "sign-up"
+          ? await authClient.signUp.email({
+              name: String(form.get("name") ?? "").trim(),
+              email: account,
+              password,
+            })
+          : account.includes("@")
+            ? await authClient.signIn.email({ email: account, password, rememberMe })
+            : await authClient.signIn.username({ username: account, password, rememberMe });
 
       if (result.error) {
         setError(
           result.error.status === 429
             ? "Too many attempts. Please try again later."
             : mode === "sign-in"
-              ? "Incorrect email or password."
+              ? "Incorrect account or password."
               : "Could not create your account. Check your details and try again."
         );
         return;
       }
+
+      if (mode === "sign-in") rememberAccount(account, rememberMe);
 
       startTransition(() => {
         router.replace(safeAuthRedirect(nextPath));
@@ -71,7 +99,7 @@ export function LoginForm({ allowSignUp, nextPath }: { allowSignUp: boolean; nex
       </h1>
       <p className="mt-3 text-sm leading-6 text-ink-600">
         {mode === "sign-in"
-          ? "Sign in to manage papers, extraction tasks, and standardized data."
+          ? "Sign in with your student ID or administrator email to manage papers, extraction tasks, and standardized data."
           : "Create an account with your work email and a password of at least 8 characters."}
       </p>
 
@@ -91,17 +119,21 @@ export function LoginForm({ allowSignUp, nextPath }: { allowSignUp: boolean; nex
         ) : null}
 
         <label className="block">
-          <span className="text-sm font-semibold text-ink-800">Email</span>
+          <span className="text-sm font-semibold text-ink-800">
+            {mode === "sign-in" ? "Student ID or email" : "Email"}
+          </span>
           <input
             autoCapitalize="none"
-            autoComplete="email"
+            autoComplete={mode === "sign-in" ? "username" : "email"}
             className="mt-2 min-h-11 w-full rounded-[8px] border border-ink-200 bg-white px-3.5 text-sm text-ink-950 outline-none transition placeholder:text-ink-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-            inputMode="email"
-            name="email"
-            placeholder="name@example.com"
+            defaultValue={mode === "sign-in" ? lastAccount : undefined}
+            inputMode={mode === "sign-in" ? "text" : "email"}
+            key={`${mode}:${lastAccount}`}
+            name="account"
+            placeholder={mode === "sign-in" ? "Student ID or name@example.com" : "name@example.com"}
             required
             spellCheck={false}
-            type="email"
+            type={mode === "sign-in" ? "text" : "email"}
           />
         </label>
 
@@ -131,9 +163,9 @@ export function LoginForm({ allowSignUp, nextPath }: { allowSignUp: boolean; nex
       </div>
 
       {mode === "sign-in" ? (
-        <label className="mt-5 flex w-fit items-center gap-2 text-sm text-ink-700">
-          <input className="h-4 w-4 rounded border-ink-300 accent-brand-700" name="rememberMe" type="checkbox" />
-          Keep me signed in
+        <label className="mt-5 flex w-fit items-center gap-2 text-sm text-ink-700" title="Stay signed in on this device and prefill your account next time">
+          <input className="h-4 w-4 rounded border-ink-300 accent-brand-700" defaultChecked name="rememberMe" type="checkbox" />
+          Keep me signed in on this device
         </label>
       ) : null}
 

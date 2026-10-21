@@ -161,10 +161,16 @@ export function DatabaseView({
   domain,
   clientModule: mod,
   initialData,
+  canModerate = true,
+  viewerSignedIn = true,
 }: {
   domain: Domain;
   clientModule: ClientModule;
   initialData?: DatabaseInitialData;
+  /** Administrators only: show approve/delete controls. Defaults to true (public compatibility mode). */
+  canModerate?: boolean;
+  /** Anonymous visitors only see the official database, so the Review Queue tab is hidden. */
+  viewerSignedIn?: boolean;
 }) {
   const Card = mod.Card;
   const Editor = mod.Editor;
@@ -668,9 +674,11 @@ export function DatabaseView({
           <Tab active={status === "official"} onClick={() => changeStatus("official")}>
             Checked Database <Badge active={status === "official"}>{counts.official}</Badge>
           </Tab>
-          <Tab active={status === "review"} onClick={() => changeStatus("review")}>
-            Review Queue <Badge active={status === "review"} tone="amber">{counts.review}</Badge>
-          </Tab>
+          {viewerSignedIn ? (
+            <Tab active={status === "review"} onClick={() => changeStatus("review")}>
+              Review Queue <Badge active={status === "review"} tone="amber">{counts.review}</Badge>
+            </Tab>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-stretch gap-0 border border-ink-200 bg-white">
           {stats.slice(0, 2).map((s) => (
@@ -761,7 +769,7 @@ export function DatabaseView({
         {queryReady && selectedRecords.length > 0 && (
           <div className="ml-auto flex items-center gap-2 text-sm">
             <span className="font-mono text-ink-700">{selectedRecords.length} selected</span>
-            {status === "review" && (
+            {status === "review" && canModerate && (
               <button
                 onClick={approveSelected}
                 disabled={readySelected.length === 0 || mutationBusy}
@@ -777,13 +785,15 @@ export function DatabaseView({
                 <CheckIcon /> Approve ready ({readySelected.length})
               </button>
             )}
-            <button
-              onClick={deleteSelected}
-              disabled={mutationBusy}
-              className="inline-flex min-h-11 items-center gap-1.5 rounded-[2px] border border-rose-300 bg-white px-4 py-2.5 font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <TrashIcon /> {status === "review" ? "Reject" : "Delete"}
-            </button>
+            {canModerate && (
+              <button
+                onClick={deleteSelected}
+                disabled={mutationBusy}
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-[2px] border border-rose-300 bg-white px-4 py-2.5 font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <TrashIcon /> {status === "review" ? "Reject" : "Delete"}
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -873,6 +883,7 @@ export function DatabaseView({
             mutationBusy={mutationBusy}
             selected={selected}
             editingId={editingId}
+            canModerate={canModerate}
             onToggle={toggle}
             onEdit={setEditingId}
             onQuickEdit={quickEdit}

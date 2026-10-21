@@ -18,7 +18,7 @@ const DOMAIN_LABELS: Record<Domain, string> = {
   diffusion: "Diffusion",
 };
 
-export function TopNav() {
+export function TopNav({ showMonitor = true }: { showMonitor?: boolean }) {
   const pathname = usePathname();
   const parts = pathname.split("/");
   const first = parts[1];
@@ -116,7 +116,7 @@ export function TopNav() {
             <Link href="/monitor#overview" className="shrink-0 rounded-md px-2 py-2 text-xs font-medium text-brand-800 focus-visible:ring-2 focus-visible:ring-brand-500">使用概览</Link>
             <Link href="/monitor#feedback" className="shrink-0 rounded-md px-2 py-2 text-xs font-medium text-brand-800 focus-visible:ring-2 focus-visible:ring-brand-500">用户反馈</Link>
           </nav>}
-          <Link href="/monitor" aria-label="Usage monitor" title="Usage monitor" aria-current={onMonitorPage ? "page" : undefined} className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${onMonitorPage ? "bg-brand-50 text-brand-800" : "text-ink-700 hover:bg-white"}`}><svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M4 20V10m6 10V4m6 16v-7m5 7H3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg></Link>
+          {showMonitor ? <Link href="/monitor" aria-label="Usage monitor" title="Usage monitor" aria-current={onMonitorPage ? "page" : undefined} className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${onMonitorPage ? "bg-brand-50 text-brand-800" : "text-ink-700 hover:bg-white"}`}><svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden><path d="M4 20V10m6 10V4m6 16v-7m5 7H3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg></Link> : null}
           <AuthControls />
         </div>
       </div>

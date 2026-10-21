@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAppApiSession } from "@/lib/auth.server";
+import { getOptionalApiSession } from "@/lib/auth.server";
 import { getSourcePageText } from "@/lib/db";
 import { isDomain } from "@/lib/domain";
 import { findEvidenceOnPage, renderSourceFigure, renderSourcePage } from "@/lib/sources";
@@ -12,9 +12,10 @@ export const maxDuration = 60;
  * GET a cited page. Default: the rendered page image (PNG). `?format=text`: the
  * page's extracted text, for showing context with a highlight. `?format=evidence&q=…`:
  * normalized boxes locating the quote on the page image, for on-image highlights.
+ * Public read (source ids are unguessable UUIDs).
  */
 export async function GET(req: NextRequest, { params }: { params: { domain: string; id: string; n: string } }) {
-  const access = await requireAppApiSession(req);
+  const access = await getOptionalApiSession(req);
   if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
   const domain = params.domain;

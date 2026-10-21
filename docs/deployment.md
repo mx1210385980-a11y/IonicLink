@@ -52,6 +52,12 @@ To enable application login, the server-owned `/opt/ioniclink-v2/.env.production
 
 - `BETTER_AUTH_SECRET`: a unique random value containing at least 32 characters.
 - `BETTER_AUTH_URL`: the public HTTPS origin, for example `https://ioniclink.example.org`.
+  On a private campus network, plain HTTP is also accepted when the origin targets a loopback or
+  private-network address (for example `http://10.20.30.40:3000`); public HTTP origins are still
+  rejected at startup. If the internal network uses publicly-routable addresses (some campuses
+  assign ranges like `192.10.x.x` internally), set `IONICLINK_ALLOW_INSECURE_HTTP=true` to accept
+  plain HTTP there explicitly — credentials and session cookies then travel unencrypted, so only
+  use it on a trusted network.
 - `IONICLINK_ALLOW_SIGNUP=false`: the recommended production default.
 
 The first login-enabled deployment also needs `IONICLINK_BOOTSTRAP_EMAIL` and an 8-128 character
@@ -60,18 +66,18 @@ an administrator only when the email does not already exist. After the health ch
 remove the bootstrap password from `.env.production` and recreate the container. Existing accounts
 and sessions remain in `auth.db`.
 
-When login is enabled, TLS must terminate at a reverse proxy or load balancer before traffic reaches the exposed container
-port. Do not publish the login form over plain HTTP: otherwise credentials and session cookies are
-exposed in transit. The reverse proxy must preserve `Host` and send `X-Forwarded-Proto: https`.
+When login is enabled on a public origin, TLS must terminate at a reverse proxy or load balancer
+before traffic reaches the exposed container port. Do not publish the login form over plain HTTP on a
+public network: otherwise credentials and session cookies are exposed in transit. The reverse proxy
+must preserve `Host` and send `X-Forwarded-Proto: https`. Plain HTTP without a TLS proxy is only
+acceptable on a trusted private network (for example a campus intranet `IP:port` deployment).
 
 When login is enabled, application pages and data APIs require a general application account. In
 public compatibility mode they retain the previous open-workspace behavior while cross-origin writes
-remain rejected. The `/teaching` lab remains independent. Students choose AI or manual
-extraction and receive an automatically generated ID for the most recently created experiment.
-The current instructor entry creates a teacher session without checking a password. Neither
-application login nor `TEACHING_TEACHER_PASSWORD` protects this entry; restricted teaching
-deployments need separate access control. `TEACHING_TEACHER_PASSWORD` is still used by the
-retained teaching-session login API.
+remain rejected. The `/teaching` lab is tied to platform accounts: the instructor seat requires a
+platform administrator (role "admin"), and students join experiments while signed in with their
+own accounts. The former shared `TEACHING_TEACHER_PASSWORD` and passwordless instructor entry are
+retired.
 
 Before students join, the teacher creates an experiment from an uploaded tribology PDF and
 confirms a fixed answer key in `/teaching/admin`. The AI group uses the same live extraction

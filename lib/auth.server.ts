@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { betterAuth } from "better-auth";
 import { getMigrations } from "better-auth/db/migration";
-import { admin } from "better-auth/plugins";
+import { admin, username } from "better-auth/plugins";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { headers } from "next/headers";
@@ -106,6 +106,7 @@ function createAuth() {
       max: 60,
       customRules: {
         "/sign-in/email": { window: 60, max: 5 },
+        "/sign-in/username": { window: 60, max: 5 },
         "/sign-up/email": { window: 300, max: 3 },
       },
     },
@@ -113,8 +114,14 @@ function createAuth() {
       cookiePrefix: "ioniclink",
     },
     plugins: [
+      // Student accounts sign in with their student ID as the username; no email
+      // is exposed to them (a synthetic placeholder email is stored internally).
+      username({
+        minUsernameLength: 3,
+        maxUsernameLength: 30,
+      }),
       admin({
-        defaultRole: "user",
+        defaultRole: "student",
         adminRoles: ["admin"],
       }),
     ],
@@ -129,6 +136,40 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 let authReadyPromise: Promise<void> | null = null;
+
+function isPrivateNetworkHost(parsed: URL): boolean {
+  const hostname = parsed.hostname.toLowerCase();
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) return true;
+  if (hostname.startsWith("[")) {
+    // IPv6 literals: loopback, link-local, and unique-local addresses are private.
+    return (
+      hostname === "[::1]" ||
+      hostname.startsWith("[fe80:") ||
+      hostname.startsWith("[fc") ||
+      hostname.startsWith("[fd")
+    );
+  }
+  const octets = hostname.split(".");
+  if (octets.length !== 4 || octets.some((part) => !/^\d{1,3}$/.test(part))) return false;
+  const [a, b] = octets.map(Number);
+  return (
+    a === 10 || // 10.0.0.0/8
+    a === 127 || // loopback
+    (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12
+    (a === 192 && b === 168) || // 192.168.0.0/16
+    (a === 169 && b === 254) // link-local
+  );
+}
+
+/**
+ * Explicit opt-out for trusted networks whose addresses are not RFC 1918 (some
+ * campuses assign publicly-routable ranges internally, e.g. 192.10.x.x). When
+ * set, plain HTTP origins are accepted in production. Session cookies then
+ * travel unencrypted, so this must only be used on a trusted internal network.
+ */
+function allowInsecureHttpOrigin(): boolean {
+  return value("IONICLINK_ALLOW_INSECURE_HTTP")?.toLowerCase() === "true";
+}
 
 function validateRuntimeConfig(): void {
   const configurationStarted = Boolean(configuredSecret || configuredBaseURL);
@@ -153,8 +194,21 @@ function validateRuntimeConfig(): void {
   if (parsed.pathname !== "/" || parsed.search || parsed.hash) {
     throw new Error("BETTER_AUTH_URL must be an origin without a path, query, or hash.");
   }
-  if (process.env.NODE_ENV === "production" && parsed.protocol !== "https:") {
-    throw new Error("BETTER_AUTH_URL must use HTTPS in production.");
+  if (
+    process.env.NODE_ENV === "production" &&
+    parsed.protocol !== "https:" &&
+    !isPrivateNetworkHost(parsed)
+  ) {
+    if (!allowInsecureHttpOrigin()) {
+      throw new Error(
+        "BETTER_AUTH_URL must use HTTPS in production unless it targets a loopback or private-network address. " +
+          "For trusted internal networks with publicly-routable addresses, set IONICLINK_ALLOW_INSECURE_HTTP=true."
+      );
+    }
+    console.warn(
+      "[auth] IONICLINK_ALLOW_INSECURE_HTTP is enabled: credentials and session cookies travel " +
+        "unencrypted. Only use this on a trusted internal network."
+    );
   }
 }
 
@@ -162,6 +216,9 @@ async function ensureBootstrapAdmin(): Promise<void> {
   const email = value("IONICLINK_BOOTSTRAP_EMAIL")?.toLowerCase();
   const password = value("IONICLINK_BOOTSTRAP_PASSWORD");
   const name = value("IONICLINK_BOOTSTRAP_NAME") ?? "IonicLink Administrator";
+  // Optional: lets the bootstrap administrator sign in with a username
+  // (e.g. a numeric ID) instead of the synthetic email.
+  const username = value("IONICLINK_BOOTSTRAP_USERNAME");
 
   if (Boolean(email) !== Boolean(password)) {
     throw new Error("IONICLINK_BOOTSTRAP_EMAIL and IONICLINK_BOOTSTRAP_PASSWORD must be set together.");
@@ -187,9 +244,45 @@ async function ensureBootstrapAdmin(): Promise<void> {
   if (existing) return;
 
   await auth.api.createUser({
-    body: { email, password, name, role: "admin" },
-  });
+    body: {
+      email,
+      password,
+      name,
+      role: "admin",
+      ...(username ? { data: { username, displayUsername: username } } : {}),
+    },
+  } as unknown as Parameters<typeof auth.api.createUser>[0]);
   console.info("[auth-audit]", JSON.stringify({ event: "bootstrap_admin_created" }));
+}
+
+/**
+ * SQLite cannot ALTER TABLE ... ADD COLUMN with a UNIQUE constraint, which is
+ * what better-auth's migration generates when the username plugin meets an
+ * existing user table. Add the columns as nullable TEXT first (SQLite unique
+ * indexes allow multiple NULLs, matching the plugin's optional-username
+ * semantics); the regular migration diff then sees them as present.
+ */
+function ensureUsernameColumns(): void {
+  const table = authDatabase
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'user'")
+    .get() as { name: string } | undefined;
+  if (!table) return;
+
+  const columns = authDatabase.prepare('PRAGMA table_info("user")').all() as Array<{ name: string }>;
+  const names = new Set(columns.map((column) => column.name));
+  const added: string[] = [];
+  if (!names.has("username")) {
+    authDatabase.exec('ALTER TABLE "user" ADD COLUMN username TEXT');
+    added.push("username");
+  }
+  if (!names.has("displayUsername")) {
+    authDatabase.exec('ALTER TABLE "user" ADD COLUMN displayUsername TEXT');
+    added.push("displayUsername");
+  }
+  authDatabase.exec('CREATE UNIQUE INDEX IF NOT EXISTS "user_username_unique" ON "user" (username)');
+  if (added.length) {
+    console.info("[auth-audit]", JSON.stringify({ event: "username_columns_added", columns: added }));
+  }
 }
 
 export async function ensureAuthReady(): Promise<void> {
@@ -198,6 +291,7 @@ export async function ensureAuthReady(): Promise<void> {
 
   if (!authReadyPromise) {
     authReadyPromise = (async () => {
+      ensureUsernameColumns();
       const migrations = await getMigrations(auth.options);
       if (migrations.toBeCreated.length || migrations.toBeAdded.length) {
         await migrations.runMigrations();
@@ -238,6 +332,26 @@ export async function requireAppPageSession(nextPath: string) {
   if (!session) {
     const next = safeAuthRedirect(requestHeaders.get("x-ioniclink-request-path") ?? nextPath);
     redirect(`/login?next=${encodeURIComponent(next)}`);
+  }
+  return session;
+}
+
+export type AppSession = NonNullable<Awaited<ReturnType<typeof getAppSession>>>;
+
+/** Only the "admin" role is privileged; everything else (student, legacy "user") is student-level. */
+export function sessionHasAdminRole(session: AppSession | null): boolean {
+  const role = session?.user?.role;
+  if (!role) return false;
+  return role
+    .split(",")
+    .map((part) => part.trim())
+    .includes("admin");
+}
+
+export async function requireAppPageRole(nextPath: string, role: "admin") {
+  const session = await requireAppPageSession(nextPath);
+  if (session && role === "admin" && !sessionHasAdminRole(session)) {
+    redirect("/");
   }
   return session;
 }
@@ -299,6 +413,51 @@ export async function requireAppApiSession(request: Request): Promise<AppApiAcce
       ),
     };
   }
+}
+
+/**
+ * Read-tier guard: cross-origin check plus best-effort session resolution.
+ * Anonymous visitors get `{ ok: true, session: null }` (even when auth is
+ * enabled) so public read routes can serve official-only data. Note the
+ * ambiguity with public compatibility mode (auth disabled), which also yields
+ * a null session — callers that need to distinguish must check
+ * `isAppAuthEnabled()` themselves.
+ */
+export async function getOptionalApiSession(request: Request): Promise<AppApiAccess> {
+  const crossOrigin = crossOriginResponse(request);
+  if (crossOrigin) return { ok: false, response: crossOrigin };
+  if (!isAppAuthEnabled()) return { ok: true, session: null };
+
+  try {
+    const session = await getAppSession(request.headers);
+    return { ok: true, session };
+  } catch (error) {
+    console.error("[auth] session validation failed", error);
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "Sign-in is temporarily unavailable." },
+        { status: 503, headers: { "Cache-Control": "no-store" } }
+      ),
+    };
+  }
+}
+
+/** Write-tier guard for administrator-only actions (approve-to-official, delete, import). */
+export async function requireAppApiRole(request: Request, role: "admin"): Promise<AppApiAccess> {
+  const access = await requireAppApiSession(request);
+  if (!access.ok) return access;
+  if (!access.session) return access; // public compatibility mode: no roles exist
+  if (role === "admin" && !sessionHasAdminRole(access.session)) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "This action requires an administrator account." },
+        { status: 403, headers: { "Cache-Control": "no-store" } }
+      ),
+    };
+  }
+  return access;
 }
 
 export function auditAuthResponse(request: Request, response: Response): void {

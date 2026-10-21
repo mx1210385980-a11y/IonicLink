@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { closeTeachingStoreForTests, getTeachingDb, teachingDataDir } from "./teaching/store";
@@ -196,17 +196,8 @@ export function calculateTeachingMetrics(
   };
 }
 
-export function verifyTeacherPassword(candidate: string): boolean {
-  const configured = process.env.TEACHING_TEACHER_PASSWORD;
-  if (!configured) return false;
-  const left = Buffer.from(candidate);
-  const right = Buffer.from(configured);
-  return left.length === right.length && timingSafeEqual(left, right);
-}
-
-export function teacherLoginConfigured(): boolean {
-  return Boolean(process.env.TEACHING_TEACHER_PASSWORD);
-}
+// Instructor access moved to platform administrator accounts (app/api/teaching/_auth.ts);
+// the shared TEACHING_TEACHER_PASSWORD flow is retired.
 
 export function createTeachingSession(session: TeachingSession): string {
   const token = randomBytes(32).toString("base64url");
@@ -984,7 +975,7 @@ export function getTeachingAdminDashboard(requestedProjectId?: string | null): {
       : projects[0]?.id) ?? null;
   if (!selectedProjectId) {
     return {
-      configured: teacherLoginConfigured(),
+      configured: true,
       projects,
       selectedProjectId: null,
       papers: [],
@@ -1062,7 +1053,7 @@ export function getTeachingAdminDashboard(requestedProjectId?: string | null): {
   });
   const completed = rows.filter((row) => row.elapsedSeconds != null);
   return {
-    configured: teacherLoginConfigured(),
+    configured: true,
     projects,
     selectedProjectId,
     papers,
@@ -1089,7 +1080,8 @@ export class TeachingReviewValidationError extends Error {
 export function reviewTeachingSubmission(
   submissionId: string,
   humanScores: TeachingScores,
-  aiScores: TeachingScores
+  aiScores: TeachingScores,
+  reviewerId: string = "teacher"
 ): void {
   const store = db();
   const submission = store
@@ -1102,7 +1094,7 @@ export function reviewTeachingSubmission(
     .prepare(
       `INSERT INTO teaching_reviews
        (submission_id, human_scores_json, ai_scores_json, reviewed_at, reviewer_id)
-       VALUES (?, ?, ?, ?, 'teacher')
+       VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(submission_id) DO UPDATE SET
          human_scores_json = excluded.human_scores_json,
          ai_scores_json = excluded.ai_scores_json,
@@ -1112,7 +1104,8 @@ export function reviewTeachingSubmission(
       submissionId,
       JSON.stringify(normalizedScores(humanScores)),
       JSON.stringify(normalizedScores(aiScores)),
-      now()
+      now(),
+      reviewerId.slice(0, 128) || "teacher"
     );
 }
 

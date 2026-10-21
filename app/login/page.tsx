@@ -22,9 +22,9 @@ export default async function LoginPage({
       <LoginForm allowSignUp={isSelfRegistrationEnabled()} nextPath={nextPath} />
       <Link
         className="mt-5 rounded-[8px] px-3 py-2 text-sm font-semibold text-ink-600 transition hover:bg-white/70 hover:text-brand-700 focus:outline-none focus:ring-2 focus:ring-brand-200"
-        href="/teaching"
+        href="/tribology/database"
       >
-        Open the teaching lab
+        Browse the public database without signing in
       </Link>
     </div>
   );

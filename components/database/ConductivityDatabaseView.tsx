@@ -48,6 +48,6 @@ export const conductivityClientModule: ClientModule = {
   systemFacets: buildConductivitySystemFacets,
 };
 
-export function ConductivityDatabaseView({ initialData }: { initialData: DatabaseInitialData }) {
-  return <DatabaseView domain="conductivity" clientModule={conductivityClientModule} initialData={initialData} />;
+export function ConductivityDatabaseView({ initialData, canModerate, viewerSignedIn }: { initialData: DatabaseInitialData; canModerate?: boolean; viewerSignedIn?: boolean }) {
+  return <DatabaseView domain="conductivity" clientModule={conductivityClientModule} initialData={initialData} canModerate={canModerate} viewerSignedIn={viewerSignedIn} />;
 }

@@ -35,6 +35,8 @@ export interface ExtractionWorkspaceViewProps {
   sortDirection: "asc" | "desc";
   onToggleSort: () => void;
   onRemove: (job: BatchJob) => void;
+  /** Administrators only: show document/job deletion. Defaults to true. */
+  canDelete?: boolean;
   renderStatus: (status: JobStatus, error?: string | null, checked?: boolean) => ReactNode;
   renderFileIcon: () => ReactNode;
   currentPage: number;
@@ -66,6 +68,7 @@ export function ExtractionWorkspaceView({
   sortDirection,
   onToggleSort,
   onRemove,
+  canDelete = true,
   renderStatus,
   renderFileIcon,
   currentPage,
@@ -169,7 +172,7 @@ export function ExtractionWorkspaceView({
                         <p className="mt-2 text-[11px] leading-5 text-ink-600">Created · {formatJobTime(job.createdAt)}<br />Finished · {formatJobTime(job.completedAt ?? job.committedAt)}</p>
                       </div>
                       {job.status === "committed" && <Link href={`/${domain}/database?status=${job.checked ? "official" : "review"}`} className="mt-1 flex rounded-md px-3 py-2 text-xs font-medium text-brand-700 hover:bg-brand-50">{job.checked ? "View checked records" : "Open review"}</Link>}
-                      <button type="button" onClick={() => onRemove(job)} disabled={controlsDisabled} aria-label={job.sourceId ? `Delete document and all extracted data: ${job.filename}` : `Remove extraction job: ${job.filename}`} className="mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-rose-700 hover:bg-rose-50 disabled:opacity-40"><TrashIcon />{job.sourceId ? "Delete document and data" : "Remove extraction job"}</button>
+                      {canDelete ? <button type="button" onClick={() => onRemove(job)} disabled={controlsDisabled} aria-label={job.sourceId ? `Delete document and all extracted data: ${job.filename}` : `Remove extraction job: ${job.filename}`} className="mt-1 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs text-rose-700 hover:bg-rose-50 disabled:opacity-40"><TrashIcon />{job.sourceId ? "Delete document and data" : "Remove extraction job"}</button> : null}
                     </WorkspaceMenu>
                   </div>
                 </td>

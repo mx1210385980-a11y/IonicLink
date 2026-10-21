@@ -18,6 +18,31 @@ async function main() {
     return;
   }
 
+  if (process.env.IONICLINK_AUTH_WORKER_MODE === "private-http") {
+    assert.equal(isAppAuthEnabled(), true);
+    await ensureAuthReady();
+    console.log("Production private-network HTTP worker tests passed");
+    return;
+  }
+
+  if (process.env.IONICLINK_AUTH_WORKER_MODE === "public-http") {
+    assert.equal(isAppAuthEnabled(), true);
+    await assert.rejects(
+      ensureAuthReady(),
+      /must use HTTPS in production unless it targets a loopback or private-network address/,
+      "public HTTP origins stay rejected in production"
+    );
+    console.log("Production public HTTP rejection worker tests passed");
+    return;
+  }
+
+  if (process.env.IONICLINK_AUTH_WORKER_MODE === "trusted-http") {
+    assert.equal(isAppAuthEnabled(), true);
+    await ensureAuthReady();
+    console.log("Production trusted-network HTTP worker tests passed");
+    return;
+  }
+
   assert.equal(isAppAuthEnabled(), false, "missing production auth configuration disables application auth");
   await ensureAuthReady();
 

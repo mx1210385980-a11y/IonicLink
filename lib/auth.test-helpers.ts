@@ -41,3 +41,35 @@ export function createTestAppSession(): Promise<TestSession> {
   }
   return sessionPromise;
 }
+
+const TEST_ADMIN_EMAIL = `route-admin-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@ioniclink.test`;
+
+let adminSessionPromise: Promise<TestSession> | null = null;
+
+/** Platform administrator session, for routes gated by requireAppApiRole/platformSessionIsAdmin. */
+export function createTestAdminSession(): Promise<TestSession> {
+  if (!adminSessionPromise) {
+    adminSessionPromise = (async () => {
+      await ensureAuthReady();
+      await auth.api.createUser({
+        body: { email: TEST_ADMIN_EMAIL, name: "Route Test Admin", password: TEST_PASSWORD, role: "admin" },
+      });
+      const response = await auth.handler(
+        new Request("http://localhost:3000/api/auth/sign-in/email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Origin: "http://localhost:3000" },
+          body: JSON.stringify({ email: TEST_ADMIN_EMAIL, password: TEST_PASSWORD }),
+        })
+      );
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        throw new Error(`Could not sign in the test administrator (HTTP ${response.status})${detail ? `: ${detail}` : "."}`);
+      }
+      const setCookies = responseCookies(response);
+      const cookie = setCookies.map((value) => value.split(";", 1)[0]).join("; ");
+      if (!cookie) throw new Error("The administrator login did not return a session cookie.");
+      return { cookie, email: TEST_ADMIN_EMAIL, password: TEST_PASSWORD, setCookies };
+    })();
+  }
+  return adminSessionPromise;
+}

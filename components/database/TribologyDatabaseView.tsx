@@ -40,6 +40,6 @@ export const tribologyClientModule: ClientModule = {
   systemFacets: buildSystemFacets,
 };
 
-export function TribologyDatabaseView({ initialData }: { initialData: DatabaseInitialData }) {
-  return <DatabaseView domain="tribology" clientModule={tribologyClientModule} initialData={initialData} />;
+export function TribologyDatabaseView({ initialData, canModerate, viewerSignedIn }: { initialData: DatabaseInitialData; canModerate?: boolean; viewerSignedIn?: boolean }) {
+  return <DatabaseView domain="tribology" clientModule={tribologyClientModule} initialData={initialData} canModerate={canModerate} viewerSignedIn={viewerSignedIn} />;
 }

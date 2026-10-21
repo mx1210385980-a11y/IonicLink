@@ -5,13 +5,13 @@ import {
   joinDefaultTeachingExperiment,
   joinGroupCrossoverExperiment,
   normalizeStudentAlias,
-  teacherLoginConfigured,
   TeachingRosterError,
-  verifyTeacherPassword,
 } from "@/lib/teaching";
 import {
   TEACHING_COOKIE,
   clearTeachingCookie,
+  platformSessionIsAdmin,
+  platformSignedIn,
   rejectCrossOriginMutation,
   withTeachingCookie,
 } from "../_auth";
@@ -50,18 +50,14 @@ export async function POST(request: NextRequest) {
   }
 
   if (body.role === "teacher") {
-    if (typeof body.password !== "string") {
-      return NextResponse.json({ error: "Enter the instructor password." }, { status: 400 });
-    }
+    // The instructor seat belongs to platform administrators; the shared
+    // TEACHING_TEACHER_PASSWORD is retired.
     try {
-      if (!teacherLoginConfigured()) {
+      if (!(await platformSessionIsAdmin(request))) {
         return NextResponse.json(
-          { error: "TEACHING_TEACHER_PASSWORD is not configured on the server." },
-          { status: 503 }
+          { error: "Instructor access requires a platform administrator account. Sign in first." },
+          { status: 403 }
         );
-      }
-      if (!verifyTeacherPassword(body.password)) {
-        return NextResponse.json({ error: "Incorrect instructor password." }, { status: 401 });
       }
       const token = createTeachingSession({ role: "teacher", projectId: null, participantId: null });
       return withTeachingCookie(NextResponse.json({ redirect: "/teaching/admin" }), token, request);
@@ -72,6 +68,11 @@ export async function POST(request: NextRequest) {
         { message: "Instructor sign-in failed. Try again later." }
       );
     }
+  }
+
+  // Students join experiments with their platform account.
+  if (!(await platformSignedIn(request))) {
+    return NextResponse.json({ error: "Sign in with your platform account first." }, { status: 401 });
   }
 
   let studentAlias: string;

@@ -4,19 +4,21 @@ import { readSimplePaper, readSimplePdf, saveStudentUploadedPdf } from "@/lib/te
 import { getSourcePdf } from "@/lib/sources";
 import { getSource } from "@/lib/db";
 import { renderPdfPage } from "@/lib/pdf";
-import { rejectCrossOriginMutation, sessionFromRequest } from "../../_auth";
+import { rejectCrossOriginMutation, platformSessionIsAdmin, sessionFromRequest } from "../../_auth";
 import { labError, labStudentId, checkLabAttempt } from "../_helpers";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   try {
     const session = sessionFromRequest(request);
-    if (!session) return NextResponse.json({ error: "Sign in first." }, { status: 401 });
-    const student = session.role === "student" && session.participantId ? getSimpleStudent(labStudentId(session.participantId)) : null;
-    const id = session.role === "teacher" ? request.nextUrl.searchParams.get("sourceId") : student?.experiment.sourceId;
+    // A platform administrator counts as instructor when no teaching cookie is present.
+    const isTeacher = session?.role === "teacher" || (!session && (await platformSessionIsAdmin(request)));
+    if (!session && !isTeacher) return NextResponse.json({ error: "Sign in first." }, { status: 401 });
+    const student = session?.role === "student" && session.participantId ? getSimpleStudent(labStudentId(session.participantId)) : null;
+    const id = isTeacher ? request.nextUrl.searchParams.get("sourceId") : student?.experiment.sourceId;
     if (!id) throw new Error("Assigned paper not found.");
     const source = await readSimplePaper(id).catch((error) => {
-      if (session.role === "teacher") return getSource("tribology", id);
+      if (isTeacher) return getSource("tribology", id);
       throw error;
     });
     if (request.nextUrl.searchParams.get("format") === "text") {
@@ -24,7 +26,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ pages: source.pages }, { headers: { "cache-control": "private, no-store" } });
     }
     const pdf = await readSimplePdf(id).catch((error) => {
-      if (session.role === "teacher") return getSourcePdf("tribology", id);
+      if (isTeacher) return getSourcePdf("tribology", id);
       throw error;
     });
     if (!pdf) throw new Error("PDF is missing.");

@@ -8,10 +8,18 @@ import { POST as join } from "./lab/join/route";
 import { GET as template, POST as upload } from "./lab/table/route";
 import { GET as paper, POST as uploadPaper } from "./lab/paper/route";
 import { POST as extract } from "./lab/extract/route";
+import { createTestAppSession } from "@/lib/auth.test-helpers";
 
-function request(endpoint = "", body?: unknown, cookie?: string, origin = "http://localhost") {
+// Platform sessions: lab endpoints (join in particular) require a signed-in platform account.
+let appStudent = "";
+
+function merge(appCookie: string | null, cookie?: string) {
+  return [appCookie, cookie].filter(Boolean).join("; ");
+}
+function request(endpoint = "", body?: unknown, cookie?: string, origin = "http://localhost", appCookie: string | null = appStudent) {
+  const merged = merge(appCookie, cookie);
   return new NextRequest(`http://localhost/api/teaching/lab${endpoint}`, { method: body === undefined ? "GET" : "POST",
-    headers: { origin, ...(cookie ? { cookie } : {}), ...(body === undefined ? {} : { "content-type": "application/json" }) },
+    headers: { origin, ...(merged ? { cookie: merged } : {}), ...(body === undefined ? {} : { "content-type": "application/json" }) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 function safe(state: unknown) {
@@ -21,7 +29,7 @@ function safe(state: unknown) {
 function fileRequest(cookie: string, origin = "http://localhost") {
   const form = new FormData();
   form.set("file", new File(["cation,anion,substrate,temperature,load,cof\nEMIM,BF4,steel,25,1,0.1"], "answer.csv", { type: "text/csv" }));
-  return new NextRequest("http://localhost/api/teaching/lab/table", { method: "POST", headers: { cookie, origin }, body: form });
+  return new NextRequest("http://localhost/api/teaching/lab/table", { method: "POST", headers: { cookie: merge(appStudent, cookie), origin }, body: form });
 }
 function pdfRequest(cookie: string, version: number, text: string, origin = "http://localhost", filename = "student-paper.pdf") {
   const stream = `BT /F1 12 Tf 72 720 Td (${text}) Tj ET`;
@@ -35,15 +43,17 @@ function pdfRequest(cookie: string, version: number, text: string, origin = "htt
   const form = new FormData();
   form.set("file", new File([document], filename, { type: "application/pdf" }));
   form.set("version", String(version));
-  return new NextRequest("http://localhost/api/teaching/lab/paper", { method: "POST", headers: { cookie, origin }, body: form });
+  return new NextRequest("http://localhost/api/teaching/lab/paper", { method: "POST", headers: { cookie: merge(appStudent, cookie), origin }, body: form });
 }
 async function run() {
+  // Anonymous checks run before any platform account exists (appStudent is still "").
   assert.equal((await GET(request())).status, 401);
   assert.equal((await POST(request("", { action: "create" }))).status, 401);
   assert.equal((await template(request("/table"))).status, 401);
   assert.equal((await paper(request("/paper"))).status, 401);
   assert.equal((await uploadPaper(pdfRequest("", 0, "Paper"))).status, 401);
   assert.equal((await extract(request("/extract", {}))).status, 401);
+  appStudent = (await createTestAppSession()).cookie;
   const teacher = `ioniclink_teaching_session=${createTeachingSession({ role: "teacher", projectId: null, participantId: null })}`;
   assert.equal((await extract(request("/extract", {}, teacher))).status, 403);
   assert.equal((await uploadPaper(pdfRequest(teacher, 0, "Teacher paper"))).status, 403);

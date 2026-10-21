@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { createTeachingSession, getTeachingSession } from "@/lib/teaching";
 import { createSimpleExperiment, getCurrentSimpleStudentId, joinSimpleGroup, getSimpleStudent, joinSimpleExperiment, listSimpleExperiments } from "@/lib/teaching/simpleStore";
-import { rejectCrossOriginMutation, TEACHING_COOKIE, withTeachingCookie } from "../../_auth";
+import { rejectCrossOriginMutation, TEACHING_COOKIE, platformSessionIsAdmin, platformSignedIn, withTeachingCookie } from "../../_auth";
 import { labBody, labError } from "../_helpers";
 
 export const runtime = "nodejs";
@@ -15,10 +15,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Choose AI, manual, or instructor entry." }, { status: 400 });
     }
     if (mode === "teacher") {
+      // The instructor seat requires a platform administrator account — the
+      // previous passwordless entry is closed.
+      if (!(await platformSessionIsAdmin(request))) {
+        return NextResponse.json({ error: "Instructor access requires a platform administrator account. Sign in first." }, { status: 403 });
+      }
       const currentToken = request.cookies.get(TEACHING_COOKIE)?.value;
       const token = getTeachingSession(currentToken)?.role === "teacher" ? currentToken!
         : createTeachingSession({ role: "teacher", projectId: null, participantId: null });
       return withTeachingCookie(NextResponse.json({ redirect: "/teaching/admin" }), token, request);
+    }
+    // Students join experiments with their platform account.
+    if (!(await platformSignedIn(request))) {
+      return NextResponse.json({ error: "Sign in with your platform account first." }, { status: 401 });
     }
     if (groupNo !== undefined) {
       if (typeof groupNo !== "number" || !Number.isInteger(groupNo) || groupNo < 1 || groupNo > 4) throw new Error("Choose group 1, 2, 3, or 4.");

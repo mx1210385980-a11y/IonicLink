@@ -91,7 +91,7 @@ function committedTransition(
 }
 
 export async function GET(request: NextRequest) {
-  const session = requireTeachingRole(request, "student");
+  const session = await requireTeachingRole(request, "student");
   if (session instanceof NextResponse) return session;
   try {
     const state = session.participantId ? getCurrentTeachingRound(session.participantId) : null;
@@ -109,7 +109,7 @@ export async function GET(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   const rejected = rejectCrossOriginMutation(request);
   if (rejected) return rejected;
-  const session = requireTeachingRole(request, "student");
+  const session = await requireTeachingRole(request, "student");
   if (session instanceof NextResponse) return session;
   let body: { version?: unknown; answers?: unknown } | null;
   try {
@@ -163,7 +163,7 @@ export async function PATCH(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const rejected = rejectCrossOriginMutation(request);
   if (rejected) return rejected;
-  const session = requireTeachingRole(request, "student");
+  const session = await requireTeachingRole(request, "student");
   if (session instanceof NextResponse) return session;
   if (!session.participantId) return NextResponse.json({ error: "Your student session has expired." }, { status: 401 });
 

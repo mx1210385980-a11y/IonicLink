@@ -17,19 +17,26 @@ import {
   PATCH as studentPatch,
   POST as studentPost,
 } from "./student/route";
+import { createTestAdminSession, createTestAppSession } from "@/lib/auth.test-helpers";
 
 type JsonRecord = Record<string, unknown>;
+
+// Platform sessions: the teaching module sits behind platform accounts now.
+let appStudentCookie = "";
+let appAdminCookie = "";
 
 function request(
   path: string,
   method: string,
   body?: unknown,
   cookie?: string,
-  extraHeaders: Record<string, string> = {}
+  extraHeaders: Record<string, string> = {},
+  appCookie: string | null = appStudentCookie
 ): NextRequest {
   const headers = new Headers(extraHeaders);
   if (body !== undefined) headers.set("content-type", "application/json");
-  if (cookie) headers.set("cookie", cookie);
+  const mergedCookie = [appCookie, cookie].filter(Boolean).join("; ");
+  if (mergedCookie) headers.set("cookie", mergedCookie);
   return new NextRequest(`http://localhost${path}`, {
     method,
     headers,
@@ -139,9 +146,9 @@ function assertNoConfidentialFields(payload: JsonRecord): void {
 }
 
 async function main(): Promise<void> {
-  const previousTeacherPassword = process.env.TEACHING_TEACHER_PASSWORD;
-  process.env.TEACHING_TEACHER_PASSWORD = "route-test-password";
-
+  // App auth is enabled in tests: students and instructors arrive with a platform session.
+  appStudentCookie = (await createTestAppSession()).cookie;
+  appAdminCookie = (await createTestAdminSession()).cookie;
   try {
   const invalidRole = await sessionPost(
     request("/api/teaching/session", "POST", { role: "administrator", studentAlias: "S000" })
@@ -218,13 +225,20 @@ async function main(): Promise<void> {
   const noAuth = await studentGet(request("/api/teaching/student", "GET"));
   assert.equal(noAuth.status, 401);
 
+  const noPlatformSession = await sessionPost(
+    request("/api/teaching/session", "POST", { role: "student", studentAlias: "S000" }, undefined, {}, null)
+  );
+  assert.equal(noPlatformSession.status, 401, "teaching student entry requires a platform account");
+
   const teacherLogin = await sessionPost(
-    request("/api/teaching/session", "POST", {
-      role: "teacher",
-      password: "route-test-password",
-    })
+    request("/api/teaching/session", "POST", { role: "teacher" }, undefined, {}, appAdminCookie)
   );
   assert.equal(teacherLogin.status, 200);
+
+  const studentOnTeacherSeat = await sessionPost(
+    request("/api/teaching/session", "POST", { role: "teacher" })
+  );
+  assert.equal(studentOnTeacherSeat.status, 403, "the instructor seat requires a platform administrator");
   const teacherCookie = cookieFrom(teacherLogin);
   const teacherOnStudent = await studentGet(
     request("/api/teaching/student", "GET", undefined, teacherCookie)
@@ -890,8 +904,6 @@ async function main(): Promise<void> {
   assert.match(anonymousCsv, /"S001"/);
   assert.match(anonymousCsv, /"S002"/);
   } finally {
-    if (previousTeacherPassword === undefined) delete process.env.TEACHING_TEACHER_PASSWORD;
-    else process.env.TEACHING_TEACHER_PASSWORD = previousTeacherPassword;
     closeTeachingDatabaseForTests();
   }
 

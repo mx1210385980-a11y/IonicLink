@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { getCurrentAppSession, isAppAuthEnabled, sessionHasAdminRole } from "@/lib/auth.server";
 import { listJobs, listRecords, listSourceSummaries } from "@/lib/db";
 import { isDomain, type Domain } from "@/lib/domain";
 import { getModule } from "@/lib/modules/registry.server";
@@ -11,12 +12,16 @@ import { buildLibraryEntries, queryLibrary, libraryPageHref, type LibraryEntry, 
 export const dynamic = "force-dynamic";
 const inputClass = "min-w-0 rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm text-ink-800";
 
-export default function LibraryPage({ params, searchParams = {} }: { params: { domain: string }; searchParams?: LibraryParams }) {
+export default async function LibraryPage({ params, searchParams = {} }: { params: { domain: string }; searchParams?: LibraryParams }) {
   if (!isDomain(params.domain)) notFound();
   const domain = params.domain;
   const mod = getModule(domain);
+  const appSession = await getCurrentAppSession();
+  const canDelete = sessionHasAdminRole(appSession);
   const sources = listSourceSummaries(domain);
-  const records = listRecords(domain);
+  // Anonymous visitors only see records that were checked into the official database.
+  const allRecords = listRecords(domain);
+  const records = isAppAuthEnabled() && !appSession ? allRecords.filter((record) => record.status === "official") : allRecords;
   const entries = buildLibraryEntries(sources, records, listJobs(domain));
   const query = queryLibrary(entries, searchParams);
   const path = `/${domain}/library`;
@@ -40,14 +45,14 @@ export default function LibraryPage({ params, searchParams = {} }: { params: { d
     </form>
     <div className="flex flex-wrap items-center justify-between gap-2 text-sm"><p role="status">{query.total ? `${(query.page-1)*20+1}–${Math.min(query.page*20, query.total)}` : "0"} of {query.total} matching entries <span className="text-ink-500">· {entries.length} in collection</span></p><span className="text-xs text-ink-500">20 entries per page</span></div>
     <section aria-label="Literature results" className="min-w-0 space-y-3">
-      {query.entries.map(entry=><LiteratureRow key={entry.id} domain={domain} entry={entry} headline={record=>mod.recordHeadline(record)} />)}
+      {query.entries.map(entry=><LiteratureRow key={entry.id} domain={domain} entry={entry} canDelete={canDelete} headline={record=>mod.recordHeadline(record)} />)}
       {!query.entries.length && <div className="rounded-xl border border-dashed border-ink-200 bg-white px-6 py-12 text-center"><h2 className="font-semibold">{entries.length ? "No literature matches these filters" : "Your literature library is empty"}</h2><p className="mt-2 text-sm text-ink-700">{entries.length ? "Try a broader title, DOI or publication year." : "Upload a PDF to connect a paper with extracted records and evidence."}</p><Link className="btn mt-4" href={entries.length ? path : `/${domain}/extract`}>{entries.length ? "Clear filters" : "Upload documents"}</Link></div>}
     </section>
     {query.pages>1 && <nav aria-label="Literature pagination" className="flex items-center justify-between gap-3 py-2">{query.page>1 ? <Link className="btn" href={libraryPageHref(path,query,query.page-1)}>Previous</Link> : <span className="text-sm text-ink-400">Previous</span>}<span className="text-sm">Page {query.page} of {query.pages}</span>{query.page<query.pages ? <Link className="btn" href={libraryPageHref(path,query,query.page+1)}>Next</Link> : <span className="text-sm text-ink-400">Next</span>}</nav>}
   </div>;
 }
 
-function LiteratureRow({domain,entry,headline}:{domain:Domain;entry:LibraryEntry;headline:(record:LibraryRecord)=>string}) {
+function LiteratureRow({domain,entry,canDelete,headline}:{domain:Domain;entry:LibraryEntry;canDelete:boolean;headline:(record:LibraryRecord)=>string}) {
   const {records}=entry;
   const state = !records.length ? "No records" : entry.review ? entry.checked ? "Partially checked" : "Awaiting review" : "All records checked";
   const databaseHref = (title:string,status:"official"|"review")=>`/${domain}/database?${new URLSearchParams({paper:title,status})}`;
@@ -69,10 +74,10 @@ function LiteratureRow({domain,entry,headline}:{domain:Domain;entry:LibraryEntry
         <div className="grid min-w-0 gap-3">
           {entry.titles.length>1 && <div className="space-y-1 text-xs"><p className="text-amber-800">Multiple paper titles are linked to this document. Open the matching title:</p>{entry.titles.map(title=><div key={title} className="flex flex-wrap gap-2"><span>{title}</span>{records.some(r=>r.paper.title===title && r.status==="official") && <Link className="text-brand-700 underline" href={databaseHref(title,"official")}>Checked records</Link>}{records.some(r=>r.paper.title===title && r.status==="review") && <Link className="text-amber-800 underline" href={databaseHref(title,"review")}>Review records</Link>}</div>)}</div>}
           {!!records.length && <ul className="grid max-h-72 gap-2 overflow-y-auto sm:grid-cols-2">{records.map(record=><li key={record.id} className="min-w-0 rounded border border-ink-100 bg-ink-50 px-3 py-2 text-xs"><Link href={databaseHref(record.paper.title,record.status)} className="flex flex-wrap justify-between gap-2 hover:underline"><span className="font-mono">{record.id} · {record.status==="official" ? "checked" : "review"}</span><span className="font-semibold text-brand-700">{headline(record)}</span></Link><p className="mt-1 truncate" title={`${record.core.ionicLiquid.cation} ${record.core.ionicLiquid.anion}`}>{record.core.ionicLiquid.cation} · {record.core.ionicLiquid.anion}</p></li>)}</ul>}
-          <div className="panel flex w-full min-w-0 flex-wrap justify-end gap-2">
+          {canDelete ? <div className="panel flex w-full min-w-0 flex-wrap justify-end gap-2">
             {entry.sources.length<=1 ? <DeleteLiteratureButton domain={domain} label={entry.sources[0]?.filename || entry.title} action={entry.sources[0] ? {kind:"source",sourceId:entry.sources[0].id,jobCount:entry.sources[0].jobs,recordCount:entry.sources[0].records.length} : {kind:"records",recordIds:records.map(r=>r.id)}}/>
               : entry.sources.map(s=><DeleteLiteratureButton key={s.id} domain={domain} label={s.filename} action={{kind:"source",sourceId:s.id,jobCount:s.jobs,recordCount:s.records.length}}/>)}
-          </div>
+          </div> : null}
         </div>
       </div>
     </details>

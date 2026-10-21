@@ -107,10 +107,11 @@ retries, time away from the page, and review. Manual time is self-reported. Grou
 submitted results only; the speed ratio is `manual mean time / AI mean time`. These are
 descriptive classroom comparisons with different timing sources, not controlled causal results.
 
-The current instructor entry is open: `/api/teaching/lab/enter` creates a teacher session
-without a password. General application login and `TEACHING_TEACHER_PASSWORD` do not protect
-this entry. Deployments requiring restricted teaching access need a separate access-control
-configuration. The password setting remains used by the retained teaching-session login API.
+The instructor seat belongs to platform administrator accounts: signing in with an
+admin account at `/teaching` (or `/teaching/admin`) opens the teacher dashboard.
+Students join experiments with their own platform accounts (student ID sign-in).
+The former shared `TEACHING_TEACHER_PASSWORD` and the passwordless instructor entry
+are retired.
 
 Teaching tables initialize automatically in `${IONICLINK_DATA_DIR:-<repository>/data}/teaching.db`.
 The teacher creates each experiment; source copies live under `teaching-papers/<sourceId>/`.

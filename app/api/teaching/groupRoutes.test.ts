@@ -15,8 +15,13 @@ import {
 import { GET as groupExportGet } from "./admin/group/export/route";
 import { GET as adminGet } from "./admin/route";
 import { POST as sessionPost } from "./session/route";
+import { createTestAdminSession, createTestAppSession } from "@/lib/auth.test-helpers";
 
 type JsonRecord = Record<string, unknown>;
+
+// Platform sessions: the teaching module sits behind platform accounts now.
+let appStudentCookie = "";
+let appAdminCookie = "";
 
 // --- fixture tribology.db with two official records --------------------------
 
@@ -52,11 +57,13 @@ function request(
   path: string,
   method: string,
   body?: unknown,
-  cookie?: string
+  cookie?: string,
+  appCookie: string | null = appStudentCookie
 ): NextRequest {
   const headers = new Headers();
   if (body !== undefined) headers.set("content-type", "application/json");
-  if (cookie) headers.set("cookie", cookie);
+  const mergedCookie = [appCookie, cookie].filter(Boolean).join("; ");
+  if (mergedCookie) headers.set("cookie", mergedCookie);
   return new NextRequest(`http://localhost${path}`, {
     method,
     headers,
@@ -75,12 +82,12 @@ async function json(response: Response): Promise<JsonRecord> {
 }
 
 async function main(): Promise<void> {
-  const previousTeacherPassword = process.env.TEACHING_TEACHER_PASSWORD;
-  process.env.TEACHING_TEACHER_PASSWORD = "group-route-test-password";
-
+  // App auth is enabled in tests: students and instructors arrive with a platform session.
+  appStudentCookie = (await createTestAppSession()).cookie;
+  appAdminCookie = (await createTestAdminSession()).cookie;
   try {
     // --- auth -----------------------------------------------------------------
-    const noAuth = await groupAdminGet(request("/api/teaching/admin/group?action=list", "GET"));
+    const noAuth = await groupAdminGet(request("/api/teaching/admin/group?action=list", "GET", undefined, undefined, null));
     assert.equal(noAuth.status, 401);
 
     const studentLogin = await sessionPost(
@@ -91,13 +98,10 @@ async function main(): Promise<void> {
     const studentOnGroupAdmin = await groupAdminGet(
       request("/api/teaching/admin/group?action=list", "GET", undefined, studentCookie)
     );
-    assert.equal(studentOnGroupAdmin.status, 403);
+    assert.equal(studentOnGroupAdmin.status, 403, "a teaching student session never gains instructor access");
 
     const teacherLogin = await sessionPost(
-      request("/api/teaching/session", "POST", {
-        role: "teacher",
-        password: "group-route-test-password",
-      })
+      request("/api/teaching/session", "POST", { role: "teacher" }, undefined, appAdminCookie)
     );
     assert.equal(teacherLogin.status, 200);
     const teacherCookie = cookieFrom(teacherLogin);
@@ -351,8 +355,6 @@ async function main(): Promise<void> {
     );
     assert.equal(unknownAction.status, 400);
   } finally {
-    if (previousTeacherPassword === undefined) delete process.env.TEACHING_TEACHER_PASSWORD;
-    else process.env.TEACHING_TEACHER_PASSWORD = previousTeacherPassword;
     closeTeachingDatabaseForTests();
   }
 
