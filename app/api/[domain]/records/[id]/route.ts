@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getOptionalApiSession, isAppAuthEnabled, requireAppApiRole, requireAppApiSession } from "@/lib/auth.server";
 import { deleteRecords, getRecord, updateRecord, type FieldProvenancePatch } from "@/lib/db";
 import { isDomain } from "@/lib/domain";
+import { withUsageAction } from "@/lib/usage";
 import type { ExtractedFields, RecordStatus } from "@/lib/schema";
 
 export const runtime = "nodejs";
@@ -19,7 +20,7 @@ export async function GET(req: NextRequest, { params }: { params: { domain: stri
   return NextResponse.json({ record }, { headers: { "Cache-Control": "no-store" } });
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { domain: string; id: string } }) {
+async function patchHandler(req: NextRequest, { params }: { params: { domain: string; id: string } }) {
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
   const body = (await req.json()) as {
     fields?: ExtractedFields;
@@ -41,10 +42,18 @@ export async function PATCH(req: NextRequest, { params }: { params: { domain: st
   return NextResponse.json({ record: result.record });
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: { domain: string; id: string } }) {
+async function deleteHandler(_req: NextRequest, { params }: { params: { domain: string; id: string } }) {
   const access = await requireAppApiRole(_req, "admin");
   if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
   const n = deleteRecords(params.domain, [decodeURIComponent(params.id)]);
   return NextResponse.json({ deleted: n });
+}
+
+export function PATCH(req: NextRequest, context: { params: { domain: string; id: string } }) {
+  return withUsageAction(req, "更新记录", patchHandler, req, context);
+}
+
+export function DELETE(req: NextRequest, context: { params: { domain: string; id: string } }) {
+  return withUsageAction(req, "删除记录", deleteHandler, req, context);
 }

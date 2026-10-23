@@ -6,6 +6,7 @@ import { adaptDiffusionDataset, DIFFUSION_DATASET_ADAPTER } from "@/lib/datasets
 import { parseTabularFile } from "@/lib/datasets/parse";
 import type { DatasetImportResult } from "@/lib/datasets/types";
 import { isDomain } from "@/lib/domain";
+import { withUsageAction } from "@/lib/usage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,7 +14,7 @@ export const maxDuration = 120;
 
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
 
-export async function POST(req: NextRequest, { params }: { params: { domain: string } }) {
+async function postHandler(req: NextRequest, { params }: { params: { domain: string } }) {
   // Dataset import (preview and commit) is an administrator-only action.
   const access = await requireAppApiRole(req, "admin");
   if (!access.ok) return access.response;
@@ -83,4 +84,8 @@ export async function POST(req: NextRequest, { params }: { params: { domain: str
     const status = /supported dataset formats|rows exceeds|columns exceeds|unrecognized|invalid/i.test(message) ? 422 : 400;
     return NextResponse.json({ error: message }, { status });
   }
+}
+
+export function POST(req: NextRequest, context: { params: { domain: string } }) {
+  return withUsageAction(req, "导入数据集", postHandler, req, context);
 }

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { authClient } from "@/lib/auth-client";
+import { FeedbackDialog } from "@/components/auth/FeedbackDialog";
 import { DEFAULT_DOMAIN, DOMAINS, isDomain, type Domain } from "@/lib/domain";
 
 const DOMAIN_LABELS: Record<Domain, string> = {
@@ -115,6 +116,7 @@ function RailUserMenu({ name, isAdmin, active }: { name: string; isAdmin: boolea
   const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -166,6 +168,14 @@ function RailUserMenu({ name, isAdmin, active }: { name: string; isAdmin: boolea
           <button
             type="button"
             role="menuitem"
+            onClick={() => { setOpen(false); setFeedbackOpen(true); }}
+            className="block w-full rounded-md px-2.5 py-2 text-left text-sm text-[#dce7ed] transition-colors hover:bg-[#353e45] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300"
+          >
+            Submit feedback
+          </button>
+          <button
+            type="button"
+            role="menuitem"
             disabled={busy}
             onClick={() => void signOut()}
             className="block w-full rounded-md px-2.5 py-2 text-left text-sm text-[#dce7ed] transition-colors hover:bg-[#353e45] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300 disabled:opacity-50"
@@ -185,6 +195,7 @@ function RailUserMenu({ name, isAdmin, active }: { name: string; isAdmin: boolea
         <UserIcon />
       </button>
       <span className="max-w-[130px] truncate text-[11px] leading-4 text-[#dce7ed]" title={name}>{name}</span>
+      <FeedbackDialog open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
     </div>
   );
 }

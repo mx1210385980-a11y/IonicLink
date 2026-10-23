@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, requireAppApiRole } from "@/lib/auth.server";
+import { withUsageAction } from "@/lib/usage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,7 +54,7 @@ async function createAdminAccount(account: string, password: string, name?: stri
   } as unknown as Parameters<typeof auth.api.createUser>[0]);
 }
 
-export async function POST(request: NextRequest) {
+async function postHandler(request: NextRequest) {
   const access = await requireAppApiRole(request, "admin");
   if (!access.ok) return access.response;
 
@@ -117,4 +118,8 @@ export async function POST(request: NextRequest) {
   }
 
   return jsonError(400, "Unknown mode.");
+}
+
+export function POST(request: NextRequest) {
+  return withUsageAction(request, "创建账号", postHandler, request);
 }

@@ -3,11 +3,12 @@ import { requireAppApiSession } from "@/lib/auth.server";
 import { getRecord } from "@/lib/db";
 import { isDomain } from "@/lib/domain";
 import { recordsToCsv } from "@/lib/csv";
+import { withUsageAction } from "@/lib/usage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function POST(req: NextRequest, { params }: { params: { domain: string } }) {
+async function postHandler(req: NextRequest, { params }: { params: { domain: string } }) {
   const access = await requireAppApiSession(req);
   if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
@@ -41,4 +42,8 @@ export async function POST(req: NextRequest, { params }: { params: { domain: str
       "Cache-Control": "no-store",
     },
   });
+}
+
+export function POST(req: NextRequest, context: { params: { domain: string } }) {
+  return withUsageAction(req, "导出数据", postHandler, req, context);
 }

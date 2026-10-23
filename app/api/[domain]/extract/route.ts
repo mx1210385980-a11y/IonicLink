@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAppApiSession } from "@/lib/auth.server";
+import { withUsageAction } from "@/lib/usage";
 import {
   extractRecords,
   isLiveExtractionEnabled,
@@ -17,7 +18,7 @@ export const maxDuration = 300;
  * Accepts either a PDF upload (multipart, field "file") or raw text
  * (JSON { text }). Returns extracted candidate records WITHOUT saving.
  */
-export async function POST(req: NextRequest, { params }: { params: { domain: string } }) {
+async function postHandler(req: NextRequest, { params }: { params: { domain: string } }) {
   const access = await requireAppApiSession(req);
   if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
@@ -77,4 +78,8 @@ export async function GET(_req: NextRequest, { params }: { params: { domain: str
   if (!access.ok) return access.response;
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
   return NextResponse.json({ live: isLiveExtractionEnabled() });
+}
+
+export function POST(req: NextRequest, context: { params: { domain: string } }) {
+  return withUsageAction(req, "提取数据", postHandler, req, context);
 }

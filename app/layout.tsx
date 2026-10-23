@@ -3,6 +3,7 @@ import "./globals.css";
 import { TopNav } from "@/components/TopNav";
 import { SourceViewer } from "@/components/SourceViewer";
 import { WorkspaceNavigationRail } from "@/components/WorkspaceNavigationRail";
+import { UsageTracker } from "@/components/UsageTracker";
 import { getCurrentAppSession, isAppAuthEnabled, sessionHasAdminRole } from "@/lib/auth.server";
 
 export const metadata: Metadata = {
@@ -28,6 +29,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <main className="mx-auto w-full max-w-none px-2 pb-6 pt-3 sm:px-4 lg:px-0 lg:pb-0 lg:pt-0">{children}</main>
         </div>
         <SourceViewer />
+        <UsageTracker />
       </body>
     </html>
   );

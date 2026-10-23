@@ -5,6 +5,7 @@ import { getDatabasePayload } from "@/lib/database.server";
 import { isDomain } from "@/lib/domain";
 import type { RecordDraft } from "@/lib/schema";
 import { parseExactStructureSearch, StructureSearchInputError } from "@/lib/structureSearch.server";
+import { withUsageAction } from "@/lib/usage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,7 +40,7 @@ export async function GET(req: NextRequest, { params }: { params: { domain: stri
   return NextResponse.json(getDatabasePayload(domain, opts));
 }
 
-export async function POST(req: NextRequest, { params }: { params: { domain: string } }) {
+async function postHandler(req: NextRequest, { params }: { params: { domain: string } }) {
   if (!isDomain(params.domain)) return NextResponse.json({ error: "Unknown domain" }, { status: 404 });
   const body = (await req.json()) as { records: RecordDraft[]; status?: "review" | "official" };
   if (!Array.isArray(body.records)) {
@@ -61,4 +62,8 @@ export async function POST(req: NextRequest, { params }: { params: { domain: str
     }
     throw error;
   }
+}
+
+export function POST(req: NextRequest, context: { params: { domain: string } }) {
+  return withUsageAction(req, "创建记录", postHandler, req, context);
 }
