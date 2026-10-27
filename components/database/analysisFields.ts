@@ -2,7 +2,7 @@ import type { Domain } from "@/lib/domain";
 import { standardizeIonLabel, type IonKind } from "@/lib/ionStructures";
 import { formatCof } from "@/lib/schema";
 import { rawLabel, stdLabel, type Quantity } from "@/lib/units";
-import type { AnalysisField, AnalysisRecord, AnalysisSort, PlotConfig } from "./analysisTypes";
+import type { AnalysisField, AnalysisRecord, AnalysisSort } from "./analysisTypes";
 
 const finite = (value: unknown): number | null => typeof value === "number" && Number.isFinite(value) ? value : null;
 const cleanText = (value: unknown): string | null => typeof value === "string" && value.trim() ? value.trim() : null;
@@ -130,10 +130,6 @@ export function getAnalysisFields(domain: Domain): AnalysisField[] { return fiel
 export function defaultColumns(domain: Domain): string[] {
   const context = domain === "tribology" ? ["substrate", "scale", "load", "velocity"] : domain === "conductivity" ? ["surface", "viscosity"] : ["species", "systemName", "poreSize"];
   return ["id", "cation", "anion", "metric", ...context, "temperature", "method", "paper", "year"];
-}
-
-export function defaultPlotConfig(domain: Domain): PlotConfig {
-  return { x: domain === "tribology" ? "load" : "temperature", y: "metric", logX: domain === "tribology", logY: domain === "diffusion", groupBy: "method" };
 }
 
 /** Missing/non-finite values stay last in both directions; ties retain input order. */

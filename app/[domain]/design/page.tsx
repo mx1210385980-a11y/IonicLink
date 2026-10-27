@@ -5,5 +5,5 @@ export const dynamic = "force-dynamic";
 
 export default function DesignPage({ params }: { params: { domain: string } }) {
   if (!isDomain(params.domain) || params.domain !== "tribology") notFound();
-  redirect("/teaching#prediction");
+  redirect("/teaching/prediction");
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Domain } from "@/lib/domain";
 import type { RecordStatus } from "@/lib/schema";
@@ -31,10 +30,6 @@ import {
 } from "@/lib/structureSearch";
 
 type AnyRecord = any;
-
-const DatabaseScatterPlot = dynamic(() => import("@/components/database/DatabaseScatterPlot").then((module) => module.DatabaseScatterPlot), {
-  loading: () => <div role="status" className="p-8 text-sm text-ink-500">Loading plot…</div>,
-});
 
 export const SEARCH_DEBOUNCE_MS = 300;
 export const VISIBLE_BATCH_SIZE = 50;
@@ -180,7 +175,6 @@ export function DatabaseView({
   const [comparisonRecords, setComparisonRecords] = useState<AnalysisRecord[]>([]);
   const [detailRecord, setDetailRecord] = useState<AnalysisRecord | null>(null);
   const compareIds = useMemo(() => new Set(comparisonRecords.map((record) => record.id)), [comparisonRecords]);
-  const plotIds = useMemo(() => new Set(analysis.plotIds ?? []), [analysis.plotIds]);
 
   const [status, setStatus] = useState<RecordStatus>(initialData?.status ?? "official");
   const [facet, setFacet] = useState<string>("all");
@@ -312,7 +306,6 @@ export function DatabaseView({
     setSelected((previous) => previous.size === 0 ? previous : new Set());
     setEditingId(null);
     setDetailRecord(null);
-    setAnalysis((previous) => previous.plotIds === null ? previous : { ...previous, plotIds: null });
   }, []);
 
   const changeStatus = useCallback((next: RecordStatus) => {
@@ -498,9 +491,8 @@ export function DatabaseView({
   const analysisRecords = useMemo(() => status === "official" ? applyAnalysisFilters(propertyFiltered, analysisFields, analysis) : propertyFiltered, [propertyFiltered, analysisFields, analysis, status]);
   const visible = useMemo(() => {
     if (status === "review") return propertyFiltered;
-    const selectedRecords = analysis.plotIds === null ? analysisRecords : analysisRecords.filter((record) => plotIds.has(record.id));
-    return sortAnalysisRecords(selectedRecords, analysisFields, analysis.sort);
-  }, [status, propertyFiltered, analysisRecords, analysis.plotIds, analysis.sort, analysisFields, plotIds]);
+    return sortAnalysisRecords(analysisRecords, analysisFields, analysis.sort);
+  }, [status, propertyFiltered, analysisRecords, analysis.sort, analysisFields]);
   const anyFilters = variableFiltered || paper !== "all" || facet !== "all" || Boolean(search.trim()) || Boolean(structureSearch);
   const clearAllFilters = () => {
     invalidateQueryInteractions();
@@ -508,7 +500,7 @@ export function DatabaseView({
     searchTimeoutRef.current = null;
     setSearch(""); setCommittedSearch(""); setPaper("all"); setFacet("all");
     setStructureSearch(null); setFilters(EMPTY_FILTERS); setVisibleLimit(VISIBLE_BATCH_SIZE);
-    setAnalysis((previous) => ({ ...previous, constraints: [], evidence: "all", method: "", context: "", plotIds: null }));
+    setAnalysis((previous) => ({ ...previous, constraints: [], evidence: "all", method: "", context: "" }));
   };
   const filtered = variableFiltered;
   const displayedRecords = useMemo(
@@ -538,7 +530,6 @@ export function DatabaseView({
   const changeFilters = useCallback((next: RecordFilters) => {
     setFilters(next);
     setVisibleLimit(VISIBLE_BATCH_SIZE);
-    setAnalysis((previous) => ({ ...previous, plotIds: null }));
   }, []);
 
   const changeAnalysis = useCallback((next: AnalysisState) => {
@@ -829,21 +820,11 @@ export function DatabaseView({
 
       {status === "official" && !loading && <div className="space-y-3 border-b border-ink-100 p-4">
         <DatabaseQuality domain={domain} records={qualityRecords} fields={analysisFields} evidenceFilter={analysis.evidence}
-          onEvidenceFilterChange={(evidence) => changeAnalysis({ ...analysis, evidence, plotIds: null })} />
+          onEvidenceFilterChange={(evidence) => changeAnalysis({ ...analysis, evidence })} />
         {comparisonRecords.length > 0 && <RecordComparison domain={domain} records={comparisonRecords} fields={analysisFields} units={analysis.units}
           onRemove={(id) => setComparisonRecords((previous) => previous.filter((record) => record.id !== id))}
           onClear={() => setComparisonRecords([])} onOpenRecord={openDetail} />}
       </div>}
-
-      {status === "official" && !loading && analysis.view === "plot" && <div className="border-b border-ink-200 p-4">
-        <DatabaseScatterPlot records={analysisRecords} fields={analysisFields} config={analysis.plot}
-          onConfigChange={(plot) => changeAnalysis({ ...analysis, plot, plotIds: null })}
-          selectedIds={plotIds} onSelectRecords={(ids) => changeAnalysis({ ...analysis, plotIds: ids })}
-          onOpenRecord={openDetail} onToggleCompare={toggleCompare} compareIds={compareIds} disabled={!queryReady} />
-      </div>}
-      {status === "official" && !loading && analysis.plotIds !== null && <p role="status" className="border-b border-ink-200 px-4 py-3 text-sm text-brand-800">Plot selection: {visible.length} matching records. The table and exports use this selection.
-          <button type="button" onClick={() => changeAnalysis({ ...analysis, plotIds: null })} className="ml-3 underline">Clear plot selection</button>
-      </p>}
 
       {/* ── records ── */}
       <div className={status === "review" && !loading && visible.length > 0 ? "" : "space-y-5 p-4"}>

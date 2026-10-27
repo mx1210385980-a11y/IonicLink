@@ -12,7 +12,7 @@ const html = renderToStaticMarkup(createElement(HomePageContent));
 assert.match(html, /Data overview/);
 assert.equal((html.match(/<h1 /g) ?? []).length, 1);
 assert.match(html, /aria-label="All workspace totals"/);
-assert.match(html, /href="\/teaching#prediction"/);
+assert.match(html, /href="\/teaching\/prediction"/);
 assert.match(html, /Prediction of μ/);
 
 for (const [domain, label] of [

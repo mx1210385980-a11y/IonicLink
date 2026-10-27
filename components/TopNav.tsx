@@ -109,8 +109,8 @@ export function TopNav({ showMonitor = true }: { showMonitor?: boolean }) {
             </nav>
           )}
           {onTeachingPage && <nav aria-label="AI experiment sections" className="flex min-w-0 flex-1 gap-1 overflow-x-auto">
-            <Link href="/teaching#data-extraction" className="shrink-0 rounded-md px-2 py-2 text-xs font-medium text-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">Data extraction</Link>
-            <Link href="/teaching#prediction" className="shrink-0 rounded-md px-2 py-2 text-xs font-medium text-indigo-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Prediction of μ</Link>
+            <Link href="/teaching/extraction" className="shrink-0 rounded-md px-2 py-2 text-xs font-medium text-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">Experiment Ⅰ</Link>
+            <Link href="/teaching/prediction" className="shrink-0 rounded-md px-2 py-2 text-xs font-medium text-indigo-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500">Experiment Ⅱ</Link>
           </nav>}
           {onMonitorPage && <nav aria-label="Usage monitor sections" className="flex min-w-0 flex-1 gap-1 overflow-x-auto">
             <Link href="/monitor#overview" className="shrink-0 rounded-md px-2 py-2 text-xs font-medium text-brand-800 focus-visible:ring-2 focus-visible:ring-brand-500">使用概览</Link>

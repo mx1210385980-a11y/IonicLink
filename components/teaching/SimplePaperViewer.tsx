@@ -3,16 +3,16 @@ import Image from "next/image";
 import { useEffect, useState } from "react";
 import { requestJson } from "@/components/request";
 
-export function SimplePaperViewer() {
+export function SimplePaperViewer({ baseUrl = "/api/teaching/lab/paper" }: { baseUrl?: string }) {
   const [pages, setPages] = useState<Array<{ page: number; text: string }>>([]);
   const [page, setPage] = useState(1); const [text, setText] = useState(false); const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   useEffect(() => {
     let active = true;
-    void requestJson<{ pages: Array<{ page: number; text: string }> }>("/api/teaching/lab/paper?format=text", undefined, "Could not load source")
+    void requestJson<{ pages: Array<{ page: number; text: string }> }>(`${baseUrl}?format=text`, undefined, "Could not load source")
       .then((value) => { if (active) setPages(value.pages); }).catch((cause) => { if (active) setError(cause.message); });
     return () => { active = false; };
-  }, []);
+  }, [baseUrl]);
   function turn(next: number) { setPage(next); setLoading(true); setError(""); }
   return <section aria-label="Teaching paper source" className="min-w-0 overflow-hidden rounded-lg border border-ink-200 bg-white">
     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ink-200 px-3 py-2 text-xs">
@@ -24,7 +24,7 @@ export function SimplePaperViewer() {
       {error && <p role="alert" className="p-3 text-xs text-amber-700">{error}, Use Open PDF above to read the source.</p>}
       {text ? <div className="whitespace-pre-wrap break-words bg-white p-4 text-sm leading-7">{pages.find((item) => item.page === page)?.text || "Loading source text…"}</div>
         : <>{loading && <p className="p-3 text-xs text-ink-500">Loading page {page} …</p>}
-          <Image key={page} src={`/api/teaching/lab/paper?format=page&page=${page}`} alt={`PaperNo. ${page} page`} width={900} height={1200} unoptimized
+          <Image key={page} src={`${baseUrl}?format=page&page=${page}`} alt={`PaperNo. ${page} page`} width={900} height={1200} unoptimized
             className="h-auto w-full bg-white" onLoad={() => setLoading(false)} onError={() => { setLoading(false); setError("Could not load page image"); }} /></>}
     </div>
   </section>;

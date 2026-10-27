@@ -2,8 +2,8 @@ import type { Domain } from "@/lib/domain";
 import type { RecordStatus } from "@/lib/schema";
 import { isStructureSearchTarget, structureSearchInputIssue, type StructureSearchValue } from "@/lib/structureSearch";
 import { EMPTY_FILTERS, type RecordFilters } from "@/components/recordFilters";
-import { defaultColumns, defaultPlotConfig, getAnalysisFields } from "./analysisFields";
-import type { AnalysisConstraint, AnalysisDensity, AnalysisField, AnalysisRecord, AnalysisSort, AnalysisView, EvidenceFilter, PlotConfig } from "./analysisTypes";
+import { defaultColumns, getAnalysisFields } from "./analysisFields";
+import type { AnalysisConstraint, AnalysisDensity, AnalysisField, AnalysisRecord, AnalysisSort, AnalysisView, EvidenceFilter } from "./analysisTypes";
 import { getRecordEvidence } from "./comparison";
 
 export interface AnalysisState {
@@ -13,12 +13,10 @@ export interface AnalysisState {
   units: "raw" | "std";
   columns: string[];
   sort: AnalysisSort;
-  plot: PlotConfig;
   constraints: AnalysisConstraint[];
   evidence: EvidenceFilter;
   method: string;
   context: string;
-  plotIds: string[] | null;
   groupByPaper: boolean;
   conditionsOverview: boolean;
 }
@@ -27,8 +25,8 @@ export function defaultAnalysisState(domain: Domain): AnalysisState {
   return {
     version: 1, view: "table", density: "compact", units: "std",
     columns: defaultColumns(domain), sort: { key: "id", direction: "asc" },
-    plot: defaultPlotConfig(domain), constraints: [], evidence: "all", method: "", context: "",
-    plotIds: null, groupByPaper: true, conditionsOverview: false,
+    constraints: [], evidence: "all", method: "", context: "",
+    groupByPaper: true, conditionsOverview: false,
   };
 }
 
@@ -51,22 +49,15 @@ export function parseAnalysisState(value: unknown, domain: Domain): AnalysisStat
   }) : [];
   return {
     ...defaults,
-    view: ["cards", "table", "plot"].includes(input.view) ? input.view : defaults.view,
+    view: ["cards", "table"].includes(input.view) ? input.view : defaults.view,
     density: input.density === "comfortable" ? "comfortable" : "compact",
     units: input.units === "raw" ? "raw" : "std",
     columns: columns.length ? columns : defaults.columns,
     sort: { key: keys.has(input.sort?.key) ? input.sort.key : "id", direction: input.sort?.direction === "desc" ? "desc" : "asc" },
-    plot: {
-      x: numeric.has(input.plot?.x) ? input.plot.x : defaults.plot.x,
-      y: numeric.has(input.plot?.y) ? input.plot.y : defaults.plot.y,
-      logX: input.plot?.logX === true, logY: input.plot?.logY === true,
-      groupBy: ["method", "paper", "cation"].includes(input.plot?.groupBy) ? input.plot.groupBy : "method",
-    },
     constraints,
     evidence: ["direct", "inferred", "assumed", "unassessed"].includes(input.evidence) ? input.evidence : "all",
     method: typeof input.method === "string" ? input.method.slice(0, 512) : "",
     context: typeof input.context === "string" ? input.context.slice(0, 512) : "",
-    plotIds: Array.isArray(input.plotIds) ? strings(input.plotIds, 10000) : null,
     groupByPaper: input.groupByPaper !== false,
     conditionsOverview: input.conditionsOverview === true,
   };
@@ -149,7 +140,7 @@ export function applyAnalysisFilters(records: AnalysisRecord[], fields: Analysis
 }
 
 export function hasAnalysisFilters(state: AnalysisState): boolean {
-  return state.evidence !== "all" || Boolean(state.method || state.context.trim()) || state.plotIds !== null || state.constraints.some((filter) => filter.min != null || filter.max != null || filter.missing !== "any");
+  return state.evidence !== "all" || Boolean(state.method || state.context.trim()) || state.constraints.some((filter) => filter.min != null || filter.max != null || filter.missing !== "any");
 }
 
 export function downloadAnalysisSnapshot(domain: Domain, records: AnalysisRecord[], location: DatabaseLocation): void {

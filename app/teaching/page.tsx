@@ -1,11 +1,9 @@
-import { TeachingExperimentWorkspace } from "@/components/teaching/TeachingExperimentWorkspace";
-import { requireAppPageSession } from "@/lib/auth.server";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "AI experiment — IonicLink" };
 
-export default async function TeachingPage() {
-  // The teaching module is tied to platform accounts: visitors must sign in first.
-  await requireAppPageSession("/teaching");
-  return <TeachingExperimentWorkspace />;
+export default function TeachingPage() {
+  // The two experiments live on their own subpages; land on Experiment Ⅰ.
+  redirect("/teaching/extraction");
 }

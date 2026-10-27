@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { parseQuantity } from "@/lib/units";
 import type { Domain } from "@/lib/domain";
-import { defaultColumns, defaultPlotConfig, getAnalysisFields, sortAnalysisRecords } from "./analysisFields";
+import { defaultColumns, getAnalysisFields, sortAnalysisRecords } from "./analysisFields";
 import type { AnalysisRecord } from "./analysisTypes";
 
 const record = (id: string, cof: number | null, overrides: Partial<AnalysisRecord> = {}): AnalysisRecord => ({
@@ -73,9 +73,6 @@ for (const domain of ["tribology", "conductivity", "diffusion"] as const) {
   const fields = getAnalysisFields(domain);
   assert.equal(new Set(fields.map((field) => field.key)).size, fields.length);
   for (const column of defaultColumns(domain)) assert.ok(fields.some((field) => field.key === column));
-  const plot = defaultPlotConfig(domain);
-  assert.ok(fields.find((field) => field.key === plot.x)?.numeric);
-  assert.ok(fields.find((field) => field.key === plot.y)?.numeric);
   assert.equal(find("metric", domain).getValue(record("empty", null, { core: {} })), null);
 }
 console.log("Analysis field sorting, units, aliases and three-domain tests passed");

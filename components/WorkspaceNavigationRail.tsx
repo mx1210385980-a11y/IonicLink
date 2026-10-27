@@ -19,11 +19,6 @@ const DOMAIN_MARKS: Record<Domain, string> = {
   diffusion: "D",
 };
 
-const SECTION_LINKS = [
-  { segment: "extract", label: "Extract", icon: <ExtractIcon /> },
-  { segment: "database", label: "Database", icon: <DatabaseIcon /> },
-] as const;
-
 export function WorkspaceNavigationRail({ authEnabled = false, viewerIsAdmin = false, viewerName = null }: { authEnabled?: boolean; viewerIsAdmin?: boolean; viewerName?: string | null }) {
   const pathname = usePathname();
   const parts = pathname.split("/");
@@ -70,32 +65,46 @@ export function WorkspaceNavigationRail({ authEnabled = false, viewerIsAdmin = f
           const href = onDomainPage && section
             ? section === "design" && item !== "tribology" ? `/${item}/database` : `/${item}/${section}`
             : `/${item}/database`;
-          return <RailLink key={item} href={href} label={`${DOMAIN_LABELS[item]} workspace`} displayLabel={DOMAIN_LABELS[item]} active={onDomainPage && item === domain}>
-            <span className="text-[27px] font-normal italic leading-none" aria-hidden>{DOMAIN_MARKS[item]}</span>
-          </RailLink>;
+          const active = onDomainPage && item === domain;
+          return (
+            <div key={item}>
+              <RailLink href={href} label={`${DOMAIN_LABELS[item]} workspace`} displayLabel={DOMAIN_LABELS[item]} active={active}>
+                <span className="text-[27px] font-normal italic leading-none" aria-hidden>{DOMAIN_MARKS[item]}</span>
+              </RailLink>
+              {active ? (
+                <div data-testid="workspace-children" className="mb-1 ml-[25px] mt-1 flex flex-col gap-0.5 border-l border-[#3a4249] pl-2.5">
+                  <RailLink compact href={`/${item}/extract`} label="Extract" active={section === "extract"} />
+                  <RailLink compact href={`/${item}/database`} label="Database" active={section === "database"} />
+                  <RailLink compact href={`/${item}/library`} label="Documents" active={section === "library"} />
+                </div>
+              ) : null}
+            </div>
+          );
         })}
         <RailLink href="/afm" label="AFM workspace" displayLabel="AFM" active={onAfmPage}>
           <span className="text-[22px] font-normal italic leading-none" aria-hidden>F</span>
         </RailLink>
       </nav>
       <div className="mx-3 mb-5 mt-[22px] shrink-0 border-t border-[#566169]" />
-      <nav aria-label={onMonitorPage ? "Usage monitor sections" : onTeachingPage ? "AI experiment sections" : `${DOMAIN_LABELS[domain]} sections`} data-testid="section-dock" className="flex shrink-0 flex-col gap-2.5">
-        {onMonitorPage ? <>
-          <RailLink href="/monitor#overview" label="使用概览"><MonitorIcon /></RailLink>
-          <RailLink href="/monitor#feedback" label="用户反馈"><FeedbackIcon /></RailLink>
-        </> : onTeachingPage ? <>
-          <RailLink href="/teaching#data-extraction" label="Data extraction"><ExtractIcon /></RailLink>
-          <RailLink href="/teaching#prediction" label="Prediction of μ"><ModelIcon /></RailLink>
-        </> : SECTION_LINKS.map((item) => {
-          const href = `/${domain}/${item.segment}`;
-          return <RailLink key={item.segment} href={href} label={item.label} active={onDomainPage && section === item.segment}>{item.icon}</RailLink>;
-        })}
-      </nav>
-      <div className="mx-3 mb-5 mt-6 shrink-0 border-t border-[#566169]" />
-      <div data-testid="utility-dock" className="flex shrink-0 flex-col gap-[17px]">
-        <RailLink href={`/${domain}/library`} label="Documents" active={onDomainPage && section === "library"}><LibraryIcon /></RailLink>
-        <RailLink href="/teaching" label="AI experiment" active={onTeachingPage}><TeachingIcon /></RailLink>
-        {showMonitor ? <RailLink href="/monitor" label="Usage monitor" active={onMonitorPage}><MonitorIcon /></RailLink> : null}
+      <div data-testid="utility-dock" className="flex shrink-0 flex-col gap-2.5">
+        <div>
+          <RailLink href="/teaching" label="AI experiment" active={onTeachingPage}><TeachingIcon /></RailLink>
+          {onTeachingPage ? (
+            <div data-testid="teaching-children" className="mb-1 ml-[25px] mt-1 flex flex-col gap-0.5 border-l border-[#3a4249] pl-2.5">
+              <RailLink compact href="/teaching/extraction" label="Experiment Ⅰ- Data Extraction" displayLabel="Experiment Ⅰ" active={pathname.startsWith("/teaching/extraction")} />
+              <RailLink compact href="/teaching/prediction" label="Experiment Ⅱ- Prediction of μ" displayLabel="Experiment Ⅱ" active={pathname.startsWith("/teaching/prediction")} />
+            </div>
+          ) : null}
+        </div>
+        <div>
+          {showMonitor ? <RailLink href="/monitor" label="Usage monitor" active={onMonitorPage}><MonitorIcon /></RailLink> : null}
+          {showMonitor && onMonitorPage ? (
+            <div data-testid="monitor-children" className="mb-1 ml-[25px] mt-1 flex flex-col gap-0.5 border-l border-[#3a4249] pl-2.5">
+              <RailLink compact href="/monitor#overview" label="使用概览" />
+              <RailLink compact href="/monitor#feedback" label="用户反馈" />
+            </div>
+          ) : null}
+        </div>
         {effectiveIsAdmin ? <RailLink href="/admin/users" label="Account management" displayLabel="Accounts" active={pathname.startsWith("/admin")}><UsersIcon /></RailLink> : null}
       </div>
       {authEnabled ? (
@@ -200,11 +209,11 @@ function RailUserMenu({ name, isAdmin, active }: { name: string; isAdmin: boolea
   );
 }
 
-const RAIL_ITEM = "flex h-[46px] w-full shrink-0 items-center gap-3 rounded-md px-3.5 text-sm font-normal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300 focus-visible:ring-inset";
+const RAIL_ITEM = "flex w-full shrink-0 items-center gap-3 rounded-md px-3.5 text-sm font-normal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-300 focus-visible:ring-inset";
 
-function RailLink({ href, label, displayLabel, active = false, truncate = false, children }: { href: string; label: string; displayLabel?: string; active?: boolean; truncate?: boolean; children: ReactNode }) {
-  return <Link href={href} aria-label={label} aria-current={active ? "page" : undefined} title={truncate ? displayLabel ?? label : undefined} className={`${RAIL_ITEM} ${active ? "bg-[#3c454c] text-white" : "text-[#dce7ed] hover:bg-[#353e45] hover:text-white"}`}>
-    <span className="grid h-6 w-6 shrink-0 place-items-center" aria-hidden>{children}</span>
+function RailLink({ href, label, displayLabel, active = false, truncate = false, compact = false, children }: { href: string; label: string; displayLabel?: string; active?: boolean; truncate?: boolean; compact?: boolean; children?: ReactNode }) {
+  return <Link href={href} aria-label={label} aria-current={active ? "page" : undefined} title={truncate ? displayLabel ?? label : undefined} className={`${RAIL_ITEM} ${compact ? "h-8 px-2.5 text-[13px]" : "h-[46px]"} ${active ? "bg-[#3c454c] text-white" : compact ? "text-[#b8c6cf] hover:bg-[#353e45] hover:text-white" : "text-[#dce7ed] hover:bg-[#353e45] hover:text-white"}`}>
+    {children ? <span className="grid h-6 w-6 shrink-0 place-items-center" aria-hidden>{children}</span> : null}
     <span className={truncate ? "min-w-0 truncate" : "whitespace-nowrap"}>{displayLabel ?? label}</span>
   </Link>;
 }

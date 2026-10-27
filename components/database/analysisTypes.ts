@@ -17,15 +17,8 @@ export interface AnalysisField {
 }
 
 export type AnalysisSort = { key: string; direction: "asc" | "desc" };
-export type AnalysisView = "cards" | "table" | "plot";
+export type AnalysisView = "cards" | "table";
 export type AnalysisDensity = "compact" | "comfortable";
-export type PlotConfig = {
-  x: string;
-  y: string;
-  logX: boolean;
-  logY: boolean;
-  groupBy: "method" | "paper" | "cation";
-};
 
 export type AnalysisConstraint = {
   field: string;

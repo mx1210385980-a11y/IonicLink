@@ -30,8 +30,8 @@ export function AnalysisToolbar({ domain, state, onChange, viewUrl, onRestore, o
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex flex-wrap items-center gap-3">
         <div role="group" aria-label="Database view" className="inline-flex rounded-md border border-ink-300 p-0.5">
-          {(["table", "plot", "cards"] as const).map((view) => <button key={view} type="button" aria-pressed={state.view === view} onClick={() => onChange({ ...state, view })} className={`min-h-9 rounded px-4 text-sm font-semibold ${state.view === view ? "bg-brand-700 text-white" : "text-ink-600 hover:bg-ink-50"}`}>
-            {view === "table" ? "Table" : view === "plot" ? "Plot" : "Cards"}
+          {(["table", "cards"] as const).map((view) => <button key={view} type="button" aria-pressed={state.view === view} onClick={() => onChange({ ...state, view })} className={`min-h-9 rounded px-4 text-sm font-semibold ${state.view === view ? "bg-brand-700 text-white" : "text-ink-600 hover:bg-ink-50"}`}>
+            {view === "table" ? "Table" : "Cards"}
           </button>)}
         </div>
         <label className="flex items-center gap-2 text-sm text-ink-600">Units

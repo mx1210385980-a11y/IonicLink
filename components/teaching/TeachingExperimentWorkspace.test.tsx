@@ -1,20 +1,24 @@
 import assert from "node:assert/strict";
 import React, { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { TeachingExperimentWorkspace } from "./TeachingExperimentWorkspace";
+import { TeachingExtractionExperiment, TeachingPredictionExperiment } from "./TeachingExperimentWorkspace";
 
 (globalThis as typeof globalThis & { React: typeof React }).React = React;
-const html = renderToStaticMarkup(createElement(TeachingExperimentWorkspace));
-assert.equal((html.match(/<h1/g) ?? []).length, 1);
-assert.match(html, /id="ai-experiment-title"[^>]*>AI experiment</);
-assert.match(html, /id="data-extraction-title"[^>]*>Data extraction</);
-assert.match(html, /id="prediction-title"[^>]*>Prediction of μ</);
-assert.ok(html.indexOf('id="data-extraction"') < html.indexOf('id="prediction"'));
-for (const group of [1, 2, 3, 4]) assert.match(html, new RegExp(`Group ${group}`));
-assert.match(html, /Round 1/);
-assert.match(html, /Round 2/);
-assert.match(html, /True vs Predicted/);
-assert.match(html, /Literature validation/);
-assert.match(html, /type="checkbox"/);
-assert.match(html, /href="\/teaching\/admin"/);
-console.log("AI experiment combines extraction groups and interactive prediction");
+const extractionHtml = renderToStaticMarkup(createElement(TeachingExtractionExperiment));
+const teacherHtml = renderToStaticMarkup(createElement(TeachingExtractionExperiment, { isAdmin: true }));
+const predictionHtml = renderToStaticMarkup(createElement(TeachingPredictionExperiment));
+for (const html of [extractionHtml, predictionHtml]) {
+  assert.equal((html.match(/<h1/g) ?? []).length, 1);
+  assert.match(html, /id="ai-experiment-title"[^>]*>AI experiment</);
+}
+assert.match(extractionHtml, /id="data-extraction-title"[^>]*>Experiment Ⅰ- Data Extraction</);
+assert.match(predictionHtml, /id="prediction-title"[^>]*>Experiment Ⅱ- Prediction of μ</);
+assert.ok(!extractionHtml.includes('id="prediction"'), "Experiment Ⅰ no longer embeds the prediction panel");
+assert.ok(!predictionHtml.includes('id="data-extraction"'), "Experiment Ⅱ no longer embeds the extraction panel");
+assert.match(extractionHtml, /data-testid="live-student"/, "students get the join-and-extract live workspace");
+assert.match(teacherHtml, /data-testid="live-teacher"/, "administrators get the experiment console");
+assert.match(teacherHtml, /开展实验/, "teachers can open a new experiment session");
+assert.match(predictionHtml, /True vs Predicted/);
+assert.match(predictionHtml, /Literature validation/);
+assert.match(predictionHtml, /type="checkbox"/);
+console.log("AI experiment splits extraction and prediction into two full-width subpages");

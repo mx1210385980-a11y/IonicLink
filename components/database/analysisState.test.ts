@@ -19,11 +19,10 @@ const complete: DatabaseLocation = {
     loadMinN: 1e-9, loadMaxN: 5e-8, tempMinK: 293.15, tempMaxK: 320,
   },
   analysis: {
-    ...defaults, view: "plot", density: "comfortable", units: "raw", columns: ["id", "cation", "metric", "load", "temperature"],
+    ...defaults, view: "cards", density: "comfortable", units: "raw", columns: ["id", "cation", "metric", "load", "temperature"],
     sort: { key: "metric", direction: "desc" },
-    plot: { x: "load", y: "metric", logX: true, logY: false, groupBy: "paper" },
     constraints: [{ field: "metric", min: 0, max: 0.12, missing: "present" }, { field: "velocity", min: null, max: 1e-5, missing: "any" }],
-    evidence: "direct", method: "AFM", context: "100 ppm", plotIds: ["paper-1/point-2", "paper-2/point-3"],
+    evidence: "direct", method: "AFM", context: "100 ppm",
     groupByPaper: false, conditionsOverview: true,
   },
 };
@@ -49,20 +48,16 @@ assert.equal(readDatabaseLocation("?structureSmiles=CC&structureTarget=unknown",
 const sanitized = parseAnalysisState({
   version: 1, view: "spreadsheet", density: "giant", units: "imperial", evidence: "guessed",
   columns: ["id", "metric", "DROP TABLE", "metric", 7], sort: { key: "bad", direction: "sideways" },
-  plot: { x: "cation", y: "unknown", groupBy: "scale" },
   constraints: [{ field: "cation", min: 3 }, { field: "metric", min: NaN, max: Infinity, missing: "other" }, { field: "unknown", min: 1 }],
-  plotIds: ["a", "a", 4], method: 12, context: [],
+  method: 12, context: [],
 }, "tribology");
 assert.deepEqual(sanitized.columns, ["id", "metric"]);
 assert.deepEqual(sanitized.sort, { key: "id", direction: "asc" });
-assert.equal(sanitized.plot.x, defaults.plot.x);
-assert.equal(sanitized.plot.y, defaults.plot.y);
-assert.equal(sanitized.plot.groupBy, "method");
 assert.deepEqual(sanitized.constraints, [{ field: "metric", min: null, max: null, missing: "any" }]);
 assert.equal(sanitized.view, "table");
 assert.equal(sanitized.units, "std");
 assert.equal(sanitized.evidence, "all");
-assert.deepEqual(sanitized.plotIds, ["a"]);
+assert.equal(parseAnalysisState({ version: 1, view: "plot" }, "tribology").view, "table", "Legacy plot views fall back to the table");
 const filters = parseRecordFilters({
   cations: ["bmim", "bmim", 12], anions: null, surfaces: ["gold"], surfaceQuery: 17,
   confinedSystems: ["1D", "2D", "3D-Cage", "Membrane", "0D-Pools", "Gyroid", "3D", "pore", "gyroid"],
@@ -74,14 +69,6 @@ assert.equal(filters.loadMinN, null);
 assert.equal(filters.loadMaxN, null);
 assert.equal(filters.tempMinK, null);
 assert.equal(filters.tempMaxK, 323);
-
-for (const selection of [[], null] as const) {
-  const state = { ...defaults, plotIds: selection === null ? null : [] };
-  const location = { ...complete, analysis: state };
-  const restored = readDatabaseLocation(locationUrl(location).search, "tribology");
-  assert.deepEqual(restored.analysis.plotIds, selection, "An empty brush result must not be turned into an unfiltered view");
-  assert.equal(hasAnalysisFilters(restored.analysis), selection !== null);
-}
 
 function point(id: string, load: Quantity | null, cof: number | null = 0.1, overrides: Partial<AnalysisRecord> = {}): AnalysisRecord {
   return {
@@ -122,7 +109,7 @@ for (const domain of ["conductivity", "diffusion"] as const) {
 }
 
 // Clearing query constraints should preserve the user's chosen way of viewing data.
-const presentationOnly: AnalysisState = { ...complete.analysis, constraints: [], evidence: "all", method: "", context: "", plotIds: null };
+const presentationOnly: AnalysisState = { ...complete.analysis, constraints: [], evidence: "all", method: "", context: "" };
 assert.equal(hasAnalysisFilters(presentationOnly), false);
 assert.equal(hasAnalysisFilters({ ...presentationOnly, context: " \t " }), false);
 assert.equal(hasAnalysisFilters({ ...presentationOnly, constraints: [{ field: "metric", min: null, max: null, missing: "any" }] }), false);
@@ -131,7 +118,7 @@ const clearedUrl = locationUrl(cleared);
 for (const key of ["facet", "paper", "search", "structureSmiles", "structureTarget", "structureMode"]) assert.equal(clearedUrl.searchParams.has(key), false);
 const restoredClear = readDatabaseLocation(clearedUrl.search, "tribology");
 assert.deepEqual(restoredClear, cleared);
-assert.equal(restoredClear.analysis.view, "plot");
+assert.equal(restoredClear.analysis.view, "cards");
 assert.equal(restoredClear.analysis.units, "raw");
 assert.deepEqual(restoredClear.analysis.sort, complete.analysis.sort);
 console.log("Analysis state URL, validation, scientific filters and reset-semantics tests passed");

@@ -10,13 +10,15 @@ assert.match(railSource, /data-testid="workspace-navigation-rail"/, "the app exp
 assert.match(railSource, /Property workspaces/, "the rail retains the domain switcher");
 assert.match(railSource, /data-testid="workspace-switcher"/, "domain choices are visually grouped into one compact dock");
 assert.match(railSource, /href="\/afm" label="AFM workspace"/, "AFM is a fourth top-level workspace in the desktop rail");
-assert.match(railSource, /data-testid="section-dock"/, "workspace sections are visually grouped into one compact dock");
+assert.match(railSource, /data-testid="workspace-children"/, "the active workspace nests its pages directly underneath");
 assert.match(railSource, /data-testid="utility-dock"/, "teaching and account actions form a separate utility dock");
 assert.match(railSource, /tribology: "μ"[\s\S]*conductivity: "σ"[\s\S]*diffusion: "D"/, "scientific domain marks replace ambiguous decorative icons");
 assert.match(railSource, /displayLabel \?\? label/, "navigation labels remain visible beside their icons");
 assert.match(railSource, /usePathname/, "the global rail derives its active states from the current route");
-assert.match(railSource, /section === item\.segment/, "each domain section receives the correct active state");
-assert.match(railSource, /href="\/teaching#prediction" label="Prediction of μ"/, "prediction belongs to the teaching navigation");
+assert.match(railSource, /section === "extract"/, "each nested workspace page receives the correct active state");
+assert.match(railSource, /data-testid="teaching-children"/, "teaching experiments nest under the AI experiment entry");
+assert.match(railSource, /href="\/teaching\/prediction" label="Experiment Ⅱ- Prediction of μ"/, "prediction is a dedicated teaching subpage in the navigation");
+assert.match(railSource, /href="\/teaching\/extraction" label="Experiment Ⅰ- Data Extraction"/, "extraction is a dedicated teaching subpage in the navigation");
 assert.doesNotMatch(railSource, /segment: "design"/, "prediction is no longer a domain section");
 assert.match(railSource, /section === "design" && item !== "tribology"/, "switching away from Tribology Design falls back to a reachable database");
 assert.match(railSource, /authClient\.useSession\(\)/, "the rail subscribes to the client session so account entries never disappear without a refresh");
@@ -38,7 +40,7 @@ assert.match(rootLayoutSource, /lg:pl-\[190px\]/, "desktop content is offset by 
 assert.match(topNavSource, /<header className="[^"]*lg:hidden"/, "the horizontal navigation is mobile-only on every page");
 assert.match(topNavSource, /<AuthControls \/>/, "mobile navigation retains the existing auth controls");
 assert.match(topNavSource, /href="\/afm"/, "AFM is a fourth top-level workspace in the mobile navigation");
-assert.match(topNavSource, /href="\/teaching#prediction"/, "mobile prediction opens the teaching section");
+assert.match(topNavSource, /href="\/teaching\/prediction"/, "mobile prediction opens the teaching subpage");
 assert.doesNotMatch(topNavSource, /seg: "design"/, "mobile property sections omit the relocated prediction");
 assert.match(topNavSource, /aria-label="AI experiment"/, "the mobile teaching shortcut uses the experiment name");
 assert.match(topNavSource, /hidden text-base[^"]*sm:inline/, "the wordmark yields space to mobile workspace controls");

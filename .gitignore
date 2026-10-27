@@ -73,6 +73,7 @@ backend/temp_uploads/
 /data/*.sqlite
 /data/*.sqlite3
 /data/sources/
+/data/teaching-papers/
 /data/*/sources/
 /data/backups/
 /data/audit-*/

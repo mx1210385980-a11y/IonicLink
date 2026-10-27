@@ -32,7 +32,7 @@ export function HomePageContent() {
           <div>
             <h1 id="overview-title" className="text-[30px] font-semibold leading-tight lg:text-[36px] tracking-[-0.025em]">Data overview</h1>
           </div>
-          <Link href="/teaching#prediction" className={`inline-flex min-h-10 items-center gap-3 rounded-lg border border-[#dce0e4] bg-white px-4 text-sm font-medium text-ink-700 transition hover:border-[#00888a] hover:text-[#00888a] ${FOCUS}`}>Prediction of μ <ArrowIcon /></Link>
+          <Link href="/teaching/prediction" className={`inline-flex min-h-10 items-center gap-3 rounded-lg border border-[#dce0e4] bg-white px-4 text-sm font-medium text-ink-700 transition hover:border-[#00888a] hover:text-[#00888a] ${FOCUS}`}>Prediction of μ <ArrowIcon /></Link>
         </header>
 
         <dl aria-label="All workspace totals" className="my-8 grid grid-cols-3 divide-x divide-[#dce0e4] sm:my-10 lg:mb-9 lg:grid-cols-[31.2%_36.8%_32%] lg:mt-12 lg:min-h-[76px]">
