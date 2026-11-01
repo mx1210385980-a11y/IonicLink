@@ -1,250 +1,356 @@
 import { randomUUID } from "node:crypto";
 import { getTeachingDb } from "./store";
 import { validateSimpleRows } from "./simpleScoring";
-import { scoreLive, type LiveDashboard, type LiveExperiment, type LiveMark, type LiveParticipant, type LiveParticipantView, type LiveStudentState } from "./liveShared";
+import { blankLiveRow, LIVE_EXTRACTION_FIELDS, type LiveRow } from "./liveFields";
+import {
+  liveAssignment, scoreLive,
+  type LiveDashboardParticipant, type LiveExperiment, type LiveMark, type LiveMode,
+  type LiveParticipant, type LiveRoundResult, type LiveScore, type LiveStudentState, type LiveWorkStatus,
+} from "./liveShared";
 
-function db() {
-  const store = getTeachingDb();
-  store.exec(`CREATE TABLE IF NOT EXISTS live_experiments (
-    id TEXT PRIMARY KEY, payload TEXT NOT NULL);
-    CREATE TABLE IF NOT EXISTS live_participants (
-    id TEXT PRIMARY KEY, experiment_id TEXT NOT NULL REFERENCES live_experiments(id),
-    user_key TEXT NOT NULL, payload TEXT NOT NULL, UNIQUE(experiment_id, user_key));`);
-  return store;
+function now() { return new Date().toISOString(); }
+function withLiveDb<T>(fn: (db: ReturnType<typeof getTeachingDb>) => T): T {
+  const db = getTeachingDb();
+  db.exec(`CREATE TABLE IF NOT EXISTS live_experiments (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS live_participants (id TEXT PRIMARY KEY, experiment_id TEXT NOT NULL, user_key TEXT NOT NULL, payload TEXT NOT NULL, UNIQUE(experiment_id, user_key));`);
+  return db.transaction(() => fn(db))();
 }
 
-function read<T>(row: unknown): T | null {
-  return row ? JSON.parse((row as { payload: string }).payload) as T : null;
+function normalizeExperiment(raw: LiveExperiment): LiveExperiment {
+  const legacyPaper = { sourceId: raw.paperSourceId ?? "", paperTitle: raw.paperTitle ?? "", gold: raw.gold ?? [] };
+  const papers = Array.from({ length: raw.groupCount }, (_, index) => ({
+    sourceId: raw.papers?.[index]?.sourceId ?? (index === 0 ? legacyPaper.sourceId : ""),
+    paperTitle: raw.papers?.[index]?.paperTitle ?? (index === 0 ? legacyPaper.paperTitle : ""),
+    gold: raw.papers?.[index]?.gold ?? (index === 0 ? legacyPaper.gold : []),
+  }));
+  const currentRound = Math.max(0, Math.min(raw.groupCount - 1, raw.currentRound ?? 0));
+  const current = papers[currentRound];
+  return { ...raw, papers, currentRound, paperSourceId: current.sourceId, paperTitle: current.paperTitle, gold: current.gold };
 }
 
-function required(value: unknown, label: string, max = 200): string {
-  if (typeof value !== "string" || !value.trim() || value.trim().length > max) throw new Error(`Invalid ${label}`);
-  return value.trim();
-}
-
-function writeExperiment(value: LiveExperiment): void {
-  db().prepare("UPDATE live_experiments SET payload = ? WHERE id = ?").run(JSON.stringify(value), value.id);
-}
-
-function writeParticipant(value: LiveParticipant): void {
-  db().prepare("UPDATE live_participants SET payload = ? WHERE id = ?").run(JSON.stringify(value), value.id);
-}
-
-export function getLiveExperiment(id: string): LiveExperiment {
-  const value = read<LiveExperiment>(db().prepare("SELECT payload FROM live_experiments WHERE id = ?").get(id));
-  if (!value) throw new Error("Experiment not found");
-  return value;
-}
-
-export function listLiveExperiments(): LiveExperiment[] {
-  return db().prepare("SELECT payload FROM live_experiments ORDER BY rowid DESC").all().map((row) => read<LiveExperiment>(row)!);
-}
-
-export function createLiveExperiment(input: { name: unknown; groupCount: unknown }): LiveExperiment {
-  const name = required(input.name, "Experiment name", 100);
-  const groupCount = Number(input.groupCount);
-  if (!Number.isInteger(groupCount) || groupCount < 2 || groupCount > 8) throw new Error("Choose 2–8 groups");
-  const value: LiveExperiment = {
-    id: randomUUID(), name, groupCount, status: "open",
-    paperSourceId: "", paperTitle: "", gold: [],
-    createdAt: new Date().toISOString(), startedAt: null, finishedAt: null,
-  };
-  db().prepare("INSERT INTO live_experiments VALUES (?, ?)").run(value.id, JSON.stringify(value));
-  return value;
-}
-
-function participants(experimentId: string): LiveParticipant[] {
-  return db().prepare("SELECT payload FROM live_participants WHERE experiment_id = ? ORDER BY rowid").all(experimentId)
-    .map((row) => read<LiveParticipant>(row)!);
-}
-
-function participant(id: string): LiveParticipant {
-  const value = read<LiveParticipant>(db().prepare("SELECT payload FROM live_participants WHERE id = ?").get(id));
-  if (!value) throw new Error("Participant not found");
-  return value;
-}
-
-function withScore(experiment: LiveExperiment, value: LiveParticipant): LiveParticipantView {
-  // Cells are reviewable even before an answer key exists; accuracy only
-  // becomes meaningful once the instructor provides one.
-  return { ...value, score: value.status === "submitted" ? scoreLive(experiment.gold, value.rows, value.overrides) : null };
-}
-
-export function getLiveDashboard(experimentId: string): LiveDashboard {
-  const experiment = getLiveExperiment(experimentId);
-  return { experiment, participants: participants(experimentId).map((value) => withScore(experiment, value)) };
-}
-
-export function joinLiveExperiment(experimentId: string, input: { userKey: unknown; alias: unknown }): LiveParticipant {
-  const userKey = required(input.userKey, "Account", 120);
-  const alias = required(input.alias, "Student name", 80);
-  return db().transaction(() => {
-    const experiment = getLiveExperiment(experimentId);
-    const existing = read<LiveParticipant>(db().prepare("SELECT payload FROM live_participants WHERE experiment_id = ? AND user_key = ?").get(experimentId, userKey));
-    if (existing) return existing;
-    if (experiment.status !== "open") throw new Error("This experiment has already started. Ask your instructor about the next session");
-    const value: LiveParticipant = {
-      id: randomUUID(), experimentId, userKey, alias, groupNo: null, mode: null,
-      status: "waiting", rows: [], version: 0,
-      startedAt: null, extractionAttemptAt: null, extractedAt: null, submittedAt: null,
-      elapsedSeconds: null, error: null, overrides: {}, reviewNote: "", reviewedAt: null,
-    };
-    db().prepare("INSERT INTO live_participants VALUES (?, ?, ?, ?)").run(value.id, experimentId, userKey, JSON.stringify(value));
-    return value;
-  })();
-}
-
-export function findLiveParticipant(userKey: string): LiveParticipant | null {
-  return read<LiveParticipant>(db().prepare("SELECT payload FROM live_participants WHERE user_key = ? ORDER BY rowid DESC LIMIT 1").get(userKey));
-}
-
-export function setLivePaper(experimentId: string, input: { sourceId: unknown; paperTitle: unknown }): LiveExperiment {
-  const sourceId = required(input.sourceId, "Paper", 80);
-  const paperTitle = required(input.paperTitle, "Paper title", 1000);
-  if (!/^[0-9a-f-]{36}$/i.test(sourceId)) throw new Error("Invalid paper ID");
-  const experiment = getLiveExperiment(experimentId);
-  if (experiment.status !== "open") throw new Error("The paper is fixed once the experiment starts");
-  experiment.paperSourceId = sourceId;
-  experiment.paperTitle = paperTitle;
-  writeExperiment(experiment);
-  return experiment;
-}
-
-export function setLiveGold(experimentId: string, input: unknown): LiveExperiment {
-  const gold = validateSimpleRows(input);
-  if (gold.some((row) => Object.values(row).some((cell) => !cell))) throw new Error("Complete all six answer-key fields. Enter NR for unreported values");
-  const experiment = getLiveExperiment(experimentId);
-  experiment.gold = gold;
-  writeExperiment(experiment);
-  // A changed answer key invalidates earlier teacher marks, mirroring the classic lab.
-  for (const value of participants(experimentId)) {
-    value.overrides = {}; value.reviewNote = ""; value.reviewedAt = null; value.version++;
-    writeParticipant(value);
-  }
-  return experiment;
-}
-
-export function startLiveExperiment(experimentId: string): LiveExperiment {
-  return db().transaction(() => {
-    const experiment = getLiveExperiment(experimentId);
-    if (experiment.status !== "open") throw new Error("This experiment has already started");
-    if (!experiment.paperSourceId) throw new Error("Upload the experiment paper first");
-    const joined = participants(experimentId);
-    if (!joined.length) throw new Error("Wait for at least one student to join");
-    joined.forEach((value, index) => {
-      value.groupNo = (index % experiment.groupCount) + 1;
-      // No AI model is connected in the current deployment: every group uses
-      // the manual channel. Restore `value.groupNo % 2 === 1 ? "ai" : "manual"`
-      // to bring back alternating AI/manual groups.
-      value.mode = "manual";
-      value.status = "idle"; value.version++;
-      writeParticipant(value);
-    });
-    experiment.status = "running";
-    experiment.startedAt = new Date().toISOString();
-    writeExperiment(experiment);
-    return experiment;
-  })();
-}
-
-export function finishLiveExperiment(experimentId: string): LiveExperiment {
-  const experiment = getLiveExperiment(experimentId);
-  if (experiment.status !== "running") throw new Error("Only a running experiment can be finished");
-  experiment.status = "finished";
-  experiment.finishedAt = new Date().toISOString();
-  writeExperiment(experiment);
-  return experiment;
-}
-
-function change(id: string, version: unknown, update: (value: LiveParticipant) => void): LiveParticipantView {
-  return db().transaction(() => {
-    const value = participant(id);
-    if (!Number.isInteger(version) || version !== value.version) throw new Error("The record has changed. Refresh and try again");
-    update(value); value.version++;
-    writeParticipant(value);
-    return withScore(getLiveExperiment(value.experimentId), value);
-  })();
-}
-
-function requireRunningPaper(experiment: LiveExperiment): void {
-  if (experiment.status !== "running") throw new Error("The experiment is not running");
-  if (!experiment.paperSourceId) throw new Error("The instructor has not uploaded the paper yet");
-}
-
-export function saveLiveDraft(id: string, input: { version: unknown; rows: unknown }): LiveParticipantView {
-  return change(id, input.version, (value) => {
-    if (value.status === "submitted" || value.status === "extracting" || (value.mode === "ai" && value.status !== "review")) throw new Error("Editing is not available in the current state");
-    // Manual work is timed from the first saved edit; AI work times from extraction.
-    value.startedAt ??= new Date().toISOString();
-    value.rows = validateSimpleRows(input.rows);
-  });
-}
-
-export function startLiveExtraction(id: string, version: unknown): LiveParticipantView {
-  return change(id, version, (value) => {
-    requireRunningPaper(getLiveExperiment(value.experimentId));
-    const attempt = value.extractionAttemptAt ?? value.startedAt;
-    const stale = value.status === "extracting" && attempt && Date.now() - Date.parse(attempt) >= 360_000;
-    if (value.mode !== "ai" || (!["idle", "error"].includes(value.status) && !stale)) throw new Error("AI extraction is not available in the current state. Wait 6 minutes before retrying a running task");
-    value.status = "extracting"; value.extractionAttemptAt = new Date().toISOString();
-    value.startedAt ??= value.extractionAttemptAt; value.error = null;
-  });
-}
-
-export function finishLiveExtraction(id: string, version: unknown, rows: unknown): LiveParticipantView {
-  return change(id, version, (value) => {
-    if (value.mode !== "ai" || value.status !== "extracting") throw new Error("The extraction task state has changed");
-    value.rows = validateSimpleRows(rows); value.status = "review"; value.extractedAt = new Date().toISOString();
-  });
-}
-
-export function failLiveExtraction(id: string, version: unknown, message: string): LiveParticipantView {
-  return change(id, version, (value) => {
-    if (value.mode !== "ai" || value.status !== "extracting") throw new Error("The extraction task state has changed");
-    value.status = "idle"; value.error = message.slice(0, 500);
-  });
-}
-
-export function submitLive(id: string, input: { version: unknown; rows: unknown }): LiveParticipantView {
-  return change(id, input.version, (value) => {
-    const experiment = getLiveExperiment(value.experimentId);
-    requireRunningPaper(experiment);
-    if (value.status === "submitted" || value.status === "extracting" || (value.mode === "ai" && value.status === "review" && (!value.startedAt || !value.extractedAt))) throw new Error("Complete extraction and review first");
-    const rows = validateSimpleRows(input.rows), submittedAt = new Date().toISOString();
-    if (rows.every((row) => Object.values(row).every((cell) => !cell))) throw new Error("Enter the extraction results");
-    // Both channels are timed automatically: manual work starts at the first
-    // saved edit (falling back to the experiment start), AI work at extraction.
-    value.startedAt ??= experiment.startedAt ?? submittedAt;
-    value.rows = rows; value.submittedAt = submittedAt; value.status = "submitted";
-    value.elapsedSeconds = Math.max(0.001, (Date.parse(submittedAt) - Date.parse(value.startedAt)) / 1000);
-  });
-}
-
-export function reviewLive(id: string, input: { version: unknown; overrides: unknown; note?: unknown }): LiveParticipantView {
-  return change(id, input.version, (value) => {
-    const experiment = getLiveExperiment(value.experimentId);
-    if (value.status !== "submitted") throw new Error("Review requires a submission");
-    if (!input.overrides || typeof input.overrides !== "object" || Array.isArray(input.overrides)) throw new Error("Invalid review format");
-    const keys = new Set(scoreLive(experiment.gold, value.rows).cells.map((cell) => cell.key));
-    const overrides: Record<string, LiveMark> = {};
-    for (const [key, mark] of Object.entries(input.overrides as Record<string, unknown>)) {
-      if (!keys.has(key) || !["correct", "incorrect", "uncertain"].includes(String(mark))) throw new Error("Invalid review field");
-      overrides[key] = mark as LiveMark;
-    }
-    if (input.note !== undefined && (typeof input.note !== "string" || input.note.length > 2000)) throw new Error("Review notes must be at most 2,000 characters");
-    value.overrides = overrides; value.reviewNote = typeof input.note === "string" ? input.note.trim() : ""; value.reviewedAt = new Date().toISOString();
-  });
-}
-
-export function getLiveStudent(id: string): LiveStudentState {
-  const value = participant(id);
-  const experiment = getLiveExperiment(value.experimentId);
+function normalizeParticipant(raw: LiveParticipant): LiveParticipant {
   return {
-    participant: withScore(experiment, value),
-    experiment: {
-      id: experiment.id, name: experiment.name, status: experiment.status, groupCount: experiment.groupCount,
-      paperTitle: experiment.paperTitle, hasPaper: Boolean(experiment.paperSourceId), hasAnswerKey: experiment.gold.length > 0,
-    },
-    joinedCount: participants(experiment.id).length,
+    ...raw,
+    round: raw.round ?? 0,
+    paperIndex: raw.paperIndex ?? Math.max(0, raw.groupNo - 1),
+    history: raw.history ?? [],
+    overrides: raw.overrides ?? {},
+    reviewNote: raw.reviewNote ?? "",
+    reviewedAt: raw.reviewedAt ?? null,
+    error: raw.error ?? "",
+    exitedAt: raw.exitedAt ?? null,
+    startedAt: raw.startedAt ?? null,
+    submittedAt: raw.submittedAt ?? null,
+    elapsedSeconds: raw.elapsedSeconds ?? null,
   };
 }
+
+function readExperiment(db: ReturnType<typeof getTeachingDb>, id: string): LiveExperiment {
+  const row = db.prepare("SELECT payload FROM live_experiments WHERE id = ?").get(id) as { payload: string } | undefined;
+  if (!row) throw new Error("Experiment not found");
+  return normalizeExperiment(JSON.parse(row.payload));
+}
+function saveExperiment(db: ReturnType<typeof getTeachingDb>, experiment: LiveExperiment) {
+  db.prepare("UPDATE live_experiments SET payload = ? WHERE id = ?").run(JSON.stringify(normalizeExperiment(experiment)), experiment.id);
+}
+function readParticipant(db: ReturnType<typeof getTeachingDb>, id: string): LiveParticipant {
+  const row = db.prepare("SELECT payload FROM live_participants WHERE id = ?").get(id) as { payload: string } | undefined;
+  if (!row) throw new Error("Student seat not found");
+  return normalizeParticipant(JSON.parse(row.payload));
+}
+function saveParticipant(db: ReturnType<typeof getTeachingDb>, participant: LiveParticipant) {
+  db.prepare("UPDATE live_participants SET payload = ? WHERE id = ?").run(JSON.stringify(participant), participant.id);
+}
+function participants(db: ReturnType<typeof getTeachingDb>, experimentId: string) {
+  const rows = db.prepare("SELECT payload FROM live_participants WHERE experiment_id = ?").all(experimentId) as Array<{ payload: string }>;
+  return rows.map((row) => normalizeParticipant(JSON.parse(row.payload))).sort((a, b) => a.joinedAt.localeCompare(b.joinedAt));
+}
+function withScore(participant: LiveParticipant, gold: LiveRow[]): LiveDashboardParticipant {
+  return { ...participant, score: participant.status === "submitted" ? scoreLive(gold, participant.rows, participant.overrides) : null };
+}
+function currentWork(participant: LiveParticipant): LiveRoundResult {
+  return {
+    round: participant.round, paperIndex: participant.paperIndex, mode: participant.mode, status: participant.status,
+    rows: participant.rows, startedAt: participant.startedAt, submittedAt: participant.submittedAt,
+    elapsedSeconds: participant.elapsedSeconds, overrides: participant.overrides, reviewNote: participant.reviewNote,
+    reviewedAt: participant.reviewedAt, error: participant.error,
+  };
+}
+function workForRound(participant: LiveParticipant, round: number): LiveRoundResult {
+  if (participant.round === round) return participant;
+  const historical = participant.history.find((item) => item.round === round);
+  if (!historical) throw new Error("This student has no result for the selected round");
+  return historical;
+}
+function resetWork(participant: LiveParticipant, experiment: LiveExperiment, startedAt: string | null, waiting = false) {
+  const assignment = liveAssignment(participant.groupNo, experiment.currentRound, experiment.groupCount);
+  participant.round = experiment.currentRound;
+  participant.paperIndex = assignment.paperIndex;
+  participant.mode = assignment.mode;
+  participant.status = waiting ? "waiting" : "idle";
+  participant.rows = [];
+  participant.startedAt = startedAt;
+  participant.submittedAt = null;
+  participant.elapsedSeconds = null;
+  participant.overrides = {};
+  participant.reviewNote = "";
+  participant.reviewedAt = null;
+  participant.error = "";
+  participant.version += 1;
+}
+
+export function createLiveExperiment(input: { name: string; groupCount: number }): LiveExperiment {
+  const name = input.name.trim();
+  const groupCount = Number(input.groupCount);
+  if (!name || name.length > 100) throw new Error("Enter an experiment name (up to 100 characters)");
+  if (!Number.isInteger(groupCount) || groupCount < 2 || groupCount > 8 || groupCount % 2 !== 0) throw new Error("Choose an even number of groups: 2, 4, 6, or 8");
+  return withLiveDb((db) => {
+    const experiment = normalizeExperiment({
+      id: randomUUID(), name, groupCount, status: "open", papers: [], currentRound: 0,
+      paperSourceId: "", paperTitle: "", gold: [], createdAt: now(), startedAt: null, finishedAt: null,
+    });
+    db.prepare("INSERT INTO live_experiments (id, payload) VALUES (?, ?)").run(experiment.id, JSON.stringify(experiment));
+    return experiment;
+  });
+}
+
+export function listLiveExperiments() {
+  return withLiveDb((db) => (db.prepare("SELECT payload FROM live_experiments").all() as Array<{ payload: string }>)
+    .map((row) => normalizeExperiment(JSON.parse(row.payload))).sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+}
+export function getLiveExperiment(id: string) { return withLiveDb((db) => readExperiment(db, id)); }
+
+export function setLivePaper(id: string, input: { sourceId: string; paperTitle: string; paperIndex?: number }) {
+  return withLiveDb((db) => {
+    const experiment = readExperiment(db, id);
+    if (experiment.status !== "open") throw new Error("Papers are fixed once the experiment starts");
+    const paperIndex = input.paperIndex ?? 0;
+    if (!Number.isInteger(paperIndex) || paperIndex < 0 || paperIndex >= experiment.groupCount) throw new Error("Invalid paper number");
+    experiment.papers[paperIndex] = { sourceId: input.sourceId, paperTitle: input.paperTitle.slice(0, 300), gold: experiment.papers[paperIndex].gold };
+    saveExperiment(db, experiment);
+    return getLiveExperiment(id);
+  });
+}
+export function setLiveGold(id: string, value: unknown, paperIndex?: number) {
+  return withLiveDb((db) => {
+    const experiment = readExperiment(db, id);
+    if (experiment.status === "finished") throw new Error("The experiment has finished");
+    const index = paperIndex ?? experiment.currentRound;
+    if (!Number.isInteger(index) || index < 0 || index >= experiment.groupCount) throw new Error("Invalid paper number");
+    experiment.papers[index].gold = validateSimpleRows(value, LIVE_EXTRACTION_FIELDS);
+    saveExperiment(db, experiment);
+    return getLiveExperiment(id);
+  });
+}
+
+export function joinLiveExperiment(experimentId: string, input: { userKey: string; alias: string }) {
+  return withLiveDb((db) => {
+    const experiment = readExperiment(db, experimentId);
+    const existing = db.prepare("SELECT payload FROM live_participants WHERE experiment_id = ? AND user_key = ?").get(experimentId, input.userKey) as { payload: string } | undefined;
+    if (existing) return normalizeParticipant(JSON.parse(existing.payload));
+    if (experiment.status !== "open") throw new Error("This experiment has already started");
+    const alias = input.alias.trim();
+    if (!alias || alias.length > 40) throw new Error("Enter a display name (up to 40 characters)");
+    const participant = normalizeParticipant({
+      id: randomUUID(), experimentId, userKey: input.userKey, alias, groupNo: 0, joinedAt: now(), version: 0,
+      round: 0, paperIndex: 0, mode: "manual", status: "waiting", rows: [], startedAt: null, submittedAt: null,
+      elapsedSeconds: null, overrides: {}, reviewNote: "", reviewedAt: null, error: "", exitedAt: null, history: [],
+    });
+    db.prepare("INSERT INTO live_participants (id, experiment_id, user_key, payload) VALUES (?, ?, ?, ?)")
+      .run(participant.id, experimentId, input.userKey, JSON.stringify(participant));
+    return participant;
+  });
+}
+
+export function startLiveExperiment(id: string) {
+  return withLiveDb((db) => {
+    const experiment = readExperiment(db, id);
+    if (experiment.status !== "open") throw new Error("Only an open experiment can start");
+    if (experiment.papers.some((paper) => !paper.sourceId)) throw new Error(`Upload all ${experiment.groupCount} papers before starting`);
+    const joined = participants(db, id);
+    if (!joined.length) throw new Error("Wait for at least one student to join");
+    const startedAt = now();
+    experiment.status = "running"; experiment.startedAt = startedAt; experiment.currentRound = 0;
+    joined.forEach((participant, index) => {
+      participant.groupNo = (index % experiment.groupCount) + 1;
+      resetWork(participant, experiment, startedAt);
+      saveParticipant(db, participant);
+    });
+    saveExperiment(db, experiment);
+    return getLiveDashboard(id);
+  });
+}
+
+export function advanceLiveRound(id: string) {
+  return withLiveDb((db) => {
+    const experiment = readExperiment(db, id);
+    if (experiment.status !== "running") throw new Error("The experiment is not running");
+    if (experiment.currentRound >= experiment.groupCount - 1) throw new Error("This is the final round; finish the experiment instead");
+    const joined = participants(db, id);
+    if (!joined.length || joined.some((participant) => participant.status !== "submitted")) throw new Error("All students must submit before the next round");
+    const startedAt = now();
+    for (const participant of joined) {
+      participant.history.push(currentWork(participant));
+      resetWork(participant, experimentWithNextRound(experiment), startedAt);
+      saveParticipant(db, participant);
+    }
+    experiment.currentRound += 1;
+    saveExperiment(db, experiment);
+    return getLiveDashboard(id);
+  });
+}
+
+/** Produce the next-round assignment without mutating the experiment before every seat is archived. */
+function experimentWithNextRound(experiment: LiveExperiment): LiveExperiment {
+  return { ...experiment, currentRound: experiment.currentRound + 1 };
+}
+
+export function finishLiveExperiment(id: string) {
+  return withLiveDb((db) => {
+    const experiment = readExperiment(db, id);
+    if (experiment.status !== "running") throw new Error("Only a running experiment can finish");
+    experiment.status = "finished"; experiment.finishedAt = now(); saveExperiment(db, experiment);
+    return getLiveDashboard(id);
+  });
+}
+
+export function exitLiveExperiment(participantId: string) {
+  return withLiveDb((db) => {
+    const participant = readParticipant(db, participantId);
+    const experiment = readExperiment(db, participant.experimentId);
+    if (experiment.status !== "finished") throw new Error("You can exit after the experiment has finished");
+    participant.exitedAt = now();
+    participant.version += 1;
+    saveParticipant(db, participant);
+    return { ok: true };
+  });
+}
+
+function editableParticipant(db: ReturnType<typeof getTeachingDb>, participantId: string, version: number) {
+  const participant = readParticipant(db, participantId);
+  if (participant.version !== version) throw new Error("This workspace changed. Refresh and try again.");
+  const experiment = readExperiment(db, participant.experimentId);
+  if (experiment.status !== "running") throw new Error("The experiment is not accepting work");
+  if (participant.status === "submitted") throw new Error("This round was already submitted");
+  return { participant, experiment };
+}
+export function saveLiveDraft(participantId: string, input: { version: number; rows: unknown }) {
+  return withLiveDb((db) => {
+    const { participant } = editableParticipant(db, participantId, input.version);
+    participant.rows = validateSimpleRows(input.rows, LIVE_EXTRACTION_FIELDS);
+    participant.version += 1; saveParticipant(db, participant);
+    return withScore(participant, readExperiment(db, participant.experimentId).papers[participant.paperIndex]?.gold ?? []);
+  });
+}
+export function submitLive(participantId: string, input: { version: number; rows: unknown }) {
+  return withLiveDb((db) => {
+    const { participant } = editableParticipant(db, participantId, input.version);
+    participant.rows = validateSimpleRows(input.rows, LIVE_EXTRACTION_FIELDS);
+    participant.status = "submitted"; participant.submittedAt = now();
+    participant.elapsedSeconds = participant.startedAt ? Math.max(1, Math.round((Date.parse(participant.submittedAt) - Date.parse(participant.startedAt)) / 1000)) : null;
+    participant.version += 1; saveParticipant(db, participant);
+    return withScore(participant, readExperiment(db, participant.experimentId).papers[participant.paperIndex]?.gold ?? []);
+  });
+}
+
+export function startLiveExtraction(participantId: string, version: number) {
+  return withLiveDb((db) => {
+    const { participant } = editableParticipant(db, participantId, version);
+    if (participant.mode !== "ai") throw new Error("AI extraction is available only to AI groups");
+    if (participant.status === "extracting") throw new Error("Extraction is already running");
+    participant.status = "extracting";
+    participant.error = "";
+    participant.version += 1;
+    saveParticipant(db, participant);
+    return participant;
+  });
+}
+
+export function finishLiveExtraction(participantId: string, version: number, rows: unknown) {
+  return withLiveDb((db) => {
+    const participant = readParticipant(db, participantId);
+    if (participant.version !== version || participant.status !== "extracting") throw new Error("This extraction is no longer active");
+    participant.rows = validateSimpleRows(rows, LIVE_EXTRACTION_FIELDS);
+    participant.status = "review";
+    participant.version += 1;
+    saveParticipant(db, participant);
+    return getLiveStudent(participantId).participant!;
+  });
+}
+
+export function failLiveExtraction(participantId: string, version: number, note: string) {
+  return withLiveDb((db) => {
+    const participant = readParticipant(db, participantId);
+    if (participant.version !== version || participant.status !== "extracting") throw new Error("This extraction is no longer active");
+    participant.status = "idle";
+    participant.error = note;
+    participant.version += 1;
+    saveParticipant(db, participant);
+    return getLiveStudent(participantId).participant!;
+  });
+}
+
+export function reviewLive(participantId: string, input: { version: number; overrides: Record<string, LiveMark>; note?: string; round?: number }) {
+  return withLiveDb((db) => {
+    const participant = readParticipant(db, participantId);
+    if (participant.version !== input.version) throw new Error("This submission changed. Refresh and try again.");
+    const experiment = readExperiment(db, participant.experimentId);
+    const work = workForRound(participant, input.round ?? participant.round);
+    if (work.status !== "submitted") throw new Error("Wait for the student to submit");
+    const gold = experiment.papers[work.paperIndex]?.gold ?? [];
+    const valid = new Set(scoreLive(gold, work.rows).cells.map((cell) => cell.key));
+    for (const [key, mark] of Object.entries(input.overrides)) {
+      if (!valid.has(key) || !["correct", "incorrect", "uncertain"].includes(mark)) throw new Error("Invalid review field or mark");
+      work.overrides[key] = mark;
+    }
+    if (input.note !== undefined) {
+      if (input.note.length > 2000) throw new Error("Review note is too long");
+      work.reviewNote = input.note;
+    }
+    work.reviewedAt = now();
+    participant.version += 1; saveParticipant(db, participant);
+    return withScore({ ...participant, ...work }, gold);
+  });
+}
+
+export function getLiveDashboard(experimentId: string, round?: number) {
+  return withLiveDb((db) => {
+    const experiment = readExperiment(db, experimentId);
+    const selectedRound = round ?? experiment.currentRound;
+    if (!Number.isInteger(selectedRound) || selectedRound < 0 || selectedRound > experiment.currentRound) throw new Error("Invalid round");
+    const joined = participants(db, experimentId).map((participant) => {
+      const work = workForRound(participant, selectedRound);
+      const view = { ...participant, ...work, history: participant.history };
+      return withScore(view, experiment.papers[work.paperIndex]?.gold ?? []);
+    });
+    return { experiment, participants: joined };
+  });
+}
+
+export function findLiveParticipant(userKey: string) {
+  return withLiveDb((db) => {
+    const rows = db.prepare("SELECT payload FROM live_participants WHERE user_key = ?").all(userKey) as Array<{ payload: string }>;
+    const joined = rows.map((row) => normalizeParticipant(JSON.parse(row.payload)))
+      .filter((participant) => !participant.exitedAt)
+      .sort((a, b) => b.joinedAt.localeCompare(a.joinedAt));
+    return joined[0] ?? null;
+  });
+}
+
+export function getLiveStudent(participantId: string): LiveStudentState {
+  return withLiveDb((db) => {
+    const participant = readParticipant(db, participantId);
+    const experiment = readExperiment(db, participant.experimentId);
+    const paper = experiment.papers[participant.paperIndex];
+    const joinedCount = (db.prepare("SELECT COUNT(*) AS n FROM live_participants WHERE experiment_id = ?").get(experiment.id) as { n: number }).n;
+    return {
+      experiment: { id: experiment.id, name: experiment.name, groupCount: experiment.groupCount, status: experiment.status,
+        currentRound: experiment.currentRound, totalRounds: experiment.groupCount,
+        paperTitle: paper?.paperTitle ?? "", hasPaper: Boolean(paper?.sourceId), hasAnswerKey: Boolean(paper?.gold.length) },
+      participant: withScore(participant, paper?.gold ?? []), joinedCount,
+    };
+  });
+}
+
+export function liveRowsTemplate() { return [blankLiveRow()]; }
+export type { LiveMode, LiveScore, LiveWorkStatus };

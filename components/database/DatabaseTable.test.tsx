@@ -9,7 +9,7 @@ const sample: AnalysisRecord = {
   id: "r1", status: "official", createdAt: "2026-09-12", paper: { title: "Paper A" },
   core: { ionicLiquid: { cation: "[BMIM]", anion: "[BF4]" }, cof: 0.1, temperature: { raw: "not stated", value: null, unit: "", std: 293.15, stdUnit: "K", approx: true } },
   extended: {}, flexible: [], sourceId: "source-1",
-  provenance: { cof: { page: 3, quote: "COF = 0.1", basis: "direct" }, temperature: { basis: "assumed", basisNote: "Room-temperature convention" } },
+  provenance: { cof: { page: 3, quote: "COF = 0.1", basis: "direct" }, temperature: { basis: "assumed", basisNote: "Room-temperature convention" }, load: { figure: "Fig. 2b", basis: "inferred", basisNote: "Read from the friction curve" } },
 };
 const base: DatabaseTableProps = {
   domain: "tribology", records: [sample], fields: getAnalysisFields("tribology"), columns: defaultColumns("tribology"),
@@ -22,6 +22,10 @@ assert.match(html, /aria-sort="ascending"/);
 assert.match(html, /Open evidence for COF in r1/);
 assert.match(html, /Direct/);
 assert.match(html, /Assumed/);
+assert.match(html, /Inferred from Fig\. 2b/);
+assert.match(html, /Inferred from Fig\. 2b: Read from the friction curve/);
+assert.match(html, /Assumed: Room-temperature convention/);
+assert.doesNotMatch(html, /Assumed · assumed/);
 assert.match(html, /As reported: not stated/);
 assert.match(html, /aria-pressed="true"/);
 assert.match(html, /Open record r1/);

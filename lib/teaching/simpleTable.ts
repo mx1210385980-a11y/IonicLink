@@ -1,4 +1,7 @@
 import { TEACHING_FIELDS, type SimpleRow } from "./simpleShared";
+import type { TeachingFieldKey } from "../teachingShared";
+
+type TableField<Key extends string> = { key: Key; label: string };
 
 const ALIASES: Record<string, string[]> = {
   cation: ["cation", "阳离子"], anion: ["anion", "阴离子"],
@@ -31,23 +34,31 @@ export function parseSimpleCsv(text: string, separator = ","): string[][] {
   return rows;
 }
 
-export function simpleRowsFromCells(cells: string[][]): SimpleRow[] {
+export function simpleRowsFromCells<FieldKey extends string = TeachingFieldKey>(
+  cells: string[][],
+  fields: readonly TableField<FieldKey>[] = TEACHING_FIELDS as unknown as readonly TableField<FieldKey>[],
+): Array<Record<FieldKey, string>> {
   const meaningful = cells.filter((row) => row.some((cell) => cell.trim()));
   const headers = meaningful.shift()?.map((header) => header.trim().toLowerCase()) ?? [];
-  const indices = TEACHING_FIELDS.map(({ key, label }) => {
-    const matches = headers.flatMap((header, index) => ALIASES[key].includes(header) ? [index] : []);
+  const indices = fields.map(({ key, label }) => {
+    const aliases = ALIASES[key] ?? [key.toLowerCase(), label.toLowerCase()];
+    const matches = headers.flatMap((header, index) => aliases.includes(header) ? [index] : []);
     if (matches.length !== 1) throw new Error(`The header must contain exactly one ${label} column. Use the template.`);
     return matches[0];
   });
   if (!meaningful.length || meaningful.length > 100) throw new Error("The table must contain 1–100 records.");
-  return meaningful.map((row) => Object.fromEntries(TEACHING_FIELDS.map(({ key }, index) => {
+  return meaningful.map((row) => Object.fromEntries(fields.map(({ key }, index) => {
     const value = (row[indices[index]] ?? "").trim();
     if (value.length > 500) throw new Error("Each field must be at most 500 characters.");
     return [key, value];
-  })) as SimpleRow);
+  })) as Record<FieldKey, string>);
 }
 
-export async function parseSimpleTable(name: string, bytes: Uint8Array): Promise<SimpleRow[]> {
+export async function parseSimpleTable<FieldKey extends string = TeachingFieldKey>(
+  name: string,
+  bytes: Uint8Array,
+  fields: readonly TableField<FieldKey>[] = TEACHING_FIELDS as unknown as readonly TableField<FieldKey>[],
+): Promise<Array<Record<FieldKey, string>>> {
   if (!bytes.length || bytes.length > MAX_TABLE_BYTES) throw new Error("Upload a table no larger than 5 MB.");
   if (/\.xlsx$/i.test(name)) {
     const { default: ExcelJS } = await import("exceljs");
@@ -65,15 +76,17 @@ export async function parseSimpleTable(name: string, bytes: Uint8Array): Promise
       }
       cells.push(values);
     });
-    return simpleRowsFromCells(cells);
+    return simpleRowsFromCells(cells, fields);
   }
   if (!/\.(csv|tsv)$/i.test(name)) throw new Error("Select a CSV, TSV, or XLSX table.");
   let text: string;
   try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
   catch { throw new Error("Save the CSV as UTF-8 before uploading."); }
-  return simpleRowsFromCells(parseSimpleCsv(text, /\.tsv$/i.test(name) ? "\t" : ","));
+  return simpleRowsFromCells(parseSimpleCsv(text, /\.tsv$/i.test(name) ? "\t" : ","), fields);
 }
 
-export function simpleTemplateCsv(): string {
-  return "\uFEFF" + TEACHING_FIELDS.map(({ key }) => key).join(",") + "\r\n";
+export function simpleTemplateCsv<FieldKey extends string = TeachingFieldKey>(
+  fields: readonly { key: FieldKey }[] = TEACHING_FIELDS as unknown as readonly { key: FieldKey }[],
+): string {
+  return "\uFEFF" + fields.map(({ key }) => key).join(",") + "\r\n";
 }

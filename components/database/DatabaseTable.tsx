@@ -3,7 +3,7 @@
 import React, { useMemo } from "react";
 import type { Domain } from "@/lib/domain";
 import { openRecordEvidence, type UnitMode } from "@/components/recordCardParts";
-import { provenanceBadge } from "@/lib/schema";
+import { describeEvidenceBasis, evidenceBasisLabel, provenanceBadge } from "@/lib/schema";
 import type { AnalysisDensity, AnalysisField, AnalysisRecord, AnalysisSort } from "./analysisTypes";
 
 export interface DatabaseTableProps {
@@ -62,17 +62,19 @@ export function DatabaseTable({ domain, records, fields, columns, onColumnsChang
             const quantity = field.getQuantity?.(record);
             const basis = evidence?.basis;
             const sourceLabel = evidence ? provenanceBadge(evidence) : "";
-            const title = quantity?.raw ? `${value}\nAs reported: ${quantity.raw}` : value;
+            const evidenceTitle = evidence ? describeEvidenceBasis(evidence) : "";
+            const title = [quantity?.raw ? `${value}\nAs reported: ${quantity.raw}` : value, evidenceTitle].filter(Boolean).join("\n");
             const width = compact ? field.key === "paper" ? "max-w-64" : "max-w-48" : "max-w-80";
             const valueClass = compact
               ? field.numeric ? "block min-w-16 truncate leading-5" : "line-clamp-2 min-w-16 whitespace-normal break-words leading-5"
               : "block min-w-16 whitespace-normal break-words";
-            const evidenceLabel = [basis ? basis[0].toUpperCase() + basis.slice(1) : "Unassessed", sourceLabel].filter(Boolean).join(" · ");
+            const basisLabel = evidence ? evidenceBasisLabel(evidence) : "Unassessed";
+            const evidenceLabel = basis === "direct" || !basis ? [basisLabel, sourceLabel].filter(Boolean).join(" · ") : basisLabel;
             return <td key={field.key} className={`${spacing} align-top ${field.key === "id" ? "sticky left-0 z-10 bg-white group-hover:bg-brand-50" : ""} ${field.numeric ? "font-mono tabular-nums" : ""}`}>
               {field.key === "id" ? <button type="button" onClick={() => onOpenRecord(record)} disabled={disabled} className="whitespace-nowrap rounded font-mono font-semibold text-brand-800 underline decoration-brand-200 underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600">{value}</button>
                 : evidence ? <button type="button" disabled={disabled} title={title} aria-label={`Open evidence for ${field.label} in ${record.id}`} onClick={() => openRecordEvidence({ domain, sourceId: record.sourceId, recordId: record.id, field: provenanceKey, value, prov: evidence })} className={`${width} rounded text-left underline decoration-dotted underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-600 ${basis === "inferred" || basis === "assumed" ? "text-amber-800 decoration-amber-400" : "text-ink-900 decoration-brand-300"}`}>
                   <span className={valueClass}>{value}</span>
-                  <span title={evidenceLabel} className={`mt-1 block font-sans text-xs leading-4 text-ink-600 ${compact ? "truncate" : ""}`}>{evidenceLabel}</span>
+                  <span title={title} className={`mt-1 block font-sans text-xs leading-4 text-ink-600 ${compact ? "truncate" : ""}`}>{evidenceLabel}</span>
                 </button> : <span title={title} className={`${width} ${valueClass} text-ink-800`}>{value}</span>}
             </td>;
           })}

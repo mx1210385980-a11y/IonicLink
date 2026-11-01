@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { LiveDashboard, LiveExperiment, LiveMark, LiveParticipantView } from "@/lib/teaching/liveShared";
-import { TEACHING_FIELDS } from "@/lib/teaching/simpleShared";
+import { blankLiveRow, LIVE_EXTRACTION_FIELDS, LIVE_FIELD_LABELS } from "@/lib/teaching/liveFields";
 import { requestErrorMessage, requestJson, RequestError } from "@/components/request";
-import { accuracy, blankRow, FIELD_LABELS, fieldInput, minutes, SimpleRows, uploadTable } from "./SimpleTeachingParts";
+import { accuracy, fieldInput, minutes, uploadLiveTable } from "./SimpleTeachingParts";
+import { LiveRows } from "./LiveRows";
 
 type TeacherData = { experiments: LiveExperiment[]; dashboard: LiveDashboard | null };
 
@@ -24,6 +25,7 @@ export function LiveTeacher() {
   const [loaded, setLoaded] = useState(false);
   const [creating, setCreating] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [viewRound, setViewRound] = useState<number | null>(null);
   const [reviewId, setReviewId] = useState<string | null>(null);
   const [reviewCell, setReviewCell] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -31,18 +33,24 @@ export function LiveTeacher() {
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async (id?: string | null) => {
-    const next = await requestJson<TeacherData>(`/api/teaching/live${id ? `?id=${encodeURIComponent(id)}` : ""}`, { cache: "no-store" }, "Refresh failed");
+    const query = new URLSearchParams();
+    if (id) query.set("id", id);
+    if (viewRound != null) query.set("round", String(viewRound));
+    const suffix = query.size ? `?${query.toString()}` : "";
+    const next = await requestJson<TeacherData>(`/api/teaching/live${suffix}`, { cache: "no-store" }, "Refresh failed");
     setData(next); setLoaded(true); setError("");
-  }, []);
+  }, [viewRound]);
   useEffect(() => {
     const timer = setInterval(() => { if (!document.hidden) void refresh(selectedId).catch(() => {}); }, 5000);
     return () => clearInterval(timer);
   }, [refresh, selectedId]);
-  useEffect(() => { void refresh().catch((cause) => setError(requestErrorMessage(cause, "Load failed"))); }, [refresh]);
+  useEffect(() => { void refresh(selectedId).catch((cause) => setError(requestErrorMessage(cause, "Load failed"))); }, [refresh, selectedId]);
 
   const dashboard = data.dashboard;
   const experiment = dashboard?.experiment;
   const review = dashboard?.participants.find((item) => item.id === reviewId && item.score) ?? null;
+  const allSubmitted = Boolean(dashboard?.participants.length) && dashboard!.participants.every((item) => item.status === "submitted");
+  const displayedRound = viewRound ?? experiment?.currentRound ?? 0;
 
   async function run(action: string, extra: object = {}, message = "") {
     if (busy) return;
@@ -51,6 +59,7 @@ export function LiveTeacher() {
       const next = await post<LiveDashboard>({ action, experimentId: experiment?.id, ...extra });
       setData((previous) => ({ ...previous, dashboard: next }));
       setSelectedId(next.experiment.id);
+      if (action === "start" || action === "advance") setViewRound(null);
       if (message) setNotice(message);
     } catch (cause) { setError(requestErrorMessage(cause, "Action failed")); } finally { setBusy(false); }
   }
@@ -61,7 +70,7 @@ export function LiveTeacher() {
     <div className="flex flex-wrap items-end gap-3">
       <label className="min-w-56 flex-1 text-xs text-ink-600">Experiment
         <select aria-label="Current live experiment" className={`${fieldInput} mt-1`} value={experiment?.id ?? ""} disabled={!data.experiments.length}
-          onChange={(event) => { setSelectedId(event.target.value); setReviewId(null); setReviewCell(null); void refresh(event.target.value).catch((cause) => setError(requestErrorMessage(cause, "Load failed"))); }}>
+          onChange={(event) => { setSelectedId(event.target.value); setViewRound(null); setReviewId(null); setReviewCell(null); void requestJson<TeacherData>(`/api/teaching/live?id=${encodeURIComponent(event.target.value)}`, { cache: "no-store" }, "Load failed").then(setData).catch((cause) => setError(requestErrorMessage(cause, "Load failed"))); }}>
           {!data.experiments.length && <option value="">No experiment yet</option>}
           {data.experiments.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.status}</option>)}
         </select>
@@ -69,7 +78,7 @@ export function LiveTeacher() {
       <button className="btn-primary min-h-10" onClick={() => setCreating(!creating)}>{creating ? "Cancel" : "开展实验"}</button>
     </div>
     {creating && <CreateLiveExperiment onCreated={async (created) => {
-      setCreating(false); setSelectedId(created.experiment.id);
+      setCreating(false); setSelectedId(created.experiment.id); setViewRound(null);
       setData((previous) => ({ experiments: [created.experiment, ...previous.experiments], dashboard: created }));
       setNotice("实验已创建，学生现在可以加入。上传文献并等待人数到齐后开始。");
     }} />}
@@ -85,27 +94,38 @@ export function LiveTeacher() {
               {" · "}{experiment.groupCount} groups · 已加入 <strong>{dashboard.participants.length}</strong> 人
             </p>
           </div>
-          {experiment.status === "open" && <button className="btn-primary" disabled={busy || !experiment.paperSourceId || !dashboard.participants.length} onClick={() => void run("start", {}, "实验已开始，学生已自动分组并收到文献。")}>开始实验</button>}
-          {experiment.status === "running" && <button className="btn" disabled={busy} onClick={() => void run("finish", {}, "实验已结束。")}>结束实验</button>}
+          {experiment.status === "open" && <button className="btn-primary" disabled={busy || experiment.papers.some((paper) => !paper.sourceId) || !dashboard.participants.length} onClick={() => void run("start", {}, "实验已开始：第 1 轮奇数组人工、偶数组 AI。")}>开始第 1 轮</button>}
+          {experiment.status === "running" && <div className="flex flex-wrap gap-2">
+            {experiment.currentRound < experiment.groupCount - 1 && <button className="btn-primary" disabled={busy || !allSubmitted || viewRound != null} title={viewRound != null ? "先切回当前轮次" : allSubmitted ? "轮换文献并交换人工/AI 方式" : "本轮所有学生提交后才能进入下一轮"} onClick={() => void run("advance", {}, `第 ${experiment.currentRound + 2} 轮已开始。`)}>进入第 {experiment.currentRound + 2} 轮</button>}
+            <button className="btn" disabled={busy} onClick={() => void run("finish", {}, "实验已结束。")}>结束实验</button>
+          </div>}
         </div>
+        {experiment.status !== "open" && <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg bg-ink-50 p-3">
+          <span className="mr-2 text-sm font-semibold">共 {experiment.groupCount} 轮 · 当前第 {experiment.currentRound + 1} 轮</span>
+          {Array.from({ length: experiment.currentRound + 1 }, (_, round) => <button key={round} className={`rounded-md px-3 py-1.5 text-xs ${displayedRound === round ? "bg-brand-600 text-white" : "bg-white text-ink-700 ring-1 ring-ink-200"}`} onClick={() => { setViewRound(round === experiment.currentRound ? null : round); setReviewId(null); setReviewCell(null); }}>第 {round + 1} 轮结果</button>)}
+          {viewRound != null && <span className="text-xs text-amber-700">正在查看历史轮次</span>}
+        </div>}
         {experiment.status === "open" && <>
-          <p className="mt-3 text-xs text-ink-500">开始条件：已上传文献 + 至少 1 名学生加入。开始后系统自动轮流分组（当前统一为人工提取通道），文献自动下发。</p>
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <label className={`btn cursor-pointer ${busy ? "pointer-events-none opacity-50" : ""}`}>{experiment.paperSourceId ? "更换文献 PDF" : "上传文献 PDF"}
-              <input aria-label="Upload experiment paper" type="file" accept=".pdf" className="sr-only" disabled={busy} onChange={async (event) => {
-                const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
-                setBusy(true); setError("");
-                try {
-                  const form = new FormData(); form.set("file", file); form.set("experimentId", experiment.id);
-                  await requestJson("/api/teaching/live/paper", { method: "POST", body: form }, "Upload failed");
-                  await refresh(experiment.id); setNotice("文献已上传，开始实验后自动下发给学生。");
-                } catch (cause) { setError(requestErrorMessage(cause, "Upload failed")); } finally { setBusy(false); }
-              }} />
-            </label>
-            <span className="text-sm text-ink-600">{experiment.paperTitle || "尚未上传文献"}</span>
-            {experiment.paperSourceId && <a className="text-sm text-brand-700" target="_blank" rel="noreferrer" href={`/api/teaching/live/paper?experimentId=${experiment.id}`}>查看 PDF ↗</a>}
-          </div>
-          <LiveAnswerKey key={`${experiment.id}-${experiment.gold.length}`} experiment={experiment} onSaved={async () => { await refresh(experiment.id); setNotice("答案已保存，提交结果自动评分。"); }} />
+          <p className="mt-3 text-xs text-ink-500">组数必须为偶数，并上传同样数量的文献。每轮各组轮换一篇文献，同时交换人工/AI 方式；第 1 轮 Group 1 人工、Group 2 AI。每轮全员提交后教师才能开启下一轮。</p>
+          <div className="mt-4 grid gap-4 xl:grid-cols-2">{experiment.papers.map((paper, paperIndex) => <section key={paperIndex} className="rounded-xl border border-ink-200 bg-ink-50/40 p-4">
+            <h4 className="font-semibold">文献 {paperIndex + 1} <span className="ml-1 text-xs font-normal text-ink-500">Paper {paperIndex + 1}</span></h4>
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <label className={`btn cursor-pointer ${busy ? "pointer-events-none opacity-50" : ""}`}>{paper.sourceId ? "更换 PDF" : "上传 PDF"}
+                <input aria-label={`Upload experiment paper ${paperIndex + 1}`} type="file" accept=".pdf" className="sr-only" disabled={busy} onChange={async (event) => {
+                  const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
+                  setBusy(true); setError("");
+                  try {
+                    const form = new FormData(); form.set("file", file); form.set("experimentId", experiment.id); form.set("paperIndex", String(paperIndex));
+                    await requestJson("/api/teaching/live/paper", { method: "POST", body: form }, "Upload failed");
+                    await refresh(experiment.id); setNotice(`文献 ${paperIndex + 1} 已上传。`);
+                  } catch (cause) { setError(requestErrorMessage(cause, "Upload failed")); } finally { setBusy(false); }
+                }} />
+              </label>
+              <span className="min-w-0 flex-1 break-words text-sm text-ink-600">{paper.paperTitle || "尚未上传"}</span>
+              {paper.sourceId && <a className="text-sm text-brand-700" target="_blank" rel="noreferrer" href={`/api/teaching/live/paper?experimentId=${experiment.id}&paperIndex=${paperIndex}`}>查看 PDF ↗</a>}
+            </div>
+            <LiveAnswerKey key={`${experiment.id}-${paperIndex}-${paper.gold.length}`} experiment={experiment} paper={paper} paperIndex={paperIndex} onSaved={async () => { await refresh(experiment.id); setNotice(`文献 ${paperIndex + 1} 的答案已保存。`); }} />
+          </section>)}</div>
           {dashboard.participants.length > 0 && <ul className="mt-4 flex flex-wrap gap-2">{dashboard.participants.map((item) => <li key={item.id} className="rounded-full bg-ink-50 px-3 py-1 text-xs text-ink-700">{item.alias}</li>)}</ul>}
         </>}
       </section>
@@ -131,31 +151,32 @@ function CreateLiveExperiment({ onCreated }: { onCreated: (dashboard: LiveDashbo
     <h3 className="font-semibold">开展新实验</h3>
     <div className="mt-4 flex flex-wrap items-end gap-4">
       <label className="min-w-56 flex-1 text-sm">实验名称<input required maxLength={100} className={`${fieldInput} mt-1`} value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：第 3 周离子液体提取实验" /></label>
-      <label className="text-sm">组数（2–8）<input aria-label="Group count" type="number" min={2} max={8} className={`${fieldInput} mt-1 w-24`} value={groupCount} onChange={(event) => setGroupCount(Number(event.target.value))} /></label>
+      <label className="text-sm">组数（偶数 2–8）<input aria-label="Group count" type="number" min={2} max={8} step={2} className={`${fieldInput} mt-1 w-24`} value={groupCount} onChange={(event) => setGroupCount(Number(event.target.value))} /></label>
       <button className="btn-primary" disabled={busy}>{busy ? "创建中…" : "创建并开放加入"}</button>
     </div>
     {error && <div className="mt-3"><RequestError>{error}</RequestError></div>}
   </form>;
 }
 
-function LiveAnswerKey({ experiment, onSaved }: { experiment: LiveExperiment; onSaved: () => Promise<void> }) {
-  const [gold, setGold] = useState(experiment.gold.length ? experiment.gold : [blankRow()]);
+function LiveAnswerKey({ experiment, paper, paperIndex, onSaved }: { experiment: LiveExperiment; paper: LiveExperiment["papers"][number]; paperIndex: number; onSaved: () => Promise<void> }) {
+  const [gold, setGold] = useState(paper.gold.length ? paper.gold : [blankLiveRow()]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   return <details className="mt-4 rounded-lg border border-ink-200 p-4">
-    <summary className="cursor-pointer text-sm font-medium text-ink-700">{experiment.gold.length ? `标准答案（${experiment.gold.length} 条记录）` : "设置标准答案（用于准确率评分）"}</summary>
+    <summary className="cursor-pointer text-sm font-medium text-ink-700">{paper.gold.length ? `标准答案（${paper.gold.length} 条记录）` : "设置标准答案（用于准确率评分）"}</summary>
     <div className="mt-3 flex flex-wrap gap-3">
       <label className="btn cursor-pointer">上传答案表<input aria-label="Upload answer key" type="file" accept=".csv,.tsv,.xlsx" className="sr-only" disabled={busy} onChange={async (event) => {
         const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
         setBusy(true); setError("");
-        try { setGold(await uploadTable(file)); } catch (cause) { setError(requestErrorMessage(cause, "Upload failed")); } finally { setBusy(false); }
+        try { setGold(await uploadLiveTable(file)); } catch (cause) { setError(requestErrorMessage(cause, "Upload failed")); } finally { setBusy(false); }
       }} /></label>
-      <a className="btn" href="/api/teaching/lab/table">下载模板</a>
+      <a className="btn" href="/api/teaching/live/table">下载完整字段模板</a>
     </div>
-    <div className="mt-3"><SimpleRows rows={gold} label="Answer key" disabled={busy} onChange={setGold} /></div>
+    <p className="mt-3 text-xs text-ink-500">答案需覆盖全部 {LIVE_EXTRACTION_FIELDS.length} 个字段；文献未提及的字段填 /。</p>
+    <div className="mt-3"><LiveRows rows={gold} label="Answer key" disabled={busy} onChange={setGold} /></div>
     <button className="btn-primary mt-3" disabled={busy} onClick={async () => {
       setBusy(true); setError("");
-      try { await post({ action: "gold", experimentId: experiment.id, gold }); await onSaved(); }
+      try { await post({ action: "gold", experimentId: experiment.id, paperIndex, gold }); await onSaved(); }
       catch (cause) { setError(requestErrorMessage(cause, "Save failed")); } finally { setBusy(false); }
     }}>{busy ? "保存中…" : "保存答案并评分"}</button>
     {error && <div className="mt-3"><RequestError>{error}</RequestError></div>}
@@ -164,13 +185,13 @@ function LiveAnswerKey({ experiment, onSaved }: { experiment: LiveExperiment; on
 
 function LiveResults({ dashboard, reviewId, reviewCell, onSelect }: { dashboard: LiveDashboard; reviewId: string | null; reviewCell: string | null; onSelect: (id: string | null, cellKey?: string | null) => void }) {
   const groups = Array.from({ length: dashboard.experiment.groupCount }, (_, index) => index + 1);
-  const hasGold = dashboard.experiment.gold.length > 0;
+  const hasGold = dashboard.participants.some((item) => dashboard.experiment.papers[item.paperIndex]?.gold.length);
   return <section className="space-y-4">
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       {groups.map((groupNo) => {
         const members = dashboard.participants.filter((item) => item.groupNo === groupNo);
         const submitted = members.filter((item) => item.status === "submitted");
-        const scored = hasGold ? submitted.filter((item) => item.score) : [];
+        const scored = submitted.filter((item) => item.score && dashboard.experiment.papers[item.paperIndex]?.gold.length);
         const avgAccuracy = scored.length ? scored.reduce((sum, item) => sum + item.score!.accuracy, 0) / scored.length : null;
         const timed = submitted.filter((item) => item.elapsedSeconds != null);
         const avgSeconds = timed.length ? timed.reduce((sum, item) => sum + item.elapsedSeconds!, 0) / timed.length : null;
@@ -187,7 +208,7 @@ function LiveResults({ dashboard, reviewId, reviewCell, onSelect }: { dashboard:
     <div className="overflow-x-auto rounded-xl border border-ink-200 bg-white">
       <table aria-label="Combined group results" className="w-full text-left text-sm">
         <thead className="bg-ink-50 text-xs text-ink-600"><tr>
-          {["Group", "Student", "Record", ...TEACHING_FIELDS.map(({ key }) => FIELD_LABELS[key]), "审阅"].map((label) => <th key={label} className="whitespace-nowrap px-3 py-3">{label}</th>)}
+          {["Group", "Student", "Record", ...LIVE_EXTRACTION_FIELDS.map(({ label }) => label), "审阅"].map((label) => <th key={label} className="whitespace-nowrap px-3 py-3">{label}</th>)}
         </tr></thead>
         <tbody>
           {dashboard.participants.map((item) => {
@@ -196,7 +217,7 @@ function LiveResults({ dashboard, reviewId, reviewCell, onSelect }: { dashboard:
             if (item.status !== "submitted" || !item.rows.length) {
               return <tr key={item.id} className={`border-t border-ink-100 ${GROUP_COLORS[((item.groupNo ?? 1) - 1) % GROUP_COLORS.length]}`}>
                 <td className="px-3 py-3 font-medium">G{item.groupNo}</td><td className="px-3 py-3">{item.alias}</td>
-                <td colSpan={7} className="px-3 py-3 text-xs text-ink-500">{item.status === "extracting" ? "AI 提取中…" : item.status === "review" ? "校对中" : "尚未提交"}</td>
+                <td colSpan={LIVE_EXTRACTION_FIELDS.length + 1} className="px-3 py-3 text-xs text-ink-500">{item.status === "extracting" ? "AI 提取中…" : item.status === "review" ? "校对中" : "尚未提交"}</td>
                 <td className="px-3 py-3 text-xs text-ink-400">—</td>
               </tr>;
             }
@@ -204,11 +225,11 @@ function LiveResults({ dashboard, reviewId, reviewCell, onSelect }: { dashboard:
               {rowIndex === 0 && <>
                 <td rowSpan={item.rows.length} className="px-3 py-3 align-top font-medium">G{item.groupNo}</td>
                 <td rowSpan={item.rows.length} className="max-w-32 break-words px-3 py-3 align-top">{item.alias}
-                  <span className="mt-1 block text-xs font-normal text-ink-500">{minutes(item.elapsedSeconds)}{hasGold && item.score ? ` · ${accuracy(item.score.accuracy)}` : ""}</span>
+                  <span className="mt-1 block text-xs font-normal text-ink-500">{minutes(item.elapsedSeconds)}{dashboard.experiment.papers[item.paperIndex]?.gold.length && item.score ? ` · ${accuracy(item.score.accuracy)}` : ""}</span>
                 </td>
               </>}
               <td className="px-3 py-2 tabular-nums text-ink-500">{rowIndex + 1}</td>
-              {TEACHING_FIELDS.map(({ key }) => {
+              {LIVE_EXTRACTION_FIELDS.map(({ key }) => {
                 const cellKey = `${rowIndex}:${key}`;
                 const mark = marks.get(cellKey);
                 const selected = reviewId === item.id && reviewCell === cellKey;
@@ -224,7 +245,7 @@ function LiveResults({ dashboard, reviewId, reviewCell, onSelect }: { dashboard:
               </td>}
             </tr>);
           })}
-          {!dashboard.participants.length && <tr><td colSpan={10} className="px-4 py-8 text-center text-sm text-ink-500">还没有学生加入。</td></tr>}
+          {!dashboard.participants.length && <tr><td colSpan={LIVE_EXTRACTION_FIELDS.length + 4} className="px-4 py-8 text-center text-sm text-ink-500">还没有学生加入。</td></tr>}
         </tbody>
       </table>
     </div>
@@ -254,7 +275,7 @@ function LiveReview({ participant, focusKey, onFocus, onClose, onSaved }: { part
       <button className="btn" onClick={onClose}>收起</button>
     </header>
     {focused ? <div className="mt-4 rounded-xl border-2 border-brand-200 bg-brand-50/50 p-5">
-      <p className="text-xs font-medium uppercase tracking-wide text-brand-700">当前单元格 · 记录 {focused.answerRow! + 1} · {FIELD_LABELS[focused.field]}</p>
+      <p className="text-xs font-medium uppercase tracking-wide text-brand-700">当前单元格 · 记录 {focused.answerRow! + 1} · {LIVE_FIELD_LABELS[focused.field]}</p>
       <div className="mt-2 flex flex-wrap gap-x-8 gap-y-1 text-sm">
         <p><span className="text-ink-500">学生答案：</span><strong>{focused.actual || "Missing"}</strong></p>
         <p><span className="text-ink-500">标准答案：</span>{focused.expected || "—（未设答案，请直接判断）"}</p>
@@ -274,7 +295,7 @@ function LiveReview({ participant, focusKey, onFocus, onClose, onSaved }: { part
       <tbody>{cells.map((cell) => <tr key={cell.key} className={`border-t border-ink-100 ${focused?.key === cell.key ? "bg-brand-50/70" : ""} ${cell.answerRow != null ? "cursor-pointer" : ""}`}
         onClick={() => { if (cell.answerRow != null) onFocus(`${cell.answerRow}:${cell.field}`); }}>
         <td className="px-3 py-2 text-xs">{cell.goldRow == null ? "Extra" : cell.goldRow + 1} / {cell.answerRow == null ? "Missing" : cell.answerRow + 1}</td>
-        <td className="whitespace-nowrap px-3 py-2">{FIELD_LABELS[cell.field]}</td>
+        <td className="whitespace-nowrap px-3 py-2">{LIVE_FIELD_LABELS[cell.field]}</td>
         <td className="max-w-40 break-words px-3 py-2">{cell.expected || "—"}</td>
         <td className="max-w-40 break-words px-3 py-2">{cell.actual || "Missing"}</td>
         <td className={`px-3 py-2 text-xs ${cell.machineCorrect ? "text-emerald-700" : "text-rose-700"}`}>{cell.machineCorrect ? "Match" : "Unmatched"}</td>
@@ -291,7 +312,7 @@ function LiveReview({ participant, focusKey, onFocus, onClose, onSaved }: { part
     <label className="mt-4 block text-xs text-ink-600">审阅备注<textarea maxLength={1000} value={note} onChange={(event) => setNote(event.target.value)} className={`${fieldInput} mt-1 py-2`} placeholder="说明判分依据，学生会看到这条备注" /></label>
     <button className="btn-primary mt-3" disabled={busy} onClick={async () => {
       setBusy(true); setError("");
-      try { await post({ action: "review", participantId: participant.id, version: participant.version, overrides, note }); await onSaved(); }
+      try { await post({ action: "review", participantId: participant.id, version: participant.version, round: participant.round, overrides, note }); await onSaved(); }
       catch (cause) { setError(requestErrorMessage(cause, "Save failed")); } finally { setBusy(false); }
     }}>{busy ? "保存中…" : "保存审阅结果"}</button>
     {error && <div className="mt-3"><RequestError>{error}</RequestError></div>}

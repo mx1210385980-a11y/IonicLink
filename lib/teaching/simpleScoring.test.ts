@@ -12,6 +12,7 @@ assert.equal(simpleCellMatches("load", "1 mN", "1 MN"), false);
 assert.equal(simpleCellMatches("cof", "0.1", "0.11"), false);
 assert.equal(simpleCellMatches("anion", "", ""), false);
 assert.equal(simpleCellMatches("anion", "NR", "未报告"), true);
+assert.equal(simpleCellMatches("roughness", "/", "未提及"), true);
 const initial = scoreSimpleRows([a], [{ ...a, cof: "0.2" }]);
 const overridden = scoreSimpleRows([a], [{ ...a, cof: "0.2" }], { [initial.cells.find(cell => cell.field === "cof")!.key]: true });
 assert.equal(overridden.machineAccuracy, 5 / 6);

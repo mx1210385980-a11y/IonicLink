@@ -17,10 +17,10 @@ export type SimplePaperTask = {
   id: string; experimentId: string; sourceId: string; paperTitle: string; fingerprint: string;
   gold: SimpleRow[]; version: number; createdAt: string;
 };
-export type SimpleCellScore = { key: string; goldRow: number | null; answerRow: number | null;
-  field: TeachingFieldKey; expected: string; actual: string; machineCorrect: boolean; correct: boolean };
-export type SimpleScore = { version: "field-overlap-v1"; denominator: number; machineCorrect: number;
-  correct: number; machineAccuracy: number; accuracy: number; cells: SimpleCellScore[] };
+export type SimpleCellScore<FieldKey extends string = TeachingFieldKey> = { key: string; goldRow: number | null; answerRow: number | null;
+  field: FieldKey; expected: string; actual: string; machineCorrect: boolean; correct: boolean };
+export type SimpleScore<FieldKey extends string = TeachingFieldKey> = { version: "field-overlap-v1"; denominator: number; machineCorrect: number;
+  correct: number; machineAccuracy: number; accuracy: number; cells: SimpleCellScore<FieldKey>[] };
 export type SimpleStudent = {
   learnerId?: string; groupNo?: number; roundNo?: number; paperNo?: number;
   taskId?: string;

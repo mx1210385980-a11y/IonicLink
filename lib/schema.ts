@@ -275,6 +275,31 @@ export function provenanceBadge(p?: FieldProvenance): string {
   return loc;
 }
 
+/** Compact evidence label that says where an inferred value came from. */
+export function evidenceBasisLabel(p?: FieldProvenance): string {
+  if (!p?.basis) return "Unassessed";
+  if (p.basis === "inferred") {
+    const source = p.figure || p.table || p.section || (p.page != null ? `p.${p.page}` : "");
+    return source ? `Inferred from ${source}` : "Inferred";
+  }
+  return p.basis === "assumed" ? "Assumed" : "Direct";
+}
+
+/** Hover-ready explanation, including the curator's inference/assumption note. */
+export function describeEvidenceBasis(p?: FieldProvenance): string {
+  if (!p) return "No provenance recorded.";
+  const label = evidenceBasisLabel(p);
+  if (p.basisNote) return `${label}: ${p.basisNote}`;
+  if (p.basis === "inferred") {
+    if (p.figure) return `${label}. Derived from the figure rather than explicitly stated for this measurement.`;
+    if (p.table) return `${label}. Derived from the table rather than explicitly stated for this measurement.`;
+    return `${label}. Stated elsewhere in the source and presumed to apply to this measurement.`;
+  }
+  if (p.basis === "assumed") return `${label}. Not stated in the source; supplied by assumption or convention.`;
+  if (p.basis === "direct") return "Direct evidence. Explicitly stated for this measurement.";
+  return "Unassessed evidence. Its support for this measurement has not been reviewed.";
+}
+
 /* ------------------------------------------------------------------ */
 /* Batch jobs — server-side PDF upload queue.                         */
 /* ------------------------------------------------------------------ */
@@ -475,7 +500,7 @@ export const EXTRACTION_TOOL_SCHEMA = {
                 },
                 basisNote: {
                   type: "string",
-                  description: "For inferred values: what the inference rests on, e.g. 'stated for the CV measurements, not restated for AFM friction'.",
+                  description: "For inferred or assumed values: the exact reasoning or convention, e.g. 'read from the friction curve in Fig. 4a' or 'room-temperature convention because temperature is not stated'.",
                 },
               },
               required: ["field"],

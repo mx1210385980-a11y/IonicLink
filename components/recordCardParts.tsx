@@ -1,6 +1,6 @@
 "use client";
 
-import { formatProvenance, provenanceBadge, type FieldProvenance } from "@/lib/schema";
+import { describeEvidenceBasis, formatProvenance, provenanceBadge, type FieldProvenance } from "@/lib/schema";
 import { standardizeIonFormula, standardizeIonLabel, type IonKind } from "@/lib/ionStructures";
 import { rawLabel, stdLabel, stdRangeParts, type Quantity } from "@/lib/units";
 import { DEFAULT_DOMAIN, type Domain } from "@/lib/domain";
@@ -220,7 +220,7 @@ export function ConditionChip({
         data-testid="evidence-click-target"
         onClick={() => openRecordEvidence({ sourceId, recordId, field: item.field ?? item.label, value: item.value, prov: item.prov!, domain })}
         className={className}
-        title={`${item.title ?? item.value} · evidence available`}
+        title={`${item.title ?? item.value} · ${item.prov.basis === "inferred" || item.prov.basis === "assumed" ? describeEvidenceBasis(item.prov) : "evidence available"}`}
         aria-label={`Open evidence for ${item.field ?? item.label}`}
       >
         {content}
@@ -291,9 +291,11 @@ export function ProvBadge({
 }
 
 function evidencePreview(p: FieldProvenance): string {
-  const raw = p.quote || p.context || p.basisNote || formatProvenance(p);
+  const raw = p.basis === "inferred" || p.basis === "assumed"
+    ? describeEvidenceBasis(p)
+    : p.quote || p.context || p.basisNote || formatProvenance(p);
   const text = raw.replace(/\s+/g, " ").trim();
-  return text.length > 96 ? `${text.slice(0, 94)}…` : text;
+  return text.length > 160 ? `${text.slice(0, 158)}…` : text;
 }
 
 export function MissingChip({ label }: { label: string }) {

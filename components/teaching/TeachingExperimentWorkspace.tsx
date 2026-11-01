@@ -1,6 +1,6 @@
-import { ModelPreview } from "@/components/design/ModelPreview";
 import { LiveTeacher } from "@/components/teaching/LiveTeacher";
 import { LiveStudent } from "@/components/teaching/LiveStudent";
+import { PredictionStudentWorkspace, PredictionTeacherWorkspace } from "@/components/teaching/PredictionSubmissions";
 import type { ReactNode } from "react";
 
 function TeachingExperimentShell({ children }: { children: ReactNode }) {
@@ -25,12 +25,12 @@ export function TeachingExtractionExperiment({ isAdmin = false }: { isAdmin?: bo
   );
 }
 
-export function TeachingPredictionExperiment() {
+export function TeachingPredictionExperiment({ isAdmin = false }: { isAdmin?: boolean }) {
   return (
     <TeachingExperimentShell>
       <section id="prediction" aria-labelledby="prediction-title" className="border-t-4 border-indigo-500 pt-4">
         <h2 id="prediction-title" className="mb-4 text-xl font-semibold text-indigo-900">Experiment Ⅱ- Prediction of μ</h2>
-        <ModelPreview embedded />
+        {isAdmin ? <PredictionTeacherWorkspace /> : <PredictionStudentWorkspace />}
       </section>
     </TeachingExperimentShell>
   );
