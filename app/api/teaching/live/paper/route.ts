@@ -14,13 +14,16 @@ async function paperForCaller(request: NextRequest): Promise<string> {
   if (!caller) throw Object.assign(new Error("Sign in first."), { status: 401 });
   if (caller.admin) {
     const id = String(request.nextUrl.searchParams.get("experimentId") ?? "");
-    return getLiveExperiment(id).paperSourceId;
+    const experiment = getLiveExperiment(id);
+    const paperIndex = Number(request.nextUrl.searchParams.get("paperIndex") ?? experiment.currentRound);
+    if (!Number.isInteger(paperIndex) || !experiment.papers[paperIndex]) throw new Error("Invalid paper number.");
+    return experiment.papers[paperIndex].sourceId;
   }
   const own = findLiveParticipant(caller.userKey);
   if (!own) throw Object.assign(new Error("Join the experiment first."), { status: 403 });
   const experiment = getLiveExperiment(own.experimentId);
   if (experiment.status === "open") throw new Error("The paper is available once the experiment starts");
-  return experiment.paperSourceId;
+  return experiment.papers[own.paperIndex]?.sourceId ?? "";
 }
 
 export async function GET(request: NextRequest) {
@@ -52,9 +55,10 @@ export async function POST(request: NextRequest) {
     const form = await request.formData();
     const file = form.get("file");
     const experimentId = String(form.get("experimentId") ?? "");
+    const paperIndex = Number(form.get("paperIndex") ?? 0);
     if (!(file instanceof File)) throw new Error("Select a PDF.");
     if (file.size > 20 * 1024 * 1024) return NextResponse.json({ error: "The file exceeds 20 MB." }, { status: 413 });
     const paper = await saveStudentUploadedPdf(file.name, new Uint8Array(await file.arrayBuffer()));
-    return NextResponse.json(setLivePaper(experimentId, { sourceId: paper.id, paperTitle: paper.filename }));
+    return NextResponse.json(setLivePaper(experimentId, { sourceId: paper.id, paperTitle: paper.filename, paperIndex }));
   } catch (error) { return labError(error); }
 }

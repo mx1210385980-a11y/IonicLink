@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { formatProvenance, provenanceBadge } from "./schema";
+import { describeEvidenceBasis, evidenceBasisLabel, formatProvenance, provenanceBadge } from "./schema";
 import { ingest, toFields } from "./ingest";
 
 /**
@@ -22,6 +22,16 @@ const formatted = formatProvenance({
   basisNote: "stated for the CV measurements, not AFM friction",
 });
 assert.ok(formatted.includes("inferred evidence (stated for the CV measurements, not AFM friction)"), formatted);
+
+// Weak-evidence labels and hover text expose the actual source and rationale.
+assert.equal(evidenceBasisLabel({ figure: "Fig. 4a", basis: "inferred" }), "Inferred from Fig. 4a");
+assert.equal(evidenceBasisLabel({ table: "Table 2", basis: "inferred" }), "Inferred from Table 2");
+assert.equal(describeEvidenceBasis({ figure: "Fig. 4a", basis: "inferred", basisNote: "read from the friction curve" }),
+  "Inferred from Fig. 4a: read from the friction curve");
+assert.match(describeEvidenceBasis({ table: "Table 2", basis: "inferred" }), /Derived from the table/);
+assert.equal(describeEvidenceBasis({ basis: "assumed", basisNote: "room-temperature convention" }),
+  "Assumed: room-temperature convention");
+assert.match(describeEvidenceBasis({ basis: "assumed" }), /Not stated in the source/);
 
 // Ingest round-trip: basis/basisNote are kept, invalid basis values are
 // dropped, and a basis-only entry (assumption with no location) survives.

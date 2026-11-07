@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { extractRecords, isLiveExtractionEnabled } from "@/lib/extract";
 import { pagesToTaggedText, renderPdfPage } from "@/lib/pdf";
-import { readSimplePaper, readSimplePdf, recordToSimpleRow } from "@/lib/teaching/simplePapers";
+import { readSimplePaper, readSimplePdf } from "@/lib/teaching/simplePapers";
+import { recordToLiveRow } from "@/lib/teaching/liveFields";
 import { failLiveExtraction, findLiveParticipant, finishLiveExtraction, getLiveExperiment, startLiveExtraction } from "@/lib/teaching/liveStore";
 import { rejectCrossOriginMutation } from "../../_auth";
 import { labBody, labError } from "../../lab/_helpers";
@@ -24,10 +25,11 @@ export async function POST(request: NextRequest) {
     if (own.id !== body.participantId) return NextResponse.json({ error: "You can only run your own extraction." }, { status: 403 });
     if (own.mode !== "ai") return NextResponse.json({ error: "AI extraction is available only to AI groups." }, { status: 403 });
     const experiment = getLiveExperiment(own.experimentId);
-    if (!experiment.paperSourceId) throw new Error("The instructor has not uploaded the paper yet.");
+    const assignedPaper = experiment.papers[own.paperIndex];
+    if (!assignedPaper?.sourceId) throw new Error("The instructor has not uploaded this round's paper yet.");
     if (!isLiveExtractionEnabled()) return NextResponse.json({ error: "The extraction service is not configured. Ask your instructor to configure a model." }, { status: 503 });
-    const paper = await readSimplePaper(experiment.paperSourceId);
-    const started = startLiveExtraction(own.id, body.version);
+    const paper = await readSimplePaper(assignedPaper.sourceId);
+    const started = startLiveExtraction(own.id, Number(body.version));
     runningId = own.id;
     runningVersion = started.version;
     let pdf: Uint8Array | undefined;
@@ -35,7 +37,7 @@ export async function POST(request: NextRequest) {
       renderPage: async (page, scale) => { pdf ??= await readSimplePdf(paper.id); return renderPdfPage(pdf, page, scale); },
     });
     if (!result.records.length) throw new Error("No reviewable records were extracted. Retry or ask your instructor to check the paper.");
-    return NextResponse.json(finishLiveExtraction(own.id, runningVersion, result.records.map((record) => recordToSimpleRow(record))));
+    return NextResponse.json(finishLiveExtraction(own.id, runningVersion, result.records.map((record) => recordToLiveRow(record))));
   } catch (error) {
     if (runningVersion !== null && runningId) {
       try { failLiveExtraction(runningId, runningVersion, "Extraction did not finish. Retry; elapsed time is preserved."); } catch { /* A newer request already recovered this attempt. */ }

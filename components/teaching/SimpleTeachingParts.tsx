@@ -1,5 +1,6 @@
 "use client";
 import { TEACHING_FIELDS, type SimpleMode, type SimpleRow, type SimpleStudent } from "@/lib/teaching/simpleShared";
+import type { LiveRow } from "@/lib/teaching/liveFields";
 import { requestJson } from "@/components/request";
 
 export const FIELD_LABELS = { cation: "Cation", anion: "Anion", substrate: "Substrate", temperature: "Temperature", load: "Load", cof: "Coefficient of friction" };
@@ -21,6 +22,11 @@ export function labPost<T>(body: object, url = "/api/teaching/lab"): Promise<T> 
 export async function uploadTable(file: File): Promise<SimpleRow[]> {
   const form = new FormData(); form.set("file", file);
   const result = await requestJson<{ rows: SimpleRow[] }>("/api/teaching/lab/table", { method: "POST", body: form }, "Could not read table");
+  return result.rows;
+}
+export async function uploadLiveTable(file: File): Promise<LiveRow[]> {
+  const form = new FormData(); form.set("file", file);
+  const result = await requestJson<{ rows: LiveRow[] }>("/api/teaching/live/table", { method: "POST", body: form }, "Could not read table");
   return result.rows;
 }
 export async function signOutTeaching() {

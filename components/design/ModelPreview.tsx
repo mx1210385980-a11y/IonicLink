@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   MODEL_PREVIEW_BASE_MODEL_KEYS,
   MODEL_PREVIEW_STRATEGY_DEFAULTS,
@@ -1262,7 +1262,67 @@ function baseKeyFromSelection(selected: BaseModelName[]) {
   return BASE_MODEL_ORDER.filter((name) => selected.includes(name)).join("+");
 }
 
-export function ModelPreview({ embedded = false }: { embedded?: boolean }) {
+export type ModelPreviewCaptureControls = {
+  capture: () => Promise<string>;
+  parameters: ModelPreviewRequest;
+};
+
+type RasterizedChart = { image: HTMLImageElement; width: number; height: number; title: string };
+
+function rasterizeChart(svg: SVGSVGElement): Promise<RasterizedChart> {
+  const clone = svg.cloneNode(true) as SVGSVGElement;
+  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  const viewBox = svg.viewBox.baseVal;
+  const width = viewBox?.width || svg.clientWidth || 320;
+  const height = viewBox?.height || svg.clientHeight || 240;
+  clone.setAttribute("width", String(width));
+  clone.setAttribute("height", String(height));
+  const xml = new XMLSerializer().serializeToString(clone);
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve({
+      image,
+      width: Math.round(width * 2),
+      height: Math.round(height * 2),
+      title: svg.closest("figure")?.querySelector("figcaption")?.textContent?.trim() || "Model chart",
+    });
+    image.onerror = () => reject(new Error("The current chart could not be captured. Try again."));
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(xml)}`;
+  });
+}
+
+async function captureCharts(root: HTMLElement | null): Promise<string> {
+  const svgElements = Array.from(root?.querySelectorAll("svg") ?? []);
+  if (!svgElements.length) throw new Error("The charts are not ready yet.");
+  const charts = await Promise.all(svgElements.map(rasterizeChart));
+  const gap = 24;
+  const padding = 24;
+  const titleHeight = 42;
+  const canvas = document.createElement("canvas");
+  canvas.width = padding * 2 + charts.reduce((sum, chart) => sum + chart.width, 0) + gap * (charts.length - 1);
+  canvas.height = padding * 2 + titleHeight + Math.max(...charts.map((chart) => chart.height));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("PNG capture is not available in this browser.");
+  context.fillStyle = "#f8fafc";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  let x = padding;
+  for (const chart of charts) {
+    context.fillStyle = "#0f172a";
+    context.font = "600 22px Arial, sans-serif";
+    context.textBaseline = "middle";
+    context.fillText(chart.title, x, padding + titleHeight / 2, chart.width);
+    context.drawImage(chart.image, x, padding + titleHeight, chart.width, chart.height);
+    x += chart.width + gap;
+  }
+  const dataUrl = canvas.toDataURL("image/png");
+  if (!dataUrl.startsWith("data:image/png;base64,")) throw new Error("The browser did not create a PNG screenshot.");
+  return dataUrl;
+}
+
+export function ModelPreview({ embedded = false, children }: {
+  embedded?: boolean;
+  children?: (controls: ModelPreviewCaptureControls) => ReactNode;
+}) {
   const [selectedBase, setSelectedBase] = useState<BaseModelName[]>(["catboost", "forest", "xgboost"]);
   const [dualControls, setDualControls] = useState({ weight: MODEL_PREVIEW_STRATEGY_DEFAULTS.dual.weight });
   const [activeRegion, setActiveRegion] = useState<RegionId | null>(null);
@@ -1333,6 +1393,9 @@ export function ModelPreview({ embedded = false }: { embedded?: boolean }) {
   const resultRef = useRef<ModelPreviewResult | null>(null);
   const appliedSummaryRef = useRef("");
   const hasAppliedTrendRef = useRef(false);
+  const chartsRef = useRef<HTMLDivElement | null>(null);
+  const capture = useCallback(() => captureCharts(chartsRef.current), []);
+  const captureParameters = useMemo<ModelPreviewRequest>(() => ({ strategy, options: activeOptions }), [activeOptions, strategy]);
 
   useEffect(() => {
     resultRef.current = result;
@@ -1356,7 +1419,7 @@ export function ModelPreview({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <section className={`space-y-3 ${embedded ? "[container-type:inline-size] [container-name:teaching-prediction]" : ""}`}>
-      <div className="model-preview-charts grid gap-3 lg:grid-cols-2">
+      <div ref={chartsRef} className="model-preview-charts grid gap-3 lg:grid-cols-2">
         <FitChart result={visibleResult} previousResult={previousRun?.result} activeRegion={activeRegion} strategy={strategy} options={activeOptions} />
         <LiteratureChart result={visibleResult} />
       </div>
@@ -1498,6 +1561,7 @@ export function ModelPreview({ embedded = false }: { embedded?: boolean }) {
           )}
         </div>
       </section>
+      {children?.({ capture, parameters: captureParameters })}
     </section>
   );
 }
