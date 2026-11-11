@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { renderPdfPage } from "@/lib/pdf";
-import { readSimplePaper, readSimplePdf, saveStudentUploadedPdf } from "@/lib/teaching/simplePapers";
+import { readSimplePaper, readSimplePdf, saveStudentUploadedPdf, simplePaperFingerprint } from "@/lib/teaching/simplePapers";
 import { findLiveParticipant, getLiveExperiment, setLivePaper } from "@/lib/teaching/liveStore";
 import { rejectCrossOriginMutation } from "../../_auth";
 import { labError } from "../../lab/_helpers";
 import { liveCaller } from "../_auth";
+import { readLiveForm } from "../_form";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,12 +50,18 @@ export async function POST(request: NextRequest) {
     const caller = await liveCaller(request);
     if (!caller) return NextResponse.json({ error: "Sign in first." }, { status: 401 });
     if (!caller.admin) return NextResponse.json({ error: "Only the instructor uploads the experiment paper." }, { status: 403 });
-    const form = await request.formData();
+    const form = await readLiveForm(request, 20 * 1024 * 1024);
     const file = form.get("file");
     const experimentId = String(form.get("experimentId") ?? "");
+    const experiment = getLiveExperiment(experimentId);
+    if (experiment.status !== "open") throw new Error("The paper is fixed once the experiment starts.");
     if (!(file instanceof File)) throw new Error("Select a PDF.");
     if (file.size > 20 * 1024 * 1024) return NextResponse.json({ error: "The file exceeds 20 MB." }, { status: 413 });
     const paper = await saveStudentUploadedPdf(file.name, new Uint8Array(await file.arrayBuffer()));
+    if (experiment.previousRoundId) {
+      const previous = await readSimplePaper(getLiveExperiment(experiment.previousRoundId).paperSourceId);
+      if (simplePaperFingerprint(previous.pages) === paper.fingerprint) throw new Error("Use a different paper for round 2, not a renamed copy of round 1.");
+    }
     return NextResponse.json(setLivePaper(experimentId, { sourceId: paper.id, paperTitle: paper.filename }));
   } catch (error) { return labError(error); }
 }

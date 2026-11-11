@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 
 const railSource = readFileSync("components/WorkspaceNavigationRail.tsx", "utf8");
 const workspaceSource = readFileSync("components/ExtractionWorkspaceView.tsx", "utf8");
+const frameSource = readFileSync("components/WorkspacePageFrame.tsx", "utf8");
 const topNavSource = readFileSync("components/TopNav.tsx", "utf8");
 const rootLayoutSource = readFileSync("app/layout.tsx", "utf8");
 
@@ -29,7 +30,10 @@ assert.match(railSource, /max-w-\[130px\] truncate/, "long user names are trunca
 assert.match(railSource, /href="\/account"[\s\S]{0,500}Account settings/, "the account menu links to the account settings page");
 assert.match(railSource, /authClient\.signOut\(\)/, "the account menu offers sign-out");
 assert.doesNotMatch(railSource, /function BrandMark|function DomainIcon/, "the rail no longer carries the old mixed icon families");
-assert.match(workspaceSource, /max-w-\[1240px\]/, "Extract shares the centered workspace content width");
+assert.match(workspaceSource, /<WorkspacePageFrame/, "Extract uses the shared workspace frame");
+assert.match(frameSource, /max-w-\[1240px\]/, "the shared frame provides the centered workspace width");
+assert.match(readFileSync("app/afm/page.tsx", "utf8"), /<WorkspacePageFrame/, "AFM uses the same page frame without changing its curve components");
+assert.match(readFileSync("components/teaching/TeachingExperimentWorkspace.tsx", "utf8"), /<WorkspacePageFrame/, "teaching uses the same page frame");
 assert.match(railSource, /label="Home" active=\{onHomePage\}/, "Home is active on the canonical overview");
 assert.match(railSource, /href="\/" label="Home"/, "desktop Home links to the canonical overview");
 assert.match(topNavSource, /: "\/";/, "mobile Home links to the same overview");

@@ -225,10 +225,11 @@ export function ConductivityCard({
 
   return (
     <article
-      className={`record-card-unified-text group relative grid overflow-hidden rounded-xl border bg-white transition duration-300 xl:grid-cols-[72px_minmax(0,1.18fr)_minmax(0,1.62fr)] ${
+      data-workspace-theme="school"
+      className={`record-card-unified-text group relative grid overflow-hidden rounded-xl border bg-white transition-colors xl:grid-cols-[72px_minmax(0,1.18fr)_minmax(0,1.62fr)] ${
         selected
           ? "border-brand-300 shadow-card ring-1 ring-brand-200"
-          : "border-ink-200/80 shadow-sm hover:-translate-y-px hover:border-brand-200 hover:shadow-card"
+          : "border-[#dce0e4] shadow-[0_2px_8px_rgba(24,39,48,0.025)] hover:border-brand-200"
       }`}
     >
       {selected && <span className="absolute inset-y-0 left-0 z-10 w-[3px] bg-brand-500" />}

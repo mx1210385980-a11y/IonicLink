@@ -1,5 +1,7 @@
 "use client";
 
+import { SCHOOL_SECTION_HEADER } from "../workspaceStyles";
+
 import { useMemo, useRef, useState, type DragEvent, type MouseEvent } from "react";
 import type { AfmAutomaticAxisCalibration } from "@/lib/afm/axisCalibration";
 import { calibrateAfmPoints, type AfmDigitizationAnalysis, type AfmNormalizedPoint, type AfmPlotBox } from "@/lib/afm/digitizeCurve";
@@ -200,10 +202,10 @@ export function AfmDigitizationWorkspace() {
 
   return (
     <section className="panel overflow-hidden" data-testid="afm-digitization-workspace">
-      <div className="border-b border-ink-200 bg-gradient-to-r from-cyan-50/80 via-white to-brand-50/60 px-4 py-4 sm:px-6 sm:py-5">
+      <div className={`${SCHOOL_SECTION_HEADER} px-4 py-4 sm:px-6 sm:py-5`}>
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="max-w-3xl">
-            <p className="label-eyebrow text-cyan-700">AFM curve digitization</p>
+            <p className="label-eyebrow text-brand-700">AFM curve digitization</p>
             <h2 className="mt-1 text-xl font-semibold tracking-tight text-ink-950">Digitize curves from papers or figure images</h2>
             <p className="mt-1 text-sm leading-6 text-ink-600">
               Upload a PDF or image. The platform locates figure pages, separates panels, extracts curves, and inherits physical axes and units when traceable evidence is available. Results enter the AI review queue automatically; manual controls are reserved for low-confidence exceptions.
@@ -221,7 +223,7 @@ export function AfmDigitizationWorkspace() {
       <div className="p-4 sm:p-6">
         {!result ? (
           <div
-            className={`grid min-h-64 place-items-center rounded-2xl border-2 border-dashed px-5 py-10 text-center transition ${dragging ? "border-cyan-500 bg-cyan-50" : "border-ink-200 bg-ink-50/55 hover:border-cyan-300 hover:bg-cyan-50/40"}`}
+            className={`grid min-h-64 place-items-center rounded-xl border-2 border-dashed px-5 py-10 text-center transition ${dragging ? "border-[#00888a] bg-brand-50" : "border-[#00888a]/50 bg-[#f8fbfb] hover:border-[#00888a] hover:bg-brand-50"}`}
             onDragEnter={(event) => { event.preventDefault(); setDragging(true); }}
             onDragOver={(event) => event.preventDefault()}
             onDragLeave={(event) => { if (event.currentTarget === event.target) setDragging(false); }}
@@ -232,19 +234,19 @@ export function AfmDigitizationWorkspace() {
             }}
           >
             <div>
-              <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-cyan-100 text-cyan-800"><UploadIcon /></div>
+              <div className="mx-auto grid h-12 w-12 place-items-center rounded-xl border border-[#dce0e4] bg-white text-[#00888a]"><UploadIcon /></div>
               <h3 className="mt-4 text-lg font-semibold text-ink-950">Drop in a paper or an AFM curve image</h3>
               <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-ink-600">PDF pages are screened for credible force–distance or force–separation figures before digitization. Images are analysed directly.</p>
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => inputRef.current?.click()}
-                className="mt-5 inline-flex min-h-11 items-center justify-center rounded-xl bg-ink-950 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-ink-800 focus:outline-none focus:ring-2 focus:ring-cyan-300 disabled:cursor-wait disabled:opacity-60"
+                className="btn-primary mt-5 disabled:cursor-wait disabled:opacity-60"
               >
                 {busy ? "Analysing figure pages and curves…" : "Choose PDF or image"}
               </button>
               <input ref={inputRef} type="file" aria-label="Upload PDF or image" accept=".pdf,.png,.jpg,.jpeg,.webp,application/pdf,image/png,image/jpeg,image/webp" className="sr-only" onChange={(event) => { chooseFiles(event.target.files); event.target.value = ""; }} />
-              <p className="mt-3 font-mono text-[10px] uppercase tracking-wide text-ink-400">PDF · PNG · JPG · WEBP · max 35 MB</p>
+              <p className="mt-3 text-xs text-ink-600">PDF · PNG · JPG · WEBP · max 35 MB</p>
             </div>
           </div>
         ) : selected ? (
@@ -319,7 +321,7 @@ export function AfmDigitizationWorkspace() {
                 ) : null}
               </div>
 
-              <div className="space-y-4 rounded-2xl border border-ink-200 bg-ink-50/55 p-4 sm:p-5">
+              <div className="space-y-4 rounded-xl border border-[#dce0e4] bg-[#f8f9fa] p-4 sm:p-5">
                 <AutomaticAxisSummary calibration={selectedCalibration ?? result.axisCalibration} axes={axes} active={automaticAxisActive} />
                 <label className="block text-xs font-semibold text-ink-700">Curve name
                   <input value={curveLabel} onChange={(event) => setCurveLabel(event.target.value)} className="mt-1.5 min-h-10 w-full rounded-lg border border-ink-200 bg-white px-3 text-sm font-normal text-ink-900 focus:border-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-100" />
@@ -364,7 +366,7 @@ export function AfmDigitizationWorkspace() {
 }
 
 function StageChip({ index, label }: { index: string; label: string }) {
-  return <span className="inline-flex items-center gap-1.5 rounded-full border border-ink-200 bg-white/80 px-2.5 py-1.5"><span className="grid h-4 w-4 place-items-center rounded-full bg-ink-900 font-mono text-[9px] text-white">{index}</span>{label}</span>;
+  return <span className="inline-flex items-center gap-1.5 rounded-lg border border-[#dce0e4] bg-white px-2.5 py-1.5"><span className="grid h-5 w-5 place-items-center rounded-md bg-[#00888a] text-xs text-white">{index}</span>{label}</span>;
 }
 
 export function InheritedPanelContext({ panel }: { panel: NonNullable<DigitizationCandidate["panel"]> }) {
@@ -478,7 +480,7 @@ export function AfmSourceResultComparison({
 }) {
   return (
     <section data-testid="afm-source-result-comparison" className="overflow-hidden rounded-2xl border border-ink-200 bg-white shadow-sm">
-      <div className="flex flex-col gap-2 border-b border-ink-200 bg-gradient-to-r from-slate-50 via-white to-cyan-50/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+      <div className={`${SCHOOL_SECTION_HEADER} flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5`}>
         <div>
           <p className="label-eyebrow text-cyan-700">Source vs digitized result</p>
           <h3 className="mt-1 text-base font-semibold text-ink-950">Original paper curve versus platform digitization</h3>

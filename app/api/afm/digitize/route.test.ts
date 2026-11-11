@@ -4,6 +4,7 @@ import { createCanvas } from "@napi-rs/canvas";
 import { NextRequest } from "next/server";
 import { createTestAppSession } from "@/lib/auth.test-helpers";
 import { POST } from "./route";
+import { terminateAfmAxisOcrWorker } from "@/lib/afm/imageAxisOcr.server";
 
 async function main() {
   const { cookie } = await createTestAppSession();
@@ -179,4 +180,4 @@ async function main() {
 void main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
-});
+}).finally(() => terminateAfmAxisOcrWorker());

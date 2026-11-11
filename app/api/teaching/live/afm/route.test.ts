@@ -1,0 +1,40 @@
+import assert from "node:assert/strict";
+import { NextRequest } from "next/server";
+import { createTestAdminSession, createTestAppSession } from "@/lib/auth.test-helpers";
+import { liveCaller } from "../_auth";
+import { createLiveExperiment, finishLiveExtraction, getLiveDashboard, joinLiveExperiment, setLiveGold, setLivePaper, startLiveExperiment, startLiveExtraction } from "@/lib/teaching/liveStore";
+import { liveFields } from "@/lib/teaching/liveFields";
+import { saveLiveAfmArtifact } from "@/lib/teaching/liveAfm.server";
+import { GET } from "./route";
+import { POST as classroomAction } from "../route";
+
+async function main() {
+  const admin = await createTestAdminSession(), student = await createTestAppSession();
+  const request = (cookie: string, query = "") => new NextRequest(`http://localhost:3000/api/teaching/live/afm${query}`, { headers: { cookie } });
+  assert.equal((await GET(request(""))).status, 401);
+  const caller = (await liveCaller(request(student.cookie)))!;
+  const lesson = createLiveExperiment({ name: "AFM authorization fixture", domain: "afm", channel: "alternating", groupCount: 2, classroomVersion: 2 });
+  const seat = joinLiveExperiment(lesson.id, { userKey: caller.userKey, alias: caller.alias });
+  const peer = joinLiveExperiment(lesson.id, { userKey: "another-student", alias: "Another student" });
+  const gold = [{ ...Object.fromEntries(liveFields("afm").map((field) => [field.key, "NR"])), property: "Minimum digitized force", value: "-1 nN" }];
+  setLivePaper(lesson.id, { sourceId: "11111111-1111-1111-1111-111111111111", paperTitle: "Fixture" });
+  setLiveGold(lesson.id, gold); startLiveExperiment(lesson.id);
+  const id = await saveLiveAfmArtifact({ schema: "ioniclink.classroom-afm.v1", sourceName: "Fixture", createdAt: new Date().toISOString(), curves: [{ id: "panel-A", label: "Panel A", page: 3, figure: "1", imageDataUrl: "data:image/png;base64,fixture", axes: { xMin: 0, xMax: 5, yMin: -2, yMax: 10, xUnit: "nm", yUnit: "nN" }, points: [[0, 10], [1, -1], [5, 0]], segmentStarts: [1], warnings: [] }] });
+  const attempt = startLiveExtraction(seat.id, getLiveDashboard(lesson.id).participants[0].version);
+  finishLiveExtraction(seat.id, attempt.version, gold, id);
+  const query = `?experimentId=${lesson.id}&participantId=${seat.id}`;
+  assert.equal((await GET(request(student.cookie, query))).status, 200);
+  assert.equal((await GET(request(admin.cookie, query))).status, 200);
+  assert.equal((await GET(request(student.cookie, `?experimentId=${lesson.id}&participantId=${peer.id}`))).status, 403);
+  const csv = await GET(request(student.cookie, `${query}&curveId=panel-A&format=csv`));
+  assert.equal(csv.status, 200); assert.match(await csv.text(), /Separation \(nm\)/);
+  const png = await GET(request(student.cookie, `${query}&curveId=panel-A&format=png`));
+  assert.equal(png.status, 200); assert.equal(png.headers.get("content-type"), "image/png");
+  assert.equal(Buffer.from(await png.arrayBuffer()).subarray(1, 4).toString(), "PNG");
+  assert.equal((await GET(request(student.cookie, `${query}&curveId=../../secret&format=csv`))).status, 404);
+  assert.match(png.headers.get("cache-control") || "", /private, no-store/);
+  const created = await classroomAction(new NextRequest("http://localhost:3000/api/teaching/live", { method: "POST", headers: { cookie: admin.cookie, origin: "http://localhost:3000", "content-type": "application/json" }, body: JSON.stringify({ action: "create", name: "AFM without paid model", domain: "afm", groupCount: 2, channel: "alternating" }) }));
+  assert.equal(created.status, 200, "local automatic AFM lessons do not require a language model key");
+  console.log("Classroom AFM API: role isolation, saved source / curves, CSV / PNG, traversal rejection and model-free availability passed");
+}
+main();

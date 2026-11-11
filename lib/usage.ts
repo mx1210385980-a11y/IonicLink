@@ -203,7 +203,7 @@ function activeUsers(nowMs: number): MonitorUser[] {
   const rows = usageDatabase
     .prepare(
       `SELECT user_id, user_name, module, kind, at FROM usage_events
-       WHERE user_id IS NOT NULL AND at >= ? ORDER BY user_id, at DESC`
+       WHERE user_id IS NOT NULL AND at >= ? ORDER BY user_id, at DESC, id DESC`
     )
     .all(since) as Array<{ user_id: string; user_name: string; module: string; kind: string; at: string }>;
 
@@ -227,7 +227,7 @@ function activeUsers(nowMs: number): MonitorUser[] {
     users.push({
       id: current.id,
       name: current.name,
-      module: latest.module,
+      module: current.events.find((event) => event.kind === "page")?.module ?? latest.module,
       status: nowMs - lastMs <= ONLINE_WINDOW_MS ? "在线" : "空闲",
       minutes: Math.max(1, Math.round((nowMs - windowStart) / 60000)),
       operations,

@@ -1,0 +1,65 @@
+import assert from "node:assert/strict";
+import { NextRequest } from "next/server";
+import { createTestAdminSession, createTestAppSession } from "@/lib/auth.test-helpers";
+import { liveFields, liveRowsCsv } from "@/lib/teaching/liveFields";
+import { getLiveDashboard, setLivePaper } from "@/lib/teaching/liveStore";
+import { GET, POST } from "./route";
+import { GET as exportResults } from "./export/route";
+import { GET as template, POST as upload } from "./table/route";
+import { POST as extract } from "./extract/route";
+import { readLiveForm } from "./_form";
+
+async function main() {
+  const oversized = new Request("http://localhost:3000/fixture", { method: "POST", headers: { "content-type": "multipart/form-data; boundary=test" }, body: new Uint8Array(1024 * 1024 + 65537) });
+  await assert.rejects(readLiveForm(oversized, 1024 * 1024), (error: unknown) => Boolean(error && typeof error === "object" && "status" in error && error.status === 413));
+  const admin = await createTestAdminSession(), student = await createTestAppSession();
+  const request = (cookie: string, body: object, origin = "http://localhost:3000") => new NextRequest("http://localhost:3000/api/teaching/live", {
+    method: "POST", headers: { cookie, origin, "content-type": "application/json" }, body: JSON.stringify(body),
+  });
+  const get = (cookie = "", suffix = "") => new NextRequest(`http://localhost:3000/api/teaching/live${suffix}`, { headers: { cookie } });
+  assert.equal((await GET(get())).status, 401);
+  assert.equal((await exportResults(get())).status, 401);
+  assert.equal((await POST(request(student.cookie, { action: "create", name: "Forbidden", groupCount: 2 }))).status, 403);
+  assert.equal((await POST(request(admin.cookie, { action: "create", name: "Bad domain", domain: "unsupported", groupCount: 2 }))).status, 400);
+  assert.equal((await POST(request(admin.cookie, { action: "create", name: "Wrong origin", groupCount: 2 }, "https://other.example"))).status, 403);
+  const created = await POST(request(admin.cookie, { action: "create", name: "CV lesson", domain: "conductivity", groupCount: 2 }));
+  assert.equal(created.status, 200);
+  const { experiment } = await created.json();
+  assert.equal(experiment.domain, "conductivity");
+  const joined = await POST(request(student.cookie, { action: "join", experimentId: experiment.id }));
+  const own = (await joined.json()).participant;
+  assert.equal(own.status, "waiting");
+  const csv = await template(get(student.cookie, "/table?domain=conductivity"));
+  assert.equal(csv.status, 200); assert.match(await csv.text(), /scanRate/);
+  assert.equal((await template(get(student.cookie, "/table?domain=conductivity&example=giroud-2008-table1"))).status, 403);
+  const exampleKey = await template(get(admin.cookie, "/table?domain=conductivity&example=giroud-2008-table1"));
+  assert.equal(exampleKey.status, 200); assert.match(await exampleKey.text(), /7.39 S\/m/);
+  assert.equal((await exportResults(get(student.cookie, `/export?experimentId=${experiment.id}`))).status, 403);
+  const rows = [{ ...Object.fromEntries(liveFields("conductivity").map(({ key }) => [key, "NR"])), cation: "EMIM", anion: "TFSI", property: "conductivity", value: "12 mS/cm", temperature: "298 K", evidence: "p. 3" }];
+  setLivePaper(experiment.id, { sourceId: "33333333-3333-3333-3333-333333333333", paperTitle: "Test fixture only" });
+  assert.equal((await POST(request(admin.cookie, { action: "gold", experimentId: experiment.id, gold: rows }))).status, 200);
+  assert.equal((await POST(request(admin.cookie, { action: "start", experimentId: experiment.id }))).status, 200);
+  const current = getLiveDashboard(experiment.id).participants[0];
+  const form = new FormData(); form.set("file", new File([liveRowsCsv(rows, "conductivity")], "extraction.csv", { type: "text/csv" }));
+  assert.equal((await upload(new NextRequest("http://localhost:3000/api/teaching/live/table?domain=conductivity", { method: "POST", headers: { cookie: student.cookie, origin: "http://localhost:3000" }, body: form }))).status, 200);
+  assert.equal((await POST(request(student.cookie, { action: "save", participantId: "not-owned", version: current.version, rows }))).status, 403);
+  const saved = await POST(request(student.cookie, { action: "save", participantId: own.id, version: current.version, rows }));
+  const draft = await saved.json(); assert.equal(draft.rows[0].value, "12 mS/cm");
+  assert.equal((await POST(request(student.cookie, { action: "save", participantId: own.id, version: current.version, rows }))).status, 409);
+  assert.equal((await extract(request(student.cookie, { participantId: own.id, version: draft.version }))).status, 403, "manual groups cannot run AI extraction");
+  const submitted = await POST(request(student.cookie, { action: "submit", participantId: own.id, version: draft.version, rows }));
+  const result = await submitted.json(); assert.equal(result.score.accuracy, 1);
+  const reviewed = await POST(request(admin.cookie, { action: "review", participantId: own.id, version: result.version, overrides: { [result.score.cells[0].key]: "uncertain" }, note: "Check identity" }));
+  assert.equal((await reviewed.json()).score.uncertain, 1);
+  const exported = await exportResults(get(admin.cookie, `/export?experimentId=${experiment.id}&format=records`));
+  assert.equal(exported.status, 200); assert.match(exported.headers.get("cache-control") || "", /no-store/);
+  assert.match(await exported.text(), /12 mS\/cm/);
+  const assessment = await exportResults(get(admin.cookie, `/export?experimentId=${experiment.id}`));
+  assert.match(await assessment.text(), /uncertain/);
+  assert.equal((await POST(request(admin.cookie, { action: "finish", experimentId: experiment.id }))).status, 200);
+  const state = await (await GET(get(student.cookie))).json(); assert.equal(state.state.experiment.status, "finished");
+  const next = await (await POST(request(admin.cookie, { action: "create", name: "Next lesson", domain: "conductivity", groupCount: 2 }))).json();
+  const refreshed = await (await GET(get(student.cookie))).json(); assert.equal(refreshed.openExperiment.id, next.experiment.id);
+  console.log("Live classroom APIs: domain, platform roles, CSRF, draft versions, table upload, scoring, review, export and next lesson passed");
+}
+main();

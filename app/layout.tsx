@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./school-workspace.css";
 import { TopNav } from "@/components/TopNav";
 import { SourceViewer } from "@/components/SourceViewer";
 import { WorkspaceNavigationRail } from "@/components/WorkspaceNavigationRail";

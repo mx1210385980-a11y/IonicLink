@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import ExcelJS from "exceljs";
 import { NextRequest } from "next/server";
 import { listRecords, resetAll } from "@/lib/db";
-import { createTestAppSession } from "@/lib/auth.test-helpers";
+import { createTestAdminSession, createTestAppSession } from "@/lib/auth.test-helpers";
 import { POST } from "./route";
 
 async function request(bytes: Uint8Array, mode: "preview" | "commit", cookie: string) {
@@ -24,13 +24,15 @@ async function request(bytes: Uint8Array, mode: "preview" | "commit", cookie: st
 }
 
 async function main() {
-  const { cookie } = await createTestAppSession();
+  const { cookie } = await createTestAdminSession();
   resetAll("diffusion");
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Sheet1");
   sheet.addRow(["ionic_liquid", "D_cation", "D_anion", "D_unit", "temperature_value"]);
   sheet.addRow(["[BMIM][PF6]", 12.1, 8.6, "10^-12 m2/s", 349.9]);
   const bytes = new Uint8Array(await workbook.xlsx.writeBuffer());
+  const student = await createTestAppSession();
+  assert.equal((await request(bytes, "preview", student.cookie)).status, 403, "dataset imports remain administrator-only");
 
   const preview = await request(bytes, "preview", cookie);
   assert.equal(preview.status, 200);

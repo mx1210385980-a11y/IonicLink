@@ -65,6 +65,9 @@ async function main() {
     assert.equal("max_tokens" in (requestBody ?? {}), false);
     assert.equal(result.source, "openai-compatible");
     assert.equal(result.model, "kimi-k3");
+    await extractRecords("conductivity", "[PAGE 2]\nSource measurements only.", undefined, { taskInstruction: "Report Table 2 only; preserve temperature." });
+    assert.match(JSON.stringify(requestBody?.messages), /INSTRUCTOR TASK SCOPE \(not source evidence\)/);
+    assert.match(JSON.stringify(requestBody?.messages), /Report Table 2 only/);
 
     const visualPage = "data:image/png;base64,aW1hZ2U=";
     await extractRecords(

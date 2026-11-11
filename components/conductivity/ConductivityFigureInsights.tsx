@@ -5,6 +5,7 @@ import type { ConductivityPerformanceFigure, ConductivityRecord, ConductivityCur
 import type { Domain } from "@/lib/domain";
 import { pointDisplayLabel, pointInterpretation, visibleCurveKeyPoints } from "@/lib/conductivity/curveInsights";
 import { openRecordEvidence } from "../recordCardParts";
+import { SCHOOL_PANEL, SCHOOL_SECTION_HEADER } from "../workspaceStyles";
 
 export function ConductivityPerformanceFigurePanel({ figure, record, domain }: {
   figure: ConductivityPerformanceFigure; record: ConductivityRecord; domain: Domain;
@@ -29,22 +30,22 @@ export function ConductivityPerformanceFigurePanel({ figure, record, domain }: {
       prov:{...fieldSource,page:point?.sourcePage??figure.page,figure:samePage?label:fieldSource?.figure,figureBox:samePage?box:undefined,quote:point?.evidence??(point?fieldSource?.quote:figure.caption)}});
   };
   const move=(step:number)=>setIndex((activeIndex+step+panels.length)%panels.length);
-  return <div data-testid="performance-figure" className="overflow-hidden rounded-xl border border-cyan-200 bg-white">
-    <div className="flex items-center justify-between gap-2 border-b border-cyan-100 bg-cyan-50/50 px-3 py-2">
+  return <div data-testid="performance-figure" className={`${SCHOOL_PANEL} overflow-hidden`}>
+    <div className={`${SCHOOL_SECTION_HEADER} flex items-center justify-between gap-2 px-3 py-2`}>
       <div className="min-w-0"><div className="label-eyebrow">Performance curve</div><div className="mt-0.5 text-sm font-semibold leading-snug">{curveType}</div></div>
-      <button type="button" disabled={!canOpen} onClick={()=>openSource()} className="shrink-0 rounded-md border border-cyan-100 bg-white px-2 py-1 font-mono text-[10px] hover:bg-cyan-50" aria-label={`Open ${label} in source PDF`}>{label} · p.{figure.page??"?"} ↗</button>
+      <button type="button" disabled={!canOpen} onClick={()=>openSource()} className="shrink-0 rounded-md border border-[#dce0e4] bg-white px-2 py-1 text-xs hover:border-[#00888a] hover:text-[#00888a] disabled:opacity-50" aria-label={`Open ${label} in source PDF`}>{label} · p.{figure.page??"?"} ↗</button>
     </div>
     <button type="button" onClick={()=>openSource()} disabled={!canOpen} className="block h-[220px] w-full bg-white p-2" aria-label="View the full-resolution source figure">
       {url&&failedUrl!==url ? /* eslint-disable-next-line @next/next/no-img-element */
         <img src={url} alt={`${label} ${curveType}`} className="h-full w-full object-contain" loading="lazy" onError={()=>setFailedUrl(url)}/> :
         <span className="text-xs text-ink-500">{canOpen?"A clean panel crop is unavailable. Open the source page.":"The source PDF is not linked."}</span>}
     </button>
-    {panels.length>1&&<nav data-testid="performance-figure-pagination" className="flex items-center justify-between border-t border-cyan-100 px-3 py-1.5" aria-label="Performance figure pagination">
+    {panels.length>1&&<nav data-testid="performance-figure-pagination" className="flex items-center justify-between border-t border-[#e3e6e9] px-3 py-1.5" aria-label="Performance figure pagination">
       <button type="button" aria-label="Previous curve panel" onClick={()=>move(-1)} className="rounded border border-ink-100 px-2 py-0.5 hover:bg-cyan-50">‹</button>
       <span className="font-mono text-[10px]">Panel {panel.label} · {activeIndex+1}/{panels.length}</span>
       <button type="button" aria-label="Next curve panel" onClick={()=>move(1)} className="rounded border border-ink-100 px-2 py-0.5 hover:bg-cyan-50">›</button>
     </nav>}
-    <div className="space-y-2 border-t border-cyan-100 bg-slate-50/60 p-2.5">
+    <div className="space-y-2 border-t border-[#e3e6e9] bg-[#f8f9fa] p-2.5">
       <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-ink-500">
         {xAxis&&<span><b>X</b> · {xAxis}</span>}{yAxis&&<span><b>Y</b> · {yAxis}</span>}
       </div>
@@ -62,7 +63,7 @@ export function ConductivityPerformanceFigurePanel({ figure, record, domain }: {
 
 function Insight({point,open}:{point:ConductivityCurveKeyPoint;open:()=>void}) {
   const meaning=pointInterpretation(point);
-  return <div data-testid="curve-insight" className="min-w-0 rounded-lg border border-cyan-100 bg-white p-2">
+  return <div data-testid="curve-insight" className="min-w-0 rounded-lg border border-[#dce0e4] bg-white p-2">
     <div className="text-[10px] font-semibold leading-snug">{pointDisplayLabel(point)}</div>
     <div className="my-1 font-mono text-sm font-semibold leading-snug [overflow-wrap:anywhere]">{point.source==="image-estimated"?"≈ ":""}{point.value}</div>
     {(point.x||point.y)&&<div className="mb-1 font-mono text-[10px]">{[point.x?`x: ${point.x}`:"",point.y?`y: ${point.y}`:""].filter(Boolean).join(" · ")}</div>}
@@ -84,10 +85,10 @@ const TREND_LABEL: Record<ConductivityPropertyDependency["trend"], string> = {
 
 export function ConductivityDependenciesPanel({ dependencies }: { dependencies: ConductivityPropertyDependency[] }) {
   if (!dependencies.length) return null;
-  return <section data-testid="property-dependencies" className="rounded-xl border border-violet-200 bg-violet-50/45 p-2.5">
+  return <section data-testid="property-dependencies" className="rounded-xl border border-[#dce0e4] bg-[#f8f9fa] p-2.5">
     <div className="flex items-start justify-between gap-2">
-      <div><p className="label-eyebrow text-violet-800">Property dependence</p><p className="mt-1 text-[10px] leading-relaxed text-violet-950">A sparse landmark relationship, not a complete curve or a claim of causality.</p></div>
-      <span className="shrink-0 rounded-full bg-white px-2 py-1 font-mono text-[9px] text-violet-700">Y = f(X)</span>
+      <div><p className="label-eyebrow text-brand-800">Property dependence</p><p className="mt-1 text-xs leading-relaxed text-ink-600">A sparse landmark relationship, not a complete curve or a claim of causality.</p></div>
+      <span className="shrink-0 rounded-md border border-[#dce0e4] bg-white px-2 py-1 text-xs text-[#00888a]">Y = f(X)</span>
     </div>
     <div className="mt-2 space-y-2">
       {dependencies.map((dependency, index) => <DependencyCard key={`${dependency.dependentField}-${dependency.independentVariable}-${index}`} dependency={dependency} />)}
@@ -96,7 +97,7 @@ export function ConductivityDependenciesPanel({ dependencies }: { dependencies: 
 }
 
 function DependencyCard({ dependency }: { dependency: ConductivityPropertyDependency }) {
-  return <article className="rounded-lg border border-violet-100 bg-white p-2.5">
+  return <article className="rounded-lg border border-[#dce0e4] bg-white p-2.5">
     <div className="flex flex-wrap items-start justify-between gap-1.5">
       <h4 className="text-[11px] font-semibold leading-snug text-ink-900">{dependency.label}</h4>
       <span className="rounded bg-violet-50 px-1.5 py-0.5 text-[9px] font-semibold text-violet-800">{TREND_LABEL[dependency.trend]}</span>

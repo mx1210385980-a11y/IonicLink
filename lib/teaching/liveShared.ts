@@ -1,18 +1,28 @@
-import { scoreSimpleRows } from "./simpleScoring";
-import type { SimpleMode, SimpleRow } from "./simpleShared";
-import type { TeachingFieldKey } from "../teachingShared";
+import { compareLiveRows } from "./liveScoring";
+import type { SimpleMode } from "./simpleShared";
+import type { LiveDomain, LiveRow } from "./liveFields";
 
 export type LiveExperimentStatus = "open" | "running" | "finished";
 export type LiveMark = "correct" | "incorrect" | "uncertain";
+export type LiveAssessmentPolicy = { relativeTolerancePercent: number; absoluteTolerance: string };
 
 export type LiveExperiment = {
   id: string;
   name: string;
+  domain?: LiveDomain;
+  channel?: "manual" | "alternating";
+  classroomVersion?: 2;
+  assessmentPolicy?: LiveAssessmentPolicy;
+  keyVersion?: number;
+  round?: 1 | 2;
+  previousRoundId?: string;
+  nextRoundId?: string;
+  taskInstructions?: string;
   groupCount: number;
   status: LiveExperimentStatus;
   paperSourceId: string;
   paperTitle: string;
-  gold: SimpleRow[];
+  gold: LiveRow[];
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;
@@ -26,7 +36,7 @@ export type LiveParticipant = {
   groupNo: number | null;
   mode: SimpleMode | null;
   status: "waiting" | "idle" | "extracting" | "review" | "submitted";
-  rows: SimpleRow[];
+  rows: LiveRow[];
   version: number;
   startedAt: string | null;
   extractionAttemptAt: string | null;
@@ -37,13 +47,14 @@ export type LiveParticipant = {
   overrides: Record<string, LiveMark>;
   reviewNote: string;
   reviewedAt: string | null;
+  afmArtifactId?: string;
 };
 
 export type LiveCell = {
   key: string;
   goldRow: number | null;
   answerRow: number | null;
-  field: TeachingFieldKey;
+  field: string;
   expected: string;
   actual: string;
   machineCorrect: boolean;
@@ -60,8 +71,8 @@ export type LiveScore = {
 };
 
 /** Teacher marks override the automatic comparison; ⭕ keeps a cell out of neither camp. */
-export function scoreLive(gold: SimpleRow[], rows: SimpleRow[], overrides: Record<string, LiveMark> = {}): LiveScore {
-  const base = scoreSimpleRows(gold, rows);
+export function scoreLive(gold: LiveRow[], rows: LiveRow[], overrides: Record<string, LiveMark> = {}, domain: LiveDomain = "tribology", policy?: LiveAssessmentPolicy): LiveScore {
+  const base = compareLiveRows(gold, rows, domain, policy);
   const cells = base.cells.map((cell): LiveCell => ({
     key: cell.key, goldRow: cell.goldRow, answerRow: cell.answerRow, field: cell.field,
     expected: cell.expected, actual: cell.actual, machineCorrect: cell.machineCorrect,
@@ -78,10 +89,10 @@ export function scoreLive(gold: SimpleRow[], rows: SimpleRow[], overrides: Recor
 }
 
 export type LiveParticipantView = LiveParticipant & { score: LiveScore | null };
-export type LiveDashboard = { experiment: LiveExperiment; participants: LiveParticipantView[] };
+export type LiveDashboard = { experiment: LiveExperiment; participants: LiveParticipantView[]; previousRound?: { experiment: LiveExperiment; participants: LiveParticipantView[] } };
 
 export type LiveStudentState = {
   participant: LiveParticipantView;
-  experiment: Pick<LiveExperiment, "id" | "name" | "status" | "groupCount" | "paperTitle"> & { hasPaper: boolean; hasAnswerKey: boolean };
+  experiment: Pick<LiveExperiment, "id" | "name" | "domain" | "channel" | "status" | "groupCount" | "paperTitle" | "round" | "assessmentPolicy" | "classroomVersion" | "taskInstructions"> & { hasPaper: boolean; hasAnswerKey: boolean };
   joinedCount: number;
 };

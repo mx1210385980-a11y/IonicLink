@@ -1,0 +1,47 @@
+/* Scoped to our workspaces; shared Tribology/Diffusion chrome is unchanged. */
+[data-workspace-theme="school"] {
+  --school-accent: #00888a;
+  --school-accent-hover: #006e70;
+  --school-border: #dce0e4;
+  --school-ink: #242b33;
+}
+
+[data-workspace-theme="school"] .panel {
+  border-radius: 0.75rem;
+  box-shadow: 0 2px 8px rgba(24, 39, 48, 0.025);
+}
+
+[data-workspace-theme="school"] :where(.btn, .btn-primary) {
+  border-radius: 0.5rem;
+  justify-content: center;
+}
+
+[data-workspace-theme="school"] .btn {
+  border-color: var(--school-border);
+  background-color: #fff;
+  color: #263958;
+}
+
+[data-workspace-theme="school"] .btn:hover:not(:disabled) {
+  border-color: var(--school-accent);
+  color: var(--school-accent);
+}
+
+[data-workspace-theme="school"] .btn-primary {
+  border: 1px solid var(--school-accent);
+  background-color: var(--school-accent);
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(24, 39, 48, 0.05);
+}
+
+[data-workspace-theme="school"] .btn-primary:hover:not(:disabled) {
+  border-color: var(--school-accent-hover);
+  background-color: var(--school-accent-hover);
+}
+
+[data-workspace-theme="school"] :where(.btn, .btn-primary):focus-visible {
+  outline: 2px solid var(--school-accent);
+  outline-offset: 2px;
+}
+
+/* Deliberately no SVG, canvas, image or trace-colour overrides here. */

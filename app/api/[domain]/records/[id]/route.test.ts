@@ -40,10 +40,12 @@ async function main() {
   assert.equal(isolatedDomain.status, 404, "records are isolated by property domain");
 
   const unauthenticated = await request("tribology", record.id, false);
-  assert.equal(unauthenticated.status, 401);
+  assert.equal(unauthenticated.status, 404, "anonymous visitors cannot discover review records");
   assert.equal((await unauthenticated.json()).record, undefined);
   const unauthenticatedDomain = await request("not-a-domain", record.id, false);
-  assert.equal(unauthenticatedDomain.status, 401, "authentication is checked before record or domain lookup");
+  assert.equal(unauthenticatedDomain.status, 404, "public read routes reject unknown domains");
+  updateRecord("tribology", record.id, { status: "official" });
+  assert.equal((await request("tribology", record.id, false)).status, 200, "official records are publicly readable");
   console.log("Single-record GET authentication, domain isolation and fresh read tests passed");
 }
 

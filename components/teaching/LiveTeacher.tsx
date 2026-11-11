@@ -1,299 +1,209 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
-import type { LiveDashboard, LiveExperiment, LiveMark, LiveParticipantView } from "@/lib/teaching/liveShared";
-import { TEACHING_FIELDS } from "@/lib/teaching/simpleShared";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import type { LiveAssessmentPolicy, LiveDashboard, LiveExperiment, LiveMark, LiveParticipantView } from "@/lib/teaching/liveShared";
+import { blankLiveRow, LIVE_DOMAINS, liveDomainLabel, liveFields, liveMethodLabel, type LiveDomain } from "@/lib/teaching/liveFields";
 import { requestErrorMessage, requestJson, RequestError } from "@/components/request";
-import { accuracy, blankRow, FIELD_LABELS, fieldInput, minutes, SimpleRows, uploadTable } from "./SimpleTeachingParts";
+import { accuracy, fieldInput, minutes } from "./SimpleTeachingParts";
+import { LiveRows, uploadLiveTable } from "./LiveRows";
+import { LiveLessonGuide } from "./LiveLessonGuide";
+import { LiveAfmResults } from "./LiveAfmResults";
+import { SCHOOL_PANEL } from "../workspaceStyles";
 
-type TeacherData = { experiments: LiveExperiment[]; dashboard: LiveDashboard | null };
-
-const GROUP_COLORS = ["bg-brand-50/60", "bg-amber-50/60", "bg-violet-50/60", "bg-emerald-50/60", "bg-sky-50/60", "bg-rose-50/60", "bg-lime-50/60", "bg-orange-50/60"];
-const MARK_STYLE: Record<LiveMark, string> = {
-  correct: "bg-emerald-100 text-emerald-900",
-  incorrect: "bg-rose-100 text-rose-900",
-  uncertain: "bg-amber-100 text-amber-900",
-};
-
+export type TeacherData = { experiments: LiveExperiment[]; dashboard: LiveDashboard | null; canUseAi: boolean; automaticDomains?: LiveDomain[] };
+type Stage = "prepare" | "classroom" | "results";
+const MARK_STYLE: Record<LiveMark, string> = { correct: "bg-emerald-100 text-emerald-900", incorrect: "bg-rose-100 text-rose-900", uncertain: "bg-amber-100 text-amber-900" };
 async function post<T>(body: object): Promise<T> {
   return requestJson<T>("/api/teaching/live", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }, "Action failed");
 }
 
-export function LiveTeacher() {
-  const [data, setData] = useState<TeacherData>({ experiments: [], dashboard: null });
-  const [loaded, setLoaded] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [reviewId, setReviewId] = useState<string | null>(null);
-  const [reviewCell, setReviewCell] = useState<string | null>(null);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [busy, setBusy] = useState(false);
-
+export function LiveTeacher({ initialData }: { initialData?: TeacherData }) {
+  const [data, setData] = useState<TeacherData>(initialData ?? { experiments: [], dashboard: null, canUseAi: false });
+  const [loaded, setLoaded] = useState(Boolean(initialData)), [creating, setCreating] = useState(false), [busy, setBusy] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(initialData?.dashboard?.experiment.id ?? null), [reviewId, setReviewId] = useState<string | null>(null);
+  const [stage, setStage] = useState<Stage>(initialData?.dashboard?.experiment.status === "finished" ? "results" : initialData?.dashboard?.experiment.status === "running" ? "classroom" : "prepare"), [keyDirty, setKeyDirty] = useState(false);
+  const [reviewDirty, setReviewDirty] = useState(false);
+  const [error, setError] = useState(""), [notice, setNotice] = useState(""), [stale, setStale] = useState(false);
+  const requestSerial = useRef({ value: 0 });
+  const activeClassroom = useRef<string | undefined>();
   const refresh = useCallback(async (id?: string | null) => {
+    const serial = ++requestSerial.current.value;
     const next = await requestJson<TeacherData>(`/api/teaching/live${id ? `?id=${encodeURIComponent(id)}` : ""}`, { cache: "no-store" }, "Refresh failed");
-    setData(next); setLoaded(true); setError("");
+    if (serial !== requestSerial.current.value) return;
+    setData(next); setLoaded(true); setStale(false);
+    setSelectedId((current) => current ?? next.dashboard?.experiment.id ?? null);
   }, []);
-  useEffect(() => {
-    const timer = setInterval(() => { if (!document.hidden) void refresh(selectedId).catch(() => {}); }, 5000);
-    return () => clearInterval(timer);
-  }, [refresh, selectedId]);
   useEffect(() => { void refresh().catch((cause) => setError(requestErrorMessage(cause, "Load failed"))); }, [refresh]);
-
-  const dashboard = data.dashboard;
-  const experiment = dashboard?.experiment;
-  const review = dashboard?.participants.find((item) => item.id === reviewId && item.score) ?? null;
-
-  async function run(action: string, extra: object = {}, message = "") {
-    if (busy) return;
-    setBusy(true); setError(""); setNotice("");
+  useEffect(() => {
+    const timer = setInterval(() => { if (!document.hidden) void refresh(selectedId).catch(() => setStale(true)); }, 5000);
+    const requests = requestSerial.current;
+    return () => { clearInterval(timer); requests.value++; };
+  }, [refresh, selectedId]);
+  const dashboard = data.dashboard, experiment = dashboard?.experiment;
+  const domain = experiment?.domain || "tribology";
+  const review = dashboard?.participants.find((item) => item.id === reviewId && item.score);
+  useEffect(() => { if (activeClassroom.current === experiment?.id) return; activeClassroom.current = experiment?.id; setStage(experiment?.status === "open" ? "prepare" : experiment?.status === "finished" ? "results" : "classroom"); setKeyDirty(false); }, [experiment?.id, experiment?.status]);
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => { if (keyDirty || reviewDirty) { event.preventDefault(); event.returnValue = ""; } };
+    window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn);
+  }, [keyDirty, reviewDirty]);
+  function canLeave() { if (!keyDirty && !reviewDirty) return true; if (!window.confirm("Leave without saving the current answer-key or review edits?")) return false; setKeyDirty(false); setReviewDirty(false); return true; }
+  async function run(action: string, message: string) {
+    if (busy || !experiment) return;
+    setBusy(true); setError("");
     try {
-      const next = await post<LiveDashboard>({ action, experimentId: experiment?.id, ...extra });
-      setData((previous) => ({ ...previous, dashboard: next }));
-      setSelectedId(next.experiment.id);
-      if (message) setNotice(message);
+      const next = await post<LiveDashboard>({ action, experimentId: experiment.id });
+      setSelectedId(next.experiment.id); await refresh(next.experiment.id); setNotice(message);
+      if (action === "start") setStage("classroom");
+      if (action === "finish") setStage("results");
     } catch (cause) { setError(requestErrorMessage(cause, "Action failed")); } finally { setBusy(false); }
   }
-
+  const ready = Boolean(experiment?.paperSourceId && experiment.gold.length && dashboard?.participants.length);
   return <div data-testid="live-teacher" className="mt-3 space-y-5">
     {error && <RequestError>{error}</RequestError>}
+    {stale && <p role="alert" className="text-sm text-amber-800">Live updates are temporarily unavailable. Existing work is retained; check the connection before starting or finishing class.</p>}
     {notice && <p role="status" className="text-sm text-brand-700">{notice}</p>}
     <div className="flex flex-wrap items-end gap-3">
-      <label className="min-w-56 flex-1 text-xs text-ink-600">Experiment
-        <select aria-label="Current live experiment" className={`${fieldInput} mt-1`} value={experiment?.id ?? ""} disabled={!data.experiments.length}
-          onChange={(event) => { setSelectedId(event.target.value); setReviewId(null); setReviewCell(null); void refresh(event.target.value).catch((cause) => setError(requestErrorMessage(cause, "Load failed"))); }}>
+      <label className="min-w-56 flex-1 text-xs text-ink-600">Classroom
+        <select aria-label="Current live experiment" className={`${fieldInput} mt-1`} value={experiment?.id ?? ""} disabled={!data.experiments.length || busy}
+          onChange={(event) => { if (!canLeave()) return; setSelectedId(event.target.value); setReviewId(null); void refresh(event.target.value).catch((cause) => setError(requestErrorMessage(cause, "Load failed"))); }}>
           {!data.experiments.length && <option value="">No experiment yet</option>}
-          {data.experiments.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.status}</option>)}
+          {data.experiments.map((item) => <option key={item.id} value={item.id}>{item.name} · {liveDomainLabel(item.domain)} · {item.status}</option>)}
         </select>
       </label>
-      <button className="btn-primary min-h-10" onClick={() => setCreating(!creating)}>{creating ? "Cancel" : "开展实验"}</button>
+      <button className="btn-primary min-h-10" disabled={busy} onClick={() => { if (canLeave()) setCreating(!creating); }}>{creating ? "Cancel" : "Create experiment"}</button>
     </div>
-    {creating && <CreateLiveExperiment onCreated={async (created) => {
-      setCreating(false); setSelectedId(created.experiment.id);
-      setData((previous) => ({ experiments: [created.experiment, ...previous.experiments], dashboard: created }));
-      setNotice("实验已创建，学生现在可以加入。上传文献并等待人数到齐后开始。");
+    {creating && <CreateLiveExperiment automaticDomains={data.automaticDomains || (data.canUseAi ? ["tribology", "conductivity", "afm"] : ["afm"])} onCreated={async (created) => {
+      setCreating(false); setSelectedId(created.experiment.id); await refresh(created.experiment.id); setNotice("Classroom created. Prepare the paper and verified answer key, then check the roster.");
     }} />}
-    {!loaded && <p className="text-sm text-ink-500">Loading…</p>}
-    {loaded && !dashboard && !creating && <p className="rounded-lg border border-dashed border-ink-300 p-6 text-sm text-ink-500">点击「开展实验」创建一场实验：设置组数、上传文献、等待学生加入。</p>}
-    {dashboard && experiment && <>
-      <section className="rounded-xl border border-ink-200 bg-white p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-semibold">{experiment.name}</h3>
-            <p className="mt-1 text-sm text-ink-500">
-              {experiment.status === "open" ? "开放加入中" : experiment.status === "running" ? "实验进行中" : "实验已结束"}
-              {" · "}{experiment.groupCount} groups · 已加入 <strong>{dashboard.participants.length}</strong> 人
-            </p>
-          </div>
-          {experiment.status === "open" && <button className="btn-primary" disabled={busy || !experiment.paperSourceId || !dashboard.participants.length} onClick={() => void run("start", {}, "实验已开始，学生已自动分组并收到文献。")}>开始实验</button>}
-          {experiment.status === "running" && <button className="btn" disabled={busy} onClick={() => void run("finish", {}, "实验已结束。")}>结束实验</button>}
-        </div>
-        {experiment.status === "open" && <>
-          <p className="mt-3 text-xs text-ink-500">开始条件：已上传文献 + 至少 1 名学生加入。开始后系统自动轮流分组（当前统一为人工提取通道），文献自动下发。</p>
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <label className={`btn cursor-pointer ${busy ? "pointer-events-none opacity-50" : ""}`}>{experiment.paperSourceId ? "更换文献 PDF" : "上传文献 PDF"}
-              <input aria-label="Upload experiment paper" type="file" accept=".pdf" className="sr-only" disabled={busy} onChange={async (event) => {
-                const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
-                setBusy(true); setError("");
-                try {
-                  const form = new FormData(); form.set("file", file); form.set("experimentId", experiment.id);
-                  await requestJson("/api/teaching/live/paper", { method: "POST", body: form }, "Upload failed");
-                  await refresh(experiment.id); setNotice("文献已上传，开始实验后自动下发给学生。");
-                } catch (cause) { setError(requestErrorMessage(cause, "Upload failed")); } finally { setBusy(false); }
-              }} />
-            </label>
-            <span className="text-sm text-ink-600">{experiment.paperTitle || "尚未上传文献"}</span>
-            {experiment.paperSourceId && <a className="text-sm text-brand-700" target="_blank" rel="noreferrer" href={`/api/teaching/live/paper?experimentId=${experiment.id}`}>查看 PDF ↗</a>}
-          </div>
-          <LiveAnswerKey key={`${experiment.id}-${experiment.gold.length}`} experiment={experiment} onSaved={async () => { await refresh(experiment.id); setNotice("答案已保存，提交结果自动评分。"); }} />
-          {dashboard.participants.length > 0 && <ul className="mt-4 flex flex-wrap gap-2">{dashboard.participants.map((item) => <li key={item.id} className="rounded-full bg-ink-50 px-3 py-1 text-xs text-ink-700">{item.alias}</li>)}</ul>}
-        </>}
-      </section>
-      {experiment.status !== "open" && <LiveResults dashboard={dashboard} reviewId={reviewId} reviewCell={reviewCell}
-        onSelect={(id, cellKey = null) => { setReviewId(id); setReviewCell(cellKey); }} />}
-      {review && <LiveReview key={`${review.id}-${review.version}`} participant={review} focusKey={reviewCell} onFocus={setReviewCell} onClose={() => { setReviewId(null); setReviewCell(null); }} onSaved={async () => { await refresh(experiment.id); setNotice("审阅已保存，学生端可看到结果。"); }} />}
+    {!loaded && <p role="status" className="text-sm text-ink-500">Loading…</p>}
+    {loaded && !dashboard && !creating && <p className={`${SCHOOL_PANEL} p-6 text-sm text-ink-500`}>Create a classroom to prepare a lesson. Teachers and students use this same entry with their platform accounts.</p>}
+    {!creating && dashboard && experiment && <>
+      <header className={`${SCHOOL_PANEL} p-5`}>
+        <h3 className="text-lg font-semibold">{experiment.name}</h3>
+        <p className="mt-1 text-sm text-ink-500">{liveDomainLabel(domain)} · Round {experiment.round || 1} · {experiment.status} · {dashboard.participants.length} students</p>
+        <nav aria-label="Instructor lesson stages" className="mt-5 grid gap-2 sm:grid-cols-3">{([['prepare', '1. Prepare lesson'], ['classroom', '2. Run classroom'], ['results', '3. Review and export']] as const).map(([value, label]) => <button key={value} type="button" disabled={busy} aria-current={stage === value ? "step" : undefined} className={`rounded-lg border px-4 py-3 text-left text-sm ${stage === value ? "border-brand-500 bg-brand-50 font-semibold text-brand-900" : "border-ink-200 text-ink-600"}`} onClick={() => { if (canLeave()) { setStage(value); setReviewId(null); } }}>{label}</button>)}</nav>
+      </header>
+      {stage === "prepare" && <section className={`${SCHOOL_PANEL} space-y-4 p-5`}>
+        <h4 className="font-semibold">Lesson preparation</h4>
+        <LiveLessonGuide domain={domain} instructor />
+        {experiment.status === "open" && <div className="flex flex-wrap items-center gap-3">
+          <label className={`btn cursor-pointer ${busy ? "pointer-events-none opacity-50" : ""}`}>{experiment.paperSourceId ? "Replace paper PDF" : "Upload paper PDF"}
+            <input aria-label="Upload experiment paper" type="file" accept=".pdf" className="sr-only" disabled={busy} onChange={async (event) => {
+              const file = event.target.files?.[0]; event.target.value = ""; if (!file || !canLeave()) return;
+              if (experiment.paperSourceId && !window.confirm("Replacing the paper clears its answer key. Continue?")) return;
+              setBusy(true); setError("");
+              try { const form = new FormData(); form.set("file", file); form.set("experimentId", experiment.id);
+                await requestJson("/api/teaching/live/paper", { method: "POST", body: form }, "Upload failed"); await refresh(experiment.id); setNotice("Paper uploaded. Prepare its answer key before starting.");
+              } catch (cause) { setError(requestErrorMessage(cause, "Upload failed")); } finally { setBusy(false); }
+            }} />
+          </label><span className="text-sm text-ink-600">{experiment.paperTitle || "No paper uploaded"}</span>
+        </div>}
+        {experiment.previousRoundId && <p className="text-xs leading-5 text-ink-600">Round 2 keeps the same students and groups, swaps extraction methods and requires a different paper with a new answer key.</p>}
+        {experiment.paperSourceId && <a className="inline-block text-sm text-brand-700" target="_blank" rel="noreferrer" href={`/api/teaching/live/paper?experimentId=${experiment.id}`}>Open assigned PDF ↗</a>}
+        <LiveAnswerKey key={experiment.id} experiment={experiment} onDirtyChange={setKeyDirty} onBusyChange={setBusy} onSaved={async () => { await refresh(experiment.id); setNotice("Answer key and assessment settings saved. Previous review marks were reset."); }} />
+        <button className="btn-primary" disabled={keyDirty || !experiment.paperSourceId || !experiment.gold.length} onClick={() => setStage("classroom")}>Continue to classroom</button>
+      </section>}
+      {stage === "classroom" && <section className={`${SCHOOL_PANEL} space-y-4 p-5`}>
+        <h4 className="font-semibold">Classroom readiness</h4>
+        <ul className="space-y-2 text-sm text-ink-600"><li>{experiment.paperSourceId ? "✓ Paper ready" : "○ Upload a paper in Prepare lesson"}</li><li>{experiment.gold.length ? `✓ Answer key ready · ${experiment.gold.length} observations` : "○ Save the answer key in Prepare lesson"}</li><li>{dashboard.participants.length ? `✓ ${dashboard.participants.length} students joined` : "○ Ask students to open AI experiment → Experiment Ⅰ and join"}</li></ul>
+        <p className="text-xs leading-5 text-ink-500">{experiment.channel === "alternating" ? `${domain === "afm" ? "Automatic" : "AI-assisted"} and manual groups work on the same paper. Group assignment is frozen when class starts.` : "All groups work manually."} Time is elapsed wall-clock time, including pauses, not active attention.</p>
+        <div className="overflow-x-auto"><table aria-label="Classroom roster" className="w-full text-left text-sm"><thead className="bg-ink-50"><tr>{["Student", "Group", "Method", "Progress"].map((label) => <th key={label} className="p-3">{label}</th>)}</tr></thead><tbody>{dashboard.participants.map((p) => <tr key={p.id} className="border-t border-ink-100"><td className="p-3">{p.alias}</td><td className="p-3">{p.groupNo || "Assigned at start"}</td><td className="p-3">{p.mode ? liveMethodLabel(domain, p.mode) : "Assigned at start"}</td><td className="p-3">{p.status}</td></tr>)}</tbody></table></div>
+        {experiment.status === "open" && <button className="btn-primary" disabled={busy || !ready || stale} onClick={() => void run("start", "Classroom started. Students have their paper and group assignment.")}>Start experiment</button>}
+        {experiment.status === "running" && <button className="btn" disabled={busy || stale} onClick={() => { const missing = dashboard.participants.filter((p) => p.status !== "submitted").length; if (window.confirm(`${missing ? `${missing} students have not submitted. ` : ""}Finish this classroom and close further submissions?`)) void run("finish", "Classroom finished. Review and exports remain available."); }}>Finish experiment</button>}
+        {experiment.status === "finished" && <p className="text-sm text-ink-600">Classroom finished. Open Review and export for the saved results.</p>}
+      </section>}
+      {stage === "results" && <>
+        <div className="flex flex-wrap items-center justify-between gap-3"><h4 className="font-semibold">Review and export</h4><div className="flex gap-2"><a className="btn" href={`/api/teaching/live/export?experimentId=${experiment.id}&format=records`}>Records CSV</a><a className="btn" href={`/api/teaching/live/export?experimentId=${experiment.id}`}>Assessment CSV</a></div></div>
+        <LiveResults dashboard={dashboard} onSelect={(id) => { if (id !== reviewId && canLeave()) setReviewId(id); }} />
+        {review && <LiveReview key={review.id} experiment={experiment} participant={review} onDirtyChange={setReviewDirty} onClose={() => setReviewId(null)} onSaved={async () => { setReviewId(null); await refresh(experiment.id); setNotice("Review saved and shared with the student."); }} />}
+        {experiment.status === "finished" && experiment.channel === "alternating" && !experiment.previousRoundId && <details className={`${SCHOOL_PANEL} p-4`}><summary className="cursor-pointer text-sm font-medium">Optional: second-round crossover</summary><p className="my-3 text-xs leading-5 text-ink-600">Use a different paper and answer key. The same students keep their groups and swap methods. All students must have submitted round 1. This supports a paired classroom comparison, not a causal claim.</p><button className="btn" disabled={busy || dashboard.participants.some((p) => p.status !== "submitted")} onClick={() => void run("nextRound", "Round 2 prepared. Upload a different paper and save its answer key.")}>{experiment.nextRoundId ? "Open round 2" : "Prepare round 2"}</button></details>}
+      </>}
     </>}
   </div>;
 }
 
-function CreateLiveExperiment({ onCreated }: { onCreated: (dashboard: LiveDashboard) => Promise<void> }) {
-  const [name, setName] = useState("");
-  const [groupCount, setGroupCount] = useState(2);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+function CreateLiveExperiment({ automaticDomains, onCreated }: { automaticDomains: LiveDomain[]; onCreated: (dashboard: LiveDashboard) => Promise<void> }) {
+  const [name, setName] = useState(""), [domain, setDomain] = useState<LiveDomain>("conductivity");
+  const [groupCount, setGroupCount] = useState(2), [channel, setChannel] = useState("manual");
+  const [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const automatic = automaticDomains.includes(domain);
   async function create(event: FormEvent) {
-    event.preventDefault(); if (busy) return;
-    setBusy(true); setError("");
-    try { await onCreated(await post<LiveDashboard>({ action: "create", name, groupCount })); }
+    event.preventDefault(); if (busy) return; setBusy(true); setError("");
+    try { await onCreated(await post<LiveDashboard>({ action: "create", name, domain, groupCount, channel })); }
     catch (cause) { setError(requestErrorMessage(cause, "Creation failed")); } finally { setBusy(false); }
   }
-  return <form onSubmit={(event) => void create(event)} className="rounded-xl border border-brand-200 bg-brand-50/40 p-5">
-    <h3 className="font-semibold">开展新实验</h3>
-    <div className="mt-4 flex flex-wrap items-end gap-4">
-      <label className="min-w-56 flex-1 text-sm">实验名称<input required maxLength={100} className={`${fieldInput} mt-1`} value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：第 3 周离子液体提取实验" /></label>
-      <label className="text-sm">组数（2–8）<input aria-label="Group count" type="number" min={2} max={8} className={`${fieldInput} mt-1 w-24`} value={groupCount} onChange={(event) => setGroupCount(Number(event.target.value))} /></label>
-      <button className="btn-primary" disabled={busy}>{busy ? "创建中…" : "创建并开放加入"}</button>
+  return <form onSubmit={(event) => void create(event)} className={`${SCHOOL_PANEL} p-5`}>
+    <h3 className="font-semibold">Create experiment</h3>
+    <div className="mt-4 grid gap-4 sm:grid-cols-2">
+      <label className="text-xs text-ink-600">Experiment name<input aria-label="Experiment name" required maxLength={100} className={`${fieldInput} mt-1`} value={name} onChange={(event) => setName(event.target.value)} placeholder="Week 3: conductivity vs temperature" /></label>
+      <label className="text-xs text-ink-600">Teaching domain<select aria-label="Teaching domain" className={`${fieldInput} mt-1`} value={domain} onChange={(event) => { setDomain(event.target.value as LiveDomain); setChannel("manual"); }}>{LIVE_DOMAINS.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
+      <label className="text-xs text-ink-600">Groups (2–8)<input aria-label="Group count" type="number" min={2} max={8} className={`${fieldInput} mt-1`} value={groupCount} onChange={(event) => setGroupCount(Number(event.target.value))} /></label>
+      <label className="text-xs text-ink-600">Extraction channel<select aria-label="Extraction channel" className={`${fieldInput} mt-1`} value={channel} onChange={(event) => setChannel(event.target.value)}><option value="manual">Manual</option><option value="alternating" disabled={!automatic}>{domain === "afm" ? "Automatic / manual groups" : "AI-assisted / manual groups"}</option></select></label>
     </div>
+    <p className="mt-3 text-xs leading-5 text-ink-500">{domain === "afm" ? "Automatic AFM recognition uses the same local recognizer as the research workspace; no paid language model is needed." : automatic ? "AI-assisted groups use the configured extraction model and may incur provider charges." : "No extraction model is configured. Manual lessons work; AI-assisted groups remain disabled."}</p>
+    <button className="btn-primary mt-4" disabled={busy}>{busy ? "Creating…" : "Create and prepare lesson"}</button>
     {error && <div className="mt-3"><RequestError>{error}</RequestError></div>}
   </form>;
 }
 
-function LiveAnswerKey({ experiment, onSaved }: { experiment: LiveExperiment; onSaved: () => Promise<void> }) {
-  const [gold, setGold] = useState(experiment.gold.length ? experiment.gold : [blankRow()]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  return <details className="mt-4 rounded-lg border border-ink-200 p-4">
-    <summary className="cursor-pointer text-sm font-medium text-ink-700">{experiment.gold.length ? `标准答案（${experiment.gold.length} 条记录）` : "设置标准答案（用于准确率评分）"}</summary>
-    <div className="mt-3 flex flex-wrap gap-3">
-      <label className="btn cursor-pointer">上传答案表<input aria-label="Upload answer key" type="file" accept=".csv,.tsv,.xlsx" className="sr-only" disabled={busy} onChange={async (event) => {
-        const file = event.target.files?.[0]; event.target.value = ""; if (!file) return;
-        setBusy(true); setError("");
-        try { setGold(await uploadTable(file)); } catch (cause) { setError(requestErrorMessage(cause, "Upload failed")); } finally { setBusy(false); }
-      }} /></label>
-      <a className="btn" href="/api/teaching/lab/table">下载模板</a>
-    </div>
-    <div className="mt-3"><SimpleRows rows={gold} label="Answer key" disabled={busy} onChange={setGold} /></div>
-    <button className="btn-primary mt-3" disabled={busy} onClick={async () => {
+function LiveAnswerKey({ experiment, onSaved, onDirtyChange, onBusyChange }: { experiment: LiveExperiment; onSaved: () => Promise<void>; onDirtyChange: (dirty: boolean) => void; onBusyChange: (busy: boolean) => void }) {
+  const domain = experiment.domain || "tribology";
+  const [gold, setGold] = useState(experiment.gold.length ? experiment.gold : [blankLiveRow(domain)]);
+  const [policy, setPolicy] = useState<LiveAssessmentPolicy>(experiment.assessmentPolicy || { relativeTolerancePercent: 0, absoluteTolerance: "" });
+  const [keyVersion, setKeyVersion] = useState(experiment.keyVersion ?? 0), [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const [instructions, setInstructions] = useState(experiment.taskInstructions || "");
+  const [sourceId, setSourceId] = useState(experiment.paperSourceId);
+  useEffect(() => { onBusyChange(busy); return () => onBusyChange(false); }, [busy, onBusyChange]);
+  function markDirty() { setDirty(true); onDirtyChange(true); }
+  useEffect(() => {
+    if (!dirty && !busy) { setGold(experiment.gold.length ? experiment.gold : [blankLiveRow(domain)]); setPolicy(experiment.assessmentPolicy || { relativeTolerancePercent: 0, absoluteTolerance: "" }); setKeyVersion(experiment.keyVersion ?? 0); setInstructions(experiment.taskInstructions || ""); setSourceId(experiment.paperSourceId); }
+  }, [experiment.gold, experiment.assessmentPolicy, experiment.keyVersion, experiment.taskInstructions, experiment.paperSourceId, domain, dirty, busy]);
+  const changedElsewhere = (keyVersion !== (experiment.keyVersion ?? 0) || sourceId !== experiment.paperSourceId) && dirty;
+  return <details open={!experiment.gold.length} className="rounded-lg border border-ink-200 p-4">
+    <summary className="cursor-pointer text-sm font-medium text-ink-700">Answer key · {experiment.gold.length} saved observations{dirty ? " · unsaved edits" : ""}</summary>
+    <p className="mt-3 text-xs leading-5 text-ink-500">Verify every observation against the source. Fill all fields; use NR when unreported. Saving replaces the key and clears previous review marks. The key is not generated or approved automatically.</p>
+    <label className="mt-4 block text-xs text-ink-600">Student task / target figures<textarea aria-label="Lesson instructions" className={`${fieldInput} mt-1 min-h-24 py-2`} maxLength={3000} disabled={busy} value={instructions} placeholder="Specify the table / panels, properties and comparisons students should report. Do not put the answers here." onChange={(event) => { setInstructions(event.target.value); markDirty(); }} /></label>
+    {changedElsewhere && <div role="alert" className="mt-3 text-sm text-amber-800">The saved paper or key changed in another session. Your edits are retained and cannot overwrite the newer version.<button className="btn ml-3" onClick={() => { if (window.confirm("Discard these unsaved edits and reload the saved key?")) { setDirty(false); onDirtyChange(false); } }}>Reload saved key</button></div>}
+    <div className="my-3 flex flex-wrap gap-3"><label className="btn cursor-pointer">Upload answer table<input aria-label="Upload answer key" type="file" accept=".csv,.tsv,.xlsx" className="sr-only" disabled={busy} onChange={async (event) => { const file = event.target.files?.[0]; event.target.value = ""; if (!file) return; setBusy(true); setError(""); try { setGold(await uploadLiveTable(file, domain)); markDirty(); } catch (cause) { setError(requestErrorMessage(cause, "Upload failed")); } finally { setBusy(false); } }} /></label><a className="btn" href={`/api/teaching/live/table?domain=${domain}`}>Download template</a></div>
+    <LiveRows domain={domain} rows={gold} label="Answer key" disabled={busy} onChange={(rows) => { setGold(rows); markDirty(); }} />
+    {domain !== "tribology" && <details className="mt-4 border-t border-ink-100 pt-3"><summary className="cursor-pointer text-sm font-medium">Assessment settings</summary><p className="my-3 text-xs leading-5 text-ink-500">Default: exact reported values after unit conversion. For image readings only, set a justified tolerance before class. Tolerances apply to measured value / separation, never to experimental conditions. Unknown units must match exactly.</p><div className="grid gap-3 sm:grid-cols-2"><label className="text-xs text-ink-600">Relative tolerance (%)<input aria-label="Relative tolerance percent" className={`${fieldInput} mt-1`} type="number" min="0" max="20" step="0.1" value={policy.relativeTolerancePercent} onChange={(event) => { setPolicy({ ...policy, relativeTolerancePercent: Number(event.target.value) }); markDirty(); }} /></label><label className="text-xs text-ink-600">Absolute tolerance (optional, with unit)<input aria-label="Absolute tolerance" className={`${fieldInput} mt-1`} maxLength={80} value={policy.absoluteTolerance} placeholder="e.g. 0.05 nN" onChange={(event) => { setPolicy({ ...policy, absoluteTolerance: event.target.value }); markDirty(); }} /></label></div></details>}
+    <button className="btn-primary mt-4" disabled={busy || changedElsewhere || !experiment.paperSourceId} onClick={async () => {
+      if (experiment.gold.length && !window.confirm("Replace the answer key and clear previous review marks?")) return;
       setBusy(true); setError("");
-      try { await post({ action: "gold", experimentId: experiment.id, gold }); await onSaved(); }
+      try { await post({ action: "gold", experimentId: experiment.id, gold, keyVersion, assessmentPolicy: policy, taskInstructions: instructions }); setDirty(false); onDirtyChange(false); await onSaved(); }
       catch (cause) { setError(requestErrorMessage(cause, "Save failed")); } finally { setBusy(false); }
-    }}>{busy ? "保存中…" : "保存答案并评分"}</button>
+    }}>{busy ? "Saving…" : "Save verified answer key"}</button>
     {error && <div className="mt-3"><RequestError>{error}</RequestError></div>}
   </details>;
 }
 
-function LiveResults({ dashboard, reviewId, reviewCell, onSelect }: { dashboard: LiveDashboard; reviewId: string | null; reviewCell: string | null; onSelect: (id: string | null, cellKey?: string | null) => void }) {
-  const groups = Array.from({ length: dashboard.experiment.groupCount }, (_, index) => index + 1);
-  const hasGold = dashboard.experiment.gold.length > 0;
-  return <section className="space-y-4">
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      {groups.map((groupNo) => {
-        const members = dashboard.participants.filter((item) => item.groupNo === groupNo);
-        const submitted = members.filter((item) => item.status === "submitted");
-        const scored = hasGold ? submitted.filter((item) => item.score) : [];
-        const avgAccuracy = scored.length ? scored.reduce((sum, item) => sum + item.score!.accuracy, 0) / scored.length : null;
-        const timed = submitted.filter((item) => item.elapsedSeconds != null);
-        const avgSeconds = timed.length ? timed.reduce((sum, item) => sum + item.elapsedSeconds!, 0) / timed.length : null;
-        return <div key={groupNo} className={`rounded-xl border border-ink-200 p-4 ${GROUP_COLORS[(groupNo - 1) % GROUP_COLORS.length]}`}>
-          <h4 className="font-semibold">Group {groupNo} <span className="ml-1 text-xs font-normal text-ink-500">{members[0]?.mode === "manual" ? "人工提取" : "AI 提取"}</span></h4>
-          <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
-            <div><dt className="text-xs text-ink-500">准确率</dt><dd className="mt-0.5 text-xl font-semibold tabular-nums">{accuracy(avgAccuracy)}</dd></div>
-            <div><dt className="text-xs text-ink-500">平均用时</dt><dd className="mt-0.5 text-xl font-semibold tabular-nums">{avgSeconds == null ? "—" : `${(avgSeconds / 60).toFixed(1)} min`}</dd></div>
-          </dl>
-          <p className="mt-2 text-xs text-ink-500">已提交 {submitted.length} / {members.length} 人{scored.some((item) => item.score!.uncertain > 0) ? ` · 存疑 ${scored.reduce((sum, item) => sum + item.score!.uncertain, 0)} 格` : ""}</p>
-        </div>;
-      })}
-    </div>
-    <div className="overflow-x-auto rounded-xl border border-ink-200 bg-white">
-      <table aria-label="Combined group results" className="w-full text-left text-sm">
-        <thead className="bg-ink-50 text-xs text-ink-600"><tr>
-          {["Group", "Student", "Record", ...TEACHING_FIELDS.map(({ key }) => FIELD_LABELS[key]), "审阅"].map((label) => <th key={label} className="whitespace-nowrap px-3 py-3">{label}</th>)}
-        </tr></thead>
-        <tbody>
-          {dashboard.participants.map((item) => {
-            const marks = new Map<string, LiveMark>();
-            for (const cell of item.score?.cells ?? []) if (cell.answerRow != null) marks.set(`${cell.answerRow}:${cell.field}`, cell.mark);
-            if (item.status !== "submitted" || !item.rows.length) {
-              return <tr key={item.id} className={`border-t border-ink-100 ${GROUP_COLORS[((item.groupNo ?? 1) - 1) % GROUP_COLORS.length]}`}>
-                <td className="px-3 py-3 font-medium">G{item.groupNo}</td><td className="px-3 py-3">{item.alias}</td>
-                <td colSpan={7} className="px-3 py-3 text-xs text-ink-500">{item.status === "extracting" ? "AI 提取中…" : item.status === "review" ? "校对中" : "尚未提交"}</td>
-                <td className="px-3 py-3 text-xs text-ink-400">—</td>
-              </tr>;
-            }
-            return item.rows.map((row, rowIndex) => <tr key={`${item.id}-${rowIndex}`} className={`border-t border-ink-100 ${GROUP_COLORS[((item.groupNo ?? 1) - 1) % GROUP_COLORS.length]}`}>
-              {rowIndex === 0 && <>
-                <td rowSpan={item.rows.length} className="px-3 py-3 align-top font-medium">G{item.groupNo}</td>
-                <td rowSpan={item.rows.length} className="max-w-32 break-words px-3 py-3 align-top">{item.alias}
-                  <span className="mt-1 block text-xs font-normal text-ink-500">{minutes(item.elapsedSeconds)}{hasGold && item.score ? ` · ${accuracy(item.score.accuracy)}` : ""}</span>
-                </td>
-              </>}
-              <td className="px-3 py-2 tabular-nums text-ink-500">{rowIndex + 1}</td>
-              {TEACHING_FIELDS.map(({ key }) => {
-                const cellKey = `${rowIndex}:${key}`;
-                const mark = marks.get(cellKey);
-                const selected = reviewId === item.id && reviewCell === cellKey;
-                return <td key={key} className={`max-w-44 break-words p-1 ${mark ? MARK_STYLE[mark] : ""}`}>
-                  <button type="button" aria-label={`Review ${item.alias} record ${rowIndex + 1} ${key}`} onClick={() => onSelect(item.id, cellKey)}
-                    className={`w-full rounded-md px-2 py-1.5 text-left transition hover:ring-2 hover:ring-brand-400 ${selected ? "ring-2 ring-brand-600" : ""}`}>
-                    {row[key] || "—"}
-                  </button>
-                </td>;
-              })}
-              {rowIndex === 0 && <td rowSpan={item.rows.length} className="px-3 py-3 align-top">
-                {item.score ? <button className={`text-sm ${reviewId === item.id ? "font-semibold text-brand-800" : "text-brand-700"} underline-offset-4 hover:underline`} onClick={() => onSelect(reviewId === item.id && !reviewCell ? null : item.id)}>{item.reviewedAt ? "已审阅 · 修改" : "审阅"}</button> : <span className="text-xs text-ink-400">待提交</span>}
-              </td>}
-            </tr>);
-          })}
-          {!dashboard.participants.length && <tr><td colSpan={10} className="px-4 py-8 text-center text-sm text-ink-500">还没有学生加入。</td></tr>}
-        </tbody>
-      </table>
-    </div>
-    <p className="text-xs text-ink-500">点击任意单元格，在下方审阅面板为该格打 <span className="font-semibold text-emerald-700">✓ 正确</span> / <span className="font-semibold text-amber-600">⭕ 存疑</span> / <span className="font-semibold text-rose-700">× 错误</span>；单元格颜色同步显示审阅结果。{!hasGold && "设置标准答案后自动计算机评与准确率。"}</p>
+function LiveResults({ dashboard, onSelect }: { dashboard: LiveDashboard; onSelect: (id: string) => void }) {
+  const { experiment, participants } = dashboard, domain = experiment.domain || "tribology";
+  return <section className={`${SCHOOL_PANEL} space-y-4 p-5`}>
+    <p className="text-xs leading-5 text-ink-500">{participants.filter((p) => p.status === "submitted").length} / {participants.length} submitted. Select a student to inspect observations and review individual fields. Automatic scores are provisional; uncertain fields remain in the denominator.</p>
+    <details><summary className="cursor-pointer text-sm font-medium">Group summaries</summary><div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: experiment.groupCount }, (_, i) => i + 1).map((group) => { const members = participants.filter((p) => p.groupNo === group), submitted = members.filter((p) => p.status === "submitted"), timed = submitted.filter((p) => p.elapsedSeconds != null); return <div key={group} className="rounded-lg border border-ink-200 p-3 text-xs"><p className="font-semibold">Group {group} · {members[0]?.mode ? liveMethodLabel(domain, members[0].mode) : "Not assigned"}</p><p className="mt-2">{submitted.length} / {members.length} submitted · {accuracy(experiment.gold.length && submitted.length ? submitted.reduce((sum, p) => sum + (p.score?.accuracy || 0), 0) / submitted.length : null)}</p><p className="mt-1">{minutes(timed.length ? timed.reduce((sum, p) => sum + p.elapsedSeconds!, 0) / timed.length : null)}</p></div>; })}</div></details>
+    <div className="overflow-x-auto"><table aria-label="Combined group results" className="w-full text-left text-sm"><thead className="bg-ink-50"><tr>{["Student / group", "Method", "Progress", "Accuracy", "Elapsed", "Review"].map((label) => <th key={label} className="whitespace-nowrap p-3">{label}</th>)}</tr></thead><tbody>{participants.map((p) => <tr key={p.id} className="border-t border-ink-100"><td className="p-3">{p.alias} · {p.groupNo ? `G${p.groupNo}` : "—"}</td><td className="p-3">{p.mode ? liveMethodLabel(domain, p.mode) : "—"}</td><td className="p-3">{p.status}</td><td className="p-3">{experiment.gold.length ? accuracy(p.score?.accuracy) : "Awaiting key"}</td><td className="p-3">{minutes(p.elapsedSeconds)}</td><td className="p-3"><button className="text-brand-700 underline disabled:text-ink-400 disabled:no-underline" disabled={!p.score} onClick={() => onSelect(p.id)}>{p.reviewedAt ? "Edit review" : "Review"}</button></td></tr>)}</tbody></table></div>
+    {dashboard.previousRound && <details className="border-t border-ink-100 pt-3"><summary className="cursor-pointer text-sm font-medium">Paired round comparison</summary><p className="my-3 text-xs text-ink-500">Different papers and opposite methods; elapsed times include pauses. These are classroom comparisons, not controlled causal estimates.</p><div className="overflow-x-auto"><table aria-label="Paired classroom rounds" className="w-full text-left text-xs"><thead><tr>{["Student", "Round 1 method / accuracy / time", "Round 2 method / accuracy / time"].map((label) => <th key={label} className="p-2">{label}</th>)}</tr></thead><tbody>{participants.map((p) => { const before = dashboard.previousRound!.participants.find((first) => first.userKey === p.userKey); return <tr key={p.id} className="border-t border-ink-100"><td className="p-2">{p.alias}</td><td className="p-2">{before ? `${liveMethodLabel(domain, before.mode)} · ${accuracy(before.score?.accuracy)} · ${minutes(before.elapsedSeconds)}` : "No paired result"}</td><td className="p-2">{liveMethodLabel(domain, p.mode)} · {accuracy(p.score?.accuracy)} · {minutes(p.elapsedSeconds)}</td></tr>; })}</tbody></table></div></details>}
   </section>;
 }
 
-function LiveReview({ participant, focusKey, onFocus, onClose, onSaved }: { participant: LiveParticipantView; focusKey: string | null; onFocus: (key: string) => void; onClose: () => void; onSaved: () => Promise<void> }) {
-  const [overrides, setOverrides] = useState<Record<string, LiveMark>>(participant.overrides);
-  const [note, setNote] = useState(participant.reviewNote);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const marks: Array<{ value: LiveMark; label: string; symbol: string; active: string }> = [
-    { value: "correct", label: "正确", symbol: "✓", active: "bg-emerald-600 text-white" },
-    { value: "uncertain", label: "存疑", symbol: "⭕", active: "bg-amber-400 text-amber-950" },
-    { value: "incorrect", label: "错误", symbol: "×", active: "bg-rose-600 text-white" },
-  ];
-  const cells = participant.score?.cells ?? [];
-  const focused = cells.find((cell) => cell.answerRow != null && `${cell.answerRow}:${cell.field}` === focusKey) ?? null;
-  function markCell(key: string, value: LiveMark) {
-    setOverrides((previous) => ({ ...previous, [key]: value }));
-  }
-  return <section aria-label="Instructor review" className="rounded-xl border border-brand-300 bg-white p-5">
-    <header className="flex flex-wrap items-center justify-between gap-3">
-      <div><h3 className="text-lg font-semibold">审阅：{participant.alias} · Group {participant.groupNo}</h3>
-        <p className="mt-1 text-sm text-ink-500">准确率 {accuracy(participant.score?.accuracy)} · 存疑 {participant.score?.uncertain ?? 0} 格 · 用时 {minutes(participant.elapsedSeconds)}</p></div>
-      <button className="btn" onClick={onClose}>收起</button>
-    </header>
-    {focused ? <div className="mt-4 rounded-xl border-2 border-brand-200 bg-brand-50/50 p-5">
-      <p className="text-xs font-medium uppercase tracking-wide text-brand-700">当前单元格 · 记录 {focused.answerRow! + 1} · {FIELD_LABELS[focused.field]}</p>
-      <div className="mt-2 flex flex-wrap gap-x-8 gap-y-1 text-sm">
-        <p><span className="text-ink-500">学生答案：</span><strong>{focused.actual || "Missing"}</strong></p>
-        <p><span className="text-ink-500">标准答案：</span>{focused.expected || "—（未设答案，请直接判断）"}</p>
-      </div>
-      <div className="mt-4 flex flex-wrap gap-3" role="group" aria-label={`Mark ${focused.key}`}>
-        {marks.map((mark) => {
-          const current = overrides[focused.key] ?? (focused.machineCorrect ? "correct" : "incorrect");
-          return <button key={mark.value} type="button" aria-pressed={current === mark.value} disabled={busy}
-            className={`flex h-14 min-w-32 items-center justify-center gap-2 rounded-xl px-6 text-xl font-bold shadow-sm transition ${current === mark.value ? `${mark.active} ring-2 ring-offset-2` : "bg-white text-ink-400 ring-1 ring-ink-200 hover:bg-ink-50"}`}
-            onClick={() => markCell(focused.key, mark.value)}>{mark.symbol}<span className="text-sm font-semibold">{mark.label}</span></button>;
-        })}
-      </div>
-      <p className="mt-3 text-xs text-ink-500">选好后点击下方「保存审阅结果」生效；可继续点击其他单元格逐格审阅。</p>
-    </div> : <p className="mt-4 rounded-lg border border-dashed border-brand-300 bg-brand-50/40 p-4 text-sm text-brand-800">👆 点击上方大表格中的任意单元格，这里会突出显示 <span className="font-semibold text-emerald-700">✓ 正确</span> / <span className="font-semibold text-amber-600">⭕ 存疑</span> / <span className="font-semibold text-rose-700">× 错误</span> 三个选项。</p>}
-    <div className="mt-4 max-h-[480px] overflow-auto"><table className="w-full text-left text-sm">
-      <thead className="sticky top-0 bg-ink-50 text-xs text-ink-500"><tr>{["Record", "Field", "Answer key", "Student answer", "Auto", "审阅"].map((label) => <th key={label} className="whitespace-nowrap px-3 py-2">{label}</th>)}</tr></thead>
-      <tbody>{cells.map((cell) => <tr key={cell.key} className={`border-t border-ink-100 ${focused?.key === cell.key ? "bg-brand-50/70" : ""} ${cell.answerRow != null ? "cursor-pointer" : ""}`}
-        onClick={() => { if (cell.answerRow != null) onFocus(`${cell.answerRow}:${cell.field}`); }}>
-        <td className="px-3 py-2 text-xs">{cell.goldRow == null ? "Extra" : cell.goldRow + 1} / {cell.answerRow == null ? "Missing" : cell.answerRow + 1}</td>
-        <td className="whitespace-nowrap px-3 py-2">{FIELD_LABELS[cell.field]}</td>
-        <td className="max-w-40 break-words px-3 py-2">{cell.expected || "—"}</td>
-        <td className="max-w-40 break-words px-3 py-2">{cell.actual || "Missing"}</td>
-        <td className={`px-3 py-2 text-xs ${cell.machineCorrect ? "text-emerald-700" : "text-rose-700"}`}>{cell.machineCorrect ? "Match" : "Unmatched"}</td>
-        <td className="px-3 py-2"><div className="flex gap-1" role="group" aria-label={`Review ${cell.key}`}>
-          {marks.map((mark) => {
-            const current = overrides[cell.key] ?? (cell.machineCorrect ? "correct" : "incorrect");
-            return <button key={mark.value} type="button" title={mark.label} aria-label={`${mark.label} ${cell.key}`} aria-pressed={current === mark.value} disabled={busy}
-              className={`h-8 w-8 rounded-md text-base font-semibold transition ${current === mark.value ? mark.active : "bg-ink-50 text-ink-400 hover:bg-ink-100"}`}
-              onClick={(event) => { event.stopPropagation(); markCell(cell.key, mark.value); }}>{mark.symbol}</button>;
-          })}
-        </div></td>
-      </tr>)}</tbody>
-    </table></div>
-    <label className="mt-4 block text-xs text-ink-600">审阅备注<textarea maxLength={1000} value={note} onChange={(event) => setNote(event.target.value)} className={`${fieldInput} mt-1 py-2`} placeholder="说明判分依据，学生会看到这条备注" /></label>
-    <button className="btn-primary mt-3" disabled={busy} onClick={async () => {
-      setBusy(true); setError("");
-      try { await post({ action: "review", participantId: participant.id, version: participant.version, overrides, note }); await onSaved(); }
-      catch (cause) { setError(requestErrorMessage(cause, "Save failed")); } finally { setBusy(false); }
-    }}>{busy ? "保存中…" : "保存审阅结果"}</button>
+function LiveReview({ participant, experiment, onClose, onSaved, onDirtyChange }: { participant: LiveParticipantView; experiment: LiveExperiment; onClose: () => void; onSaved: () => Promise<void>; onDirtyChange: (dirty: boolean) => void }) {
+  const [snapshot] = useState(participant);
+  const [overrides, setOverrides] = useState<Record<string, LiveMark>>(snapshot.overrides), [note, setNote] = useState(snapshot.reviewNote);
+  const [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const labels = Object.fromEntries(liveFields(experiment.domain).map((field) => [field.key, field.label]));
+  const changed = note !== snapshot.reviewNote || JSON.stringify(overrides) !== JSON.stringify(snapshot.overrides);
+  useEffect(() => { onDirtyChange(changed); return () => onDirtyChange(false); }, [changed, onDirtyChange]);
+  return <section aria-label="Instructor review" className={`${SCHOOL_PANEL} p-5`}>
+    <header className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-lg font-semibold">Review · {snapshot.alias} · Group {snapshot.groupNo}</h3><p className="mt-1 text-xs text-ink-500">{accuracy(snapshot.score?.accuracy)} · {minutes(snapshot.elapsedSeconds)}</p></div><button className="btn" onClick={() => { if (!changed || window.confirm("Discard unsaved review changes?")) onClose(); }}>Close review</button></header>
+    {participant.version !== snapshot.version && <p role="alert" className="mt-3 text-sm text-amber-800">The submission changed. Your unsaved marks are retained; close and reopen to review the latest version.</p>}
+    <div className="my-3"><a className="text-sm text-brand-700" href={`/api/teaching/live/paper?experimentId=${experiment.id}`} target="_blank" rel="noreferrer">Open source PDF ↗</a></div>
+    {snapshot.afmArtifactId && <LiveAfmResults participantId={snapshot.id} experimentId={experiment.id} />}
+    <div className="mt-4 max-h-[480px] overflow-auto"><table className="w-full text-left text-xs"><thead className="sticky top-0 bg-ink-50"><tr>{["Record", "Field", "Expected", "Actual", "Review"].map((label) => <th key={label} className="p-3">{label}</th>)}</tr></thead><tbody>{snapshot.score?.cells.map((cell) => <tr key={cell.key} className={`border-t border-ink-100 ${MARK_STYLE[overrides[cell.key] || cell.mark]}`}><td className="p-3">{cell.answerRow == null ? "Missing" : cell.answerRow + 1}</td><td className="p-3">{labels[cell.field]}</td><td className="max-w-48 break-words p-3">{cell.expected || "No answer key"}</td><td className="max-w-48 break-words p-3">{cell.actual || "Missing"}</td><td className="p-3"><select aria-label={`Review ${cell.key}`} className={fieldInput} disabled={busy} value={overrides[cell.key] || cell.mark} onChange={(event) => setOverrides((previous) => ({ ...previous, [cell.key]: event.target.value as LiveMark }))}>{(["correct", "incorrect", "uncertain"] as const).map((mark) => <option key={mark} value={mark}>{mark}</option>)}</select></td></tr>)}</tbody></table></div>
+    <label className="mt-4 block text-xs text-ink-600">Instructor note<textarea aria-label="Instructor note" maxLength={2000} value={note} onChange={(event) => setNote(event.target.value)} className={`${fieldInput} mt-1 py-2`} /></label>
+    <button className="btn-primary mt-3" disabled={busy || participant.version !== snapshot.version} onClick={async () => { setBusy(true); setError(""); try { await post({ action: "review", participantId: snapshot.id, version: snapshot.version, overrides, note }); await onSaved(); } catch (cause) { setError(requestErrorMessage(cause, "Save failed")); } finally { setBusy(false); } }}>Save instructor review</button>
     {error && <div className="mt-3"><RequestError>{error}</RequestError></div>}
   </section>;
 }

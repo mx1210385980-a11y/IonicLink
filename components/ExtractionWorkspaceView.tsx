@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { Domain } from "@/lib/domain";
 import type { BatchJob, JobStatus } from "@/lib/schema";
+import { WorkspacePageFrame } from "./WorkspacePageFrame";
 
 type WorkspaceFilter = "all" | "analyzing" | "finished" | "error";
 const FILTERS: readonly { key: WorkspaceFilter; label: string }[] = [
@@ -82,8 +83,7 @@ export function ExtractionWorkspaceView({
   const openFilePicker = () => fileInput.current?.click();
 
   return (
-    <section aria-label="Extraction file workspace" data-testid="extract-workspace" className="min-h-dvh bg-[#fafafa] px-4 py-6 font-sans text-ink-900 sm:px-8 lg:px-10 lg:py-8">
-      <div className="mx-auto w-full max-w-[1240px]">
+    <WorkspacePageFrame aria-label="Extraction file workspace" data-testid="extract-workspace">
         <header>
           <div>
             <h1 className="text-[26px] font-semibold leading-tight tracking-[-0.035em]">Extraction files</h1>
@@ -196,8 +196,7 @@ export function ExtractionWorkspaceView({
           </footer>
         </div>
         {committedNotice && <div className="mt-5 flex justify-end">{committedNotice}</div>}
-      </div>
-    </section>
+    </WorkspacePageFrame>
   );
 }
 

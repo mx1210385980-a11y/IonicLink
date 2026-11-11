@@ -28,6 +28,19 @@ interface AxisTick {
 }
 
 let workerPromise: Promise<Worker> | null = null;
+let workerQueue: Promise<unknown> = Promise.resolve();
+function withAxisWorker<T>(task: (worker: Worker) => Promise<T>): Promise<T> {
+  const pending = workerQueue.then(getWorker).then(task);
+  workerQueue = pending.catch(() => undefined);
+  return pending;
+}
+
+/** Release the cached worker when a test/job process is shutting down. */
+export async function terminateAfmAxisOcrWorker(): Promise<void> {
+  const pending = workerPromise;
+  workerPromise = null;
+  if (pending) await pending.then((worker) => worker.terminate(), () => undefined);
+}
 
 function getWorker() {
   if (!workerPromise) {
@@ -61,7 +74,7 @@ export async function inferAfmAxisCalibrationFromImage(
   input: { width: number; height: number; plotBox: AfmPlotBox },
 ): Promise<AfmAutomaticAxisCalibration> {
   try {
-    const worker = await getWorker();
+    return await withAxisWorker(async (worker) => {
     const result = await worker.recognize(image, {}, { text: true, tsv: true });
     const initial = parseAfmAxisOcr({
       text: result.data.text ?? "",
@@ -75,6 +88,7 @@ export async function inferAfmAxisCalibrationFromImage(
       tsv: result.data.tsv ?? "",
       ...input,
     });
+    });
   } catch (error) {
     return {
       status: "relative-only",
@@ -84,6 +98,56 @@ export async function inferAfmAxisCalibrationFromImage(
       evidence: [`Axis OCR was unavailable: ${error instanceof Error ? error.message : String(error)}`],
     };
   }
+}
+
+/** A verified numeric range still needs its pixel endpoints; panel padding is not an axis. */
+export async function locateAfmProfileFrame(image: Buffer, input: { width: number; height: number; plotBox: AfmPlotBox }, axes: AfmPhysicalAxes): Promise<Partial<AfmPlotBox>> {
+  try {
+    return await withAxisWorker(async (worker) => {
+    const scale = Math.max(1, Math.min(4, 1600 / Math.max(input.width, input.height)));
+    const source = await loadImage(image);
+    async function strip(left: number, top: number, width: number, height: number, mode: PSM) {
+      const canvas = createCanvas(Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale)));
+      canvas.getContext("2d").drawImage(source, left, top, width, height, 0, 0, canvas.width, canvas.height);
+      await worker.setParameters({ tessedit_pageseg_mode: mode, tessedit_char_whitelist: "0123456789.-+" });
+      const result = await worker.recognize(canvas.toBuffer("image/png"), {}, { tsv: true });
+      return parseTsvWords(result.data.tsv ?? "").map((word) => ({ ...word, left: left + word.left / scale, top: top + word.top / scale, width: word.width / scale, height: word.height / scale }));
+    }
+    let words: OcrWord[];
+    try {
+      const lower = Math.min(input.height - 2, Math.round(input.plotBox.bottom + input.height * 0.01));
+      const labelTop = Math.max(0, Math.round(input.plotBox.top + input.height * 0.035));
+      words = [
+        ...await strip(input.width * 0.875, labelTop, input.width * 0.1, Math.min(input.height, input.plotBox.bottom + 8) - labelTop, PSM.SINGLE_BLOCK),
+        ...await strip(0, lower, input.width * 0.94, Math.min(input.height - lower, input.height * 0.11), PSM.SINGLE_LINE),
+      ];
+    } finally { await worker.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT, tessedit_char_whitelist: "" }); }
+    const xt = collectXTicks(words, input.plotBox, input.width, input.height);
+    const leftTicks = collectYTicks(words, input.plotBox, input.width, input.height);
+    const rightTicks = deduplicateTicks(words.flatMap((word) => {
+      const value = parseTickNumber(word.text), x = word.left + word.width / 2, y = word.top + word.height / 2;
+      return value !== null && x >= input.width * 0.88 && y >= input.plotBox.top - input.height * 0.025 && y <= input.plotBox.bottom + input.height * 0.025
+        ? [{ value, position: y, confidence: word.confidence }] : [];
+    }), Math.max(4, input.height * 0.012));
+    const yt = rightTicks.length > leftTicks.length ? rightTicks : leftTicks;
+    const xr = xt.length >= 3 ? fitAxisTicks(xt, input.plotBox.left, input.plotBox.right) : null;
+    const yr = yt.length >= 3 ? fitAxisTicks(yt, input.plotBox.top, input.plotBox.bottom) : null;
+    const frame: Partial<AfmPlotBox> = {};
+    if (xr && xr.end !== xr.start) {
+      const left = input.plotBox.left + (axes.xMin - xr.start) / (xr.end - xr.start) * (input.plotBox.right - input.plotBox.left);
+      const right = input.plotBox.left + (axes.xMax - xr.start) / (xr.end - xr.start) * (input.plotBox.right - input.plotBox.left);
+      if (left >= -input.width * 0.1 && right < input.width * 1.1 && right - left > input.width * 0.35) Object.assign(frame, { left, right });
+    }
+    if (yr && yr.end !== yr.start) {
+      const top = input.plotBox.top + (axes.yMax - yr.start) / (yr.end - yr.start) * (input.plotBox.bottom - input.plotBox.top);
+      const bottom = input.plotBox.top + (axes.yMin - yr.start) / (yr.end - yr.start) * (input.plotBox.bottom - input.plotBox.top);
+      // A shared-grid panel can end near F=0 while the common scale extends to
+      // a negative tick printed only on the last row. Retain that virtual end.
+      if (top >= -input.height * 0.1 && bottom < input.height * 1.35 && bottom - top > input.height * 0.35) Object.assign(frame, { top, bottom });
+    }
+    return frame;
+    });
+  } catch { return {}; }
 }
 
 async function recognizeRotatedYAxis(

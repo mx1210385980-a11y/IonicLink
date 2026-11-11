@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 import { ingest } from "../../../../lib/ingest";
 import { createRecords } from "../../../../lib/db";
-import { createTestAppSession } from "../../../../lib/auth.test-helpers";
+import { createTestAdminSession } from "../../../../lib/auth.test-helpers";
 import { GET, POST } from "./route";
 
 const mockDraft = {
@@ -20,7 +20,7 @@ const mockDraft = {
 };
 
 async function main() {
-  const { cookie } = await createTestAppSession();
+  const { cookie } = await createTestAdminSession();
   const response = await POST(
     new NextRequest("http://localhost/api/tribology/records", {
       method: "POST",

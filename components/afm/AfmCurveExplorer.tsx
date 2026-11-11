@@ -9,6 +9,7 @@ import { afmCurveFileStem, buildAfmCurveCsv, buildAfmCurveJson, type AfmExportFo
 import type { CuratedField, FieldReviewStatus } from "@/lib/afm/interfacialExperiment";
 import { resolveIonStructure } from "@/lib/ionStructures";
 import { deriveAfmCurveDependencies, type AfmCurveDependency } from "@/lib/afm/curveDependencies";
+import { SCHOOL_SECTION_HEADER } from "../workspaceStyles";
 
 type CollectionFilter = "all" | "qualified-new" | "legacy-cleaned";
 type ReviewFilter = "all" | "verified" | "paper-suggested" | "needs-review" | "legacy-import";
@@ -134,7 +135,7 @@ export function AfmCurveExplorer({ dataset }: { dataset: AfmCurveDataset }) {
       <DataReadiness dataset={dataset} localDraftCount={localDraftCurves.length} />
 
       <section id="afm-curve-browser" className="panel scroll-mt-4 overflow-hidden">
-        <div className="border-b border-ink-200 bg-white/80 p-4 sm:p-5">
+        <div className={`${SCHOOL_SECTION_HEADER} p-4 sm:p-5`}>
           <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
             <div>
               <p className="label-eyebrow text-brand-700">Curve browser</p>
@@ -280,9 +281,9 @@ function Metric({ label, value, detail, tone = "default" }: { label: string; val
   const labelClass = tone === "verified" ? "text-brand-700" : tone === "suggested" ? "text-amber-700" : "text-ink-500";
   const valueClass = tone === "verified" ? "text-brand-800" : tone === "suggested" ? "text-amber-800" : "text-ink-950";
   return (
-    <div className={`panel p-4 ${tone === "verified" ? "border-brand-200 bg-brand-50/70" : tone === "suggested" ? "border-amber-200 bg-amber-50/70" : "bg-white/85"}`}>
-      <p className={`font-mono text-[10px] font-semibold uppercase tracking-eyebrow ${labelClass}`}>{label}</p>
-      <p className={`mt-2 font-mono text-3xl font-semibold tnum ${valueClass}`}>{value}</p>
+    <div className={`rounded-xl border p-4 ${tone === "suggested" ? "border-amber-200 bg-amber-50/70" : "border-[#dce0e4] bg-white shadow-[0_2px_8px_rgba(24,39,48,0.025)]"}`}>
+      <p className={`text-xs font-medium ${labelClass}`}>{label}</p>
+      <p className={`mt-2 text-3xl font-semibold tabular-nums ${valueClass}`}>{value}</p>
       <p className="mt-1 text-xs text-ink-600">{detail}</p>
     </div>
   );

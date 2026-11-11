@@ -27,6 +27,8 @@ export interface ExtractOptions {
   visualPages?: VisualPageInput[];
   /** Resolve pages from an isolated teaching upload using the same vision settings. */
   renderPage?: (page: number, scale: number) => Promise<Uint8Array | null>;
+  /** Instructor-authored task scope, kept separate from the paper/evidence text. */
+  taskInstruction?: string;
 }
 
 type OpenAIUserContentPart =
@@ -168,6 +170,9 @@ export async function extractRecords(
   }
 
   const mod = getModule(domain);
+  const userPrompt = (body: string) => options?.taskInstruction?.trim()
+    ? `${mod.userPrompt(body)}\n\nINSTRUCTOR TASK SCOPE (not source evidence):\n${options.taskInstruction.trim()}\nRestrict observations to this task when possible. Never treat these instructions as reported measurements or invent missing values.`
+    : mod.userPrompt(body);
   const visualPages = await resolveVisualPages(domain, trimmed, sourceId, model, options);
   // The module's hard gate: drafts the domain refuses (e.g. diffusion records
   // without any D value) never reach the review queue, whatever the model did.
@@ -190,7 +195,7 @@ export async function extractRecords(
   };
 
   if (openAIConfig) {
-    const fields = await extractWithOpenAICompatible(trimmed, model, openAIConfig, mod, visualPages);
+    const fields = await extractWithOpenAICompatible(trimmed, model, openAIConfig, { ...mod, userPrompt }, visualPages);
     return finish(fields.map(mod.ingest), "openai-compatible", model);
   }
 
@@ -214,7 +219,7 @@ export async function extractRecords(
         role: "user",
         content: visualPages.length
           ? [
-              { type: "text", text: mod.userPrompt(body) },
+              { type: "text", text: userPrompt(body) },
               ...visualPages.flatMap((visual) => [
                 {
                   type: "text" as const,
@@ -230,7 +235,7 @@ export async function extractRecords(
                 },
               ]),
             ]
-          : mod.userPrompt(body),
+          : userPrompt(body),
       },
     ],
   });
